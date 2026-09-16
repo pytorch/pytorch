@@ -3,6 +3,8 @@ name: xpu
 
 on:
   push:
+    branches:
+      - viable/strict
     tags:
       - ciflow/xpu/*
   workflow_dispatch:
@@ -120,6 +122,7 @@ jobs:
     secrets: inherit
 
   windows-xpu-n-1-build:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: win-vs2022-xpu-n-1-py3
     uses: ./.github/workflows/_win-build.yml
@@ -127,11 +130,12 @@ jobs:
       build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.3'
+      xpu-version: '2026.0'
       vc-year: '2022'
     secrets: inherit
 
   windows-xpu-n-build:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: win-vs2022-xpu-n-py3
     uses: ./.github/workflows/_win-build.yml
@@ -139,6 +143,6 @@ jobs:
       build-environment: win-vs2022-xpu-n-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2026.0'
+      xpu-version: '2026.1'
       vc-year: '2022'
     secrets: inherit

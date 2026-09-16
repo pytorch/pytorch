@@ -34,10 +34,14 @@ from torch._inductor.codecache import (
     DLLWrapper,
     get_hash,
     PyCodeCache,
+    write,
     XPUCodeCache,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
+    apply_subprocess_env,
+    clear_caches,
+    clear_on_fresh_cache,
     do_bench_using_profiling,
     get_gpu_type,
     get_ld_library_path,
@@ -92,6 +96,42 @@ class NonzeroWorkspaceNotSupportedError(Exception):
     pass
 
 
+def _cache_env_for_subprocess() -> dict[str, str | None]:
+    env_vars = [
+        "TORCHINDUCTOR_CACHE_DIR",
+        "TRITON_CACHE_DIR",
+        "FLYDSL_RUNTIME_CACHE_DIR",
+    ]
+    return {v: os.environ.get(v) for v in env_vars}
+
+
+_last_applied_cache_env: dict[str, str | None] | None = None
+
+
+def _apply_subprocess_env_and_clear_caches(
+    extra_env: dict[str, str | None] | None,
+) -> None:
+    global _last_applied_cache_env
+
+    if extra_env is None:
+        return
+
+    if extra_env != _last_applied_cache_env:
+        clear_caches()
+        _last_applied_cache_env = extra_env.copy()
+    apply_subprocess_env(extra_env)
+
+
+def _run_with_subprocess_env(
+    fn: Callable[..., Any],
+    extra_env: dict[str, str | None],
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    _apply_subprocess_env_and_clear_caches(extra_env)
+    return fn(*args, **kwargs)
+
+
 class TuningProcess:
     """
     Class to launch and interact with a benchmarking subprocess.
@@ -115,8 +155,7 @@ class TuningProcess:
                     # None is a sentinel for the child to shut down
                     break
                 try:
-                    if extra_env:
-                        os.environ.update(extra_env)
+                    _apply_subprocess_env_and_clear_caches(extra_env)
                     result = job()
                 except Exception as e:
                     result = e
@@ -130,7 +169,9 @@ class TuningProcess:
 
     @staticmethod
     def send(
-        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str] | None = None
+        obj: object,
+        write_pipe: IO[bytes],
+        extra_env: dict[str, str | None] | None = None,
     ) -> None:
         pickle.dump((obj, extra_env), write_pipe)
         write_pipe.flush()
@@ -194,7 +235,7 @@ class TuningProcess:
         """
         return self.running and self.process.poll() is None
 
-    def put(self, req: Any, extra_env: dict[str, str] | None = None) -> None:
+    def put(self, req: object, extra_env: dict[str, str | None] | None = None) -> None:
         """
         Push a work item to the child process.
         """
@@ -275,31 +316,26 @@ class TuningProcess:
         self.start()
 
 
-class TuningProcessPool:
+class TuningPoolBase:
     """
-    Maintains a pool of TuningProcesses to benchmark kernels in parallel
-    across devices. By default, we create one TuningProcess per device and
-    set the sub-process environment to make only that device visible.
+    Base class for pools that benchmark kernels in parallel across devices.
+
+    A ThreadPoolExecutor dispatches choices to workers, and each worker claims
+    one per-device resource for the duration of a benchmark. Subclasses decide
+    what that resource is (a benchmarking subprocess for TuningProcessPool, an
+    in-process device slot for TuningThreadPool) and implement target()
+    accordingly.
     """
 
     def __init__(self) -> None:
-        """
-        Start the child processes.
-        """
-        devices = self.get_device_list()
-        autotuning_log.debug("Sub-process autotune device list: %s", devices)
+        self.devices = self.get_device_list()
+        autotuning_log.debug(
+            "%s autotune device list: %s", type(self).__name__, self.devices
+        )
 
-        # Launch the child processes.
-        self.processes = [TuningProcess(device=device) for device in devices]
-
-        self.process_queue: queue.Queue[TuningProcess] = queue.Queue()
-        for p in self.processes:
-            self.process_queue.put(p)
-
-        # Use a thread pool to manage distributing work to the subprocesses.
-        # Threads block on an available process, so it makes sense to match
-        # the number of threads with the number of devices.
-        self.executor = ThreadPoolExecutor(max_workers=len(devices))
+        # Threads block on an available per-device resource, so match the
+        # number of threads to the number of devices.
+        self.executor = ThreadPoolExecutor(max_workers=len(self.devices))
 
     @staticmethod
     def get_device_list() -> Sequence[int | None]:
@@ -327,11 +363,55 @@ class TuningProcessPool:
 
         return list(range(count))
 
+    def target(self, choice: TritonTemplateCaller) -> float:
+        """
+        Benchmark a single choice on one per-device resource. Invoked by the
+        executor's worker threads.
+        """
+        raise NotImplementedError
+
+    def shutdown(self) -> None:
+        """
+        Shut down the executor.
+        """
+        self.executor.shutdown(wait=True)
+
+    def benchmark(
+        self,
+        choices: list[TritonTemplateCaller],
+    ) -> dict[TritonTemplateCaller, float]:
+        """
+        Benchmark each choice, spreading the work across the pool's workers and
+        grabbing per-device resources as soon as they're free.
+        """
+        return dict(zip(choices, self.executor.map(self.target, choices)))
+
+
+class TuningProcessPool(TuningPoolBase):
+    """
+    Maintains a pool of TuningProcesses to benchmark kernels in parallel
+    across devices. By default, we create one TuningProcess per device and
+    set the sub-process environment to make only that device visible.
+    """
+
+    def __init__(self) -> None:
+        """
+        Start the child processes.
+        """
+        super().__init__()
+
+        # Launch the child processes.
+        self.processes = [TuningProcess(device=device) for device in self.devices]
+
+        self.process_queue: queue.Queue[TuningProcess] = queue.Queue()
+        for p in self.processes:
+            self.process_queue.put(p)
+
     def shutdown(self) -> None:
         """
         Signal all child processes to exit.
         """
-        self.executor.shutdown()
+        super().shutdown()
 
         for p in self.processes:
             p.shutdown(wait=False)
@@ -340,17 +420,15 @@ class TuningProcessPool:
 
     def target(self, choice: TritonTemplateCaller) -> float:
         """
-        Entry point for the thread-pool helper threads: Wait for an open TuningProcess,
-        remove it from the queue, execute the benchmark in that subprocess, and return
-        the TuningProcess to the queue.
+        Wait for an open TuningProcess, remove it from the queue, execute the
+        benchmark in that subprocess, and return the TuningProcess to the queue.
         """
         if choice.bmreq is None:
             raise AssertionError(
                 f"Expected choice.bmreq to be set, but got None for choice '{choice}'"
             )
 
-        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
-        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
+        extra_env = _cache_env_for_subprocess()
         process = self.process_queue.get()
         process.put(choice.bmreq.benchmark, extra_env=extra_env)
         try:
@@ -382,19 +460,67 @@ class TuningProcessPool:
         finally:
             self.process_queue.put(process)
 
-    def benchmark(
-        self,
-        choices: list[TritonTemplateCaller],
-    ) -> dict[TritonTemplateCaller, float]:
-        """
-        Benchmark each choice in a separate process.
-        """
 
-        # Use a ThreadExecutorPool to spread the work across the subprocesses and
-        # to grab subprocesses as soon as they're free.
-        results = dict(zip(choices, self.executor.map(self.target, choices)))
+class TuningThreadPool(TuningPoolBase):
+    """
+    Thread-based version of TuningProcessPool for nogil Python.
 
-        return results
+    Simpler than process-based version since threads share memory:
+    - No subprocess management
+    - No pickling overhead
+    - No pipe communication
+    - Thread-safe device locking instead of process isolation
+    """
+
+    def __init__(self) -> None:
+        """
+        Initialize the thread pool with per-device locks.
+        """
+        super().__init__()
+
+        # Create locks for thread-safe device access
+        self.device_locks = {device: threading.Lock() for device in self.devices}
+
+        # Track which device each thread should use
+        self.device_queue: queue.Queue[int | None] = queue.Queue()
+        for device in self.devices:
+            self.device_queue.put(device)
+
+    def target(self, choice: TritonTemplateCaller) -> float:
+        """
+        Benchmark a single choice in a worker thread.
+        Acquires device lock to ensure thread-safe execution.
+        """
+        if choice.bmreq is None:
+            raise AssertionError(
+                f"Expected choice.bmreq to be set, but got None for choice '{choice}'"
+            )
+
+        # Get an available device
+        device = self.device_queue.get()
+        try:
+            # Acquire lock for this device
+            lock = self.device_locks[device]
+            with lock:
+                # Set device if specified
+                if device is not None:
+                    gpu_type = get_gpu_type()
+                    device_interface = get_interface_for_device(gpu_type)
+                    device_interface.set_device(device)
+
+                # Run benchmark directly (no subprocess, no pickling)
+                try:
+                    return choice.bmreq.benchmark()
+                except Exception:
+                    warnings.warn(
+                        f"Failed to benchmark choice '{choice}'. It will be ignored. "
+                        "Please debug the root cause in case the choice can bring perf gains."
+                    )
+                    # Set to INF so this choice will be ignored
+                    return float("inf")
+        finally:
+            # Return device to queue
+            self.device_queue.put(device)
 
 
 LayoutOrBuffer = ir.Layout | ir.Buffer
@@ -532,9 +658,11 @@ class BenchmarkRequest:
 
         # create args and out tensor
         if out is None:
-            if not (self.input_tensor_meta and self.output_tensor_meta):
+            if self.input_tensor_meta is None or not isinstance(
+                self.output_tensor_meta, TensorMeta
+            ):
                 raise AssertionError(
-                    "Input and output tensor meta must be populated when input_tensors is empty"
+                    "Input and output tensor meta must be populated when out is None"
                 )
             if not len(input_tensors) == 0:
                 raise AssertionError(
@@ -614,6 +742,46 @@ class _TestBenchmarkRequest(BenchmarkRequest):
         if self.crash:
             sys.exit(1)
         return self.result
+
+
+class _TestEnvBenchmarkRequest:
+    """
+    Supports unit testing subprocess environment propagation.
+    """
+
+    def __init__(self, key: str):
+        self.key = key
+
+    def benchmark(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
+    ) -> str | None:
+        return os.environ.get(self.key)
+
+
+@clear_on_fresh_cache
+class _TestCodeCache:
+    @classmethod
+    def cache_clear(cls) -> None:
+        cls.write.cache_clear()
+
+    @classmethod
+    @functools.lru_cache(None)
+    def write(cls, source_code: str) -> tuple[str, str]:
+        return write(source_code, "txt")
+
+
+class _TestCodeCacheBenchmarkRequest:
+    """
+    Supports unit testing subprocess codecache resets.
+    """
+
+    source_code = "test codecache contents\n"
+
+    def benchmark(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None
+    ) -> str:
+        _, input_path = _TestCodeCache.write(self.source_code)
+        return input_path
 
 
 class GPUDeviceBenchmarkMixin:
@@ -896,7 +1064,7 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
 
     def benchmark(self, *input_tensors: torch.Tensor, out: torch.Tensor | None = None):
         if out is not None and out.numel() == 0:
-            # no need to run the kernel of do benchmarking
+            # no need to run the kernel or do benchmarking
             return 0.0
         if self.has_out_variant or len(input_tensors) == 0:
             return super().benchmark(*input_tensors, out=out)
@@ -1273,6 +1441,53 @@ class CuteDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         return run_kernel
 
 
+# TODO: Factor out a common DSL benchmark request base shared with
+# CuteDSLBenchmarkRequest.
+class FlyDSLBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+    """Benchmark request for FlyDSL kernels."""
+
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
+        extra_args: tuple[Any, ...],
+        source_code: PartialRender,
+    ) -> None:
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.source_code = source_code.finalize_all()
+        self.module_cache_key, self.module_path = PyCodeCache.write(self.source_code)
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
+    ) -> Callable[[], None]:
+        mod = PyCodeCache.load_by_key_path(
+            self.module_cache_key,
+            self.module_path,
+            set_sys_modules=False,
+        )
+
+        from .codegen.flydsl.flydsl_kernel import MAIN_SUFFIX
+
+        main_func_name = f"{self.kernel_name}_{MAIN_SUFFIX}"
+
+        if not hasattr(mod, main_func_name):
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find FlyDSL main kernel function '{main_func_name}'. "
+                f"Available callables: {available}"
+            )
+
+        kernel_func = getattr(mod, main_func_name)
+
+        def run_kernel():
+            device_interface = get_interface_for_device("cuda")
+            stream = device_interface.get_raw_stream(out.device.index)
+            return kernel_func(*input_tensors, out, *self.extra_args, stream=stream)
+
+        return run_kernel
+
+
 @functools.cache
 def get_tuning_process_pool() -> TuningProcessPool:
     pool = TuningProcessPool()
@@ -1280,19 +1495,48 @@ def get_tuning_process_pool() -> TuningProcessPool:
     return pool
 
 
+@functools.cache
+def get_tuning_thread_pool() -> TuningThreadPool:
+    """
+    Get the singleton TuningThreadPool for nogil autotuning.
+    """
+    pool = TuningThreadPool()
+    atexit.register(pool.shutdown)
+    return pool
+
+
+def get_tuning_pool() -> TuningThreadPool | TuningProcessPool:
+    """
+    Get the appropriate tuning pool based on compile_worker_mode.
+
+    Returns TuningThreadPool for thread mode, TuningProcessPool otherwise.
+    """
+    from torch._inductor.utils import should_use_thread_workers
+
+    if should_use_thread_workers():
+        return get_tuning_thread_pool()
+    else:
+        return get_tuning_process_pool()
+
+
 def benchmark_in_sub_process(
     choices: list[TritonTemplateCaller],
 ) -> dict[TritonTemplateCaller, float]:
     """
-    Do benchmarking in a subprocess and return the perf number (latency).
+    Do benchmarking in a worker (subprocess or thread) and return the perf number (latency).
+
+    Uses subprocess pool in process mode, thread pool in thread mode.
     """
-    return get_tuning_process_pool().benchmark(choices)
+    return get_tuning_pool().benchmark(choices)
 
 
 class AutotuneProcessPool:
     """
     Singleton pool manager for running autotuning (precompilation + benchmarking)
-    in a separate process.
+    in a separate worker.
+
+    Uses a subprocess pool by default and a thread pool when
+    `should_use_thread_workers()` is true (e.g. free-threaded Python).
     """
 
     _instance: AutotuneProcessPool | None = None
@@ -1300,7 +1544,7 @@ class AutotuneProcessPool:
     _shutdown_for_inactivity: bool = False
 
     def __init__(self):
-        self._pool: ProcessPoolExecutor | None = self._init_pool()
+        self._pool: ProcessPoolExecutor | ThreadPoolExecutor | None = self._init_pool()
         self._warmup_future: Future[Any] | None = None
         self._warmup_start_time: float | None = None
         self._timer: Timer | None = self._init_timer()
@@ -1317,7 +1561,7 @@ class AutotuneProcessPool:
 
     @property
     def pool(self):
-        """Get the process pool."""
+        """Get the worker pool (process or thread)."""
         if not config.pipeline_max_autotune_gemm:
             raise AssertionError(
                 "To use AutotuneProcessPool, pipeline_max_autotune_gemm must be enabled"
@@ -1355,22 +1599,31 @@ class AutotuneProcessPool:
 
     def _init_pool(self):
         """
-        Get or create the process pool.
+        Get or create the worker pool.
 
-        Uses ProcessPoolExecutor with 'spawn' context for CUDA safety.
-        ProcessPoolExecutor is lazily initialized - workers are not spawned
-        until the first submit() call, making this property non-blocking.
+        On free-threaded Python (or when thread workers are explicitly enabled
+        via TORCHINDUCTOR_COMPILE_THREADS) returns a ThreadPoolExecutor so
+        autotuning runs in-process without subprocess/spawn overhead.
+        Otherwise returns a ProcessPoolExecutor with 'spawn' context for CUDA
+        safety. Workers are spawned lazily on first submit().
         """
-        # Use 'spawn' context to avoid CUDA fork issues
-        # Workers are spawned lazily on first submit(), not here
-        ctx = mp.get_context("spawn")
-        pool = ProcessPoolExecutor(
-            max_workers=1,
-            mp_context=ctx,
-        )
-        atexit.register(self._shutdown)
-        autotuning_log.info("AutotuneProcessPool created (workers spawn lazily)")
+        from torch._inductor.utils import should_use_thread_workers
 
+        if should_use_thread_workers():
+            pool: ProcessPoolExecutor | ThreadPoolExecutor = ThreadPoolExecutor(
+                max_workers=1,
+            )
+            autotuning_log.info("AutotuneProcessPool created (thread mode)")
+        else:
+            # Use 'spawn' context to avoid CUDA fork issues
+            ctx = mp.get_context("spawn")
+            pool = ProcessPoolExecutor(
+                max_workers=1,
+                mp_context=ctx,
+            )
+            autotuning_log.info("AutotuneProcessPool created (workers spawn lazily)")
+
+        atexit.register(self._shutdown)
         return pool
 
     def warm_up(self) -> Future[Any]:
@@ -1384,7 +1637,7 @@ class AutotuneProcessPool:
             with self._lock:
                 if self._warmup_future is None:
                     self._warmup_start_time = time.perf_counter()
-                    self._warmup_future = self.pool.submit(
+                    self._warmup_future = self.submit(
                         _init_autotune_subprocess,
                         fp32_precision=torch.backends.cuda.matmul.fp32_precision,
                     )
@@ -1416,7 +1669,13 @@ class AutotuneProcessPool:
 
     def submit(self, fn, *args, **kwargs) -> Future[Any]:
         """Submit a job to the pool and return a Future."""
-        future = self.pool.submit(fn, *args, **kwargs)
+        future = self.pool.submit(
+            _run_with_subprocess_env,
+            fn,
+            _cache_env_for_subprocess(),
+            *args,
+            **kwargs,
+        )
         if self._timer is not None:
             future.add_done_callback(lambda _: self._record_activity())
         return future
@@ -1555,7 +1814,20 @@ class AsyncAutotuner:
 
     @staticmethod
     def get_choice_hash(choice: ChoiceCaller, inputs_key: str) -> str:
-        return choice.hash_key() + inputs_key
+        # The generated module path is part of the identity: a Future benchmarks one
+        # specific generated module, but hash_key() + inputs_key repeats across
+        # compilations that share shapes and config. Without the path, start() sees the
+        # key already present and skips submitting, so get_results() hands back a Future
+        # from an earlier compilation. If that compilation aborted -- or its cache dir
+        # has since been removed -- the subprocess cannot load the module, returns inf,
+        # and every choice looks unbenchmarkable ("All choices failed to benchmark").
+        # isinstance rather than a truthiness check: a choice without a bmreq gives
+        # None, and a test double gives whatever its attribute access returns, neither
+        # of which can be concatenated onto the key.
+        module_path = getattr(getattr(choice, "bmreq", None), "module_path", None)
+        if not isinstance(module_path, str):
+            module_path = ""
+        return choice.hash_key() + inputs_key + module_path
 
     @classmethod
     def start(cls, choices: list[ChoiceCaller], inputs_key: str):
@@ -1592,7 +1864,8 @@ class AsyncAutotuner:
         Get autotuning results, blocking until complete.
 
         Args:
-            timeout: Maximum time to wait in seconds. None means wait forever.
+            choices: Candidate choices whose scheduled results should be collected.
+            inputs_key: Cache key used to identify each choice's Future.
 
         Returns:
             Dict mapping ChoiceCaller to benchmark timing
@@ -1601,5 +1874,12 @@ class AsyncAutotuner:
         timings = {}
         for choice in choices:
             choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-            timings[choice] = AsyncAutotuner.choice_hash_to_future[choice_hash].result()
+            future = AsyncAutotuner.choice_hash_to_future.get(choice_hash)
+            if future is None:
+                autotuning_log.debug(
+                    "Skipping choice without a scheduled autotuning Future: %s",
+                    choice_hash,
+                )
+                continue
+            timings[choice] = future.result()
         return timings

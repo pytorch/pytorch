@@ -10,7 +10,6 @@
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
-#include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/detail/BLASConstants.h>
 #include <ATen/cuda/detail/CublasLtUtils.h>
@@ -224,7 +223,7 @@ using detail::CuBlasLtMatmulDescriptor;
 using detail::CuBlasLtMatrixLayout;
 using detail::CuBlasLtMatmulPreference;
 using detail::CublasLtWorkspace;
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 using detail::CuBlasLtGroupedMatrixLayout;
 #endif
 
@@ -362,7 +361,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
 
   auto ltworkspace = CublasLtWorkspace();
-  TORCH_CHECK(ltworkspace.ptr != nullptr, "OOM trying to allocate workspace for cublaslt");
+  TORCH_CHECK(
+      ltworkspace.ptr != nullptr || ltworkspace.size == 0,
+      "OOM trying to allocate workspace for cublaslt");
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
 
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
@@ -485,7 +486,7 @@ inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_D
 
 template <>
 void bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -497,19 +498,47 @@ void bgemm_internal_cublas<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 
 template <>
 void bgemm_internal_cublas<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   BGEMM_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSgemmStridedBatched(
-      handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
+  if (useBF16x9()) {
+    compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
+  }
+#endif
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &alpha,
+      a,
+      CUDA_R_32F,
+      lda,
+      stridea,
+      b,
+      CUDA_R_32F,
+      ldb,
+      strideb,
+      &beta,
+      c,
+      CUDA_R_32F,
+      ldc,
+      stridec,
+      num_batches,
+      compute_type,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
 template <>
 void bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -523,7 +552,7 @@ void bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::co
 
 template <>
 void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -537,7 +566,7 @@ void bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::com
 
 template <typename C_Dtype>
 inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -553,13 +582,15 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
   void * alpha_ptr = &falpha;
   void * beta_ptr = &fbeta;
 #ifdef USE_ROCM
+  auto raw_handle = static_cast<cublasHandle_t>(handle);
   int flag = 0;
   rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
   rocblas_datatype d_type = c_type;
 #if USE_GEMM_FLAGS_FP16_ALT_IMPL
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
-  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex((rocblas_handle)handle,
+  TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_strided_batched_ex(
+                                    reinterpret_cast<rocblas_handle>(raw_handle),
                                    hipOperationToRocOperation(opa),
                                    hipOperationToRocOperation(opb), (int)m, (int)n, (int)k,
                                    (void*)alpha_ptr, a, rocblas_datatype_f16_r, (int)lda, stridea,
@@ -610,7 +641,7 @@ inline void bgemm_internal_cublas_half_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYP
 template <typename C_Dtype>
 inline void bgemm_internal_cublas_bfloat16_helper(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
   BGEMM_CHECK_ARGVALUES(at::BFloat16);
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -816,9 +847,17 @@ void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at:
   }
 }
 
+// Returns true iff the TunableOp dispatch succeeded. On a total miss
+// operator() resolves to ResultEntry::Default(), which is bgemm_internal --
+// the same path bgemm() takes when TunableOp is disabled -- so a miss costs
+// nothing extra. False means the selected kernel reported a non-OK status
+// and the caller must retry via bgemm_internal.
 template <typename Dtype, typename C_Dtype = Dtype>
-inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
+inline bool bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
   tunable::GemmStridedBatchedParams<Dtype> params;
+  // Stamp per-call dynamic-dims mask before invoking the TunableOp; see
+  // launchTunableGemmAndBias in Blas.cpp for the rationale.
+  params.dynamic_dims_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
   params.transa = transa;
   params.transb = transb;
   params.m = m;
@@ -842,19 +881,19 @@ inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
 
   if (transa_ && transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::T, tunable::BlasOp::T> bgemm{};
-    bgemm(&params);
+    return bgemm(&params) == tunable::OK;
   }
   else if (transa_ && !transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::T, tunable::BlasOp::N> bgemm{};
-    bgemm(&params);
+    return bgemm(&params) == tunable::OK;
   }
   else if (!transa_ && transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::N, tunable::BlasOp::T> bgemm{};
-    bgemm(&params);
+    return bgemm(&params) == tunable::OK;
   }
   else if (!transa_ && !transb_) {
     static tunable::GemmStridedBatchedTunableOp<Dtype, tunable::BlasOp::N, tunable::BlasOp::N> bgemm{};
-    bgemm(&params);
+    return bgemm(&params) == tunable::OK;
   }
   else {
     TORCH_CHECK(false, "unreachable");
@@ -864,67 +903,61 @@ inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    bgemm_tunable<double>(CUDABLAS_BGEMM_ARGS(double));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && bgemm_tunable<double>(CUDABLAS_BGEMM_ARGS(double))) {
+    return;
   }
-  else {
-    bgemm_internal<double>(CUDABLAS_BGEMM_ARGS(double));
-  }
+  bgemm_internal<double>(CUDABLAS_BGEMM_ARGS(double));
 }
 
 template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float))) {
+    return;
   }
-  else {
-    bgemm_internal<float>(CUDABLAS_BGEMM_ARGS(float));
-  }
+  bgemm_internal<float>(CUDABLAS_BGEMM_ARGS(float));
 }
 
 template <>
 void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    bgemm_tunable<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && bgemm_tunable<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>))) {
+    return;
   }
-  else {
-    bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
-  }
+  bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
 }
 
 template <>
 void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    bgemm_tunable<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && bgemm_tunable<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>))) {
+    return;
   }
-  else {
-    bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
-  }
+  bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
 }
 
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    bgemm_tunable<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && bgemm_tunable<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half))) {
+    return;
   }
-  else {
-    bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
-  }
+  bgemm_internal<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
 }
 
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    bgemm_tunable<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && bgemm_tunable<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16))) {
+    return;
   }
-  else {
-    bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
-  }
+  bgemm_internal<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
 }
 
 template <>
@@ -955,7 +988,7 @@ inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dty
 
 template <>
 void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -967,19 +1000,43 @@ void gemm_internal_cublas<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 
 template <>
 void gemm_internal_cublas<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSgemm(
-      handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
+  auto compute_type = CUBLAS_COMPUTE_32F;
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12090
+  if (useBF16x9()) {
+    compute_type = CUBLAS_COMPUTE_32F_EMULATED_16BFX9;
+  }
+#endif
+  TORCH_CUDABLAS_CHECK(cublasGemmEx(
+      handle,
+      opa,
+      opb,
+      m,
+      n,
+      k,
+      &alpha,
+      a,
+      CUDA_R_32F,
+      lda,
+      b,
+      CUDA_R_32F,
+      ldb,
+      &beta,
+      c,
+      CUDA_R_32F,
+      ldc,
+      compute_type,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 }
 
 template <>
 void gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -993,7 +1050,7 @@ void gemm_internal_cublas<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::comp
 
 template <>
 void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -1007,7 +1064,7 @@ void gemm_internal_cublas<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::compl
 
 template <typename C_Dtype>
 inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half, C_Dtype)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -1023,6 +1080,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   detail::cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
 #ifdef USE_ROCM
+  auto raw_handle = static_cast<cublasHandle_t>(handle);
   int flag = 0;
   rocblas_datatype c_type = std::is_same<C_Dtype, float>::value ? rocblas_datatype_f32_r : rocblas_datatype_f16_r;
   rocblas_datatype d_type = c_type;
@@ -1030,7 +1088,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   flag = at::ROCmBackwardPassGuard::is_backward_pass() ? rocblas_gemm_flags_fp16_alt_impl : 0;
 #endif
   TORCH_CUDABLAS_CHECK(rocBLASStatusToHIPStatus(rocblas_gemm_ex(
-      (rocblas_handle)handle,
+      reinterpret_cast<rocblas_handle>(raw_handle),
       hipOperationToRocOperation(opa),
       hipOperationToRocOperation(opb),
       m,
@@ -1123,7 +1181,7 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
 
 template <typename C_Dtype>
 inline void gemm_internal_cublas_bfloat16_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, C_Dtype)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   CUBLAS_SM_CARVEOUT_GUARD(handle);
   cublasOperation_t opa = detail::cublasOpFromChar(transa);
   cublasOperation_t opb = detail::cublasOpFromChar(transb);
@@ -1365,9 +1423,17 @@ void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::B
   }
 }
 
+// Returns true iff the TunableOp dispatch succeeded. On a total miss
+// operator() resolves to ResultEntry::Default(), which is gemm_internal --
+// the same path gemm() takes when TunableOp is disabled -- so a miss costs
+// nothing extra. False means the selected kernel reported a non-OK status
+// and the caller must retry via gemm_internal.
 template <typename DType, typename C_Dtype>
-inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
+inline bool gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
   tunable::GemmParams<DType> params;
+  // Stamp per-call dynamic-dims mask before invoking the TunableOp; see
+  // launchTunableGemmAndBias in Blas.cpp for the rationale.
+  params.dynamic_dims_mask = at::cuda::tunable::GetCurrentDynamicDimsMask();
   params.transa = transa;
   params.transb = transb;
   params.m = m;
@@ -1387,19 +1453,19 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
 
   if (transa_ && transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::T> gemm{};
-    gemm(&params);
+    return gemm(&params) == tunable::OK;
   }
   else if (transa_ && !transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::T, tunable::BlasOp::N> gemm{};
-    gemm(&params);
+    return gemm(&params) == tunable::OK;
   }
   else if (!transa_ && transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::T> gemm{};
-    gemm(&params);
+    return gemm(&params) == tunable::OK;
   }
   else if (!transa_ && !transb_) {
     static tunable::GemmTunableOp<DType, tunable::BlasOp::N, tunable::BlasOp::N> gemm{};
-    gemm(&params);
+    return gemm(&params) == tunable::OK;
   }
   else {
     TORCH_CHECK(false, "unreachable");
@@ -1409,67 +1475,61 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    gemm_tunable<double>(CUDABLAS_GEMM_ARGS(double));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && gemm_tunable<double>(CUDABLAS_GEMM_ARGS(double))) {
+    return;
   }
-  else {
-    gemm_internal<double>(CUDABLAS_GEMM_ARGS(double));
-  }
+  gemm_internal<double>(CUDABLAS_GEMM_ARGS(double));
 }
 
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float))) {
+    return;
   }
-  else {
-    gemm_internal<float>(CUDABLAS_GEMM_ARGS(float));
-  }
+  gemm_internal<float>(CUDABLAS_GEMM_ARGS(float));
 }
 
 template <>
 void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    gemm_tunable<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && gemm_tunable<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>))) {
+    return;
   }
-  else {
-    gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
-  }
+  gemm_internal<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
 }
 
 template <>
 void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    gemm_tunable<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && gemm_tunable<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>))) {
+    return;
   }
-  else {
-    gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
-  }
+  gemm_internal<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
 }
 
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    gemm_tunable<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && gemm_tunable<at::Half>(CUDABLAS_GEMM_ARGS(at::Half))) {
+    return;
   }
-  else {
-    gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
-  }
+  gemm_internal<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
 }
 
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  if (tuning_ctx->IsTunableOpEnabled()) {
-    gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  if (tuning_ctx->IsTunableOpEnabled()
+      && gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16))) {
+    return;
   }
-  else {
-    gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
-  }
+  gemm_internal<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
 }
 
 template <>
@@ -1507,7 +1567,13 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation) {
+    GEMMAndBiasActivationEpilogue activation,
+    const C_Dtype* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<Dtype> beta) {
+  TORCH_INTERNAL_ASSERT(
+      !(bias && c_ptr),
+      "gemm_and_bias: bias and a distinct C operand are mutually exclusive");
 
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
@@ -1522,7 +1588,8 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = bias ? 0 : 1; // bias is added in epilogue unless nullptr
+  // bias is added in the epilogue, which accumulates with beta == 0
+  opmath_t beta_val = bias ? opmath_t(0) : beta;
 
   const auto type_info = detail::getCublasLtTypeInfo<Dtype, C_Dtype>();
   const cudaDataType_t abType = type_info.ab_type;
@@ -1606,7 +1673,15 @@ bool gemm_and_bias(
 
   CuBlasLtMatrixLayout Adesc(abType, m, k, mat1_ld, transpose_mat1);
   CuBlasLtMatrixLayout Bdesc(abType, k, n, mat2_ld, transpose_mat2);
-  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, c_ptr ? c_ld : result_ld);
+  // When c_ptr is null, C aliases D and the layouts are identical, so reuse
+  // Cdesc rather than paying for a second cublasLtMatrixLayoutCreate on what is
+  // the hot nn.Linear path.
+  std::optional<CuBlasLtMatrixLayout> Ddesc;
+  if (c_ptr) {
+    Ddesc.emplace(cType, m, n, result_ld);
+  }
+  const auto Ddesc_raw = c_ptr ? Ddesc->descriptor() : Cdesc.descriptor();
 
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
@@ -1614,8 +1689,9 @@ bool gemm_and_bias(
 #ifndef USE_ROCM
   uint32_t a_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
   uint32_t b_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
-  uint32_t c_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
-  uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(bias));
+  uint32_t c_alignment =
+      detail::getAlignment(reinterpret_cast<uintptr_t>(c_ptr ? c_ptr : result_ptr));
+  uint32_t d_alignment = detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES, a_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES, b_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
@@ -1631,7 +1707,7 @@ bool gemm_and_bias(
       Adesc.descriptor(),
       Bdesc.descriptor(),
       Cdesc.descriptor(),
-      Cdesc.descriptor(),
+      Ddesc_raw,
       preference.descriptor(),
       1,
       &heuristicResult,
@@ -1650,10 +1726,10 @@ bool gemm_and_bias(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      result_ptr,
+      c_ptr ? c_ptr : result_ptr,
       Cdesc.descriptor(),
       result_ptr,
-      Cdesc.descriptor(),
+      Ddesc_raw,
       &heuristicResult.algo,
       ltworkspace.ptr,
       ltworkspace.size,
@@ -1712,7 +1788,10 @@ template bool gemm_and_bias(
     const double* bias,
     double* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const double* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<double> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1728,7 +1807,10 @@ template bool gemm_and_bias(
     const float* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const float* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<float> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1744,7 +1826,10 @@ template bool gemm_and_bias(
     const at::Half* bias,
     at::Half* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const at::Half* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::Half> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1760,7 +1845,10 @@ template bool gemm_and_bias(
     const at::Half* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const float* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::Half> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1776,7 +1864,10 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const at::BFloat16* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::BFloat16> beta);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1792,9 +1883,13 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    const float* c_ptr,
+    int64_t c_ld,
+    at::opmath_type<at::BFloat16> beta);
 
 using at::blas::ScalingType;
+using at::blas::SwizzleType;
 
 void scaled_gemm(
     char transa,
@@ -1808,12 +1903,14 @@ void scaled_gemm(
     ScalarType mat1_dtype,
     ScalarType mat1_scale_dtype,
     ScalingType mat1_scaling_type,
+    SwizzleType mat1_swizzle_type,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
     ScalarType mat2_scale_dtype,
     ScalingType mat2_scaling_type,
+    SwizzleType mat2_swizzle_type,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -1821,14 +1918,18 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    const std::optional<Tensor>& alpha) {
+    const std::optional<Tensor>& alpha,
+    const void* c_ptr,
+    float beta,
+    float alpha_multiplier,
+    const Tensor* device_beta) {
   // Note: see `cublasCommonArgs` for various non-intuitive manipulations
   // of input arguments to this function.
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
   // Note: alpha_val may change later depending on user-passed argument
-  float alpha_val = 1.0;
-  float beta_val = 0.0;
+  float alpha_val = alpha_multiplier;
+  float beta_val = beta;
 #ifndef USE_ROCM
   // Note: unused, but cublasLtMatmul requires a C pointer that is not result_ptr or nullptr
   const void* dummy_C_ptr = mat1_ptr;
@@ -1895,12 +1996,19 @@ void scaled_gemm(
 #endif // ifndef USE_ROCM
   CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
+  TORCH_INTERNAL_ASSERT(c_ptr != nullptr || beta_val == 0.0f);
+  TORCH_INTERNAL_ASSERT(c_ptr == nullptr || bias_ptr == nullptr);
 #ifdef USE_ROCM
-  // Cdesc is unused, beta is 0. But hipblaslt needs this set to something reasonable.
-  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
+  // Cdesc is unused on ROCm (c_ptr is never set, beta is 0), but hipblaslt
+  // needs it set to something reasonable.
+  const auto c_desc_dtype = result_dtype;
 #else
-  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
-#endif // ifdef USE_ROCM
+  // Without a C operand, Cdesc describes the bias, matching the pre-existing
+  // bias epilogue. With a C operand it must describe C itself.
+  const auto c_desc_dtype = c_ptr == nullptr ? bias_dtype : result_dtype;
+#endif
+  CuBlasLtMatrixLayout Cdesc(
+      ScalarTypeToCudaDataType(c_desc_dtype), m, n, result_ld);
   CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
   if (bias_ptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
@@ -1908,38 +2016,41 @@ void scaled_gemm(
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, ScalarTypeToCudaDataType(bias_dtype));
   }
 
-  // Handle user-passed alpha
-  float *alpha_ptr = &alpha_val;
-  float *beta_ptr = &beta_val;
+  // Handle user-passed alpha and its optional device-side beta.
+  const float* alpha_ptr = &alpha_val;
+  const float* beta_ptr = &beta_val;
+  TORCH_INTERNAL_ASSERT(device_beta == nullptr || alpha.has_value());
 
   if (alpha.has_value()) {
     auto& a = alpha.value();
 
     // if device-tensor
     if (a.is_cuda()) {
-      // NOTE: there are lifetime requirements on device-side pointers for alpha/beta -- the value must be
-      //       valid & correct until the cublas call finishes (not is scheduled like host-side values). Thus
-      //       we need to use allocations for alpha/beta that have some guarantees on lifetime - a statically
-      //       managed 4B buffer for alpha that we'll copy the passed alpha value into, and constant memory
-      //       for beta respectively.
-      float *user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
-      at::Tensor user_alpha = at::from_blob(user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
-      user_alpha.copy_(a);
+      TORCH_INTERNAL_ASSERT(alpha_multiplier == 1.0f);
       // Tell cublasLt we're using device-side pointers for alpha/beta
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
-      alpha_ptr = user_alpha.data_ptr<float>();
-      beta_ptr = at::cuda::detail::get_cublas_device_zero();
+      alpha_ptr = a.const_data_ptr<float>();
+      if (device_beta != nullptr) {
+        TORCH_INTERNAL_ASSERT(
+            device_beta->is_cuda() && device_beta->device() == a.device() &&
+            device_beta->numel() == 1 && device_beta->scalar_type() == kFloat);
+        beta_ptr = device_beta->const_data_ptr<float>();
+      } else {
+        TORCH_INTERNAL_ASSERT(beta_val == 0.0f);
+        beta_ptr = at::cuda::detail::get_cublas_device_zero();
+      }
     } else {
-      alpha_val = a.item<float>();
+      TORCH_INTERNAL_ASSERT(device_beta == nullptr);
+      alpha_val = a.item<float>() * alpha_multiplier;
     }
   }
     // For other data types, use the get_scale_mode function based on scaling type
     // The SCALE_MODE attrs only exist in cuBLAS 12.8+/ROCm 7.0 or in recent hipblaslt,
     // but we must invoke get_scale_mode anyways to trigger the version checks.
     // Note that AMD/ROCm follows OCP Spec 1.0, which is different from NVIDIA's implementation. See get_scale_mode() for details.
-    [[maybe_unused]] int a_scale_mode = detail::cublasLtMatmulScaleMode(mat1_scaling_type, mat1_scale_dtype, use_fast_accum);
-    [[maybe_unused]] int b_scale_mode = detail::cublasLtMatmulScaleMode(mat2_scaling_type, mat2_scale_dtype, use_fast_accum);
+    [[maybe_unused]] int a_scale_mode = detail::cublasLtMatmulScaleMode(mat1_scaling_type, mat1_swizzle_type, mat1_scale_dtype, use_fast_accum);
+    [[maybe_unused]] int b_scale_mode = detail::cublasLtMatmulScaleMode(mat2_scaling_type, mat2_swizzle_type, mat2_scale_dtype, use_fast_accum);
 #if CUDA_VERSION >= 12080 || (defined(USE_ROCM) && ROCM_VERSION >= 70000 && defined(HIPBLASLT_OUTER_VEC))
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);
@@ -1948,6 +2059,16 @@ void scaled_gemm(
   CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
+#ifndef USE_ROCM
+  if (c_ptr != nullptr) {
+    preference.setAttribute(
+        CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+        detail::getAlignment(reinterpret_cast<uintptr_t>(c_ptr)));
+  }
+  preference.setAttribute(
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
+      detail::getAlignment(reinterpret_cast<uintptr_t>(result_ptr)));
+#endif
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
@@ -2021,9 +2142,9 @@ void scaled_gemm(
       Bdesc.descriptor(),
       beta_ptr,
 #ifdef USE_ROCM
-      result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
+      c_ptr == nullptr ? result_ptr : c_ptr,
 #else
-      dummy_C_ptr, // also unused, but cuBLAS can't use nullptr or result_ptr
+      c_ptr == nullptr ? dummy_C_ptr : c_ptr,
 #endif // ifdef USE_ROCM
       Cdesc.descriptor(),
       result_ptr,
@@ -2224,7 +2345,7 @@ void grouped_gemm(
     const void *lddArrayDev,
     int batchCount,
     bool use_int64_dims) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = prop->major == 9;
   TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
@@ -2254,10 +2375,8 @@ void grouped_gemm(
   auto ltworkspace = CublasLtWorkspace();
   auto stream = at::cuda::getCurrentCUDAStream();
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, ltworkspace.size);
-  // As of CUDA 13.3u1, cuBLASLt grouped GEMM heuristics return suboptimal algos when inputs are row major
-  // Swap average rows and cols to recover optimal kernels, and update this once fixed in cuBLASLt
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, avgN);
-  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, avgM);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS, avgM);
+  preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS, avgN);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM, avgK);
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
@@ -2309,8 +2428,8 @@ void grouped_gemm(
       " when calling grouped cublasLtMatmul");
   return;
 #else
-  TORCH_CHECK(false, "grouped cublasLtMatmul requires CUDA >= 13.2 and is not supported on ROCm. Current build does not meet these requirements.");
-#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+  TORCH_CHECK(false, "grouped cublasLtMatmul requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
+#endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 
 template <>
@@ -2450,7 +2569,7 @@ void trsmBatched<c10::complex<double>>(
 
 template <>
 void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(c10::complex<double>);
@@ -2465,7 +2584,7 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
   // gemv is bw bound, and does not benefit from TF32. But the precision
   // loss still happens on TF32. So we disable it here.
   NoTF32Guard disable_tf32;
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(c10::complex<float>);
@@ -2477,7 +2596,7 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>)) {
 
 template <>
 void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(double);
@@ -2490,7 +2609,7 @@ void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
   // gemv is bw bound, and does not benefit from TF32. But the precision
   // loss still happens on TF32. So we disable it here.
   NoTF32Guard disable_tf32;
-  cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   cublasOperation_t op = detail::cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(float);
@@ -2721,7 +2840,7 @@ void geqrfBatched<c10::complex<double>>(
 template <>
 void getrfBatched<double>(
     int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
 }
@@ -2729,7 +2848,7 @@ void getrfBatched<double>(
 template <>
 void getrfBatched<float>(
     int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
 }
@@ -2742,7 +2861,7 @@ void getrfBatched<c10::complex<double>>(
     int* ipiv_array,
     int* info_array,
     int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasZgetrfBatched(
       handle,
       n,
@@ -2761,7 +2880,7 @@ void getrfBatched<c10::complex<float>>(
     int* ipiv_array,
     int* info_array,
     int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   TORCH_CUDABLAS_CHECK(cublasCgetrfBatched(
       handle,
       n,

@@ -29,6 +29,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   get-changed-files:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: Get changed files
     uses: ./.github/workflows/_get-changed-files.yml
@@ -61,10 +62,10 @@ jobs:
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         if [ "$CHANGED_FILES" = "*" ]; then
-          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
-        else
-          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
+          CHANGED_FILES="--all-files"
         fi
+        export CHANGED_FILES
+        export LINTER_GROUP=clang
         export CLANG=1
         # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
         export MAX_JOBS="$(nproc --ignore=2)"
@@ -88,9 +89,8 @@ jobs:
       runner: mt-l-x86iamx-8-16
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-linter-${{ needs.get-label-type.outputs.ci-docker-hash }}
       script: |
-        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running pyrefly"
-        ADDITIONAL_LINTRUNNER_ARGS="--take PYREFLY --all-files" .github/scripts/lintrunner.sh
+        LINTER_GROUP=pyrefly .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
     uses: ./.github/workflows/_lint.yml
@@ -105,10 +105,11 @@ jobs:
         # Cap parallelism to the pod's CPU budget; os.cpu_count() overcounts on k8s and OOMs.
         export MAX_JOBS="$(nproc --ignore=2)"
         if [ "$CHANGED_FILES" = '*' ]; then
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
-        else
-          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
+          CHANGED_FILES="--all-files"
         fi
+        export CHANGED_FILES
+        export LINTER_GROUP=other
+        .github/scripts/lintrunner.sh
 
   quick-checks:
     if: github.repository_owner == 'pytorch'
@@ -142,6 +143,7 @@ jobs:
         python3 torch/testing/_internal/check_kernel_launches.py |& tee cuda_kernel_launch_checks.txt
 
   pr-sanity-checks:
+    needs: get-label-type
     name: pr-sanity-checks
     runs-on: linux.24_04.4x
     # Only run this on pull requests. This check is simple enough to be done without a Docker image
@@ -238,6 +240,7 @@ jobs:
         PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
 
   test_collect_env:
+    needs: get-label-type
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
     runs-on: ${{ matrix.runner }}
@@ -309,6 +312,7 @@ jobs:
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   doc-redirects-check:
+    needs: get-label-type
     name: doc-redirects-check
     runs-on: linux.24_04.4x
     if: github.event_name == 'pull_request' && github.repository_owner == 'pytorch'

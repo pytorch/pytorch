@@ -173,6 +173,11 @@ using opmath_t = typename detail::OpMathType<T>::type;
 template <typename T>
 using accum_t = typename detail::AccumulationType<T>::type;
 
+template <typename T, int N>
+struct alignas(sizeof(T) * N) aligned_vector {
+  T v[N];
+};
+
 // TODO: Move it to type_traits header may be
 template <typename F, typename... Args>
 using result_of = decltype(::metal::declval<F>()(::metal::declval<Args>()...));
@@ -283,10 +288,23 @@ template <
     typename T,
     typename U,
     ::metal::enable_if_t<
-        !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>),
+        !::metal::is_same_v<U, T> && (is_complex_v<T> == is_complex_v<U>) &&
+            !is_float8_v<T> && !is_float8_v<U>,
         bool> = true>
 inline T cast_to(const U from) {
   return static_cast<T>(from);
+}
+
+// Metal rejects static_cast<bfloat>(fp8)
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        !::metal::is_same_v<U, T> && !is_complex_v<T> && !is_complex_v<U> &&
+            (is_float8_v<T> || is_float8_v<U>),
+        bool> = true>
+inline T cast_to(const U from) {
+  return T(float(from));
 }
 
 // - Scalar to complex
@@ -354,6 +372,28 @@ inline common_dtype<T, U> div(const T x, const U y) {
     return T(x.x / y.x, x.y / y.x);
   }
   return T(::metal::dot(x, y), x.y * y.x - x.x * y.y) / ::metal::dot(y, y);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<!is_complex_v<T>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return ::metal::fma(x, y, z);
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline common_dtype<T, U> fma(
+    const T x,
+    const U y,
+    const common_dtype<T, U> z) {
+  return z + mul(x, y);
 }
 
 // Remainder operator
@@ -539,6 +579,9 @@ inline float2 conj(float2 a) {
 // `h = a sqrt(1 + r)`
 // where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
 //
+// Case 0: Either input is inf
+//  Return inf
+//
 // Case 1: `a == b`
 //   The formula simplifies to `h = a sqrt(2)`.
 //
@@ -550,6 +593,9 @@ inline float2 conj(float2 a) {
 // Case 3: All other cases.
 //   Use `h = a sqrt(1 + r)`.
 inline float hypot(float a_, float b_) {
+  if (::metal::isinf(a_) || ::metal::isinf(b_)) {
+    return INFINITY;
+  }
   auto a = max(a_, b_);
   auto b = min(a_, b_);
 

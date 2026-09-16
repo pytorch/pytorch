@@ -965,7 +965,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // interpreter. But this way we hold onto graph/node and Function and
   // we can create module hierarchy string for each event in autograd
   // profiler at the end, when consolidating events.
-  // At the moment overhead does not seem exhorbitantly large.
+  // At the moment overhead does not seem exorbitantly large.
   // Another option would be return vector of (string, InlinedCallstackPtrs)
   // string would contain function name and typename of self
   // Format of the returned vector of strings:

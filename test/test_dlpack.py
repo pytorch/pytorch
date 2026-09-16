@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.utils.dlpack import (
     DLDeviceType,
@@ -369,7 +370,7 @@ class TestTorchDlPack(TestCase):
             x.__dlpack__(stream=0)
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyCUDA
     @deviceCountAtLeast(2)
     def test_dlpack_tensor_on_different_device(self, devices):
         dev0, dev1 = devices[:2]
@@ -414,6 +415,29 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(z.shape, (1,))
         # Stride normalization has been removed, strides should be preserved
         self.assertEqual(z.stride(), (3,))
+
+    @xfailIfTorchDynamo
+    @skipMeta
+    @onlyCPU
+    def test_from_dlpack_negative_strides(self, device):
+        # torch.from_dlpack() on a NumPy array with negative strides used to
+        # abort the process instead of raising a catchable Python exception.
+        # See https://github.com/pytorch/pytorch/issues/188023.
+        import numpy as np
+
+        # 1-D negative stride
+        a1 = np.arange(8.0)[::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a1)
+
+        # 2-D, one negative axis
+        a2 = np.arange(12.0).reshape(3, 4)[:, ::-1]
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.from_dlpack(a2)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -820,6 +844,76 @@ class TestTorchDlPack(TestCase):
         module.test_dlpack_exchange_api(
             tensor, api_capsule, device.startswith(("cuda", "xpu"))
         )
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
+    def test_dlpack_exchange_api_sliced(self, device):
+        # Regression: on MPS, DLTensor.data is an opaque id<MTLBuffer>, so
+        # toDLPackNonOwning must export the storage base and carry the view
+        # offset in byte_offset rather than doing pointer arithmetic on the
+        # handle. Every other backend keeps exporting data_ptr() with
+        # byte_offset == 0, which consumers such as CuteDSL rely on.
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
+        base = torch.arange(24, dtype=torch.float32, device=device).reshape(4, 6)
+        sliced = base[1:3, :]  # storage_offset = 6, elemsize = 4 -> byte_offset = 24
+
+        source = """
+        #include <torch/extension.h>
+        #include <ATen/dlpack.h>
+        #include <pybind11/pybind11.h>
+        #include <memory>
+
+        namespace py = pybind11;
+
+        void check_sliced_dltensor(
+            at::Tensor base, at::Tensor sliced, py::object api_obj) {
+            const DLPackExchangeAPI* api =
+                static_cast<const DLPackExchangeAPI*>(
+                    PyCapsule_GetPointer(api_obj.ptr(), "dlpack_exchange_api"));
+            TORCH_CHECK(api != nullptr, "API pointer is NULL");
+
+            std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                THPVariable_Wrap(sliced), &Py_DecRef);
+            TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor");
+
+            DLTensor dltensor;
+            int result = api->dltensor_from_py_object_no_sync(py_obj.get(), &dltensor);
+            TORCH_CHECK(result == 0,
+                        "dltensor_from_py_object_no_sync failed with code ", result);
+
+            // base covers the whole storage, so its data_ptr() is the storage
+            // base (on MPS, the unmodified id<MTLBuffer>).
+            void* expected_data;
+            uint64_t expected_offset;
+            if (sliced.device().type() == at::kMPS) {
+                expected_data = base.mutable_data_ptr();
+                expected_offset =
+                    sliced.storage_offset() * c10::elementSize(sliced.scalar_type());
+            } else {
+                expected_data = sliced.mutable_data_ptr();
+                expected_offset = 0;
+            }
+
+            TORCH_CHECK(dltensor.data == expected_data,
+                        "unexpected DLTensor.data for a sliced tensor");
+            TORCH_CHECK(dltensor.byte_offset == expected_offset,
+                        "byte_offset should be ", expected_offset,
+                        ", got ", dltensor.byte_offset);
+        }
+        """
+
+        from torch.utils import cpp_extension
+
+        module = cpp_extension.load_inline(
+            name="test_sliced_dltensor",
+            cpp_sources=[source],
+            functions=["check_sliced_dltensor"],
+            verbose=False,
+            with_cuda=device.startswith("cuda"),
+            with_sycl=device.startswith("xpu"),
+        )
+        module.check_sliced_dltensor(base, sliced, api_capsule)
 
     @skipMeta
     @onlyOn(["xpu", "cuda"])

@@ -12,9 +12,11 @@ import operator
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
+from textwrap import dedent
 from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import Self, TypeVar
 
@@ -315,21 +317,49 @@ class DeviceCodegen:
 
 KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
 
+# Device index to emit into generated code: either a literal compile-time index, or a
+# code expression evaluated at run time (e.g. current_device_idx_expr() under
+# compile-on-one-rank).
+DeviceIdx = int | str
+
 device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
+    def uses_gpu_cpp_wrapper(self) -> bool:
+        """Explicitly opt into the CUDA/XPU-style C++ wrapper two-pass path.
+
+        Using, registering, or inheriting from a CppWrapperGpu-style class does
+        not imply this capability. MPS and MTIA use GPU-style wrapper classes
+        but do not require the CUDA/XPU lazy-autotune JIT+AOT path solely for
+        that reason.
+        """
+        return False
+
     def import_get_raw_stream_as(self, name: str) -> str:
         raise NotImplementedError
 
-    def set_device(self, device_idx: int) -> str:
+    def set_device(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
 
     def synchronize(self) -> str:
         raise NotImplementedError
 
-    def device_guard(self, device_idx: int) -> str:
+    def device_guard(self, device_idx: DeviceIdx) -> str:
         raise NotImplementedError
+
+    def current_device_idx_expr(self) -> str:
+        # Runtime expression evaluating to the current device index. Used under
+        # compile-on-one-rank so the wrapper resolves its device at run time
+        # (rank-agnostic) instead of baking the compile-time index. Only CUDA/ROCm
+        # implements this today; raise something actionable rather than a bare
+        # NotImplementedError from deep inside device-context codegen.
+        raise RuntimeError(
+            f"compile-on-one-rank (device-as-parameter) is not supported on "
+            f"{type(self).__name__}: it has no current_device_idx_expr(), so the "
+            f"generated wrapper would bake the compile-time device index and not be "
+            f"rank-portable."
+        )
 
     def current_stream(self) -> str:
         raise NotImplementedError
@@ -358,6 +388,9 @@ class DeviceOpOverrides:
     def kernel_driver(self) -> str:
         raise NotImplementedError
 
+    def cpp_kernel_launch_supports_pdl(self) -> bool:
+        return False
+
     def cpp_stream_type(self) -> str:
         raise NotImplementedError
 
@@ -370,6 +403,14 @@ class DeviceOpOverrides:
     def cpp_device_ptr(self) -> str:
         raise NotImplementedError
 
+    def aten_device_type(self) -> str:
+        """Return the C++ ATen DeviceType expression for this device.
+
+        The returned value must use the ``at::k...`` form, for example
+        ``at::kPrivateUse1``.
+        """
+        raise NotImplementedError
+
     def tma_descriptor_helpers(self) -> str:
         raise NotImplementedError
 
@@ -380,6 +421,30 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
 
+class NoOpDeviceOpOverrides(DeviceOpOverrides):
+    def import_get_raw_stream_as(self, name: str) -> str:
+        return dedent(
+            """
+            def get_raw_stream(_):
+                return 0
+            """
+        )
+
+    def cpp_kernel_type(self) -> str:
+        return "void*"
+
+    def set_device(self, device_idx: DeviceIdx) -> str:
+        return "pass"
+
+    def synchronize(self) -> str:
+        return "pass"
+
+    def device_guard(self, device_idx: DeviceIdx) -> str:
+        return "torch._ops.contextlib.nullcontext()"
+
+
+# Thread-safe lazy initialization for device op overrides
+device_op_overrides_lock = threading.RLock()
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 _device_op_overrides_initialized = False
 custom_backend_passes: dict[str, CustomGraphModulePass | None] = {}
@@ -488,7 +553,17 @@ def get_wrapper_codegen_for_device(
         if fx_wrapper:
             return wrapper_codegen_obj.fx_wrapper_codegen
         elif cpp_wrapper:
-            return wrapper_codegen_obj.cpp_wrapper_codegen
+            cpp_wrapper_codegen = wrapper_codegen_obj.cpp_wrapper_codegen
+            # allow_stack_allocation is a per-compile config, so the arrayref CPU
+            # wrapper must follow the current config value rather than whatever it
+            # happened to be at first registration (see init_backend_registration).
+            if device == "cpu" and config.aot_inductor.allow_stack_allocation:
+                from .cpp_wrapper_cpu import CppWrapperCpu
+                from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
+
+                if cpp_wrapper_codegen is CppWrapperCpu:
+                    return CppWrapperCpuArrayRef
+            return cpp_wrapper_codegen
         else:
             return wrapper_codegen_obj.wrapper_codegen
     return None
@@ -502,15 +577,17 @@ def get_custom_backend_config_for_device(device: str) -> ConfigModule | None:
     return custom_backend_codegen_configs.get(device)
 
 
+# Prevents a hook that re-enters init_backend_registration from firing itself again.
+_privateuse1_backend_init_in_progress = False
+
+
 @functools.cache
-def init_backend_registration() -> None:
-    """
-    Register the backend for different devices, including the scheduling
-    for kernel code generation and the host side wrapper code generation.
-    """
+def _init_builtin_backend_registration() -> None:
+    # The built-in devices are never unregistered, so this only needs to run
+    # once per process; the privateuse1 probe in init_backend_registration
+    # below re-runs on every call.
     from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
-    from .cpp_wrapper_cpu_array_ref import CppWrapperCpuArrayRef
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cpp_wrapper_mps import CppWrapperMps
     from .cuda_combined_scheduling import CUDACombinedScheduling
@@ -534,9 +611,11 @@ def init_backend_registration() -> None:
             "cpu",
             lambda scheduling: cpu_backends[config.cpu_backend](scheduling),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef
-            if config.aot_inductor.allow_stack_allocation
-            else CppWrapperCpu,
+            # allow_stack_allocation selects CppWrapperCpuArrayRef, but that is a
+            # per-compile config; the choice is made dynamically in
+            # get_wrapper_codegen_for_device rather than frozen here at the
+            # process's first registration.
+            CppWrapperCpu,
             WrapperFxCodegen,
         )
 
@@ -601,18 +680,48 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+
+def init_backend_registration() -> None:
+    """
+    Register the backend for different devices, including the scheduling
+    for kernel code generation and the host side wrapper code generation.
+    """
+    global _privateuse1_backend_init_in_progress
+    _init_builtin_backend_registration()
+
     private_backend = torch._C._get_privateuse1_backend_name()
     if (
         private_backend != "privateuseone"
         and get_scheduling_for_device(private_backend) is None
     ):
-        from torch.utils.backend_registration import _get_custom_mod_func
+        device_mod = getattr(torch, private_backend, None)
+        backend_init = getattr(device_mod, "_inductor_backend_init", None)
+        if backend_init is not None:
+            # Vendor hook: runs the full inductor integration and must call
+            # register_backend_for_device itself. Serialized on the compile
+            # lock so a concurrent first compile waits for the in-flight hook
+            # instead of observing a half-registered device.
+            from torch._dynamo.convert_frame import compile_lock
 
-        try:
-            device_scheduling = _get_custom_mod_func("Scheduling")
-            wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
-            cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
-            fx_wrapper_codegen = _get_custom_mod_func("WrapperFxCodegen")
+            with compile_lock:
+                # Re-check under the lock: another thread may have finished
+                # registration while we waited, and a hook that re-enters
+                # this function (the lock is re-entrant) must not fire
+                # itself again.
+                if get_scheduling_for_device(private_backend) is not None:
+                    return
+                if _privateuse1_backend_init_in_progress:
+                    return
+                _privateuse1_backend_init_in_progress = True
+                try:
+                    backend_init()
+                finally:
+                    _privateuse1_backend_init_in_progress = False
+        else:
+            device_scheduling = getattr(device_mod, "Scheduling", None)
+            wrapper_codegen = getattr(device_mod, "PythonWrapperCodegen", None)
+            cpp_wrapper_codegen = getattr(device_mod, "CppWrapperCodegen", None)
+            fx_wrapper_codegen = getattr(device_mod, "WrapperFxCodegen", None)
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
@@ -621,8 +730,6 @@ def init_backend_registration() -> None:
                     cpp_wrapper_codegen,
                     fx_wrapper_codegen,
                 )
-        except RuntimeError:
-            pass
 
 
 def index_prevent_reordering(
@@ -639,7 +746,8 @@ def index_prevent_reordering(
 def register_device_op_overrides(
     device: str, device_op_overrides: DeviceOpOverrides
 ) -> None:
-    device_op_overrides_dict[device] = device_op_overrides
+    with device_op_overrides_lock:
+        device_op_overrides_dict[device] = device_op_overrides
 
 
 def _initialize_device_op_overrides():
@@ -649,16 +757,22 @@ def _initialize_device_op_overrides():
     if _device_op_overrides_initialized:
         return
 
-    from . import mps_device_op_overrides  # noqa: F401
-    from .cpu_device_op_overrides import CpuDeviceOpOverrides
-    from .cuda import device_op_overrides  # noqa: F401
-    from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-    from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+    with device_op_overrides_lock:
+        if _device_op_overrides_initialized:
+            return
 
-    # TPU uses Pallas for codegen and only needs no-op overrides
-    register_device_op_overrides("tpu", CpuDeviceOpOverrides())
+        from . import (
+            cpu_device_op_overrides,  # noqa: F401
+            mps_device_op_overrides,  # noqa: F401
+        )
+        from .cuda import device_op_overrides  # noqa: F401
+        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
-    _device_op_overrides_initialized = True
+        # TPU uses Pallas for codegen and only needs no-op overrides
+        register_device_op_overrides("tpu", NoOpDeviceOpOverrides())
+
+        _device_op_overrides_initialized = True
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
@@ -666,6 +780,12 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         raise AssertionError(type(device))
     _initialize_device_op_overrides()
     return device_op_overrides_dict[device]
+
+
+def _uses_gpu_cpp_wrapper(device: str) -> bool:
+    _initialize_device_op_overrides()
+    overrides = device_op_overrides_dict.get(device)
+    return overrides is not None and overrides.uses_gpu_cpp_wrapper()
 
 
 DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
@@ -1207,6 +1327,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         is_pure: bool = True,
         pack: int = 1,
         input_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_index: int = 0,
     ) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: inline_asm_elementwise only implemented for Triton backend"
@@ -1651,7 +1773,7 @@ class KernelArgs:
         )
 
     @staticmethod
-    def _buffer_is_marked_removed(name: Any) -> bool:
+    def _buffer_is_marked_removed(name: object) -> bool:
         # this function is needed by MTIA
         return isinstance(name, RemovedArg)
 
@@ -1731,7 +1853,7 @@ class KernelArgs:
         Returns:
             Tuple[str, str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - "workspace_{i}": agraph level unique identifier for
+                - "workspace_{i}": a graph level unique identifier for
                     the workspace tensor.
                 - offset: An integer representing the item offset in the workspace.
         """
@@ -1768,13 +1890,19 @@ class KernelArgs:
         Returns:
             name of the semaphores buffer
         """
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
         current_device = V.graph.get_current_device_or_throw()
+        # This name is emitted into the wrapper, so under compile-on-one-rank it cannot
+        # carry the rank's device index (the graph is single-device there, so the type
+        # alone still distinguishes buffers).
+        suffix = "" if _coor_enabled() else f"_{current_device.index}"
         arg = WorkspaceArg(
             count=min_size,
             zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
             dtype=torch.uint32,
             inner_name="sem_ptr",
-            outer_name=f"semaphores_{current_device.type}_{current_device.index}",
+            outer_name=f"semaphores_{current_device.type}{suffix}",
             device=current_device,
         )
         for existing_arg in self.workspace_args:
@@ -2092,6 +2220,13 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     def get(self, cache_key: str) -> CSEVariableType:
         return self._cache[self.augment_key(cache_key)]
 
+    def contains_value(self, value: CSEVariableType) -> bool:
+        return (
+            value in self._cache.values()
+            or value in self.store_cache.values()
+            or value in self.reduction_cache.values()
+        )
+
     def generate(
         self,
         buffer: IndentedBuffer,
@@ -2179,7 +2314,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(var_name, bounds, dtype, shape)
+        )
         self.varname_map[var_name] = var
         return var
 
@@ -2193,7 +2330,9 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         torch._check_value(
             name not in self.varname_map, lambda: f"duplicate name: {name}"
         )
-        var = V.kernel.create_cse_var(name, bounds, dtype, shape)
+        var = cast(
+            "CSEVariableType", V.kernel.create_cse_var(name, bounds, dtype, shape)
+        )
         self.varname_map[name] = var
         return var
 
@@ -2238,6 +2377,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers: OrderedSet[str] = OrderedSet()
         self.store_buffer_names: OrderedSet[str] = OrderedSet()
+        self.store_buffer_counts: dict[str, int] = {}
         self._load_mask: str | None = None
         self._load_other: None | int | float = None
         # OrderedSet in set_current_node
@@ -2316,7 +2456,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        """A load the depends on an index we have read"""
+        """A load that depends on an index we have read"""
         prior = self.loads
         try:
             # put the load in the compute section as it might have deps
@@ -2478,7 +2618,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
-                self.num_store -= 1
+                self.num_store -= self.store_buffer_counts.get(name, 1)
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -2798,6 +2938,7 @@ class CSEProxy(DefaultHandler):
                 V.kernel.compute,
                 v,
                 bounds=bounds,
+                # pyrefly: ignore[bad-argument-type]
                 dtype=output_dtype,
                 shape=output_shape,
             )
@@ -2977,6 +3118,9 @@ class CSEProxy(DefaultHandler):
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
+            self.kernel.store_buffer_counts[name] = (
+                self.kernel.store_buffer_counts.get(name, 0) + 1
+            )
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
@@ -2993,6 +3137,9 @@ class CSEProxy(DefaultHandler):
 
         if name not in V.graph.removed_buffers:
             self.kernel.num_store += 1
+            self.kernel.store_buffer_counts[name] = (
+                self.kernel.store_buffer_counts.get(name, 0) + 1
+            )
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(

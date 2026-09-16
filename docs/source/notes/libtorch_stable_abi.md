@@ -30,6 +30,7 @@ It consists of
 - torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
+- torch/csrc/stable/pyobject.h: Provides conversions between Python objects and their `torch::stable` equivalents, such as `tensor_from_pyobject` / `tensor_to_pyobject` for a Python `torch.Tensor`. To access these APIs, you still need to only link `libtorch`, but `libtorch_python` must be loaded at runtime; see the Python interop shims section below.
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
@@ -42,16 +43,28 @@ The stable C headers started by AOTInductor form the foundation of the stable AB
 - [torch/csrc/inductor/aoti_torch/c/shim.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/c/shim.h): Includes C-style shim APIs for commonly used regarding Tensors, dtypes, CUDA, and the like.
 - [torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h): Includes C-style shim APIs for ATen ops from `native_functions.yaml` (e.g. `aoti_torch_aten_new_empty`).
 - [torch/csrc/inductor/aoti_torch/generated/c_shim_*.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/inductor/aoti_torch/generated): Includes C-style shim APIs for specific backend kernels dispatched from `native_functions.yaml` (e.g. `aoti_torch_cuda_pad`). These APIs should only be used for the specific backend they are named after (e.g. `aoti_torch_cuda_pad` should only be used within CUDA kernels), as they opt out of the dispatcher.
-- [torch/csrc/stable/c/shim.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/stable/c/shim.h): We are building out more ABIs to logically live in `torch/csrc/stable/c` instead of continuing the AOTI naming that no longer makes sense for our general use case.
+- [torch/csrc/stable/c/shim.h](https://github.com/pytorch/pytorch/blob/main/torch/csrc/stable/c/shim.h): We are building out more ABIs to logically live in `torch/csrc/stable/c` instead of continuing the AOTI naming that no longer makes sense for our general use case. This consolidated shim collection also holds the C entry points backing `tensor_from_pyobject`/`tensor_to_pyobject` (see the Python interop shims section below).
 
 These headers are promised to be ABI stable across releases and adhere to a stronger backwards compatibility policy than LibTorch. Specifically, we promise not to modify them for at least 2 years after they are released. However, this is **use at your own risk**. For example, users must handle the memory lifecycle of objects returned by certain APIs. Further, the stack-based APIs discussed below which allow the user to call into the PyTorch dispatcher do not provide strong guarantees on forward and backward compatibility of the underlying op that is called.
 
 Unless absolutely necessary, we recommend the high-level C++ API in `torch/csrc/stable`
 which will handle all the rough edges of the C API for the user.
 
+### Python interop shims
+
+`torch/csrc/stable/pyobject.h` converts between Python objects and their
+`torch::stable` equivalents (for example `tensor_from_pyobject` / `tensor_to_pyobject` for
+converting between `torch::stable::Tensor` in C++ and `torch.Tensor` in Python). Like the
+rest of the stable ABI, an extension using them can just link `libtorch`.
+
+Unlike the rest of the stable ABI, they require `libtorch_python` to be loaded at
+runtime and must be called with the GIL held. If you call them from a context that
+may run without the GIL (for example a boxed `STABLE_TORCH_LIBRARY` kernel),
+acquire it first.
+
 ## Migrating your kernel to the LibTorch stable ABI
 
-If you'd like your kernel to be ABI stable with LibTorch, meaning you'd the ability to build for one version and run on another, your kernel must only use the limited stable ABI. This following section goes through some steps of migrating an existing kernel and APIs we imagine you would need to swap over.
+If you'd like your kernel to be ABI stable with LibTorch, meaning you'd have the ability to build for one version and run on another, your kernel must only use the limited stable ABI. This following section goes through some steps of migrating an existing kernel and APIs we imagine you would need to swap over.
 
 Firstly, instead of registering kernels through `TORCH_LIBRARY`, LibTorch ABI stable kernels must be registered via `STABLE_TORCH_LIBRARY`. Note that implementations registered via `STABLE_TORCH_LIBRARY` must be boxed unlike `TORCH_LIBRARY`. The `TORCH_BOX` macro handles this automatically for most use cases. See the simple example below or our docs on [Stack-based APIs](stack-based-apis) for more details. For kernels that are registered via `pybind`, before using the stable ABI, it would be useful to migrate to register them via `TORCH_LIBRARY`.
 
@@ -252,6 +265,9 @@ Extensions can select the minimum abi version to be compatible with using:
 ```
 
 before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
+
+You cannot target a newer ABI version than the libtorch you are compiling against. Setting `TORCH_TARGET_VERSION` above the torch version (`TORCH_ABI_VERSION`) you are
+building with will result in a compile error.
 
 The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.
 
