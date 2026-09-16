@@ -1159,10 +1159,10 @@
     {
       "Gb_type": "Import alias already bound",
       "Context": "{alias} for {module_name}: {offender}",
-      "Explanation": "The module alias {alias} for {module_name} is already bound to a {offender} in the globals of the frame being traced.",
+      "Explanation": "The module alias {alias} for {module_name} is already bound to a {offender} in the globals of {scope}, the module of the frame being compiled.",
       "Hints": [
-        "Remove or rename the global of that name in the module of the frame being traced.",
-        "If it holds a module of another name, two module names mangle onto this alias: rename one of the two modules.",
+        "Remove or rename the global {alias} in module {scope}.",
+        "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it."
       ]
     }

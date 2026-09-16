@@ -32,7 +32,6 @@ import dataclasses
 import dis
 import functools
 import importlib
-import importlib.machinery
 import inspect
 import itertools
 import linecache
@@ -2412,8 +2411,15 @@ class InstructionTranslatorBase(
     # Cache note: This cache only exists for the duration of this
     # InstructionTranslator - so it should be safe to do.
     @cache_method
-    def import_source(self, module_name: str) -> GlobalSource:
-        """Create an alias to a module for use in guards"""
+    def import_source(
+        self, module_name: str, graph_break_ok: bool = False
+    ) -> GlobalSource:
+        """
+        Create an alias to a module for use in guards. A slot already holding
+        something other than the resolved module is a hard error unless the
+        caller can graph break there (positional: cache_method takes no
+        keyword arguments).
+        """
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2432,35 +2438,15 @@ class InstructionTranslatorBase(
             # sys.modules itself: importlib.import_module takes the module lock
             # for a present name on 3.10. A name since removed or blocked with
             # None keeps what it last resolved to, as re-importing would run
-            # the module body inside the trace; one still executing its body
-            # is imported, which waits for it as an import statement would.
+            # the module body inside the trace. An entry still executing its
+            # body is served as is: on IMPORT_NAME's path __import__ has just
+            # waited for it, and importing it here would block on its module
+            # lock under compile_lock, an order importlib's deadlock check cannot see.
             value = sys.modules.get(module_name)
             if value is None and module_name in _import_source_cache:
                 value = _import_source_cache[module_name]
             elif value is None:
                 value = importlib.import_module(module_name)
-            elif isinstance(value, types.ModuleType):
-                # Both out of instance dicts, like the __name__ reads below: an
-                # attribute read runs a PEP 562 __getattr__, a class-level
-                # __getattribute__ (importlib.util._LazyModule imports on any)
-                # or, on the spec, a descriptor. _load_unlocked writes
-                # _initializing as a plain instance attribute on whatever
-                # _find_spec returned, a ModuleSpec from every finder in the
-                # stdlib and in torch (no __slots__, class-level default or
-                # descriptor for it), and the flag is read off that type
-                # alone, which is also the one sure to have a __dict__.
-                # Narrower than the getattr gate in importlib's _find_and_load
-                # by those choices: a module whose body deleted __spec__ from
-                # its dict, one serving it or the flag from such a hook, or a
-                # spec of another type -- _find_spec takes any object a
-                # meta_path finder returns and _load_unlocked flags it all the
-                # same -- reads as not initializing and is served as is where
-                # an import statement would wait on it.
-                spec = object.__getattribute__(value, "__dict__").get("__spec__")
-                if isinstance(spec, importlib.machinery.ModuleSpec):
-                    spec_dict = object.__getattribute__(spec, "__dict__")
-                    if spec_dict.get("_initializing"):
-                        value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
             cacheable = True
 
@@ -2485,8 +2471,8 @@ class InstructionTranslatorBase(
             # os.path is named posixpath, and torch's own BC shim entries are
             # all of that shape -- so recognize a stale module by the name the
             # resolved module answers to as well as by the key. Two module
-            # names mangling onto one alias still graph break: their resolved
-            # names differ.
+            # names mangling onto one alias still graph break in practice:
+            # their resolved names differ.
             value_name = (
                 object.__getattribute__(value, "__dict__").get("__name__")
                 if isinstance(value, types.ModuleType)
@@ -2498,14 +2484,27 @@ class InstructionTranslatorBase(
                 offender = type(bound).__name__
                 if bound_name is not None:
                     offender = f"{offender} named {bound_name}"
+                # f_globals is the root frame's: an inlined callee's own module is not
+                # where the alias lives, so the message names the module whose it is.
+                scope = f_globals.get("__name__")
+                # A graph break only where the traced bytecode chose the name, IMPORT_NAME.
+                # Every other caller resolves a name of Dynamo's choosing -- torch's, the
+                # stdlib's, a class's __module__, an inlined callee's module -- and from
+                # codegen an Unsupported is not a graph break but a frame skipped after the
+                # backend ran, silent at default log levels; those keep the hard error.
+                if not graph_break_ok:
+                    raise AssertionError(
+                        f"import alias {alias} for {module_name} is already bound to "
+                        f"a {offender} in the globals of {scope}"
+                    )
                 unimplemented(
                     gb_type="Import alias already bound",
                     context=f"{alias} for {module_name}: {offender}",
-                    explanation=f"The module alias {alias} for {module_name} is already "
-                    f"bound to a {offender} in the globals of the frame being traced.",
+                    explanation=f"The module alias {alias} for {module_name} is already bound to "
+                    f"a {offender} in the globals of {scope}, the module of the frame being compiled.",
                     hints=[
-                        "Remove or rename the global of that name in the module of the frame being traced.",
-                        "If it holds a module of another name, two module names mangle onto this alias: rename one of the two modules.",
+                        f"Remove or rename the global {alias} in module {scope}.",
+                        "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
@@ -2520,15 +2519,9 @@ class InstructionTranslatorBase(
         self.output.import_sources[alias] = module_name
         if cacheable and isinstance(value, types.ModuleType):
             _import_source_cache[module_name] = value
-        # The write is into a live namespace and nothing unwinds it -- there is
-        # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
-        # trace that graph-breaks or restarts, as does the write install makes
-        # to this name. A writer's same-named module is replaced: value is the
-        # live entry whenever sys.modules holds a module under the name, or the
-        # one a first import has just put there, and what this process's traces
-        # last bound when the name is gone or blocked with None; there neither
-        # module is the live entry, and the cached one is the object the guards
-        # this alias roots were built against.
+        # A writer's same-named module is replaced: value is the live entry or,
+        # for a name gone or blocked with None, what this process's traces last
+        # bound, the object the guards this alias roots were built against.
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
@@ -2627,11 +2620,12 @@ class InstructionTranslatorBase(
             # returned, not the module named by module_name. However, when a
             # non-empty fromlist argument is given, the module named by name is
             # returned. Therefore, we set the source correctly here.
+            # graph_break_ok: the name is the traced bytecode's own choice.
             if not fromlist:
                 top_level_module_name = module_name.partition(".")[0]
-                source = self.import_source(top_level_module_name)
+                source = self.import_source(top_level_module_name, True)
             else:
-                source = self.import_source(module_name)
+                source = self.import_source(module_name, True)
 
         if self.exec_recorder:
             # pyrefly: ignore [unbound-name]
