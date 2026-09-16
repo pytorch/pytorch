@@ -5,11 +5,10 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/cupti/monitor_python.h>
+#include <torch/csrc/profiler/cuspy/cuspy_python.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
@@ -407,7 +406,18 @@ void initPythonBindings(PyObject* module) {
           "``{ProfilerActivity.XPU: [\"CONCURRENT_KERNEL\", \"XPU_RUNTIME\", "
           "\"GpuTime\"]}``.")
       .value("MTIA", ActivityType::MTIA, "MTIA device activity.")
-      .value("CUDA", ActivityType::CUDA, "CUDA kernels and runtime.")
+      .value(
+          "CUDA",
+          ActivityType::CUDA,
+          "CUDA kernels and runtime. To sample CUDA hardware performance "
+          "counters, use ``ProfilerActivityConfig`` with a "
+          "``PerformanceMetricsConfig`` in the activity dict, e.g. "
+          "``{ProfilerActivity.CUDA: ProfilerActivityConfig("
+          "profiler_configs=[PerformanceMetricsConfig("
+          "metric_names=[\"sm__cycles_active.avg\"])])}``. "
+          "Metric names are CUPTI PM sampling metrics supported by the "
+          "current CUDA device. Hardware counter collection requires a "
+          "Kineto build with CUPTI PM sampling support.")
       .value("HPU", ActivityType::HPU, "HPU device activity.")
       .value(
           "PrivateUse1",
@@ -741,10 +751,8 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
-  initCuptiMonitorBindings(m);
-  if (PyModule_AddType(m.ptr(), &THPCapturedTracebackType) < 0) {
-    throw python_error();
-  }
+  initCuspyBindings(m);
+  TORCH_CHECK_PYTHON(PyModule_AddType(m.ptr(), &THPCapturedTracebackType) >= 0);
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,
@@ -807,17 +815,12 @@ void initPythonBindings(PyObject* module) {
   RecordFunctionFast_Type.tp_init = RecordFunctionFast_init;
   RecordFunctionFast_Type.tp_new = RecordFunctionFast_new;
 
-  if (PyType_Ready(&RecordFunctionFast_Type) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&RecordFunctionFast_Type) >= 0);
 
-  Py_INCREF(&RecordFunctionFast_Type);
-  if (PyModule_AddObject(
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObjectRef(
           m.ptr(),
           "_RecordFunctionFast",
-          (PyObject*)&RecordFunctionFast_Type) != 0) {
-    Py_DECREF(&RecordFunctionFast_Type);
-    throw python_error();
-  }
+          (PyObject*)&RecordFunctionFast_Type) == 0);
 }
 } // namespace torch::profiler

@@ -10,7 +10,15 @@ import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.fx_passes.group_batch_fusion import (
+    apply_group_batch_fusion,
+    BatchSubPostGradFusion,
+)
 from torch._inductor.test_case import run_tests, TestCase
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
+from torch.testing._internal.common_utils import recover_orig_fp32_precision
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
 
 
@@ -251,6 +259,22 @@ class _TestPointwiseOps(torch.nn.Module):
         return torch.cat(div, dim=1)
 
 
+class _TestPointwiseOpsWithAlpha(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = torch.split(x.to(self.device), 500, dim=1)
+        x_split = torch.split(inputs[0], 50, dim=1)
+        y_split = torch.split(inputs[1], 50, dim=1)
+        add = [
+            torch.add(x_split[i], y_split[i], alpha=3.0) for i in range(len(x_split))
+        ]
+        sub = [torch.sub(add[i], y_split[i], alpha=2.0) for i in range(len(add))]
+        return torch.cat(sub, dim=1)
+
+
 class _TestPointwiseOpsPostGrad(torch.nn.Module):
     def __init__(self, device):
         super().__init__()
@@ -381,6 +405,27 @@ class TestGroupBatchFusion(TestCase):
                 4,
             )
             counters.clear()
+
+    @requires_gpu()
+    @unittest.skipUnless(
+        BF16X9_SUPPORTED, "requires CUDA 12.9+ and compute capability 10.0 or 10.3"
+    )
+    @recover_orig_fp32_precision
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={"group_linear": {"require_fbgemm": False}},
+    )
+    def test_bfx9_skips_group_linear_fusion(self):
+        torch.backends.cuda.matmul.fp32_precision = "bfx9"
+        inputs = (torch.randn(10, 10, device=GPU_TYPE),)
+        for has_bias in (False, True):
+            with self.subTest(has_bias=has_bias):
+                counters.clear()
+                module = MyModule(10, has_bias).to(GPU_TYPE)
+                expected = module(*inputs)
+                actual = torch.compile(module)(*inputs)
+                self.assertEqual(actual, expected)
+                self.assertEqual(counters["inductor"]["group_linear"], 0)
 
     @requires_gpu()
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -661,6 +706,101 @@ class TestGroupBatchFusion(TestCase):
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
+            "batch_aten_add": {},
+            "batch_aten_sub": {},
+        },
+    )
+    def test_pointwise_math_ops_with_alpha_fusion(self):
+        counters.clear()
+        module = _TestPointwiseOpsWithAlpha(GPU_TYPE)
+        input_ref = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
+        input_res = [input_ref[0].detach().clone().requires_grad_(True)]
+        traced = torch.compile(module)
+        ref = module(*input_ref)
+        res = traced(*input_res)
+        self.assertEqual(ref, res, rtol=1e-5, atol=1e-5)
+        self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_sub"], 1)
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(input_ref[0].grad, input_res[0].grad, rtol=1e-5, atol=1e-5)
+        counters.clear()
+
+    def test_batch_aten_sub_preserves_alpha(self):
+        class Model(torch.nn.Module):
+            def forward(self, *args):
+                # Two fusion groups: five subs with alpha=2.0, five with
+                # alpha=3.5.
+                alphas = [2.0] * 5 + [3.5] * 5
+                return tuple(
+                    torch.ops.aten.sub.Tensor(
+                        args[2 * i], args[2 * i + 1], alpha=alphas[i]
+                    )
+                    for i in range(10)
+                )
+
+        inputs = [torch.randn(16, 16) for _ in range(20)]
+        model = Model()
+        with FakeTensorMode() as fake_mode:
+            fake_inputs = [fake_mode.from_tensor(t) for t in inputs]
+            gm = make_fx(model)(*fake_inputs)
+            apply_group_batch_fusion(gm.graph, BatchSubPostGradFusion())
+
+        fused_sub_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target == torch.ops.aten.sub.Tensor
+        ]
+        self.assertEqual(len(fused_sub_nodes), 2)
+        alphas = {n.kwargs.get("alpha") for n in fused_sub_nodes}
+        self.assertEqual(alphas, {2.0, 3.5})
+
+        res = gm(*inputs)
+        ref = model(*inputs)
+        self.assertEqual(res, ref)
+
+    def test_batch_aten_sub_normalizes_default_alpha(self):
+        # The dispatcher elides kwargs equal to their schema defaults, so
+        # sub(x, y) and sub(x, y, alpha=1) trace to identical nodes and
+        # fuse into a single group: keying on node.kwargs loses no fusion
+        # opportunity for default-valued kwargs.
+        class Model(torch.nn.Module):
+            def forward(self, *args):
+                bare = [
+                    torch.ops.aten.sub.Tensor(args[2 * i], args[2 * i + 1])
+                    for i in range(5)
+                ]
+                explicit = [
+                    torch.ops.aten.sub.Tensor(
+                        args[10 + 2 * i], args[11 + 2 * i], alpha=1
+                    )
+                    for i in range(5)
+                ]
+                return tuple(bare + explicit)
+
+        inputs = [torch.randn(16, 16) for _ in range(20)]
+        model = Model()
+        with FakeTensorMode() as fake_mode:
+            fake_inputs = [fake_mode.from_tensor(t) for t in inputs]
+            gm = make_fx(model)(*fake_inputs)
+            apply_group_batch_fusion(gm.graph, BatchSubPostGradFusion())
+
+        fused_sub_nodes = [
+            n
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target == torch.ops.aten.sub.Tensor
+        ]
+        self.assertEqual(len(fused_sub_nodes), 1)
+        self.assertEqual(dict(fused_sub_nodes[0].kwargs), {})
+
+        res = gm(*inputs)
+        ref = model(*inputs)
+        self.assertEqual(res, ref)
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
             "batch_aten_relu": {},
             "batch_aten_sigmoid": {},
             "batch_aten_tanh": {},
@@ -796,14 +936,15 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
         counters.clear()
 
-    @unittest.skipUnless(
-        torch.xpu.is_available(),
-        "batch_linear_lhs auto-enable is XPU-only for now",
+    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("xpu",), "min_fuse_set_size": 2},
+        },
     )
-    def test_xpu_auto_enable_batch_linear_lhs(self):
-        # Verify that batch_linear_lhs fusion is auto-enabled when example inputs
-        # contain XPU tensors, driven by the "devices" key in the default
-        # config.pre_grad_fusion_options.
+    def test_xpu_batch_linear_lhs(self):
+        # batch_linear_lhs is disabled by default; enabling it for XPU via mock
+        # config must make the fusion fire on XPU tensors.
         default_options = config.pre_grad_fusion_options
         self.assertIn("batch_linear_lhs", default_options)
         self.assertEqual(default_options["batch_linear_lhs"]["devices"], ("xpu",))
@@ -826,7 +967,7 @@ class TestGroupBatchFusion(TestCase):
             self.assertEqual(
                 orig_fusion_options,
                 dict(config.pre_grad_fusion_options),
-                "config.pre_grad_fusion_options should not be mutated by auto-enable",
+                "config.pre_grad_fusion_options should not be mutated",
             )
             counters.clear()
 
@@ -959,11 +1100,57 @@ class _TestBMMFusionModule(torch.nn.Module):
         return output
 
 
+class _TestMixedDtypeBMMFusionModule(torch.nn.Module):
+    """Same-shape linears split across two dtypes, as autocast-exempt layers produce."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Each dtype needs its own fusable group, so >= MIN_FUSE_SET_SIZE of each.
+        self.fp32_modules = torch.nn.ModuleList(
+            [torch.nn.Linear(10, 10) for _ in range(5)]
+        )
+        self.bf16_modules = torch.nn.ModuleList(
+            [torch.nn.Linear(10, 10).to(torch.bfloat16) for _ in range(5)]
+        )
+
+    def forward(self, fp32_inputs, bf16_inputs):
+        fp32_output = None
+        for linear, input in zip(self.fp32_modules, fp32_inputs):
+            fp32_output = (
+                linear(input) if fp32_output is None else fp32_output + linear(input)
+            )
+        bf16_output = None
+        for linear, input in zip(self.bf16_modules, bf16_inputs):
+            bf16_output = (
+                linear(input) if bf16_output is None else bf16_output + linear(input)
+            )
+        return fp32_output, bf16_output
+
+
 @requires_gpu()
 @torch._inductor.config.patch(
     post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )
 class TestPostGradBatchLinearFusion(TestCase):
+    def test_batch_linear_post_grad_fusion_mixed_dtype(self):
+        # Grouping only on shape would batch the fp32 and bf16 addmms together;
+        # the stack lowers to aten.cat, which type-promotes instead of erroring,
+        # and the promoted operand then fails a downstream mm/addmm.
+        counters.clear()
+        pt1_module = _TestMixedDtypeBMMFusionModule().to(GPU_TYPE)
+        fp32_inputs = [torch.randn(10, 10, device=GPU_TYPE) for _ in range(5)]
+        bf16_inputs = [
+            torch.randn(10, 10, device=GPU_TYPE, dtype=torch.bfloat16) for _ in range(5)
+        ]
+        eager_fp32, eager_bf16 = pt1_module(fp32_inputs, bf16_inputs)
+        pt2_module = torch.compile(pt1_module)
+        compiled_fp32, compiled_bf16 = pt2_module(fp32_inputs, bf16_inputs)
+        self.assertTrue(torch.allclose(eager_fp32, compiled_fp32))
+        # bmm reassociates the sum, which bf16 cannot represent exactly.
+        self.assertTrue(torch.allclose(eager_bf16, compiled_bf16, rtol=1e-2, atol=1e-2))
+        # Each dtype still forms its own batch, so fusion is not merely disabled.
+        self.assertEqual(counters["inductor"]["batch_linear_post_grad"], 2)
+
     def test_batch_linear_post_grad_fusion(self):
         pt1_module = _TestBMMFusionModule().to(GPU_TYPE)
         inputs = []
