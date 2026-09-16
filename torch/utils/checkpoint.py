@@ -1502,12 +1502,13 @@ class CheckpointPolicy(enum.Enum):
         save additional tensors not limited to ones that are actually needed for
         gradient computation.
 
-        Selective checkpointing always saves explicitly registered, non-aliasing
-        ordered effects that are valid SAC cache boundaries instead of replaying
-        them, even when the policy would otherwise replay them. Raw c10d launches
-        are not valid cache boundaries and are excluded. Since saved SAC entries
-        are consumed during backward, a checkpoint containing such an effect does
-        not support repeated backward with ``retain_graph=True``.
+        Selective checkpointing saves non-aliasing ordered effects that are valid
+        SAC cache boundaries instead of replaying them under preferred recompute
+        or CPU-offload policies. Mandatory policies remain authoritative. Effects
+        may be registered explicitly through
+        ``torch.library._register_effectful_op`` or inferred from TorchBind
+        arguments. Raw c10d launches are not valid cache boundaries and remain
+        unsupported in recomputed SAC regions.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1
@@ -1517,7 +1518,13 @@ class CheckpointPolicy(enum.Enum):
     PREFER_CPU_OFFLOAD = 5
 
 
+# Policies for which eager SAC actually caches the output. CPU offload policies
+# currently fall through to recomputation, so they are deliberately absent.
 _SAVE_POLICIES = (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE)
+_EFFECT_OVERRIDE_POLICIES = (
+    CheckpointPolicy.PREFER_RECOMPUTE,
+    CheckpointPolicy.PREFER_CPU_OFFLOAD,
+)
 
 
 def _policy_from_bool(b):
@@ -1528,10 +1535,11 @@ def _policy_from_bool(b):
 def _is_cacheable_effect(op) -> bool:
     """Return whether SAC can cache an effectful op instead of replaying it.
 
-    Raw c10d launches mutate separately allocated outputs and return an
-    asynchronous Work handle, so their return value is not a valid cache
-    boundary. Functional collectives are handled separately by the AOT
-    partitioner.
+    Raw c10d launches mutate their inputs and return an asynchronous Work handle,
+    so their return value is not a valid cache boundary. They remain unsupported
+    in recomputed eager SAC regions, where they may be launched again during
+    backward. Use functional collectives instead; the AOT partitioner preserves
+    those separately.
     """
     from torch._higher_order_ops.effects import has_effects
 
@@ -1612,7 +1620,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
-        if policy not in _SAVE_POLICIES and _is_cacheable_effect(func):
+        if policy in _EFFECT_OVERRIDE_POLICIES and _is_cacheable_effect(func):
             policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:
