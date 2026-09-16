@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import contextvars
 import dataclasses
 import enum
 import functools
@@ -3552,8 +3551,8 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
 
 @dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    node1: BaseSchedulerNode | str
-    node2: BaseSchedulerNode | str
+    name1: BaseSchedulerNode | str
+    name2: BaseSchedulerNode | str
 
     @staticmethod
     def _name(node: BaseSchedulerNode | str) -> str:
@@ -3563,8 +3562,8 @@ class WhyNoFuse:
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug(
                 "cannot fuse %s with %s: " + reason,
-                self._name(self.node1),
-                self._name(self.node2),
+                self._name(self.name1),
+                self._name(self.name2),
                 *args,
             )
 
@@ -3819,11 +3818,11 @@ class SchedulerNode(BaseSchedulerNode):
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
-        for tracker in _active_loop_mutation_trackers.get():
-            tracker.track(self)
+        if self.scheduler._loop_mutation_listener is not None:
+            self.scheduler._loop_mutation_listener(self)
         # Identifies the current loop state, so analyses derived from it can be
         # cached across the O(n^2) fusion pair search. Bumped after notifying
-        # active trackers, which snapshot the pre-mutation state: snapshot and
+        # the listener, which snapshots the pre-mutation state: snapshot and
         # restore then carry the generation, so rolling a trial reindex back
         # also restores cache validity.
         self._loop_state_gen += 1
@@ -5672,33 +5671,39 @@ class _LoopMutationTracker:
     candidates do not inherit a speculative layout chosen for a fusion
     that did not happen.
 
-    Recursive can_fuse() calls share a context-local tracker stack so each scope
-    captures its own decision boundary while the outer scope still sees nested
-    mutations.
+    Recursive can_fuse() calls chain their listeners so each scope captures its
+    own decision boundary while the outer scope still sees nested mutations.
 
-    The context rolls back by default. Call commit() before leaving it to keep
-    mutations. If no mutation occurred, exiting is a no-op.
+    Use finish(rollback=False) to keep mutations or finish(rollback=True) to
+    restore the original state. If no mutation occurred, finish() is a no-op.
     """
 
     nodes: tuple[BaseSchedulerNode, ...]
+    scheduler: Scheduler
+    previous_listener: Callable[[SchedulerNode], None] | None
     state: _LoopStateSnapshot | None = None
-    token: contextvars.Token[tuple[_LoopMutationTracker, ...]] | None = None
-    committed: bool = False
 
     @classmethod
     def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopMutationTracker:
-        """Create an inactive rollback scope without walking candidate leaves."""
-        return cls(nodes=tuple(OrderedSet(nodes)))
-
-    def __enter__(self) -> typing.Self:
-        if self.token is not None:
-            raise AssertionError("loop mutation tracker already active")
-        active = _active_loop_mutation_trackers.get()
-        self.token = _active_loop_mutation_trackers.set((*active, self))
-        return self
+        """Create a rollback scope without walking candidate leaves."""
+        seen = tuple(OrderedSet(nodes))
+        if not seen:
+            raise AssertionError("expected at least one scheduler node")
+        scheduler = seen[0].scheduler
+        if any(node.scheduler is not scheduler for node in seen[1:]):
+            raise AssertionError("expected scheduler nodes to have the same owner")
+        tracker = cls(
+            nodes=seen,
+            scheduler=scheduler,
+            previous_listener=scheduler._loop_mutation_listener,
+        )
+        scheduler._loop_mutation_listener = tracker.track
+        return tracker
 
     def track(self, sn: SchedulerNode) -> None:
         """Lazily snapshot candidate roots when the first mutation occurs."""
+        if self.previous_listener is not None:
+            self.previous_listener(sn)
         if self.state is not None:
             # Keep the original pre-mutation snapshot for the whole scope.
             return
@@ -5710,23 +5715,12 @@ class _LoopMutationTracker:
         # reassigned directly and has no mutation hook of its own.
         self.state = _LoopStateSnapshot.create(self.nodes)
 
-    def commit(self) -> None:
-        self.committed = True
-
-    def __exit__(self, exc_type: type[BaseException] | None, *args: Any) -> None:
-        """Leave the tracking scope, restoring state unless it was committed."""
-        if self.token is None:
-            raise AssertionError("loop mutation tracker is not active")
-        _active_loop_mutation_trackers.reset(self.token)
-        self.token = None
-        if (self.committed and exc_type is None) or self.state is None:
+    def finish(self, *, rollback: bool) -> None:
+        """Detach the listener and restore captured state if rolling back."""
+        self.scheduler._loop_mutation_listener = self.previous_listener
+        if not rollback or self.state is None:
             return
         self.state.restore()
-
-
-_active_loop_mutation_trackers: contextvars.ContextVar[
-    tuple[_LoopMutationTracker, ...]
-] = contextvars.ContextVar("active_loop_mutation_trackers", default=())
 
 
 # Distinguishes "not cached" from a cached None in _tiling_memory_cache.
@@ -5748,6 +5742,7 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _init(self, nodes: list[ir.Operation]) -> None:
+        self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         # buffer name -> reuse key, see _single_user_read_reuse_keys
         self._fusion_reuse_keys: dict[str, Any] = {}
@@ -9842,16 +9837,19 @@ class Scheduler:
         Speculative loop mutations (reordering, reindexing) are automatically
         rolled back if the fusion decision ultimately fails.
         """
-        with _LoopMutationTracker.create((node1, node2)) as tracker:
+        tracker = _LoopMutationTracker.create((node1, node2))
+        try:
             can_fuse = self._can_fuse_impl(
                 node1,
                 node2,
                 can_reorder=can_reorder,
                 allow_mix_order_reduction=allow_mix_order_reduction,
             )
-            if can_fuse:
-                tracker.commit()
-            return can_fuse
+        except BaseException:
+            tracker.finish(rollback=True)
+            raise
+        tracker.finish(rollback=not can_fuse)
+        return can_fuse
 
     def _can_fuse_impl(
         self,
