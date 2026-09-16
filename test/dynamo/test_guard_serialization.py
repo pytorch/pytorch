@@ -2487,8 +2487,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_tensor_match_current_device(self):
-        # Loading on another rank must preserve the relative-device decision made when
-        # the guard was serialized, rather than re-derive it from the saved tensor.
+        # The relative-device decision must survive a load on a rank whose current
+        # device differs from the saving one. It is re-derived rather than carried in
+        # the state, so what makes that safe is that the derivation ignores the saved
+        # tensor's index -- the one piece of the artifact that is rank-specific.
         from torch._dynamo.package import load_guard_manager, load_guards_state
 
         def f(x: torch.Tensor):
