@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import dataclasses
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from enum import Enum
 from functools import partial
 from typing import Any, cast
 
@@ -37,6 +38,7 @@ FLEX_GEMM_OP_SPECS = {
     torch.ops.aten.addmm.default: FlexGemmOpSpec("addmm", 1, 2, bias_index=0),
     torch.ops.aten.bmm.default: FlexGemmOpSpec("bmm", 0, 1),
     torch.ops.aten.baddbmm.default: FlexGemmOpSpec("baddbmm", 1, 2, bias_index=0),
+    torch.ops.aten._scaled_mm_v2.default: FlexGemmOpSpec("scaled_mm", 0, 1),
 }
 FLEX_GEMM_OP_ALIASES = {
     torch.mm: torch.ops.aten.mm.default,
@@ -239,6 +241,22 @@ def check_flex_gemm_alias_and_mutation(
         raise RuntimeError("flex_gemm might be modifying an input")
 
 
+# NOTE [FlexGEMM scaled-mm surrogate]
+# ProxyTensor cannot carry an OpOverload whose schema requires exact strides as
+# a HOP input. The HOP therefore carries stride-neutral aten.mm while its body
+# contains aten._scaled_mm_v2; static kwargs identify the body op for analysis.
+# TODO: Remove this surrogate and its decoder once _scaled_mm_v2's
+# needs_exact_strides tag is replaced with lowering-time layout constraints;
+# pass aten._scaled_mm_v2 directly to the HOP instead.
+def flex_gemm_body_gemm_op(
+    gemm_op: torch._ops.OpOverload, gemm_kwargs: dict[str, Any]
+) -> torch._ops.OpOverload:
+    """Return the GEMM op captured inside the FlexGEMM body graph."""
+    if gemm_kwargs.get("flex_gemm_op") == "scaled_mm":
+        return torch.ops.aten._scaled_mm_v2.default
+    return gemm_op
+
+
 def apply_flex_gemm_body_graph_passes(
     body_graph: torch.fx.GraphModule, gemm_op: torch._ops.OpOverload
 ) -> None:
@@ -312,6 +330,200 @@ class FlexGemm(HigherOrderOperator):
 flex_gemm_hop = FlexGemm()
 
 
+def scaled_mm_arg_list(value: Any, name: str) -> tuple[torch.Tensor, ...]:
+    """Normalize one public scaled-mm tensor or tensor-list argument."""
+    values = tuple(value) if isinstance(value, list) else (value,)
+    if not values or not all(isinstance(item, torch.Tensor) for item in values):
+        raise RuntimeError(f"{name} must be a tensor or non-empty list of tensors")
+    return values
+
+
+def scaled_mm_enum_values(
+    value: Any, name: str, enum_type: type[Enum]
+) -> tuple[int, ...]:
+    """Normalize one public scaled-mm enum or enum-list argument."""
+    values = tuple(value) if isinstance(value, list) else (value,)
+    if not values:
+        raise RuntimeError(f"{name} must not be empty")
+    if not all(isinstance(item, enum_type) for item in values):
+        raise RuntimeError(f"{name} must contain {enum_type.__name__} values")
+    return tuple(item.value for item in values)
+
+
+_BLOCKWISE_1X16 = torch.nn.functional.ScalingType.BlockWise1x16.value
+_BLOCKWISE_1X32 = torch.nn.functional.ScalingType.BlockWise1x32.value
+_TENSORWISE = torch.nn.functional.ScalingType.TensorWise.value
+_SWIZZLE_32_4_4 = torch.nn.functional.SwizzleType.SWIZZLE_32_4_4.value
+_NO_SWIZZLE = torch.nn.functional.SwizzleType.NO_SWIZZLE.value
+# Per-operand scale recipe -> (QuACK format, required swizzles, data dtype,
+# block-scale dtype). Both operands must use the same entry.
+QUACK_BLOCKSCALED_RECIPES: dict[
+    tuple[int, ...], tuple[str, tuple[int, ...], torch.dtype, torch.dtype]
+] = {
+    (_BLOCKWISE_1X32,): (
+        "mxfp8_e4m3",
+        (_SWIZZLE_32_4_4,),
+        torch.float8_e4m3fn,
+        torch.float8_e8m0fnu,
+    ),
+    (_BLOCKWISE_1X16,): (
+        "nvfp4",
+        (_SWIZZLE_32_4_4,),
+        torch.float4_e2m1fn_x2,
+        torch.float8_e4m3fn,
+    ),
+    (_BLOCKWISE_1X16, _TENSORWISE): (
+        "nvfp4",
+        (_SWIZZLE_32_4_4, _NO_SWIZZLE),
+        torch.float4_e2m1fn_x2,
+        torch.float8_e4m3fn,
+    ),
+}
+
+
+def validate_scaled_mm(
+    mat_a: torch.Tensor,
+    mat_b: torch.Tensor,
+    scale_a: Sequence[torch.Tensor],
+    scale_b: Sequence[torch.Tensor],
+    recipe_a: Sequence[int],
+    recipe_b: Sequence[int],
+    swizzle_a: Sequence[int],
+    swizzle_b: Sequence[int],
+) -> str:
+    """Validate the fused scaled-mm operands and return their shared QuACK format."""
+    recipe = tuple(recipe_a)
+    contract = QUACK_BLOCKSCALED_RECIPES.get(recipe)
+    if contract is None or tuple(recipe_b) != recipe:
+        raise NotImplementedError(
+            "FlexGEMM scaled-mm requires matching BlockWise1x32 MXFP8 or "
+            "BlockWise1x16 NVFP4 recipes, with optional NVFP4 TensorWise global scales"
+        )
+    format_name, swizzles, data_dtype, scale_dtype = contract
+    if (
+        tuple(swizzle_a) != swizzles
+        or tuple(swizzle_b) != swizzles
+        or len(scale_a) != len(recipe)
+        or len(scale_b) != len(recipe)
+    ):
+        raise NotImplementedError(
+            "FlexGEMM scaled-mm requires one SWIZZLE_32_4_4 block scale per operand "
+            "and optional unswizzled NVFP4 TensorWise scales"
+        )
+    if (mat_a.dtype, mat_b.dtype, scale_a[0].dtype, scale_b[0].dtype) != (
+        data_dtype,
+        data_dtype,
+        scale_dtype,
+        scale_dtype,
+    ):
+        raise NotImplementedError(
+            f"FlexGEMM {format_name} scaled-mm requires "
+            f"{data_dtype} data and {scale_dtype} scales"
+        )
+    for scale in (*scale_a[1:], *scale_b[1:]):
+        if scale.dtype is not torch.float32 or tuple(scale.shape) not in (
+            (),
+            (1,),
+            (1, 1),
+        ):
+            raise NotImplementedError(
+                "FlexGEMM NVFP4 TensorWise scales must be scalar Float32 tensors"
+            )
+    return format_name
+
+
+def flex_gemm_scaled_mm(
+    gemm_args: tuple[Any, ...],
+    epilogue_fn: Callable[[Any], Any],
+    gemm_kwargs: dict[str, Any],
+    kernel_options: dict[str, Any],
+) -> Any:
+    """Normalize the public scaled-mm call without allowing an unfused fallback."""
+    if kernel_options.get("backend", "TRITON") != "QUACK":
+        raise NotImplementedError("FlexGEMM F.scaled_mm requires backend='QUACK'")
+    if len(gemm_args) != 4:
+        raise RuntimeError(
+            "FlexGEMM F.scaled_mm expects gemm_args=(mat_a, mat_b, scale_a, scale_b)"
+        )
+    mat_a, mat_b, scale_a_arg, scale_b_arg = gemm_args
+    scale_a = scaled_mm_arg_list(scale_a_arg, "scale_a")
+    scale_b = scaled_mm_arg_list(scale_b_arg, "scale_b")
+    options = dict(gemm_kwargs)
+    for name in ("scale_recipe_a", "scale_recipe_b"):
+        if name not in options:
+            raise RuntimeError(f"missing required scaled-mm option {name!r}")
+    recipe_a = scaled_mm_enum_values(
+        options.pop("scale_recipe_a"), "scale_recipe_a", torch.nn.functional.ScalingType
+    )
+    recipe_b = scaled_mm_enum_values(
+        options.pop("scale_recipe_b"), "scale_recipe_b", torch.nn.functional.ScalingType
+    )
+    swizzle_a_arg = options.pop("swizzle_a", None)
+    swizzle_b_arg = options.pop("swizzle_b", None)
+    swizzle_a = (
+        ()
+        if swizzle_a_arg is None
+        else scaled_mm_enum_values(
+            swizzle_a_arg, "swizzle_a", torch.nn.functional.SwizzleType
+        )
+    )
+    swizzle_b = (
+        ()
+        if swizzle_b_arg is None
+        else scaled_mm_enum_values(
+            swizzle_b_arg, "swizzle_b", torch.nn.functional.SwizzleType
+        )
+    )
+    bias = options.pop("bias", None)
+    if bias is not None:
+        raise NotImplementedError(
+            "FlexGEMM F.scaled_mm tensor bias is not supported yet"
+        )
+    output_dtype = options.pop("output_dtype", torch.bfloat16)
+    contraction_dim = tuple(options.pop("contraction_dim", ()))
+    use_fast_accum = options.pop("use_fast_accum", False)
+    if contraction_dim or use_fast_accum:
+        raise NotImplementedError(
+            "FlexGEMM scaled-mm does not support custom contraction or fast accumulation"
+        )
+    if options:
+        raise RuntimeError(
+            f"unsupported FlexGEMM F.scaled_mm options: {sorted(options)}"
+        )
+    validate_scaled_mm(
+        mat_a, mat_b, scale_a, scale_b, recipe_a, recipe_b, swizzle_a, swizzle_b
+    )
+    scale_a_end = 2 + len(scale_a)
+    flat_gemm_args = (mat_a, mat_b, *scale_a, *scale_b)
+    gemm_kwargs = {"flex_gemm_op": "scaled_mm"}
+
+    def body_fn(*args: Any) -> Any:
+        return epilogue_fn(
+            torch.ops.aten._scaled_mm_v2.default(
+                args[0],
+                args[1],
+                list(args[2:scale_a_end]),
+                list(recipe_a),
+                list(swizzle_a),
+                list(args[scale_a_end:]),
+                list(recipe_b),
+                list(swizzle_b),
+                bias,
+                output_dtype,
+                list(contraction_dim),
+                use_fast_accum,
+            )
+        )
+
+    return flex_gemm_hop(
+        torch.ops.aten.mm.default,
+        body_fn,
+        flat_gemm_args,
+        gemm_kwargs,
+        kernel_options,
+    )
+
+
 def flex_gemm(
     gemm_op: Callable[..., Any],
     gemm_args: tuple[Any, ...],
@@ -324,6 +536,17 @@ def flex_gemm(
         gemm_kwargs = {}
     if kernel_options is None:
         kernel_options = {}
+    if gemm_op in (
+        torch.ops.aten._scaled_mm_v2,
+        torch.ops.aten._scaled_mm_v2.default,
+    ):
+        raise RuntimeError(
+            "FlexGEMM direct aten._scaled_mm_v2 calls are unsupported; "
+            "use torch.nn.functional.scaled_mm"
+        )
+    if gemm_op is torch.nn.functional.scaled_mm:
+        return flex_gemm_scaled_mm(gemm_args, epilogue_fn, gemm_kwargs, kernel_options)
+
     gemm_op = cast(torch._ops.OpOverload, FLEX_GEMM_OP_ALIASES.get(gemm_op, gemm_op))
 
     def body_fn(*args: Any) -> Any:
@@ -385,7 +608,9 @@ def flex_gemm_proxy_torch_dispatch_mode(
             ),
         )(*flat_args)
         if kernel_options.get("backend") == "QUACK":
-            apply_flex_gemm_body_graph_passes(body_graph, gemm_op)
+            apply_flex_gemm_body_graph_passes(
+                body_graph, flex_gemm_body_gemm_op(gemm_op, kwargs)
+            )
         _, body_graph_name = unique_graph_id(proxy_mode, prefix="flex_gemm_body_graph")
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
         proxy_args = pytree.tree_map(

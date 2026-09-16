@@ -17,7 +17,6 @@
 #include <ATen/ops/log_sigmoid_forward_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
-#include <ATen/ops/relu_native.h>
 #include <ATen/ops/rsub.h>
 #include <ATen/ops/sigmoid.h>
 #include <ATen/ops/sigmoid_backward_native.h>
@@ -35,25 +34,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/ActivationKernel_metallib.h>
 #endif
-
-Tensor relu_mps(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
-  auto output = at::empty_like(self);
-  if (output.numel() == 0)
-    return output;
-  auto iter = at::TensorIteratorConfig().add_output(output).add_const_input(self).build();
-  lib.exec_unary_kernel(iter, "relu");
-  return output;
-}
-
-Tensor& relu_mps_(Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
-  if (self.numel() == 0)
-    return self;
-  auto iter = at::TensorIteratorConfig().add_output(self).add_const_input(self).set_check_mem_overlap(false).build();
-  lib.exec_unary_kernel(iter, "relu");
-  return self;
-}
 
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
   lib.exec_unary_kernel(iter, "hardshrink", lambda);
