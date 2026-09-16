@@ -830,6 +830,14 @@ def _call_while_loop(
                 if not carry.is_tensor():
                     raise AssertionError("Expected carry to be a tensor")
                 example = carry.as_proxy().node.meta["example_value"]
+                if isinstance(
+                    example, torch.nested._internal.nested_tensor.NestedTensor
+                ):
+                    cloned_carry = carry.call_method(
+                        tx, "clone", args=[], kwargs={}
+                    ).clone()
+                    cloned_carry.as_proxy().node.meta["example_value"].constant = None
+                    return cloned_carry
                 size, stride, offset = (
                     example.size(),
                     example.stride(),

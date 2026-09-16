@@ -13199,6 +13199,128 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(len(graph.find_nodes(op="call_method", target="add_")), 1)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_constant_false_nested_tensor(self, device):
+        def f(x):
+            def cond_fn(x):
+                return False
+
+            def body_fn(x):
+                return (x + 1,)
+
+            return torch.while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.nested.nested_tensor(
+            [
+                torch.ones(2, 3, device=device),
+                torch.ones(4, 3, device=device),
+            ],
+            layout=torch.jagged,
+        )
+        result = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertIs(type(result[0]), type(x))
+        self.assertEqual(result[0], x)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_wrapper_subclass_predicate(self, device):
+        from torch.testing._internal.subclasses import WrapperSubclass
+
+        def f(x):
+            return torch.while_loop(
+                lambda a: a.is_contiguous(),
+                lambda a: ((a + 1).repeat_interleave(2)[::2],),
+                (x,),
+            )
+
+        x = WrapperSubclass(torch.arange(8.0, device=device)[::2])
+        body_value = (x + 1).repeat_interleave(2)[::2]
+        self.assertEqual(body_value.shape, x.shape)
+        self.assertEqual(body_value.stride(), x.stride())
+        self.assertEqual(body_value.storage_offset(), x.storage_offset())
+        result = torch.compile(f, backend="eager", fullgraph=True)(x)[0]
+        self.assertIs(type(result), type(x))
+        self.assertEqual(result.a, x.a)
+        self.assertEqual(result.stride(), x.stride())
+        self.assertEqual(result.storage_offset(), x.storage_offset())
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @parametrize("case", ["duplicate", "additional", "captured"])
+    def test_while_loop_constant_false_identity_rng(self, device, case):
+        def f(state, x):
+            before = x.new_zeros(()) + random.random()
+
+            def cond_fn(a, b):
+                r = random.randint(1, 10) if a is b else random.random()
+                state.add_(1 if torch.tensor(r).is_floating_point() else 10)
+                return False
+
+            def captured_cond_fn(a):
+                r = random.randint(1, 10) if a is x else random.random()
+                state.add_(1 if torch.tensor(r).is_floating_point() else 10)
+                return False
+
+            if case == "duplicate":
+                result = torch.while_loop(cond_fn, lambda a, b: (a + 1, b + 1), (x, x))
+            elif case == "additional":
+                result = torch.ops.higher_order.while_loop(
+                    cond_fn, lambda a, b: (a + 1,), (x,), (x,)
+                )
+            else:
+                result = torch.while_loop(captured_cond_fn, lambda a: (a + 1,), (x,))
+
+            after = x.new_zeros(()) + random.random()
+            return (*result, before, after)
+
+        rng_state = random.getstate()
+        try:
+            random.seed(0)
+            expected_rng = random.Random(0)
+            state = torch.zeros((), device=device)
+            x = torch.zeros(3, device=device)
+            compiled = torch.compile(f, backend="eager", fullgraph=True)
+            with torch.no_grad():
+                for invocation in range(2):
+                    expected_before = expected_rng.random()
+                    expected_rng.randint(1, 10)
+                    expected_after = expected_rng.random()
+                    result = compiled(state, x)
+                    for output in result[:-2]:
+                        self.assertEqual(output, x)
+                    self.assertEqual(result[-2], expected_before)
+                    self.assertEqual(result[-1], expected_after)
+                    self.assertEqual(state, 10 * (invocation + 1))
+                    self.assertEqual(random.getstate(), expected_rng.getstate())
+        finally:
+            random.setstate(rng_state)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_constant_false_nested_cond_rng(self, device):
+        def f(x, pred):
+            def branch(z):
+                def cond_fn(a):
+                    if a is not z:
+                        torch.tensor(random.random())
+                    return False
+
+                result = torch.while_loop(cond_fn, lambda a: (a + 1,), (z,))
+                return result[0].clone()
+
+            return torch.cond(pred, branch, lambda z: z.clone(), (x,))
+
+        rng_state = random.getstate()
+        try:
+            random.seed(0)
+            expected_rng_state = random.getstate()
+            x = torch.arange(3.0, device=device)
+            pred = torch.tensor(True, device=device)
+            compiled = torch.compile(f, backend="eager", fullgraph=True)
+            with torch.no_grad():
+                for _ in range(2):
+                    self.assertEqual(compiled(x, pred), x)
+                    self.assertEqual(random.getstate(), expected_rng_state)
+        finally:
+            random.setstate(rng_state)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     def test_while_loop_constant_false_cond_input_mutation(self, device):
         def f(x):
             def cond_fn(x):
@@ -13222,9 +13344,40 @@ class <lambda>(torch.nn.Module):
             f(x)
 
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_constant_false_replay_input_mutation(self, device):
+        def f(x):
+            def cond_fn(a, b):
+                if a is b:
+                    a.add_(1)
+                return False
+
+            def body_fn(a, b):
+                return a + 1, b + 1
+
+            return torch.while_loop(cond_fn, body_fn, (x, x))
+
+        x = torch.ones(3, device=device)
+        with (
+            torch.enable_grad(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Higher order ops do not support input mutation",
+            ),
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(x, torch.ones_like(x))
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipCUDAIf(not SM70OrLater, "triton")
+    # Inductor requires 16-byte-aligned while_loop carries.
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: (
+            params["backend"] == "inductor" and params["offset"] in (1, 2, 3)
+        ),
+    )
     @parametrize("dynamic", [True, False])
-    @parametrize("offset", [0, 4])
+    @parametrize("offset", [0, 1, 2, 3, 4])
     @parametrize("backend", ["aot_eager", "inductor"])
     def test_while_loop_carry_layout(self, device, dynamic, offset, backend):
         def f(x):
@@ -13249,6 +13402,35 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(result, x + 40)
         self.assertEqual(result.stride(), x.stride())
         self.assertEqual(result.storage_offset(), x.storage_offset())
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    @skipCUDAIf(not SM70OrLater, "triton")
+    # Inductor's zero-trip clone densifies noncontiguous carries.
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["backend"] == "inductor",
+    )
+    @parametrize("dynamic", [True, False])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_while_loop_tensor_predicate_zero_trip(self, device, dynamic, backend):
+        def f(i, x):
+            def cond_fn(i, x):
+                return i < 0
+
+            def body_fn(i, x):
+                out = x.new_zeros(x.shape[0] * 2)
+                out[::2] = x + 1
+                return i + 1, out[::2]
+
+            return torch.while_loop(cond_fn, body_fn, (i, x))
+
+        i = torch.zeros((), dtype=torch.int64, device=device)
+        x = torch.arange(8.0, device=device)[::2]
+        result = torch.compile(f, backend=backend, fullgraph=True, dynamic=dynamic)(
+            i, x
+        )
+        self.assertEqual(result[0], i)
+        self.assertEqual(result[1], x)
 
     # https://github.com/pytorch/pytorch/issues/195327
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
