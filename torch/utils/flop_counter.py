@@ -443,10 +443,10 @@ def _unpack_flash_attention_nested_shapes(
             raise AssertionError("sdpa_flop_count: expected key.shape to be 3-dimensional")
         if len(value.shape) != 3:
             raise AssertionError("sdpa_flop_count: expected value.shape to be 3-dimensional")
-        _, h_q, d_q = query.shape
+        t_q, h_q, d_q = query.shape
         _, h_k, d_k = key.shape
         _, h_v, d_v = value.shape
-        expected_grad_out_shape = (query.shape[0], h_q, d_v)
+        expected_grad_out_shape = (t_q, h_q, d_v)
         if grad_out is not None and tuple(grad_out.shape) != expected_grad_out_shape:
             raise AssertionError(
                 "sdpa_flop_count: grad_out has shape "
@@ -501,10 +501,10 @@ def _unpack_efficient_attention_nested_shapes(
             raise AssertionError("_unpack_efficient_attention_nested_shapes: expected key.shape to be 4-dimensional")
         if len(value.shape) != 4:
             raise AssertionError("_unpack_efficient_attention_nested_shapes: expected value.shape to be 4-dimensional")
-        _, _, h_q, d_q = query.shape
+        b, m, h_q, d_q = query.shape
         _, _, h_k, d_k = key.shape
         _, _, h_v, d_v = value.shape
-        expected_grad_out_shape = (query.shape[0], query.shape[1], h_q, d_v)
+        expected_grad_out_shape = (b, m, h_q, d_v)
         if grad_out is not None and tuple(grad_out.shape) != expected_grad_out_shape:
             raise AssertionError(
                 "_unpack_efficient_attention_nested_shapes: grad_out has shape "

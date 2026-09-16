@@ -1000,17 +1000,17 @@ class _PipelineStageBase(ABC):
         user_kwargs = kwargs or {}
         composite_kwargs = user_kwargs
         if self._pass_pipeline_metadata:
-            metadata = {
-                _PIPELINE_STAGE_INDEX_KEY: self.stage_index,
-                _PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
-            }
             collisions = _PIPELINE_METADATA_KEYS & user_kwargs.keys()
             if collisions:
                 names = ", ".join(sorted(collisions))
                 raise ValueError(
                     f"pass_pipeline_metadata reserves forward kwarg name(s): {names}"
                 )
-            composite_kwargs = {**user_kwargs, **metadata}
+            composite_kwargs = {
+                **user_kwargs,
+                _PIPELINE_STAGE_INDEX_KEY: self.stage_index,
+                _PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
+            }
 
         if self._runtime_validate:
             self._validate_stage_tensors(
@@ -1806,10 +1806,14 @@ class PipelineStage(_PipelineStageBase):
         pass_pipeline_metadata: Pass ``pipeline_stage_index`` and
             ``pipeline_microbatch_index`` to each forward. The values are the
             global logical stage index and the global microbatch index within
-            the current step. This requires complete static metadata across the
-            schedule. The wrapped module may accept the reserved keywords
-            directly or consume them in a ``with_kwargs`` forward pre-hook.
-            Compiled modules may specialize on these Python integer values.
+            current training or evaluation step. This requires complete static
+            metadata across the schedule. The wrapped module may accept the
+            reserved keywords directly or consume them in a ``with_kwargs``
+            forward pre-hook. Training with DTensor inputs also requires static
+            ``input_grads`` and ``output_grads`` metadata even when forward-only
+            evaluation succeeds without it. Compiled modules receive Python
+            integers and may recompile for each distinct value if the forward
+            uses them in control flow or shape computations.
     """
 
     def __init__(
@@ -1917,7 +1921,7 @@ class PipelineStage(_PipelineStageBase):
 
         Args:
             has_backward: Whether the schedule includes a backward pass.
-            received_acc: Accumulated product tensor from the previous
+            received_acc: Two-element accumulated vote from the previous
                 same-rank stage (V-schedule), or ``None`` for the first
                 stage / cross-rank.
 
@@ -1957,7 +1961,7 @@ class PipelineStage(_PipelineStageBase):
     ) -> torch.Tensor:
         """Backward phase of the warm-up vote protocol (stage N−1 → 0).
 
-        Propagates the final accumulated product (computed in the forward
+        Propagates the final two-element vote (computed in the forward
         phase) back through the pipeline so every stage learns the global
         inference mode.
 
@@ -2419,10 +2423,9 @@ class PipelineStage(_PipelineStageBase):
 
         if self._inference_mode == InferenceMode.DYNAMIC:
             if self._pass_pipeline_metadata:
-                raise PipeliningMetadataError(
-                    "pass_pipeline_metadata requires complete static metadata: "
-                    "provide input_args and output_args for every stage, plus "
-                    "input_grads and output_grads for DTensors with backward"
+                raise AssertionError(
+                    "the schedule-wide warm-up vote must reject dynamic metadata "
+                    "inference when pass_pipeline_metadata is enabled"
                 )
             # DYNAMIC mode: run forward metadata inference
             # args may be _StageForwardMeta for same-rank V-schedule stages
