@@ -2472,10 +2472,10 @@ class InstructionTranslatorBase(
         # this checks for (two module names still mangle to one alias).
         if alias in f_globals and f_globals[alias] is not value:
             bound = f_globals[alias]
-            # __name__ is read out of the instance dict through
-            # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
-            # class-level __getattribute__ (importlib.util._LazyModule imports on
-            # any attribute read) runs inside the trace on the way to a verdict.
+            # Both names out of the instance dicts: a PEP 562 module __getattr__
+            # and a class-level __getattribute__ (importlib.util._LazyModule
+            # imports on any attribute read) are user code that must not run
+            # inside a trace.
             bound_name = (
                 object.__getattribute__(bound, "__dict__").get("__name__")
                 if isinstance(bound, types.ModuleType)
@@ -2495,13 +2495,6 @@ class InstructionTranslatorBase(
             accepted = (module_name, value_name) if value_name else (module_name,)
             if bound_name not in accepted:
                 # Named by type, never repr'd: __repr__ is user code too.
-                # IMPORT_NAME has no break_graph_if_unsupported, so this
-                # Unsupported reaches step(): the frame is skipped outright
-                # unless a checkpoint (an empty stack after two or more ops)
-                # precedes the import, and compiled up to that checkpoint
-                # otherwise. Either outcome is cached on the code object and
-                # nothing guards this global, so fixing it afterwards does not
-                # retrace the frame until torch._dynamo.reset().
                 offender = type(bound).__name__
                 if bound_name is not None:
                     offender = f"{offender} named {bound_name}"
