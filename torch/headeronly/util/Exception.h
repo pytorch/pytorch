@@ -4,7 +4,9 @@
 #include <torch/headeronly/macros/Macros.h>
 
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace c10 {
 // On nvcc, C10_UNLIKELY thwarts missing return statement analysis.  In cases
@@ -47,7 +49,7 @@ std::string stdTorchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   // in the headeronly world.
   std::ostringstream oss;
   ((oss << args), ...);
-  return oss.str();
+  return std::move(oss).str();
 }
 
 inline const char* stdTorchCheckMsgImpl(const char* msg) {
@@ -68,16 +70,17 @@ HIDDEN_NAMESPACE_END(torch, headeronly, detail)
       ##__VA_ARGS__))
 #endif // STRIP_ERROR_MESSAGES
 
-#define STD_TORCH_CHECK(cond, ...)                \
-  if (C10_UNLIKELY_OR_CONST(!(cond))) {           \
-    throw std::runtime_error(STD_TORCH_CHECK_MSG( \
-        cond,                                     \
-        "",                                       \
-        __func__,                                 \
-        ", ",                                     \
-        __FILE__,                                 \
-        ":",                                      \
-        __LINE__,                                 \
-        ", ",                                     \
-        ##__VA_ARGS__));                          \
+#define STD_TORCH_CHECK(cond, ...)                                    \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                               \
+    /* @allow-raw-throw: this macro is the headeronly check itself */ \
+    throw std::runtime_error(STD_TORCH_CHECK_MSG(                     \
+        cond,                                                         \
+        "",                                                           \
+        __func__,                                                     \
+        ", ",                                                         \
+        __FILE__,                                                     \
+        ":",                                                          \
+        __LINE__,                                                     \
+        ", ",                                                         \
+        ##__VA_ARGS__));                                              \
   }

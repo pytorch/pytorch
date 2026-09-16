@@ -728,7 +728,7 @@ void RecordFunction::before(RecordFunction::FunctionDescriptor fn, int64_t seque
   std::visit([this](auto&& fn) {
     if constexpr (std::is_same_v<std::decay_t<decltype(fn)>, std::string_view>) {
       is_nccl_meta_ = (fn == kParamCommsCallName);
-      fn_ = std::string(fn);
+      fn_.emplace<std::string>(fn);
     } else {
       is_nccl_meta_ = (fn.get().name() == kParamCommsCallName);
       fn_ = fn;

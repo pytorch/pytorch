@@ -290,9 +290,6 @@ class ComposabilityTest(MultiProcContinuousTest):
         ],
     )
     def test_pp_fsdp(self, dp_type, ScheduleClass):
-        if TEST_WITH_ROCM:
-            return
-
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
@@ -465,14 +462,14 @@ class ComposabilityTest(MultiProcContinuousTest):
                 self.assertEqual(
                     unsharded_count,
                     total_fsdp_params,
-                    f"Expected all {total_fsdp_params} FSDP parameters to be unsharded, "
+                    lambda msg: f"{msg}\nExpected all {total_fsdp_params} FSDP parameters to be unsharded, "
                     f"but only {unsharded_count} are unsharded",
                 )
             else:
                 self.assertEqual(
                     unsharded_count,
                     0,
-                    f"Expected all FSDP parameters to be sharded, "
+                    lambda msg: f"{msg}\nExpected all FSDP parameters to be sharded, "
                     f"but {unsharded_count} out of {total_fsdp_params} are unsharded",
                 )
 

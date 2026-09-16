@@ -187,7 +187,7 @@ class BaseSparsifier(abc.ABC):
             tensor_fqn = local_args.get("tensor_fqn", None)
             if tensor_fqn is None:
                 raise AssertionError(
-                    "tensor_fqn is a required argument in the sparsity config which"
+                    "tensor_fqn is a required argument in the sparsity config which "
                     "replaces previous `module` and [module]`fqn` arguments"
                 )
 

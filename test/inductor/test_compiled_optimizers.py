@@ -46,6 +46,7 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     PolynomialLR,
     ReduceLROnPlateau,
+    SequentialLR,
     StepLR,
 )
 from torch.testing._internal.common_device_type import (
@@ -152,11 +153,9 @@ LR_SCHEDULER_TO_KWARGS = {
     StepLR: {"step_size": 1, "gamma": 100},
     MultiStepLR: {"milestones": [1, 2], "gamma": 100},
     ExponentialLR: {"gamma": 100},
+    SequentialLR: {"schedulers": None, "milestones": [1, 2]},
     CosineAnnealingLR: {"T_max": 7},
-    # These schedulers have memory leaks in eager
-    # https://github.com/pytorch/pytorch/issues/126131
-    # SequentialLR: {"schedulers": None, "milestones": [1, 2]},
-    # ChainedScheduler: {"schedulers": None},
+    ChainedScheduler: {"schedulers": None},
     CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
     CosineAnnealingWarmRestarts: {"T_0": 1},
     OneCycleLR: {
@@ -173,7 +172,7 @@ LR_SCHEDULER_TO_KWARGS = {
 
 
 def create_scheduler(scheduler, optim):
-    kwargs = LR_SCHEDULER_TO_KWARGS[scheduler]
+    kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler])
     if "schedulers" in kwargs:
         kwargs["schedulers"] = [
             create_scheduler(torch.optim.lr_scheduler.ConstantLR, optim)
@@ -727,6 +726,16 @@ class CompiledOptimizerTests(TestCase):
         self.assertIsNotNone(manager)
         self.assertEqual(manager.new_graph_id().id, 1)
 
+    def test_create_scheduler_does_not_mutate_kwargs(self):
+        for scheduler_cls in (ChainedScheduler, SequentialLR):
+            expected_kwargs = deepcopy(LR_SCHEDULER_TO_KWARGS[scheduler_cls])
+            model = torch.nn.Linear(1, 1)
+            opt = SGD(model.parameters(), lr=0.1)
+
+            create_scheduler(scheduler_cls, opt)
+
+            self.assertEqual(LR_SCHEDULER_TO_KWARGS[scheduler_cls], expected_kwargs)
+
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
@@ -941,6 +950,75 @@ class CompiledOptimizerTests(TestCase):
         self.assertLess(end - start, 90)
 
     @requires_gpu_and_triton
+    @skipIfRocm(msg="ROCm Triton compile time regresses on joined foreach bodies")
+    def test_foreach_shared_body_codegen(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        for sizes, last_branch in (
+            ((1536, 2048, 2560), "elif pid < num_xblocks_2"),
+            ((1536, 2048, 2304), "elif pid % 3 == 2"),
+        ):
+            with (
+                self.subTest(sizes=sizes),
+                fresh_cache(),
+                config.patch(combo_kernel_allow_mixed_sizes=2),
+            ):
+                xs = [torch.randn(n, device=GPU_TYPE) for n in sizes]
+                ys = [torch.randn_like(x) for x in xs]
+                expected = torch._foreach_add(xs, ys)
+                actual, codes = run_and_get_code(
+                    torch.compile(fn, fullgraph=True), xs, ys
+                )
+
+            self.assertEqual(actual, expected)
+            foreach_codes = [
+                code for code in codes if "@triton_heuristics.foreach" in code
+            ]
+            self.assertEqual(len(foreach_codes), 1)
+            code = foreach_codes[0]
+            self.assertEqual(code.count("tl.load("), 2)
+            self.assertEqual(code.count("tl.store("), 1)
+            self.assertIn("foreach_arg0 = in_ptr0", code)
+            self.assertIn("foreach_arg0 = in_ptr2", code)
+            self.assertGreater(
+                code.rfind("tmp0 = tl.load(foreach_arg0"),
+                code.rfind(last_branch),
+            )
+
+    @requires_gpu_and_triton
+    def test_foreach_optimizer_shared_body_correctness(self):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def opt_step(params, grads, momentum):
+            torch._foreach_mul_(momentum, 0.9)
+            torch._foreach_add_(momentum, grads, alpha=0.1)
+            torch._foreach_add_(params, momentum, alpha=-0.01)
+            return params, momentum
+
+        params = [torch.randn(n, device=GPU_TYPE) for n in (1536, 2048, 2560)]
+        grads = [torch.randn_like(p) for p in params]
+        momentum = [torch.zeros_like(p) for p in params]
+        params_ref = [p.clone() for p in params]
+        momentum_ref = [m.clone() for m in momentum]
+
+        with fresh_cache():
+            _, codes = run_and_get_code(
+                torch.compile(opt_step, fullgraph=True), params, grads, momentum
+            )
+        opt_step(params_ref, grads, momentum_ref)
+
+        self.assertEqual(params, params_ref)
+        self.assertEqual(momentum, momentum_ref)
+        foreach_codes = [code for code in codes if "@triton_heuristics.foreach" in code]
+        if torch.version.hip is not None:
+            self.assertFalse(any("foreach_arg0" in code for code in foreach_codes))
+        else:
+            self.assertTrue(any("foreach_arg0" in code for code in foreach_codes))
+
+    @requires_gpu_and_triton
     def test_S429861(self):
         # Just verify we can compile this function without error
         try:
@@ -1016,6 +1094,42 @@ class CompiledOptimizerBitwiseTests(TestCase):
     to the eager optimizer step.
     """
 
+    @config.patch(
+        {
+            "score_fusion_memory_threshold": 1,
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_foreach_lerp_scalar_high_weight_bitwise(self):
+        cases = [
+            (0.9, (torch.float32, torch.float32)),
+            (0.1, (torch.float32, torch.float32)),
+            (0.9, (torch.float32, torch.float64)),
+            (0.49999999, (torch.float32, torch.float64)),
+            (0.9, (torch.float16, torch.float16)),
+        ]
+
+        for weight, dtypes in cases:
+            with self.subTest(weight=weight, dtypes=dtypes):
+
+                def fn(start, end):
+                    return torch._foreach_lerp(start, end, weight)
+
+                torch.manual_seed(42)
+                start = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                end = [
+                    torch.randn(32, device=GPU_TYPE, dtype=dtypes[0]),
+                    torch.randn(16, device=GPU_TYPE, dtype=dtypes[1]),
+                ]
+                expected = fn(start, end)
+                actual = torch.compile(fn)(start, end)
+                self.assertEqual(actual, expected, atol=0, rtol=0)
+
     @staticmethod
     def _test_optimizer_bitwise(
         test_case,
@@ -1056,7 +1170,7 @@ class CompiledOptimizerBitwiseTests(TestCase):
                         p_compiled,
                         atol=0,
                         rtol=0,
-                        msg=f"Step {step + 1}, param {i}: params differ",
+                        msg=lambda msg: f"{msg}\nStep {step + 1}, param {i}: params differ",
                     )
 
         # Also check optimizer state
@@ -1072,7 +1186,7 @@ class CompiledOptimizerBitwiseTests(TestCase):
                         compiled_val,
                         atol=0,
                         rtol=0,
-                        msg=f"State '{key}' differs",
+                        msg=lambda msg: f"{msg}\nState '{key}' differs",
                     )
 
         if kernel_count is not None and test_case.check_kernel_count:

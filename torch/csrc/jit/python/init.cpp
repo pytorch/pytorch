@@ -884,8 +884,9 @@ void initJITBindings(PyObject* module) {
               }
             }
             auto old_strategy = getFusionStrategy();
-            auto strat =
-                fmap(old_strategy, [](std::pair<FusionBehavior, size_t> behav) {
+            auto strat = fmap(
+                std::move(old_strategy),
+                [](std::pair<FusionBehavior, size_t> behav) {
                   return std::pair<std::string, size_t>(
                       behav.first == FusionBehavior::STATIC ? "STATIC"
                                                             : "DYNAMIC",
@@ -1336,7 +1337,7 @@ void initJITBindings(PyObject* module) {
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
-        return s.str();
+        return std::move(s).str();
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
@@ -1548,9 +1549,7 @@ void initJITBindings(PyObject* module) {
     THPObjectPtr getMemview(void* buf, size_t n) const {
       THPObjectPtr memview(PyMemoryView_FromMemory(
           reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
-      if (!memview) {
-        throw python_error();
-      }
+      TORCH_CHECK_PYTHON(memview);
       return memview;
     }
 
@@ -1666,6 +1665,11 @@ void initJITBindings(PyObject* module) {
              uint64_t storage_alignment) {
             return self.getRecordOffsetNoRead(
                 zipfile_header_offset, filename, size, storage_alignment);
+          })
+      .def(
+          "get_record_size",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordSize(key);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -1780,7 +1784,8 @@ void initJITBindings(PyObject* module) {
           ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
           auto opWithStack = getOpWithStack(overloads, args, kwargs);
-          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          std::shared_ptr<Operator> overload =
+              std::move(std::get<0>(opWithStack));
           auto result = overload->schema().overload_name();
           if (result.empty()) {
             result = "default";
@@ -1828,7 +1833,7 @@ void initJITBindings(PyObject* module) {
                     sortedOps, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
-              py::doc(docstring.str().c_str()));
+              py::doc(std::move(docstring).str().c_str()));
           return py::make_tuple(func, overload_names);
         } catch (const c10::Error& e) {
           auto msg = torch::get_cpp_stacktraces_enabled()
@@ -1896,7 +1901,7 @@ void initJITBindings(PyObject* module) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
     if (!type) {
-      throw std::runtime_error(s.str());
+      throw std::runtime_error(std::move(s).str());
     }
     return type.value();
   });
@@ -2014,7 +2019,7 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self, const FunctionSchema& old_schema) {
             std::ostringstream out;
             auto result = self.isForwardCompatibleWith(old_schema, out);
-            return std::make_pair(result, out.str());
+            return std::make_pair(result, std::move(out).str());
           })
       .def(
           "__eq__",
@@ -2031,20 +2036,20 @@ void initJITBindings(PyObject* module) {
           [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "__repr__",
           [](const FunctionSchema& self) {
             std::stringstream ss;
             ss << self;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(py::pickle(
           [](const FunctionSchema& self) { // __getstate__
             std::stringstream ss;
             ss << self;
-            return py::str(ss.str());
+            return py::str(std::move(ss).str());
           },
           [](const py::str& schema) { // __setstate__, note: no `self` argument
             return parseSchema(schema);

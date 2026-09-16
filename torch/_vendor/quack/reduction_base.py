@@ -6,7 +6,7 @@ import cutlass
 import cutlass.cute as cute
 from cutlass import Int32, Int64, Float32, const_expr
 
-from . import copy_utils
+import torch._vendor.quack.copy_utils as copy_utils
 
 
 class ReductionBase:
@@ -25,6 +25,20 @@ class ReductionBase:
     def _set_cluster_n(self):
         self.cluster_n = 1
 
+    def _cap_cluster_n(self, vecsize: int) -> None:
+        """Cap ``cluster_n`` so every peer CTA owns a distinct, non-empty N-tile.
+
+        A clustered launch splits the row across ``cluster_n`` CTAs. If
+        ``threads_per_row * cluster_n`` exceeds the number of vector blocks in the
+        row (``N // vecsize``), one CTA tile already spans the whole row
+        (``tiler_mn[1] >= N``); local_tile then collapses every peer onto tile 0,
+        so the peers re-reduce the same columns and double-count in the cluster
+        reduction. Capping to ``(N // vecsize) // threads_per_row`` guarantees
+        ``tiler_mn[1] < N`` whenever the resulting ``cluster_n > 1``.
+        """
+        max_cluster_n = max(1, (self.N // vecsize) // self._threads_per_row())
+        self.cluster_n = min(self.cluster_n, max_cluster_n)
+
     def _get_tiled_copy(self, vecsize: int = 1):
         assert self.N % vecsize == 0, f"Input N {self.N} is not divisible by vector size {vecsize}"
         threads_per_row = self._threads_per_row()
@@ -35,49 +49,46 @@ class ReductionBase:
         tiled_copy = copy_utils.tiled_copy_2d(self.dtype, threads_per_row, num_threads, vecsize)
         return tiled_copy, tiler_mn, threads_per_row
 
-    def _get_reduction_buffer_layout(self, tv_layout: cute.Layout, cluster_n: int):
+    def _get_reduction_buffer_layout(
+        self, tv_layout: cute.Layout, cluster_n: int, num_slots: Optional[int] = None
+    ):
+        """num_slots overrides the buffer slot count when it differs from the number
+        of sync stages (e.g. several values reduced per stage through one barrier)."""
         num_warps = cute.size(tv_layout, mode=[0]) // cute.arch.WARP_SIZE
         warps_per_row = (
             num_warps
             if cute.rank(tv_layout.shape[0]) == 1
             else max(tv_layout.shape[0][0] // cute.arch.WARP_SIZE, 1)
         )
+        if num_slots is None:
+            num_slots = self.stage
         return cute.make_ordered_layout(
-            (num_warps // warps_per_row, (warps_per_row, cluster_n), self.stage),
+            (num_warps // warps_per_row, (warps_per_row, cluster_n), num_slots),
             order=(1, 0, 2),
         )
 
     def _allocate_reduction_buffer_and_mbar(
-        self, smem: cutlass.utils.SmemAllocator, tv_layout: cute.Layout, is_persistent: bool = False
+        self, smem: cutlass.utils.SmemAllocator, tv_layout: cute.Layout
     ) -> Tuple[cute.Tensor, Optional[cute.Pointer]]:
+        """Single-shot (non-persistent) reduction: full barriers only. Persistent
+        kernels use quack.pipeline.PipelineStasAsync instead, which also manages
+        empty barriers for buffer reuse across iterations."""
         reduction_buffer = smem.allocate_tensor(
             self.reduction_dtype,
             self._get_reduction_buffer_layout(tv_layout, self.cluster_n),
             byte_alignment=8,
         )
         if const_expr(self.cluster_n > 1):
-            mbar_ptr = smem.allocate_array(
-                Int64, num_elems=self.stage if not is_persistent else self.stage * 2
-            )
+            mbar_ptr = smem.allocate_array(Int64, num_elems=self.stage)
         else:
             mbar_ptr = None
         return reduction_buffer, mbar_ptr
 
     @cute.jit
-    def _initialize_cluster(
-        self,
-        tidx: Int32,
-        mbar_ptr: cute.Pointer,
-        num_warps: int,
-        is_persistent: bool = False,
-    ):
+    def _initialize_cluster(self, tidx: Int32, mbar_ptr: cute.Pointer, num_warps: int):
         if const_expr(self.cluster_n > 1):
             if tidx < self.stage:  # Initialize full barrier
                 cute.arch.mbarrier_init(mbar_ptr + tidx, 1)
-                if const_expr(is_persistent):  # Initialize empty barrier
-                    cute.arch.mbarrier_init(
-                        mbar_ptr + self.stage + tidx, num_warps * self.cluster_n
-                    )
             cute.arch.mbarrier_init_fence()
             # Cluster arrive after barrier init
             cute.arch.cluster_arrive_relaxed()

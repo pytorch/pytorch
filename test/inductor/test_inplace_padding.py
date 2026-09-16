@@ -9,7 +9,7 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import serialTest, skipIfXpu
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -211,6 +211,23 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    def test_negative_padding(self):
+        """
+        Negative padding (shrinking the tensor) should not trigger inplace padding
+        and should evaluate correctly without ValueRangeError.
+        """
+
+        def f(x, y):
+            x = aten.constant_pad_nd(x + 1.0, (0, -2, 0, 0), 12345.0)
+            return x @ y
+
+        M, N = 64, 64
+        x = rand_strided((M, N), (N + 10, 1), device=GPU_TYPE)
+        y = torch.randn(N - 2, M, device=GPU_TYPE)
+        check_model(self, f, (x, y), atol=1e-2, rtol=1e-2)
+
+        self.assertEqual(num_inplace_padding(), 0)
+
     @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     @serialTest()
@@ -259,7 +276,6 @@ class InplacePaddingTest(TestCase):
     @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
     @serialTest()
-    @skipIfXpu(msg="AssertionError: torch-xpu-ops: #2997")
     def test_linear_and_cel_max_autotune(self):
         self.test_linear_and_cel()
 

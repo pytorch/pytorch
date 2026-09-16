@@ -5,7 +5,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
@@ -499,7 +498,7 @@ std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, s
   // i.e. if input is not contiguous, then output is also discontiguous
   Tensor output = wrap_buffer(output_buffer, sizemat.clone(), stridemat.clone(), offsets.clone()),
       mask = wrap_buffer(mask_buffer, sizemat.clone(), stridemat.clone(), offsets.clone());
-  return std::make_tuple(output, mask);
+  return std::make_tuple(std::move(output), std::move(mask));
 }
 
 Tensor softmax_nested(
@@ -802,7 +801,8 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
       sizemat_reshaped_ptr += ndims_underlying_reshaped;
     }
   }
-  return std::make_tuple(viewable, sizemat_reshaped, stridemat_reshaped);
+  return std::make_tuple(
+      viewable, std::move(sizemat_reshaped), std::move(stridemat_reshaped));
 }
 } // namespace
 
@@ -1074,8 +1074,7 @@ static Tensor cat_nested_impl(
     std::vector<at::Tensor> sizes;
     buffers.reserve(tensors.size());
     sizes.reserve(tensors.size());
-    for (const auto i : c10::irange(tensors.size())) {
-      const Tensor& t = tensors[i];
+    for (const Tensor& t : tensors) {
       TORCH_CHECK(
           t.is_nested(), "Expected each tensor in given list to be nested.");
       TORCH_CHECK(

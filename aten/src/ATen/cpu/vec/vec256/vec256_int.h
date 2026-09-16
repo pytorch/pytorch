@@ -114,10 +114,7 @@ class Vectorized<int64_t> : public Vectorizedi {
   }
   static Vectorized<int64_t> loadu(const void* ptr, int64_t count) {
     __at_align__ int64_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
@@ -266,10 +263,7 @@ class Vectorized<int32_t> : public Vectorizedi {
   }
   static Vectorized<int32_t> loadu(const void* ptr, int32_t count) {
     __at_align__ int32_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
@@ -568,10 +562,7 @@ class Vectorized<int16_t> : public Vectorizedi {
   }
   static Vectorized<int16_t> loadu(const void* ptr, int16_t count) {
     __at_align__ int16_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }
@@ -918,10 +909,7 @@ class Vectorized8 : public Vectorizedi {
   }
   static Vectorized<T> loadu(const void* ptr, T count) {
     __at_align__ T tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See
-    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to one using "={1}" because gcc would compile it
-    // to two instructions while a loop would be compiled to one instruction.
+    // Fill tail with 1; loop for GCC 11 auto-vec.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 1;
     }

@@ -42,7 +42,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <ostream>
 
 namespace at::vec {
 
@@ -55,34 +54,6 @@ namespace at::vec {
 // namespace` which changes the name mangling, but can still be
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
-
-inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
-  stream << val.val_;
-  return stream;
-}
-inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
-  stream << static_cast<int>(val.val_);
-  return stream;
-}
-inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
-  stream << static_cast<unsigned int>(val.val_);
-  return stream;
-}
-
-template <typename T>
-std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
-  T buf[Vectorized<T>::size()];
-  vec.store(buf);
-  stream << "vec[";
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    if (i != 0) {
-      stream << ", ";
-    }
-    stream << buf[i];
-  }
-  stream << ']';
-  return stream;
-}
 
 #if defined(CPU_CAPABILITY_AVX2)
 
@@ -170,7 +141,6 @@ Vectorized<int32_t> inline convert_to_int_of_same_size<float>(
   return _mm256_cvttps_epi32(src);
 }
 
-// From: https://stackoverflow.com/a/41148578
 template <>
 Vectorized<double> inline convert_to_fp_of_same_size<double>(
     const Vectorized<int64_t>& src) {
@@ -189,7 +159,12 @@ Vectorized<double> inline convert_to_fp_of_same_size<double>(
   /* int64 = low32 + high32*2^32 = v_hi + v_lo - 2^52 - 2^63 - 2^84 */
   __m256d v_hi_dbl = _mm256_sub_pd(_mm256_castsi256_pd(v_hi), magic_d_all);
   __m256d result = _mm256_add_pd(v_hi_dbl, _mm256_castsi256_pd(v_lo));
-  return result;
+
+  /* The final add cancels 2^52 against -2^52 when src is 0; IEEE gives that
+      exact-zero sum a negative sign under roundTowardNegative, where SCVTF
+      would give +0.0.  Force the all-zero encoding back. */
+  __m256i is_zero = _mm256_cmpeq_epi64(src, _mm256_setzero_si256());
+  return _mm256_andnot_pd(_mm256_castsi256_pd(is_zero), result);
 }
 
 template <>

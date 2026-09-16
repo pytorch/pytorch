@@ -126,9 +126,8 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
         arch = int(cutlass_arch(device_type))
-        assert device_type != "cuda" or arch >= 90, (
-            "For CUDA, only SM90+ is supported for EVT"
-        )
+        if device_type == "cuda" and arch < 90:
+            raise AssertionError("For CUDA, only SM90+ is supported for EVT")
         epilogue_functor = _trace(fn_src, example_tensors, arch, **kwargs)
         visitor = EpilogueFunctorVisitor(arch, epilogue_functor)
         fusion_callbacks = FusionCallbacks(visitor.graph, arch, emit_CD=False)
@@ -211,7 +210,58 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         buffer = IndentedBuffer()
         with buffer.set_tabwidth(2):
 
-            def render_argument_type(name: str, t: CutlassArgType) -> None:
+            def get_constant_value(name: str) -> float | int | None:
+                dag_ir = getattr(epilogue_functor, "dag_ir", None)
+                if dag_ir is not None:
+                    try:
+                        node_meta = dag_ir.get_node_meta(name)
+                    except Exception:
+                        node_meta = None
+                    if node_meta is not None:
+                        tensor_meta = getattr(node_meta, "tensor", None)
+                        if isinstance(tensor_meta, dict) and tensor_meta.get(
+                            "is_constant"
+                        ):
+                            return tensor_meta.get("tensor")
+
+                # Immediate constants are encoded as "imm_<value>_k<idx>" where
+                # the first underscore in <value> stands in for the decimal point
+                # (e.g. "imm_0_044715_k1" -> 0.044715). dag_ir meta is the primary
+                # source; this name parsing is a best-effort fallback.
+                if not name.startswith("imm_"):
+                    return None
+
+                value_part, _, _ = name[len("imm_") :].rpartition("_k")
+                if not value_part:
+                    return None
+                try:
+                    return float(value_part.replace("_", ".", 1))
+                except ValueError:
+                    return None
+
+            def render_argument_type(
+                name: str,
+                t: CutlassArgType,
+                constant_value: float | int | None = None,
+            ) -> None:
+                if constant_value is None and name not in name_to_buffer:
+                    # An imm_* node is an immediate constant whose value we
+                    # failed to recover (dag_ir meta missing AND name parsing
+                    # failed, e.g. an unsupported encoding). Emitting an empty
+                    # struct here would silently drop the constant and produce a
+                    # numerically wrong kernel, so fail loudly instead.
+                    if name.startswith("imm_"):
+                        raise RuntimeError(
+                            f"Could not recover the value of immediate constant "
+                            f"node {name!r} for the CUTLASS EVT epilogue. "
+                            f"Refusing to emit an empty argument that would "
+                            f"silently drop the constant."
+                        )
+                    # Other non-buffer nodes (e.g. autogen_identity_*/compute_*
+                    # placeholders) legitimately render as an empty struct,
+                    # matching CUTLASS reference EVT kernels.
+                    buffer.writeline(f"{{}}, /* {name} */")
+                    return
                 if issubclass(t, ctypes.c_byte):
                     buffer.writeline(f"{{}}, /* {name} */")
                 else:
@@ -219,7 +269,11 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                         (
                             fname,
                             _get_arg_from_node(
-                                ty, name_to_buffer[name], size_hint_fn, arg_renames
+                                ty,
+                                name_to_buffer.get(name),
+                                size_hint_fn,
+                                arg_renames,
+                                constant_value,
                             ),
                         )
                         for fname, ty in t._fields_
@@ -237,7 +291,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                             render_thread_type(name, inner_t)
                     buffer.writeline("},")
                 else:
-                    render_argument_type(name, t)
+                    render_argument_type(name, t, get_constant_value(name))
 
             # unroll the recursion once to address special case formatting
             # namely, no ending comma and no indentation for the outermost thread type
@@ -255,9 +309,10 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
 
     def _get_arg_from_node(
         arg_ty: type,
-        node: Buffer,
+        node: Buffer | None,
         size_hint_fn: Callable[[Expr | int], int],
         arg_renames: EVTArgRenames,
+        constant_value: float | int | None = None,
     ) -> str:
         from ..template import CUTLASSTemplate
 
@@ -268,8 +323,18 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             str(arg_ty)
             == "<class 'cutlass_cppgen.backend.c_types.tuple_factory_.<locals>.TupleType'>"
         ):
+            if constant_value is not None:
+                raise NotImplementedError(
+                    "Immediate constants do not use tuple argument types"
+                )
             DEFAULT_STRIDE_LEN = 3
-            assert len(node.get_layout().stride) <= DEFAULT_STRIDE_LEN
+            if node is None:
+                raise AssertionError("node must not be None for tuple argument types")
+            if len(node.get_layout().stride) > DEFAULT_STRIDE_LEN:
+                raise AssertionError(
+                    f"expected stride length <= {DEFAULT_STRIDE_LEN}, "
+                    f"got {len(node.get_layout().stride)}"
+                )
             stride = [size_hint_fn(x) for x in node.get_layout().stride]
             for _ in range(DEFAULT_STRIDE_LEN - len(stride)):
                 stride.append(0)
@@ -286,11 +351,19 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
             return f"{{{', '.join([render_stride(x) for x in stride])}}}"
 
         elif issubclass(arg_ty, ctypes.c_void_p):
+            if constant_value is not None:
+                return "nullptr"
+            if node is None:
+                raise AssertionError("node must not be None for pointer argument")
             name = arg_renames.new_name(node.get_name())
             return f"({CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}*) ({name} + {name}_offset)"
         elif (
             arg_ty in _CUTLASS_C_DTYPES
         ):  # Assumption: this is the element dtype, this holds for all cutlass ir nodes currently
+            if constant_value is not None:
+                return str(constant_value)
+            if node is None:
+                raise AssertionError("node must not be None for dtype argument")
             return f"{CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]}(0)"
         elif issubclass(arg_ty, EmptyByte):
             return "{}"

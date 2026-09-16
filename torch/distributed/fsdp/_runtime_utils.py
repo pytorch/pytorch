@@ -855,7 +855,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             if handle._use_fake_reduce
             else state.process_group
         )
-        dist.reduce_scatter_tensor(
+        dist.reduce_scatter_single(
             new_sharded_grad,
             padded_unsharded_grad,
             group=pg,

@@ -21,8 +21,8 @@ void weight_norm_first_dim_kernel(
     const TensorBase& v,
     const TensorBase& g,
     int64_t M, int64_t N) {
-  const auto v_data = v.data_ptr<scalar_t>();
-  const auto g_data = g.data_ptr<scalar_t>();
+  const auto v_data = v.const_data_ptr<scalar_t>();
+  const auto g_data = g.const_data_ptr<scalar_t>();
   auto w_data = w.data_ptr<scalar_t>();
   auto norm_data = norm.data_ptr<accscalar_t>();
 
@@ -133,8 +133,8 @@ void weight_norm_last_dim_kernel(
     const TensorBase& v,
     const TensorBase& g,
     int64_t M, int64_t N) {
-  const auto v_data = v.data_ptr<scalar_t>();
-  const auto g_data = g.data_ptr<scalar_t>();
+  const auto v_data = v.const_data_ptr<scalar_t>();
+  const auto g_data = g.const_data_ptr<scalar_t>();
   auto w_data = w.data_ptr<scalar_t>();
   auto norm_data = norm.data_ptr<accscalar_t>();
 
@@ -187,7 +187,7 @@ void weight_norm_backward_first_dim_kernel(
     const TensorBase& saved_g,
     const TensorBase& saved_norm,
     int64_t M, int64_t N) {
-  const auto grad_w_data = grad_w.data_ptr<scalar_t>();
+  const auto grad_w_data = grad_w.const_data_ptr<scalar_t>();
   const auto saved_v_data = saved_v.const_data_ptr<scalar_t>();
   const auto saved_g_data = saved_g.const_data_ptr<scalar_t>();
   const auto saved_norm_data = saved_norm.const_data_ptr<accscalar_t>();
@@ -330,7 +330,7 @@ void weight_norm_backward_last_dim_kernel(
     const TensorBase& saved_g,
     const TensorBase& saved_norm,
     int64_t M, int64_t N) {
-  const auto grad_w_data = grad_w.data_ptr<scalar_t>();
+  const auto grad_w_data = grad_w.const_data_ptr<scalar_t>();
   const auto saved_v_data = saved_v.const_data_ptr<scalar_t>();
   const auto saved_g_data = saved_g.const_data_ptr<scalar_t>();
   const auto saved_norm_data = saved_norm.const_data_ptr<accscalar_t>();
@@ -407,6 +407,10 @@ void weight_norm_kernel(
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
+  if (v.numel() == 0) {
+    norm.zero_();
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, v.scalar_type(),
       "weight_norm_kernel", [&]() {
     using accscalar_t = at::opmath_type<scalar_t>;
@@ -432,6 +436,10 @@ void weight_norm_backward_kernel(
     int64_t dim) {
   TORCH_INTERNAL_ASSERT(dim == 0 || dim == saved_v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
+  if (saved_v.numel() == 0) {
+    grad_g.zero_();
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, saved_v.scalar_type(),
       "weight_norm_backward_kernel", [&]() {
     using accscalar_t = at::opmath_type<scalar_t>;

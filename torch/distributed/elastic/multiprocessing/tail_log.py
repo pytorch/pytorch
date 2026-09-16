@@ -152,7 +152,7 @@ class TailLog:
                 f.result()
             except Exception as e:
                 logger.exception(
-                    "error in log tailor for %s%s. %s",
+                    "error in log tailer for %s%s. %s",
                     self._name,
                     local_rank,
                     e.__class__.__qualname__,

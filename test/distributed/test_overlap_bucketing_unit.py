@@ -1,8 +1,10 @@
 # Owner(s): ["module: inductor"]
 import json
 import os
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -40,7 +42,7 @@ aten = torch.ops.aten
 from torch.testing._internal.common_fsdp import get_devtype
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 import torch
@@ -468,6 +470,82 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         FileCheck().check("cat.default").check("all_reduce.default").check(
             "split_with_sizes"
         ).check_count("%mm", 2).run(graph_str)
+
+    def test_manual_bucket_splits_dependent_all_reduce(self):
+        """Bucketing must split dependent same-key all_reduces, not fuse them.
+
+        Reproduces the loss-parallel cross-entropy pattern with two independent
+        chunks: a "sumexp" all_reduce whose result feeds a "result" all_reduce.
+        All four are sum/same-group/same-dtype (one bucket key), but fusing a
+        sumexp with its dependent result would make the merged collective's
+        input depend on its own output -- a cycle that failed region
+        topological sort ("stable topological sort of region failed").
+
+        Correct partitioning fuses the two independent sumexps into one bucket
+        and the two independent results into another, so four all_reduces
+        collapse to exactly two bucketed all_reduces (via two cats), no cycle.
+        """
+
+        def func(a, b, c, d):
+            group_name = "0"
+            ar = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+            sumexp0 = wait(ar(a, "sum", group_name))
+            sumexp1 = wait(ar(b, "sum", group_name))
+            result0 = wait(ar(sumexp0 + c, "sum", group_name))
+            result1 = wait(ar(sumexp1 + d, "sum", group_name))
+            return result0.sum() + result1.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            d = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c, d)
+
+        collective_info = build_collective_info(traced.graph, {})
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            ManualOverlapPreservingBucketer,
+        )
+
+        bucketer = ManualOverlapPreservingBucketer(
+            traced.graph, collective_info, scheduled
+        )
+
+        # find_nodes returns nodes in graph (topological) order.
+        sumexp0, sumexp1, result0, result1 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+
+        # The partition itself: independent sumexps in one bucket, dependent
+        # results in another -- a sumexp is never grouped with its own result.
+        buckets = bucketer._split_independent_collectives(
+            OrderedSet([sumexp0, sumexp1, result0, result1]),
+            list(traced.graph.nodes),
+        )
+        bucket_sets = [set(b) for b in buckets]
+        self.assertEqual(len(buckets), 2)
+        self.assertIn({sumexp0, sumexp1}, bucket_sets)
+        self.assertIn({result0, result1}, bucket_sets)
+
+        # End to end: bucketing must not raise, and the partition above means the
+        # two independent pairs each fuse (two cats) while the dependent pairs
+        # stay separate, so four all_reduces collapse to exactly two.
+        bucketer.manual_bucket_collectives(list(traced.graph.nodes))
+        traced.graph.lint()
+
+        all_reduces = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        cats = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.cat.default
+        )
+        self.assertEqual(len(all_reduces), 2)
+        self.assertEqual(len(cats), 2)
 
     def test_no_cross_type_bucketing_ar_and_rs(self):
         """
@@ -1055,6 +1133,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+@instantiate_parametrized_tests
 class TestCrossPGOverlap(InductorTestCase):
     """
     Tests for cross-PG overlap scheduling.
@@ -1153,6 +1232,47 @@ class TestCrossPGOverlap(InductorTestCase):
 
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
 
+    @parametrize("wait_a_first", [False, True])
+    def test_active_wait_is_not_scheduled_recursively(self, wait_a_first):
+        pg1_name = self.pg1_name
+        pg2_name = self.pg2_name
+
+        def func(a, b):
+            start_a = torch.ops._c10d_functional.all_gather_into_tensor(a, 2, pg1_name)
+            start_b = torch.ops._c10d_functional.all_gather_into_tensor(b, 2, pg1_name)
+            if wait_a_first:
+                wait_a = torch.ops._c10d_functional.wait_tensor(start_a)
+                wait_b = torch.ops._c10d_functional.wait_tensor(start_b)
+            else:
+                wait_b = torch.ops._c10d_functional.wait_tensor(start_b)
+                wait_a = torch.ops._c10d_functional.wait_tensor(start_a)
+            start_c = torch.ops._c10d_functional.all_gather_into_tensor(
+                wait_b, 2, pg2_name
+            )
+            wait_c = torch.ops._c10d_functional.wait_tensor(start_c)
+            return wait_a.sum() + wait_c.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if "all_gather" in str(node.target):
+                return 10.0 if override_size == 0 else 3.0
+            return 0.0
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        schedule_overlap_bucketing(
+            traced,
+            custom_runtime_estimation=custom_runtime,
+            pre_bucketing_fsdp_collectives=False,
+        )
+        traced.graph.lint()
+
     def test_two_queue_scheduling_off_path_nodes(self):
         """
         Test that off-path nodes (reduce_scatters whose results don't block compute)
@@ -1224,7 +1344,82 @@ class TestCrossPGOverlap(InductorTestCase):
         last_mm = max(mm_positions)
         self.assertTrue(
             any(p < last_mm for p in rs_starts),
-            f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
+            lambda msg: f"{msg}\nOff-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
+        )
+
+    @torch._inductor.config.patch(
+        {"test_configs.assume_bucketing_reduces_latency": False}
+    )
+    def test_prefetch_prioritizes_larger_hidden_time(self):
+        """
+        When multiple future collectives have the same semantic priority, choose
+        the one that can consume more of the current overlap window first.
+        """
+        group_name = self.pg1_name
+
+        def func(a, b, c):
+            group_size = 1
+            mm = torch.mm(a, a)
+
+            ag_small = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+            ag_large = torch.ops._c10d_functional.all_gather_into_tensor(
+                c, group_size, group_name
+            )
+
+            wait_small = torch.ops._c10d_functional.wait_tensor(ag_small)
+            wait_large = torch.ops._c10d_functional.wait_tensor(ag_large)
+            return mm.sum() + wait_small.sum() + wait_large.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c)
+
+        ag_small, ag_large = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        (mm,) = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if node is ag_small:
+                return 1.0
+            if node is ag_large:
+                return 8.0
+            if node.target == torch.ops.aten.mm.default:
+                return 8.0
+            return 0.0
+
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            # Each all_gather has a 128B footprint in this graph.  Limit in-flight
+            # collectives to one so picking the larger hidden-time candidate
+            # reduces total exposed time, rather than only changing order.
+            max_in_flight_gb=0.0000002,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+        scheduler.run()
+
+        self.assertIn(mm, scheduler.collective_info[ag_large].hiding_nodes)
+        self.assertNotIn(mm, scheduler.collective_info[ag_small].hiding_nodes)
+        self.assertEqual(scheduler.collective_info[ag_large].exposed_time_ms, 0.0)
+        self.assertEqual(scheduler.collective_info[ag_small].exposed_time_ms, 1.0)
+        self.assertEqual(
+            sum(info.exposed_time_ms for info in scheduler.collective_info.values()),
+            1.0,
         )
 
 
@@ -1395,6 +1590,109 @@ class TestFusibleNodeOverlap(InductorTestCase):
             str(out.graph)
         )
         self.assertEqual(len(scheduler.collective_info), 1)
+
+
+class TestOverlapSchedulingNoMemoryLimit(InductorTestCase):
+    """Test overlap scheduling without a memory-increase limit."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=store)
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_no_memory_limit(self):
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(x, w):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor(
+                x, 4, group_name
+            )
+            all_gather = torch.ops._c10d_functional.wait_tensor(all_gather)
+            return all_gather @ w
+
+        gm = make_fx(func, tracing_mode="fake")(torch.randn(8, 16), torch.randn(16, 16))
+
+        with (
+            patch(
+                "torch.utils._runtime_estimation.get_transfer_time", return_value=0.0
+            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.get_collective_do_bench",
+                return_value=lambda fn, *args, **kwargs: 0.01,
+            ),
+        ):
+            schedule_overlap_bucketing(
+                gm,
+                max_memory_increase_gb=None,
+                max_memory_increase_ratio=None,
+            )
+        self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
+
+    def test_no_memory_limit_prefetches_across_compute_gap(self):
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        group_name = dist.distributed_c10d._get_default_group().group_name
+
+        def func(a, b, w):
+            all_gather = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, 4, group_name
+            )
+            first = b @ w
+            second = first @ w
+            all_gather = torch.ops._c10d_functional.wait_tensor(all_gather)
+            return second.sum() + (all_gather @ w).sum()
+
+        gm = make_fx(func, tracing_mode="fake")(
+            torch.randn(8, 16), torch.randn(8, 16), torch.randn(16, 16)
+        )
+
+        with (
+            patch(
+                "torch.utils._runtime_estimation.get_transfer_time", return_value=0.0
+            ),
+            patch(
+                "torch._inductor.fx_passes.overlap_scheduling.get_collective_do_bench",
+                return_value=lambda fn, *args, **kwargs: 0.01,
+            ),
+        ):
+            scheduler = OverlapScheduler(
+                gm,
+                max_in_flight_gb=5.0,
+                max_compute_pre_fetch=200,
+                collective_bucketing=False,
+                insert_overlap_deps=False,
+                compute_overlap_multipler=1.0,
+                max_coll_distance=200,
+                custom_runtime_estimation=None,
+                collective_estimator="analytical",
+                max_memory_increase_gb=None,
+                max_memory_increase_ratio=None,
+            )
+            scheduler.run()
+
+        (ag,) = gm.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        # A finite domination index is the precondition for the budget loop
+        # that used to raise IndexError when uncapped.
+        self.assertNotEqual(scheduler.compute_index_domination[ag], sys.maxsize)
+        # Positive index guarantees a non-empty budget-loop range on first eval.
+        self.assertGreater(scheduler.compute_index_domination[ag], 0)
+        # The collective is actually prefetched across the compute gap.
+        self.assertTrue(scheduler.collective_info[ag].hiding_nodes)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -1651,6 +1949,282 @@ class TestOverlapSchedulingFixes(InductorTestCase):
             "Cycle: pre_bucket <-> new_start via data + extra deps",
         )
 
+    def test_graphsafe_rng_state_with_insert_overlap_deps(self):
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch._prims.rng_prims import graphsafe_run_with_rng_state
+
+        torch.cuda.init()
+
+        def func(a, b, rng_state):
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(a, 1, "0")
+            rng = graphsafe_run_with_rng_state(
+                torch.ops.aten.mm.default, a, b, rng_state=rng_state
+            )
+            wait = torch.ops._c10d_functional.wait_tensor(ag)
+            return rng + wait
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            a = torch.empty(4, 4, device=self.device)
+            b = torch.empty(4, 4, device=self.device)
+            gen = torch.cuda.default_generators[0].clone_state()
+            traced = make_fx(func)(a, b, gen)
+
+        def custom_runtime_estimation(
+            node: fx.Node, override_size: int | None
+        ) -> float | None:
+            if node.op != "call_function":
+                return None
+            if node.target is graphsafe_run_with_rng_state:
+                return 10.0
+            if node.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
+                return 10.0
+            return None
+
+        schedule_overlap_bucketing(
+            traced,
+            insert_overlap_deps=True,
+            collective_bucketing=False,
+            custom_runtime_estimation=custom_runtime_estimation,
+            collective_estimator="analytical",
+            compute_estimator="analytical",
+            pre_bucketing_fsdp_collectives=False,
+        )
+
+        rng_placeholder = next(
+            n
+            for n in traced.graph.nodes
+            if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Generator)
+        )
+        user = next(iter(rng_placeholder.users))
+        self.assertIs(user.target, control_deps)
+
+        graph = GraphLowering(traced, [a, b, gen])
+        with V.set_fake_mode(fake_mode), V.set_graph_handler(graph):
+            graph.run(a, b, gen)
+
+
+class TestManualOverlapSchedulingUnit(TestCase):
+    def test_wait_user_repair_runs_once_after_all_bucket_groups(self):
+        from torch._dynamo import graph_deduplication
+        from torch._inductor.fx_passes import overlap_manual_scheduling
+        from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
+
+        def func(a, b, c, d):
+            all_reduce = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+            first0 = wait(all_reduce(a, "sum", "0"))
+            early_user = -first0
+            first1 = wait(all_reduce(b + 1, "sum", "0"))
+            second0 = wait(all_reduce(first0 + c, "sum", "0"))
+            second1 = wait(all_reduce(first1 + d, "sum", "0"))
+            return early_user.sum() + second0.sum() + second1.sum()
+
+        with FakeTensorMode():
+            inputs = [torch.ones(4, 4) for _ in range(4)]
+            traced = make_fx(func)(*inputs)
+
+        collective_info = {}
+        for wait in traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.wait_tensor.default,
+        ):
+            start = wait.args[0]
+            if isinstance(start, fx.Node):
+                collective_info[start] = CollectiveInfo(start, wait, 0, 0, 0)
+
+        bucketer = overlap_manual_scheduling.ManualOverlapPreservingBucketer(
+            traced.graph, collective_info, OrderedSet(traced.graph.nodes)
+        )
+        bucket_group = bucketer._bucket_group
+        bucket_group_calls = 0
+
+        def bucket_group_and_check(coll_nodes):
+            nonlocal bucket_group_calls
+            result = bucket_group(coll_nodes)
+            bucket_group_calls += 1
+            if bucket_group_calls == 1:
+                with self.assertRaisesRegex(
+                    RuntimeError, "used before it has been defined"
+                ):
+                    traced.graph.lint()
+            return result
+
+        with (
+            patch.object(bucketer, "_bucket_group", side_effect=bucket_group_and_check),
+            patch.object(
+                overlap_manual_scheduling,
+                "_move_wait_users_after_latest_inputs",
+                wraps=overlap_manual_scheduling._move_wait_users_after_latest_inputs,
+            ) as repair,
+            patch.object(
+                graph_deduplication,
+                "_stable_topological_sort",
+                wraps=graph_deduplication._stable_topological_sort,
+            ) as stable_sort,
+        ):
+            bucketer.manual_bucket_collectives(list(traced.graph.nodes))
+
+        self.assertEqual(bucket_group_calls, 2)
+        self.assertEqual(repair.call_count, 1)
+        self.assertEqual(stable_sort.call_count, 1)
+        self.assertEqual(len(repair.call_args.args[1]), 4)
+        self.assertEqual(len(repair.call_args.args[2]), 4)
+        self.assertEqual(
+            len(
+                traced.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops._c10d_functional.all_reduce.default,
+                )
+            ),
+            2,
+        )
+        traced.graph.lint()
+
+    def test_late_wait_user_repair_is_linear_for_high_fan_in(self):
+        """Ensure reverse-ordered replacement inputs are each visited only once."""
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_wait_users_after_latest_inputs,
+        )
+
+        class CountingInputs(dict[fx.Node, None]):
+            def __init__(self, inputs: dict[fx.Node, None]) -> None:
+                super().__init__(inputs)
+                self.num_visits = 0
+
+            def __iter__(self):
+                for node in super().__iter__():
+                    self.num_visits += 1
+                    yield node
+
+            def __reversed__(self):
+                for node in super().__reversed__():
+                    self.num_visits += 1
+                    yield node
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        old_waits = [graph.call_function(torch.neg, (x,)) for _ in range(32)]
+        user = graph.call_function(torch.cat, (old_waits,))
+        new_waits = [graph.call_function(torch.clone, (x,)) for _ in range(32)]
+        graph.output(user)
+        graph.lint()
+
+        replacements = dict(zip(old_waits, reversed(new_waits), strict=True))
+        for old_wait, new_wait in replacements.items():
+            user.replace_input_with(old_wait, new_wait)
+        counting_inputs = CountingInputs(user._input_nodes)
+        user._input_nodes = counting_inputs
+
+        _move_wait_users_after_latest_inputs(
+            graph,
+            replacements=replacements,
+            replaced_users={old_wait: [user] for old_wait in old_waits},
+        )
+
+        self.assertEqual(counting_inputs.num_visits, len(new_waits))
+        graph.lint()
+
+    def test_late_wait_user_repair_detects_cycle(self):
+        """Ensure replacement-introduced dependency cycles are rejected."""
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_wait_users_after_latest_inputs,
+        )
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        old_wait = graph.call_function(torch.neg, (x,))
+        user = graph.call_function(torch.relu, (old_wait,))
+        new_wait = graph.call_function(torch.clone, (user,))
+        graph.output(new_wait)
+        graph.lint()
+
+        user.replace_input_with(old_wait, new_wait)
+        with self.assertRaisesRegex(AssertionError, "stable topological sort failed"):
+            _move_wait_users_after_latest_inputs(
+                graph,
+                replacements={old_wait: new_wait},
+                replaced_users={old_wait: [user]},
+            )
+
+    def test_late_wait_user_repair_is_stable_and_bounded(self):
+        """Ensure repair preserves stable order without repeated graph scans."""
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            _move_wait_users_after_latest_inputs,
+        )
+
+        class CountingGraph(fx.Graph):
+            def __init__(self):
+                super().__init__()
+                self.num_nodes_accesses = 0
+
+            @property
+            def nodes(self):
+                self.num_nodes_accesses += 1
+                return super().nodes
+
+        graph = CountingGraph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        old_wait = graph.call_function(torch.neg, (x,))
+        other_old_wait = graph.call_function(torch.neg, (y,))
+        first_user = graph.call_function(torch.relu, (old_wait,))
+        last_user = first_user
+        for _ in range(50):
+            last_user = graph.call_function(torch.relu, (last_user,))
+        second_user = graph.call_function(torch.sigmoid, (old_wait,))
+        third_user = graph.call_function(torch.relu, (other_old_wait,))
+        unrelated_before = graph.call_function(torch.sin, (x,))
+        new_wait = graph.call_function(torch.clone, (x,))
+        other_new_wait = graph.call_function(torch.clone, (y,))
+        unrelated_after = graph.call_function(torch.cos, (x,))
+        graph.output(
+            (last_user, second_user, third_user, unrelated_before, unrelated_after)
+        )
+        graph.lint()
+
+        first_user.replace_input_with(old_wait, new_wait)
+        second_user.replace_input_with(old_wait, new_wait)
+        third_user.replace_input_with(other_old_wait, other_new_wait)
+        with self.assertRaisesRegex(RuntimeError, "used before it has been defined"):
+            graph.lint()
+
+        accesses_before_repair = graph.num_nodes_accesses
+        _move_wait_users_after_latest_inputs(
+            graph,
+            replacements={old_wait: new_wait, other_old_wait: other_new_wait},
+            replaced_users={
+                old_wait: [first_user, second_user],
+                other_old_wait: [third_user],
+            },
+        )
+        repair_nodes_accesses = graph.num_nodes_accesses - accesses_before_repair
+
+        graph.lint()
+        node_positions = {node: i for i, node in enumerate(graph.nodes)}
+        self.assertLess(node_positions[new_wait], node_positions[first_user])
+        self.assertLess(node_positions[other_new_wait], node_positions[third_user])
+        self.assertLess(node_positions[last_user], node_positions[second_user])
+        self.assertLess(node_positions[unrelated_before], node_positions[new_wait])
+        self.assertLess(node_positions[third_user], node_positions[unrelated_after])
+        self.assertLess(repair_nodes_accesses, 10)
+
+        repaired_order = list(graph.nodes)
+        _move_wait_users_after_latest_inputs(
+            graph,
+            replacements={old_wait: new_wait, other_old_wait: other_new_wait},
+            replaced_users={
+                old_wait: [first_user, second_user],
+                other_old_wait: [third_user],
+            },
+        )
+        self.assertEqual(list(graph.nodes), repaired_order)
+
 
 class TestForeachGroupsUnit(InductorTestCase):
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
@@ -1684,6 +2258,25 @@ class TestForeachGroupsUnit(InductorTestCase):
             ag_ins, 2, torch.float32, out_dtype_ints, 0, None
         )
         self.assertTrue(torch.allclose(result_with, result_without))
+
+
+class TestNodeRuntimeEstimationUnit(InductorTestCase):
+    def test_compute_estimation_logging_handles_symbolic_scalar_meta(self):
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _log_compute_estimations,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+        x.meta["val"] = torch.empty(2, 3)
+        y.meta["val"] = ShapeEnv().create_unbacked_symint()
+        add = graph.call_function(torch.ops.aten.add.Tensor, (x, y))
+        add.meta["val"] = torch.empty(2, 3)
+        graph.output(add)
+
+        _log_compute_estimations([add], [1.0], [1.0])
 
 
 def _make_pge_trace(

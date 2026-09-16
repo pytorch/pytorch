@@ -1,0 +1,105 @@
+# Owner(s): ["module: dsl-native-ops"]
+
+import importlib.util
+import os
+import re
+import shutil
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+VENDOR_SCRIPT = REPO_ROOT / "tools" / "vendoring" / "quack" / "vendor.sh"
+FLEX_GEMM_PATCHES = REPO_ROOT / "tools" / "vendoring" / "quack" / "flex_gemm_patches"
+# Classes the FlexGEMM patch series may add to QuACK: generic protocol hooks
+# only. Concrete FlexGEMM EpiOps live in torch/_inductor/kernel/flex_gemm/quack_ops.
+FLEX_GEMM_PATCH_CLASSES = {"_FragmentEpiModMixin", "ModProblem"}
+
+
+# Python 3.10's IntEnum formatting breaks QuACK schema inference, not native-AOT.
+@unittest.skipIf(
+    sys.version_info < (3, 11),
+    "QuACK custom-op imports require Python 3.11 or newer",
+)
+@unittest.skipIf(
+    importlib.util.find_spec("cutlass") is None,
+    "vendored QuACK imports require CuTeDSL/CUTLASS",
+)
+class TestQuackVendor(TestCase):
+    def test_vendored_quack_imports_from_torch_vendor(self):
+        import torch._vendor.quack as quack
+        from torch._vendor.quack.epilogue.frontend import EpiMod
+        from torch._vendor.quack.gemm_interface import gemm_symmetric_out
+        from torch._vendor.quack.rmsnorm import rmsnorm
+
+        vendor_root = Path(quack.__file__).resolve().parent
+        self.assertIn("torch/_vendor/quack", vendor_root.as_posix())
+        for obj in (EpiMod, gemm_symmetric_out, rmsnorm):
+            self.assertTrue(callable(obj))
+        self.assertNotIn("quack", sys.modules)
+
+    def test_vendored_ops_use_torch_vendor_quack_namespace(self):
+        import torch
+        import torch._vendor.quack.gemm_runtime.torch_op
+        import torch._vendor.quack.rmsnorm
+
+        self.assertTrue(hasattr(torch.ops.torch_vendor_quack, "gemm_epi"))
+        self.assertTrue(hasattr(torch.ops.torch_vendor_quack, "_rmsnorm_fwd"))
+
+
+class TestQuackFlexGemmPatches(TestCase):
+    def test_patch_series_holds_only_hooks(self):
+        series = [
+            line.split("#")[0].strip()
+            for line in (FLEX_GEMM_PATCHES / "series").read_text().splitlines()
+        ]
+        for name in filter(None, series):
+            text = (FLEX_GEMM_PATCHES / name).read_text()
+            files = re.findall(r"^diff --git a/(\S+) ", text, flags=re.MULTILINE)
+            self.assertFalse(
+                [f for f in files if f.startswith("tests/")],
+                f"{name} carries QuACK test hunks; keep them on the upstreaming branch",
+            )
+            classes = set(re.findall(r"^\+class (\w+)\b", text, flags=re.MULTILINE))
+            self.assertEqual(
+                classes - FLEX_GEMM_PATCH_CLASSES,
+                set(),
+                f"{name} adds concrete classes; move them to flex_gemm/quack_ops",
+            )
+
+
+@unittest.skipIf(
+    shutil.which("git") is None or shutil.which("patch") is None,
+    "re-running the vendoring script requires git and patch",
+)
+class TestQuackVendorScript(TestCase):
+    def test_vendor_script_reproduces_committed_tree(self):
+        src = os.environ.get("QUACK_VENDOR_SRC")
+        allow_clone = os.environ.get("QUACK_VENDOR_ALLOW_CLONE", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if not src and not allow_clone:
+            self.skipTest(
+                "set QUACK_VENDOR_SRC to a local quack checkout at the pinned SHA, "
+                "or QUACK_VENDOR_ALLOW_CLONE=1 to fetch upstream main"
+            )
+
+        cmd = ["bash", str(VENDOR_SCRIPT), "--check"]
+        if src:
+            cmd += ["--src", str(Path(src).expanduser())]
+        self.assertEqual(
+            subprocess.run(cmd, cwd=str(REPO_ROOT)).returncode,
+            0,
+            "vendor.sh --check reported drift; edit the FlexGEMM patchset or "
+            "PyTorch vendoring patches, not the vendored files",
+        )
+
+
+if __name__ == "__main__":
+    run_tests()

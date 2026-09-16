@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    skipIfRocm,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
@@ -87,7 +86,6 @@ foreach_map_copy = foreach_map_wrapper(aten.copy)
 # More general functions
 foreach_map_add_fn = foreach_map_wrapper(add_op)
 foreach_map_add_inplace = foreach_map_wrapper(add_inplace_op)
-foreach_map_recipaddmul = foreach_map_wrapper(addrecip_op)
 foreach_map_addcmul = foreach_map_wrapper(addcmul_op)
 foreach_map_recipaddmul = foreach_map_wrapper(recipaddmul_op)
 
@@ -988,24 +986,28 @@ class ForeachTests(TestCase):
 
     @requires_gpu
     @torch._inductor.config.patch("combo_kernel_allow_mixed_sizes", 2)
+    @config.patch({"combo_kernel_per_subkernel_blocks": True})
     def test_2d_block_mixed_sizes_with_mask(self):
         """2D blocking with mixed sizes should have mask"""
+        from torch._inductor.utils import run_and_get_code
 
         def fn(a0, a1, a2, b0, b1, b2):
             return torch._foreach_add([a0, a1, a2], [b0, b1, b2])
 
-        self.check_model_gpu(
-            fn,
-            (
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 2048, device=GPU_TYPE),
-                torch.rand(1024, 2048, device=GPU_TYPE),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
-                torch.rand(2048, 2048, device=GPU_TYPE).t(),
-                torch.rand(2048, 1024, device=GPU_TYPE).t(),
-            ),
+        inputs = (
+            torch.rand(1024, 2048, device=GPU_TYPE),
+            torch.rand(2048, 2048, device=GPU_TYPE),
+            torch.rand(1024, 2048, device=GPU_TYPE),
+            torch.rand(2048, 1024, device=GPU_TYPE).t(),
+            torch.rand(2048, 2048, device=GPU_TYPE).t(),
+            torch.rand(2048, 1024, device=GPU_TYPE).t(),
         )
-
+        fn_c = torch.compile(fn)
+        compiled_out, code = run_and_get_code(fn_c, *inputs)
+        code = " ".join(code)
+        self.assertEqual(compiled_out, fn(*inputs))
+        self.assertIn("@triton_heuristics.foreach", code)
+        self.assertNotIn("SequentialFlattenComboKernelGrid", code)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_gpu
@@ -1244,7 +1246,6 @@ class ForeachTests(TestCase):
         for a, b in zip(eager_tensor_scalar, compiled_tensor_scalar):
             self.assertEqual(a, b, atol=0, rtol=0)
 
-    @skipIfRocm
     @requires_gpu
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("emulate_precision_casts", True)
@@ -1390,7 +1391,6 @@ class ForeachTests(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
-    @skipIfRocm
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_uses_fma_instruction(self):

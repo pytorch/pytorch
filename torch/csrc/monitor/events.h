@@ -56,7 +56,7 @@ class TORCH_API EventHandler {
 };
 
 // logEvent calls each registered event handler with the event. This method can
-// be called from concurrently from multiple threads.
+// be called concurrently from multiple threads.
 TORCH_API void logEvent(const Event& e);
 
 // registerEventHandler registers an EventHandler so it receives any logged

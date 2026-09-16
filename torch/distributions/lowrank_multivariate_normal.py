@@ -170,7 +170,7 @@ class LowRankMultivariateNormal(Distribution):
 
     @lazy_property
     def scale_tril(self) -> Tensor:
-        # The following identity is used to increase the numerically computation stability
+        # The following identity is used to increase the numerical computation stability
         # for Cholesky decomposition (see http://www.gaussianprocess.org/gpml/, Section 3.4.3):
         #     W @ W.T + D = D1/2 @ (I + D-1/2 @ W @ W.T @ D-1/2) @ D1/2
         # The matrix "I + D-1/2 @ W @ W.T @ D-1/2" has eigenvalues bounded from below by 1,

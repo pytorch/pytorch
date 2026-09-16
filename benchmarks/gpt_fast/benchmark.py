@@ -93,7 +93,7 @@ def run_layer_norm(device: str = "cuda"):
     for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
         memory_bandwidth = 0
         for D in input_shapes:
-            mod = nn.LayerNorm(D).to(device)
+            mod = nn.LayerNorm(D).to(device=device, dtype=dtype)
 
             x = torch.randn(BS, D, device=device, dtype=dtype)
 

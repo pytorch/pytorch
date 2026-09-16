@@ -39,6 +39,50 @@ IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
 
 
+class TestCppExtensionImport(common.TestCase):
+    def test_cython_not_loaded_with_import_cpp_extension(self):
+        script = """
+import importlib.util
+import inspect
+import pathlib
+import sys
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    root = pathlib.Path(tmpdir)
+    (root / "Cython" / "Distutils").mkdir(parents=True)
+    (root / "Cython" / "Compiler").mkdir(parents=True)
+    (root / "Cython" / "__init__.py").write_text("")
+    (root / "Cython" / "Distutils" / "__init__.py").write_text("")
+    (root / "Cython" / "Compiler" / "__init__.py").write_text("")
+    (root / "Cython" / "Compiler" / "Main.py").write_text("")
+    (root / "Cython" / "Distutils" / "build_ext.py").write_text(
+        "from distutils.command.build_ext import build_ext\\n"
+    )
+
+    sys.path.insert(0, tmpdir)
+    assert importlib.util.find_spec("Cython") is not None  # noqa: S101
+    import torch.utils.cpp_extension
+
+    cython_modules = sorted(
+        name for name in sys.modules
+        if name == "Cython" or name.startswith("Cython.")
+    )
+    assert not cython_modules, cython_modules  # noqa: S101
+    build_extension_cls = torch.utils.cpp_extension.BuildExtension
+    assert isinstance(build_extension_cls, type)  # noqa: S101
+    assert build_extension_cls is torch.utils.cpp_extension.BuildExtension  # noqa: S101
+    build_extension_source = inspect.getsource(build_extension_cls)
+    assert "def build_extensions" in build_extension_source  # noqa: S101
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionJIT(common.TestCase):
@@ -96,6 +140,39 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIsNone(doubler.get().grad)
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
+
+    def test_jit_stale_lock_file_does_not_deadlock(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/189245:
+        # a leftover 'lock' file (e.g. from a builder killed by SIGKILL/OOM)
+        # must not deadlock later loads. Run in a subprocess so a regression
+        # (an infinite wait) surfaces as a timeout instead of hanging the job.
+        build_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, build_dir, ignore_errors=True)
+        # Simulate the stale lock left behind by a forcefully killed builder.
+        open(os.path.join(build_dir, "lock"), "w").close()
+        script = "\n".join(
+            [
+                "import torch.utils.cpp_extension as ext",
+                "m = ext.load_inline(",
+                "    name='stale_lock_ext',",
+                "    cpp_sources='int forty_two() { return 42; }',",
+                "    functions=['forty_two'],",
+                f"    build_directory={build_dir!r},",
+                "    verbose=True)",
+                "assert m.forty_two() == 42",
+                "print('STALE_LOCK_OK')",
+            ]
+        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("cpp_extension.load() deadlocked on a stale lock file (#189245)")
+        self.assertIn("STALE_LOCK_OK", proc.stdout, msg=proc.stderr)
 
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
@@ -335,14 +412,11 @@ class TestCppExtensionJIT(common.TestCase):
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
         major, minor = map(int, torch.version.cuda.split(".")[:2])
-        if major < 12 or (major == 12 and minor <= 9):
+        if major == 12 and minor <= 9:
             # Compute capability <= 7.0 is only supported up to CUDA 12.9
             archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
             archflags["Volta"] = (["70"], ["70"])
             archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if major < 12:
-            # CUDA 12 drops compute capability < 5.0
-            archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
         for flags, expected in archflags.items():
             try:

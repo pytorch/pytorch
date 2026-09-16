@@ -19,6 +19,15 @@ inputs:
     description: S3 bucket to upload artifacts to
     required: false
     default: "gha-artifacts"
+  skip-s3:
+    description: |
+      If 'true', skip the S3 upload entirely and upload directly to GitHub
+      Actions artifacts. Set this on runners that have no credentials capable
+      of writing to the S3 bucket (e.g. ROCm runners, which only assume the
+      read-only ECR login role) to avoid noisy s3:PutObject "not authorized"
+      errors.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -103,6 +112,7 @@ runs:
     # ===========================================
     - name: Store Test Downloaded JSONs on S3
       id: s3-upload-jsons
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -115,6 +125,7 @@ runs:
 
     - name: Store Test Reports on S3
       id: s3-upload-reports
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -127,6 +138,7 @@ runs:
 
     - name: Store Usage Logs on S3
       id: s3-upload-logs
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -139,6 +151,7 @@ runs:
 
     - name: Store Debug Artifacts on S3
       id: s3-upload-debug
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -151,6 +164,7 @@ runs:
 
     - name: Store Profiler Traces on S3
       id: s3-upload-profiler-traces
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -163,6 +177,7 @@ runs:
 
     - name: Store TLParse Output on S3
       id: s3-upload-tlparse
+      if: ${{ inputs.skip-s3 != 'true' }}
       uses: seemethere/upload-artifact-s3@v5
       continue-on-error: true
       with:
@@ -177,8 +192,14 @@ runs:
     - name: Check S3 upload status
       id: check-s3
       shell: bash
+      env:
+        SKIP_S3: ${{ inputs.skip-s3 }}
+        S3_REPORTS_OUTCOME: ${{ steps.s3-upload-reports.outcome }}
       run: |
-        if [[ "${{ steps.s3-upload-reports.outcome }}" == "failure" ]]; then
+        if [[ "${SKIP_S3}" == "true" ]]; then
+          echo "S3 upload skipped, uploading to GHA"
+          echo "s3-failed=true" >> "$GITHUB_OUTPUT"
+        elif [[ "${S3_REPORTS_OUTCOME}" == "failure" ]]; then
           echo "S3 upload failed, will fallback to GHA"
           echo "s3-failed=true" >> "$GITHUB_OUTPUT"
         else

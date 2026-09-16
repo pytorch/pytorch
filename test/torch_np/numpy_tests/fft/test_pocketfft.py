@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -67,6 +68,9 @@ class TestFFT1D(TestCase):
         assert_allclose(fft1(x) / np.sqrt(30), np.fft.fft(x, norm="ortho"), atol=5e-6)
         assert_allclose(fft1(x) / 30.0, np.fft.fft(x, norm="forward"), atol=5e-6)
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182099")
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182112")
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182098")
     @parametrize("norm", (None, "backward", "ortho", "forward"))
     def test_ifft(self, norm):
         x = random(30) + 1j * random(30)

@@ -27,7 +27,7 @@ __global__ void cuda_multiple_vars_always_fail_assertion_kernel(
   if (i != 0) {
     CUDA_KERNEL_ASSERT2(i == -i);
   } else {
-    CUDA_KERNEL_ASSERT2(i == i + 1);
+    CUDA_KERNEL_ASSERT2(false);
   }
 }
 

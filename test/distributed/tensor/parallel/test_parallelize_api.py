@@ -65,7 +65,7 @@ class TensorParallelAPITests(DTensorTestBase):
                     dist_param.redistribute(
                         device_mesh=dist_param.device_mesh, placements=replicate
                     ).to_local(),
-                    f"{name} not equal between dist and non-dist",
+                    lambda msg: f"{msg}\n{name} not equal between dist and non-dist",
                 )
 
     def _compare_module(
