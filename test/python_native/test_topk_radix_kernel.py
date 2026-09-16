@@ -25,15 +25,22 @@ class TestRadixKernelBuilder(TestCase):
     def test_build_contract(self):
         from torch._native.ops.topk.cutedsl_kernels import build
 
-        b = build({"dtype": "float32", "N": 4096, "K": 64, "deterministic": False})
-        self.assertEqual(b["prefix"], "topk_radix_f32_n4096_k64_nondet")
+        b = build(
+            {
+                "kernel": "radix",
+                "dtype": "float32",
+                "K": 64,
+                "deterministic": False,
+                "scalar_tail_iters": None,
+                "fixed_vec_iters": None,
+            }
+        )
+        self.assertEqual(b["prefix"], "topk_radix_f32_k64_nondet_vdyn_tdyn")
         self.assertEqual(len(b["fake_args"]), 4)
         self.assertEqual(
             [t["name"] for t in b["tensor_args"]], ["mX", "mValues", "mIndices"]
         )
-        self.assertEqual(b["tensor_args"][0]["dynamic_sizes"], [0])
-        self.assertIsNone(b["fn"].scalar_tail_iters)
-        self.assertIsNone(b["fn"].fixed_vec_iters)
+        self.assertEqual(b["tensor_args"][0]["dynamic_sizes"], [0, 1])
 
     @skipIfNoCuteDSL
     def test_build_prefixes_unique_across_grid(self):
@@ -42,7 +49,16 @@ class TestRadixKernelBuilder(TestCase):
         prefixes = set()
         for dtype in ("float32", "bfloat16"):
             for det in (False, True):
-                b = build({"dtype": dtype, "N": 4096, "K": 64, "deterministic": det})
+                b = build(
+                    {
+                        "kernel": "radix",
+                        "dtype": dtype,
+                        "K": 64,
+                        "deterministic": det,
+                        "scalar_tail_iters": None,
+                        "fixed_vec_iters": None,
+                    }
+                )
                 prefixes.add(b["prefix"])
         self.assertEqual(len(prefixes), 4)
 
@@ -50,33 +66,28 @@ class TestRadixKernelBuilder(TestCase):
     def test_launch_bounds_compile_without_cuda_device(self):
         import cutlass.cute as cute
         import cutlass.cutlass_dsl.cutlass as cutlass_dsl
-        from cutlass import Float32, Int64
 
-        from torch._native.ops.topk.cutedsl_kernels import (
-            _make_fake_tensor,
-            _RadixSelectTopK,
+        from torch._native.ops.topk.aot import _ARCH_TAIL_ITERS
+        from torch._native.ops.topk.cutedsl_kernels import build
+
+        b = build(
+            {
+                "kernel": "radix",
+                "dtype": "float32",
+                "K": 1024,
+                "deterministic": True,
+                "scalar_tail_iters": _ARCH_TAIL_ITERS,
+                "fixed_vec_iters": None,
+            }
         )
-
-        batch = cute.sym_int()
-        k = 1024
+        self.assertEqual(b["prefix"], "topk_radix_f32_k1024_det_vdyn_tarch")
+        self.assertEqual(b["fn"].min_blocks_per_mp, 2)
         with mock.patch.object(
             cutlass_dsl.cuda_helpers,
             "get_device_attribute",
             side_effect=AssertionError("unexpected CUDA device query"),
         ):
-            cute.compile(
-                _RadixSelectTopK(
-                    k,
-                    deterministic=True,
-                    index_dtype=Int64,
-                    scalar_tail_iters=4,
-                    min_blocks_per_mp=2,
-                ),
-                _make_fake_tensor(Float32, (batch, 32768), 4),
-                _make_fake_tensor(Float32, (batch, k), 4),
-                _make_fake_tensor(Int64, (batch, k), 4),
-                cute.runtime.make_fake_stream(),
-            )
+            cute.compile(b["fn"], *b["fake_args"])
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
