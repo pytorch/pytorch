@@ -757,6 +757,35 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
+    def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
+        """Check the identity, storage, version, and value contract."""
+        data_ptr = input.data_ptr()
+        version = input._version
+        returned = scaled_addmm_(input, *args, **kwargs)
+        self.assertIs(returned, input)
+        self.assertEqual(input.data_ptr(), data_ptr)
+        self.assertEqual(input._version, version + 1)
+        self.assertEqual(input, expected, atol=5e-2, rtol=5e-2)
+
+    def assert_scaled_addmm_cudagraph(self, input, expected, args, **kwargs):
+        """Check in-place scaled-addmm capture and replay."""
+        for _ in range(3):
+            scaled_addmm_(input.clone(), *args, **kwargs)
+        torch.cuda.synchronize()
+
+        captured_input = input.clone()
+        data_ptr = captured_input.data_ptr()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            captured_output = scaled_addmm_(captured_input, *args, **kwargs)
+        captured_input.copy_(input)
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertIs(captured_output, captured_input)
+        self.assertEqual(captured_input.data_ptr(), data_ptr)
+        self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize(
         "test_case",
@@ -895,76 +924,6 @@ class TestFP8Matmul(TestCase):
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
-    @onlyCUDA
-    @skipIfRocm
-    def test_scaled_addmm_fake_tensor(self, device):
-        with FakeTensorMode():
-            input = torch.empty(16, 32, device=device, dtype=torch.bfloat16)
-            mat1 = torch.empty(16, 16, device=device, dtype=e4m3_type)
-            mat2 = torch.empty(16, 32, device=device, dtype=e4m3_type)
-            scale_a = torch.ones(1, device=device)
-            scale_b = torch.ones(1, device=device)
-            args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
-
-            result = scaled_addmm(input, *args)
-            self.assertEqual(result.shape, input.shape)
-            self.assertEqual(result.dtype, input.dtype)
-
-            self.assertIs(scaled_addmm_(input, *args), input)
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_scaled_addmm_fullgraph(self, device):
-        from torch._inductor.utils import run_and_get_code
-
-        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
-            32, 32, 32, device, torch.bfloat16
-        )
-
-        def fn(input, mat1, mat2, scale_a, scale_b):
-            return scaled_addmm(
-                input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
-            )
-
-        operands = (mat1, mat2, scale_a, scale_b)
-        expected = fn(input, *operands)
-        actual = torch.compile(fn, fullgraph=True)(input, *operands)
-        self.assertEqual(actual, expected)
-
-        def fn_(input, mat1, mat2, scale_a, scale_b):
-            return scaled_addmm_(
-                input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
-            )
-
-        expected_inplace = fn_(input.clone(), *operands)
-        functionalized_input = input.clone()
-        functionalized = torch.func.functionalize(fn_)(functionalized_input, *operands)
-        self.assertEqual(functionalized, expected_inplace, atol=5e-2, rtol=5e-2)
-        self.assertEqual(
-            functionalized_input, expected_inplace, atol=5e-2, rtol=5e-2
-        )
-
-        inplace = input.clone()
-        actual_inplace, source_codes = run_and_get_code(
-            torch.compile(fn_, fullgraph=True), inplace, *operands
-        )
-        self.assertIs(actual_inplace, inplace)
-        self.assertEqual(actual_inplace, expected_inplace, atol=5e-2, rtol=5e-2)
-        source = "\n".join(source_codes)
-        self.assertIn("_scaled_addmm_", source)
-        self.assertNotIn("triton_poi_fused_copy", source)
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_scaled_addmm_cudagraph(self, device):
-        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
-            32, 32, 32, device, torch.bfloat16
-        )
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
-        self.assert_scaled_addmm_cudagraph(input, scaled_addmm(input, *args), args)
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_change_stride(self, base_dtype, device):
@@ -1072,20 +1031,6 @@ class TestFP8Matmul(TestCase):
                 "Bias is not supported when out_dtype is set to Float32",
                 lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
             )
-
-    @onlyCUDA
-    @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
-    def test_error_message_fp8_pre_sm89(self, device) -> None:
-        (k, l, m) = (16, 48, 32)
-        x = torch.rand((k, l), device=device).to(e4m3_type)
-        y = torch.rand((m, l), device=device).to(e4m3_type).t()
-        scale_a = torch.tensor(1.0, device=device)
-        scale_b = torch.tensor(1.0, device=device)
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
-            lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
-        )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipCUDAIf(SM100OrLater, "fast_accum is SM90-only")
@@ -1341,39 +1286,6 @@ class TestFP8Matmul(TestCase):
             self.assertGreaterEqual(float(cosine_sim), 0.999)
         else:
             self.assertEqual(out, out_emulated, atol=7e-2, rtol=7e-2)
-
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
-    @parametrize("wrap_v2", [True, False])
-    def test_scaled_mm_row_wise_fp32_out_with_bias_errors(self, wrap_v2, device):
-        # fp32 output combined with a bias is not supported on the row-wise path.
-        if torch.version.hip:
-            raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
-
-        M, K, N = 16, 32, 48
-        input_dtype = e4m3_type
-        x = random_matrix_with_scaled_reduction_dim(M, K, dtype=torch.float32, device=device, reduction_dim=-1)
-        y = random_matrix_with_scaled_reduction_dim(N, K, dtype=torch.float32, device=device, reduction_dim=-1).t()
-        x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
-        y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
-        x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
-        y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
-        bias = torch.randn((N,), device=device, dtype=torch.bfloat16)
-
-        with self.assertRaisesRegex(
-            (ValueError, RuntimeError),
-            "Bias is not supported when out_dtype is set to Float32",
-        ):
-            scaled_mm_wrap(
-                x_fp8,
-                y_fp8,
-                scale_a=x_scales.reciprocal(),
-                scale_b=y_scales.reciprocal(),
-                out_dtype=torch.float32,
-                bias=bias,
-                wrap_v2=wrap_v2,
-            )
 
     @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
@@ -1715,65 +1627,6 @@ class TestFP8Matmul(TestCase):
             output_dtype
         )
 
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling works on SM90 (Hopper)")
-    @unittest.skipIf(
-        not torch.version.hip and _get_torch_cuda_version() < (12, 9),
-        "cuBLAS blockwise scaling added in CUDA 12.9",
-    )
-    @runOnRocmArch(MI350_ARCH)
-    @parametrize("output_dtype", [torch.bfloat16, ])
-    @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
-    @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
-    def test_scaled_mm_deepseek_error_messages(
-        self, output_dtype, lhs_block, rhs_block, M, N, K, device
-    ):
-
-        torch.manual_seed(42)
-
-        x = torch.randn(M, K, device=device, dtype=output_dtype).pow(3)
-        y = torch.randn(N, K, device=device, dtype=output_dtype).pow(3)
-
-        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
-        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
-
-        # 1x128 blocks need scales to be outer-dim-major
-        if lhs_block == 1:
-            x_scales = x_scales.t().contiguous().t()
-            lhs_recipe = ScalingType.BlockWise1x128
-        else:
-            lhs_recipe = ScalingType.BlockWise128x128
-
-        if rhs_block == 1:
-            y_scales = y_scales.t().contiguous().t()
-            rhs_recipe = ScalingType.BlockWise1x128
-        else:
-            rhs_recipe = ScalingType.BlockWise128x128
-
-        # Verify that actual F8 mm raises expected error
-        if torch.version.hip:
-            # ROCm does not yet support DeepSeek-style blockwise scaling
-            expected_error = NotImplementedError
-            expected_pattern = "1x128 and 128x128 scaling not available with ROCm"
-        else:
-            # CUDA non-SM90 should raise NotImplementedError
-            expected_error = NotImplementedError
-            expected_pattern = ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
-        with self.assertRaisesRegex(
-            expected_error,
-            expected_pattern
-        ):
-            scaled_mm_wrap(
-                x_fp8,
-                y_fp8.t(),
-                scale_a=x_scales,
-                scale_recipe_a=lhs_recipe,
-                scale_b=y_scales.t(),
-                scale_recipe_b=rhs_recipe,
-                out_dtype=output_dtype,
-            )
-
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("which_dim_zero", [0, 1, 2])
     @parametrize("use_torch_compile", [False, True])
@@ -1799,86 +1652,6 @@ class TestFP8Matmul(TestCase):
         out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
-
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164271")
-    @onlyCUDA
-    @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
-    def test_honor_sm_carveout(self, device) -> None:
-        torch.manual_seed(42)
-
-        x = torch.randn(8192, 2048, device=device, dtype=torch.float32)
-        y = torch.randn(8192, 2048, device=device, dtype=torch.float32).t()
-        x_scales = tensor_to_scale(x, e4m3_type, dim=1).reciprocal()
-        y_scales = tensor_to_scale(y, e4m3_type, dim=0).reciprocal()
-        x_fp8 = to_fp8_saturated(x / x_scales, e4m3_type)
-        y_fp8 = to_fp8_saturated(y / y_scales, e4m3_type)
-
-        cu_count = torch.cuda.get_device_properties().multi_processor_count
-        carveout = 66 if torch.version.cuda else cu_count // 8
-
-        # Warm up so hipBLASLt's one-time init kernel does not appear in the profile trace below.
-        scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-        torch.cuda.synchronize()
-
-        with tempfile.NamedTemporaryFile() as f:
-            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
-                self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-                torch._C._set_sm_carveout_experimental(0)
-                self.assertEqual(torch._C._get_sm_carveout_experimental(), 0)
-                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-                torch._C._set_sm_carveout_experimental(66)
-                self.assertEqual(torch._C._get_sm_carveout_experimental(), 66)
-                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-                torch._C._set_sm_carveout_experimental(None)
-                self.assertIsNone(torch._C._get_sm_carveout_experimental())
-                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
-
-            prof.export_chrome_trace(f.name)
-            if torch.version.hip:
-                with open(f.name) as file:
-                    events = [evt for evt in json.load(file)["traceEvents"] if evt.get("cat", "") == "kernel"]
-                # events were returned out of order; need to be sorted on "ts" timestamp
-                events = sorted(events, key=lambda x: x['ts'])
-                # ROCm carveout is invisible except for kernels running slower on fewer CUs
-                no_carveout, carveout_0, carveout, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
-                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):  # noqa: SIM222
-                    # something went wrong, print more info to help debug flaky test
-                    print("ROCm debug info for test_honor_sm_carveout")
-                    print("cu_count", cu_count)
-                    print("no_carveout", no_carveout)
-                    print("carveout_0", carveout_0)
-                    print("carveout", carveout)
-                    print("no_carveout_again", no_carveout_again)
-                self.assertTrue(no_carveout < carveout)
-                self.assertTrue(carveout_0 < carveout)
-                self.assertTrue(no_carveout_again < carveout)
-                # ROCm carveout will create new streams when enabled, and go back to the original stream when disabled
-                no_carveout, carveout_0, carveout, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
-                self.assertTrue(no_carveout == no_carveout_again)
-                self.assertTrue(no_carveout == carveout_0)
-                self.assertTrue(no_carveout != carveout)
-                self.assertTrue(carveout_0 != carveout)
-            else:
-                with open(f.name) as file:
-                    no_carveout, carveout_0, carveout_66, no_carveout_again = [
-                        math.prod(evt.get("args", {}).get("grid", []))
-                        for evt in json.load(file)["traceEvents"]
-                        if evt.get("cat", "") == "kernel"
-                    ]
-
-                self.assertEqual(no_carveout, no_carveout_again)
-                if SM100OrLater:
-                    # expected failure
-                    # CUTLASS only supports SM carveout via green contexts on SM100
-                    self.assertEqual(no_carveout, carveout_66)
-                    self.assertEqual(carveout_66, carveout_0)
-                else:
-                    # correct behavior
-                    self.assertNotEqual(no_carveout, carveout_66)
-                    self.assertNotEqual(carveout_66, carveout_0)
 
     @skipXPU
     def test_pack_uint4(self):
@@ -2887,9 +2660,36 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(actual, expected)
 
 
-
-
 class TestFP8MatmulCUDA(TestCase):
+    def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
+        """Check the identity, storage, version, and value contract."""
+        data_ptr = input.data_ptr()
+        version = input._version
+        returned = scaled_addmm_(input, *args, **kwargs)
+        self.assertIs(returned, input)
+        self.assertEqual(input.data_ptr(), data_ptr)
+        self.assertEqual(input._version, version + 1)
+        self.assertEqual(input, expected, atol=5e-2, rtol=5e-2)
+
+    def assert_scaled_addmm_cudagraph(self, input, expected, args, **kwargs):
+        """Check in-place scaled-addmm capture and replay."""
+        for _ in range(3):
+            scaled_addmm_(input.clone(), *args, **kwargs)
+        torch.cuda.synchronize()
+
+        captured_input = input.clone()
+        data_ptr = captured_input.data_ptr()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            captured_output = scaled_addmm_(captured_input, *args, **kwargs)
+        captured_input.copy_(input)
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertIs(captured_output, captured_input)
+        self.assertEqual(captured_input.data_ptr(), data_ptr)
+        self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
+
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -3136,35 +2936,6 @@ class TestFP8MatmulCUDA(TestCase):
         )
 
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
-
-    def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
-        """Check the identity, storage, version, and value contract."""
-        data_ptr = input.data_ptr()
-        version = input._version
-        returned = scaled_addmm_(input, *args, **kwargs)
-        self.assertIs(returned, input)
-        self.assertEqual(input.data_ptr(), data_ptr)
-        self.assertEqual(input._version, version + 1)
-        self.assertEqual(input, expected, atol=5e-2, rtol=5e-2)
-
-    def assert_scaled_addmm_cudagraph(self, input, expected, args, **kwargs):
-        """Check in-place scaled-addmm capture and replay."""
-        for _ in range(3):
-            scaled_addmm_(input.clone(), *args, **kwargs)
-        torch.cuda.synchronize()
-
-        captured_input = input.clone()
-        data_ptr = captured_input.data_ptr()
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            captured_output = scaled_addmm_(captured_input, *args, **kwargs)
-        captured_input.copy_(input)
-        graph.replay()
-        torch.cuda.synchronize()
-
-        self.assertIs(captured_output, captured_input)
-        self.assertEqual(captured_input.data_ptr(), data_ptr)
-        self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
 
     @onlyCUDA
     @skipIfRocm
@@ -3454,6 +3225,233 @@ class TestFP8MatmulCUDA(TestCase):
             compiled = torch.compile(fn, fullgraph=True)(compiled_input)
             self.assertIs(compiled, compiled_input)
             self.assertEqual(compiled, actual, atol=5e-2, rtol=5e-2)
+
+    @onlyCUDA
+    @skipIfRocm
+    def test_scaled_addmm_fake_tensor(self, device):
+        with FakeTensorMode():
+            input = torch.empty(16, 32, device=device, dtype=torch.bfloat16)
+            mat1 = torch.empty(16, 16, device=device, dtype=e4m3_type)
+            mat2 = torch.empty(16, 32, device=device, dtype=e4m3_type)
+            scale_a = torch.ones(1, device=device)
+            scale_b = torch.ones(1, device=device)
+            args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+
+            result = scaled_addmm(input, *args)
+            self.assertEqual(result.shape, input.shape)
+            self.assertEqual(result.dtype, input.dtype)
+
+            self.assertIs(scaled_addmm_(input, *args), input)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_fullgraph(self, device):
+        from torch._inductor.utils import run_and_get_code
+
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            32, 32, 32, device, torch.bfloat16
+        )
+
+        def fn(input, mat1, mat2, scale_a, scale_b):
+            return scaled_addmm(input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b))
+
+        operands = (mat1, mat2, scale_a, scale_b)
+        expected = fn(input, *operands)
+        actual = torch.compile(fn, fullgraph=True)(input, *operands)
+        self.assertEqual(actual, expected)
+
+        def fn_(input, mat1, mat2, scale_a, scale_b):
+            return scaled_addmm_(input, *tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b))
+
+        expected_inplace = fn_(input.clone(), *operands)
+        functionalized_input = input.clone()
+        functionalized = torch.func.functionalize(fn_)(functionalized_input, *operands)
+        self.assertEqual(functionalized, expected_inplace, atol=5e-2, rtol=5e-2)
+        self.assertEqual(functionalized_input, expected_inplace, atol=5e-2, rtol=5e-2)
+
+        inplace = input.clone()
+        actual_inplace, source_codes = run_and_get_code(torch.compile(fn_, fullgraph=True), inplace, *operands)
+        self.assertIs(actual_inplace, inplace)
+        self.assertEqual(actual_inplace, expected_inplace, atol=5e-2, rtol=5e-2)
+        source = "\n".join(source_codes)
+        self.assertIn("_scaled_addmm_", source)
+        self.assertNotIn("triton_poi_fused_copy", source)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_cudagraph(self, device):
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            32, 32, 32, device, torch.bfloat16
+        )
+        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        self.assert_scaled_addmm_cudagraph(input, scaled_addmm(input, *args), args)
+
+    @onlyCUDA
+    @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
+    def test_error_message_fp8_pre_sm89(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.rand((k, l), device=device).to(e4m3_type)
+        y = torch.rand((m, l), device=device).to(e4m3_type).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"torch\.\_scaled\_mm is only supported on CUDA devices with compute capability \>\= 9\.0 or 8\.9, or ROCm MI300\+",
+            lambda: scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float32),
+        )
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @skipCUDAIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_mm_row_wise_fp32_out_with_bias_errors(self, wrap_v2, device):
+        if torch.version.hip:
+            raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
+
+        M, K, N = 16, 32, 48
+        input_dtype = e4m3_type
+        x = random_matrix_with_scaled_reduction_dim(M, K, dtype=torch.float32, device=device, reduction_dim=-1)
+        y = random_matrix_with_scaled_reduction_dim(N, K, dtype=torch.float32, device=device, reduction_dim=-1).t()
+        x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
+        y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
+        x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
+        bias = torch.randn((N,), device=device, dtype=torch.bfloat16)
+
+        with self.assertRaisesRegex((ValueError, RuntimeError), "Bias is not supported when out_dtype is set to Float32"):
+            scaled_mm_wrap(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales.reciprocal(),
+                scale_b=y_scales.reciprocal(),
+                out_dtype=torch.float32,
+                bias=bias,
+                wrap_v2=wrap_v2,
+            )
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling works on SM90 (Hopper)")
+    @unittest.skipIf(
+        not torch.version.hip and _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @runOnRocmArch(MI350_ARCH)
+    @parametrize("output_dtype", [torch.bfloat16])
+    @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
+    @parametrize("M,N,K", [(256, 256, 256), (256, 256, 512)])
+    def test_scaled_mm_deepseek_error_messages(self, output_dtype, lhs_block, rhs_block, M, N, K, device):
+        torch.manual_seed(42)
+
+        x = torch.randn(M, K, device=device, dtype=output_dtype).pow(3)
+        y = torch.randn(N, K, device=device, dtype=output_dtype).pow(3)
+
+        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
+        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
+
+        if lhs_block == 1:
+            x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.BlockWise1x128
+        else:
+            lhs_recipe = ScalingType.BlockWise128x128
+
+        if rhs_block == 1:
+            y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.BlockWise1x128
+        else:
+            rhs_recipe = ScalingType.BlockWise128x128
+
+        if torch.version.hip:
+            expected_error = NotImplementedError
+            expected_pattern = "1x128 and 128x128 scaling not available with ROCm"
+        else:
+            expected_error = NotImplementedError
+            expected_pattern = ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
+        with self.assertRaisesRegex(expected_error, expected_pattern):
+            scaled_mm_wrap(
+                x_fp8,
+                y_fp8.t(),
+                scale_a=x_scales,
+                scale_recipe_a=lhs_recipe,
+                scale_b=y_scales.t(),
+                scale_recipe_b=rhs_recipe,
+                out_dtype=output_dtype,
+            )
+
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164271")
+    @onlyCUDA
+    @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(not SM90OrLater, "sm89 kernel isn't opted into carveout yet")
+    def test_honor_sm_carveout(self, device) -> None:
+        torch.manual_seed(42)
+
+        x = torch.randn(8192, 2048, device=device, dtype=torch.float32)
+        y = torch.randn(8192, 2048, device=device, dtype=torch.float32).t()
+        x_scales = tensor_to_scale(x, e4m3_type, dim=1).reciprocal()
+        y_scales = tensor_to_scale(y, e4m3_type, dim=0).reciprocal()
+        x_fp8 = to_fp8_saturated(x / x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y / y_scales, e4m3_type)
+
+        cu_count = torch.cuda.get_device_properties().multi_processor_count
+        carveout = 66 if torch.version.cuda else cu_count // 8
+
+        scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+        torch.cuda.synchronize()
+
+        with tempfile.NamedTemporaryFile() as f:
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+                self.assertIsNone(torch._C._get_sm_carveout_experimental())
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                torch._C._set_sm_carveout_experimental(0)
+                self.assertEqual(torch._C._get_sm_carveout_experimental(), 0)
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                torch._C._set_sm_carveout_experimental(66)
+                self.assertEqual(torch._C._get_sm_carveout_experimental(), 66)
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+                torch._C._set_sm_carveout_experimental(None)
+                self.assertIsNone(torch._C._get_sm_carveout_experimental())
+                scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
+
+            prof.export_chrome_trace(f.name)
+            if torch.version.hip:
+                with open(f.name) as file:
+                    events = [evt for evt in json.load(file)["traceEvents"] if evt.get("cat", "") == "kernel"]
+                events = sorted(events, key=lambda x: x["ts"])
+                no_carveout, carveout_0, carveout, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
+                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):  # noqa: SIM222
+                    print("ROCm debug info for test_honor_sm_carveout")
+                    print("cu_count", cu_count)
+                    print("no_carveout", no_carveout)
+                    print("carveout_0", carveout_0)
+                    print("carveout", carveout)
+                    print("no_carveout_again", no_carveout_again)
+                self.assertTrue(no_carveout < carveout)
+                self.assertTrue(carveout_0 < carveout)
+                self.assertTrue(no_carveout_again < carveout)
+                no_carveout, carveout_0, carveout, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
+                self.assertTrue(no_carveout == no_carveout_again)
+                self.assertTrue(no_carveout == carveout_0)
+                self.assertTrue(no_carveout != carveout)
+                self.assertTrue(carveout_0 != carveout)
+            else:
+                with open(f.name) as file:
+                    no_carveout, carveout_0, carveout_66, no_carveout_again = [
+                        math.prod(evt.get("args", {}).get("grid", []))
+                        for evt in json.load(file)["traceEvents"]
+                        if evt.get("cat", "") == "kernel"
+                    ]
+
+                self.assertEqual(no_carveout, no_carveout_again)
+                if SM100OrLater:
+                    self.assertEqual(no_carveout, carveout_66)
+                    self.assertEqual(carveout_66, carveout_0)
+                else:
+                    self.assertNotEqual(no_carveout, carveout_66)
+                    self.assertNotEqual(carveout_66, carveout_0)
+
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
 
