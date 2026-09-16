@@ -1757,7 +1757,7 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         result, (code,) = self._run_and_compare(
             functools.partial(torch.amax, dim=-1),
             x,
-            expected_num_block_pointers=2,
+            expected_num_block_pointers=1,  # Input uses block_ptr, output uses device-TMA
             expected_num_triton_kernels=1,
             config_patches={
                 "pad_outputs": True,
