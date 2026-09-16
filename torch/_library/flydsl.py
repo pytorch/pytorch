@@ -11,7 +11,7 @@ def wrap_flydsl(
     launcher: Callable[..., Any],
     /,
     *,
-    mutates_args: Iterable[str],
+    mutates_args: str | Iterable[str],
 ) -> Any:
     """Wrap a FlyDSL ``@jit`` launcher for dispatcher-based tracing.
 
@@ -24,6 +24,22 @@ def wrap_flydsl(
     preconstructed FlyDSL ``JitArgument`` objects.
 
     Variadic launcher parameters are not supported.
+
+    Args:
+        launcher: A function decorated with ``flydsl.compiler.jit``.
+        mutates_args: The name, or names, of tensor arguments mutated by the
+            launcher.
+
+    Returns:
+        A callable launcher that can be captured by PyTorch compilation APIs.
+
+    Example::
+
+        captured_launcher = torch.library.wrap_flydsl(
+            launcher,
+            mutates_args="out",
+        )
+        captured_launcher(out, inp, inp.numel())
     """
     from torch._dynamo.decorators import allow_in_graph, assume_constant_result
     from torch._higher_order_ops.flydsl_kernel_wrap import (
@@ -99,7 +115,9 @@ def wrap_flydsl(
         and flydsl_typing.Constexpr.is_constexpr_annotation(parameter.annotation)
     )
 
-    mutations = frozenset(mutates_args)
+    mutations = frozenset(
+        (mutates_args,) if isinstance(mutates_args, str) else mutates_args
+    )
     unknown = mutations.difference(signature.parameters)
     if unknown:
         raise ValueError(
