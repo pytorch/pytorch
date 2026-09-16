@@ -916,12 +916,15 @@ __global__ void __launch_bounds__(BS)
 ldl_diagonal_panel_fused_kernel(
   scalar_t* __restrict__ dLD, int n, int lda,
   int nb, int curr_step, int* dcurr_step,
-  int* dipiv, int* dinfo
+  int* dipiv, int* dinfo,
+  // scratch for the out-of-panel replay below, 2 * (n - panel_end) elements
+  scalar_t* __restrict__ dcorr
 ) {
   using real_t = c10::scalar_value_type<scalar_t>::type;
   const real_t ALPHA = (1 + std::sqrt(17)) / 8;
   const auto tid = threadIdx.x;
   const auto panel_start = curr_step;
+  const auto panel_end = panel_start + nb;
 
   scalar_t D[2][2];
 
@@ -941,10 +944,47 @@ ldl_diagonal_panel_fused_kernel(
     );
     const auto diag_abs = ldl::abs(dLD[LinOff(curr_step, curr_step, lda)]);
 
-    if (diag_abs >= ALPHA * lambda) {
+    // The trailing block dLD[panel_end:, panel_end:] stays stale until the
+    // end-of-panel GEMM, but Bunch-Kaufman scans the whole column and can land
+    // in it. Bring the candidate row/col up to date in place, keeping the
+    // correction so it can be undone below. Doing it before the interchange
+    // means the swap carries the updated values (diagonal included) to where
+    // they belong, so the search and the swap need no special casing.
+    scalar_t* __restrict__ corr_col = dcorr;
+    scalar_t* __restrict__ corr_row = dcorr + (n - panel_end);
+    bool replay = false;
+
+    // ilambda is -1 when the scan found no candidate at all, which happens once
+    // NaNs reach the column: every comparison against a NaN is false, so the
+    // argmax never leaves its sentinel. Without this guard the sentinel is used
+    // as a column index below and reads off the front of the buffer.
+    if (ilambda < 0 || diag_abs >= ALPHA * lambda) {
       // No permutation, 1x1 pivot
       piv = curr_step;
     } else {
+      replay = (ilambda >= panel_end) && (curr_step > panel_start);
+      if (replay) {
+        for (int i = panel_end + tid; i < n; i += BS) {
+          scalar_t acc{};
+          for (int t = panel_start; t < curr_step; ++t) {
+            acc += dLD[LinOff(i, t, lda)] * dLD[LinOff(t, ilambda, lda)];
+          }
+          corr_col[i - panel_end] = acc;
+          dLD[LinOff(i, ilambda, lda)] -= acc;
+        }
+        for (int j = panel_end + tid; j < n; j += BS) {
+          // the diagonal is owned by the column sweep above
+          if (j == ilambda) {
+            continue;
+          }
+          scalar_t acc{};
+          for (int t = panel_start; t < curr_step; ++t) {
+            acc += dLD[LinOff(ilambda, t, lda)] * dLD[LinOff(t, j, lda)];
+          }
+          corr_row[j - panel_end] = acc;
+          dLD[LinOff(ilambda, j, lda)] -= acc;
+        }
+      }
       __syncthreads();
       // Checking whether ilambda diagonal pivot is "stable"
       const auto [sigma, _] = ldl::find_pivot_row<scalar_t, BS>(
@@ -965,13 +1005,10 @@ ldl_diagonal_panel_fused_kernel(
     }
     // }
 
-    // Update info/piv vector
+    // Update piv vector. info is set further below, once D is known: for a 2x2
+    // block a zero diagonal is the normal case (it is why the block was chosen),
+    // so singularity there is det(D) == 0, not a zero entry.
     if (tid == 0) {
-      // Update info vector
-      if (ldl::abs(dLD[LinOff(piv, piv, lda)]) == static_cast<real_t>(0) && *dinfo == 0) {
-        *dinfo = piv + 1;
-      }
-
       // Update pivot vector
       if (pivot_rank == 1) {
         dipiv[curr_step] = piv + 1;
@@ -1000,6 +1037,22 @@ ldl_diagonal_panel_fused_kernel(
     }
     // }
 
+    // Undo the replay. Without an interchange this simply restores the stale
+    // values. With one, the swap has moved the updated row/col into the panel
+    // and a current one out into the deferred block, so this lands on the
+    // latter -- leaving it stale, which is what makes the end-of-panel GEMM
+    // apply to it exactly once.
+    if (replay) {
+      for (int i = panel_end + tid; i < n; i += BS) {
+        dLD[LinOff(i, ilambda, lda)] += corr_col[i - panel_end];
+      }
+      for (int j = panel_end + tid; j < n; j += BS) {
+        if (j != ilambda) {
+          dLD[LinOff(ilambda, j, lda)] += corr_row[j - panel_end];
+        }
+      }
+      __syncthreads();
+    }
 
     // Update L21 {
     // L21 = dLD[curr_step + pivot_rank:, curr_step:curr_step + pivot_rank]
@@ -1008,6 +1061,9 @@ ldl_diagonal_panel_fused_kernel(
     // between U12 and D
     if (pivot_rank == 1) {
       auto D11 = dLD[LinOff(curr_step, curr_step, lda)];
+      if (tid == 0 && ldl::abs(D11) == static_cast<real_t>(0) && *dinfo == 0) {
+        *dinfo = curr_step + 1;
+      }
       for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
         dLD[LinOff(i, curr_step, lda)] /= D11;
       }
@@ -1020,6 +1076,9 @@ ldl_diagonal_panel_fused_kernel(
 
       // scale by det(D)
       auto det = D[0][0] * D[1][1] - D[0][1] * D[1][0];
+      if (tid == 0 && ldl::abs(det) == static_cast<real_t>(0) && *dinfo == 0) {
+        *dinfo = curr_step + 1;
+      }
       D[1][1] /= det;
       D[0][0] /= det;
       D[0][1] /= det;
@@ -1102,7 +1161,7 @@ template <typename scalar_t>
 void ldl_diagonal_panel(
   scalar_t* dLD, int n, int lda,
   int nb, int curr_step, int* dcurr_step,
-  int* dipiv, int* dinfo
+  int* dipiv, int* dinfo, scalar_t* dcorr
 ) {
   constexpr int PANEL_THRESHOLD = 512;
   constexpr int LARGE_PANEL_NTHREADS = 1024;
@@ -1115,13 +1174,13 @@ void ldl_diagonal_panel(
     ldl_diagonal_panel_fused_kernel<scalar_t, LARGE_PANEL_NTHREADS><<<grid, LARGE_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
       dLD, n, lda,
       nb, curr_step, dcurr_step,
-      dipiv, dinfo
+      dipiv, dinfo, dcorr
     );
   } else {
     ldl_diagonal_panel_fused_kernel<scalar_t, SMALL_PANEL_NTHREADS><<<grid, SMALL_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
       dLD, n, lda,
       nb, curr_step, dcurr_step,
-      dipiv, dinfo
+      dipiv, dinfo, dcorr
     );
   }
 }
@@ -1145,6 +1204,10 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
 
     auto panel_step_holder = at::empty({1}, LD.options().dtype(at::kInt));
     auto* dstep = static_cast<int*>(panel_step_holder.data_ptr());
+
+    // Scratch for the out-of-panel pivot replay: two vectors of length n
+    auto corr = at::empty({2 * n}, LD.options());
+    auto* dcorr = static_cast<scalar_t*>(corr.data_ptr());
     int step = 0;
 
     // Right-Down-Diagonal-looking blocked LDLT/LDLH:
@@ -1159,7 +1222,7 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
       ldl_diagonal_panel(
         dLD, n, lda,
         curr_nb, step, dstep,
-        dipiv, dinfo
+        dipiv, dinfo, dcorr
       );
       // }
 

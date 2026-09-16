@@ -578,17 +578,17 @@ void ldl_factor_kernel(
     const Tensor& info,
     bool upper,
     bool hermitian) {
-  // DEBUG: dispatch unconditionally for now!
-  std::cout << "calling custom" << std::endl;
-  ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
-  std::cout << "done" << std::endl;
-  return;
-
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
-       { ldl_factor_cusolver(
+       {
+         // DEBUG
+         if (hermitian) {
+  ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+         } else {
+         ldl_factor_cusolver(
           LD, pivots, info, upper, hermitian);
+         }
         return;
 }
     case at::LinalgBackend::Magma:
