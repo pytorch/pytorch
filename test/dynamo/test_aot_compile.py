@@ -4351,7 +4351,11 @@ from user code:
         self.assertIn("L['y']", entry)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
-        caveat = CAVEAT_AFTER_A_RAISE.format("", f"[0] <RuntimeError: {cause}>")
+        # Collapsed as _raise_text collapses it: under TORCH_SHOW_CPP_STACKTRACES=1,
+        # which run_test.py sets on a retry, str(cause) carries the multi-line C++
+        # backtrace, and the report is one line per paragraph.
+        collapsed = " ".join(str(cause).splitlines())
+        caveat = CAVEAT_AFTER_A_RAISE.format("", f"[0] <RuntimeError: {collapsed}>")
         self.assertTrue(advice.endswith(caveat), advice)
         self.assertNotIn("Every guard tree raised", message)
         # The residue itself, probed after the dispatch under test so that
@@ -4515,6 +4519,51 @@ from user code:
         caveat = CAVEAT_AFTER_A_RAISE.format("", quoted)
         self.assertTrue(advice.endswith(caveat), advice)
         self.assertEqual(message.count("boom on compare 1"), 1, message)
+        self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_caveat_skips_an_opted_out_raise_then_rejection(self):
+        # [0] enabled and [1] opted out both raised on the scan and rejected on
+        # the second pass, so both are in `answered` and neither in `trusted`
+        # (recording never reads the flag); the caveat names and quotes only
+        # [0]'s raise, through the enabled filter on its entries. Quoting [1]'s
+        # would blame a tree whose guards nobody asked about and contradict
+        # [1]'s own withheld line, which says [0]'s raise is what withheld it.
+        # Under the caveat's gate every trusted entry is opted out, so that
+        # filter also subsumes the `- trusted` term.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [
+                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
+                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
+            ]
+        )
+
+        results = model.forward.compiled_results
+        one = "the checked scan is unhappy"
+        two = "the opted-out scan is unhappy"
+        first = RaisesOnceThenRejects(one)
+        second = RaisesOnceThenRejects(two)
+        results[0]._artifacts.guard_manager = first
+        results[1]._artifacts.guard_manager = second
+        results[1].disable_guard_check()
+        with self.assertRaises(RuntimeError) as ctx:
+            served = model(torch.randn(3, 3))
+            self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual((first.checks, second.checks), (2, 2))
+        self.assertIn("  [0] stub guard rejected", lines)
+        withheld = "withheld because [0]'s guard check raised>"
+        self.assertIn(f"  [1] <opted out of guard checks; {withheld}", lines)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, message)
+        self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
+        self.assertEqual(str(ctx.exception.__cause__), one)
+        advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
+        caveat = CAVEAT_AFTER_A_RAISE.format("", f"[0] <RuntimeError: {one}>")
+        self.assertTrue(advice.endswith(caveat), advice)
+        self.assertEqual(message.count(one), 1, message)
+        self.assertNotIn(two, message)
         self.assertNotIn("Every guard tree raised", message)
 
     def test_aot_compile_module_second_pass_warns_that_it_served_over_a_raise(self):
