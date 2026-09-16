@@ -6186,33 +6186,62 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         def _gen_pair(m, k, n):
             return genf_int(m, k), genf_int(k, n)
 
-        self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(0\) needs to be greater than 16, but got 16",
-                               lambda: torch._int_mm(*_gen_pair(16, 8, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
-                               lambda: torch._int_mm(*_gen_pair(17, 7, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
-                               lambda: torch._int_mm(*_gen_pair(17, 8, 31)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"expected scalar type Char but found Float",
-                               lambda: torch._int_mm(genf_int(17, 8).float(), genf_int(8, 32)))
-        self.assertRaisesRegex(RuntimeError,
-                               r"expected scalar type Char but found Float",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32).float()))
-        self.assertRaisesRegex(RuntimeError,
-                               r"Expected result dtype to be of type kInt but got float",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 32).float()))
-        self.assertRaisesRegex(RuntimeError,
-                               r"Expected result.size\(0\) to be 17 but got 15",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(15, 32).int()))
-        self.assertRaisesRegex(RuntimeError,
-                               r"Expected result.size\(0\) to be 17 but got 16",
-                               lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
+        common_cases = [
+            (
+                r"expected scalar type Char but found Float|Expected self dtype to be int8 or uint8 but got float",
+                lambda: torch._int_mm(genf_int(17, 8).float(), genf_int(8, 32)),
+            ),
+            (
+                r"expected scalar type Char but found Float|Expected mat2 dtype to be of type int8 but got float",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32).float()),
+            ),
+            (
+                r"Expected result dtype to be of type kInt but got float",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 32).float()),
+            ),
+            (
+                r"Expected result.size\(0\) to be 17 but got 15",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(15, 32).int()),
+            ),
+            (
+                r"Expected result.size\(0\) to be 17 but got 16",
+                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()),
+            ),
+        ]
+
+        for regex, fn in common_cases:
+            self.assertRaisesRegex(RuntimeError, regex, fn)
+
+        if self.device_type == "cuda":
+            cuda_cases = [
+                (
+                    r"self.size\(0\) needs to be greater than 16, but got 16",
+                    lambda: torch._int_mm(*_gen_pair(16, 8, 32)),
+                ),
+                (
+                    r"self.size\(1\) needs to be greater than 0 and a multiple of 8, but got 7",
+                    lambda: torch._int_mm(*_gen_pair(17, 7, 32)),
+                ),
+                (
+                    r"mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
+                    lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)),
+                ),
+                (
+                    r"mat2.size\(1\) needs to be greater than 0 and a multiple of 8, but got 31",
+                    lambda: torch._int_mm(*_gen_pair(17, 8, 31)),
+                ),
+            ]
+        else:
+            non_cuda_cases = [
+                (
+                    r"self.size\(1\) needs to match mat2.size\(0\) but got 8 and 7|mat1 and mat2 shapes cannot be multiplied \(17x8 and 7x32\)",
+                    lambda: torch._int_mm(genf_int(17, 8), genf_int(7, 32)),
+                ),
+            ]
+            cuda_cases = non_cuda_cases
+
+        for regex, fn in cuda_cases:
+            self.assertRaisesRegex(RuntimeError, regex, fn)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
