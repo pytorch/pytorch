@@ -970,8 +970,9 @@ class CompiledFxGraph(OutputCode):
             # Replay bypasses generated assertions and copies inputs into graph buffers.
             def checked_call(inputs: Sequence[InputType]) -> object:
                 for i in aligned_input_idxs:
-                    tensor = cast(torch.Tensor, inputs[i])
-                    assert_alignment(tensor, GPU_ALIGN_BYTES, "input")
+                    assert_alignment(
+                        cast(torch.Tensor, inputs[i]), GPU_ALIGN_BYTES, "input"
+                    )
                 return cudagraph_callable(inputs)
 
             self.current_callable = checked_call
