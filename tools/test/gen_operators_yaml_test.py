@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import tempfile
 import unittest
 from collections import defaultdict
 from unittest.mock import Mock, patch
@@ -20,7 +21,7 @@ def _mock_options():
     options = argparse.Namespace()
     options.root_ops = "aten::add,aten::cat"
     options.training_root_ops = []
-    options.output_path = "/tmp"
+    options.output_path = tempfile.gettempdir()
     options.dep_graph_yaml_path = "dummy_pytorch_op_deps.yaml"
     options.model_name = "test_model"
     options.model_versions = None

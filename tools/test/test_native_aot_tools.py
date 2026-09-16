@@ -244,13 +244,14 @@ class TestExportJobs(unittest.TestCase):
                 b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
                 if opts:
                     b["options"] = opts
-                tc.export(b, "/tmp", arch="sm_90a")
+                tc.export(b, tempfile.gettempdir(), arch="sm_90a")
                 self.assertTrue(seen["options"].endswith("--gpu-arch sm_90a"))
                 if opts:
                     self.assertTrue(seen["options"].startswith(opts))
             # No arch: the detect-from-device path must not inject --gpu-arch.
             tc.export(
-                {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}, "/tmp"
+                {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []},
+                tempfile.gettempdir(),
             )
             self.assertNotIn("--gpu-arch", seen["options"] or "")
 
@@ -264,9 +265,12 @@ class TestExportJobs(unittest.TestCase):
         self.assertIn("-mtriple=", pin)
         b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
         with _fake_cute_compile() as seen:
-            tc.export(dict(b), "/tmp", arch="sm_90a")
+            tc.export(dict(b), tempfile.gettempdir(), arch="sm_90a")
             self.assertIn(f"--host-target '{pin}'", seen["options"])
-            tc.export(dict(b, options="--host-target 'llvm -mcpu=neoverse-n1'"), "/tmp")
+            tc.export(
+                dict(b, options="--host-target 'llvm -mcpu=neoverse-n1'"),
+                tempfile.gettempdir(),
+            )
             self.assertEqual(seen["options"], "--host-target 'llvm -mcpu=neoverse-n1'")
 
     def test_export_refuses_an_unpinned_machine(self) -> None:
@@ -281,9 +285,12 @@ class TestExportJobs(unittest.TestCase):
             mock.patch.object(toolchains.platform, "machine", lambda: "ppc64le"),
         ):
             with self.assertRaisesRegex(RuntimeError, "no pinned host target"):
-                tc.export(dict(b), "/tmp", arch="sm_90a")
+                tc.export(dict(b), tempfile.gettempdir(), arch="sm_90a")
             # ...but a declaration that names its own is still served.
-            tc.export(dict(b, options="--host-target 'llvm -mtriple=x'"), "/tmp")
+            tc.export(
+                dict(b, options="--host-target 'llvm -mtriple=x'"),
+                tempfile.gettempdir(),
+            )
         self.assertNotIn(platform.machine(), ("ppc64le",))
 
     def test_an_empty_host_target_from_a_declaration_is_refused(self) -> None:
@@ -299,7 +306,9 @@ class TestExportJobs(unittest.TestCase):
             ):
                 with self.subTest(opts):
                     with self.assertRaisesRegex(RuntimeError, "empty value"):
-                        tc.export(dict(b, options=opts), "/tmp", arch="sm_90a")
+                        tc.export(
+                            dict(b, options=opts), tempfile.gettempdir(), arch="sm_90a"
+                        )
 
     def test_a_declared_host_target_is_read_not_sniffed(self) -> None:
         # Both spellings the DSL accepts, and the value is what reaches compile().
@@ -357,7 +366,9 @@ class TestExportJobs(unittest.TestCase):
             b = {"prefix": "p", "fn": None, "fake_args": (), "tensor_args": []}
             with mock.patch.object(export, "load_builder", lambda *a: lambda p: b):
                 with self.assertRaisesRegex(RuntimeError, "cannot export"):
-                    export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
+                    export.export_point(
+                        "fakeop", "aot_kernel.py", {}, tempfile.gettempdir()
+                    )
 
     def test_pool_preload_stays_fork_safe(self):
         # CPython gh-117378 was not backported below 3.12.
@@ -428,12 +439,16 @@ if __name__ == "__main__":
             export, "load_builder", side_effect=ImportError("torch import failed")
         ):
             with self.assertRaisesRegex(RuntimeError, "builder import failed"):
-                export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
+                export.export_point(
+                    "fakeop", "aot_kernel.py", {}, tempfile.gettempdir()
+                )
 
         missing = ModuleNotFoundError("No module named 'cutlass'", name="cutlass")
         with mock.patch.object(export, "load_builder", side_effect=missing):
             with self.assertRaisesRegex(RuntimeError, "DSL runtime not installed"):
-                export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
+                export.export_point(
+                    "fakeop", "aot_kernel.py", {}, tempfile.gettempdir()
+                )
 
     def test_json_normal_matches_sidecar_round_trip(self):
         # It stands in for a json.dumps/loads pair, so any divergence makes a spec
@@ -4035,7 +4050,9 @@ class TestWheelRefusal(unittest.TestCase):
             mock.patch.object(build_stage2, "should_run", lambda: False),
         ):
             with self.assertRaisesRegex(RuntimeError, "does not import"):
-                build_stage2.main(["--wheel", "/tmp/nonexistent.whl"])
+                build_stage2.main(
+                    ["--wheel", tempfile.gettempdir() + "/nonexistent.whl"]
+                )
 
     def test_the_refusal_is_ahead_of_every_applicability_gate(self):
         # The refusal cannot consult should_run, which needs torch: hence the guard.
@@ -4047,7 +4064,9 @@ class TestWheelRefusal(unittest.TestCase):
             ),
         ):
             with self.assertRaises(RuntimeError):
-                build_stage2.main(["--wheel", "/tmp/nonexistent.whl"])
+                build_stage2.main(
+                    ["--wheel", tempfile.gettempdir() + "/nonexistent.whl"]
+                )
         self.assertEqual(called, [])
 
     def test_without_wheel_an_unimportable_torch_is_a_clean_skip(self):
