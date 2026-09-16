@@ -327,7 +327,7 @@ def make_mxfp_gemm_kernel_name(param: MXFPGemmParams) -> str:
     )
 
 
-def make_mxfp_tiled_mma(param: MXFPGemmParams, operand_elem):
+def make_mxfp_tiled_mma(param: MXFPGemmParams, operand_elem, elements_per_byte):
     mma_atom = fx.make_mma_atom(
         fx.rocdl.cdna4.MFMA_Scale(
             MXFP_MFMA_M,
@@ -343,17 +343,51 @@ def make_mxfp_tiled_mma(param: MXFPGemmParams, operand_elem):
     wave_layout = fx.make_layout(
         (param.m_waves, param.n_waves, 1), (param.n_waves, 1, 0)
     )
-    if const_expr(param.mxfp_format_id == MXFP_FORMAT_FP4):
-        return mma_atom, fx.make_tiled_mma(mma_atom, wave_layout)
+    chunk = GFX950_DMA_BYTES * elements_per_byte
     mma_permutation = fx.make_tile(
         None,
         None,
         fx.make_layout(
-            (GFX950_DMA_BYTES, 2, MXFP_MFMA_K // (2 * GFX950_DMA_BYTES)),
-            (1, MXFP_MFMA_K // 2, GFX950_DMA_BYTES),
+            (chunk, MXFP_MFMA_K // (4 * chunk), 4),
+            (1, 4 * chunk, chunk),
         ),
     )
     return mma_atom, fx.make_tiled_mma(mma_atom, wave_layout, mma_permutation)
+
+
+def make_mxfp_tiled_copy(copy_atom, tiled_mma, operand, elements_per_byte):
+    tile_size = tiled_mma.tile_size_mnk
+    if operand == "A":
+        tv_layout = tiled_mma.tv_layout_A_tiled
+        outer_size = fx.select(tile_size, [0])
+    else:
+        tv_layout = tiled_mma.tv_layout_B_tiled
+        outer_size = fx.select(tile_size, [1])
+    if elements_per_byte > 1:
+        thr_shape = tv_layout[0].shape.to_py_value()
+        thr_stride = tv_layout[0].stride.to_py_value()
+        val_shape = tv_layout[1].shape.to_py_value()
+        val_stride = tv_layout[1].stride.to_py_value()
+        if isinstance(thr_stride[0], tuple):
+            lane_stride = (
+                thr_stride[0][0],
+                thr_stride[0][1] // elements_per_byte,
+            )
+            packed_thr_stride = (lane_stride, *thr_stride[1:])
+        else:
+            packed_thr_stride = (
+                thr_stride[0],
+                thr_stride[1] // elements_per_byte,
+            )
+        tv_layout = fx.make_layout(
+            (thr_shape, val_shape[0] // elements_per_byte),
+            (packed_thr_stride, val_stride[0]),
+        )
+    tile = fx.make_tile(
+        fx.make_layout(outer_size, 1),
+        fx.make_layout(MXFP_MFMA_K // elements_per_byte, 1),
+    )
+    return fx.make_tiled_copy(copy_atom, tv_layout, tile)
 
 
 @flyc.kernel
@@ -469,71 +503,32 @@ def gemm_mxfp_gfx950_kernel(
     out_buf = fx.rocdl.make_buffer_tensor(out_view, max_size=True)
     gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
 
-    mma_atom, tiled_mma = make_mxfp_tiled_mma(param, operand_elem)
+    mma_atom, tiled_mma = make_mxfp_tiled_mma(param, operand_elem, elements_per_byte)
     thr_mma = tiled_mma.thr_slice(tid)
 
-    if const_expr(is_mxfp4):
-        universal_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), fx.Uint8)
-        buffer_s2r_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Uint8)
-        transposed_s2r_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans8_64b(), fx.Uint8
-        )
-        a_tv_layout = fx.make_layout(
-            (((16, 4), n_waves, m_waves), 16),
-            (
-                (
-                    (1, m_waves * MXFP_MFMA_M * 16),
-                    0,
-                    MXFP_MFMA_M,
-                ),
-                m_waves * MXFP_MFMA_M,
-            ),
-        )
-        b_tv_layout = fx.make_layout(
-            (((16, 4), n_waves, m_waves), 16),
-            (
-                (
-                    (1, n_waves * MXFP_MFMA_N * 16),
-                    MXFP_MFMA_N,
-                    0,
-                ),
-                n_waves * MXFP_MFMA_N,
-            ),
-        )
-        a_tiled_copy = fx.make_tiled_copy(
-            transposed_s2r_atom if a_is_transposed else buffer_s2r_atom,
-            a_tv_layout,
-            fx.make_tile(
-                fx.make_layout(m_waves * MXFP_MFMA_M, 1),
-                fx.make_layout(MXFP_MFMA_K // elements_per_byte, 1),
-            ),
-        )
-        b_tiled_copy = fx.make_tiled_copy(
-            transposed_s2r_atom if not b_is_transposed else buffer_s2r_atom,
-            b_tv_layout,
-            fx.make_tile(
-                fx.make_layout(n_waves * MXFP_MFMA_N, 1),
-                fx.make_layout(MXFP_MFMA_K // elements_per_byte, 1),
-            ),
-        )
-        a_s2r_atom = transposed_s2r_atom if a_is_transposed else universal_s2r_atom
-        b_s2r_atom = transposed_s2r_atom if not b_is_transposed else universal_s2r_atom
-        thr_copy_A = a_tiled_copy.get_slice(tid)
-        thr_copy_B = b_tiled_copy.get_slice(tid)
-    else:
-        universal_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), operand_elem)
-        buffer_s2r_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), operand_elem)
-        transposed_s2r_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans8_64b(), operand_elem
-        )
-        a_s2r_atom = transposed_s2r_atom if a_is_transposed else universal_s2r_atom
-        b_s2r_atom = transposed_s2r_atom if not b_is_transposed else universal_s2r_atom
-        a_tiled_copy_atom = transposed_s2r_atom if a_is_transposed else buffer_s2r_atom
-        b_tiled_copy_atom = (
-            transposed_s2r_atom if not b_is_transposed else buffer_s2r_atom
-        )
-        thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
-        thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
+    universal_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), fx.Uint8)
+    buffer_s2r_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Uint8)
+    transposed_s2r_atom = fx.make_copy_atom(
+        fx.rocdl.cdna4.LDSReadTrans8_64b(), fx.Uint8
+    )
+    a_s2r_atom = transposed_s2r_atom if a_is_transposed else universal_s2r_atom
+    b_s2r_atom = transposed_s2r_atom if not b_is_transposed else universal_s2r_atom
+    a_tiled_copy_atom = transposed_s2r_atom if a_is_transposed else buffer_s2r_atom
+    b_tiled_copy_atom = transposed_s2r_atom if not b_is_transposed else buffer_s2r_atom
+    a_tiled_copy = make_mxfp_tiled_copy(
+        a_tiled_copy_atom,
+        tiled_mma,
+        "A",
+        elements_per_byte,
+    )
+    b_tiled_copy = make_mxfp_tiled_copy(
+        b_tiled_copy_atom,
+        tiled_mma,
+        "B",
+        elements_per_byte,
+    )
+    thr_copy_A = a_tiled_copy.get_slice(tid)
+    thr_copy_B = b_tiled_copy.get_slice(tid)
     a_lds_layout_bytes = make_lds_layout(
         block_m,
         block_k_bytes,
@@ -853,24 +848,14 @@ def gemm_mxfp_gfx950_kernel(
         return words
 
     def load_fragments(stage):
-        if const_expr(is_mxfp4):
-            sA_stage = fx.make_view(
-                smem_a_bytes + stage * fx.Int32(param.a_stage_bytes),
-                a_lds_layout_bytes,
-            )
-            sB_stage = fx.make_view(
-                smem_b_bytes + stage * fx.Int32(param.b_stage_bytes),
-                b_lds_layout_bytes,
-            )
-        else:
-            sA_stage = fx.make_view(
-                smem_a + stage * fx.Int32(block_m * block_k),
-                a_lds_layout_bytes,
-            )
-            sB_stage = fx.make_view(
-                smem_b + stage * fx.Int32(block_n * block_k),
-                b_lds_layout_bytes,
-            )
+        sA_stage = fx.make_view(
+            smem_a_bytes + stage * fx.Int32(param.a_stage_bytes),
+            a_lds_layout_bytes,
+        )
+        sB_stage = fx.make_view(
+            smem_b_bytes + stage * fx.Int32(param.b_stage_bytes),
+            b_lds_layout_bytes,
+        )
         thr_sA = thr_copy_A.partition_S(sA_stage)
         thr_sB = thr_copy_B.partition_S(sB_stage)
         for kh in range_constexpr(param.k_halves):
