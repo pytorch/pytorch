@@ -694,11 +694,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
-  // Implementations may retain the Store passed to split() and merge(). A
-  // PrefixStore isolates rendezvous keys, but its connection-global state may
-  // be shared with the caller or sibling backends. An implementation that
-  // requires an independent connection or mutates state such as the timeout
-  // must clone it first.
+  // The caller namespaces each child's rendezvous keys, but the Store may use
+  // the parent's live connection. Implementations that block while holding or
+  // mutate connection-global state, such as the timeout, must clone it first.
   virtual c10::intrusive_ptr<Backend> split(
       const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
