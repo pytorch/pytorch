@@ -2,12 +2,32 @@
 
 import copy
 import functools
+import os
 import pickle
+import tempfile
 
 import torch._inductor.test_case
+from torch.compiler._precompile_types import PrecompileSummary
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
+    def test_summary_is_incomplete_without_a_backend_graph(self):
+        def summary(**kw):
+            base = dict(
+                frames=1,
+                resume_functions=0,
+                guarded_codes=1,
+                backend_graphs=1,
+                bypassed=(),
+            )
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+
     def test_source_graph_module_copies_are_isolated(self):
         # _src and the exec'd forward are shared between copies; everything else
         # nn.Module keeps on an instance is state, hook dicts included, and a
@@ -216,6 +236,139 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
             _entry_fn_of(functools.partial(_session_breaks))
         with self.assertRaisesRegex(TypeError, "expected a callable"):
             _entry_fn_of(3)
+
+
+class _SessionReadsAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+        self.scale = 2
+
+    def forward(self, x):
+        return self.lin(x) * self.scale
+
+
+def _drop_scale(entries):
+    return ["scale" not in e.name for e in entries]
+
+
+def _session_summary_raises(x):
+    raise ValueError("boom")
+
+
+class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _session(self, fn, **kwargs):
+        from torch._dynamo.precompile_package import precompile_capture
+
+        kwargs.setdefault("backend", "eager")
+        kwargs.setdefault("dynamic", False)
+        return precompile_capture(fn, **kwargs)
+
+    def _gate(self, session, **flags):
+        flags = {
+            "require_complete": True,
+            "require_no_risky_drops": True,
+            "require_no_dropped_guards": False,
+            **flags,
+        }
+        return session._gated_summary(**flags)
+
+    def test_summary_counts_frames_variants_and_guards(self):
+        model = _SessionReadsAttr()
+        session = self._session(model)
+        with session as cap:
+            cap(torch.randn(2, 4))
+            cap(torch.randn(3, 4))
+        summary = session.summary()
+        self.assertEqual(summary.frames, 1)
+        self.assertEqual(summary.guarded_codes, 2)
+        self.assertEqual(summary.backend_graphs, 2)
+        self.assertEqual(summary.bypassed, ())
+        self.assertEqual(summary.capture_errors, ())
+        self.assertTrue(summary.complete)
+        self.assertIn("TENSOR_MATCH", summary.kept_guard_types())
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types())
+        self.assertEqual(summary.risky_dropped_guards, ())
+        self.assertEqual(summary.policy_dropped_guards, ())
+
+    def test_a_custom_filter_composes_with_the_default_and_its_drops_are_risky(self):
+        session = self._session(_SessionReadsAttr(), guard_filter_fn=_drop_scale)
+        with session as cap:
+            cap(torch.randn(2, 4))
+        summary = session.summary()
+        self.assertTrue(any("scale" in name for _, name in summary.dropped_guards))
+        self.assertTrue(
+            any("scale" in name for _, name in summary.risky_dropped_guards)
+        )
+        self.assertIn("MODULE_MATCH", summary.dropped_guard_types())
+        self.assertTrue(
+            any("scale" in name for _, name, _ in summary.dropped_guard_code)
+        )
+
+    def test_invariants_classify_guards_across_variants(self):
+        session = self._session(_SessionReadsAttr())
+        with session as cap:
+            cap(torch.randn(2, 4))
+            cap(torch.randn(3, 4))
+        (frame,) = session.invariants()
+        self.assertEqual(frame.frame, "forward")
+        self.assertEqual(frame.variants, 2)
+        varying = {(f.guard_type, f.source) for f in frame.varying}
+        self.assertIn(("TENSOR_MATCH", "x"), varying)
+        self.assertTrue(any("scale" in f.source for f in frame.invariant))
+        self.assertIsInstance(frame.invariant[0].render(), str)
+
+    def test_invariants_report_is_written_on_a_clean_exit_only(self):
+        model = _SessionReadsAttr()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "inv.txt")
+            with self._session(model, invariants=path) as cap:
+                cap(torch.randn(2, 4))
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("frame forward", text)
+            self.assertIn("invariant", text)
+            os.unlink(path)
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with self._session(model, invariants=path) as cap:
+                    cap(torch.randn(2, 4))
+                    raise RuntimeError("boom")
+            self.assertFalse(os.path.exists(path))
+
+    def test_gates_refuse_an_empty_or_failed_capture(self):
+        from torch._dynamo.exc import PackageError
+
+        session = self._session(_SessionReadsAttr())
+        with session:
+            pass
+        with self.assertRaisesRegex(PackageError, "captured no compiled code"):
+            self._gate(session)
+        self.assertEqual(self._gate(session, require_complete=False).guarded_codes, 0)
+
+        session = self._session(_session_summary_raises)
+        with session as cap:
+            with self.assertRaisesRegex(ValueError, "boom"):
+                cap(torch.ones(2))
+        with self.assertRaisesRegex(PackageError, "incomplete because capture raised"):
+            self._gate(session)
+
+    def test_gates_refuse_risky_and_plain_drops_as_asked(self):
+        from torch._dynamo.exc import PackageError
+
+        session = self._session(_SessionReadsAttr(), guard_filter_fn=_drop_scale)
+        with session as cap:
+            cap(torch.randn(2, 4))
+        with self.assertRaisesRegex(PackageError, "can affect dispatch"):
+            self._gate(session)
+        with self.assertRaisesRegex(PackageError, "were not serialized"):
+            self._gate(
+                session, require_no_risky_drops=False, require_no_dropped_guards=True
+            )
+        self.assertTrue(self._gate(session, require_no_risky_drops=False).complete)
 
 
 if __name__ == "__main__":
