@@ -181,7 +181,10 @@ Load a previously saved AOT-compiled function from a file.
   it is served stale even when the guard on `D['a']` passes. That re-read is
   not atomic with the guard check before it, so a rebind landing between the two
   is served unchecked, exactly as an eager compiled frame serves one landing
-  between its guards and its globals.
+  between its guards and its globals. A store the function itself makes to such
+  a global lands in the loaded artifact's own globals, not in this dict, and the
+  next call's re-read replaces it, so a function that accumulates into a guarded
+  global serves this dict's value on every call where eager counts up.
   The re-read writes into the loaded artifact's own globals dict, which every
   call of it shares, so two threads serving one loaded artifact race on that
   write; a caller who needs isolation loads the artifact once per thread.
