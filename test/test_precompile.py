@@ -103,6 +103,24 @@ class TestPrecompile(TestCase):
                 frames, types.SimpleNamespace(fn_name="step", codes=[])
             )
 
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know must be refused cleanly rather than baked from the example
+        # or leaked as a raw fake-tensor exception.
+        from torch._precompile import _capture
+
+        model = torch.nn.Linear(4, 4)
+
+        def branches(m, x):
+            return m(x) if x.sum() > 0 else m(-x)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        for fn in (branches, items):
+            with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
+                _capture(fn, (model, torch.randn(3, 4)), None)
+
     def test_precompile_module_identity(self):
         # torch.compiler.precompile is a submodule: re-importing it resolves to the
         # SAME module object, and its name is the stable public path.

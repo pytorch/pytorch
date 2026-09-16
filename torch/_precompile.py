@@ -83,9 +83,14 @@ it.
 #
 # 3. Control flow (and, by default, shapes) is specialized to the example. A non-strict
 #    trace follows the single path taken for the example inputs: Python ``if``/``for``
-#    over tensor values, ``.item()``, and shape-dependent branching are resolved at
-#    trace time and baked. Shapes are static BY DEFAULT (capture uses make_fx in its
-#    "real" mode, so each size is baked as a constant). You can opt specific user-input
+#    over a static (Python ``int``) value and shape-dependent branching on a static size
+#    are resolved at trace time and baked. Shapes are static BY DEFAULT (capture runs
+#    make_fx in its "fake" mode, so each size is baked as a concrete constant). What is
+#    NOT silently baked is a data-dependent op -- ``.item()``, ``.nonzero()``, a Python
+#    ``if``/``for`` over a TENSOR VALUE: under fake tracing the value is unknown, so such
+#    an op RAISES at capture (a GuardOnDataDependentSymNode / unbacked error surfaced as
+#    PrecompileError) rather than freezing the example run's value into the artifact as a
+#    real trace would. You can opt specific user-input
 #    dims into being dynamic by marking them with
 #    ``torch._dynamo.decorators.mark_unbacked`` before calling: those dims are
 #    captured as UNBACKED symints (symbolic capture), which CANNOT be guarded on -- so
@@ -833,10 +838,12 @@ def _capture(
     onto the runtime model's ``.grad`` fields rather than return them (invariant 5).
 
     This is a NON-STRICT trace (invariant 3): make_fx records only the ATen ops
-    that run for THIS example. Python-level control flow over tensor values, data-
-    dependent branches, and shapes are specialized to ``args`` and baked. The
-    interning/order established here for params then buffers is the calling
-    convention the runtime model must reproduce (invariant 2).
+    that run for THIS example. Static (Python ``int``) control flow and shapes are
+    specialized to ``args`` and baked; a data-dependent op (``.item()``, a branch
+    over a tensor value) instead raises at capture, since this traces under fake
+    mode where the value is unknown. The interning/order established here for params
+    then buffers is the calling convention the runtime model must reproduce
+    (invariant 2).
     """
     import contextlib
 
@@ -923,15 +930,42 @@ def _capture(
     for a in real_flat:
         if isinstance(a, torch.Tensor):
             a.grad = None
+    from torch._subclasses.fake_tensor import (
+        DataDependentOutputException,
+        FakeTensorMode,
+    )
+
+    # ``fake_mode`` is the DYNAMIC (symbolic) fake mode -- set only on the unbacked path,
+    # where it threads its ShapeEnv to the lowering (and turns on scalar_asserts). The
+    # static path also traces on fakes, but with a plain (non-symbolic) fake mode kept in
+    # ``capture_cm`` only, so ``_Capture.fake_mode`` stays None and the lowering treats
+    # the capture as static. Either way ``capture_cm`` is the FakeTensorMode we trace in.
     fake_mode = None
+    capture_cm: FakeTensorMode
     if any(marks):
         flat_args, fake_mode = _fakeify_with_unbacked(pb_flat, user_flat, marks)
+        capture_cm = fake_mode
         user_input_shapes = [
             None
             if base is None
             else tuple(None if i in per else s for i, s in enumerate(base))
             for base, per in zip(user_input_shapes, marks)
         ]
+    else:
+        # Static capture: fakeify every input so the trace runs no real compute (no
+        # in-place input mutation, no grad on the example model). allow_non_fake_inputs
+        # lets a real tensor that fn closes over (an unregistered attr, a global, a
+        # captured constant -- invariant 1) flow through as a baked constant, so
+        # _check_no_constant_tensors below rejects it with the same clean PrecompileError
+        # a real trace gave, rather than a raw mixed-fake AssertionError.
+        capture_cm = FakeTensorMode(allow_non_fake_inputs=True)
+        with capture_cm:
+            flat_args = [
+                capture_cm.from_tensor(a, static_shapes=True)
+                if isinstance(a, torch.Tensor)
+                else a
+                for a in flat_args
+            ]
 
     # flat_fn (traced by make_fx) writes these back so _capture can thread the output
     # structure and the harvested-grad param indices into the _Capture result.
@@ -1003,16 +1037,23 @@ def _capture(
         captured_grad_param_indices = grad_param_indices
         return [*result_flat, *grad_flat]
 
-    # Trace with grad enabled so any backward in ``fn`` is built as graph ops; the
-    # forward graph is the same as under no_grad. Restore in finally so a make_fx
-    # failure (e.g. fn raising after running a backward) does not leave the user's
-    # example model with clobbered .grad fields.
+    # The caller picks the grad mode (no_grad unless training=True), so a backward
+    # in ``fn`` is built as graph ops only under training. Restore .grad in finally
+    # so a make_fx failure (e.g. fn raising after running a backward) does not
+    # leave the user's example model with clobbered .grad fields.
     from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
-    tracing_mode = "symbolic" if fake_mode is not None else "real"
-    capture_cm = fake_mode if fake_mode is not None else contextlib.nullcontext()
+    # Trace on FAKE tensors either way (flat_args were fakeified above), so the trace
+    # runs NO real compute and has no real side effects (no in-place input mutation, no
+    # grad accumulation on the example model): the single real execution is the graph run
+    # on the real inputs, which the caller-driven capture does by serving the built
+    # artifact and handing back its result. The unbacked path keeps its symbolic ShapeEnv
+    # ("symbolic"); a static capture uses concrete fake shapes ("fake"). A data-dependent
+    # op (.item(), .nonzero(), a tensor-value branch) that a real trace would silently
+    # specialize now raises at capture rather than baking an unsound constant.
+    tracing_mode = "symbolic" if fake_mode is not None else "fake"
     try:
-        with torch.enable_grad(), capture_cm:
+        with capture_cm:
             try:
                 gm = make_fx(
                     flat_fn,
@@ -1020,16 +1061,17 @@ def _capture(
                     tracing_mode=tracing_mode,
                 )(flat_args)
             except GuardOnDataDependentSymNode as e:
-                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
-                # the computation needs to guard on / specialize its size (e.g. a
-                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
-                # be guarded, so rather than bake a silently-wrong artifact, fail here.
+                raise _unbacked_guard_error(e) from e
+            except DataDependentOutputException as e:
+                # A static capture has no ShapeEnv, so a value the fake trace cannot
+                # know (.item(), a branch over a tensor) surfaces here rather than as
+                # GuardOnDataDependentSymNode; refuse cleanly instead of leaking it.
                 raise PrecompileError(
-                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
-                    "(it branches on or specializes that size), which is not allowed for "
-                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
-                    "or restructure fn to avoid the size-dependent operation. Underlying: "
-                    f"{str(e).splitlines()[0]}"
+                    "precompile: fn performs a data-dependent operation (.item(), "
+                    ".nonzero(), a Python branch over a tensor value) whose result "
+                    "cannot be known while tracing on fake tensors, so it cannot be "
+                    "captured; make_fx specializes only static (Python int) control "
+                    f"flow. Underlying: {e}"
                 ) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
@@ -1905,18 +1947,13 @@ class PrecompiledModule(PrecompiledRunnable):
         return obj
 
     def _compile(self, args: tuple[object, ...]) -> None:
-        # make_fx is the only implemented tracer; "dynamo" is a planned alternative
-        # capture front-end. Reject it here (the single capture-dispatch point) before
-        # running fn, so the failure is clear rather than a wrong default.
-        if self._tracer != "make_fx":
-            raise NotImplementedError(
-                f"precompile tracer={self._tracer!r} is not implemented yet; use "
-                "tracer='make_fx' (the default)."
-            )
+        # PrecompiledModule is the make_fx path only: the DynamoTracer front-end is routed
+        # to the execution-driven capture before it gets here.
         if self._backend == "eager" and _has_unbacked_marks(args):
             raise NotImplementedError(
-                "precompile: mark_unbacked (dynamic shapes) is only supported with "
-                "backend='inductor'; eager + unbacked is not supported."
+                "precompile: mark_unbacked (dynamic shapes) with MakeFxTracer is only "
+                "supported with backend='inductor'; make_fx + eager + unbacked is not "
+                "supported (DynamoTracer supports either backend)."
             )
         capture = _capture(self._fn, args, self._decompositions)
         self._module_positions = capture.module_positions
@@ -2073,6 +2110,7 @@ class PrecompiledModule(PrecompiledRunnable):
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
                 "backend": self._backend,
+                "tracer": self._tracer,
                 "code_hash": code_hash,
                 "artifact": self._artifact_bytes,
             },
