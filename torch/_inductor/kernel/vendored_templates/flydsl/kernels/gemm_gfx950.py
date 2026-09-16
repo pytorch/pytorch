@@ -63,7 +63,7 @@ class GemmGfx950Param:
 
 
 @dataclass(slots=True, kw_only=True, eq=False)
-class AsyncLoadContext:
+class GemmABLoadContext:
     """Workgroup-wide state shared by direct-to-LDS operand loads.
 
     ``wave_offset`` and ``tid`` select each lane's LDS destination;
@@ -81,16 +81,6 @@ class AsyncLoadContext:
     ldg_x_threads: Any
     block_k: Any
     has_k_tail: Any
-
-
-@dataclass(slots=True, kw_only=True, eq=False)
-class GemmABLoadContext(AsyncLoadContext):
-    """Direct-to-LDS state plus the A/B LDS-to-register copy partitions.
-
-    The copy atoms select the layout-specific LDS read instruction, while
-    ``thr_copy_a`` and ``thr_copy_b`` bind those atoms to the calling thread.
-    """
-
     uni_copy_atom: Any
     buffer_copy_atom: Any
     a_s2r_copy_atom: Any
@@ -109,7 +99,7 @@ class AsyncLoadOperand:
     mapping.
     """
 
-    context: AsyncLoadContext
+    context: GemmABLoadContext
     rsrc: Any
     lds_layout: Any
     outer_tile_size: Any
