@@ -4751,20 +4751,20 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 },
             )
         else:
-            # cuBLASLt added an internal cudaStreamIsCapturing check before
-            # launching GEMM kernels starting with CUDA 13.4, which shows up
-            # as an extra runtime event ahead of each addmm's kernel launch.
+            # cuBLASLt added two internal cudaStreamIsCapturing checks before
+            # launching GEMM kernels starting with CUDA 13.4, which show up
+            # as extra runtime events ahead of each addmm's kernel launch.
             extra_event = not torch.version.hip and _get_torch_cuda_version() >= (13, 4)
             capture_1, capture_2 = "", ""
             if extra_event:
                 capture_1 = (
                     "event=cudaStreamIsCapturing node=addmm "
                     "stack_trace=x = self.linear1(x)\n"
-                )
+                ) * 2
                 capture_2 = (
                     "event=cudaStreamIsCapturing node=addmm_1 "
                     "stack_trace=x = self.linear2(x)\n"
-                )
+                ) * 2
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
