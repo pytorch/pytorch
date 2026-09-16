@@ -118,8 +118,14 @@ def _check_vector_norm_args(
     shape = x.shape
     if dim is not None and not isinstance(dim, IntLike):
         for d in dim:
+            d_canonical = d % len(shape) if d < 0 and len(shape) > 0 else d
             torch._check(
-                sym_or(x.numel() != 0, d < len(shape) and d >= 0 and shape[d] != 0),
+                sym_or(
+                    x.numel() != 0,
+                    d_canonical < len(shape)
+                    and d_canonical >= 0
+                    and shape[d_canonical] != 0,
+                ),
                 lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
