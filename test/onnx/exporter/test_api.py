@@ -62,6 +62,7 @@ class SampleModelForDimOne(torch.nn.Module):
 
 class TestExportAPIDynamo(common_utils.TestCase):
     """Tests for the ONNX exporter API when dynamo=True."""
+
     hw_classification = HardwareClassification.GENERIC
 
     def assert_export(
