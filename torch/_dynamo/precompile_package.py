@@ -119,9 +119,11 @@ capture block.
 from __future__ import annotations
 
 import functools
+import hashlib
 import importlib.machinery
 import logging
 import os
+import re
 import site
 import sys
 import sysconfig
@@ -624,6 +626,40 @@ def _is_risky_drop(
     return True
 
 
+# Object addresses differ every run, so they are scrubbed from rendered guard
+# facts. Keep these anchored to the call shapes that carry addresses: a bare
+# \b\d{9,}\b also eats a user constant (a dict key, a slice bound), so two
+# variants guarding different values render the same fact and invent an
+# invariant neither holds.
+_OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
+_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
+_DYNAMO_INDICES = re.compile(r"_dynamo_\w*indices")
+# Dynamo appends a per-process counter to the globals it installs, so the same
+# guard reads __builtins_dict___6 in one compilation and ___8 in the next.
+# Leaving that in makes identical guards look like they differ.
+_DYNAMO_COUNTER = re.compile(
+    r"(__builtins_dict__|__compiled_fn|__resume_at)_*\d+(_\d+)?"
+)
+# OutputGraph.install_global_by_id names a global "<prefix>_<id(value)>_c<n>",
+# so a guard reading one carries BOTH an address and a compile counter inside
+# an identifier, where neither pattern above can see it. Real models reach this
+# -- transformers' Qwen2 installs three -- and the report then differs run to
+# run, which is exactly what the "commit and diff" contract rules out.
+_DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
+
+
+def _normalize(text: str) -> str:
+    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)  # see _saved_hooks_fingerprint
+    text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
+    return _DYNAMO_COUNTER.sub(r"\1_<n>", text)
+
+
+def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
+    # Keep the _dynamo_*_indices parts: they carry TENSOR_MATCH's dimension
+    # marking, so mark_static on one variant and not the next shows up only here.
+    return tuple(_normalize(part) for part in (code_list or ()))
+
+
 # Guards whose check IS object identity, directly or through a derived guard,
 # which is the same test default_guard_filter_fn drops on.
 _IDENTITY_GUARD_TYPES = frozenset(
@@ -776,3 +812,7 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
         "WEAKREF_ALIVE",
     }
 )
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
