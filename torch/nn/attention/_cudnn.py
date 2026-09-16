@@ -27,6 +27,7 @@ import importlib
 import importlib.util
 
 from . import _registry
+from ._registry import FlashAttentionHandle as _ProviderHandle
 
 
 __all__ = [
@@ -37,7 +38,7 @@ __all__ = [
 _CUDNN_MODULE_PATH = "cudnn.torch"
 
 # The provider's handle while its kernels are installed; None when they are not.
-_ACTIVE_HANDLE: _registry.FlashAttentionHandle | None = None
+_ACTIVE_HANDLE: _ProviderHandle | None = None
 
 # The provider's own register_fn, captured on first import. Held here so both
 # entry points install through this module rather than one of them calling the
@@ -62,23 +63,23 @@ def is_enabled() -> bool:
     return _ACTIVE_HANDLE is not None
 
 
-def enable(module_path: str = _CUDNN_MODULE_PATH) -> _registry.FlashAttentionHandle:
+def enable(module_path: str = _CUDNN_MODULE_PATH) -> None:
     """Install the provider's kernels over the cuDNN SDPA ops.
 
-    Idempotent: a second call returns the handle from the first rather than
-    installing twice, so the registry route and the ``torch.backends.cuda``
-    route cannot get out of step with each other.
+    Idempotent: a second call is a no-op rather than a second install, so the
+    registry route and the ``torch.backends.cuda`` route cannot get out of step
+    with each other. Use :func:`disable` to undo -- the handle is held here
+    rather than handed out, so there is one owner of the installed state.
     """
     global _ACTIVE_HANDLE
 
     if _ACTIVE_HANDLE is not None:
-        return _ACTIVE_HANDLE
+        return
 
     if _PROVIDER_REGISTER_FN is None:
         _capture_provider(module_path)
 
     _ACTIVE_HANDLE = _PROVIDER_REGISTER_FN()
-    return _ACTIVE_HANDLE
 
 
 def _capture_provider(module_path: str) -> None:
