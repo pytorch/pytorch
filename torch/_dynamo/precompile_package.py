@@ -119,6 +119,8 @@ capture block.
 from __future__ import annotations
 
 import collections
+import contextlib
+import contextvars
 import functools
 import hashlib
 import importlib.machinery
@@ -129,9 +131,10 @@ import site
 import sys
 import sysconfig
 import types
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
+import torch._functorch.config as functorch_config
 from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import (
     FrameInvariants,
@@ -145,7 +148,7 @@ from .source import AttrSource, DictGetItemSource, GlobalSource
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from .package import _DynamoCacheEntry
     from .types import GuardFilterEntry
@@ -160,6 +163,65 @@ __all__ = [
     "FrameInvariants",
     "PrecompileSummary",
 ]
+
+
+# Depth per context so overlapping sessions on one thread patch once and
+# restore once; a worker thread starts at zero and patches for itself.
+_CAPTURE_CONFIG_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "_CAPTURE_CONFIG_DEPTH", default=0
+)
+_CAPTURE_CONFIG_STACK: contextvars.ContextVar[contextlib.ExitStack | None] = (
+    contextvars.ContextVar("_CAPTURE_CONFIG_STACK", default=None)
+)
+
+
+@contextlib.contextmanager
+def _capture_config(training: bool) -> Iterator[None]:
+    # Backends serialize into the artifact rather than the process-local
+    # inductor cache. AOTAutograd lowers the backward lazily on the first
+    # .backward(), so a training capture that never makes one forces it eager.
+    depth = _CAPTURE_CONFIG_DEPTH.get()
+    if depth == 0:
+        functorch_patch: dict[str, Any] = {
+            "bundled_autograd_cache": True,
+            # AOTAutogradCache refuses to KEY a graph it cannot address soundly
+            # -- a graph calling anything outside its allowlist -- and a refusal
+            # means it never saves, so the bundled artifact precompile needs is
+            # never recorded and the capture ends with nothing to serialize.
+            # That gate asks whether the key tells this graph's behaviour apart
+            # from another's, which a precompile artifact does not depend on: it
+            # is addressed by backend id and pinned to one torch build, so fall
+            # back to a nonce key rather than declining, as
+            # torch._dynamo.aot_compile and aot_compile_joint_with_descriptors
+            # already do.
+            "bypass_autograd_cache_key": True,
+        }
+        if training:
+            functorch_patch["force_non_lazy_backward_lowering"] = True
+        stack = contextlib.ExitStack()
+        stack.enter_context(functorch_config.patch(functorch_patch))
+        # allow_empty_graphs keeps an empty graph as a compiled frame so its
+        # guards reach the artifact. It also extends the lifetime of objects the
+        # frame holds: with it on, a weakref callback on a value the frame
+        # captured does not fire when the caller drops its reference
+        # (test/dynamo/test_repros.py ReproTests.test_weakref_callback).
+        try:
+            stack.enter_context(torch._dynamo.config.patch(allow_empty_graphs=True))
+        except BaseException:
+            stack.close()
+            raise
+        _CAPTURE_CONFIG_STACK.set(stack)
+    _CAPTURE_CONFIG_DEPTH.set(depth + 1)
+    try:
+        yield
+    finally:
+        remaining = _CAPTURE_CONFIG_DEPTH.get() - 1
+        _CAPTURE_CONFIG_DEPTH.set(remaining)
+        if remaining == 0:
+            stack = _CAPTURE_CONFIG_STACK.get()
+            _CAPTURE_CONFIG_STACK.set(None)
+            if stack is not None:
+                stack.close()
 
 
 def _compose_with_default(
