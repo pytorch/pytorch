@@ -1,14 +1,25 @@
 """
 Ahead-of-time precompilation of a callable into MANY graphs: the multi-graph
 counterpart of ``torch.compile(fn, fullgraph=True).aot_compile(...)``. Every
-frame Dynamo produces while the caller's calls run -- the entry
-frame, each ``torch_dynamo_resume_in_*`` continuation created by a graph break,
-and every recompiled variant of each -- is captured into one serializable
-artifact on top of CompilePackage.
+frame Dynamo produces while the caller's calls run -- the entry frame, each
+``torch_dynamo_resume_in_*`` continuation created by a graph break, and every
+recompiled variant of each -- is captured into one serializable artifact whose
+frames are stored through CompilePackage (``torch/_dynamo/package.py``), a
+low-level component that is not meant to be used directly.
 
-Everything here is internal; the capture session and the
-``torch.compiler.precompile.capture`` / ``accumulate`` / ``load`` entry points
-that build on it follow in later commits. This is distinct from
+Everything here is internal, and the module fills in over several commits: the
+guard filter the serialized copy is written under (``default_guard_filter_fn``)
+comes first, then the lint over the guards it drops (``_is_risky_drop``), the
+guard-type classification and fingerprints behind the ``PrecompileSummary``
+report, the per-frame comparison of captured variants and the summary builder
+(``_varying_guard_slots``, ``_summarize``), and the compiler configuration a
+capture runs under (``_capture_config``). The capture session that calls them
+-- the ``torch.compiler.precompile.capture`` / ``accumulate`` / ``load`` entry
+points, its ``guard_filter_fn`` and ``require_no_dropped_guards`` options and
+the runnable ``load`` returns -- is a follow-up, so until it lands nothing
+under ``torch/`` calls into this module; the module docstring of
+``torch/_precompile.py``, rewritten at the top of this stack, carries the
+caller-facing usage. This is distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture.
 
@@ -16,88 +27,75 @@ Capture is by execution, and the caller drives it: the session hands back a
 callable, the caller invokes it with real inputs inside their own loop, and
 every frame Dynamo produces is recorded. Runtime guards stay intact during
 capture, so later calls trigger the same recompilations as ordinary
-``torch.compile``; ``guard_filter_fn`` applies only to the serialized copy, and
-every dropped guard is reported in ``PrecompileSummary.dropped_guards``.
-
-    with torch.compiler.precompile.capture(
-        step, artifact_path="m.py", cache_path="m.cache", backend="inductor"
-    ) as cap:
-        y1 = cap(model, x1)  # runs step(model, x1), returns its result
-        y2 = cap(model, x2)  # exercises another variant
-
-    # later, in a fresh process
-    compiled = torch.compiler.precompile.load("m.py", "m.cache")
-    with compiled, torch.no_grad():
-        compiled(model, x1)
-
-``precompile.accumulate`` is the same model, rewriting the artifact on every
-call instead of once at block exit.
+``torch.compile``: the session's ``guard_filter_fn`` applies only to the
+serialized copy, unlike ``torch.compile``'s option of the same name, which
+removes a rejected guard from the runtime check as well
+(``CheckFunctionManager.__init__`` builds the runtime guards from the filtered
+list). Every dropped guard is reported in ``PrecompileSummary.dropped_guards``.
 
 If serialization drops a configuration-dependent guard, the artifact is refused
 by default rather than written with variants whose dispatch would be ambiguous
-after load. ``invariants`` writes a readable report
-that separates, per frame, the guards holding in EVERY variant from the ones
-that differed: the first are preconditions the artifact is only valid under,
-the second are what tell its graphs apart. Guards from different frames are not
+after load. Which drops those are is decided per frame, by comparing the guards
+of every captured variant of one frame: a guard that held identically in every
+variant is a precondition the artifact is only valid under, one that differed
+is what tells its graphs apart. Guards from different frames are not
 comparable -- an entry frame guards its arguments, a resume frame guards
-whatever crossed the break -- so the intersection is per frame.
+whatever crossed the break -- so the comparison never crosses frames.
 
 Because capture is by execution, a resume function only exists once the frame
 ahead of it has actually run, so every variant must be exercised. Whatever you
-do not run is not in the artifact, and ``summary().complete`` means complete
-only for the observed capture, not for every possible input to the callable. A
-captured call that raises marks the session incomplete even if caller code
-catches it.
+do not run is not in the artifact, and ``PrecompileSummary.complete`` means
+complete only for the observed capture, not for every possible input to the
+callable. A captured call that raises marks the session incomplete even if
+caller code catches it.
 
 Know these before relying on an artifact in production:
 
 * Calls run with the grad mode the caller sets; capture forces neither
   ``no_grad()`` nor ``enable_grad()``. For an inference artifact run the calls
-  under ``torch.no_grad()``. For a training artifact pass ``training=True``,
-  which lowers the backward eagerly so the artifact carries one and a served
-  output can be backpropagated -- without it, AOTAutograd defers the backward
-  to the first ``.backward()`` call, so a grad-enabled capture that never makes
-  one records no backends and cannot be written. No loss is needed: the joint
-  trace synthesizes tangents from the forward outputs' own metadata.
+  under ``torch.no_grad()``. For a training artifact capture with
+  ``training=True`` (see ``_capture_config``), which lowers the backward
+  eagerly so the artifact carries one and a served output can be
+  backpropagated -- without it, AOTAutograd defers the backward to the first
+  ``.backward()`` call, so a grad-enabled capture that never makes one records
+  no backends and cannot be written. No loss is needed: the joint trace
+  synthesizes tangents from the forward outputs' own metadata.
 * A non-tensor argument, and any value that crosses a graph break, is guarded
   by equality, so an int/bool/str argument or a break coming from ``.item()``
   yields an artifact that only serves calls reproducing those exact values.
-  ``summary().wont_generalize`` lists them; exercise every value you need to
-  serve with a ``cap(...)`` call, or expect poor coverage on new data.
+  ``PrecompileSummary.wont_generalize`` lists them; exercise every value you
+  need to serve with a captured call, or expect poor coverage on new data.
   ``dynamic=True`` helps with shapes but not with pinned values.
-* Identity guards cannot be serialized, so precompiling gives up on noticing
-  that a guarded object was rebound. ``summary().dropped_guards`` is the
-  authoritative list. ``summary().risky_dropped_guards`` includes every drop
-  observed to distinguish captured variants plus a lint for configuration-like
-  sources; it is still not a proof for unobserved deployments. See
-  ``_is_risky_drop``. The public ``torch.compiler.precompile`` facade rejects
-  the RISKY subset by default. Refusing every drop is opt-in: every model drops
-  the identity guards precompile cannot serialize, so
+* Identity guards (and the dict-version and weakref-liveness guards) cannot be
+  serialized, so precompiling gives up on noticing that a guarded object was
+  rebound, mutated or collected. ``PrecompileSummary.dropped_guards`` is the
+  authoritative list. ``PrecompileSummary.risky_dropped_guards`` includes
+  every drop observed to distinguish captured variants plus a lint for
+  configuration-like sources (``_is_risky_drop``); it is still not a proof for
+  unobserved deployments. The follow-up's public ``torch.compiler.precompile``
+  facade rejects the RISKY subset by default. Refusing every drop is opt-in: every
+  model drops the identity guards precompile cannot serialize, so
   ``require_no_dropped_guards=True`` refuses essentially every real artifact.
   Some models trip the lint on library internals. Measured on stock models
-  when this was written, torchvision resnet18 and
-  mobilenet_v3 report none, timm's ViT reports one (a re-exported
-  ``torch._assert``) and transformers' Qwen2 reports 33 built from a two-layer
-  config, 55 for the pretrained 24-layer, of which only the
-  attention-implementation registry looks genuinely config-selected. Report
-  counts are per model, not per library: torchvision's efficientnet_b0 reports
-  2 and timm's swin reports 5, one of which is a real config slot. Audit the
-  list before relying on the relaxed dropped-guard default, and before
-  relaxing the risky-drop rail on top of it.
+  when this was written, torchvision resnet18 and mobilenet_v3 report none,
+  timm's ViT reports one (a re-exported ``torch._assert``) and transformers'
+  Qwen2 reports 33 built from a two-layer config, 55 for the pretrained
+  24-layer, of which only the attention-implementation registry looks genuinely
+  config-selected. Report counts are per model, not per library: torchvision's
+  efficientnet_b0 reports 2 and timm's swin reports 5, one of which is a real
+  config slot. Audit the list before relying on the relaxed dropped-guard
+  default, and before relaxing the risky-drop rail on top of it.
 * Some models do not capture yet. For example, T5 raises ``PackageError: Cannot
-  find module for code <code object __init__`` from ``_get_code_source``, which
-  is byte-identical to base and which plain ``caching_precompile`` also raises.
+  find module for code <code object __init__`` from ``_get_code_source`` in
+  ``torch/_dynamo/package.py``, which plain ``caching_precompile`` also raises.
 * The model must live in an importable module. Source is checksummed, so a
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
-* ``install()`` writes compiled and resume functions into module globals, but
-  guarded dispatch is scoped to the isolated compile region owned by the
-  returned callable. Call the returned object rather than another instance of
-  the same class. Multiple loaded artifacts can share entry, inner, and resume
-  code objects without taking each other's entries; ``unload()`` removes only
-  its own region and the globals it still owns.
-
-This wraps CompilePackage, which is the low-level component and is not meant to
-be used directly.
+* ``CompilePackage.install()`` writes compiled and resume functions into module
+  globals, but guarded dispatch is scoped to the isolated compile region owned
+  by the runnable ``load`` returns. Call that runnable rather than another
+  instance of the same class. Multiple loaded artifacts can share entry, inner,
+  and resume code objects without taking each other's entries; the runnable's
+  ``unload()`` removes only its own region and the globals it still owns.
 """
 
 from __future__ import annotations
@@ -129,7 +127,7 @@ from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Callable, Iterator, Mapping, Sequence
+    from collections.abc import Iterator, Mapping, Sequence
 
     from torch.compiler._precompile_types import GuardFact as _GuardFact
 
@@ -229,68 +227,44 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
             revert()
 
 
-def _compose_with_default(
-    user: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]],
-) -> Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]:
-    """AND a caller's filter with the default rather than replacing it.
-
-    ``default_guard_filter_fn`` is not a default in the "sensible starting point"
-    sense -- it is what drops the identity guards that CANNOT be serialized at
-    all. Replacing it means a caller who wanted to drop three of their own guards
-    silently re-admits every unserializable one, and the failure surfaces as
-    "ID_MATCH guard cannot be serialized" in frames that have nothing to do with
-    their filter. A custom filter can only ever want to drop MORE, so composing
-    is the only reading that makes sense.
-    """
-
-    def composed(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
-        chosen = user(entries)
-        if len(chosen) != len(entries):
-            raise ValueError(
-                f"guard_filter_fn returned {len(chosen)} decisions for "
-                f"{len(entries)} guards; it must return one per entry."
-            )
-        base = default_guard_filter_fn(entries)
-        return [bool(a) and bool(b) for a, b in zip(base, chosen)]
-
-    return composed
-
-
-def default_guard_filter_fn(
-    guard_entries: Sequence[GuardFilterEntry],
-) -> Sequence[bool]:
+def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[bool]:
     """
     Drop every guard whose type, or whose derived type, is one the serializer
     refuses, and keep everything else.
 
     Read this before trusting an artifact. The refused set is the IDENTITY
     guards -- ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH, NN_MODULE,
-    CLASS_MATCH, DICT_VERSION, WEAKREF_ALIVE -- so precompiling inherently gives
-    up on noticing that a guarded object was REBOUND to a different object of
-    the same shape. Most such guards are on modules and builtins and are stable
+    CLASS_MATCH -- plus DICT_VERSION (dict mutation) and WEAKREF_ALIVE
+    (liveness), so precompiling inherently gives up on noticing that a guarded
+    object was REBOUND to a different object of the same shape, MUTATED or
+    COLLECTED. Most such guards are on modules and builtins and are stable
     in practice, but one on a global holding a function is not: rebind it
     between capture and load and the artifact serves the graph traced against
-    the old one, with no error.
+    the old one, with no error. Keeping them instead makes serialization raise
+    for essentially every function, so every drop is recorded with its source
+    name in ``PrecompileSummary.dropped_guards`` and the only rail on by default
+    is the module's risky-drop lint over them; a lint is not a proof.
 
     This is not exactly ``CheckFunctionManager.serialize_guards``'s test. It is
-    stricter in one direction: the serializer accepts a TYPE_MATCH or
-    BUILTIN_MATCH whatever its derived types, so the BUILTIN_MATCH whose
-    derived ID_MATCH this drops would have serialized. It is looser in the
-    other: a TYPE_MATCH on a local-scope class passes here and the serializer
-    still refuses it, because the type cannot be pickled.
-
-    Keeping the identity guards makes serialization raise for essentially every
-    function, so every drop is recorded with its source name in
-    ``PrecompileSummary.dropped_guards``. A caller is not refused for having
-    them, because requiring none would refuse essentially every model. The rail
-    that is on is the risky-drop lint, and a lint is not a proof. See
-    ``_is_risky_drop``.
+    stricter in one direction: ``GuardBuilder.BUILTIN_MATCH`` is an
+    ``id_match_unchecked`` that records ID_MATCH as its derived type, so this
+    drops EVERY builtin guard (``len``, ``isinstance``, ``torch.relu`` and the
+    like) although the serializer accepts a TYPE_MATCH or BUILTIN_MATCH whatever
+    its derived types; a builtin rebound between capture and load is therefore
+    never detected either. It is looser in the other: a TYPE_MATCH on a
+    local-scope class passes here and the serializer still refuses it, because
+    the type cannot be pickled. ``CheckFunctionManager.__init__`` applies the
+    same idea inline under ``torch._dynamo.config.caching_precompile`` (drop
+    ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE, DICT_VERSION and anything deriving
+    ID_MATCH or DICT_VERSION); this set is the serializer's full refusal list,
+    so it also drops NN_MODULE, FUNCTION_MATCH, CLASS_MATCH and MODULE_MATCH and
+    anything deriving them.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
         g.guard_type not in unsupported
         and not any(d in unsupported for d in g.derived_guard_types)
-        for g in guard_entries
+        for g in entries
     ]
 
 
@@ -305,11 +279,14 @@ def _source_root(source: Source) -> Source:
     return source.get_base() if isinstance(source, ChainedSource) else source
 
 
-# Locals Dynamo synthesizes when a resume function is itself nested, passed
-# positionally into the continuation (resume_execution.py builds the list).
-# They name generated code, not a slot any config chooses, so an identity guard
-# lost on one cannot diverge.
-_DYNAMO_SYNTHESIZED = ("__nested_resume_fns", "__nested_frame_values")
+# The list of Dynamo-generated resume functions a nested resume function takes
+# as its first parameter (resume_execution.py and comprehension_graph_break.py
+# mint the name; codegen_call_resume in symbolic_convert.py builds the list). Its
+# entries are generated code, not a slot any config chooses, so an identity
+# guard lost on one cannot diverge. Its sibling __nested_frame_values is NOT
+# here: it carries the enclosing frames' live locals, so a guard rooted there
+# is judged like the local it stands for.
+_DYNAMO_SYNTHESIZED = ("__nested_resume_fns",)
 
 
 def _is_dynamo_synthesized(source: Source) -> bool:
@@ -359,18 +336,17 @@ def _install_roots() -> tuple[str, ...]:
     paths = sysconfig.get_paths()
     roots = [p for p in (paths.get("purelib"), paths.get("platlib")) if p]
     for name in ("getsitepackages", "getusersitepackages"):
-        # getattr, not a direct reference: the "old virtualenv site.py" this
-        # guards against does not DEFINE these, so naming them here would raise
-        # the very AttributeError the except is for -- out of a lint, aborting
-        # the capture it was asked to check.
-        get = getattr(site, name, None)
         try:
-            got = get() if get is not None else None
+            got = getattr(site, name)()
             found = [got] if isinstance(got, str) else list(got or ())
         except Exception:
-            continue  # -S, or a site.py that defines it but cannot answer
+            continue  # an old-virtualenv site.py lacks it, or it cannot answer
         roots += [p for p in found if isinstance(p, str)]
-    return tuple(sorted({_norm(p) for p in roots}))
+    # On Windows getsitepackages() lists the bare prefix, which the whole stdlib
+    # sits under; a directory the stdlib lives under is not an install root.
+    stdlib = _stdlib_roots()
+    normed = {_norm(p) for p in roots}
+    return tuple(sorted(r for r in normed if not any(_within(s, (r,)) for s in stdlib)))
 
 
 @functools.cache
@@ -495,17 +471,19 @@ def _is_library_module(module_name: str | None) -> bool:
 
 
 def _defined_where_read(
-    value: object, user_stack: traceback.StackSummary | None
+    value: object, bound_name: str, user_stack: traceback.StackSummary | None
 ) -> bool:
     """
-    Whether the def lives in the file of the frame that read it.
+    Whether ``bound_name`` is a def of that name living in the file that read it.
 
-    The caller has already matched the value's ``__name__`` to the global it
-    was read from; this adds the WHERE. A def bound to its own name in its OWN
-    module takes an edit there to repoint. ``from impl_a import op`` takes only
-    a conditional import in the reader, which is not an edit at all and which
-    no checksum covers.
+    A def bound to its own name in its OWN module takes an edit there to
+    repoint. ``from impl_a import op`` takes only a conditional import in the
+    reader, which is not an edit at all and which no checksum covers, and
+    ``act = _impl_a if cfg.fast else _impl_b`` in the reading file is a slot
+    however close to home the def is.
     """
+    if getattr(value, "__name__", None) != bound_name:
+        return False
     home = sys.modules.get(_owning_module(value) or "")
     file = getattr(home, "__file__", None)
     if not user_stack or not isinstance(file, str):
@@ -515,7 +493,9 @@ def _defined_where_read(
 
 def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
     """
-    The module behind an ``__import_a_dot_b`` alias, mirroring import_source.
+    The module behind an ``__import_a_dot_b`` alias, mirroring the ordinary
+    branch of import_source; a torch_package module is aliased without the
+    prefix and comes back None here, which fails closed.
 
     The OutputGraph's import_sources table is authoritative, but a guard entry
     does not carry it; unmangling collides only for a module literally named
@@ -709,6 +689,7 @@ def _is_risky_drop(
     """
     source = entry.orig_guard.originating_source
     value = entry.value
+    stack = entry.orig_guard.user_stack
     if _is_dynamo_synthesized(source):
         return False
     if source.name in namespaces:
@@ -733,7 +714,7 @@ def _is_risky_drop(
     ):
         return not (
             _is_library_module(_owning_module(value))
-            or _defined_where_read(value, entry.orig_guard.user_stack)
+            or _defined_where_read(value, source.global_name, stack)
         )
     return True
 
@@ -1279,7 +1260,7 @@ def _summarize(
         dropped_guards=tuple(sorted(dropped)),
         dropped_guard_code=tuple(
             (gtype, name, dropped_code[(gtype, name)])
-            for gtype, name in sorted(dropped | policy_dropped | risky)
+            for gtype, name in sorted(dropped | policy_dropped)
             if (gtype, name) in dropped_code
         ),
         kept_guards=tuple(sorted(kept)),
