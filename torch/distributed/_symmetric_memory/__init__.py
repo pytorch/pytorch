@@ -2376,10 +2376,10 @@ def get_signal_pad_size() -> int:
 
 
 # An internal map from device to the symmetric memory pool for that device.
-_symm_mem_pools: dict[_device, Any] = {}
+_symm_mem_pools: dict[_device, torch.cuda.MemPool | torch.xpu.MemPool] = {}
 
 
-def get_mem_pool(device: _device) -> Any:
+def get_mem_pool(device: _device) -> torch.cuda.MemPool | torch.xpu.MemPool:
     """
     Get the symmetric memory pool for a given device. If not found, create a new
     pool.
