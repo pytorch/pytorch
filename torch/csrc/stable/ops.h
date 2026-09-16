@@ -1330,6 +1330,27 @@ inline bool is_pinned(const torch::stable::Tensor& self) {
   return torch::stable::detail::to<bool>(stack[0]);
 }
 
+/// Stable version of the masked_select op.
+///
+/// Returns a 1-D tensor of the elements of self where mask is true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param mask A boolean tensor broadcastable with self.
+/// @return A 1-D tensor of the selected elements.
+inline torch::stable::Tensor masked_select(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mask) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(mask)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::masked_select", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)
