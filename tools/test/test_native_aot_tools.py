@@ -3066,7 +3066,7 @@ class TestShouldRun(unittest.TestCase):
         self.assertFalse(self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "7.5;8.0"}))
 
     def test_multi_exportable_arch_runs(self):
-        # The real list: .ci/manywheel builds x86_64 CUDA 13.x with these, and they
+        # The real list: .ci/wheel/linux builds x86_64 CUDA 13.x with these, and they
         # resolve to two capabilities, so every release wheel takes this path.
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
