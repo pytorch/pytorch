@@ -616,7 +616,9 @@ class SelfModeBranchGlobalModule(torch.nn.Module):
     # The same branch on an attribute rather than an argument: the guard on
     # self.mode is a LOCAL_UNSPECIALIZED_NN_MODULE source, which sorts after
     # GLOBAL, so the root's G accessor is installed -- and fails -- before the
-    # self.mode guard (the L['x'] TENSOR_MATCH, a LOCAL, comes before both).
+    # self.mode guard (the L['x'] TENSOR_MATCH, a LOCAL, comes before both), and
+    # check_verbose quotes only the first failing accessor's parts, so the
+    # self.mode mismatch is invisible to a report on the missing global.
     def __init__(self, mode):
         super().__init__()
         self.mode = mode
@@ -2387,14 +2389,16 @@ from user code:
         counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
         with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
+            self.assertEqual(binds, [results[0]])
+            binds.clear()
             with self.assertRaises(RuntimeError) as ctx:
                 model(torch.ones(3, 3, dtype=torch.float16))
         message = str(ctx.exception)
         served.assert_called_once()
-        # One bind for the matched call and one for the call nothing matched, and
-        # one entry per result off that second bind, whatever else the report
-        # carries.
-        self.assertEqual(binds, [results[0], results[0]])
+        # One bind for the call nothing matched as well, counted apart from the
+        # matched call's, and one entry per result off that bind, whatever else
+        # the report carries.
+        self.assertEqual(binds, [results[0]])
         lines = message.splitlines()
         self.assertEqual(sum(line.startswith("  [") for line in lines), len(xs))
         self.assertIn("Add a ModelInput", message)
@@ -2673,15 +2677,13 @@ from user code:
         self._rescued_by_the_recheck(model, x)
 
     @parametrize("leading_opt_outs", [0, 1, 2])
-    def test_module_dispatch_no_match_falls_through_to_the_first_result(
+    def test_module_dispatch_no_match_raises_unless_a_result_opted_out(
         self, leading_opt_outs
     ):
-        # Nothing mocked: a call neither result guards is handed to
-        # compiled_results[0], which raises unless it opted out, in which case
-        # its graph runs; opting [1] out as well changes nothing. The graphs
-        # differ (x * 2 and x * 3), so the number says which result answered.
-        # The fourth row, [1] opted out alone, raises here like the first and
-        # is pinned by the commit that changes it.
+        # Nothing mocked: a call neither result guards raises the no-match
+        # report, and is handed to no result; with [0] opted out its graph runs
+        # instead, and opting [1] out as well changes nothing. The graphs differ
+        # (x * 2 and x * 3), so the number says which result answered.
         model, x = self._aot_compile_mode_branches()
         for result in model.forward.compiled_results[:leading_opt_outs]:
             result.disable_guard_check()
@@ -3031,9 +3033,10 @@ from user code:
             message = str(ctx.exception)
             self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
             self.assertIn(
-                "this HermeticModule instance's forward resolves to, seen through any "
-                "Dynamo wrapper to the function it wraps, since that is the one the "
-                "load resolved",
+                "this HermeticModule instance's forward resolves to, seen through the "
+                "wrappers torch.compile and torch._dynamo.disable return and through "
+                "any functools.wraps'd torch._dynamo.external_utils function to the "
+                "function they wrap, since that is the one the load resolved",
                 message,
             )
             wrapper_globals["AOT_HERMETIC_WEIGHT"] = saved
@@ -3112,15 +3115,14 @@ from user code:
         named = "this GlobalConfigModule instance's forward resolves to"
         neutral = "the live scope this artifact was loaded against; define it there"
         pair = by_forward.compiled_results[:1] + by_caller.compiled_results[:1]
-        resolve = patch(
-            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
-        )
+        target = "torch._dynamo.aot_compile._resolve_guard_scope"
         cases = ((pair, [named, neutral]), (pair[::-1], [neutral, named]))
         for results, wording in cases:
             mixed = AOTCompiledModel(GlobalConfigModule(), results)
+            resolve = patch(target, wraps=_resolve_guard_scope)
             with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
                 mixed(x)
-            resolves.assert_called_once()
+            resolves.assert_called_once_with(mixed.model)
             message = str(ctx.exception)
             self.assertIn("[0] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
             self.assertIn("[1] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
@@ -4035,15 +4037,16 @@ from user code:
             "\n".join(logs.output),
         )
 
-    def test_aot_compile_module_fallback_names_a_targetless_dynamo_wrapper(self):
+    def test_aot_compile_module_deserialize_refuses_a_targetless_dynamo_wrapper(
+        self,
+    ):
         # error_on_graph_break, patch_dynamo_config and disable_nested_graph_breaks
         # bind through wrap_dunder_call_ctx_manager, whose inner deliberately
-        # skips functools.wraps: a plain function get_traced_fn does resolve, in
-        # external_utils' namespace, with no __wrapped__ to follow to the forward
-        # it wraps. Falling back is right; the reason has to name this shape and
-        # model.forward as given, not the cannot-resolve one over the unwrapped
-        # function, and external_utils' namespace, the one a resolution would
-        # have seeded, gains nothing.
+        # skips functools.wraps: a plain function owning external_utils' dict
+        # with no __wrapped__ to follow to the forward it wraps. The hop stops on
+        # it and the namespace test refuses it as it refuses any external_utils
+        # function bound as forward, with the reason it gave before the hop
+        # existed, and external_utils' namespace gains nothing.
         mod = GlobalConfigModule()
         mod.forward = torch._dynamo.error_on_graph_break(True)(mod.forward)
         self.assertIs(mod.forward.__globals__, vars(torch._dynamo.external_utils))
@@ -4052,46 +4055,33 @@ from user code:
             mod,
             torch._dynamo.external_utils,
             "GlobalConfigModule.forward (function named "
-            "wrap_dunder_call_ctx_manager.<locals>.inner) is a Dynamo wrapper "
-            "without a resolvable target, a torch._dynamo.external_utils function "
-            "carrying no __wrapped__; bind the forward it wraps as model.forward "
-            "instead",
+            "wrap_dunder_call_ctx_manager.<locals>.inner) resolves to "
+            "wrap_dunder_call_ctx_manager.<locals>.inner, whose globals are "
+            "torch._dynamo.external_utils's namespace, a torch module a load "
+            "neither roots guards in nor seeds; bind the module's own forward, "
+            "defined outside torch, as model.forward instead",
         )
 
     def test_aot_compile_module_fallback_names_a_compiled_partial_forward(self):
         # torch.compile over a partial wraps it in wrap_inline (no source file,
-        # not a function), so the unwrap follows __wrapped__ onto the partial
-        # and get_traced_fn fails THERE. Falling back is right (before the
-        # unwrap this shape resolved eval_frame's dict and the torch-namespace
-        # rule refused it); the reason has to say what the wrapper reached, not
-        # tell the user to make model.forward a plain function -- the
-        # compile_wrapper already is one.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
+        # not a function), so the hop follows __wrapped__ onto the partial and
+        # get_traced_fn fails THERE. Falling back is right (before the hop this
+        # shape resolved eval_frame's dict and the torch-namespace rule refused
+        # it); the reason has to say what the wrapper reached, not tell the user
+        # to make model.forward a plain function -- the compile_wrapper already
+        # is one -- and eval_frame's namespace gains nothing.
         mod = GlobalConfigModule()
         mod.forward = torch.compile(
             functools.partial(GlobalConfigModule.forward, mod), backend="eager"
         )
-        eval_frame_globals = vars(torch._dynamo.eval_frame)
-        preexisting = frozenset(eval_frame_globals)
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            compiled = AOTCompiledModel.deserialize(mod, data)
-        for result in compiled.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-        reason = (
+        self._assert_forward_refused(
+            mod,
+            torch._dynamo.eval_frame,
             "GlobalConfigModule.forward (function named wrap_inline.<locals>.inner) "
             "resolves through a Dynamo wrapper to an instance of partial, which "
-            "get_traced_fn cannot resolve to a Python function"
+            "get_traced_fn cannot resolve to a Python function; bind a plain "
+            "function or bound method as model.forward instead",
         )
-        self.assertIn(reason, "\n".join(logs.output))
-        with self.assertRaises(RuntimeError) as ctx:
-            compiled(x)
-        message = str(ctx.exception)
-        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
-        self.assertIn(f"rebuilt because {reason}", message)
-        self.assertIn("bind a plain function or bound method as model.forward", message)
-        self.assertNotIn("so its own globals are used", message)
-        self.assertEqual({k for k in eval_frame_globals if k not in preexisting}, set())
 
     def test_aot_compile_module_fallback_names_a_compiled_builtin_forward(self):
         # torch.compile over a C-implemented bound method (a tensor's sum) wraps
@@ -4101,29 +4091,20 @@ from user code:
         # the wrapper reached all the same; only the un-hopped builtin, bound as
         # forward directly, is the shape get_traced_fn cannot resolve as given.
         x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
         mod = GlobalConfigModule()
         mod.forward = torch.compile(x.sum, backend="eager")
         resolved = torch._dynamo.eval_frame.innermost_fn(mod.forward).__wrapped__
         self.assertEqual(type(resolved).__name__, "builtin_function_or_method")
         with self.assertRaises(AttributeError):
             torch._dynamo.convert_frame.get_traced_fn(resolved)
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            compiled = AOTCompiledModel.deserialize(mod, data)
-        for result in compiled.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-        reason = (
+        self._assert_forward_refused(
+            mod,
+            torch._dynamo.eval_frame,
             "GlobalConfigModule.forward (function named Tensor.sum) resolves "
             "through a Dynamo wrapper to an instance of builtin_function_or_method, "
-            "which get_traced_fn cannot resolve to a Python function"
+            "which get_traced_fn cannot resolve to a Python function; bind a plain "
+            "function or bound method as model.forward instead",
         )
-        self.assertIn(reason, "\n".join(logs.output))
-        with self.assertRaises(RuntimeError) as ctx:
-            compiled(x)
-        message = str(ctx.exception)
-        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
-        self.assertIn(f"rebuilt because {reason}", message)
-        self.assertNotIn("so its own globals are used", message)
         mod.forward = x.sum
         scope, reason = _resolve_guard_scope(mod)
         self.assertIsNone(scope)
@@ -5442,8 +5423,10 @@ from user code:
         # the non-recursive one external_utils' get_nonrecursive_disable_wrapper.
         # Neither namespace is the scope, the bound method they wrap is. The
         # non-recursive wrapper also satisfies the __wrapped__ hop's predicate,
-        # so the innermost_fn assertion is what pins that innermost_fn alone,
-        # not the hop, reaches the bound method.
+        # so recursive_False is served by either mechanism and only
+        # recursive_True catches a load that drops innermost_fn; the
+        # innermost_fn assertion records which mechanism reaches the bound
+        # method first, not which one the load needed.
         x = torch.randn(4, 8)
         data = self._two_input_global_guard_artifact(x)
         mod = GlobalConfigModule()
