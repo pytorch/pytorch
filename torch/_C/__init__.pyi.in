@@ -273,6 +273,7 @@ class _FunctionBase:
     _raw_saved_tensors: tuple[Any]
     next_functions: tuple[tuple[Any, _int], ...]
     needs_input_grad: tuple[_bool]
+    _input_grad_buffers: tuple[Tensor | None, ...]
     metadata: dict
     _materialize_non_diff_grads: _bool
     # skip adding type hints for the fields that have wrappers defined
