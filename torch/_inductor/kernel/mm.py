@@ -28,7 +28,15 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import Buffer, ChoiceCaller, IRNode, is_triton, is_unaligned, Layout
+from ..ir import (
+    Buffer,
+    ChoiceCaller,
+    FallbackKernel,
+    IRNode,
+    is_triton,
+    is_unaligned,
+    Layout,
+)
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
     fallback_handler,
@@ -185,6 +193,48 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
 
 aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
+
+
+def scaled_mm_v2_choice(
+    mat_a,
+    mat_b,
+    scale_a,
+    scale_b,
+    bias=None,
+    *,
+    recipe_a,
+    recipe_b,
+    out_dtype,
+    use_fast_accum,
+    kernel=aten._scaled_mm_v2.out,
+    **kwargs,
+):
+    """Restore v2's tensor-list schema from flat autotuning inputs."""
+    return kernel(
+        mat_a,
+        mat_b,
+        [scale_a],
+        [recipe_a],
+        [0],
+        [scale_b],
+        [recipe_b],
+        [0],
+        bias,
+        out_dtype,
+        [],
+        use_fast_accum,
+        **kwargs,
+    )
+
+
+aten__fp8_mm_v2 = ExternKernelChoice(
+    scaled_mm_v2_choice,
+    name="_scaled_mm_v2",
+    kernel_creator=functools.partial(
+        scaled_mm_v2_choice,
+        kernel=functools.partial(FallbackKernel.create, aten._scaled_mm_v2.default),
+    ),
 )
 
 
@@ -1276,8 +1326,7 @@ def tuned_scaled_mm_v2(
     #     expresses MX/NVFP4, with NO_SWIZZLE)
     #   - multi-level scales (two-level NVFP4)
     #   - any non-fp32 block scale
-    # The eager op is called directly so it keeps its native v2 scale_b
-    # convention, unlike the v1 aten__fp8_mm choice used on the supported path.
+    # Call the eager v2 op directly to preserve its recipes and scale conventions.
     def fallback():
         # contraction_dim is a non-optional int[] in the schema (default []);
         # this lowering defaults it to None, so coerce before the eager call.
@@ -1374,10 +1423,19 @@ def tuned_scaled_mm_v2(
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten__fp8_mm)
-        kwarg_overrides[aten__fp8_mm.uid] = dict(
-            out_dtype=out_dtype, use_fast_accum=use_fast_accum
-        )
+        # DeepSeek v2 scale axes/padding differ from the legacy extern schema.
+        # Keep the existing v1 choice for compatible tensorwise/rowwise paths.
+        extern_kwargs = dict(out_dtype=out_dtype, use_fast_accum=use_fast_accum)
+        if (
+            scale_option_a in main_loop_scaling_types
+            or scale_option_b in main_loop_scaling_types
+        ):
+            choice = aten__fp8_mm_v2
+            extern_kwargs.update(recipe_a=recipe_a[0], recipe_b=recipe_b[0])
+        else:
+            choice = aten__fp8_mm
+        templates_to_use.append(choice)
+        kwarg_overrides[choice.uid] = extern_kwargs
 
     _, is_nonzero = _is_static_problem(layout)
 
@@ -1410,6 +1468,21 @@ def tuned_scaled_mm_v2(
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
+                # Shared inference accepts v1 RHS shapes; v2 loads require v2 extents.
+                for scale, mat, outer, recipe, transpose in (
+                    (scale_a_real, mat_a, m, scale_option_a, False),
+                    (scale_b_real, mat_b, n, scale_option_b, True),
+                ):
+                    scale_size = scale.get_size()
+                    if len(scale_size) != 2:
+                        raise RuntimeError("DeepSeek scales must be two-dimensional")
+                    if recipe == ScalingType.BlockWise1x128:
+                        for actual, expected in zip(
+                            scale_size, (outer, ceildiv(k, 128))
+                        ):
+                            V.graph.sizevars.check_equals(actual, expected)
+                    elif not is_desired_scaling(mat, scale_size, recipe, transpose):
+                        raise RuntimeError("DeepSeek scale shape does not match recipe")
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
                 overriders["SCALE_A_TRANSPOSED"] = _scale_is_transposed(
