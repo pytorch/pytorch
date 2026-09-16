@@ -4342,6 +4342,11 @@ from user code:
             self.assertEqual(second(x), x * 2)
         self.assertEqual(len(logs.output), 1)
         self.assertIn("[0]'s guard check raised RuntimeError", logs.output[0])
+        # The helper's one result opted out, so the advice is the last resort's,
+        # not the fix-or-drop an enabled tree gets.
+        self.assertIn("opted out of guard checks, but", logs.output[0])
+        self.assertIn("reachable only through the last resort", logs.output[0])
+        self.assertNotIn("Fix or drop input", logs.output[0])
 
     def _model_whose_tree_raises(self, text):
         # One result, opted out of the re-check, whose tree raises in the scan:
