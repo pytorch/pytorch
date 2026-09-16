@@ -392,17 +392,12 @@ class TestFSDPOptimState(FSDPTest):
             raise NotImplementedError
         if group is None:
             group = dist.distributed_c10d._get_default_group()
-        if device is None:
-            device = self.device_type
-        device_type = torch.device(device).type
         model = TransformerWithSharedParams.init(
             group,
             FSDPInitMode.RECURSIVE if wrap else FSDPInitMode.NO_FSDP,
-            # Initialize on CPU, then move to the current rank's accelerator.
-            DEVICEInitMode.DEVICE_NEVER,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
-        model = model.to(device_type)
         optim = optim_class(model.parameters(), lr=0.01)
         return model, optim, None
 
