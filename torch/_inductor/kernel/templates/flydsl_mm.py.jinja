@@ -1,18 +1,15 @@
 import os
 import threading
 
-{% if IS_MXFP %}
-from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-    make_mxfp_param_and_validate,
-)
-from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
-    gemm_mxfp_gfx950 as _kernel,
-)
-{% else %}
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
     make_gemm_param_and_validate,
 )
+{% if IS_MXFP %}
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
+    gemm_mxfp_gfx950 as _kernel,
+)
+{% else %}
 from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
     gemm_gfx950 as _kernel,
 )
@@ -35,37 +32,21 @@ def _inductor_tensor_arg(tensor):
 
 
 def _make_param():
-{% if IS_MXFP %}
-    return make_mxfp_param_and_validate(
-        MXFP_FORMAT,
-        GEMM_M,
-        GEMM_N,
-        GEMM_K,
-        OUT_DTYPE,
-        {
-            "TILE_M": TILE_M,
-            "TILE_N": TILE_N,
-            "TILE_K": TILE_K,
-            "STAGES": STAGES,
-            "M_WAVES": M_WAVES,
-            "N_WAVES": N_WAVES,
-            "GROUP_M": GROUP_M,
-            "LDS_SCALE": LDS_SCALE,
-        },
-        a_is_transposed=A_IS_TRANSPOSED,
-        b_is_transposed=B_IS_TRANSPOSED,
-    )
-{% else %}
     has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
+{% if not IS_MXFP %}
     if USE_HALF_TILE_INTERLEAVED:
         k_tiles = (GEMM_K + TILE_K - 1) // TILE_K
         has_k_tail = has_k_tail or k_tiles % 2 != 0
+{% endif %}
     return make_gemm_param_and_validate(
         GEMM_M,
         GEMM_N,
         GEMM_K,
         {
             "dtype_id": GEMM_DTYPE_ID,
+{% if IS_MXFP %}
+            "out_dtype_id": OUT_DTYPE_ID,
+{% endif %}
             "tile_m": TILE_M,
             "tile_n": TILE_N,
             "tile_k": TILE_K,
@@ -73,14 +54,13 @@ def _make_param():
             "m_waves": M_WAVES,
             "n_waves": N_WAVES,
             "group_m": GROUP_M,
-            "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
+            "use_half_tile_interleaved": {% if IS_MXFP %}False{% else %}USE_HALF_TILE_INTERLEAVED{% endif %},
             "a_is_transposed": A_IS_TRANSPOSED,
             "b_is_transposed": B_IS_TRANSPOSED,
             "has_bias": False,
             "has_k_tail": has_k_tail,
         },
     )
-{% endif %}
 
 
 {% if IS_MXFP %}

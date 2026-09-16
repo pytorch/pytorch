@@ -15,16 +15,23 @@ from flydsl.runtime.device import get_rocm_arch
 GFX950_DMA_BYTES = 16
 GFX950_WAVE_SIZE = 64
 GFX950_MAX_BLOCK_THREADS = 1024
-GEMM_DTYPE_BF16 = 2
-GEMM_DTYPE_FP16 = 3
+GFX950_SCALE_DMA_BYTES = 4
+MXFP_SCALE_BLOCK_K = 32
+MXFP_MAX_MMA_REPEAT = 8
 _LDS_BANK_PERIOD_LOG2 = 6
 _LDS_READ_B128_BASE = 3
 _LDS_READ_TR16_BASE = 4
+
+GEMM_DTYPE_BF16 = 2
+GEMM_DTYPE_FP16 = 3
+GEMM_DTYPE_MXFP4 = 4
+GEMM_DTYPE_MXFP8 = 5
 
 
 @fx.struct
 class GemmGfx950Param:
     dtype_id: fx.Constexpr[int]
+    out_dtype_id: fx.Constexpr[int]
     block_m: fx.Constexpr[int]
     block_n: fx.Constexpr[int]
     block_k: fx.Constexpr[int]
@@ -47,6 +54,12 @@ class GemmGfx950Param:
     mma_m: fx.Constexpr[int]
     mma_n: fx.Constexpr[int]
     mma_k: fx.Constexpr[int]
+    # MXFP E8M0 scales staged through LDS.
+    scale_a_iters: fx.Constexpr[int]
+    scale_b_iters: fx.Constexpr[int]
+    scale_a_bytes: fx.Constexpr[int]
+    scale_b_bytes: fx.Constexpr[int]
+    scale_row_bytes: fx.Constexpr[int]
 
 
 @dataclass(slots=True, kw_only=True, eq=False)
@@ -183,6 +196,14 @@ def make_tile_schedule(
     )
 
 
+def mxfp8_scale_stage_bytes(rows, block_k, block_threads):
+    # A complete 32-bit DMA per thread, padding the last workgroup-sized
+    # chunk. Extra lanes duplicate valid rows rather than reading OOB.
+    workgroup_bytes = block_threads * GFX950_SCALE_DMA_BYTES
+    n_bytes = rows * (block_k // MXFP_SCALE_BLOCK_K)
+    return (n_bytes + workgroup_bytes - 1) // workgroup_bytes * workgroup_bytes
+
+
 def make_gemm_gfx950_param(
     dtype_id: int = GEMM_DTYPE_BF16,
     tile_m: int = 256,
@@ -201,15 +222,13 @@ def make_gemm_gfx950_param(
     mma_m: int = 16,
     mma_n: int = 16,
     mma_k: int = 32,
+    out_dtype_id: int | None = None,
 ) -> GemmGfx950Param:
     # Keep the kernel implementation's internal block terminology unchanged.
     block_m, block_n, block_k = tile_m, tile_n, tile_k
-    if dtype_id not in (GEMM_DTYPE_BF16, GEMM_DTYPE_FP16):
-        raise ValueError(f"unsupported dtype_id={dtype_id}")
+    is_mxfp = dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
     if block_m <= 0 or block_n <= 0 or block_k <= 0 or stages <= 0:
         raise ValueError("block_m, block_n, block_k, and stages must be positive")
-    if (mma_m, mma_n, mma_k) != (16, 16, 32):
-        raise ValueError("the gfx950 layout kernel currently requires mma=16x16x32")
     if stages < 2:
         raise ValueError("stages must be at least 2 for the staged LDS pipeline")
     if m_waves <= 0 or n_waves <= 0:
@@ -217,7 +236,44 @@ def make_gemm_gfx950_param(
     if group_m < 0:
         raise ValueError("group_m must be non-negative")
 
-    in_dbytes = out_dbytes = 2
+    if is_mxfp:
+        if use_half_tile_interleaved:
+            raise ValueError("MXFP does not support half-tile interleaved")
+        if has_bias:
+            raise ValueError("MXFP does not support bias")
+        if mma_k < 128:
+            mma_k = 128
+        if block_k % mma_k != 0:
+            raise ValueError(
+                f"block_k must be a multiple of the MFMA K depth: block_k={block_k}"
+            )
+        if block_m % m_waves or block_n % n_waves:
+            raise ValueError("block_m/block_n must be divisible by m_waves/n_waves")
+        in_dbytes = 1
+        out_dbytes = 2
+        elements_per_byte = 2 if dtype_id == GEMM_DTYPE_MXFP4 else 1
+        block_k_bytes = block_k // elements_per_byte
+        granules_per_row = block_k_bytes // GFX950_DMA_BYTES
+        if granules_per_row == 0 or granules_per_row & (granules_per_row - 1):
+            raise ValueError(
+                "the packed K-row byte count divided by the DMA width must be a "
+                f"power of two for the XOR swizzle: block_k={block_k}, "
+                f"block_k_bytes={block_k_bytes}"
+            )
+        if out_dtype_id is None:
+            out_dtype_id = GEMM_DTYPE_BF16
+        elif out_dtype_id not in (GEMM_DTYPE_BF16, GEMM_DTYPE_FP16):
+            raise ValueError(f"unsupported out_dtype_id={out_dtype_id}")
+    else:
+        if dtype_id not in (GEMM_DTYPE_BF16, GEMM_DTYPE_FP16):
+            raise ValueError(f"unsupported dtype_id={dtype_id}")
+        if (mma_m, mma_n, mma_k) != (16, 16, 32):
+            raise ValueError("the gfx950 layout kernel currently requires mma=16x16x32")
+        in_dbytes = out_dbytes = 2
+        block_k_bytes = block_k * in_dbytes
+        if out_dtype_id is None:
+            out_dtype_id = dtype_id
+
     cshuffle_vec_size = GFX950_DMA_BYTES // out_dbytes
     if use_half_tile_interleaved:
         half_block_m = block_m // 2
@@ -250,13 +306,44 @@ def make_gemm_gfx950_param(
     elif block_n % cshuffle_vec_size != 0:
         raise ValueError("block_n must be divisible by the c-shuffle vector size")
 
+    extra_stage_bytes = 0
+    extra_load_iters = 0
+    scale_a_iters = 0
+    scale_b_iters = 0
+    scale_a_bytes = 0
+    scale_b_bytes = 0
+    scale_row_bytes = 0
+    if is_mxfp:
+        block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
+        cshuffle_x_threads = block_n // cshuffle_vec_size
+        if (
+            cshuffle_x_threads == 0
+            or block_threads % cshuffle_x_threads != 0
+            or block_m % (block_threads // cshuffle_x_threads) != 0
+        ):
+            raise ValueError(
+                "C-shuffle thread mapping does not cover the output tile: "
+                f"block_m={block_m}, block_n={block_n}, "
+                f"block_threads={block_threads}"
+            )
+        scale_row_bytes = block_k // MXFP_SCALE_BLOCK_K
+        scale_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
+        scale_a_bytes = mxfp8_scale_stage_bytes(block_m, block_k, block_threads)
+        scale_b_bytes = mxfp8_scale_stage_bytes(block_n, block_k, block_threads)
+        scale_a_iters = scale_a_bytes // scale_bytes_per_pass
+        scale_b_iters = scale_b_bytes // scale_bytes_per_pass
+        extra_stage_bytes = scale_a_bytes + scale_b_bytes
+        extra_load_iters = scale_a_iters + scale_b_iters
+
     schedule = make_tile_schedule(
         block_m,
         block_n,
-        block_k * in_dbytes,
+        block_k_bytes,
         stages,
         m_waves,
         n_waves,
+        extra_stage_bytes=extra_stage_bytes,
+        extra_load_iters=extra_load_iters,
         output_tile_bytes=block_m * block_n * out_dbytes,
     )
     load_elems_per_iter = schedule.block_threads * GFX950_DMA_BYTES // in_dbytes
@@ -273,19 +360,36 @@ def make_gemm_gfx950_param(
             )
     mma_m_repeat = block_m // m_waves // mma_m
     mma_n_repeat = block_n // n_waves // mma_n
-    if mma_m_repeat * m_waves * mma_m != block_m:
-        raise ValueError(
-            "block_m must be divisible by m_waves * mma_m: "
-            f"block_m={block_m}, m_waves={m_waves}, mma_m={mma_m}"
-        )
-    if mma_n_repeat * n_waves * mma_n != block_n:
-        raise ValueError(
-            "block_n must be divisible by n_waves * mma_n: "
-            f"block_n={block_n}, n_waves={n_waves}, mma_n={mma_n}"
-        )
+    if is_mxfp:
+        if (
+            mma_m_repeat == 0
+            or mma_n_repeat == 0
+            or mma_m_repeat * m_waves * mma_m != block_m
+            or mma_n_repeat * n_waves * mma_n != block_n
+        ):
+            raise ValueError(
+                "each wave tile must be a positive multiple of the 16x16 MFMA tile"
+            )
+        if mma_m_repeat > MXFP_MAX_MMA_REPEAT or mma_n_repeat > MXFP_MAX_MMA_REPEAT:
+            raise ValueError(
+                "accumulator repeats exceed the register budget: "
+                f"mma_m_repeat={mma_m_repeat}, mma_n_repeat={mma_n_repeat}"
+            )
+    else:
+        if mma_m_repeat * m_waves * mma_m != block_m:
+            raise ValueError(
+                "block_m must be divisible by m_waves * mma_m: "
+                f"block_m={block_m}, m_waves={m_waves}, mma_m={mma_m}"
+            )
+        if mma_n_repeat * n_waves * mma_n != block_n:
+            raise ValueError(
+                "block_n must be divisible by n_waves * mma_n: "
+                f"block_n={block_n}, n_waves={n_waves}, mma_n={mma_n}"
+            )
 
     return GemmGfx950Param(
         dtype_id=dtype_id,
+        out_dtype_id=out_dtype_id,
         block_m=block_m,
         block_n=block_n,
         block_k=block_k,
@@ -308,11 +412,26 @@ def make_gemm_gfx950_param(
         mma_m=mma_m,
         mma_n=mma_n,
         mma_k=mma_k,
+        scale_a_iters=scale_a_iters,
+        scale_b_iters=scale_b_iters,
+        scale_a_bytes=scale_a_bytes,
+        scale_b_bytes=scale_b_bytes,
+        scale_row_bytes=scale_row_bytes,
     )
 
 
 def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
-    dtype_str = "fp16" if param.dtype_id == GEMM_DTYPE_FP16 else "bf16"
+    if param.dtype_id == GEMM_DTYPE_MXFP4:
+        dtype_str = "mxfp4"
+    elif param.dtype_id == GEMM_DTYPE_MXFP8:
+        dtype_str = "mxfp8"
+    elif param.dtype_id == GEMM_DTYPE_FP16:
+        dtype_str = "fp16"
+    else:
+        dtype_str = "bf16"
+    if param.dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8):
+        out_str = "fp16" if param.out_dtype_id == GEMM_DTYPE_FP16 else "bf16"
+        dtype_str = f"{dtype_str}_{out_str}"
     name = f"gemm_{dtype_str}_t{param.block_m}x{param.block_n}x{param.block_k}x{param.stages}"
     name += f"_w{param.m_waves}x{param.n_waves}"
     name += f"_gm{param.group_m}"
@@ -1281,6 +1400,17 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
         result = make_gemm_gfx950_param(**kwargs)
     except Exception:
         return None
+    if result.dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8):
+        if m <= 0 or n <= 0 or k <= 0:
+            return None
+        if k % result.mma_k or k > 2**31 - 1:
+            return None
+        async_load_vec_size = GFX950_DMA_BYTES // result.in_data_bytes
+        if result.a_is_transposed and m % async_load_vec_size != 0:
+            return None
+        if not result.b_is_transposed and n % GFX950_DMA_BYTES != 0:
+            return None
+        return result
     output_vec_size = GFX950_DMA_BYTES // result.out_data_bytes
     if n % output_vec_size != 0 or k % result.mma_k != 0:
         return None

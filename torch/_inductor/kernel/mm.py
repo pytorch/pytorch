@@ -298,12 +298,8 @@ def _get_flydsl_2d_layout_metadata(
     if out_stride[1] != 1:
         return None
 
-    mat1_leading_stride = (
-        mat1_stride[1] if mat1_is_transposed else mat1_stride[0]
-    )
-    mat2_leading_stride = (
-        mat2_stride[1] if mat2_is_transposed else mat2_stride[0]
-    )
+    mat1_leading_stride = mat1_stride[1] if mat1_is_transposed else mat1_stride[0]
+    mat2_leading_stride = mat2_stride[1] if mat2_is_transposed else mat2_stride[0]
     sizevars = V.graph.sizevars
     aligned_byte_expressions = (
         mat1.get_layout().offset * operand_itemsize,
@@ -373,9 +369,7 @@ def get_flydsl_mm_template_kwargs(
         return []
 
     itemsize = dtype.itemsize
-    metadata = _get_flydsl_2d_layout_metadata(
-        layout, mat1, mat2, itemsize, itemsize
-    )
+    metadata = _get_flydsl_2d_layout_metadata(layout, mat1, mat2, itemsize, itemsize)
     if metadata is None:
         return []
 
@@ -559,7 +553,9 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                 out_dtype == torch.float32
                 and input_dtype in (torch.float16, torch.bfloat16)
             ),
-            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+            lambda: (
+                "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs"
+            ),
         )
 
     # Lower matmul-related operations (e.g., torch.matmul / torch.bmm / torch.addmm)
@@ -1245,7 +1241,10 @@ def get_flydsl_mxfp_template_kwargs(
     scale_b: Any,
 ) -> list[dict[str, Any]]:
     """Return shape-compatible configs for one gfx950 MXFP operand format."""
-    from ..heuristics.template.flydsl import get_mxfp_gemm_configs_for_shape
+    from ..heuristics.template.flydsl import (
+        get_gemm_configs,
+        is_gemm_config_valid_for_shape,
+    )
 
     if not use_flydsl_gemm_template(layout):
         return []
@@ -1346,29 +1345,41 @@ def get_flydsl_mxfp_template_kwargs(
     ):
         return []
 
-    out_dtype_name = "bfloat16" if layout.dtype == torch.bfloat16 else "float16"
+    from .vendored_templates.flydsl.kernels import (
+        GEMM_DTYPE_BF16,
+        GEMM_DTYPE_FP16,
+        GEMM_DTYPE_MXFP4,
+        GEMM_DTYPE_MXFP8,
+    )
+
+    gemm_dtype_id = GEMM_DTYPE_MXFP4 if mxfp_format == "mxfp4" else GEMM_DTYPE_MXFP8
+    out_dtype_id = (
+        GEMM_DTYPE_BF16 if layout.dtype == torch.bfloat16 else GEMM_DTYPE_FP16
+    )
     # Config generation validates tile construction without a concrete shape;
     # the selector drops the ones this shape cannot use before autotuning.
     return [
         {
             **gemm_config,
             "IS_MXFP": True,
-            "MXFP_FORMAT": mxfp_format,
+            "GEMM_DTYPE_ID": gemm_dtype_id,
+            "OUT_DTYPE_ID": out_dtype_id,
             "GEMM_M": m,
             "GEMM_N": n,
             "GEMM_K": k,
-            "OUT_DTYPE": out_dtype_name,
             "A_IS_TRANSPOSED": a_is_transposed,
             "B_IS_TRANSPOSED": b_is_transposed,
         }
-        for gemm_config in get_mxfp_gemm_configs_for_shape(
-            mxfp_format,
+        for gemm_config in get_gemm_configs(mxfp_format)
+        if is_gemm_config_valid_for_shape(
             m,
             n,
             k,
-            out_dtype_name,
+            gemm_dtype_id,
+            gemm_config,
             a_is_transposed=a_is_transposed,
             b_is_transposed=b_is_transposed,
+            out_dtype_id=out_dtype_id,
         )
     ]
 

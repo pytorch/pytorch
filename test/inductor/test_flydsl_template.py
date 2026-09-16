@@ -17,7 +17,7 @@ from torch._inductor.codegen.flydsl.flydsl_scheduling import (
     FlyDSLScheduling,
 )
 from torch._inductor.codegen.flydsl.flydsl_template import FlyDSLTemplate
-from torch._inductor.heuristics.template.flydsl import FlyDSLMXFPConfig
+from torch._inductor.heuristics.template.flydsl import FlyDSLGemmConfig
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel import mm
 from torch._inductor.runtime.flydsl_cache import run_cached_flydsl
@@ -1132,7 +1132,7 @@ class TestFlyDSLTemplate(TestCase):
 E2M1_MAGNITUDES = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
 _MXFP_LAYOUT_CASE = (
     (64, 96, 256),
-    (32, 32, 128, 2, 1, 1, 0, 0),
+    (32, 32, 128, 2, 1, 1, 0),
     torch.bfloat16,
 )
 
@@ -1230,27 +1230,71 @@ def _candidate_args(
     }
 
 
+def _mxfp_param_kwargs(
+    mxfp_format,
+    gemm_config,
+    *,
+    k,
+    out_dtype="bfloat16",
+    a_is_transposed=False,
+    b_is_transposed=True,
+):
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        GEMM_DTYPE_BF16,
+        GEMM_DTYPE_FP16,
+        GEMM_DTYPE_MXFP4,
+        GEMM_DTYPE_MXFP8,
+        infer_has_k_tail,
+    )
+
+    tile_k = int(gemm_config["TILE_K"])
+    stages = int(gemm_config["STAGES"])
+    return {
+        "dtype_id": GEMM_DTYPE_MXFP4 if mxfp_format == "mxfp4" else GEMM_DTYPE_MXFP8,
+        "out_dtype_id": (
+            GEMM_DTYPE_BF16 if out_dtype == "bfloat16" else GEMM_DTYPE_FP16
+        ),
+        "tile_m": int(gemm_config["TILE_M"]),
+        "tile_n": int(gemm_config["TILE_N"]),
+        "tile_k": tile_k,
+        "stages": stages,
+        "m_waves": int(gemm_config["M_WAVES"]),
+        "n_waves": int(gemm_config["N_WAVES"]),
+        "group_m": int(gemm_config["GROUP_M"]),
+        "use_half_tile_interleaved": False,
+        "a_is_transposed": a_is_transposed,
+        "b_is_transposed": b_is_transposed,
+        "has_bias": False,
+        "has_k_tail": infer_has_k_tail(k, tile_k, stages),
+    }
+
+
 def _run_mxfp_tile(mxfp_format, shape, tile, out_dtype, inputs, operand_layout=()):
     import flydsl.compiler as flyc
 
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+        make_gemm_param_and_validate,
+    )
     from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
         gemm_mxfp_gfx950,
-        make_mxfp_param_and_validate,
     )
 
     m, n, k = shape
     a_is_transposed, b_is_transposed = operand_layout or (False, True)
     out = torch.zeros(m, n, device=inputs[0].device, dtype=out_dtype)
     tensors = (out, *(tensor.view(torch.uint8) for tensor in inputs))
-    param = make_mxfp_param_and_validate(
-        mxfp_format,
+    param = make_gemm_param_and_validate(
         m,
         n,
         k,
-        "bfloat16" if out_dtype == torch.bfloat16 else "float16",
-        asdict(FlyDSLMXFPConfig(*tile)),
-        a_is_transposed=a_is_transposed,
-        b_is_transposed=b_is_transposed,
+        _mxfp_param_kwargs(
+            mxfp_format,
+            asdict(FlyDSLGemmConfig(*tile)),
+            k=k,
+            out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
+            a_is_transposed=a_is_transposed,
+            b_is_transposed=b_is_transposed,
+        ),
     )
     assert param is not None
     compile_args = tuple(
@@ -1308,46 +1352,56 @@ class TestFlyDSLMXFPMetadata(TestCase):
     @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
     def test_tile_storage_units(self, mxfp_format, block_k_bytes):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-            make_mxfp_param_and_validate,
-            mxfp_gemm_derived,
+            GEMM_DTYPE_MXFP4,
+            GEMM_DTYPE_MXFP8,
+            make_gemm_gfx950_param,
+            make_gemm_param_and_validate,
+        )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+            GFX950_DMA_BYTES,
         )
 
-        derived = mxfp_gemm_derived(mxfp_format, 64, 64, 256, 2, 1, 1)
-        self.assertEqual(derived.block_k_bytes, block_k_bytes)
-        self.assertEqual(derived.k_halves, 2)
+        dtype_id = GEMM_DTYPE_MXFP4 if mxfp_format == "mxfp4" else GEMM_DTYPE_MXFP8
+        param = make_gemm_gfx950_param(
+            dtype_id=dtype_id,
+            tile_m=64,
+            tile_n=64,
+            tile_k=256,
+            stages=2,
+            m_waves=1,
+            n_waves=1,
+            a_is_transposed=False,
+            b_is_transposed=True,
+        )
+        self.assertEqual(param.ldg_x_threads * GFX950_DMA_BYTES, block_k_bytes)
+        self.assertEqual(param.block_k // param.mma_k, 2)
         for k, tile_k in ((384, 256), (640, 512)):
-            config_ = asdict(FlyDSLMXFPConfig(32, 32, tile_k, 2, 1, 1, 0, 0))
-            param = make_mxfp_param_and_validate(
-                mxfp_format, 65, 97, k, "bfloat16", config_
+            config_ = asdict(FlyDSLGemmConfig(32, 32, tile_k, 2, 1, 1, 0))
+            param = make_gemm_param_and_validate(
+                65, 97, k, _mxfp_param_kwargs(mxfp_format, config_, k=k)
             )
             self.assertIsNotNone(param)
             self.assertTrue(param.has_k_tail)
             self.assertIsNone(
-                make_mxfp_param_and_validate(
-                    mxfp_format, 65, 97, 160, "bfloat16", config_
+                make_gemm_param_and_validate(
+                    65, 97, 160, _mxfp_param_kwargs(mxfp_format, config_, k=160)
                 )
             )
-        config_ = asdict(FlyDSLMXFPConfig(32, 32, 256, 2, 1, 1, 0, 0))
+        config_ = asdict(FlyDSLGemmConfig(32, 32, 256, 2, 1, 1, 0))
         self.assertIsNone(
-            make_mxfp_param_and_validate(
-                mxfp_format,
+            make_gemm_param_and_validate(
                 65,
                 96,
                 256,
-                "bfloat16",
-                config_,
-                a_is_transposed=True,
+                _mxfp_param_kwargs(mxfp_format, config_, k=256, a_is_transposed=True),
             )
         )
         self.assertIsNone(
-            make_mxfp_param_and_validate(
-                mxfp_format,
+            make_gemm_param_and_validate(
                 64,
                 97,
                 256,
-                "bfloat16",
-                config_,
-                b_is_transposed=False,
+                _mxfp_param_kwargs(mxfp_format, config_, k=256, b_is_transposed=False),
             )
         )
 
@@ -1372,11 +1426,23 @@ class TestFlyDSLMXFPMetadata(TestCase):
     @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
     def test_invalid_tile_config(self, tile, error):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-            mxfp_gemm_derived,
+            GEMM_DTYPE_MXFP4,
+            make_gemm_gfx950_param,
         )
 
+        block_m, block_n, block_k, stages, m_waves, n_waves = tile
         with self.assertRaisesRegex(ValueError, error):
-            mxfp_gemm_derived("mxfp4", *tile)
+            make_gemm_gfx950_param(
+                dtype_id=GEMM_DTYPE_MXFP4,
+                tile_m=block_m,
+                tile_n=block_n,
+                tile_k=block_k,
+                stages=stages,
+                m_waves=m_waves,
+                n_waves=n_waves,
+                a_is_transposed=False,
+                b_is_transposed=True,
+            )
 
     @parametrize(
         "mxfp_format,expected_tile_ks",
@@ -1398,12 +1464,8 @@ class TestFlyDSLMXFPMetadata(TestCase):
             flydsl_heuristics._get_mxfp_candidates(mxfp_format, False),
         )
         self.assertEqual(
-            [(config_.TILE_K, config_.LDS_SCALE) for config_ in configs],
-            [
-                (tile_k, lds_scale)
-                for tile_k in expected_tile_ks
-                for lds_scale in (0, 1)
-            ],
+            [config_.TILE_K for config_ in configs],
+            list(expected_tile_ks),
         )
 
     @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
@@ -1506,16 +1568,16 @@ class TestFlyDSLMXFPDevice(TestCase):
     @parametrize(
         "case",
         (
-            ("mxfp8", (64, 96, 256), (32, 32, 128, 2, 1, 1, 0, 0), torch.bfloat16),
-            ("mxfp8", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0, 1), torch.bfloat16),
-            ("mxfp8", (256, 256, 1024), (128, 128, 128, 4, 2, 2, 4, 0), torch.bfloat16),
-            ("mxfp8", (256, 256, 512), (256, 256, 128, 2, 2, 2, 0, 0), torch.float16),
-            ("mxfp4", (32, 32, 256), (16, 16, 128, 2, 1, 1, 0, 0), torch.bfloat16),
-            ("mxfp4", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0, 1), torch.bfloat16),
-            ("mxfp4", (256, 256, 1024), (64, 64, 128, 4, 2, 2, 4, 0), torch.bfloat16),
-            ("mxfp4", (256, 256, 512), (256, 256, 256, 2, 4, 2, 0, 0), torch.float16),
-            ("mxfp8", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0, 0), torch.bfloat16),
-            ("mxfp4", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0, 0), torch.bfloat16),
+            ("mxfp8", (64, 96, 256), (32, 32, 128, 2, 1, 1, 0), torch.bfloat16),
+            ("mxfp8", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0), torch.bfloat16),
+            ("mxfp8", (256, 256, 1024), (128, 128, 128, 4, 2, 2, 4), torch.bfloat16),
+            ("mxfp8", (256, 256, 512), (256, 256, 128, 2, 2, 2, 0), torch.float16),
+            ("mxfp4", (32, 32, 256), (16, 16, 128, 2, 1, 1, 0), torch.bfloat16),
+            ("mxfp4", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0), torch.bfloat16),
+            ("mxfp4", (256, 256, 1024), (64, 64, 128, 4, 2, 2, 4), torch.bfloat16),
+            ("mxfp4", (256, 256, 512), (256, 256, 256, 2, 4, 2, 0), torch.float16),
+            ("mxfp8", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0), torch.bfloat16),
+            ("mxfp4", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0), torch.bfloat16),
             ("mxfp8", *_MXFP_LAYOUT_CASE, False, False),
             ("mxfp8", *_MXFP_LAYOUT_CASE, True, False),
             ("mxfp8", *_MXFP_LAYOUT_CASE, True, True),
