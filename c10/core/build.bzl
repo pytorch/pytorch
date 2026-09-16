@@ -81,6 +81,7 @@ def define_targets(rules):
             ":ScalarType",
             "//third_party/cpuinfo",
             "//c10/macros",
+            "//c10/util:TypeCast",
             "//c10/util:base",
             "//c10/util:typeid",
         ],
