@@ -246,6 +246,37 @@ def prod_inner_tree(input, axis, reduction_ordering: tl.constexpr):
 
 
 @triton.jit
+def _split_batch_invariant_chunks(x, num_chunks: tl.constexpr):
+    # Expose scalar chunks without a reduction over the chunk dimension.
+    if num_chunks == 1:
+        return (x,)
+    else:
+        left, right = (
+            x.reshape((x.shape[0], 2, x.shape[1] // 2)).permute(0, 2, 1).split()
+        )
+        return _split_batch_invariant_chunks(
+            left, num_chunks // 2
+        ) + _split_batch_invariant_chunks(right, num_chunks // 2)
+
+
+@triton.jit
+def batch_invariant_sum(
+    accumulator,
+    partials,
+    reduction_offset,
+    reduction_numel,
+    num_chunks: tl.constexpr,
+    chunk_size: tl.constexpr,
+):
+    chunks = _split_batch_invariant_chunks(partials, num_chunks)
+    for chunk_index in tl.static_range(num_chunks):
+        value = accumulator + chunks[chunk_index]
+        chunk_offset = reduction_offset + chunk_index * chunk_size
+        accumulator = tl.where(chunk_offset < reduction_numel, value, accumulator)
+    return accumulator
+
+
+@triton.jit
 def minimum(a, b):
     return tl.minimum(a, b, propagate_nan=tl.PropagateNan.ALL)
 

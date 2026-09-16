@@ -5975,6 +5975,12 @@ class SIMDScheduling(BaseScheduling):
         # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
 
+        if any(
+            node.has_batch_invariant_reduction()
+            for node in EnableReduction.filter(node_schedule)
+        ):
+            return _TilingSelection(default_tiling, None, None)
+
         # Force tiling compatible with matmul dimensions
         # when natively generating matmul without template calls.
         for node in EnableReduction.filter(node_schedule):

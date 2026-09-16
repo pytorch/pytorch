@@ -488,6 +488,11 @@ class InductorChoices:
         """
         if not config.triton.persistent_reductions:
             return False
+        if (
+            features.batch_invariant_chunk_size() == 1
+            and V.graph.sizevars.statically_known_gt(features.reduction_numel, 128)
+        ):
+            return False
         reduction_hint = features.get_reduction_hint()
         rblock = features.strict_reduction_rblock()
         if rblock is not None and not features.has_strict_multirow_reduction():

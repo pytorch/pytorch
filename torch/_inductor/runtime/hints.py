@@ -288,7 +288,6 @@ class InductorMeta(typing.TypedDict, total=False):
     spill_threshold: int
     store_cubin: bool
     deterministic: bool
-    batch_invariant: bool
     force_filter_reduction_configs: bool
     mix_order_reduction_allow_multi_stages: bool
     dynamic_disable_pipelining: bool
@@ -324,11 +323,13 @@ class InductorMeta(typing.TypedDict, total=False):
     add_persistent_rblock: bool
     max_persistent_rblock: int
     strict_reduction_rblock: int
+    batch_invariant_chunk_size: int
     kernel_num_gb: float
     kernel_flop: int
 
     # Kernel identity / launch (codegen_kernel literal)
     grid_type: str
+    batch_invariant_split_size_arg: str
     kernel_name: str
     mutated_arg_names: typing.Any
     optimize_mem: bool

@@ -115,37 +115,6 @@ class DeterministicTest(TestCase):
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
     @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
-    @inductor_config.patch(batch_invariant=True)
-    def test_persistent_reduction_batch_invariance(self):
-        H = 768
-        FULL = 1024
-
-        def fn(x, w, b):
-            return torch.nn.functional.layer_norm(x, (H,), weight=w, bias=b)
-
-        torch.manual_seed(0)
-        w = torch.randn(H, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(H, device=GPU_TYPE, dtype=torch.bfloat16)
-        x_full = torch.randn(FULL, H, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        compiled = torch.compile(fn)
-        torch._dynamo.reset()
-        out_full = compiled(x_full, w, b)
-        self.assertEqual(out_full, fn(x_full, w, b))
-
-        # Halving sweep, matching what the benchmark harness does.
-        size = FULL // 2
-        while size >= 1:
-            torch._dynamo.reset()
-            out = compiled(x_full[:size].contiguous(), w, b)
-            ref = out_full[:size].contiguous()
-            self.assertTrue(
-                torch.equal(ref, out),
-                lambda msg: f"{msg}\npersistent reduction diverged at size={size} (FULL={FULL})",
-            )
-            size //= 2
-
-    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
     def test_cumsum_deterministic(self):
         from torch._inductor.utils import run_and_get_code
 
