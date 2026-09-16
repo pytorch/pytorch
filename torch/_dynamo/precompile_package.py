@@ -690,6 +690,61 @@ def _warn_risky_drops(risky: Sequence[tuple[str, str]]) -> None:
     )
 
 
+def _missing_backends_message(
+    total: int, missing: Sequence[object], backend: str = "inductor"
+) -> str:
+    """Why some compiled subgraphs never reached the artifact.
+
+    Reports the recorded/total split rather than asserting nothing was
+    recorded: a single missing id is fatal here, and saying so as "never
+    recorded" reads as total failure when most of the capture succeeded.
+    """
+    shown = ", ".join(str(b) for b in missing[:8])
+    if len(missing) > 8:
+        shown += f", ... ({len(missing) - 8} more)"
+    if backend not in ("inductor", "eager"):
+        # A session takes any backend Dynamo can resolve, but only these two
+        # leave something a served artifact can run: "eager" keeps the fx
+        # graphs and "inductor" bundles compiled code. Anything else captures
+        # cleanly and records nothing, so say so here rather than let it read
+        # as a defect in the model. aot_eager is the one people reach for,
+        # since it is how you isolate AOTAutograd.
+        return (
+            f"Precompilation recorded {total - len(missing)} of {total} "
+            f"compiled backend(s) because backend={backend!r} does not produce "
+            f"anything serializable; precompile can record only 'inductor' or "
+            f"'eager'. To isolate AOTAutograd without inductor, use plain "
+            f"torch.compile(backend='aot_eager') -- that needs no precompile."
+        )
+    from torch._dynamo.utils import counters
+
+    # Rendering re-enters AOTAutograd outside the pinned bypass_autograd_cache_key
+    # config and bypasses there routinely, so this is a diagnostic, not a diagnosis.
+    bypasses = counters["aot_autograd"].get("autograd_cache_bypass", 0)
+    bypass_note = (
+        f" It bypassed {bypasses} time(s) here, which rendering does for any "
+        "graph the cache cannot key, and which does not by itself explain a gap."
+        if bypasses
+        else ""
+    )
+    return (
+        f"Precompilation recorded {total - len(missing)} of {total} compiled "
+        f"backend(s), so {len(missing)} graph(s) would reach the artifact with "
+        f"no code behind them: {shown}. Capture pins functorch's "
+        "bypass_autograd_cache_key, so AOTAutograd keys every graph it lowers "
+        "and no longer declines to record one it cannot address."
+        + bypass_note
+        + " A gap therefore means a graph whose backward never compiled, which "
+        "is a forward-only capture with grad enabled. Pass training=True to "
+        "lower the backward eagerly (the joint trace synthesizes tangents, so "
+        "no loss is needed), capture under torch.no_grad() / "
+        "torch.inference_mode() for an inference artifact, or run .backward() "
+        "inside the capture block. Re-run with "
+        "TORCH_LOGS=+torch._functorch._aot_autograd to see each graph as it "
+        "lowers."
+    )
+
+
 class PrecompileSession:
     """
     A caller-driven capture in progress. Enter as a context manager to get the
@@ -1163,16 +1218,24 @@ class PrecompileSession:
             for guard_type, name in self._dropped_guards
             if (guard_type, _normalize(name)) in varying_dropped
         }
+        from .package import SerializedCode
+
+        entry = self._package.cache_entry()
         return _summarize(
-            self._package.cache_entry(),
+            entry,
             self._dropped_guards,
             self._kept_guards - self._policy_dropped_guards,
             self._policy_dropped_guards,
             risky,
-            # Truncated and uncovered frames need the package's capture-mode
-            # bookkeeping, which is not part of this build.
+            # Truncated frames need the package's capture-mode bookkeeping,
+            # which is not part of this build; an uncovered frame is one the
+            # package recorded without a single guarded variant.
             frozenset(),
-            frozenset(),
+            frozenset(
+                SerializedCode.to_code_object(code.python_code).co_name
+                for code in entry.codes
+                if not code.bypassed and not code.guarded_codes
+            ),
             self._capture_errors,
             self._guard_sets,
             self._dropped_guard_code,
@@ -1280,6 +1343,120 @@ class PrecompileSession:
                 list(summary.wont_generalize),
             )
         return summary
+
+    def rendered_backends(
+        self, backend_ids: Sequence[str]
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Compiled subgraphs as READABLE source, and the reason each of the rest
+        stayed pickled, both keyed by backend id.
+
+        The pickled bundle is the fallback, not the goal: a subgraph is Inductor
+        output, which has a source form (the make_fx tracer emits exactly this),
+        unlike the guard trees and transformed bytecode beside it. Anything that
+        fails to render -- an effectful op, a graph with no compute, a training
+        shape the composer refuses -- stays pickled, and its reason is warned
+        here and written into the artifact header so the fallback is visible.
+
+        Rendering re-runs AOTAutograd + Inductor on the retained graph, so it is
+        a second lowering, paid once per subgraph that reaches the artifact.
+        """
+        from torch._functorch import aot_autograd
+
+        if self._backend_obj is None or self._backend == "eager":
+            return {}, {}
+        rendered: dict[str, str] = {}
+        refused: dict[str, str] = {}
+        for backend_id in backend_ids:
+            held = self._backend_obj.graphs.get(str(backend_id))
+            if held is None:
+                continue
+            gm, fakes = held
+            try:
+                # grad_enabled is what makes AOTAutograd emit the joint
+                # forward+backward for a training capture; without it the
+                # backward is silently absent and the served output loses its
+                # grad_fn.
+                source, _ = aot_autograd.compile_to_python(gm, fakes)
+            except Exception as e:
+                reason = " ".join(f"{type(e).__name__}: {e}".split())
+                log.warning(
+                    "precompile: subgraph %s stays pickled, not rendered as source: %s",
+                    backend_id,
+                    reason,
+                )
+                refused[str(backend_id)] = reason
+                continue
+            rendered[str(backend_id)] = source
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        keys = list(rendered)
+        namespaced = namespace_module_names([rendered[k] for k in keys])
+        return dict(zip(keys, namespaced)), refused
+
+    def snapshot_artifact(
+        self,
+        *,
+        require_complete: bool = True,
+        require_no_risky_drops: bool = True,
+        require_no_dropped_guards: bool = False,
+    ) -> tuple[str, bytes]:
+        """Render everything captured SO FAR, leaving this session able to capture more.
+
+        The render reads the package's records without consuming them, which is
+        what lets ``save()`` be called repeatedly within one capture block.
+        """
+        summary = self._gated_summary(
+            require_complete=require_complete,
+            require_no_risky_drops=require_no_risky_drops,
+            require_no_dropped_guards=require_no_dropped_guards,
+        )
+        from torch._precompile import _build_multigraph_artifact
+
+        backends = self._collect_backends()
+        entry = self._package.cache_entry()
+        rendered, refused = self.rendered_backends(list(backends))
+        return _build_multigraph_artifact(
+            entry,
+            backends,
+            summary,
+            self._backend,
+            _entry_fn_of(self._fn),
+            rendered,
+            refused,
+        )
+
+    def _collect_backends(self) -> dict[str, Any]:
+        """The compiled subgraphs this capture produced, keyed by backend id."""
+        from torch._dynamo.precompile_context import (
+            EagerCacheArtifact,
+            PrecompileContext,
+        )
+
+        self._take_backend_artifacts()
+        collected = dict(self._backend_artifacts)
+        if self._backend == "eager":
+            # Eager "backends" are fx graphs with no compiled artifact of their
+            # own, so they have to be gathered explicitly.
+            for backend_id, backend in self._package.cached_backends.items():
+                collected[backend_id] = EagerCacheArtifact(
+                    key=backend_id, content=backend
+                )
+        entry = self._package.cache_entry()
+        for backend_id in entry.backend_ids:
+            if backend_id not in collected:
+                artifact = PrecompileContext.take_artifact(backend_id)
+                if artifact is not None:
+                    collected[backend_id] = artifact
+        missing = [b for b in entry.backend_ids if b not in collected]
+        if missing:
+            raise PackageError(
+                _missing_backends_message(
+                    len(entry.backend_ids), missing, self._backend
+                )
+            )
+        return {str(b): collected[b] for b in entry.backend_ids}
 
 
 def precompile_capture(
