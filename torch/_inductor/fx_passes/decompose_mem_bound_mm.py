@@ -48,6 +48,42 @@ if "decompose_mm_pass" in config.post_grad_fusion_options:
     )
 
 
+# Decomposition policy of a device type: "accelerator" devices (e.g. "cuda",
+# "xpu") decompose large-K matrix multiplications, while "cpu" devices
+# decompose small matrices. Third-party backends can register their own
+# device type via register_mm_decomposition_policy.
+_ACCELERATOR_POLICY = "accelerator"
+_CPU_POLICY = "cpu"
+
+_mm_decomposition_policies: dict[str, str] = {}
+
+
+def register_mm_decomposition_policy(device_type: str, policy: str) -> None:
+    """Register `device_type` for the decompose_mm_pass post-grad pattern.
+
+    Args:
+        device_type: the device type string, e.g. "cuda", "cpu", or the name
+            of a third-party backend registered via PrivateUse1.
+        policy: either "accelerator" or "cpu", selecting the decomposition
+            threshold logic to apply for that device.
+    """
+    _mm_decomposition_policies[device_type] = policy
+
+
+register_mm_decomposition_policy("cuda", _ACCELERATOR_POLICY)
+register_mm_decomposition_policy("xpu", _ACCELERATOR_POLICY)
+register_mm_decomposition_policy("cpu", _CPU_POLICY)
+
+
+def _get_decomposition_policy(a: Tensor, b: Tensor) -> str | None:
+    """Return the decomposition policy for the device type shared by `a` and
+    `b`, or None if they are on different device types or the device type is
+    not registered."""
+    if a.device.type != b.device.type:
+        return None
+    return _mm_decomposition_policies.get(a.device.type)
+
+
 def check_device(a: Tensor, b: Tensor, device="cuda") -> bool:
     return (a.device.type == b.device.type) and (b.device.type == device)
 
@@ -66,9 +102,8 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         return False
     if len(mat1.shape) != 3 or len(mat2.shape) != 3:
         return False
-    if check_device(mat1, mat2, device="cuda") or check_device(
-        mat1, mat2, device="xpu"
-    ):
+    policy = _get_decomposition_policy(mat1, mat2)
+    if policy == _ACCELERATOR_POLICY:
         if mat1.shape[0] < min_first_dimension_decomposition:
             return False
         # 2 of m, n, k must be <= MAX_OTHER_DIMENSION_DECOMPOSITION
@@ -81,7 +116,7 @@ def should_decompose_bmm(mat1, mat2) -> bool:
         ):
             return False
         return True
-    elif check_device(mat1, mat2, device="cpu"):
+    elif policy == _CPU_POLICY:
         if (
             mat1.shape[0] <= cpu_max_first_dimension_decomposition
             and mat2.shape[0] <= cpu_max_first_dimension_decomposition
@@ -131,18 +166,16 @@ def should_decompose_mm(mat1, mat2) -> bool:
     if not config.post_grad_fusion_options["decompose_mm_pass"].get(
         "skip_dynamic_shape_dim_check", False
     ):
+        policy = _get_decomposition_policy(mat1, mat2)
         return (
-            (
-                check_device(mat1, mat2, device="cuda")
-                or check_device(mat1, mat2, device="xpu")
-            )
+            policy == _ACCELERATOR_POLICY
             and statically_known_true(
                 mat1.shape[0] >= min_first_dimension_decomposition
             )
             and statically_known_true(mat2.shape[0] < max_other_dimension_decomposition)
             and statically_known_true(mat2.shape[1] < max_other_dimension_decomposition)
         ) or (
-            check_device(mat1, mat2, device="cpu")
+            policy == _CPU_POLICY
             and statically_known_true(
                 mat1.shape[0] <= cpu_max_first_dimension_decomposition
             )
@@ -155,11 +188,9 @@ def should_decompose_mm(mat1, mat2) -> bool:
         )
     # case 2: we decompose mm if the input is dynamic shape
     else:
+        policy = _get_decomposition_policy(mat1, mat2)
         return (
-            (
-                check_device(mat1, mat2, device="cuda")
-                or check_device(mat1, mat2, device="xpu")
-            )
+            policy == _ACCELERATOR_POLICY
             and (
                 statically_known_true(
                     mat1.shape[0] >= min_first_dimension_decomposition
@@ -181,7 +212,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
                 )
             )
         ) or (
-            check_device(mat1, mat2, device="cpu")
+            policy == _CPU_POLICY
             and (
                 statically_known_true(
                     mat1.shape[0] <= cpu_max_first_dimension_decomposition

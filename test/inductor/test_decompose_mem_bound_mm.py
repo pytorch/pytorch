@@ -340,6 +340,63 @@ class TestDecomposeMemMM(TestCase):
         )
         counters.clear()
 
+    def test_policy_registry_defaults(self):
+        """Built-in device types are registered with the expected policies."""
+        from torch._inductor.fx_passes.decompose_mem_bound_mm import (
+            _ACCELERATOR_POLICY,
+            _CPU_POLICY,
+            _get_decomposition_policy,
+            _mm_decomposition_policies,
+        )
+
+        self.assertEqual(_mm_decomposition_policies["cuda"], _ACCELERATOR_POLICY)
+        self.assertEqual(_mm_decomposition_policies["xpu"], _ACCELERATOR_POLICY)
+        self.assertEqual(_mm_decomposition_policies["cpu"], _CPU_POLICY)
+
+        mat1 = torch.randn(4, 4)
+        mat2 = torch.randn(4, 4)
+        self.assertEqual(_get_decomposition_policy(mat1, mat2), _CPU_POLICY)
+        # Unregistered device types have no policy entry.
+        self.assertIsNone(_mm_decomposition_policies.get("npu"))
+        self.assertIsNone(_mm_decomposition_policies.get("privateuseone"))
+
+    def test_register_device_policy_changes_behavior(self):
+        """Registering a device type with a different policy flips the
+        decomposition decision accordingly."""
+        from unittest import mock
+
+        from torch._inductor.fx_passes.decompose_mem_bound_mm import (
+            _ACCELERATOR_POLICY,
+            _mm_decomposition_policies,
+        )
+
+        # (m, k, n) satisfies the accelerator thresholds (m >= 10240, k, n < 32)
+        # but not the cpu thresholds (m <= 1). Two distinct shapes are used so
+        # the second compile does not hit the FxGraphCache entry of the first.
+        mat1 = torch.randn(10240, 8)
+        mat2 = torch.randn(8, 8)
+        mat3 = torch.randn(20480, 4)
+        mat4 = torch.randn(4, 4)
+
+        # Default cpu policy: not decomposed.
+        counters.clear()
+        module = MyModule3()
+        traced = torch.compile(module, dynamic=False)
+        self.compare_pred(module, traced, [mat1, mat2])
+        self.assertEqual(counters["inductor"]["decompose_mm"], 0)
+        counters.clear()
+
+        # Re-register "cpu" with the accelerator policy: now decomposed.
+        # dynamic=False keeps shapes static so the statically_known_* checks
+        # in the accelerator policy resolve deterministically.
+        with mock.patch.dict(_mm_decomposition_policies, {"cpu": _ACCELERATOR_POLICY}):
+            counters.clear()
+            module = MyModule3()
+            traced = torch.compile(module, dynamic=False)
+            self.compare_pred(module, traced, [mat3, mat4])
+            self.assertEqual(counters["inductor"]["decompose_mm"], 1)
+            counters.clear()
+
     # We have to increase tolerance for navi3 because all fp16, bf16
     # GEMMs operations have an accuracy issue caused by hardware limitation
     @patch_test_members(
