@@ -28,7 +28,7 @@ from torch._dynamo.package import (
     DynamoCache,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.symbolic_convert import _import_module, InstructionTranslatorBase
 from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -1088,20 +1088,27 @@ def add(x, y):
         reloaded = pickle.loads(pickle.dumps(source))
         self.assertEqual(reloaded, source)
 
-    def test_import_alias_accepts_a_stale_module_under_an_aliased_key(self):
+    @parametrize("stale_named_for", ("target", "key"))
+    def test_import_alias_accepts_a_stale_module_of_either_accepted_name(
+        self, stale_named_for
+    ):
         # A sys.modules key need not equal the module's own __name__: os.path is
         # named posixpath, and torch's own BC shims (torch.distributed._shard.
         # checkpoint, torch._inductor.template_heuristics.triton) are all such
         # entries. So the stale module one more handover after an install leaves
-        # in the alias slot has to be recognized by the name the resolved module
-        # answers to, since under such a key that is never the key itself. A
-        # module of some third name still graph breaks: that is what two module
-        # names mangling onto one alias leave behind.
+        # in the alias slot is recognized by either accepted name. One is the
+        # name the resolved module answers to, since under such a key that is
+        # never the key itself. The other is the key on its own, whichever name
+        # the resolved module has: the copy a BC-shim key held before a handover
+        # put the shim's target under it. A module of some third name still
+        # graph breaks: that is what two module names mangling onto one alias
+        # leave behind.
         key = "torch_test_package_import_alias_shim_key"
+        target = "torch_test_package_import_alias_shim_target"
         alias = f"__import_{key}"
-        stale = types.ModuleType("torch_test_package_import_alias_shim_target")
+        stale = types.ModuleType(target if stale_named_for == "target" else key)
         stale.VALUE = 2
-        live = types.ModuleType(stale.__name__)
+        live = types.ModuleType(target)
         live.VALUE = 3
         args = (torch.randn(3, 2),)
 
@@ -1127,38 +1134,6 @@ def add(x, y):
             sys.modules.pop(key, None)
             # The memo outlives the sys.modules entry, and a same-process rerun
             # would otherwise resolve this run's module.
-            _import_module.cache_clear()
-            fn.__globals__.pop(alias, None)
-            torch._dynamo.reset()
-
-    def test_import_alias_accepts_a_stale_module_named_for_the_key(self):
-        # The aliased-key case the other way round: the slot holds a module
-        # named for the sys.modules key while the module the key resolves to
-        # answers to another name -- the copy a BC-shim key held before a
-        # handover put the shim's target under it. The key is accepted on its
-        # own, whichever name the resolved module has, and the live module
-        # replaces the stale one.
-        key = "torch_test_package_import_alias_key_named"
-        alias = f"__import_{key}"
-        stale = types.ModuleType(key)
-        stale.VALUE = 2
-        live = types.ModuleType("torch_test_package_import_alias_key_named_target")
-        live.VALUE = 3
-        args = (torch.randn(3, 2),)
-
-        def fn(x):
-            import torch_test_package_import_alias_key_named as shim
-
-            return x + shim.VALUE
-
-        try:
-            sys.modules[key] = live
-            fn.__globals__[alias] = stale
-            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(fn(*args), compiled_fn(*args))
-            self.assertIs(fn.__globals__[alias], live)
-        finally:
-            sys.modules.pop(key, None)
             _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
@@ -1661,6 +1636,47 @@ def add(x, y):
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
+
+    def test_import_alias_check_with_a_non_module_value_accepts_the_key_alone(self):
+        # importlib.import_module hands back whatever sys.modules holds under the
+        # name, so a caller with no module-type test in front of import_source
+        # -- every one but IMPORT_NAME and get_globals_source_and_value -- can
+        # resolve a non-module value. That value has no __name__ to accept, so
+        # the accepted names are the key alone: a nameless module in the slot is
+        # refused rather than matched against None, and a module named for the
+        # key is accepted and, the value being the live entry, replaced by it.
+        # No public path hands import_source such a value short of replacing one
+        # of torch's or the stdlib's own modules in sys.modules, so the method is
+        # driven directly on a stub carrying the three things it reads off the
+        # translator: the traced globals, the package and the output's
+        # import_sources. A refused call leaves nothing in cache_method's cache.
+        key = "torch_test_package_import_alias_non_module_value"
+        alias = f"__import_{key}"
+        value = types.SimpleNamespace(VALUE=1)
+        nameless = types.ModuleType("nameless")
+        del nameless.__dict__["__name__"]
+        f_globals = {}
+        output = types.SimpleNamespace(
+            global_scope=f_globals, import_sources={}, update_co_names=lambda name: None
+        )
+        tx = types.SimpleNamespace(output=output, package=None)
+        try:
+            sys.modules[key] = value
+            f_globals[alias] = nameless
+            refused = f"alias {alias} for {key}.*bound to a module in the globals"
+            with self.assertRaisesRegex(Unsupported, refused):
+                InstructionTranslatorBase.import_source(tx, key)
+            self.assertIs(f_globals[alias], nameless)
+            self.assertEqual(output.import_sources, {})
+
+            f_globals[alias] = types.ModuleType(key)
+            source = InstructionTranslatorBase.import_source(tx, key)
+            self.assertEqual(source.global_name, alias)
+            self.assertIs(f_globals[alias], value)
+            self.assertEqual(output.import_sources, {alias: key})
+        finally:
+            sys.modules.pop(key, None)
+            _import_module.cache_clear()
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
