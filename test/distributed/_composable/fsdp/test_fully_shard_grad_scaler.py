@@ -29,20 +29,21 @@ class TestFullyShardGradientScaler(FSDPTest):
         )
 
     def _test_gradient_scaler(self, device: str, has_inf: bool, test_2d: bool):
+        # A bare device type (without index) resolves to each rank's current
+        # device, while the injected `device` is the primary device on every rank.
+        device_type = torch.device(device).type
         torch.manual_seed(0)
         model = nn.Sequential(
-            *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
+            *[nn.Linear(4, 4, device=device_type, bias=False) for _ in range(2)]
         )
         for layer in model:
             fully_shard(layer)
         fully_shard(model)
-        input = torch.randn([4, 4], device=device)
+        input = torch.randn([4, 4], device=device_type)
 
         if test_2d:
             mesh_2d = init_device_mesh(
-                torch.device(device).type,
-                (2, self.world_size // 2),
-                mesh_dim_names=("dp", "tp"),
+                device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
             )
             dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
             model = nn.Sequential(MLP(2), MLP(2), MLP(2))
@@ -62,12 +63,10 @@ class TestFullyShardGradientScaler(FSDPTest):
             for module in model:
                 fully_shard(module, mesh=dp_mesh)
             fully_shard(model, mesh=dp_mesh)
-            input = torch.randn((2,), device=device)
+            input = torch.randn((2,), device=device_type)
 
         loss = model(input).sum()
-        scaler = GradScaler(
-            init_scale=2.0, enabled=True, device=torch.device(device).type
-        )
+        scaler = GradScaler(init_scale=2.0, enabled=True, device=device_type)
         opt = torch.optim.Adam(model.parameters(), lr=1e-2)
         scaler.scale(loss).backward()
         inv_scale = scaler._scale.double().reciprocal().float()
