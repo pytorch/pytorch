@@ -2580,7 +2580,7 @@ from user code:
             model(torch.randn(3, 3))
         message = str(ctx.exception)
         raised = "[0] <guard check raised RuntimeError: guard tree is unhappy>"
-        self.assertIn(raised, message)
+        self.assertIn(f"  {raised}", message.splitlines())
         self.assertNotIn("pybind boundary", message)
         self.assertIn("Every guard tree raised", message)
 
@@ -2615,7 +2615,7 @@ from user code:
                 model(torch.randn(3, 3))
         message = str(ctx.exception)
         raised = "[0] <guard check raised SystemError: stub tree is unhappy>"
-        self.assertIn(raised, message)
+        self.assertIn(f"  {raised}", message.splitlines())
         self.assertNotIn("the caller was handling this", message)
         self.assertNotIn("pybind boundary", message)
 
@@ -3827,11 +3827,10 @@ from user code:
         # here can clear that residue -- and lets a later rejection from the same
         # tree stand on the residue rather than on this call, so it holds the
         # opt-out back on any raise. But the raise is no longer all the report can
-        # say about that entry -- the tree
-        # did reject this call on the second pass, and that rejection is a real
-        # answer, so the report quotes the guard it rejected on and the advice
-        # that rejection earns, and names the raise as what withheld the opt-out
-        # and what to fix.
+        # say about that entry -- the tree did reject this call on the second
+        # pass, and that rejection is a real answer, so the report quotes the
+        # guard it rejected on and the advice that rejection earns, and names the
+        # raise as what withheld the opt-out and what to fix.
         x = torch.ones(3, 3)
         model = torch.compile(DictBranchModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -3863,7 +3862,9 @@ from user code:
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
         self.assertIn("Add a ModelInput", message)
         chained = []
-        cause: BaseException | None = ctx.exception
+        # Start at the cause: a walk from ctx.exception would pass on a report
+        # that quoted the raise itself and chained nothing.
+        cause: BaseException | None = ctx.exception.__cause__
         while cause is not None:
             chained.append(str(cause))
             cause = cause.__cause__ or cause.__context__
@@ -4739,24 +4740,10 @@ from user code:
         # first model to log would silence every later one carrying the same
         # defect -- one broken artifact per process reported, and the rest quiet.
         self._hide_leaked_dynamo_globals()
-
-        class Raises:
-            def check(self, f_locals):
-                raise RuntimeError("guard tree is unhappy")
-
-        def broken_model():
-            model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-            model._aot_compile(
-                [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
-            )
-            result = model.forward.compiled_results[0]
-            result._artifacts.guard_manager = Raises()
-            result.disable_guard_check()
-            return model
-
         x = torch.randn(3, 3)
         logger = "torch._dynamo.aot_compile"
-        first, second = broken_model(), broken_model()
+        first = self._model_whose_tree_raises("guard tree is unhappy")
+        second = self._model_whose_tree_raises("guard tree is unhappy")
         with self.assertLogs(logger, level="WARNING") as logs:
             self.assertEqual(first(x), x * 2)
         self.assertEqual(len(logs.output), 1)
@@ -4766,6 +4753,23 @@ from user code:
             self.assertEqual(second(x), x * 2)
         self.assertEqual(len(logs.output), 1)
         self.assertIn("[0]'s guard check raised RuntimeError", logs.output[0])
+
+    def _model_whose_tree_raises(self, text):
+        # One result, opted out of the re-check, whose tree raises in the scan:
+        # the artifact the two dedup tests around this helper share, told apart
+        # by the raise's text.
+        class Raises:
+            def check(self, f_locals):
+                raise RuntimeError(text)
+
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        result = model.forward.compiled_results[0]
+        result._artifacts.guard_manager = Raises()
+        result.disable_guard_check()
+        return model
 
     def test_aot_compile_module_warns_again_about_a_replaced_index(self):
         # The dedup key is (index, exception type) and compiled_results is
@@ -4814,35 +4818,17 @@ from user code:
         # to the binding verdict never runs for it and the (0, "RuntimeError")
         # its first call logged would silence every artifact later put at [0].
         self._hide_leaked_dynamo_globals()
-
-        class Raises:
-            def __init__(self, text):
-                self.text = text
-
-            def check(self, f_locals):
-                raise RuntimeError(self.text)
-
-        def broken(text):
-            model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-            model._aot_compile(
-                [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
-            )
-            result = model.forward.compiled_results[0]
-            result._artifacts.guard_manager = Raises(text)
-            result.disable_guard_check()
-            return model, result
-
         x = torch.randn(3, 3)
         logger = "torch._dynamo.aot_compile"
-        model, _ = broken("the first artifact is unhappy")
+        model = self._model_whose_tree_raises("the first artifact is unhappy")
         with self.assertLogs(logger, level="WARNING") as logs:
             self.assertEqual(model(x), x * 2)
         self.assertEqual(len(logs.output), 1)
         self.assertIn("RuntimeError: the first artifact is unhappy", logs.output[0])
         with self.assertNoLogs(logger, level="WARNING"):
             model(x)
-        _, replacement = broken("the second artifact is unhappy")
-        model.forward.compiled_results[0] = replacement
+        replacement = self._model_whose_tree_raises("the second artifact is unhappy")
+        model.forward.compiled_results[0] = replacement.forward.compiled_results[0]
         with self.assertLogs(logger, level="WARNING") as logs:
             self.assertEqual(model(x), x * 2)
         self.assertEqual(len(logs.output), 1)
