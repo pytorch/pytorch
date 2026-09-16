@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     download_file,
     HardwareClassification,
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_CI,
     IS_FBCODE,
     IS_FILESYSTEM_UTF8_ENCODING,
@@ -1150,14 +1151,26 @@ class TestSerialization(TestCase, SerializationMixin):
                                          torch.nn.Linear(1, 1, bias=False).to(torch.float8_e4m3fn),
                                          torch.nn.Linear(1, 2, bias=False).to(torch.float8_e4m3fn)])
 
-        with BytesIOContext() as f:
-            torch.save(big_model.state_dict(), f)
-            # Delete the original model before loading another one to
-            # reduce peak memory from ~12GB to ~8GB
-            del big_model
-            gc.collect()
-            f.seek(0)
-            torch.load(f)
+        # Windows ARM64 io.BytesIO cannot grow past ~4 GiB. CPython raises
+        # MemoryError, and that exception escaping miniz's C write callback
+        # becomes a fatal access violation (0xC0000005) instead of a Python
+        # error. Keep zip64 data-descriptor coverage via a real file, which
+        # is also how archives this large are saved in practice.
+        if IS_WINDOWS and IS_ARM64:
+            with TemporaryFileName() as fname:
+                torch.save(big_model.state_dict(), fname)
+                del big_model
+                gc.collect()
+                torch.load(fname)
+        else:
+            with BytesIOContext() as f:
+                torch.save(big_model.state_dict(), f)
+                # Delete the original model before loading another one to
+                # reduce peak memory from ~12GB to ~8GB
+                del big_model
+                gc.collect()
+                f.seek(0)
+                torch.load(f)
 
     @parametrize('weights_only', (True, False))
     def test_pathlike_serialization(self, weights_only):
