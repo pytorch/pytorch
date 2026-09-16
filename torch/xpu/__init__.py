@@ -1158,7 +1158,7 @@ def _get_zes_engine_handle(device: Device = None) -> c_void_p:
 
     # See Note [telemetry handle selection]
     engine_count = c_uint32(0)
-    # TODO: zesDeviceEnumEngineGroups does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors;
+    # TODO: zesDeviceEnumEngineGroups does not return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS on privilege errors on Xe;
     # instead it succeeds with count=0. Treat that as an error with a helpful hint about elevated privileges.
     rc = pyzes.zesDeviceEnumEngineGroups(device_handle, byref(engine_count), None)
     if rc == pyzes.ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS or engine_count.value == 0:
