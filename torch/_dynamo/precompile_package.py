@@ -132,7 +132,7 @@ from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
 
 from .guards import CheckFunctionManager
-from .source import DictGetItemSource, GlobalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource
 
 
 if TYPE_CHECKING:
@@ -425,6 +425,77 @@ def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
     if not global_name.startswith(prefix):
         return None
     return sys.modules.get(global_name[len(prefix) :].replace("_dot_", "."))
+
+
+def _module_namespaces(
+    entries: Sequence[GuardFilterEntry],
+) -> dict[str, types.ModuleType]:
+    """
+    Sources holding a module whose binding config cannot repoint, mapped to the
+    module itself. Dynamo guards every module it walks through, so the path
+    down to ``F.gelu`` is guarded module by module, which is what lets an
+    attribute read be recognised as coming off a namespace rather than off an
+    object a config could have swapped. The module comes back with the name
+    because whether a read off a namespace is safe depends on which module it
+    is -- see ``_is_risky_drop``.
+
+    TRUSTED is the load-bearing half and is deliberately narrow. A module is
+    that if torch or the stdlib owns it, if it is bound under its own name --
+    ``import mypkg.layers``, and the ``__import_x`` alias Dynamo installs to
+    reach an inlined function's own globals -- or if it is an attribute of a
+    trusted module under a name that module already owns: its own ``__name__``
+    (a plain ``import own_sub`` inside the parent) or the parent's plus the
+    attribute (``from . import sub``). An ALIASED user module is none of those:
+    ``if flag: import impl_b as impl`` picks what ``impl.op`` resolves to per
+    machine, and so does the same alias spelled ``from . import impl_b as
+    impl`` in a package __init__. Inheriting the parent's trust without
+    checking the name is what let ``mypkg.impl.op`` through before.
+    """
+    modules = {
+        e.orig_guard.originating_source.name: (e.orig_guard.originating_source, e.value)
+        for e in entries
+        if isinstance(e.value, types.ModuleType)
+        and isinstance(_source_root(e.orig_guard.originating_source), GlobalSource)
+    }
+    # Dynamo guards the attributes it reads off an import alias but never the
+    # bare alias, so a real model produces G['__import_torch'].Tensor with no
+    # module-valued entry for G['__import_torch'] to anchor it. The alias name
+    # encodes its module, so recover it rather than treating torch.Tensor as a
+    # config-swappable slot.
+    for e in entries:
+        root = _source_root(e.orig_guard.originating_source)
+        if isinstance(root, GlobalSource) and root.name not in modules:
+            aliased = _dynamo_alias_module(root.global_name)
+            if aliased is not None:
+                modules[root.name] = (root, aliased)
+    trusted: dict[str, bool] = {}
+
+    def is_trusted(name: str) -> bool:
+        if name not in trusted:
+            trusted[name] = False  # also breaks cycles while recursing
+            found = modules.get(name)
+            if found is not None:
+                source, module = found
+                # Mirrors InstructionTranslator.import_source's alias.
+                dynamo_alias = "__import_" + module.__name__.replace(".", "_dot_")
+                if _is_library_module(module.__name__):
+                    trusted[name] = True
+                elif isinstance(source, GlobalSource):
+                    trusted[name] = source.global_name in (
+                        module.__name__,
+                        dynamo_alias,
+                    )
+                elif isinstance(source, AttrSource):
+                    outer = modules.get(source.base.name)
+                    trusted[name] = (
+                        outer is not None
+                        and is_trusted(source.base.name)
+                        and module.__name__
+                        in (source.member, f"{outer[1].__name__}.{source.member}")
+                    )
+        return trusted[name]
+
+    return {name: module for name, (_, module) in modules.items() if is_trusted(name)}
 
 
 # Dynamo's own handle on the builtins dict, minted by
