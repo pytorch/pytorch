@@ -488,6 +488,42 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         return 2
 
     @skip_if_lt_x_gpu(1)
+    def test_param_dtype_fn_preserves_input_cast_dtype(self):
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(8, 8)
+                self.scale = nn.Parameter(torch.ones(8))
+                self.input_dtype: torch.dtype | None = None
+                self.param_dtypes: tuple[torch.dtype, torch.dtype] | None = None
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.input_dtype = x.dtype
+                self.param_dtypes = (self.linear.weight.dtype, self.scale.dtype)
+                return self.linear(x).float() * self.scale
+
+        model = Model().to(device_type)
+        fp32_scale = model.scale
+
+        def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            return torch.float32 if param is fp32_scale else None
+
+        replicate(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+                param_dtype_fn=param_dtype_fn,
+            ),
+        )
+        model(torch.randn(2, 8, device=device_type)).sum().backward()
+        self.assertEqual(model.input_dtype, torch.bfloat16)
+        self.assertEqual(model.param_dtypes, (torch.bfloat16, torch.float32))
+        state_mp_policy = replicate.state(model)._mp_policy
+        self.assertEqual(state_mp_policy.param_dtype, torch.bfloat16)
+        self.assertIsNone(state_mp_policy.param_dtype_fn)
+
+    @skip_if_lt_x_gpu(1)
     def test_float16_on_one_submodule(self):
         x = torch.zeros(2, 100, device=device_type)
 

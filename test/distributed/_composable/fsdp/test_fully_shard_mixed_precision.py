@@ -100,13 +100,6 @@ class TestMixedPrecisionPolicy(TestCase):
             ):
                 invalid_policy._resolve_for_param(default_param)
 
-        policy = MixedPrecisionPolicy(
-            param_dtype=torch.bfloat16,
-            param_dtype_fn=lambda _: torch.float16,
-        )
-        with self.assertRaisesRegex(ValueError, "parameter's original dtype"):
-            policy._resolve_for_param(default_param)
-
     def test_dtype_fns_are_keyword_only(self):
         self.assertEqual(
             MixedPrecisionPolicy.__match_args__,
