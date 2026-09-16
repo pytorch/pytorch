@@ -200,7 +200,6 @@ arithmetic_ops = (
     "pow",
     "mod",
     "truediv",
-    "matmul",
     "floordiv",
     "radd",
     "rsub",
@@ -215,6 +214,10 @@ arithmetic_ops = (
     "ifloordiv",
     "imod",  # inplace ops
 )
+# `@` is the only binary operator that never accepts a Python scalar: matmul
+# between a Tensor and an int/float/bool raises TypeError at runtime, so it must
+# not be typed like the other arithmetic operators.
+matmul_ops = ("matmul",)
 logic_ops = (
     "and",
     "or",
@@ -226,7 +229,7 @@ logic_ops = (
     "ior",
     "ixor",  # inplace ops
 )
-binary_ops = shift_ops + arithmetic_ops + logic_ops
+binary_ops = shift_ops + arithmetic_ops + matmul_ops + logic_ops
 
 symmetric_comparison_ops = ("eq", "ne")
 asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
@@ -262,6 +265,8 @@ def sig_for_ops(opname: str) -> list[str]:
                 f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ...{suffix}"
             ]
         return [f"def {opname}(self, other: Tensor | Number | _complex) -> Tensor: ..."]
+    elif name in matmul_ops:
+        return [f"def {opname}(self, other: Tensor) -> Tensor: ..."]
     elif name in logic_ops:
         return [f"def {opname}(self, other: Tensor | _int) -> Tensor: ..."]
     elif name in shift_ops:

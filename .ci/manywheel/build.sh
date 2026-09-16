@@ -21,6 +21,20 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
 
         python3 "${SCRIPTPATH}/build_install_deps.py" "${PYTORCH_ROOT}"
 
+        # Keep CMake and Ninja stable across Python ABI iterations. PATH alone is
+        # insufficient because scikit-build-core prefers its importable,
+        # per-environment cmake/ninja packages.
+        shared_tools_dir="${RUNNER_TEMP:-/tmp}/pytorch-shared-build-tools"
+        if [[ ! -x "${shared_tools_dir}/cmake" ]]; then
+            mkdir -p "${shared_tools_dir}"
+            ln -sf "$(readlink -f "$(command -v cmake)")" "${shared_tools_dir}/cmake"
+            ln -sf "$(readlink -f "$(command -v ninja)")" "${shared_tools_dir}/ninja"
+        fi
+        PATH="${shared_tools_dir}:${PATH}"
+        CMAKE_EXECUTABLE="$(readlink -f "${shared_tools_dir}/cmake")"
+        CMAKE_ARGS="${CMAKE_ARGS:-} -DCMAKE_MAKE_PROGRAM=$(readlink -f "${shared_tools_dir}/ninja")"
+        export PATH CMAKE_EXECUTABLE CMAKE_ARGS
+
         : "${PYTORCH_FINAL_PACKAGE_DIR:=/artifacts}"
         mkdir -p "${PYTORCH_FINAL_PACKAGE_DIR}"
         RAW_WHEEL_DIR=$(mktemp -d)
