@@ -5047,14 +5047,14 @@ from user code:
             loaded(x)
 
     def test_load_compiled_function_f_globals_merges_for_the_bytecode(self):
-        # The bytecode's half of the f_globals contract, which this commit
-        # leaves alone: the dict is merged OVER the globals serialized with the
-        # artifact into a load-time snapshot, so a name it omits still resolves
-        # and a name it binds is what the graph computes with. This passes on
-        # the parent too -- the default filter keeps no global guard, so nothing
-        # here turns on which dict the guards resolve against. It is here
-        # because the other half REPLACES the guard scope, and the two are easy
-        # to conflate.
+        # The load-time half of the f_globals contract: the dict is merged OVER
+        # the globals serialized with the artifact, so a name it omits still
+        # resolves and a name it binds is what the graph computes with. That is
+        # all a global no kept guard is rooted at ever gets -- the per-call
+        # re-read covers the certified names only, and under the default filter
+        # here there are none, which is also why this passes on the parent. It
+        # is here because the other half REPLACES the guard scope, and the two
+        # are easy to conflate.
         def fn(x):
             return x * EPS
 
@@ -5191,17 +5191,15 @@ from user code:
         self.assertEqual(set(scope) - before, {builtins_key, "__builtins__"})
         self.assertEqual(loaded(x), fn(x))
 
-    def test_load_compiled_function_f_globals_accepted_rebind_is_not_used(self):
-        # The limitation the docstring and the guide record: the guards read
-        # f_globals live while the bytecode reads the load-time snapshot, so a
-        # rebind a kept TENSOR_MATCH accepts -- it compares metadata, not values
-        # -- passes the check and the graph still computes with the value the
-        # load snapshotted. test_..._guard_checks_the_tensor_type pins the
-        # rejected end; this pins the accepted one, so either fix the message
-        # weighs -- re-rooting the guards at the snapshot, or refreshing it once
-        # a check passes -- has to change this test. Unlike the rejected end, it
-        # answers the same way on the parent, where a rebind was invisible to
-        # the guards too.
+    def test_load_compiled_function_f_globals_accepted_rebind_is_served(self):
+        # A global a kept guard is rooted at is re-read from f_globals before
+        # every call, so a rebind a kept TENSOR_MATCH accepts -- it compares
+        # metadata, not values -- is what the graph computes with, not the value
+        # the load snapshotted. Serving the snapshot instead would be a wrong
+        # answer with nothing raising: the guard the swap satisfies certifies
+        # exactly the metadata the graph was compiled for, so the new tensor is
+        # the one it should read. test_..._guard_checks_the_tensor_type pins the
+        # rejected end of the same swap.
         def fn(x):
             return x * EPS
 
@@ -5229,9 +5227,92 @@ from user code:
         self.assertEqual(loaded(x), x * load_time)
 
         rebound = torch.tensor(5.0)
+        self.assertEqual(rebound.dtype, load_time.dtype)
+        self.assertEqual(rebound.shape, load_time.shape)
+        self.assertEqual(rebound.device, load_time.device)
+        self.assertEqual(rebound.requires_grad, load_time.requires_grad)
         self.assertNotEqual(rebound.item(), load_time.item())
         scope["EPS"] = rebound
+        self.assertEqual(loaded(x), x * rebound)
+
+    def test_load_compiled_function_graph_rebind_of_a_guarded_global_is_re_read(self):
+        # A forward that rebinds a guarded global has Dynamo replay the store as
+        # a STORE_GLOBAL into the bytecode's own globals, never into f_globals,
+        # which is the dict the guards read and just certified. The re-read
+        # takes the scope's value back before the next call, so the store does
+        # not accumulate across calls: a value no guard checked is not served
+        # in place of the one they passed. Eager stores into the dict its guards
+        # read; here that dict is the caller's, and the graph leaves it alone.
+        def fn(x):
+            global EPS
+            y = x * EPS
+            EPS = EPS * 2
+            return y
+
+        x = torch.randn(3, 4)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        # Not EPS.clone(): doubling 1e-7 stays inside assertEqual's tolerance.
+        load_time = torch.tensor(3.0)
+        scope = {"EPS": load_time}
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+        self.assertEqual(loaded._live_global_names, ("EPS",))
         self.assertEqual(loaded(x), x * load_time)
+        # The store landed in the bytecode's globals and left the scope alone.
+        self.assertIs(scope["EPS"], load_time)
+        self.assertEqual(loaded.fn.__globals__["EPS"], load_time * 2)
+        served = loaded(x)
+        self.assertEqual(served, x * load_time)
+        self.assertNotEqual(served.tolist(), (x * load_time * 2).tolist())
+        self.assertIs(scope["EPS"], load_time)
+
+    def test_load_compiled_function_opted_out_rebind_is_served_unchecked(self):
+        # disable_guard_check() does not stop the per-call re-read: the names a
+        # kept guard is rooted at are recorded by the load, before the opt-out
+        # flips anything, so an opted-out artifact goes on serving whatever
+        # f_globals binds -- including the nn.Parameter the kept TENSOR_MATCH
+        # rejects while the check is on, which is the same swap
+        # test_..._guard_checks_the_tensor_type pins at the other end. That is
+        # the opt-out being unsafe as documented rather than an accident:
+        # holding the load-time value here would be no more checked, only stale.
+        def fn(x):
+            return x * EPS
+
+        x = torch.randn(3, 4)
+        self._hide_leaked_dynamo_globals()
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        ).aot_compile(((x,), {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        load_time = EPS.clone()
+        scope = {"EPS": load_time}
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
+        self.assertEqual(loaded(x), x * load_time)
+
+        rebound = torch.nn.Parameter(torch.tensor(5.0), requires_grad=False)
+        self.assertNotEqual(rebound.item(), load_time.item())
+        scope["EPS"] = rebound
+        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            loaded(x)
+        loaded.disable_guard_check()
+        served = loaded(x)
+        self.assertEqual(served, x * rebound)
+        self.assertNotEqual(served.tolist(), (x * load_time).tolist())
 
     def test_aot_compile_fn_missing_global_hint_names_f_globals(self):
         # Loaded without f_globals, a function artifact's guards resolve against
