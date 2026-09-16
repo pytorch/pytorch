@@ -32,6 +32,7 @@ import dataclasses
 import dis
 import functools
 import importlib
+import importlib.machinery
 import inspect
 import itertools
 import linecache
@@ -2443,16 +2444,22 @@ class InstructionTranslatorBase(
             elif value is None:
                 value = importlib.import_module(module_name)
             elif isinstance(value, types.ModuleType):
-                # Out of the instance dict, like the __name__ reads below: an
-                # attribute read runs a PEP 562 __getattr__ or a class-level
-                # __getattribute__ (importlib.util._LazyModule imports on any).
-                # Narrower than the getattr gate in importlib's _find_and_load
-                # by that choice: a module whose body deleted __spec__ from its
-                # dict, or serves it from such a hook, is served as is where an
-                # import statement would wait on it.
+                # Both out of instance dicts, like the __name__ reads below: an
+                # attribute read runs a PEP 562 __getattr__, a class-level
+                # __getattribute__ (importlib.util._LazyModule imports on any)
+                # or, on the spec, a descriptor. _initializing is only ever an
+                # instance attribute, written by _load_unlocked on the
+                # ModuleSpec _find_spec returned; a __spec__ of another type
+                # cannot carry it and need not have a __dict__. Narrower than
+                # the getattr gate in importlib's _find_and_load by that
+                # choice: a module whose body deleted __spec__ from its dict,
+                # or serves it or the flag from such a hook, is served as is
+                # where an import statement would wait on it.
                 spec = object.__getattribute__(value, "__dict__").get("__spec__")
-                if getattr(spec, "_initializing", False):
-                    value = importlib.import_module(module_name)
+                if isinstance(spec, importlib.machinery.ModuleSpec):
+                    spec_dict = object.__getattribute__(spec, "__dict__")
+                    if spec_dict.get("_initializing"):
+                        value = importlib.import_module(module_name)
             # sys.modules accepts any object; a non-module entry is bound as is
             # by the callers that make no module check, but never remembered.
             if isinstance(value, types.ModuleType):

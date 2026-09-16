@@ -30,7 +30,10 @@ from torch._dynamo.package import (
     DynamoCache,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.symbolic_convert import _import_source_cache
+from torch._dynamo.symbolic_convert import (
+    _import_source_cache,
+    InstructionTranslatorBase,
+)
 from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -81,7 +84,7 @@ def _import_alias_getattr_boom(name):
 
 def _import_source_on_stack():
     # InstructionTranslatorBase.import_source, matched by module as well as by
-    # name; _ImportAliasProbeSpec pins that the match still finds it.
+    # name; the getattribute test pins that the pair still names it.
     frame = sys._getframe(1)
     while frame is not None:
         where = (frame.f_code.co_name, frame.f_globals.get("__name__"))
@@ -105,18 +108,15 @@ class _ImportAliasHookedModule(types.ModuleType):
 
 
 class _ImportAliasProbeSpec(importlib.machinery.ModuleSpec):
-    # The one read import_source makes by design is _initializing off the
-    # spec it took out of the module dict, so this is where a test sees that
-    # the frame walk above still names the real import_source.
-    def __init__(self, name):
-        super().__init__(name, None)
-        self.seen_import_source = False
-
+    # _load_unlocked writes _initializing into the spec's instance dict and
+    # import_source reads it from there; a property on the class is what a
+    # getattr would run instead. __import__ reads the flag off a present
+    # module's spec by design, so only a read made by import_source raises.
     @property
     def _initializing(self):
         if _import_source_on_stack():
-            self.seen_import_source = True
-        return False
+            raise RuntimeError("spec _initializing property ran inside a trace")
+        return vars(self).get("_initializing", False)
 
 
 def _bound_method_guard_target(self, x):
@@ -1681,17 +1681,22 @@ def add(x, y):
     def test_import_alias_check_does_not_run_a_module_getattribute(self):
         # Both slots hold a module whose class raises on any read import_source
         # makes: the one __import__ resolves and the stale one a prior writer
-        # left. The resolution reads the live one's __spec__ and the check reads
-        # each module's name, both out of the instance dict without running
-        # that hook; __import__ and PythonModuleVariable read __spec__ and
+        # left. The resolution reads the live one's __spec__ and the spec's
+        # _initializing, and the check reads each module's name, all out of
+        # instance dicts without running that hook or the spec's property;
+        # __import__ and PythonModuleVariable read __spec__, _initializing and
         # __name__ off the live one by design, and the frame reads nothing else
-        # off it. The live module's spec records whether the hook's frame walk
-        # saw import_source on the _initializing read the resolution makes, so
-        # a hook that no longer recognizes the frame fails here, not silently.
+        # off it. Both hooks recognize import_source by the frame's function
+        # name and module, pinned against the real function so a rename fails
+        # here instead of letting every read through.
+        walked = InstructionTranslatorBase.import_source.__wrapped__
+        where = (walked.__code__.co_name, walked.__module__)
+        self.assertEqual(where, ("import_source", "torch._dynamo.symbolic_convert"))
         name = "torch_test_package_import_alias_hooked"
         alias = f"__import_{name}"
         live = _ImportAliasHookedModule(name)
-        spec = _ImportAliasProbeSpec(name)
+        spec = _ImportAliasProbeSpec(name, None)
+        vars(spec)["_initializing"] = False
         live.__spec__ = spec
         stale = _ImportAliasHookedModule(name)
         args = (torch.randn(3, 2),)
@@ -1708,7 +1713,6 @@ def add(x, y):
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(fn(*args), compiled_fn(*args))
             self.assertIs(fn.__globals__[alias], live)
-            self.assertTrue(spec.seen_import_source)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
@@ -1810,7 +1814,7 @@ def add(x, y):
             for blocked in (False, True):
                 with self.subTest(blocked=blocked):
                     torch._dynamo.reset()
-                    with mock.patch.dict(sys.modules), spy as import_module:
+                    with spy as import_module:
                         if blocked:
                             sys.modules[name] = None
                         else:
@@ -1824,6 +1828,7 @@ def add(x, y):
                             self.assertNotIn(name, sys.modules)
                     self.assertIs(fn.__globals__[alias], profiler)
         finally:
+            sys.modules[name] = profiler
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
