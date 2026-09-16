@@ -28,6 +28,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     skipIfHpu,
@@ -1199,6 +1200,8 @@ def temporary_tensor_subclass(torch_function=None):
 
 
 class NNModuleTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
@@ -1822,6 +1825,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfHpu
     def test_lazy_module3(self, device):
         m = LazyMLP()
@@ -1853,6 +1858,8 @@ class MockModule(torch.nn.Module):
 
 
 class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_nn_module(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
