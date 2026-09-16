@@ -51,11 +51,18 @@ set_property(
     TARGET torch::sycl PROPERTY INTERFACE_LINK_LIBRARIES
     ${SYCL_LIBRARY})
 
+# LevelZero library interface
+add_library(torch::level_zero INTERFACE IMPORTED)
+
+set_property(
+    TARGET torch::level_zero PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${LevelZero_INCLUDE_DIR})
+
 # xpurt
 add_library(torch::xpurt INTERFACE IMPORTED)
 set_property(
     TARGET torch::xpurt PROPERTY INTERFACE_LINK_LIBRARIES
-    torch::sycl)
+    torch::sycl torch::level_zero)
 
 # setting xpu arch flags
 torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
