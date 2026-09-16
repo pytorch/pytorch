@@ -109,172 +109,261 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, BFloat16> {
-  C10_HOST_DEVICE static inline complex<Half> apply(BFloat16 src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::BFloat16> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::BFloat16 src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e5m2> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e5m2 src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::Float8_e5m2> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::Float8_e5m2 src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e5m2fnuz> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e5m2fnuz src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::Float8_e5m2fnuz> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::Float8_e5m2fnuz src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e4m3fn> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e4m3fn src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::Float8_e4m3fn> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::Float8_e4m3fn src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e4m3fnuz> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e4m3fnuz src) {
-    return static_cast<complex<Half>>(complex<float>{src});
-  }
-};
-
-// TODO(#146647): Can we make all these template specialization happen
-// based off our apply macros?
-template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e8m0fnu> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e8m0fnu src) {
-    return static_cast<complex<Half>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<Half>, Half> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Half src) {
-    return static_cast<complex<Half>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<Half>, complex<double>> {
-  C10_HOST_DEVICE static inline complex<Half> apply(complex<double> src) {
-    return static_cast<complex<Half>>(static_cast<complex<float>>(src));
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e5m2> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e5m2 src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e5m2fnuz> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e5m2fnuz src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e4m3fn> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e4m3fn src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e4m3fnuz> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e4m3fnuz src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::Float8_e4m3fnuz> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::Float8_e4m3fnuz src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 // TODO(#146647): Can we make all these template specialization happen
 // based off our apply macros?
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e8m0fnu> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e8m0fnu src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::Float8_e8m0fnu> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::Float8_e8m0fnu src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Half> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Half src) {
-    return static_cast<complex<BFloat16>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::Half> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::Half src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, complex<double>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(complex<double> src) {
-    return static_cast<complex<BFloat16>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::complex<double>> {
+  C10_HOST_DEVICE static inline torch::headeronly::complex<
+      torch::headeronly::Half>
+  apply(torch::headeronly::complex<double> src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        static_cast<torch::headeronly::complex<float>>(src));
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, complex<Half>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(complex<Half> src) {
-    return static_cast<complex<BFloat16>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::Float8_e5m2> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::Float8_e5m2 src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, complex<BFloat16>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<Half> apply(
-      complex<BFloat16> src) {
-    return static_cast<complex<Half>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::Float8_e5m2fnuz> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::Float8_e5m2fnuz src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<Half, complex<BFloat16>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline Half apply(
-      complex<BFloat16> src) {
-    return static_cast<Half>(static_cast<float>(src.real()));
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::Float8_e4m3fn> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::Float8_e4m3fn src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<BFloat16, complex<Half>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline BFloat16 apply(
-      complex<Half> src) {
-    return static_cast<BFloat16>(static_cast<float>(src.real()));
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::Float8_e4m3fnuz> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::Float8_e4m3fnuz src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        torch::headeronly::complex<float>{src});
+  }
+};
+
+// TODO(#146647): Can we make all these template specialization happen
+// based off our apply macros?
+template <>
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::Float8_e8m0fnu> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::Float8_e8m0fnu src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        torch::headeronly::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<BFloat16, complex<BFloat16>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline BFloat16 apply(
-      complex<BFloat16> src) {
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::Half> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::Half src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        static_cast<torch::headeronly::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::complex<double>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::complex<double> src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        static_cast<torch::headeronly::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::complex<torch::headeronly::Half>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::complex<torch::headeronly::Half> src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::BFloat16>>(
+        static_cast<torch::headeronly::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::Half>,
+    torch::headeronly::complex<torch::headeronly::BFloat16>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::Half>
+      apply(torch::headeronly::complex<torch::headeronly::BFloat16> src) {
+    return static_cast<torch::headeronly::complex<torch::headeronly::Half>>(
+        static_cast<torch::headeronly::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    torch::headeronly::Half,
+    torch::headeronly::complex<torch::headeronly::BFloat16>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      Half
+      apply(torch::headeronly::complex<torch::headeronly::BFloat16> src) {
+    return static_cast<torch::headeronly::Half>(static_cast<float>(src.real()));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    torch::headeronly::BFloat16,
+    torch::headeronly::complex<torch::headeronly::Half>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      BFloat16
+      apply(torch::headeronly::complex<torch::headeronly::Half> src) {
+    return static_cast<torch::headeronly::BFloat16>(
+        static_cast<float>(src.real()));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    torch::headeronly::BFloat16,
+    torch::headeronly::complex<torch::headeronly::BFloat16>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      BFloat16
+      apply(torch::headeronly::complex<torch::headeronly::BFloat16> src) {
     return src.real();
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, BFloat16> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(BFloat16 src) {
-    return complex<BFloat16>{src, 0};
+struct static_cast_with_inter_type<
+    torch::headeronly::complex<torch::headeronly::BFloat16>,
+    torch::headeronly::BFloat16> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline torch::headeronly::
+      complex<torch::headeronly::BFloat16>
+      apply(torch::headeronly::BFloat16 src) {
+    return torch::headeronly::complex<torch::headeronly::BFloat16>{src, 0};
   }
 };
 
 template <typename To, typename From>
 C10_HOST_DEVICE To convert(From f) {
-  return static_cast_with_inter_type<To, From>::apply(f);
+  return torch::headeronly::static_cast_with_inter_type<To, From>::apply(f);
 }
 
 // Define with C10_NOINLINE to prevent code-size bloat.
@@ -289,24 +378,25 @@ C10_HOST_DEVICE To convert(From f) {
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
-    report_overflow(name);
+  if (!std::is_same_v<To, bool> && torch::headeronly::overflows<To, From>(f)) {
+    torch::headeronly::report_overflow(name);
   }
-  return convert<To, From>(f);
+  return torch::headeronly::convert<To, From>(f);
 }
 
 // Range-checked conversion that PERMITS signed->unsigned two's-complement
 // wraparound (via overflows() with its default strict_unsigned=false). Retained
 // only to preserve the historical behavior of the few call sites that relied on
 // the wrap. DO NOT use in new code: use c10::safe_conv (strict integer
-// narrowing, c10/util/safe_conv.h) or checked_convert (general, above).
+// narrowing, c10/util/safe_conv.h) or
+// torch::headeronly::checked_convert (general, above).
 template <typename To, typename From>
 To unsafe_wrapping_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
-    report_overflow(name);
+  if (!std::is_same_v<To, bool> && torch::headeronly::overflows<To, From>(f)) {
+    torch::headeronly::report_overflow(name);
   }
-  return convert<To, From>(f);
+  return torch::headeronly::convert<To, From>(f);
 }
 
 HIDDEN_NAMESPACE_END(torch, headeronly)

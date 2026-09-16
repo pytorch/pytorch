@@ -50,7 +50,7 @@ struct static_cast_with_inter_type {
 
 template <typename To, typename From>
 C10_HOST_DEVICE To convert(From f) {
-  return static_cast_with_inter_type<To, From>::apply(f);
+  return c10::static_cast_with_inter_type<To, From>::apply(f);
 }
 
 using torch::headeronly::report_overflow;
@@ -59,10 +59,10 @@ using torch::headeronly::unchecked_cast_to_int;
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
+  if (!std::is_same_v<To, bool> && c10::overflows<To, From>(f)) {
     report_overflow(name);
   }
-  return convert<To, From>(f);
+  return c10::convert<To, From>(f);
 }
 
 // Range-checked conversion that PERMITS signed->unsigned two's-complement
@@ -76,7 +76,7 @@ To unsafe_wrapping_convert(From f, const char* name) {
   if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
     report_overflow(name);
   }
-  return convert<To, From>(f);
+  return c10::convert<To, From>(f);
 }
 
 } // namespace c10

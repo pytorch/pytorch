@@ -49,12 +49,13 @@ overflows(From f, bool strict_unsigned = false) {
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
     if (!strict_unsigned) {
-      return greater_than_max<To>(f) ||
-          (is_negative(f) &&
+      return torch::headeronly::greater_than_max<To>(f) ||
+          (torch::headeronly::is_negative(f) &&
            -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
     }
   }
-  return less_than_lowest<To>(f) || greater_than_max<To>(f);
+  return torch::headeronly::less_than_lowest<To>(f) ||
+      torch::headeronly::greater_than_max<To>(f);
 }
 
 template <typename To, typename From>
