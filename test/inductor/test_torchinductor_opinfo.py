@@ -27,9 +27,8 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     skipCPUIf,
-    skipCUDAIf,
+    skipIf,
     skipOps,
-    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
@@ -52,9 +51,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CPU,
-    HAS_CUDA_AND_TRITON,
     has_triton,
-    HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -1306,10 +1303,7 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
-    @skipXPUIf(
-        not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
-    )
+    @skipIf(not has_triton(), "Skipped! Triton not found", device_type=("cuda", "xpu"))
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
     @skipCPUIf(IS_MACOS, "Skipped under macOS")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -1326,16 +1320,9 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
 
-        if device_type not in (self.device_type, "cpu"):
-            raise AssertionError(f"Unexpected device_type: {device_type}")
-
         torch._dynamo.reset()
         with torch.no_grad():
-            # TODO: should we move empty_cache to the common device interface
-            if device_type == "cuda":
-                torch.cuda.empty_cache()
-            elif device == "xpu":
-                torch.xpu.empty_cache()
+            torch.accelerator.empty_cache()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
