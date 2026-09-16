@@ -104,7 +104,7 @@ class SymmMemAllocMixin:
         # Leverage MemPool to reuse the symmetric buffer, avoiding allocation
         # and rendezvous overhead
         mempool = symm_mem.get_mem_pool(device)
-        with torch.cuda.use_mem_pool(mempool):
+        with torch.get_device_module(device).use_mem_pool(mempool):
             return torch.empty(size, dtype=dtype, device=device)
 
 

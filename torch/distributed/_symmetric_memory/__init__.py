@@ -1920,7 +1920,9 @@ def _low_contention_all_gather_ce_multicast(
             "symmetric-memory output."
         )
     device = torch.device("cuda", device_index)
-    with torch.cuda.use_mem_pool(get_mem_pool(device)):
+    # This op is CUDA-only; going through the device module is just so that the
+    # union returned by `get_mem_pool` type-checks.
+    with torch.get_device_module(device).use_mem_pool(get_mem_pool(device)):
         output = torch.empty_strided(
             out_shape,
             make_contiguous_strides_for(out_shape),
