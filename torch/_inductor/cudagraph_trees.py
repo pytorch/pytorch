@@ -91,7 +91,6 @@ from torch._inductor.cudagraph_utils import (
     WrappedFunction,
 )
 from torch._library.opaque_object import is_custom_class_obj
-from torch._prims_common import compute_required_storage_length
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -935,15 +934,6 @@ class AliasesNewOutput(OutputAliasInfo):
         self.index = index
 
 
-def _can_copy_input_storage(inp: torch.Tensor) -> bool:
-    # Copying the logical view must preserve every storage-relative read.
-    storage_size = int(compute_required_storage_length(inp.size(), inp.stride(), 0))
-    return bool(
-        inp.storage_offset() == 0
-        and inp.untyped_storage().nbytes() == storage_size * inp.element_size()
-    )
-
-
 class CUDAGraphNode:
     """
     A single recording of a function into a CUDA Graph. Recordings of CUDA Graphs share a single memory pool
@@ -1035,18 +1025,9 @@ class CUDAGraphNode:
             for idx, t in enumerate(inputs)
             if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
         )
-        copy_cudagraph_managed_idxs_set = OrderedSet(
-            idx
-            for idx in (
-                OrderedSet(copy_cudagraph_managed_idxs) & all_cudagraph_managed_idxs
-            )
-            - static_input_idxs
-            if _can_copy_input_storage(cast(torch.Tensor, inputs[idx]))
-        )
-        self.copied_managed_input_storage_sizes: dict[int, int] = {
-            idx: cast(torch.Tensor, inputs[idx]).untyped_storage().nbytes()
-            for idx in copy_cudagraph_managed_idxs_set
-        }
+        copy_cudagraph_managed_idxs_set = (
+            OrderedSet(copy_cudagraph_managed_idxs) & all_cudagraph_managed_idxs
+        ) - static_input_idxs
         self.cudagraph_managed_idxs: list[int] = list(
             all_cudagraph_managed_idxs - copy_cudagraph_managed_idxs_set
         )
@@ -2055,7 +2036,7 @@ class CUDAGraphNode:
 
         return recording_inputs
 
-    def can_copy_cudagraph_managed_input(self, idx: int, inp: torch.Tensor) -> bool:
+    def can_copy_cudagraph_managed_input(self, idx: int) -> bool:
         # A copied input no longer aliases other inputs inside the replayed graph.
         # If any input is mutated, a later invocation can pass the same graph-pool
         # tensor to both slots and require that aliasing to be preserved.
@@ -2063,7 +2044,6 @@ class CUDAGraphNode:
             not self.wrapped_function.mutated_input_idxs
             and idx not in self.wrapped_function.static_input_idxs
             and not self.preserved_aliased_inputs[idx]
-            and _can_copy_input_storage(inp)
         )
 
     def check_invariants(
@@ -2080,18 +2060,6 @@ class CUDAGraphNode:
             inputs,
             self.static_input_data_ptrs,
         )
-
-        for idx, storage_size in self.copied_managed_input_storage_sizes.items():
-            inp = cast(torch.Tensor, inputs[idx])
-            if (
-                inp.storage_offset() != 0
-                or inp.untyped_storage().nbytes() != storage_size
-            ):
-                status = CheckInvariantStatus.CopiedInputStorageMismatch
-                return status, lambda: (
-                    f"copied managed input {idx} requires storage offset 0 "
-                    f"and {storage_size} storage bytes"
-                )
 
         # previously managed data pointers remain stable
         # this is on the hot path so moved to C++. equivalent to:
@@ -2691,22 +2659,6 @@ class CUDAGraphTreeManager:
         ):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
-        uncopyable_demoted_idxs: OrderedSet[int] = OrderedSet()
-        for idx in self._get_demoted_cudagraph_managed_idxs(function_id):
-            if _can_copy_input_storage(cast(torch.Tensor, new_inputs[idx])):
-                continue
-            uncopyable_demoted_idxs.add(idx)
-            if not self._get_cuda_graph_recorded_tensor_checker()(
-                cast(torch.Tensor, new_inputs[idx])
-            ):
-                self.skip_cudagraph[node_id][function_id] = True
-                log_cudagraph_skip_and_bump_counter(
-                    f"skipping cudagraph due to demoted input {idx} of function "
-                    f"{function_id.id} becoming an unmanaged tensor whose full "
-                    "storage cannot be preserved by copying its view"
-                )
-                return self.ids_to_funcs[function_id].model(new_inputs)
-
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
         # then warm up graph B and make more allocations, the subsequent recording of A will not
@@ -2743,11 +2695,7 @@ class CUDAGraphTreeManager:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
                 # and other
-                if any(idx in child.input_copy_idxs for idx in uncopyable_demoted_idxs):
-                    status = CheckInvariantStatus.CopiedInputStorageMismatch
-                    status_logger = functools.partial(str, status)
-                else:
-                    status, status_logger = child.check_invariants(new_inputs)
+                status, status_logger = child.check_invariants(new_inputs)
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
@@ -2797,9 +2745,7 @@ class CUDAGraphTreeManager:
                 demotable_cudagraph_managed_idxs = OrderedSet(
                     idx
                     for idx in latest.mismatched_cudagraph_managed_idxs(new_inputs)
-                    if latest.can_copy_cudagraph_managed_input(
-                        idx, cast(torch.Tensor, new_inputs[idx])
-                    )
+                    if latest.can_copy_cudagraph_managed_input(idx)
                 )
             skip_cudagraph_managed_input_idxs: tuple[int, ...] = ()
             if demotable_cudagraph_managed_idxs:

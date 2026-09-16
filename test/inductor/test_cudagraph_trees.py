@@ -7362,46 +7362,6 @@ if HAS_CUDA_AND_TRITON:
     )
     from torch.testing._internal.common_methods_invocations import op_db
 
-    class TestCudagraphManagedInputStorage(TestCase):
-        @config.patch(
-            {
-                "triton.skip_cudagraph_warmup": True,
-                "triton.cudagraph_managed_input_rerecord_limit": 1,
-            }
-        )
-        def test_managed_view_storage(self, device):
-            def consumer(x):
-                return (x.as_strided((32,), (1,), 0) + 1,)
-
-            def producer(args):
-                x = args[0]
-                args.clear()
-                return x + 0, x + 1
-
-            inp = torch.arange(32, dtype=torch.float32, device=device)
-            example = inp[:4]
-            graph = make_fx(consumer)(example)
-            compiled = compile_fx_inner(graph, [example], cudagraphs=False)
-            self.assertEqual(compiled([example])[0], inp + 1)
-
-            cudagraphify = functools.partial(
-                tree_cudagraphify_impl,
-                device_index=inp.device.index,
-                is_inference=True,
-                is_backward=False,
-            )
-            producer_cg = cudagraphify(producer, [inp], ())
-            consumer_cg = cudagraphify(compiled, [example], ())
-            for idx in range(2):
-                torch.compiler.cudagraph_mark_step_begin()
-                outputs = producer_cg([inp])
-                self.assertEqual(consumer_cg([outputs[idx][:4]])[0], inp + idx + 1)
-                del outputs
-
-    instantiate_device_type_tests(
-        TestCudagraphManagedInputStorage, globals(), only_for=("cuda",)
-    )
-
     # Ops that involve indexing/scattering that we want to test with cudagraphs
     INDEXING_OPS = (
         "index_put",

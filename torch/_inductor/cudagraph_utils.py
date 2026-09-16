@@ -476,9 +476,6 @@ class CheckInvariantStatus(Enum):
     # Expected dead indices before graph are live
     ExpectedDeadIndicesBeforeGraphMismatch = 4
 
-    # Copied managed inputs must retain their full storage extent and offset
-    CopiedInputStorageMismatch = 5
-
     def __str__(self) -> str:
         if self.name == "CudagraphManagedIdxMismatch":
             return "cudagraph managed tensor data pointer changed"
@@ -486,8 +483,6 @@ class CheckInvariantStatus(Enum):
             return "static input data pointer changed"
         elif self.name == "ExpectedDeadIndicesBeforeGraphMismatch":
             return "expected dead indices before graph are live"
-        elif self.name == "CopiedInputStorageMismatch":
-            return "copied managed input storage size or offset changed"
         else:
             return f"{self.name}: {self.value}"
 
