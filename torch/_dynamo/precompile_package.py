@@ -519,3 +519,105 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
         and source.base.global_name.startswith(_BUILTINS_DICT_PREFIX)
         and _owning_module(value) == "builtins"
     )
+
+
+def _is_risky_drop(
+    entry: GuardFilterEntry, namespaces: dict[str, types.ModuleType]
+) -> bool:
+    """
+    Whether losing this identity guard can plausibly change results.
+
+    Intersect the binding SITE with who owns the value; either test alone is
+    wrong. Site alone: ``self.act = getattr(F, cfg.activation)`` and
+    ``self.act = cfg.act_fn`` are the same swappable slot, so calling the first
+    benign because ``F.gelu`` is torch-owned waves through the exact divergence
+    this check exists for -- capture gelu, serve silu, get the gelu graph and no
+    error. Ownership alone: ``if flag: import impl_b as impl`` then ``impl.op``
+    is a read off a module namespace exactly like ``F.gelu``, and the module is
+    user code an env var chose; so is ``self.act = abs``, where the value is a
+    builtin nothing can repoint but the attribute holding it is a slot. The site
+    survives the name stripping that makes source spelling useless -- a guard on
+    ``self.act`` arrives as ``'self.act'`` -- because the structured source is
+    still on the guard.
+
+    For a capture-here / serve-there deployment the concern is not in-process
+    rebinding but DIVERGENCE: the serving machine runs the same source but picks
+    a different object because config, a flag, or an env var differs. Three
+    bindings are waived -- a builtin read the ordinary way (see
+    ``_reads_a_builtin``), a read off a TRUSTED namespace (see
+    ``_module_namespaces``) that torch or the stdlib owns or that owns the
+    value itself, and a global bound to a def of that same name when torch or
+    the stdlib owns the def or it lives in the file doing the reading. The rest
+    are slots whose occupant config chooses: instance attributes, closure
+    cells, aliased imports, cross-module ``from x import op``, registry
+    lookups.
+
+    Trusting a namespace is not trusting everything read off it. ``F.gelu`` is
+    waived because torch owns torch.nn.functional and there is only one of it;
+    ``own_helpers.call`` is waived because own_helpers owns the def, subject to
+    the gap below. ``mypkg.op`` re-exported from ``mypkg.impl_b``,
+    ``dispatch.op`` and ``mypkg.impl.op`` are not waived: the import that chose
+    the implementation lives in a file the inlined-source checksum never sees,
+    so capture and serve can disagree with every other rail passing. Waiving
+    those is how this predicate failed open in an earlier round;
+    ``_RISKY_DROP_CORPUS`` in test_precompile_package.py is the regression net that keeps
+    them, and every other shape found so far, flagged.
+
+    KNOWN GAP, and it is a wrong-answer one. EVERY waiver above judges the
+    object capture happened to bind, not the statement that bound it, so any
+    name bound CONDITIONALLY is waived whenever the branch taken on the capture
+    machine is one of the waived shapes. This is not specific to the def-name
+    arm and it is not limited to the file being read:
+
+    - def-name arm. ``if HAVE_FAST: from fastops import gelu`` / ``else: from
+      torch.nn.functional import gelu``, captured without the flag, drops
+      ``G['gelu']`` and reports nothing; a serving machine that has fastops
+      runs torch's gelu instead, with no error. A def the reading file itself
+      redefines under an ``if`` is the same shape.
+    - namespace-owns-the-value arm. A module that binds a name under an ``if``
+      and is read as a namespace by an ordinary ``import mod`` elsewhere is
+      also waived, because at capture time the module really does own whichever
+      def the branch produced. The reading file binds nothing conditionally,
+      so it looks covered and is not.
+    - library-namespace arm, and this one needs no conditional at all. The
+      waiver trusts the owner, not the binding, so a third party that rebinds a
+      torch or stdlib attribute -- ``F.gelu = _fast_gelu`` executed at import
+      by a package that happens to be installed on the serving host -- is
+      waived even though the model itself reads ``F.gelu`` unconditionally.
+      ``functools.wraps(F.gelu)(user_fn)`` reaches the same waiver by a
+      different route, since it copies ``__name__`` and ``__module__`` off the
+      torch function it wraps.
+
+    An ``allow_in_graph`` function passes too, and Dynamo traces it opaquely so
+    the inlined-source checksum never covers it either. Nothing at capture time
+    distinguishes a conditional bind from an unconditional one -- only the
+    resulting object is visible -- so this is a limit of the approach rather
+    than a missing check. ``dropped_guards`` is the authoritative list; this
+    predicate is a lint over it, not a proof of safety.
+    """
+    source = entry.orig_guard.originating_source
+    value = entry.value
+    # entry.name, not source.name: guard names arrive with local scope stripped
+    # ("L['x'].y" -> "x.y"), and these are always locals of a resume frame.
+    if _is_dynamo_synthesized(entry.name):
+        return False
+    if source.name in namespaces:
+        return False
+    if _reads_a_builtin(source, value):
+        return False
+    if isinstance(source, ChainedSource):
+        namespace = namespaces.get(source.base.name)
+        if namespace is not None:
+            return not (
+                _is_library_module(namespace.__name__)
+                or _owning_module(value) == namespace.__name__
+            )
+    if (
+        isinstance(source, GlobalSource)
+        and getattr(value, "__name__", None) == source.global_name
+    ):
+        return not (
+            _is_library_module(_owning_module(value))
+            or _defined_where_read(value, entry.orig_guard.user_stack)
+        )
+    return True
