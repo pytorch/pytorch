@@ -1,7 +1,7 @@
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, cast, Literal, NamedTuple
+from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -11,6 +11,7 @@ from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
 from torch.distributed.tensor import DTensor
 
+from ._all_gather_layout import _can_use_param_contiguous_output, _init_layout_outputs
 from ._fsdp_api import _ReduceOp
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -18,6 +19,10 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
 )
 from ._fsdp_param import FSDPParam, ShardedState
+
+
+if TYPE_CHECKING:
+    from ._all_gather_layout import AllGatherLayout
 
 
 class AllGatherResult(NamedTuple):
@@ -31,6 +36,8 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
+    layout: "AllGatherLayout | None" = None
+    output_metadata: object | None = None
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -348,10 +355,29 @@ def foreach_all_gather(
             all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
+        layout = all_gather_comm.layout
+        copy_in = torch.ops.fsdp.all_gather_copy_in
+        output_metadata = None
+        if layout is not None:
+            copy_in, output_metadata = layout.prepare(
+                inp_split_sizes,
+                all_gather_input_numel,
+                world_size,
+                dtype,
+                device,
+                param_all_gather_input_dtypes,
+                param_all_gather_input_numels,
+                _can_use_param_contiguous_output(
+                    fsdp_params,
+                    param_all_gather_input_dtypes,
+                    param_all_gather_input_numels,
+                    dtype,
+                ),
+            )
         all_gather_output = all_gather_comm.allocate(
             (all_gather_input_numel * world_size,), dtype=dtype, device=device
         )
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+        all_gather_input, all_gather_output = copy_in(
             all_gather_inputs,
             all_gather_output,
             inp_split_sizes,
@@ -375,6 +401,8 @@ def foreach_all_gather(
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
             inp_split_sizes,
+            layout,
+            output_metadata,
         )
 
 
@@ -440,6 +468,8 @@ def foreach_all_gather_copy_out(
         param_all_gather_input_dtypes,
         param_all_gather_input_numels,
         all_gather_input_split_sizes,
+        layout,
+        output_metadata,
     ) = all_gather_result
     _dtype, device = all_gather_output.dtype, all_gather_output.device
     device_handle = _get_device_handle(device.type)
@@ -447,6 +477,15 @@ def foreach_all_gather_copy_out(
         device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
+    if layout is not None and output_metadata is not None:
+        param_outputs = layout.finalize_outputs(
+            all_gather_output,
+            param_all_gather_input_numels,
+            group.size(),
+            output_metadata,
+        )
+        _init_layout_outputs(fsdp_params, param_outputs)
+        return
     world_size, device = group.size(), all_gather_output.device
 
     split_with_sizes_out: list[torch.Tensor] = []
