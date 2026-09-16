@@ -956,21 +956,14 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   // The Metal kernels bind gamma/beta at the input dtype, so mixed-dtype
   // affine params (e.g. fp32 gamma/beta with an fp16 input, the
   // keep-LayerNorm-in-fp32 recipe) must be cast, not reinterpreted.
-  const Tensor weight_cast =
-      weight.defined() && weight.scalar_type() != input.scalar_type() ? weight.to(input.scalar_type()) : weight;
-  const Tensor bias_cast =
-      bias.defined() && bias.scalar_type() != input.scalar_type() ? bias.to(input.scalar_type()) : bias;
-  auto bias_contig = bias_cast.expect_contiguous();
-  auto gamma = weight_cast.expect_contiguous();
+  const auto bias_contig = bias.defined() ? std::make_optional(bias.to(input.scalar_type()).contiguous()) : std::nullopt;
+  const auto gamma = weight.defined() ? std::make_optional(weight.to(input.scalar_type()).contiguous()) : std::nullopt;
   auto mean = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
   auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
 
   auto input_shape = input.sizes();
   uint64_t axis_size = static_cast<uint64_t>(N);
   float epsilon_buf = static_cast<float>(eps);
-  const bool use_weight_buf = weight.defined();
-  const bool use_bias_buf = bias.defined();
-  const auto use_weight_bias_buf = std::array<bool, 2>{use_weight_buf, use_bias_buf};
   const auto input_ndim = input.dim();
   const int normalized_ndim = normalized_shape.size();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -993,14 +986,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
       auto setLayerNormArgs = [&](auto idx_tag) {
         using IDX_T = decltype(idx_tag);
         mps::mtl_setArgs(
-            computeEncoder, *X, out, mean, rstd, static_cast<IDX_T>(axis_size), epsilon_buf, use_weight_bias_buf);
-        if (use_weight_buf && use_bias_buf) {
-          mps::mtl_setArgs<7>(computeEncoder, *gamma, *bias_contig);
-        } else if (use_weight_buf) {
-          mps::mtl_setArgs<7>(computeEncoder, *gamma);
-        } else if (use_bias_buf) {
-          mps::mtl_setArgs<8>(computeEncoder, *bias_contig);
-        }
+            computeEncoder, *X, out, mean, rstd, static_cast<IDX_T>(axis_size), epsilon_buf, gamma, bias_contig);
       };
       if (use32) {
         setLayerNormArgs(uint32_t{});
