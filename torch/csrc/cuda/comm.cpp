@@ -1,5 +1,6 @@
 #include <torch/csrc/cuda/comm.h>
 
+#include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 #ifdef USE_NCCL
@@ -8,6 +9,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>

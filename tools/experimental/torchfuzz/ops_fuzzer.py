@@ -1,9 +1,11 @@
+# mypy: ignore-errors
+
 import random
 from dataclasses import dataclass
 
 import torch
 
-from torchfuzz.operators import get_operator, list_operators, Operator
+from torchfuzz.operators import get_operator, list_operators
 from torchfuzz.tensor_fuzzer import (
     fuzz_tensor_size,
     fuzz_torch_tensor_type,
@@ -16,10 +18,10 @@ from torchfuzz.tensor_fuzzer import (
 
 
 # Cache operators at module level to avoid repeated calls to list_operators()
-_CACHED_OPERATORS: dict[str, Operator] | None = None
+_CACHED_OPERATORS = None
 
 
-def _get_cached_operators() -> dict[str, Operator]:
+def _get_cached_operators():
     """Get cached operators, initializing if necessary."""
     global _CACHED_OPERATORS
     if _CACHED_OPERATORS is None:
@@ -29,7 +31,7 @@ def _get_cached_operators() -> dict[str, Operator]:
 
 def _get_template_filtered_operators(
     template: str = "default", supported_ops: list[str] | None = None
-) -> dict[str, Operator]:
+):
     """Get operators filtered by template's supported_ops, with user override.
 
     If supported_ops is provided, it takes precedence and is used to filter the
@@ -53,8 +55,7 @@ def _get_template_filtered_operators(
         return all_operators
 
     # Filter operators based on allowed_ops
-    filtered_ops: dict[str, Operator] = {}
-    allowed_ops_set = set(allowed_ops)
+    filtered_ops = {}
 
     for op_name, operator in all_operators.items():
         # Always include operations that don't have a specific torch operation
@@ -67,10 +68,18 @@ def _get_template_filtered_operators(
             filtered_ops[op_name] = operator
             continue
 
-        # Accept either the fully qualified torch operation or the exact
-        # registry key. Substring matching makes similarly named operators
-        # indistinguishable, such as exp/expand and squeeze/unsqueeze.
-        should_include = torch_op in allowed_ops_set or op_name in allowed_ops_set
+        # Check if the operator supports any of the allowed operations
+        should_include = False
+        for supported_op in allowed_ops:
+            # Direct torch operation matching
+            if torch_op == supported_op:
+                should_include = True
+                break
+
+            # Direct name matching as fallback
+            if supported_op in op_name or op_name in supported_op:
+                should_include = True
+                break
 
         if should_include:
             # Set template on operators that support it
@@ -132,7 +141,7 @@ class OperationGraph:
     root_node_id: str  # The output node - produces the final result of the graph
     target_spec: Spec
 
-    def __post_init__(self) -> None:
+    def __post_init__(self):
         """Validate the graph structure after initialization."""
         if self.root_node_id not in self.nodes:
             raise ValueError(f"Root node {self.root_node_id} not found in nodes")
@@ -148,7 +157,7 @@ class OperationGraph:
         temp_visited = set()
         result = []
 
-        def visit(node_id: str) -> None:
+        def visit(node_id: str):
             if node_id in temp_visited:
                 raise ValueError(f"Cycle detected involving node {node_id}")
             if node_id in visited:
@@ -182,7 +191,7 @@ class OperationGraph:
         visited = set()
         dependencies = []
 
-        def collect_deps(current_id: str) -> None:
+        def collect_deps(current_id: str):
             if current_id in visited or current_id not in self.nodes:
                 return
             visited.add(current_id)
@@ -244,8 +253,8 @@ def fuzz_spec(template: str = "default") -> Spec:
 
 def fuzz_op(
     target_spec: Spec,
-    depth: int,
-    stack_size: int,
+    depth,
+    stack_size,
     template: str = "default",
     supported_ops: list[str] | None = None,
 ) -> tuple[str, list[Spec]]:
@@ -268,7 +277,7 @@ def fuzz_op(
 
     # Filter operators that can produce the target spec
     # IMPORTANT: iterate in a deterministic order to avoid dict-order nondeterminism
-    compatible_ops: list[tuple[str, Operator]] = []
+    compatible_ops = []
     for op_name in sorted(available_operators.keys()):
         operator = available_operators[op_name]
         if operator.can_produce(target_spec):
@@ -281,8 +290,8 @@ def fuzz_op(
         raise ValueError(f"No operators available that can produce {target_spec}")
 
     # Categorize operators into leaf and non-leaf
-    leaf_ops: list[tuple[str, Operator]] = []
-    non_leaf_ops: list[tuple[str, Operator]] = []
+    leaf_ops = []
+    non_leaf_ops = []
 
     for op_name, operator in compatible_ops:
         if op_name in ["constant", "arg"] or op_name.startswith("arg_"):
@@ -452,7 +461,7 @@ def fuzz_operation_graph(
         node_counter += 1
 
         # Generate input nodes
-        input_node_ids: list[str] = []
+        input_node_ids = []
         if input_specs:  # Non-leaf operations
             for input_spec in input_specs:
                 input_node_id = _generate_node(

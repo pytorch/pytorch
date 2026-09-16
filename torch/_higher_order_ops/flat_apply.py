@@ -17,20 +17,17 @@ _P = ParamSpec("_P")
 _Ts = TypeVarTuple("_Ts")
 
 
-def is_graphable(val: object) -> bool:
+def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
     """Definition: a graphable type is a type that is an acceptable input/output type to a FX node."""
-    return (
-        val is None
-        or isinstance(val, (*torch.fx.node.base_types, FakeScriptObject))
-        or is_custom_class(type(val))
-    )
+    return isinstance(
+        val, (*torch.fx.node.base_types, FakeScriptObject)
+    ) or is_custom_class(type(val))
 
 
 def is_graphable_type(typ: type[object]) -> bool:
     """Return whether the given type is graphable."""
     return (
-        typ is type(None)
-        or issubclass(typ, torch.fx.node.base_types)
+        issubclass(typ, torch.fx.node.base_types)
         or is_custom_class(typ)
         or issubclass(typ, FakeScriptObject)
     )
@@ -86,7 +83,7 @@ _OpTypes = (
 _op_types = typing.get_args(_OpTypes)
 
 
-_Base: TypeAlias = torch.fx.node.BaseArgumentTypes | None
+_Base: TypeAlias = torch.fx.node.BaseArgumentTypes
 # pyrefly bug: pyrefly is complaining: Expected a type form, got instance of `Literal['_FXOutput']
 # pyrefly: ignore[not-a-type]
 _FXOutput = _Base | Sequence["_FXOutput"]

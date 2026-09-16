@@ -161,7 +161,7 @@ struct alignas(sizeof(T) * 2) complex {
   template <typename U>
   explicit C10_HOST_DEVICE complex(const thrust::complex<U>& other)
       : real_(other.real()), imag_(other.imag()) {}
-// NOTE can not be implemented as follows due to ROCm bug:
+// NOTE can not be implemented as follow due to ROCm bug:
 //   explicit C10_HOST_DEVICE complex(const thrust::complex<U> &other):
 //   complex(other.real(), other.imag()) {}
 #endif

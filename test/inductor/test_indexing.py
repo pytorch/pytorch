@@ -1410,41 +1410,6 @@ class ReductionInvariantIndexingTests(InductorTestCase):
     @config.patch(
         {
             "force_disable_caches": True,
-            "triton.persistent_reductions": False,
-        }
-    )
-    def test_loop_epilogue_indirect_load_scope(self):
-        def fn(x, source, index):
-            index = index.unsqueeze(-1)
-            selected = torch.gather(source, -2, index)
-            updated = selected + x.mean(dim=-1, keepdim=True)
-            return x / updated, source.scatter(-2, index, updated)
-
-        x = torch.ones(2, 2, 8, device=GPU_TYPE)
-        source = torch.arange(1, 17, device=GPU_TYPE, dtype=torch.float32).reshape(
-            2, 8, 1
-        )
-        index = torch.arange(2, device=GPU_TYPE).repeat(2, 1)
-        actual, kernels = run_and_get_kernels(
-            torch.compile(fn, fullgraph=True, dynamic=True),
-            x,
-            source,
-            index,
-            remove_quote=True,
-        )
-
-        self.assertEqual(fn(x, source, index), actual)
-        reduction_kernels = [kernel for kernel in kernels if "tl.sum(" in kernel]
-        self.assertEqual(1, len(reduction_kernels))
-        indirect_load = r"tl\.load\([^\n]*\+ \(tmp\d+"
-        FileCheck().check("for r0_offset in tl.range").check_regex(indirect_load).check(
-            "tl.store"
-        ).check_regex(indirect_load).run(reduction_kernels[0])
-
-    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    @config.patch(
-        {
-            "force_disable_caches": True,
             "triton.prefer_nd_tiling": True,
             "triton.tile_reductions": True,
         }
@@ -1759,14 +1724,13 @@ class ReductionInvariantIndexingTests(InductorTestCase):
         FileCheck().check_regex(DENSE_X_INDEX_LOAD).run(kernels[0])
 
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
-    @parametrize("dense_indexing", [False, True])
     @config.patch(
         {
             "force_disable_caches": True,
             "triton.persistent_reductions": False,
         }
     )
-    def test_loop_epilogue_masked_index_load_scope(self, dense_indexing):
+    def test_loop_epilogue_masked_index_load_scope(self):
         def fn(index, mask, value):
             positions = torch.arange(index.numel(), device=index.device)
             masked_index = torch.ops.aten._unsafe_masked_index(
@@ -1780,20 +1744,16 @@ class ReductionInvariantIndexingTests(InductorTestCase):
             torch.tensor([True, False] * 8, device=GPU_TYPE),
             torch.randn(16, 64, device=GPU_TYPE),
         )
-        with config.patch("triton.dense_indexing", dense_indexing):
-            actual, kernels = run_and_get_kernels(
-                torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
-            )
+        actual, kernels = run_and_get_kernels(
+            torch.compile(fn, fullgraph=True), *inputs, remove_quote=True
+        )
 
         self.assertEqual(fn(*inputs), actual)
         self.assertEqual(1, len(kernels))
         kernel = kernels[0]
-        check = FileCheck().check("for r0_offset in tl.range")
-        if dense_indexing:
-            check.check_regex(DENSE_X_INDEX_LOAD)
-        else:
-            check.check_regex(REDUCTION_INVARIANT_X_LOAD)
-        check.check("tl.sum").check_regex(r"tl\.load\(").run(kernel)
+        FileCheck().check("for r0_offset in tl.range").check_regex(
+            REDUCTION_INVARIANT_X_LOAD
+        ).check("tl.sum").check_regex(r"tl\.load\(").run(kernel)
 
 
 class TestOptimizationHintIdentityExpansion(InductorTestCase):

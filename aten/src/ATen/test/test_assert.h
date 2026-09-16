@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/util/Exception.h>
+#include <stdexcept>
 #include <stdarg.h>
 
 static inline void barf(const char *fmt, ...) {
@@ -8,7 +8,7 @@ static inline void barf(const char *fmt, ...) {
   va_start(args, fmt);
   vsnprintf(msg, 2048, fmt, args);
   va_end(args);
-  TORCH_CHECK(false, msg);
+  throw std::runtime_error(msg);
 }
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900

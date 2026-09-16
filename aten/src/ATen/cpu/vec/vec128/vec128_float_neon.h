@@ -492,18 +492,14 @@ class Vectorized<float> {
       nextafter,
       Sleef_nextafterf4)
   Vectorized<float> frac() const;
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
-      sin,
-      Sleef_sinf4_u35)
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(sin)
   // Sleef sinhf/coshf overflow for large float inputs where std::sinh/cosh
   // return finite results, because Sleef uses float-range intermediates
   // internally while the scalar C library uses double precision.
   Vectorized<float> sinh() const {
     return map(std::sinh);
   }
-  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC_WITH_SLEEF_NAME(
-      cos,
-      Sleef_cosf4_u35)
+  DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC(cos)
   Vectorized<float> cosh() const {
     return map(std::cosh);
   }

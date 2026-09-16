@@ -1064,9 +1064,8 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     auto strides = stride_input[0] == StrideInput::TENSOR_CONT
         ? make_contiguous_strides(inputTensorDims)
         : make_channels_last_strides(inputTensorDims);
-    return fmap(std::move(strides), [&](ExprPtr stride) {
-      return ExprHandle(std::move(stride));
-    });
+    return fmap(
+        strides, [&](ExprPtr stride) { return ExprHandle(std::move(stride)); });
   }
 
   inputTensorStrides.resize(rank);

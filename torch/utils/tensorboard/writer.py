@@ -140,7 +140,7 @@ class FileWriter:
         Args:
           graph: A `Graph` protocol buffer.
           walltime: float. Optional walltime to override the default (current)
-            walltime (from time.time()) seconds after epoch
+            _get_file_writerfrom time.time())
         """
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)

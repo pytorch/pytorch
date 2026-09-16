@@ -9,8 +9,7 @@ runs:
       if: always()
       shell: bash
       run: |
-        amd-smi version || true
-        rocminfo 2>&1 | grep -m1 -E '^Runtime Version' | sed 's/^/rocminfo: /' || true
+        dpkg -l | grep -E "  rocm"
 
     - name: Stop all running docker containers
       if: always()

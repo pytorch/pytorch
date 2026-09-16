@@ -104,7 +104,8 @@ void applySymbolicShapesOnLT(
         converted_args.emplace_back(get_symbolic_shape(tensor));
       }
     } else if (arg.isTensor()) {
-      converted_args.emplace_back(get_symbolic_shape(arg.toTensor()));
+      auto ss = get_symbolic_shape(arg.toTensor());
+      converted_args.emplace_back(ss);
     } else {
       // If we need to support symbolic ints, here is the place
       // to add it.

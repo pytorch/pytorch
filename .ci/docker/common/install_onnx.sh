@@ -30,4 +30,5 @@ env_run python "${IMPORT_SCRIPT_FILENAME}"
 
 # Cleaning up
 env_run pip uninstall -y torch
+env_run pip cache purge
 rm "${IMPORT_SCRIPT_FILENAME}" || true

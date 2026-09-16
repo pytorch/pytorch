@@ -93,6 +93,7 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
         + ":$ORIGIN/../../nvidia/cuda_nvrtc/lib"
         + ":$ORIGIN/../../nvidia/cuda_runtime/lib"
         + ":$ORIGIN/../../nvidia/cufft/lib"
+        + ":$ORIGIN/../../nvidia/curand/lib"
         + ":$ORIGIN/../../nvidia/cusolver/lib"
         + ":$ORIGIN/../../nvidia/cusparse/lib"
         + ":$ORIGIN/../../cusparselt/lib"
@@ -101,31 +102,19 @@ def cuda_rpaths(gpu_arch_version: str) -> str:
     )
 
 
-def rocm_rpaths(rocm_home: Path | None = None) -> str:
+def rocm_rpaths() -> str:
     """RPATH list for the TheRock wheel-based ROCm layout.
 
-    ROCm packages are siblings of torch, so paths are ``$ORIGIN``-relative.
-    Include flat and discovered per-target LLVM paths for ``libomp.so`` across
-    TheRock package layouts.
+    ROCm libs come from the `rocm` pip package, which unpacks under
+    <site-packages>/_rocm_sdk_core (a sibling of torch/), so point at it
+    $ORIGIN-relatively, mirroring cuda_rpaths(). No ROCm libs are bundled into
+    the wheel in this layout.
     """
-    rpaths = [
-        "$ORIGIN/../../_rocm_sdk_core/lib",
-        "$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib",
-        "$ORIGIN/../../_rocm_sdk_libraries/lib",
-        "$ORIGIN/../../_rocm_sdk_core/lib/llvm/lib",
-    ]
-    if rocm_home is None:
-        env_home = os.environ.get("ROCM_HOME")
-        if env_home:
-            rocm_home = Path(env_home)
-    if rocm_home is not None:
-        llvm_lib = rocm_home / "lib" / "llvm" / "lib"
-        for libomp in sorted(llvm_lib.glob("*/libomp.so")):
-            if libomp.is_file():
-                rpaths.append(
-                    f"$ORIGIN/../../_rocm_sdk_core/lib/llvm/lib/{libomp.parent.name}"
-                )
-    return ":".join(rpaths)
+    return (
+        "$ORIGIN/../../_rocm_sdk_core/lib"
+        ":$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib"
+        ":$ORIGIN/../../_rocm_sdk_libraries/lib"
+    )
 
 
 def arch_extra_deps(arch: str, use_cuda: bool) -> list[Path]:
@@ -486,7 +475,7 @@ def main() -> None:
             # TheRock wheel layout (rocm7.14): ROCm ships as the `rocm` pip
             # package (_rocm_sdk_core, a sibling of torch/). Resolve libs via
             # RPATH instead of bundling them, mirroring the CUDA/XPU wheels.
-            rpaths = rocm_rpaths(rocm_home)
+            rpaths = rocm_rpaths()
             c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
             lib_so_rpath = f"{rpaths}:$ORIGIN"
             force_rpath = True

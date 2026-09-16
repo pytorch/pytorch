@@ -29,11 +29,6 @@ from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import (
 from torch.fx.experimental.migrate_gradual_types.z3_types import D, tensor_type, z3_dyn
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.tensor_type import Dyn, TensorType
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-    TestCase,
-)
 
 
 try:
@@ -53,9 +48,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
-class TorchDynamoUseCases(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class TorchDynamoUseCases(unittest.TestCase):
     def test_dim(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: TensorType([1, 2])):
@@ -93,9 +86,7 @@ class TorchDynamoUseCases(TestCase):
         # print(s.model()[dim])
 
 
-class HFOperations(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class HFOperations(unittest.TestCase):
     def test_eq_dim(self):
         """
         test dimensions and equalities
@@ -1228,9 +1219,7 @@ class HFOperations(TestCase):
         self.assertEqual(negative, z3.sat)
 
 
-class ComposeOperationsGradualTypes(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class ComposeOperationsGradualTypes(unittest.TestCase):
     def test_masked_fill(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: TensorType([2, 4])):
@@ -1505,9 +1494,7 @@ class ComposeOperationsGradualTypes(TestCase):
         self.assertEqual(solver.check(), z3.unsat)
 
 
-class GradualTypes(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class GradualTypes(unittest.TestCase):
     def test_conv_reshape_unsat(self):
         class BasicBlock(torch.nn.Module):
             def __init__(
@@ -1703,9 +1690,7 @@ class GradualTypes(TestCase):
             )
 
 
-class TestSingleOperation(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class TestSingleOperation(unittest.TestCase):
     def test_conv_wrong_example(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self) -> None:
@@ -2605,9 +2590,7 @@ class TestSingleOperation(TestCase):
         self.assertEqual(solver.check(), z3.unsat)
 
 
-class ConstraintGeneration(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class ConstraintGeneration(unittest.TestCase):
     def test_add_reshape(self):
         class BasicBlock(torch.nn.Module):
             def forward(self, x: Dyn, y: Dyn):
@@ -2664,9 +2647,7 @@ class ConstraintGeneration(TestCase):
             )
 
 
-class TestInternalConstraints(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class TestInternalConstraints(unittest.TestCase):
     def test_precision(self):
         c1 = BinConstraintT(Dyn, TVar("x"), op_precision)
         transformed, _ = transform_constraint(c1, 0)
@@ -2715,9 +2696,7 @@ class TestInternalConstraints(TestCase):
 
 
 @skipIfNoTorchVision
-class TestResNet(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class TestResNet(unittest.TestCase):
     def test_resnet50_unsat(self):
         traced = symbolic_trace(models.resnet50())
         for n in traced.graph.nodes:
@@ -2796,9 +2775,7 @@ class TestResNet(TestCase):
 
 
 @skipIfNoTorchVision
-class TestAlexNet(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class TestAlexNet(unittest.TestCase):
     def test_alexnet1(self):
         alexnet = models.alexnet()
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(alexnet)
@@ -2909,4 +2886,4 @@ class TestAlexNet(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    unittest.main()

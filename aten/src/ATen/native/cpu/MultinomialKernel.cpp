@@ -15,8 +15,6 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#include <numeric>
-
 namespace at::native {
 namespace {
 
@@ -98,7 +96,7 @@ multinomial_with_replacement_apply(
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        int64_t mid_pointer = std::midpoint(left_pointer, right_pointer);
+        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
         scalar_t cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
@@ -194,7 +192,7 @@ multinomial_with_replacement_apply(
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        int64_t mid_pointer = std::midpoint(left_pointer, right_pointer);
+        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
         float cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;

@@ -1,9 +1,9 @@
-# tools/test/header_only_linter_testdata/a.h
+# a.h
 a
 symC
 symD
 
-# tools/test/header_only_linter_testdata/bbb.h
+# bbb.h
 bbb
 symD
 symDef

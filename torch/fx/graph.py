@@ -20,7 +20,6 @@ from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Literal, NamedTuple, TYPE_CHECKING
-from typing_extensions import TypeVarTuple, Unpack
 
 import torch
 import torch.utils._pytree as pytree
@@ -73,7 +72,6 @@ _legal_ops = dict.fromkeys(
 # Signature for functions that transform the body (`list[str]`) of the
 # generated code
 TransformCodeFunc = Callable[[list[str]], list[str]]
-_InputArgs = TypeVarTuple("_InputArgs")
 
 
 class _CustomBuiltin(NamedTuple):
@@ -473,7 +471,7 @@ class CodeGen:
         else:
             return f"return {repr_fn(output_args)}"
 
-    def process_inputs(self, *args: Unpack[_InputArgs]) -> tuple[Unpack[_InputArgs]]:
+    def process_inputs(self, *args: Any) -> Any:
         """
         Transforms the inputs so that the graph can take them as arguments, as
         non-default codegen may result in the inputs to the function being
@@ -794,7 +792,6 @@ class CodeGen:
                 except ModuleNotFoundError:
                     DTensor = None  # type: ignore[assignment,misc]
                     dtensorspec_format_shard_order_str = None
-                from torch._subclasses.meta_utils import is_sparse_compressed_layout
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -814,11 +811,10 @@ class CodeGen:
                     )
 
                 # use string as annotation, to make it valid python code
-                # Compressed sparse layouts have no strides, and asking for
-                # them raises; _tensor_annotation would do exactly that.
-                if isinstance(
-                    meta_val, torch.Tensor
-                ) and not is_sparse_compressed_layout(meta_val.layout):
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                    torch.sparse_csc,
+                    torch.sparse_csr,
+                ):
                     # Fake tensors cause tests to wobble, so do not custom print them.
                     is_plain = type(meta_val) is torch.Tensor or isinstance(
                         meta_val, torch._subclasses.FakeTensor

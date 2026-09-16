@@ -359,23 +359,9 @@ def _local_broadcast_(
     return (tensors, work_so)
 
 
-def _reduce_op_and_factor(
-    reduce_op_so: ScriptObject,
-) -> tuple[int, float | torch.Tensor | None]:
-    reduce_op = ReduceOp.unbox(reduce_op_so)
-    op = int(reduce_op.op)
-    if op == ReduceOp.PREMUL_SUM:
-        factor = reduce_op.factor
-        if isinstance(factor, torch.Tensor) and factor.numel() == 1:
-            factor = factor.item()
-        return op, factor
-    return op, None
-
-
 def _local_reduce(
-    reduce_op: ReduceOp | str | int,
+    reduce_op: ReduceOp | str,
     tensors: list[torch.Tensor],
-    factor: float | torch.Tensor | None = None,
 ) -> torch.Tensor:
     if reduce_op == ReduceOp.SUM or reduce_op == "sum":
         op = operator.add
@@ -394,9 +380,7 @@ def _local_reduce(
     elif reduce_op == ReduceOp.BXOR or reduce_op == "bxor":
         op = torch.bitwise_xor
     elif reduce_op == ReduceOp.PREMUL_SUM or reduce_op == "premul_sum":
-        if factor is None:
-            raise AssertionError("PREMUL_SUM requires factor")
-        return functools.reduce(operator.add, [t * factor for t in tensors])
+        raise NotImplementedError("PREMUL_SUM: need to add binding for scaling factor")
     else:
         raise NotImplementedError(f"ReduceOp {reduce_op} not implemented")
 
@@ -424,7 +408,7 @@ def _local_all_reduce_(
     if len(tensors) != 1:
         raise AssertionError
     tensor = tensors[0]
-    reduce_op, factor = _reduce_op_and_factor(reduce_op_so)
+    reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
@@ -444,7 +428,7 @@ def _local_all_reduce_(
             group_tensors.append(tensor._local_tensors[rank])
 
         # Perform the reduction operation
-        reduced_tensor = _local_reduce(reduce_op, group_tensors, factor=factor)
+        reduced_tensor = _local_reduce(reduce_op, group_tensors)
 
         # Update all tensors in the group with the reduced result
         for rank in group_ranks:
@@ -466,7 +450,7 @@ def _local_allreduce_coalesced_(
     # "__torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work"
     from . import LocalTensor
 
-    reduce_op, factor = _reduce_op_and_factor(reduce_op_so)
+    reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
     for group_offset in group_offsets:
@@ -486,7 +470,7 @@ def _local_allreduce_coalesced_(
                 group_tensors.append(tensor._local_tensors[rank])
 
             # Perform the reduction operation
-            reduced_tensor = _local_reduce(reduce_op, group_tensors, factor=factor)
+            reduced_tensor = _local_reduce(reduce_op, group_tensors)
 
             # Update all tensors in the group with the reduced result
             for rank in group_ranks:
@@ -512,7 +496,7 @@ def _local_reduce_scatter_tensor_coalesced_(
 
     from . import LocalTensor
 
-    reduce_op, factor = _reduce_op_and_factor(reduce_op_so)
+    reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
     for group_offset in group_offsets:
@@ -537,7 +521,7 @@ def _local_reduce_scatter_tensor_coalesced_(
                 group_inputs.append(input_tensor._local_tensors[rank])
 
             # Perform the reduction operation
-            reduced_input = _local_reduce(reduce_op, group_inputs, factor=factor)
+            reduced_input = _local_reduce(reduce_op, group_inputs)
 
             reduced_input_splits = torch.split(
                 reduced_input, reduced_input.size(0) // len(group_ranks), dim=0
@@ -606,7 +590,7 @@ def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
 
     from . import LocalTensor
 
-    reduce_op, factor = _reduce_op_and_factor(reduce_op_so)
+    reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
     if not isinstance(output_tensor, LocalTensor):
@@ -625,7 +609,7 @@ def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
         for rank_i in group_ranks:
             gathered_tensors.append(input_tensor._local_tensors[rank_i])
 
-        reduced_tensor = _local_reduce(reduce_op, gathered_tensors, factor=factor)
+        reduced_tensor = _local_reduce(reduce_op, gathered_tensors)
 
         scattered_tensor = torch.split(
             reduced_tensor,

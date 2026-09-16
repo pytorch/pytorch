@@ -35,7 +35,7 @@ struct SchemaParser {
   std::variant<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
 
-    // If there are no parentheses coming, then this is just the operator name
+    // If there is no parentheses coming, then this is just the operator name
     // without an argument list
     if (L.cur().kind != '(') {
       return OperatorName(std::move(name));

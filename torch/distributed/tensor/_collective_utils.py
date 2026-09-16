@@ -25,7 +25,6 @@ from torch.distributed.distributed_c10d import (
     scatter,
     Work,
 )
-from torch.fx.experimental.proxy_tensor import get_proxy_mode
 from torch.fx.experimental.symbolic_shapes import guard_or_false
 from torch.types import IntLikeType
 
@@ -237,20 +236,22 @@ def mesh_broadcast(
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
-def _can_skip_zero_size_op(size: IntLikeType) -> bool:
-    # Captured graphs must retain zero-size ops so all ranks have the same structure.
-    if isinstance(size, int):
-        return size == 0 and not (
-            torch.compiler.is_dynamo_compiling() or get_proxy_mode() is not None
-        )
-    return not _are_we_tracing() and guard_or_false(size == 0)
-
-
 @maybe_run_for_local_tensor
 def pad_tensor(
     tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
 ) -> torch.Tensor:
-    if _can_skip_zero_size_op(pad_size):
+    # During tracing, always emit the pad op even when pad_size=0 so all
+    # ranks produce identical FX graph structure (SPMD).
+    # In eager with concrete pad_size=0, guard_or_false returns True and we
+    # skip the no-op pad. Check _are_we_tracing() first to avoid
+    # guard_or_false creating a guard that concretizes symbolic pad sizes
+    # during make_fx tracing.
+    if isinstance(pad_size, int):
+        # Fast path: avoids _are_we_tracing() which is costly at compile
+        # time due to multiple C++ dispatch mode checks.
+        if pad_size == 0:
+            return tensor
+    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
     if _are_we_tracing():
         from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
@@ -269,7 +270,18 @@ def pad_tensor(
 def unpad_tensor(
     tensor: torch.Tensor, pad_dim: int, pad_size: IntLikeType
 ) -> torch.Tensor:
-    if _can_skip_zero_size_op(pad_size):
+    # During tracing, always emit the narrow op even when pad_size=0 so all
+    # ranks produce identical FX graph structure (SPMD).
+    # In eager with concrete pad_size=0, guard_or_false returns True and we
+    # skip the no-op narrow. Check _are_we_tracing() first to avoid
+    # guard_or_false creating a guard that concretizes symbolic pad sizes
+    # during make_fx tracing.
+    if isinstance(pad_size, int):
+        # Fast path: avoids _are_we_tracing() which is costly at compile
+        # time due to multiple C++ dispatch mode checks.
+        if pad_size == 0:
+            return tensor
+    elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
     return tensor.narrow(
         pad_dim,

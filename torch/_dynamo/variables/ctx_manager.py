@@ -180,7 +180,7 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
-    # Some methods in ContextWrappingVariable assume the arguments are
+    # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
     def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         if cm_obj is None:
@@ -1608,15 +1608,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         self, annotation: dict[str, Any], initial_values: Any = None, **kwargs: Any
     ) -> None:
         self.annotation = annotation
-        budget = annotation.get(torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY)
-        target_values = (
-            (budget,) if len(annotation) == 1 and type(budget) is float else ()
-        )
-        super().__init__(
-            target_values=target_values,
-            initial_values=initial_values,
-            **kwargs,
-        )
+        super().__init__(target_values=(), initial_values=initial_values, **kwargs)
 
     def enter(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
@@ -1634,16 +1626,12 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "torch.fx.traceback"
 
     def fn_name(self) -> str:
-        if self.target_values:
-            return "_dynamo_region_activation_memory_budget"
         return "annotate"
 
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
-        if self.target_values:
-            return super().reconstruct_type(codegen)
         unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),

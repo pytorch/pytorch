@@ -1,3 +1,4 @@
+// @allow-raw-throw
 #include <unordered_map>
 
 #include <c10/util/Exception.h>
@@ -6,24 +7,10 @@
 #include <nlohmann/json.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 namespace c10d::control_plane {
 
 namespace {
-// c10::Error::what() always carries a symbolized C++ backtrace, which is
-// expensive to build and does not belong in an HTTP error body by default.
-// Select the accessor the same way torch/csrc/Exceptions.h does at the Python
-// boundary, so TORCH_SHOW_CPP_STACKTRACES still gets you the frames on what is
-// after all a debug endpoint.
-std::string errorMessage(const std::exception& e) {
-  const auto* torchError = dynamic_cast<const c10::Error*>(&e);
-  if (torchError && !torch::get_cpp_stacktraces_enabled()) {
-    return torchError->what_without_backtrace();
-  }
-  return e.what();
-}
-
 class RequestImpl : public Request {
  public:
   RequestImpl(const httplib::Request& req) : req_(req) {}
@@ -86,8 +73,7 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
         } catch (const std::exception& e) {
           res.status = 404;
           res.set_content(
-              fmt::format(
-                  "Handler {} not found: {}", handler_name, errorMessage(e)),
+              fmt::format("Handler {} not found: {}", handler_name, e.what()),
               "text/plain");
           return;
         }
@@ -99,8 +85,7 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
         } catch (const std::exception& e) {
           res.status = 500;
           res.set_content(
-              fmt::format(
-                  "Handler {} failed: {}", handler_name, errorMessage(e)),
+              fmt::format("Handler {} failed: {}", handler_name, e.what()),
               "text/plain");
           return;
         } catch (...) {

@@ -12,9 +12,7 @@ from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -22,11 +20,11 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import requires_triton
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def _assertEqualSkipScriptObject(test_case, exp, actual):
@@ -60,8 +58,6 @@ def _assertEqualScriptObject(
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -1126,8 +1122,6 @@ graph():
 
 
 class TestCompileTorchbind(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -1574,36 +1568,8 @@ def forward(self, token, obj, x):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
-
-class TestCompileTorchbindDevice(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def setUp(self):
-        super().setUp()
-        init_torchbind_implementations()
-
-        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class FakeTensorQueue:
-            def __init__(self, queue):
-                self.queue = queue
-
-            @classmethod
-            def __obj_unflatten__(cls, flattened_ctx):
-                return cls(**dict(flattened_ctx))
-
-            def push(self, x):
-                self.queue.append(x)
-
-            def pop(self):
-                return self.queue.pop(0)
-
-            def size(self):
-                return len(self.queue)
-
-    def tearDown(self):
-        torch._dynamo.reset()
-
-    @requires_triton()
+    @requires_cuda_and_triton
+    @parametrize("device", ["cpu", "cuda"])
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
         def f(tq, x):
@@ -1620,6 +1586,8 @@ class TestCompileTorchbindDevice(TestCase):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
+    @requires_cuda_and_triton
+    @parametrize("device", ["cpu", "cuda"])
     def test_export_obj_torchbind_op_with_autocast(self, device):
         class Mod(torch.nn.Module):
             def forward(self, x, tq):
@@ -1641,8 +1609,6 @@ class TestCompileTorchbindDevice(TestCase):
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -1694,7 +1660,6 @@ class TestRegisterFakeClass(TestCase):
 
 instantiate_parametrized_tests(TestExportTorchbind)
 instantiate_parametrized_tests(TestCompileTorchbind)
-instantiate_device_type_tests(TestCompileTorchbindDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

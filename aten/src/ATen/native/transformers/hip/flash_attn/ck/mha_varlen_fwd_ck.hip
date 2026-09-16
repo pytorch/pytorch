@@ -243,8 +243,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     const int total_q = q.size(0);
     const int total_k = k.size(0);
 
-    // batch_size is cu_seqlens_q.numel() - 1, so an empty cu_seqlens makes it negative.
-    TORCH_CHECK(batch_size >= 0, "cu_seqlens_q must have at least one element");
+    TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og <= 256, "CK only supports head dimension at most 256");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
@@ -349,9 +348,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
     }
 
 
-    // An empty batch or key sequence has no work: the tensors allocated above are
-    // already the correct empty result, so skip the launch rather than reject it.
-    if (batch_size > 0 && max_seqlen_k > 0) {
+    if (max_seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
         auto stream = at::cuda::getCurrentCUDAStream().stream();
         ck_tile::stream_config stream_config{stream};
@@ -385,8 +382,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
     }
     else {
-        // No kernel ran. Both are empty when batch_size == 0; when only max_seqlen_k is 0
-        // they are not, and attention over no keys is defined as zeros with an lse of inf.
+        // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
         out.zero_();
         softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }

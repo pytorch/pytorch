@@ -1,3 +1,4 @@
+#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/distributed/c10d/cuda/CUDAEventCache.hpp>
 #include <map>
 

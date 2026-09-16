@@ -159,9 +159,9 @@ bool SubgraphMatcher::tryMatchNodeInputs(
     Value* dummyOutput = dummyNode->addOutput(
         targetGraph->getUniqueValueName(), Type::Kind::None);
     targetGraph->insertBefore(dummyNode, target_node);
-    if (auto it = match.value_map.find(patternInput->value);
-        it != match.value_map.end()) {
-      return it->second->producer()->target() == kDummyTarget;
+    if (match.value_map.contains(patternInput->value)) {
+      return match.value_map[patternInput->value]->producer()->target() ==
+          kDummyTarget;
     }
     match.value_map[patternInput->value] = dummyOutput;
     match.dummy_input_to_attribute_map[dummyOutput] = &it.value;
@@ -173,8 +173,8 @@ bool SubgraphMatcher::tryMatchNode(
     const Node* pattern_node,
     Node* target_node,
     Match& match) {
-  if (auto it = match.node_map.find(pattern_node); it != match.node_map.end()) {
-    return it->second == target_node;
+  if (match.node_map.contains(pattern_node)) {
+    return match.node_map[pattern_node] == target_node;
   }
 
   // If the pattern node is an input, it should match every node
@@ -225,8 +225,8 @@ bool SubgraphMatcher::tryMatchValue(
     const Value* pval,
     Value* tval,
     Match& match) {
-  if (auto it = match.value_map.find(pval); it != match.value_map.end()) {
-    return it->second == tval;
+  if (match.value_map.contains(pval)) {
+    return match.value_map[pval] == tval;
   }
 
   const Node* pProducer = pval->producer();
@@ -361,11 +361,10 @@ void SubgraphRewriter::rewriteMatch(
   Node* insertionPoint = nullptr;
   std::vector<Value*> inputs, outputs;
   for (Value* v : pattern.inputs()) {
-    auto it = match.value_map.find(v);
-    if (it == match.value_map.end()) {
+    if (!match.value_map.contains(v)) {
       continue;
     }
-    Value* input = it->second;
+    Value* input = match.value_map.at(v);
     // We want to insert after latest producer of any input that is not a dummy
     // node
     if (!insertionPoint ||
@@ -406,9 +405,8 @@ void SubgraphRewriter::rewriteMatch(
   }
 
   for (auto& patternNode : pattern.nodes()) {
-    if (auto it = match.node_map.find(&patternNode);
-        it != match.node_map.end()) {
-      Node* n = it->second;
+    if (match.node_map.contains(&patternNode)) {
+      Node* n = match.node_map.at(&patternNode);
       replacedNodes_.insert(n);
     }
   }

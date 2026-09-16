@@ -1,6 +1,7 @@
 #include <torch/csrc/tensor/python_tensor.h>
 
 #include <pybind11/pybind11.h>
+#include <structmember.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/Dtype.h>
@@ -10,7 +11,10 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/cuda_enabled.h>
+#include <torch/csrc/utils/device_lazy_init.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
 
@@ -196,7 +200,7 @@ static void py_initialize_tensor_type(
   // we need to initialize as many types as there are VariableType instances.
   // We copy the basic object fields from a prototype definition and initialize
   // the remaining fields below.
-  type = tensor_type_prototype;
+  memcpy(&type, &tensor_type_prototype, sizeof(PyTypeObject));
   // Subclassing from torch.<ScalarType>Tensor isn't supported.
   // (Py_TPFLAGS_BASETYPE omitted). Subclassing torch.Tensor still allowed.
   type.tp_flags = Py_TPFLAGS_DEFAULT;

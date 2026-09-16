@@ -44,8 +44,14 @@ void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool h
     // TODO: we could probably optimize this by only lazily updating these values
     // the first time that we see requiresBitsetPerBackend_ = true
     // (which should almost never happen)
-    for (auto& keys : nonFallthroughKeysPerBackend_) {
-      keys = has_fallthrough ? keys.remove(k) : keys.add(k);
+    if (has_fallthrough) {
+      for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
+        nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].remove(k);
+      }
+    } else {
+      for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
+        nonFallthroughKeysPerBackend_[i] = nonFallthroughKeysPerBackend_[i].add(k);
+      }
     }
   }
 }

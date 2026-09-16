@@ -4,6 +4,7 @@
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/library.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>

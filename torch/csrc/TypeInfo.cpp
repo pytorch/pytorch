@@ -107,13 +107,8 @@ static PyObject* THPDTypeInfo_compare(
       } else {
         Py_RETURN_FALSE;
       }
-    default:
-      Py_RETURN_NOTIMPLEMENTED;
   }
-}
-
-static Py_hash_t THPDTypeInfo_hash(THPDTypeInfo* self) {
-  return static_cast<Py_hash_t>(self->type) ^ 0x345678;
+  Py_RETURN_NOTIMPLEMENTED;
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
@@ -320,7 +315,7 @@ PyTypeObject THPFInfoType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    reinterpret_cast<hashfunc>(THPDTypeInfo_hash), /* tp_hash */
+    nullptr, /* tp_hash  */
     nullptr, /* tp_call */
     reinterpret_cast<reprfunc>(THPFInfo_str), /* tp_str */
     nullptr, /* tp_getattro */
@@ -377,7 +372,7 @@ PyTypeObject THPIInfoType = {
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
-    reinterpret_cast<hashfunc>(THPDTypeInfo_hash), /* tp_hash */
+    nullptr, /* tp_hash  */
     nullptr, /* tp_call */
     reinterpret_cast<reprfunc>(THPIInfo_str), /* tp_str */
     nullptr, /* tp_getattro */

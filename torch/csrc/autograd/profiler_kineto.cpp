@@ -18,6 +18,7 @@
 #include <torch/csrc/profiler/kineto_metadata.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
+#include <torch/csrc/profiler/perf.h>
 #include <torch/csrc/profiler/standalone/itt_observer.h>
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/standalone/privateuse1_observer.h>
@@ -27,6 +28,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <stdexcept>
 #include <utility>
 
 #ifdef USE_KINETO
@@ -561,7 +563,7 @@ void pushGlobalProfilingCallbacks(
           .scopes(scopes);
 
   // Arm the drain gate before the global callback and fire on any thread. If
-  // this is a new profiling session, also bump the session generation.
+  // this a new profiling session, also bump the session generation.
   // disableProfiler() relies on this to know it must drain in-flight callbacks.
   global_callback_session.activate(new_session);
 
@@ -624,14 +626,6 @@ void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
     const ActivityFilter& activity_filter) {
-  prepareProfiler(config, activities, activity_filter, ProfilerExtensionMap{});
-}
-
-void prepareProfiler(
-    const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities,
-    const ActivityFilter& activity_filter,
-    const ProfilerExtensionMap& profiler_extensions) {
   if (config.state == ProfilerState::NVTX ||
       config.state == ProfilerState::ITT) {
     return;
@@ -655,8 +649,7 @@ void prepareProfiler(
       activities,
       config.experimental_config,
       config.trace_id,
-      activity_filter,
-      profiler_extensions);
+      activity_filter);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */

@@ -183,7 +183,6 @@ from .variables.lazy import LazyVariableTracker
 from .variables.lists import (
     BaseListVariable,
     DequeIteratorVariable,
-    DequeReverseIteratorVariable,
     ListIteratorVariable,
     ListVariable,
     SliceVariable,
@@ -2282,7 +2281,7 @@ class InstructionTranslatorBase(
         from .variables.streams import get_current_stream, new_event
 
         device = var.device
-        if device is None or device.type not in ("cuda", "mtia", "xpu"):
+        if device is None or device.type not in ("cuda", "xpu"):
             return
 
         node = var.proxy.node
@@ -3143,9 +3142,11 @@ class InstructionTranslatorBase(
                 UserDefinedExceptionObjectVariable,
             ),
         ):
-            exc.raise_type_error(
-                self,
-                "catching classes that do not inherit from BaseException is not allowed",
+            unimplemented(
+                gb_type="Exception with bad expected type",
+                context=str(expected_exc_types),
+                explanation=f"`except ...` has unsupported type {expected_exc_types}.",
+                hints=[*graph_break_hints.USER_ERROR],
             )
 
         if sys.version_info >= (3, 11):
@@ -3173,9 +3174,11 @@ class InstructionTranslatorBase(
                     UserDefinedExceptionClassVariable,
                 ),
             ):
-                exc.raise_type_error(
-                    self,
-                    "catching classes that do not inherit from BaseException is not allowed",
+                unimplemented(
+                    gb_type="Exception with non-type expectation",
+                    context=str(expected_type),
+                    explanation=f"`except ...` expects a non-type: {expected_type}.",
+                    hints=[*graph_break_hints.USER_ERROR],
                 )
             if pyexception_instance_check(exc_instance) and issubclass(
                 exc_instance.exc_type,  # type: ignore[union-attr]
@@ -3295,9 +3298,6 @@ class InstructionTranslatorBase(
         # Map to a dictionary of str -> VariableTracker
         # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [not-iterable]
-        if not all(isinstance(k, str) for k in kwargsvars):
-            exc.raise_type_error(self, "keywords must be strings")
         # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
@@ -4431,10 +4431,6 @@ class InstructionTranslatorBase(
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
-    @break_graph_if_unsupported(
-        push=True,
-        msg_prefix="Encountered graph break when formatting an f-string value",
-    )
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
         if flags is None:
@@ -5084,26 +5080,14 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
-    @break_graph_if_unsupported(
-        push=True,
-        msg_prefix="Encountered graph break when converting an f-string value",
-    )
     def CONVERT_VALUE(self, inst: Instruction) -> None:
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
         self.push(self._convert_value(self.pop(), inst.arg))
 
-    @break_graph_if_unsupported(
-        push=True,
-        msg_prefix="Encountered graph break when formatting an f-string value",
-    )
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
         self._format_value(VariableTracker.build(self, ""), 0)
 
-    @break_graph_if_unsupported(
-        push=True,
-        msg_prefix="Encountered graph break when formatting an f-string value",
-    )
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
 
@@ -6574,12 +6558,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst: Instruction) -> None:
         tos = self.stack[-1]
-        iter_vts = (
-            ListIteratorVariable,
-            TupleIteratorVariable,
-            DequeIteratorVariable,
-            DequeReverseIteratorVariable,
-        )
+        iter_vts = (ListIteratorVariable, TupleIteratorVariable, DequeIteratorVariable)
         if not isinstance(tos, iter_vts):
             self.pop()
             res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]

@@ -106,17 +106,8 @@ SEED = 1234
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a",)
-NAVI_ARCH = (
-    "gfx1030",
-    "gfx1100",
-    "gfx1101",
-    "gfx1150",
-    "gfx1151",
-    "gfx1200",
-    "gfx1201",
-)
+NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 NAVI3_ARCH = ("gfx1100", "gfx1101")
-NAVI3_5_ARCH = ("gfx1150", "gfx1151")
 NAVI4_ARCH = ("gfx1200", "gfx1201")
 
 class ProfilingMode(Enum):
@@ -1803,7 +1794,6 @@ _dsl_checker = LazyDSLCheck()
 TEST_TRITON_DSL = LazyVal(lambda: _dsl_checker.is_available('triton'))
 TEST_CUTEDSL = LazyVal(lambda: _dsl_checker.is_available('cutedsl'))
 TEST_HELION_DSL = LazyVal(lambda: _dsl_checker.is_available('helion'))
-TEST_FLYDSL = LazyVal(lambda: _dsl_checker.is_available('flydsl'))
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
@@ -1816,7 +1806,6 @@ skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
 skipIfNoTritonDSL = unittest.skipIf(not TEST_TRITON_DSL, "Triton DSL not available")
 skipIfNoCuteDSL = unittest.skipIf(not TEST_CUTEDSL, "CuTeDSL not available")
 skipIfNoHelionDSL = unittest.skipIf(not TEST_HELION_DSL, "Helion DSL not available")
-skipIfNoFlyDSL = unittest.skipIf(not TEST_FLYDSL, "FlyDSL not available")
 
 def skipIfDSLUnavailable(dsl_name: str, reason: str | None = None):
     """Skip test if specific DSL is not available"""
@@ -1873,12 +1862,6 @@ TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-# Enables tests that run only in the periodic-strict CI workflow (disabled by default)
-TEST_WITH_PERIODIC: bool = TestEnvironment.def_flag(
-    "TEST_WITH_PERIODIC",
-    env_var="PYTORCH_TEST_WITH_PERIODIC",
-    implied_by_fn=lambda: os.getenv("TEST_CONFIG") == "periodic",
-)
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW: bool = TestEnvironment.def_flag(
     "TEST_WITH_SLOW",
@@ -1917,23 +1900,7 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 TEST_CUDA_CUDSS = TEST_CUDA and torch.version.cuda is not None
 TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and torch.version.cuda is not None
 
-def _cuda_python_bindings_usable() -> bool:
-    if not _check_module_exists("cuda.bindings"):
-        return False
-    if torch.version.cuda is not None:
-        return True
-    if torch.version.hip is not None:
-        # NVIDIA's cuda-bindings installs and imports fine on a ROCm box but
-        # fails at the first call. hip-python's interop package (PyPI:
-        # hip-python-interop) provides a HIP-backed cuda.bindings and marks
-        # itself with HIP_PYTHON = True; only that flavor is usable here.
-        import cuda.bindings.runtime  # type: ignore[import]
-
-        return bool(getattr(cuda.bindings.runtime, "HIP_PYTHON", False))
-    return False
-
-
-TEST_CUDA_PYTHON_BINDINGS = _cuda_python_bindings_usable()
+TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and torch.version.cuda is not None
 TEST_NVMATH = _check_module_exists("nvmath.bindings") and torch.version.cuda is not None
 skipIfNoNvmath = unittest.skipIf(not TEST_NVMATH, "nvmath-python not available")
 
@@ -1977,7 +1944,6 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
-requires_xpu = unittest.skipUnless(TEST_XPU, "Requires XPU")
 
 
 def lazy_skip_if(condition_fn, reason):
@@ -2009,11 +1975,6 @@ def lazy_skip_if(condition_fn, reason):
             return fn(*args, **kwargs)
         return wrapper
     return decorator
-
-requires_accelerator = lazy_skip_if(
-    lambda: not torch.accelerator.is_available(),
-    "requires accelerator",
-)
 
 
 def skipIfCrossRef(fn):
@@ -2593,9 +2554,10 @@ def skipIfHpu_BUGGY(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def getRocmVersion() -> tuple[int, ...]:
+def getRocmVersion() -> tuple[int, int]:
     from torch.testing._internal.common_cuda import _get_torch_rocm_version
-    return _get_torch_rocm_version()
+    rocm_version = _get_torch_rocm_version()
+    return (rocm_version[0], rocm_version[1])
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
@@ -2909,37 +2871,6 @@ def skipIfCachingAllocatorDisabled(fn):
         and not torch._C._cuda_cudaCachingAllocator_is_enabled(),
         "requires the CUDA/HIP caching allocator (current allocator is uncached)",
     )(fn)
-
-def periodic(fn):
-    """Marks a test to run only when periodic test mode is enabled.
-
-    The periodic test configuration selects the corresponding pytest marker
-    and sets PYTORCH_TEST_WITH_PERIODIC. Tests in files outside the default
-    Python test sweep (e.g. distributed or quantization) never run.
-
-    Composes with @slowTest: periodic-strict sets PYTORCH_TEST_WITH_SLOW, so
-    slow gating (static or dynamic) does not block @periodic tests there,
-    while the periodic gate keeps a test marked both out of the slow shards;
-    it runs only in periodic-strict.
-    """
-    reason = "test is periodic; run with PYTORCH_TEST_WITH_PERIODIC to enable test"
-
-    if isinstance(fn, type):
-        if has_pytest:
-            fn = pytest.mark.periodic(fn)
-        return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(fn)
-
-    # Isolate decorator metadata when parameter variants share the original
-    # test function.
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        return fn(*args, **kwargs)
-
-    if has_pytest:
-        wrapper = pytest.mark.periodic(wrapper)
-
-    return unittest.skipUnless(TEST_WITH_PERIODIC, reason)(wrapper)
-
 
 def slowTest(fn):
     @wraps(fn)

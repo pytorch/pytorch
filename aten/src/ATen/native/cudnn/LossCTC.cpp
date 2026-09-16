@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -76,6 +77,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 } // namespace at
 
 #else // AT_CUDNN_ENABLED
+
+#include <ATen/cudnn/Types.h>
+#include <ATen/cudnn/Utils.h>
 
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>

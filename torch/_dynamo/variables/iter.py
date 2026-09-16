@@ -34,7 +34,7 @@ from ..exc import (
     unimplemented,
 )
 from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
-from .base import Method, ValueMutationNew, VariableTracker
+from .base import GetSet, Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .hashable import HashableTracker
 from .object_protocol import generic_getiter, pyiter_next
@@ -98,20 +98,17 @@ class ItertoolsVariable(VariableTracker):
     def get_real_python_backed_value(self) -> Any:
         return self.value
 
-    def _from_iterable(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list["VariableTracker"],
-        kwargs: "dict[str, VariableTracker]",
+    def _get_from_iterable(
+        self, tx: "InstructionTranslatorBase"
     ) -> "VariableTracker | None":
         # Only itertools.chain has from_iterable; declining (None) falls
         # through to the generic protocol for other itertools callables.
-        if self.value is not itertools.chain:
-            return None
-        return ItertoolsVariable(_CHAIN_FROM_ITERABLE).call_function(tx, args, kwargs)
+        if self.value is itertools.chain:
+            return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
+        return None
 
-    tp_methods = {
-        "from_iterable": Method(_from_iterable),
+    tp_getset = {
+        "from_iterable": GetSet(_get_from_iterable),
     }
 
     def call_function(
@@ -362,6 +359,13 @@ class ChainVariable(IteratorVariable):
 
     def python_type(self) -> type:
         return itertools.chain
+
+    def _get_from_iterable(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+        return ItertoolsVariable(_CHAIN_FROM_ITERABLE)
+
+    tp_getset = {
+        "from_iterable": GetSet(_get_from_iterable),
+    }
 
     def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         if not self.is_mutable():

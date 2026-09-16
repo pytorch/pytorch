@@ -96,18 +96,13 @@ class SharedCache(dict):
 shared_cache = SharedCache()
 
 
-# Kept for BC only.
 def rebuild_event(device, handle):
     return torch.cuda.Event.from_ipc_handle(device, handle)
 
 
-def _rebuild_event(device, handle, event_cls):
-    return event_cls.from_ipc_handle(device, handle)
-
-
-def _reduce_event(event):
+def reduce_event(event):
     handle = event.ipc_handle()
-    return (_rebuild_event, (event.device, handle, type(event)))
+    return (rebuild_event, (event.device, handle))
 
 
 def rebuild_tensor(cls, storage, metadata):
@@ -626,9 +621,7 @@ def reduce_storage(storage):
 
 
 def init_reductions():
-    ipc_event_classes = [torch.cuda.Event, torch.xpu.Event]
-    for event_cls in ipc_event_classes:
-        reduction.register(event_cls, _reduce_event)
+    reduction.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
         if t.__name__ == "UntypedStorage":

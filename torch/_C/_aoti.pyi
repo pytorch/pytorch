@@ -152,11 +152,10 @@ class AOTIModelPackageLoader:
     def __init__(
         self,
         model_package_path: str,
-        model_name: str = ...,
-        run_single_threaded: bool = ...,
-        num_runners: int = ...,
-        device_index: int = ...,
-        use_stream_affinity: bool = ...,
+        model_name: str,
+        run_single_threaded: bool,
+        num_runners: int,
+        device_index: int,
     ) -> None: ...
     def get_metadata(self) -> dict[str, str]: ...
     def run(

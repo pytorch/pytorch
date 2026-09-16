@@ -5,18 +5,8 @@ from math import prod
 
 import torch
 import torch._functorch.config as config
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyAccelerator,
-    skipXPUIf,
-)
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-    TEST_WITH_ROCM,
-    TestCase,
-)
-from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._triton import has_triton
 from torch.utils.checkpoint import checkpoint
 from torch.utils.flop_counter import FlopCounterMode, register_flop_formula
@@ -37,9 +27,9 @@ def compile_with_ac(f, memory_budget):
 def get_act_mem(f):
     out = f()
     out.backward()
-    start_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
+    start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
     out = f()
-    cur_mem = torch.accelerator.memory_stats()["requested_bytes.all.current"]
+    cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
     act_mem = (cur_mem - start_mem) / (1024 * 1024)
     out.backward()
     return act_mem
@@ -54,11 +44,11 @@ def get_bw_flops(f):
     return mode.get_total_flops() / (512**3 * 2)
 
 
-def create_pair(B_I, O, device):
+def create_pair(B_I, O):
     # results in B_I * O memory, requires B_I * B_I * O flops
     # arithmetic intensity of B_I
-    x = torch.randn(B_I * 512, B_I * 512, requires_grad=True, device=device)
-    w = torch.randn(B_I * 512, O * 512, requires_grad=True, device=device)
+    x = torch.randn(B_I * 512, B_I * 512, requires_grad=True)
+    w = torch.randn(B_I * 512, O * 512, requires_grad=True)
     return x, w
 
 
@@ -74,18 +64,23 @@ def get_mem_and_flops(f, memory_budget=None):
         return round(get_act_mem(f), 1), get_bw_flops(f)
 
 
-class MemoryBudgetTestDevice(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
+class MemoryBudgetTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch.set_default_device("cuda")
 
-    @onlyAccelerator
-    def test_rematerializes_cheap(self, device):
+    def tearDown(self):
+        torch.set_default_device(None)
+        super().tearDown()
+
+    def test_rematerializes_cheap(self):
         def f(x, w):
             x = x.cos()
             x = torch.mm(x, w)
             return x.sum()
 
-        x = torch.randn(512, 512, requires_grad=True, device=device)
-        w = torch.randn(512, 512, requires_grad=True, device=device)
+        x = torch.randn(512, 512, requires_grad=True)
+        w = torch.randn(512, 512, requires_grad=True)
 
         def call():
             return f(x, w)
@@ -101,18 +96,15 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(mem_5, 0.0)
         self.assertEqual(flops_5, eager_flops)
 
-    @onlyAccelerator
-    def test_matmul_even_chain(self, device):
+    def test_matmul_even_chain(self):
         def f(x, ws):
             x = x.cos()
             for w in ws:
                 x = torch.mm(x, w).cos()
             return x.sum()
 
-        x = torch.randn(512, 512, requires_grad=True, device=device)
-        ws = [
-            torch.randn(512, 512, requires_grad=True, device=device) for _ in range(5)
-        ]
+        x = torch.randn(512, 512, requires_grad=True)
+        ws = [torch.randn(512, 512, requires_grad=True) for _ in range(5)]
 
         def call():
             return f(x, ws)
@@ -132,8 +124,7 @@ class MemoryBudgetTestDevice(TestCase):
                 self.assertEqual(mem, 10.0)
                 self.assertEqual(flops, eager_flops)
 
-    @onlyAccelerator
-    def test_matmul_uneven_chain(self, device):
+    def test_matmul_uneven_chain(self):
         # This function is constructed so that we are saving one input of size
         # [512, in_dim] for each w
         # In addition, every matmul has a same ratio of compute to "memory
@@ -143,14 +134,12 @@ class MemoryBudgetTestDevice(TestCase):
             xs = [torch.mm(x, w).cos() for w in ws]
             return sum(x.sum() for x in xs)
 
-        x = torch.randn(512, 512, requires_grad=True, device=device)
+        x = torch.randn(512, 512, requires_grad=True)
 
         def make_weights(w_shapes):
             ws = []
             for dim in w_shapes:
-                ws.append(
-                    torch.randn(512, dim * 512, requires_grad=True, device=device)
-                )
+                ws.append(torch.randn(512, dim * 512, requires_grad=True))
             return ws
 
         weight_configs = [
@@ -201,9 +190,9 @@ class MemoryBudgetTestDevice(TestCase):
                 mem, _ = get_mem_and_flops(call, memory_budget=mem_achieved / total_mem)
                 self.assertEqual(mem, mem_achieved)
 
-    @onlyAccelerator
+    # needs CUDA, but this test file all needs CUDA.
     @unittest.skipIf(not has_triton(), "test needs triton")
-    def test_custom_triton_kernel(self, device):
+    def test_custom_triton_kernel(self):
         @triton.jit
         def relu_kernel_(inp_ptr, out_ptr, sz, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(0)
@@ -257,9 +246,9 @@ class MemoryBudgetTestDevice(TestCase):
                 x = torch.ops.testac.triton_relu(torch.mm(x, w))
             return x.sum()
 
-        x = torch.randn(512, 512, requires_grad=True, device=device)
+        x = torch.randn(512, 512, requires_grad=True, device="cuda")
         ws = [
-            torch.randn(512, 512, requires_grad=True, device=device) for _ in range(5)
+            torch.randn(512, 512, requires_grad=True, device="cuda") for _ in range(5)
         ]
 
         def call():
@@ -277,14 +266,13 @@ class MemoryBudgetTestDevice(TestCase):
 
                 self.assertEqual(expected, f_compile())
 
-    @onlyAccelerator
-    def test_prioritize_cheaper_matmul(self, device):
+    def test_prioritize_cheaper_matmul(self):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
             return sum(x.sum() for x in xs)
 
-        x1, w1 = create_pair(1, 4, device=device)
-        x2, w2 = create_pair(2, 2, device=device)
+        x1, w1 = create_pair(1, 4)
+        x2, w2 = create_pair(2, 2)
 
         def call():
             return f([x1, x2], [w1, w2])
@@ -297,19 +285,16 @@ class MemoryBudgetTestDevice(TestCase):
         # We are recomputing x1 @ w1 here!
         self.assertEqual(comp_flops, eager_flops + 4)
 
-    @onlyAccelerator
     @config.patch(activation_memory_budget_runtime_estimator="profile")
-    def test_profile(self, device):
+    def test_profile(self):
         def f(x, ws):
             x = x.cos()
             for w in ws:
                 x = torch.mm(x, w).cos()
             return x.sum()
 
-        x = torch.randn(512, 512, requires_grad=True, device=device)
-        ws = [
-            torch.randn(512, 512, requires_grad=True, device=device) for _ in range(5)
-        ]
+        x = torch.randn(512, 512, requires_grad=True)
+        ws = [torch.randn(512, 512, requires_grad=True) for _ in range(5)]
 
         def call():
             return f(x, ws)
@@ -320,14 +305,13 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(mem, 2)
         self.assertEqual(flops, eager_flops + 3)
 
-    @onlyAccelerator
-    def test_prioritize_cheaper_matmul2(self, device):
+    def test_prioritize_cheaper_matmul2(self):
         def f(xs, ws):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
             return sum(x.sum() for x in xs)
 
         data = [(4, 4), (6, 2), (2, 6)]
-        xs, ws = zip(*[create_pair(a, b, device=device) for a, b in data])
+        xs, ws = zip(*[create_pair(a, b) for a, b in data])
 
         def call():
             return f(xs, ws)
@@ -346,9 +330,7 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(mem, 12)
         self.assertEqual(flops - eager_flops, 2 * 2 * 6 + 4 * 4 * 4)
 
-    @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4729")
-    def test_attention_vs_linear(self, device):
+    def test_attention_vs_linear(self):
         def f(x, w):
             orig_shape = x.shape
             x = x.reshape(1, 1, x.shape[0], x.shape[1])
@@ -361,8 +343,8 @@ class MemoryBudgetTestDevice(TestCase):
             return x.sum()
 
         def try_seq_length(S, D, expected_recompute):
-            x = torch.randn(S * 512, D * 512, requires_grad=True, device=device)
-            w = torch.randn(D * 512, D * 512, requires_grad=True, device=device)
+            x = torch.randn(S * 512, D * 512, requires_grad=True)
+            w = torch.randn(D * 512, D * 512, requires_grad=True)
 
             def call():
                 return f(x, w)
@@ -397,8 +379,7 @@ class MemoryBudgetTestDevice(TestCase):
         try_seq_length(4, 7, "mm")
         try_seq_length(4, 9, "attn")
 
-    @onlyAccelerator
-    def test_manual_ac(self, device):
+    def test_manual_ac(self):
         # test that manual checkpoint boundaries are respected
         # when autoac is set
         def f(x):
@@ -413,7 +394,7 @@ class MemoryBudgetTestDevice(TestCase):
             x = checkpoint(f, x, use_reentrant=False)
             return x
 
-        x = torch.randn(64, 1024, requires_grad=True, device=device)
+        x = torch.randn(64, 1024, requires_grad=True)
 
         def call():
             return g(x).sum()
@@ -426,12 +407,7 @@ class MemoryBudgetTestDevice(TestCase):
         self.assertEqual(flops, eager_flops)
 
 
-instantiate_device_type_tests(
-    MemoryBudgetTestDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
-
-
 if __name__ == "__main__":
-    # I'm using the accelerator memory allocator to verify memory allocations
-    if HAS_GPU_AND_TRITON and not TEST_WITH_ROCM:
+    # I'm using the cuda memory allocator to verify memory allocations
+    if HAS_CUDA_AND_TRITON and not TEST_WITH_ROCM:
         run_tests()

@@ -549,16 +549,11 @@ class PatternExpr(ABC):
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
 
-    def pattern_eq(self, other: object) -> bool:
+    def pattern_eq(self, other: Any) -> bool:
         """
         Compare two `PatternExpr`s and return true if they are the
         same. Note this is NOT matching a pattern - it is comparing the pattern
         structures (for debugging).
-
-        Overrides must call `super().pattern_eq(other)` and bail out before
-        touching any subclass attribute: this base check is the only thing that
-        establishes `other` is a `Self`, which is what makes their subsequent
-        `typing.cast(Self, other)` sound.
         """
         return isinstance(other, self.__class__)
 
@@ -606,7 +601,7 @@ def _tensor_values_equal(a: torch.Tensor, b: torch.Tensor) -> bool:
     return False
 
 
-def _constant_values_equal(a: object, b: object) -> bool:
+def _constant_values_equal(a: Any, b: Any) -> bool:
     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
         if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
             return False
@@ -639,7 +634,7 @@ def _constant_values_equal(a: object, b: object) -> bool:
     return result if isinstance(result, bool) else False
 
 
-def _python_constant_repr(value: object) -> str:
+def _python_constant_repr(value: Any) -> str:
     if isinstance(value, float):
         if math.isnan(value):
             return "float('nan')"
@@ -693,7 +688,7 @@ class GetAttr(PatternExpr):
     name, which is local to the traced GraphModule.
     """
 
-    def __init__(self, value: object, users: Multiple | int = 1) -> None:
+    def __init__(self, value: Any, users: Multiple | int = 1) -> None:
         super().__init__()
         self.value = value
         self.users = users
@@ -738,12 +733,11 @@ class GetAttr(PatternExpr):
             args.append(str(self.users))
         return f"{self.__class__.__name__}({', '.join(args)})"
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
+    def pattern_eq(self, other: Any) -> bool:
         other = typing.cast(Self, other)
         return (
-            _constant_values_equal(self.value, other.value)
+            super().pattern_eq(other)
+            and _constant_values_equal(self.value, other.value)
             and self.users == other.users
         )
 
@@ -763,11 +757,9 @@ class KeywordArg(PatternExpr):
     def _match(self, node: NodeOrConstant, ctx: MatchContext) -> MatchResult:
         return Match(ctx, self, kwargs={self.name: node})  # matches anything
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
-        other = typing.cast(Self, other)
-        return self.name == other.name
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return super().pattern_eq(other) and self.name == other.name
 
 
 class ExclusiveKeywordArg(PatternExpr):
@@ -791,11 +783,9 @@ class ExclusiveKeywordArg(PatternExpr):
         ctx.exclusive_node_set.append(node)
         return Match(ctx, self, kwargs={self.name: node})  # matches anything
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
-        other = typing.cast(Self, other)
-        return self.name == other.name
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return super().pattern_eq(other) and self.name == other.name
 
 
 class _TargetExpr(PatternExpr):
@@ -870,12 +860,13 @@ class _TargetExpr(PatternExpr):
             or len(node.users) == self.users
         )
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
-        other = typing.cast(Self, other)
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
         return (
-            self.op == other.op and self.fns == other.fns and self.users == other.users
+            super().pattern_eq(other)
+            and self.op == other.op
+            and self.fns == other.fns
+            and self.users == other.users
         )
 
 
@@ -1052,13 +1043,15 @@ class _TargetArgsExpr(_TargetExpr):
                                 yield node
                                 searched.add(node)
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
-        other = typing.cast(Self, other)
-        return self.flat_args_kwargs[1] == other.flat_args_kwargs[1] and all(
-            a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
-            for a, b in zip(self.flat_args_kwargs[0], other.flat_args_kwargs[0])
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return (
+            super().pattern_eq(other)
+            and self.flat_args_kwargs[1] == other.flat_args_kwargs[1]
+            and all(
+                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+                for a, b in zip(self.flat_args_kwargs[0], other.flat_args_kwargs[0])
+            )
         )
 
 
@@ -1157,11 +1150,13 @@ class ListOf(PatternExpr):
             return FailedMatch("list: no_match")
         return m.bundle()
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
-        other = typing.cast(Self, other)
-        return self.pattern.pattern_eq(other.pattern) and self.partial == other.partial
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return (
+            super().pattern_eq(other)
+            and self.pattern.pattern_eq(other.pattern)
+            and self.partial == other.partial
+        )
 
 
 class MultiOutputPattern(PatternExpr):
@@ -1227,13 +1222,15 @@ class MultiOutputPattern(PatternExpr):
         except FailedMatch as e:
             return e
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
-        other = typing.cast(Self, other)
-        return len(self.outputs) == len(other.outputs) and all(
-            a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
-            for a, b in zip(self.outputs, other.outputs)
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return (
+            super().pattern_eq(other)
+            and len(self.outputs) == len(other.outputs)
+            and all(
+                a.pattern_eq(b) if isinstance(a, PatternExpr) else a == b
+                for a, b in zip(self.outputs, other.outputs)
+            )
         )
 
 
@@ -1270,11 +1267,11 @@ class RepeatedExpr(PatternExpr):
             m.extend(anchor_m)
         return m
 
-    def pattern_eq(self, other: object) -> bool:
-        if not super().pattern_eq(other):
-            return False
-        other = typing.cast(Self, other)
-        return self.inner_pattern.pattern_eq(other.inner_pattern)
+    def pattern_eq(self, other: Any) -> bool:
+        other = typing.cast(Self, other)  # super makes sure this is true
+        return super().pattern_eq(other) and self.inner_pattern.pattern_eq(
+            other.inner_pattern
+        )
 
 
 class PatternPrettyPrinter:
@@ -1310,7 +1307,7 @@ class PatternPrettyPrinter:
 
         return "\n".join(output)
 
-    def pretty_print(self, obj: object) -> str:
+    def pretty_print(self, obj: Any) -> str:
         if isinstance(obj, _TargetArgsExpr):
             if memoized_name := self.memoized_objs_names.get(obj):
                 return memoized_name
@@ -2732,7 +2729,7 @@ class PatternMatcherPass:
         self.patterns.clear()
 
 
-def _not_implemented(*args: object, **kwargs: object) -> NoReturn:
+def _not_implemented(*args: Any, **kwargs: Any) -> NoReturn:
     raise NotImplementedError
 
 
@@ -2771,7 +2768,9 @@ def fx_to_pattern(
     argnum = itertools.count()
 
     class Converter(torch.fx.Interpreter):
+        # pyrefly: ignore [bad-override]
         call_method = _not_implemented
+        # pyrefly: ignore [bad-override]
         call_module = _not_implemented
 
         # pyrefly: ignore [bad-override]

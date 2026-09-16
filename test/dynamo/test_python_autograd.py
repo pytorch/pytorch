@@ -5,7 +5,6 @@ import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
-from torch.testing._internal.common_utils import HardwareClassification
 
 
 if TYPE_CHECKING:
@@ -205,8 +204,6 @@ def simple(a, b):
 
 
 class TestPythonAutograd(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def _common(self, fn, expected_ops):
         args1 = [torch.randn(10), torch.randn(10)]
         args2 = [torch.randn(10), torch.randn(10)]

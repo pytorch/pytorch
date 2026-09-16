@@ -18,6 +18,7 @@
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
+#include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
 #include <c10/core/InferenceMode.h>

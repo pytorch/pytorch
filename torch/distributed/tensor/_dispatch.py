@@ -558,6 +558,13 @@ class OpDispatcher:
                 local_results = bool(r.item())
 
         if is_inplace_op:
+            if op_call.name().startswith("aten::_foreach_"):
+                # Foreach kernels do not update the wrapper DTensors' versions.
+                torch.autograd.graph.increment_version(
+                    tensor
+                    for tensor in cast(Sequence[object], args[0])
+                    if isinstance(tensor, dtensor.DTensor)
+                )
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 output_spec = output_sharding.output_spec

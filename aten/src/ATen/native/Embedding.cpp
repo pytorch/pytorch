@@ -26,6 +26,7 @@
 
 #include <c10/util/irange.h>
 
+#include <cstring>
 #include <memory>
 #include <utility>
 #include <vector>

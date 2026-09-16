@@ -14,7 +14,7 @@ from collections.abc import (
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
-from typing import Any, cast
+from typing import Any
 
 import sympy
 
@@ -72,8 +72,8 @@ def matches_module_function_pattern(
 
 
 def _is_fake_tensor_same(
-    new: object,
-    old: object,
+    new: Any,
+    old: Any,
     existing_storages: Mapping[int, int],
     *,
     check_strides: bool = True,
@@ -111,7 +111,6 @@ def _is_fake_tensor_same(
             return old is None
 
         if isinstance(new, Collection):
-            old_collection = cast(Collection[object], old)
             if recursive_ids is None:
                 recursive_ids = OrderedSet()
 
@@ -123,7 +122,7 @@ def _is_fake_tensor_same(
             # this collection have already been validated (or will be validated in the
             # future) by a call at a different layer of recursion.
             return visited or (
-                len(new) == len(old_collection)
+                len(new) == len(old)
                 and all(
                     _is_fake_tensor_same(
                         new_i,
@@ -134,15 +133,14 @@ def _is_fake_tensor_same(
                         node=node,
                         recursive_ids=recursive_ids,
                     )
-                    for new_i, old_i in zip(new, old_collection)
+                    for new_i, old_i in zip(new, old)
                 )
             )
 
         if isinstance(new, torch.types.py_sym_types):
-            old_sym = cast(torch.types.PySymType, old)
             return (
                 not_none(new.node.shape_env)._maybe_evaluate_static(
-                    sympy.Eq(new.node.expr, old_sym.node.expr)
+                    sympy.Eq(new.node.expr, old.node.expr)
                 )
                 == sympy.true
             )
@@ -152,22 +150,20 @@ def _is_fake_tensor_same(
         # implemented __eq__ method will compare IDs.
         return new == old
 
-    old_tensor = cast(torch.Tensor, old)
-
     if (
-        new.layout != old_tensor.layout
-        or new.dtype != old_tensor.dtype
-        or not is_intlist_same(new.shape, old_tensor.shape)
+        new.layout != old.layout
+        or new.dtype != old.dtype
+        or not is_intlist_same(new.shape, old.shape)
     ):
         return False
 
-    if new.device != old_tensor.device:
+    if new.device != old.device:
         return False
 
     if (
         check_strides
         and new.layout == torch.strided
-        and not is_intlist_same(new.stride(), old_tensor.stride())
+        and not is_intlist_same(new.stride(), old.stride())
     ):
         return False
 
@@ -175,8 +171,8 @@ def _is_fake_tensor_same(
         return True
 
     if not statically_known_true(
-        new.storage_offset() == old_tensor.storage_offset()
-    ) or get_storage(new) != get_storage(old_tensor):
+        new.storage_offset() == old.storage_offset()
+    ) or get_storage(new) != get_storage(old):
         return False
 
     def any_user_may_alias(node):
@@ -229,7 +225,7 @@ def _is_fake_tensor_same(
     # else.  If the FakeTensor's storage is fresh and none of the node's users can alias
     # it, then we don't need to update this node.
     if (
-        existing_storages[get_storage(old_tensor)] == 1
+        existing_storages[get_storage(old)] == 1
         and get_storage(new) not in existing_storages
         and not any_user_may_alias(node)
     ):
@@ -407,7 +403,7 @@ def _extract_subgraphs_and_args(
                 )
             wrapped_node = wrapped_nodes[0]
 
-            def replace_placeholder(item: object) -> object:
+            def replace_placeholder(item: Any) -> Any:
                 if isinstance(item, torch.fx.Node):
                     return placeholder_to_arg.get(item, item)
                 return item

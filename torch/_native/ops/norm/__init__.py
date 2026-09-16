@@ -1,6 +1,4 @@
-from .flydsl_rmsnorm_impl import register_flydsl_rmsnorm_overrides
 from .rmsnorm_impl import register_rmsnorm_overrides
 
 
-register_flydsl_rmsnorm_overrides()
 register_rmsnorm_overrides()

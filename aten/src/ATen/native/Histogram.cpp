@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 
 #include <ATen/native/Histogram.h>
 #include <ATen/native/Resize.h>
@@ -28,6 +29,7 @@
 #include <vector>
 #include <functional>
 #include <c10/util/ArrayRef.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
 

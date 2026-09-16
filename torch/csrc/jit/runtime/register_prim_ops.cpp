@@ -171,7 +171,7 @@ void sort_op(Stack& stack) {
     } else {
       comparator = c10::getLessThanComparator(g_list.get(0));
     }
-    std::ranges::sort(g_list, comparator);
+    std::sort(g_list.begin(), g_list.end(), comparator);
   }
 
   if (copy_return_list) {
@@ -2575,7 +2575,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           } else {
             int64_t index = 0;
             auto iter = size.begin();
-            std::ranges::sort(axes);
+            std::sort(axes.begin(), axes.end());
             for (const auto& axis : axes) {
               // move iter to the next axis
               iter += axis - index;

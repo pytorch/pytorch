@@ -190,10 +190,6 @@ struct MTIAHooks : public at::MTIAHooksInterface {
     return current_streams[device];
   }
 
-  bool isCurrentStreamCapturing() const override {
-    return false;
-  }
-
   void setCurrentStream(const c10::Stream& stream) const override {
     torch::utils::device_lazy_init(at::kMTIA);
 

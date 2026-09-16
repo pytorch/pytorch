@@ -6,6 +6,7 @@
 #include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>

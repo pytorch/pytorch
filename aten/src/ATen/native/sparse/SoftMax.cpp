@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/native/sparse/ParamUtils.h>
@@ -25,6 +26,7 @@
 #include <ATen/ops/_sparse_softmax_native.h>
 #endif
 
+#include <map>
 
 namespace at::native {
 namespace {

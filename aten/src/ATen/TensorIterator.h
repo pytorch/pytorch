@@ -964,6 +964,8 @@ class TORCH_API TensorIteratorConfig final {
   }
 
  private:
+  bool is_tensor_const(size_t idx);
+
   SmallVector<c10::MaybeOwned<TensorBase>, 4> tensors_;
   int num_outputs_ = 0;
   int num_inputs_ = 0;

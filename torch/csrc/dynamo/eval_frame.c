@@ -1,5 +1,7 @@
 #define PY_SSIZE_T_CLEAN
+#include <opcode.h>
 #include <signal.h>
+#include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>

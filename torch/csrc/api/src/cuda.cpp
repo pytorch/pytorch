@@ -1,6 +1,7 @@
 #include <torch/cuda.h>
 
 #include <ATen/Context.h>
+#include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
 
 namespace torch::cuda {
