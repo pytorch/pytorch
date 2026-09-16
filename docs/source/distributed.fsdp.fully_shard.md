@@ -161,6 +161,28 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
   details.
 
 
+### Custom Collective Backends
+
+Use `set_custom_all_gather` or `set_custom_reduce_scatter` to replace an
+FSDP module's collective backend:
+
+```python
+from my_backend import MyAllGather
+from torch.distributed.fsdp import fully_shard
+
+for module in [*model.layers, model]:
+    fully_shard(module)
+    module.set_custom_all_gather(MyAllGather())
+```
+
+An all-gather backend may set `AllGather.layout` to an `AllGatherLayout` to
+customize input packing and output views. Returning `None` from
+`prepare_output` uses the default rank-major copy path.
+
+Layout metadata and aliased buffers must remain valid while in use. A backend
+with a layout must use a separate instance per parameter group. FSDP does not
+free layout-owned storage.
+
 ```{eval-rst}
 .. currentmodule:: torch.distributed.fsdp
 ```
