@@ -2438,23 +2438,24 @@ class InstructionTranslatorBase(
                 # Both out of instance dicts, like the __name__ reads below: an
                 # attribute read runs a PEP 562 __getattr__, a class-level
                 # __getattribute__ (importlib.util._LazyModule imports on any)
-                # or, on the spec, a descriptor. _initializing is only ever an
-                # instance attribute, written by _load_unlocked on the
-                # ModuleSpec _find_spec returned; a __spec__ of another type
-                # cannot carry it and need not have a __dict__. Narrower than
-                # the getattr gate in importlib's _find_and_load by that
-                # choice: a module whose body deleted __spec__ from its dict,
-                # or serves it or the flag from such a hook, is served as is
-                # where an import statement would wait on it.
+                # or, on the spec, a descriptor. _load_unlocked writes
+                # _initializing as a plain instance attribute on whatever
+                # _find_spec returned, a ModuleSpec from every finder in the
+                # stdlib and in torch (no __slots__, class-level default or
+                # descriptor for it), and the flag is read off that type
+                # alone, which is also the one sure to have a __dict__.
+                # Narrower than the getattr gate in importlib's _find_and_load
+                # by those choices: a module whose body deleted __spec__ from
+                # its dict, one serving it or the flag from such a hook, or a
+                # spec of another type -- _find_spec takes any object a
+                # meta_path finder returns and _load_unlocked flags it all the
+                # same -- reads as not initializing and is served as is where
+                # an import statement would wait on it.
                 spec = object.__getattribute__(value, "__dict__").get("__spec__")
                 if isinstance(spec, importlib.machinery.ModuleSpec):
                     spec_dict = object.__getattribute__(spec, "__dict__")
                     if spec_dict.get("_initializing"):
                         value = importlib.import_module(module_name)
-            # sys.modules accepts any object; a non-module entry is bound as is
-            # by the callers that make no module check, but never remembered.
-            if isinstance(value, types.ModuleType):
-                _import_source_cache[module_name] = value
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope
@@ -2509,11 +2510,17 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-        # Recorded only once the check has passed: the package entry outlives a
-        # graph break here, and install() binds every recorded alias.
+        # Recorded only once the check has passed, all three: the package entry
+        # outlives a graph break here, and install() binds every recorded
+        # alias; the cache entry is never cleared, so a refused trace would
+        # otherwise pin a module the process may drop. sys.modules accepts any
+        # object, and a non-module entry is bound as is by the callers that
+        # make no module check, but never remembered.
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
+        if "torch_package" not in module_name and isinstance(value, types.ModuleType):
+            _import_source_cache[module_name] = value
         # The write is into a live namespace and nothing unwinds it -- there is
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
         # trace that graph-breaks or restarts, as does the write install makes
