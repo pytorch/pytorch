@@ -7389,6 +7389,16 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         except TimeoutError:
             return None
 
+    def _load_complete_trace(self, rank, timeout=30):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with open(self._trace_name(rank=rank), "rb") as f:
+                    return pickle.load(f)["entries"]
+            except (EOFError, FileNotFoundError, pickle.UnpicklingError):
+                time.sleep(0.1)
+        self.fail(f"rank {rank} did not write a complete trace")
+
 
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
@@ -7405,22 +7415,20 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
             # wait for rank0 to crash before looking for its output file
             # we rely on rank0 holding off its abort long enough to dump the debug info
             self.assertEqual(self._wait_process(0, timeout=90), -6)
-            with open(self._trace_name(rank=0), "rb") as f:
-                t = pickle.load(f)
-                t = t["entries"]
-                self.assertEqual(len(t), 2)
-                self.assertEqual(t[0]["collective_seq_id"], 1)
-                self.assertEqual(t[0]["state"], "completed")
-                self.assertEqual(t[1]["collective_seq_id"], 2)
-                self.assertEqual(
-                    t[1]["state"], self.started_or_scheduled(timing_enabled)
-                )
+            rank0_trace = self._load_complete_trace(rank=0)
+            rank1_trace = self._load_complete_trace(rank=1)
 
-            with open(self._trace_name(rank=1), "rb") as f:
-                rank1_trace = pickle.load(f)["entries"]
-                self.assertEqual(len(rank1_trace), 1)
-                self.assertEqual(rank1_trace[0]["collective_seq_id"], 1)
-                self.assertEqual(rank1_trace[0]["state"], "completed")
+            self.assertEqual(len(rank0_trace), 2)
+            self.assertEqual(rank0_trace[0]["collective_seq_id"], 1)
+            self.assertEqual(rank0_trace[0]["state"], "completed")
+            self.assertEqual(rank0_trace[1]["collective_seq_id"], 2)
+            self.assertEqual(
+                rank0_trace[1]["state"], self.started_or_scheduled(timing_enabled)
+            )
+
+            self.assertEqual(len(rank1_trace), 1)
+            self.assertEqual(rank1_trace[0]["collective_seq_id"], 1)
+            self.assertEqual(rank1_trace[0]["state"], "completed")
 
             return
 
@@ -7509,16 +7517,6 @@ class NCCLTraceTestDumpDuringShutdown(NCCLTraceTestDumpOnTimeoutBase):
     def _check_return_codes(self, fn, elapsed_time):
         self.assertEqual(self.processes[0].exitcode, -6)
         self.assertIn(self.processes[1].exitcode, {0, -signal.SIGTERM})
-
-    def _load_complete_trace(self, rank, timeout=30):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            try:
-                with open(self._trace_name(rank=rank), "rb") as f:
-                    return pickle.load(f)["entries"]
-            except (EOFError, FileNotFoundError, pickle.UnpicklingError):
-                time.sleep(0.1)
-        self.fail(f"rank {rank} did not write a complete trace")
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
