@@ -114,7 +114,7 @@ class FSDPState(_State):
         self._modules = modules
         self._device = device
         self._device_handle = _get_device_handle(device.type)
-        self._mp_policy = mp_policy._without_dtype_fns()
+        self._mp_policy = mp_policy
         self._auto_reshard_after_forward = auto_reshard_after_forward
         if len(modules) == 1:
             self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(

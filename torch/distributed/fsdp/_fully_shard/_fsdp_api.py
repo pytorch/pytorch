@@ -26,10 +26,9 @@ class MixedPrecisionPolicy:
     parameters for the optimizer step.
 
     .. warning::
-        ``param_dtype_fn`` and ``reduce_dtype_fn`` must return the same result
-        for each logical parameter on every rank. Rank-dependent results may
-        cause ranks to build incompatible collective buffers, which can fail
-        or hang.
+        ``param_dtype_fn`` must return the same result for each logical parameter
+        on every rank. Rank-dependent results may cause ranks to build incompatible
+        collective buffers, which can fail or hang.
 
     Attributes:
         param_dtype (Optional[torch.dtype]): This specifies the default dtype
@@ -39,8 +38,8 @@ class MixedPrecisionPolicy:
             unsharded parameters use their original dtype. The optimizer step
             uses the sharded parameters in the original dtype. (Default:
             ``None``)
-        reduce_dtype (Optional[torch.dtype]): The default dtype for unsharded
-            gradients and gradient reduction (reduce-scatter or all-reduce).
+        reduce_dtype (Optional[torch.dtype]): The dtype for unsharded gradients
+            and gradient reduction (reduce-scatter or all-reduce).
             FSDP sets the unsharded parameter's ``grad_dtype`` to this dtype, so
             autograd produces and accumulates gradients in this dtype regardless
             of whether gradient synchronization is enabled. FSDP packs these
@@ -66,14 +65,6 @@ class MixedPrecisionPolicy:
             parameters within one group resolve to multiple compute dtypes,
             configure one common effective reduction dtype for the group.
             (Default: ``None``)
-        reduce_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
-            Optional per-parameter override for ``reduce_dtype``. The callable
-            is evaluated once for each managed parameter when FSDP is applied.
-            Returning a dtype overrides ``reduce_dtype`` for that parameter;
-            returning ``None`` uses the default ``reduce_dtype``. Each FSDP
-            parameter group must resolve to one effective reduction dtype,
-            although separate groups may resolve to different dtypes. (Default:
-            ``None``)
     """
 
     param_dtype: torch.dtype | None = None
@@ -83,17 +74,9 @@ class MixedPrecisionPolicy:
     param_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
         default=None, kw_only=True
     )
-    reduce_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
-        default=None, kw_only=True
-    )
-
-    def _without_dtype_fns(self) -> "MixedPrecisionPolicy":
-        if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
-            return self
-        return replace(self, param_dtype_fn=None, reduce_dtype_fn=None)
 
     def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
-        if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
+        if self.param_dtype_fn is None:
             return self
         param_dtype = self.param_dtype
         if self.param_dtype_fn is not None:
@@ -112,22 +95,10 @@ class MixedPrecisionPolicy:
                         f"{param.dtype} and param_dtype {self.param_dtype}"
                     )
                 param_dtype = param_dtype_override
-        reduce_dtype = self.reduce_dtype
-        if self.reduce_dtype_fn is not None:
-            reduce_dtype_override = self.reduce_dtype_fn(param)
-            if reduce_dtype_override is not None:
-                if not isinstance(reduce_dtype_override, torch.dtype):
-                    raise ValueError(
-                        "reduce_dtype_fn must return a torch.dtype or None but got "
-                        f"{type(reduce_dtype_override)}"
-                    )
-                reduce_dtype = reduce_dtype_override
         return replace(
             self,
             param_dtype=param_dtype,
-            reduce_dtype=reduce_dtype,
             param_dtype_fn=None,
-            reduce_dtype_fn=None,
         )
 
 

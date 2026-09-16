@@ -273,38 +273,34 @@ class FSDPParamGroup:
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
-        floating_params = [
-            p for p in self.fsdp_params if p.orig_dtype.is_floating_point
-        ]
         trainable_params: list[FSDPParam] = [
-            p for p in floating_params if p.sharded_param.requires_grad
+            p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
         if trainable_params:
-            params_for_orig_dtype = trainable_params
+            params_for_dtype = trainable_params
         else:
-            params_for_orig_dtype = floating_params
-        orig_dtypes = {p.orig_dtype for p in params_for_orig_dtype}
-        reduce_dtypes = {p.reduce_dtype for p in floating_params}
-        effective_reduce_dtypes = {p.unsharded_grad_dtype for p in floating_params}
+            params_for_dtype = [
+                p for p in self.fsdp_params if p.orig_dtype.is_floating_point
+            ]
+        orig_dtypes = {p.orig_dtype for p in params_for_dtype}
+        reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
+        effective_reduce_dtypes = {p.unsharded_grad_dtype for p in params_for_dtype}
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
             # Models may have no grad params
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
-        self._orig_dtype = next(iter(orig_dtypes)) if len(orig_dtypes) == 1 else None
         if len(effective_reduce_dtypes) > 1:
             dtypes = ", ".join(sorted(str(dtype) for dtype in effective_reduce_dtypes))
             raise NotImplementedError(
                 "FSDP does not support multiple effective reduce dtypes within a "
-                "parameter group; configure one common effective reduce dtype, "
-                f"including reduce_dtype_fn results, but got: {dtypes}"
+                f"parameter group but got: {dtypes}"
             )
-        if len(reduce_dtypes) == 1:
-            self._reduce_dtype = next(iter(reduce_dtypes))
-        elif len(effective_reduce_dtypes) == 1:
-            self._reduce_dtype = next(iter(effective_reduce_dtypes))
-        else:
-            self._reduce_dtype = None
+        dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
+        self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
+        self._reduce_dtype = (
+            next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
+        )
 
     def lazy_init(self):
         # Lazy init should be idempotent

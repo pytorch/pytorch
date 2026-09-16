@@ -55,21 +55,17 @@ device_type = torch.device(get_devtype())
 
 
 class TestMixedPrecisionPolicy(TestCase):
-    def test_dtype_fns(self):
+    def test_param_dtype_fn(self):
         default_param = nn.Parameter(torch.ones(1))
         override_param = nn.Parameter(torch.ones(1))
 
         def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
             return torch.float32 if param is override_param else None
 
-        def reduce_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
-            return torch.float32 if param is override_param else None
-
         policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.bfloat16,
             param_dtype_fn=param_dtype_fn,
-            reduce_dtype_fn=reduce_dtype_fn,
         )
         self.assertEqual(
             policy._resolve_for_param(default_param),
@@ -79,28 +75,19 @@ class TestMixedPrecisionPolicy(TestCase):
         )
         self.assertEqual(
             policy._resolve_for_param(override_param),
-            MixedPrecisionPolicy(param_dtype=torch.float32, reduce_dtype=torch.float32),
-        )
-        self.assertEqual(
-            policy._without_dtype_fns(),
             MixedPrecisionPolicy(
-                param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+                param_dtype=torch.float32, reduce_dtype=torch.bfloat16
             ),
         )
 
         def invalid_dtype_fn(_: nn.Parameter) -> Any:
             return "invalid"
 
-        for invalid_policy in (
-            MixedPrecisionPolicy(param_dtype_fn=invalid_dtype_fn),
-            MixedPrecisionPolicy(reduce_dtype_fn=invalid_dtype_fn),
-        ):
-            with self.assertRaisesRegex(
-                ValueError, "must return a torch.dtype or None"
-            ):
-                invalid_policy._resolve_for_param(default_param)
+        invalid_policy = MixedPrecisionPolicy(param_dtype_fn=invalid_dtype_fn)
+        with self.assertRaisesRegex(ValueError, "must return a torch.dtype or None"):
+            invalid_policy._resolve_for_param(default_param)
 
-    def test_dtype_fns_are_keyword_only(self):
+    def test_param_dtype_fn_is_keyword_only(self):
         self.assertEqual(
             MixedPrecisionPolicy.__match_args__,
             ("param_dtype", "reduce_dtype", "output_dtype", "cast_forward_inputs"),
