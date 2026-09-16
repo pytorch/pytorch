@@ -20,7 +20,7 @@ import types
 import unittest
 import warnings
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 # Suppress libkineto USDT profiler_start/profiler_stop logs in this verbose
@@ -38,14 +38,18 @@ from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     _utils,
+    CuspyConfig,
     DeviceType,
     kineto_available,
+    PerformanceMetricsConfig,
     profile,
     ProfilerAction,
     ProfilerActivity,
+    ProfilerActivityConfig,
     record_function,
     supported_activities,
 )
+from torch.profiler.profiler import _get_profiler_extensions
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -1713,8 +1717,6 @@ class TestProfiler(TestCase):
                     self.assertTrue("string_list" in args)
                     self.assertTrue("int_param" in args)
                     self.assertTrue("string_param" in args)
-                    # Check that the list of strings is properly serialized
-                    # The list should be formatted as a JSON array by ivalueListToStr
                     self.assertEqual(args["string_list"], ["hello", "world", "test"])
                     self.assertEqual(args["int_param"], 42)
                     self.assertEqual(args["string_param"], "single_string")
@@ -2137,6 +2139,102 @@ class TestProfiler(TestCase):
                 ],
             ) as p:
                 pass
+
+    def test_profiler_activity_config(self):
+        performance_metrics = PerformanceMetricsConfig(
+            metric_names=["metric_a", "metric_b"],
+            sampling_interval_ms=0.5,
+            lookback_window_ms=2000,
+        )
+        config = ProfilerActivityConfig(
+            activity_types=["CUDA_RUNTIME"],
+            profiler_configs=[performance_metrics],
+        )
+        p = profile(activities=[{ProfilerActivity.CUDA: config}])
+        self.assertEqual(p.activity_configs, {ProfilerActivity.CUDA: config})
+
+        self.assertEqual(
+            _get_profiler_extensions(config.profiler_configs),
+            {
+                "PERFORMANCE_METRICS": "metric_a,metric_b",
+                "PERFORMANCE_METRICS_SAMPLING_INTERVAL_MS": "0.5",
+                "PERFORMANCE_METRICS_LOOKBACK_WINDOW_MS": "2000",
+            },
+        )
+        self.assertEqual(
+            _get_profiler_extensions(
+                [PerformanceMetricsConfig(metric_names=[]), CuspyConfig()]
+            ),
+            {"PERFORMANCE_METRICS": ""},
+        )
+        with (
+            patch("torch.cuda.current_device", return_value=3),
+            patch("torch.profiler.profiler.prof.profile") as kineto_profile,
+        ):
+            p.prepare_trace()
+        self.assertEqual(
+            kineto_profile.call_args.kwargs["_profiler_extensions"][
+                "PERFORMANCE_METRICS_DEVICE_ID"
+            ],
+            "3",
+        )
+
+    def test_cuspy_config_routes_performance_metrics(self):
+        performance_metrics = PerformanceMetricsConfig(
+            metric_names=["metric_a", "metric_b"],
+            sampling_interval_ms=0.5,
+            lookback_window_ms=2000,
+        )
+        cuspy_config = CuspyConfig(
+            enable_cuda_sync_events=True,
+            enable_environment_counters=True,
+            enable_graph_dependencies=False,
+            enable_event_node_ids=False,
+        )
+        p = profile(
+            activities=[
+                ProfilerActivity.CPU,
+                {
+                    ProfilerActivity.CUDA: ProfilerActivityConfig(
+                        profiler_configs=[performance_metrics, cuspy_config]
+                    )
+                },
+            ],
+            experimental_config=_ExperimentalConfig(
+                custom_profiler_config=json.dumps(
+                    {
+                        "enable_cuda_sync_events": False,
+                        "enable_environment_counters": True,
+                        "enable_graph_dependencies": True,
+                        "enable_event_node_ids": True,
+                    }
+                )
+            ),
+        )
+        observer = MagicMock(return_value=object())
+        observer_module = types.ModuleType("torch.profiler._cuspy.observers.profiler")
+        observer_module.ProfilerObserver = observer
+
+        with (
+            patch("torch.profiler.profiler.prof.profile") as kineto_profile,
+            patch.dict(
+                sys.modules,
+                {"torch.profiler._cuspy.observers.profiler": observer_module},
+            ),
+            patch("torch.profiler.profiler.prof._set_active_cuspy_profiler_observer"),
+        ):
+            p.prepare_trace()
+
+        self.assertEqual(kineto_profile.call_args.kwargs["_profiler_extensions"], {})
+        self.assertEqual(
+            observer.call_args.kwargs["pm_metrics"], ["metric_a", "metric_b"]
+        )
+        self.assertTrue(observer.call_args.kwargs["enable_cuda_sync"])
+        self.assertTrue(observer.call_args.kwargs["enable_environment_counters"])
+        self.assertFalse(observer.call_args.kwargs["enable_graph_dependencies"])
+        self.assertFalse(observer.call_args.kwargs["enable_event_node_ids"])
+        self.assertEqual(observer.call_args.kwargs["pm_sampling_interval_ms"], 0.5)
+        self.assertEqual(observer.call_args.kwargs["pm_lookback_window_ms"], 2000)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_invalid_type_name(self):
@@ -3048,6 +3146,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 instantiate_device_type_tests(TestProfilerDevice, globals())
 
 
+@instantiate_parametrized_tests
 class TestExperimentalUtils(TestCase):
     def make_tree(self) -> list[MockNode]:
         tree = {
@@ -3145,6 +3244,44 @@ class TestExperimentalUtils(TestCase):
         addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
         self.assertEqual(len(fast), len(addrs))
         self.assertEqual(len(addr2line), len(fast))
+
+    @unittest.skipIf(
+        not IS_LINUX or not (IS_X86 or IS_ARM64), "linux x86/aarch64 only cpp unwinding"
+    )
+    @parametrize("dwarf_version", [2, 3, 4, 5])
+    def test_fast_symbolize_dwarf_versions(self, dwarf_version):
+        import _ctypes
+        import ctypes
+        import shutil
+
+        cc = shutil.which("gcc") or shutil.which("clang") or shutil.which("cc")
+        if cc is None:
+            self.skipTest("no C compiler available")
+        src = "int square(int x) {\n  int y = x * x;\n  return y + 1;\n}\n"
+        with tempfile.TemporaryDirectory() as d:
+            c_file = os.path.join(d, "square.c")
+            so_file = os.path.join(d, "libsquare.so")
+            with open(c_file, "w") as f:
+                f.write(src)
+            flags = ["-shared", "-fPIC", "-O0", f"-gdwarf-{dwarf_version}"]
+            cmd = [cc, *flags, "-o", so_file, c_file]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                self.skipTest(f"{cc} does not support {flags[-1]}: {r.stderr}")
+            lib = ctypes.CDLL(so_file)
+            try:
+                addr = ctypes.cast(lib.square, ctypes.c_void_p).value
+                # symbolize treats addresses as return addresses (pc - 1), so
+                # step a few bytes into the function body
+                frames = torch._C._profiler.symbolize_addresses([addr + 8], "fast")
+                filename, lineno, funcname = frames[0]
+            finally:
+                # unmap before the directory is deleted so later tests that
+                # walk /proc/self/maps do not see a deleted file
+                _ctypes.dlclose(lib._handle)
+            self.assertEqual(funcname, "square")
+            self.assertEqual(os.path.basename(filename), "square.c")
+            self.assertTrue(1 <= lineno <= 4, f"unexpected line {lineno}")
 
     def test_profiler_overload_names(self):
         from torch.library import _scoped_library, fallthrough_kernel
@@ -4243,7 +4380,6 @@ class TestProfilerEventsParity(TestCase):
                     lambda msg: f"{msg}\nactivity_type mismatch for {e.name}",
                 )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179944")
     def test_structured_metadata_matches_chrome_trace(self):
         # Compare metadata fields between events() and Chrome trace JSON to make sure they stay in parity
         # 1. Run a dummy workload with profiling enabled and collect the json/events() outputs

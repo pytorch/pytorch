@@ -1491,8 +1491,9 @@ def _propagate_triton_eager_input_vals(
         return
 
     _, eager_kwargs = eager_input_vals
+    dropped = ("tensors_to_clone", "tensor_bases")
     mutation_eager_kwargs = {
-        key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
+        key: value for key, value in eager_kwargs.items() if key not in dropped
     }
     # The dense decomposition introduces clones plus the mutation HOP, but only
     # the mutation HOP should receive the eager-mode tensor metadata.
