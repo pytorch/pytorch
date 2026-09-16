@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: pt2"]
 import ast
+import textwrap
 import unittest
 
 import torch
@@ -84,6 +85,7 @@ class _NewObjEx:
     # A baked-global fixture whose reduce (__getnewargs_ex__ + dict state) emits a
     # ``_rebuild(...)`` call, used by test_rebuild_helper_spliced_and_runs_in_composed_module
     # to check the composed module splices and runs the _rebuild helper.
+
     def __new__(cls, a, b):
         obj = object.__new__(cls)
         obj.a = a
@@ -131,6 +133,7 @@ class _MatMul(torch.nn.Module):
     # addmm is an autocast-to-bf16 op, so a float32 input under torch.autocast engages
     # autocast and bakes the casts into the graph -- the setup the _DisableAutocast_ test
     # needs (a Linear's addmm behaves the same way).
+
     def __init__(self):
         super().__init__()
         self.l = torch.nn.Linear(4, 3)
@@ -232,6 +235,25 @@ class TestAOTCompileToPython(TestCase):
         _assert_composed(self, src)
         with torch.no_grad():
             self.assertEqual(_exec(src)(_flat_inputs(m, x))[0], m(x))
+
+    def test_graph_has_dynamic_shapes_reads_example_value(self):
+        # A Dynamo graph stashes its fake under "example_value", not "val".
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            _graph_has_dynamic_shapes,
+        )
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        graph = torch.fx.Graph()
+        node = graph.placeholder("x")
+        graph.output(node)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertFalse(_graph_has_dynamic_shapes(gm))
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        node.meta["example_value"] = mode.from_tensor(
+            torch.randn(3), static_shapes=False
+        )
+        self.assertTrue(_graph_has_dynamic_shapes(gm))
 
     def test_dynamic_shapes_runs_at_multiple_shapes(self):
         # compile_to_python has no dynamic_shapes knob: it auto-detects symbolic shapes
@@ -694,6 +716,50 @@ class TestAOTCompileToPython(TestCase):
             t.join()
         self.assertEqual(sinks["a"], ["a_fn"])
         self.assertEqual(sinks["b"], ["b_fn"])
+
+    def test_namespace_module_names_suffixes_each_modules_top_level_names(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        forward = textwrap.dedent(
+            """
+            import torch
+            from torch import empty_strided
+            def kernel(x):
+                return x + 1
+            class Runner:
+                def call(self, x):
+                    return kernel(x)
+            def call(args):
+                return Runner().call(kernel(args[0]))
+            """
+        )
+        backward = forward.replace("x + 1", "x - 1")
+        fwd, bwd = namespace_module_names([forward, backward])
+        # every module-level name each block DEFINES is suffixed per slot ...
+        self.assertIn("def kernel_s0(x):", fwd)
+        self.assertIn("def call_s0(args):", fwd)
+        self.assertIn("class Runner_s0:", fwd)
+        self.assertIn("return Runner_s0().call(kernel_s0(args[0]))", fwd)
+        self.assertIn("def kernel_s1(x):", bwd)
+        self.assertIn("return x - 1", bwd)
+        # ... while imports, attributes and nested bindings are left alone.
+        self.assertIn("from torch import empty_strided\n", fwd)
+        self.assertIn("    def call(self, x):", fwd)
+        self.assertIn("return kernel_s0(x)", fwd)
+        ns: dict[str, object] = {}
+        exec(fwd + bwd, ns)
+        self.assertEqual(ns["call_s0"]([torch.ones(2)]).tolist(), [3.0, 3.0])
+        self.assertEqual(ns["call_s1"]([torch.ones(2)]).tolist(), [-1.0, -1.0])
+
+    def test_namespace_module_names_leaves_a_module_defining_nothing_alone(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        src = "import torch\nprint(torch.__version__)\n"
+        self.assertEqual(namespace_module_names([src, src]), [src, src])
 
 
 @instantiate_parametrized_tests
