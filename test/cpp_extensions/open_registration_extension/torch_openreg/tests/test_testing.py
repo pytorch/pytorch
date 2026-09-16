@@ -351,21 +351,21 @@ class TestCapabilityGating(TestCase):
         self.fail("Expected preflight skip: dtype.fp64 is unsupported on this device")
 
     def test_capability_missing(self, device):
-        """@requires_capabilities raises SkipTest for undeclared capabilities."""
+        """@requires_capabilities raises AssertionError for undeclared capabilities."""
 
         @requires_capabilities(Capability.attention.flash_attention)
         def dummy(self):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
-            unittest.SkipTest,
+            AssertionError,
             r"has not declared capabilities: attention\.flash_attention",
         ):
             dummy(self)
         type(self).executed_tests.add(self._testMethodName)
 
     def test_capability_combined(self, device):
-        """@requires_capabilities raises SkipTest when a combined set
+        """@requires_capabilities raises AssertionError when a combined set
         includes an undeclared capability."""
 
         @requires_capabilities(
@@ -377,7 +377,7 @@ class TestCapabilityGating(TestCase):
             self.fail("should not execute")
 
         with self.assertRaisesRegex(
-            unittest.SkipTest,
+            AssertionError,
             r"has not declared capabilities: attention\.flash_attention",
         ):
             dummy(self)
