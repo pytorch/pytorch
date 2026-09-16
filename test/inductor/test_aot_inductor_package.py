@@ -475,10 +475,7 @@ model(torch.ones(2))
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
-        "Test is only supported on CUDA {}.{}+".format(*TRITON_PTXAS_VERSION),
-    )
+    @requires_triton_ptxas_compat
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
