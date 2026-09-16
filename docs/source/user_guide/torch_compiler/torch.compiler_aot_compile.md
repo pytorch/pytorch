@@ -127,7 +127,12 @@ Ahead-of-time compiles the `torch.compile()`-wrapped function.
 original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
-- `disable_guard_check()` -- Disable runtime guard validation (advanced use).
+- `disable_guard_check()` -- Disable runtime guard validation (advanced use): the
+  compiled function then runs whatever it is called with, without evaluating its
+  guards. Called on one of a module's `compiled_results` (the private,
+  experimental `_aot_compile` path), it does not skip that module's dispatch:
+  the result is still guard-checked like the others, and its opt-out only makes
+  it, from any index, the one that serves a call no result's guards accept.
 
 **Requirements:**
 
