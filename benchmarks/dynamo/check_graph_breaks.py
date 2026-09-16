@@ -78,8 +78,8 @@ def _capture_required(model: str, actual_status: str, expected_status: str) -> b
 # directions (fewer graphs can mean graphs were merged / fewer breaks -- an
 # improvement -- not less capture; more can mean fragmentation), and it is
 # already covered indirectly by graph_breaks (fragmentation) and calls_captured
-# (how much is captured). It is still required to be positive when capture is
-# expected, without comparing the graph count against a baseline.
+# (how much is captured). It must be positive when capture is required, unless
+# the baseline explicitly expects zero captured ops.
 # A metric is only compared when the expected row supplies a value, preserving
 # baselines that predate a metric or leave it unavailable for a particular model.
 # Keep in sync with METRIC_COLUMNS in ci_expected_accuracy/update_expected.py
@@ -215,14 +215,15 @@ def check_graph_breaks(
             )
             invalid.append(model)
             continue
-        if capture_required and num_graphs == 0:
+        expected_ops = _parse_counter(get_field(expected_csv, model, "calls_captured"))
+        if capture_required and num_graphs == 0 and expected_ops != 0:
             print(
                 f"{model:34}  {'INVALID:':19} "
                 "unique_graphs=0, expected Dynamo graph capture"
             )
             invalid.append(model)
             continue
-        dynamo_called = num_graphs is not None and num_graphs > 0
+        check_metrics = capture_required or (num_graphs is not None and num_graphs > 0)
 
         model_failed = False
         model_improved = False
@@ -244,7 +245,7 @@ def check_graph_breaks(
                 model_invalid = True
                 continue
             if actual is None:
-                if not dynamo_called and (actual_raw is None or pd.isna(actual_raw)):
+                if not check_metrics and (actual_raw is None or pd.isna(actual_raw)):
                     continue
                 print(
                     f"{model:34}  {'INVALID:':19} "
@@ -252,7 +253,7 @@ def check_graph_breaks(
                 )
                 model_invalid = True
                 continue
-            if not dynamo_called:
+            if not check_metrics:
                 continue
             result = _classify(actual, expected, mode)
             if result == "PASS":
@@ -271,7 +272,7 @@ def check_graph_breaks(
         if model_invalid:
             invalid.append(model)
             continue
-        if not dynamo_called:
+        if not check_metrics:
             print(f"{model:34}  EAGER_FAILED")
             continue
         if not printed_detail:

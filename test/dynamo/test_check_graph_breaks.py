@@ -85,6 +85,61 @@ class TestCheckGraphBreaks(TestCase):
         self.assertIn("missing or invalid required Dynamo metrics", message)
         self.assertIn("unique_graphs=0, expected Dynamo graph capture", output)
 
+    def test_zero_capture_matches_zero_coverage_baseline(self):
+        metrics = {"graph_breaks": 2, "calls_captured": 0, "fallbacks_to_eager": 2}
+        failures, message, output = self.check(
+            actual_results(unique_graphs=0, **metrics), expected_results(**metrics)
+        )
+
+        self.assertEqual(failures, [])
+        self.assertEqual(message, "")
+        self.assertIn("PASS", output)
+
+    @parametrize("missing_column", (False, True))
+    def test_zero_capture_requires_explicit_baseline(self, missing_column):
+        expected = expected_results(calls_captured=None)
+        if missing_column:
+            expected = expected.drop(columns="calls_captured")
+
+        failures, message, output = self.check(
+            actual_results(unique_graphs=0, calls_captured=0), expected
+        )
+
+        self.assertEqual(failures, ["model"])
+        self.assertIn("invalid", message)
+        self.assertIn("expected Dynamo graph capture", output)
+
+    @parametrize(
+        "field",
+        ("unique_graphs", "graph_breaks", "calls_captured", "fallbacks_to_eager"),
+    )
+    def test_zero_coverage_baseline_still_requires_valid_metrics(self, field):
+        actual = actual_results(unique_graphs=0, calls_captured=0)
+        actual[field] = None
+
+        failures, message, output = self.check(
+            actual, expected_results(calls_captured=0)
+        )
+
+        self.assertEqual(failures, ["model"])
+        self.assertIn("invalid", message)
+        self.assertIn(field, output)
+
+    @parametrize("field", ("graph_breaks", "fallbacks_to_eager"))
+    @parametrize("actual,expected,status", ((3, 2, "FAIL"), (1, 2, "IMPROVED")))
+    def test_zero_coverage_baseline_still_checks_metric_changes(
+        self, field, actual, expected, status
+    ):
+        failures, message, output = self.check(
+            actual_results(unique_graphs=0, calls_captured=0, **{field: actual}),
+            expected_results(calls_captured=0, **{field: expected}),
+        )
+
+        self.assertEqual(failures, ["model"])
+        self.assertIn(f"{status}:", output)
+        self.assertIn(f"{field}={actual}, expected={expected}", output)
+        self.assertIn("reflect the new baseline", message)
+
     @parametrize(
         "field",
         ("unique_graphs", "graph_breaks", "calls_captured", "fallbacks_to_eager"),

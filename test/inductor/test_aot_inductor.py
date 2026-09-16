@@ -6479,6 +6479,7 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
+    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -6567,6 +6568,7 @@ class AOTInductorTestsTemplate:
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     @common_utils.parametrize("enable_kernel_context_guard", (True, False))
+    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler(self, enable_kernel_context_guard, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
@@ -6625,6 +6627,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler_input_shapes(self):
         # Verify that kernel profiling records tensor input shapes,
         # scalar args, output handles, and ReinterpretView logical shapes.
@@ -6703,6 +6706,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler_multi_output_fallback_input_shapes(self):
         # A tuple-returning fallback (scaled_dot_product_attention) is the
         # representative kernel reaching generate_c_shim_fallback_kernel;
@@ -6752,6 +6756,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler_tensor_list_input_shapes(self):
         # A tensor-list fallback collapses its whole list into a single codegen
         # arg, so the profiling handles for its ReinterpretView inputs have no
@@ -7102,6 +7107,13 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
+    @config.patch(
+        {
+            "fallback_by_default": False,
+            "selective_decompose": False,
+            "use_joint_graph_passes": True,
+        }
+    )
     def test_aoti_debug_printer_cpp_kernel(self):
         if self.device != "cpu":
             raise unittest.SkipTest("cpu test case only")
