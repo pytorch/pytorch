@@ -347,6 +347,17 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(0, output[0].numel())
         self.assertEqual(xs[0], output[0])
 
+        # allgather of an empty tensor previously aborted with SIGFPE on gloo
+        # (a modulo-by-zero in the ring algorithm when the buffer is empty).
+        ys = [[torch.FloatTensor([]) for _ in range(self.world_size)]]
+        fut = pg.allgather(ys, xs).get_future()
+        fut.wait()
+        result = fut.value()
+        self.assertEqual(self.world_size, len(result))
+        for t in result:
+            self.assertEqual(0, t.numel())
+            self.assertEqual(xs[0], t)
+
     @requires_gloo()
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
