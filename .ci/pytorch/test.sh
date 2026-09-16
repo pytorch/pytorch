@@ -517,6 +517,21 @@ test_python_smoke_b200() {
     --upload-artifacts-while-running \
     --pytest-xdist-workers 32
 
+  # The CuTeDSL linear_cross_entropy overrides: the routing test, and the OpInfo
+  # variants that only exist where the CuTeDSL runtime does, so they are
+  # collected nowhere else.
+  time python test/run_test.py --include python_native/test_linear_cross_entropy_override $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # The variants' expectations live outside test_ops too: two xfails in
+  # test_ops_gradients.py and nine TestOperators entries in the shared skip
+  # tuple. An expectation that never runs rots into an unexpected success
+  # without anyone noticing, so collect those suites here as well -- a handful
+  # of tests each once restricted to this op.
+  time env OPINFO_RESTRICT_TO_DSL=cutedsl python test/run_test.py --include test_ops_gradients -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # functorch selects its variants with -k instead: restricting op_db trips
+  # `opsToleranceOverride`, which asserts that every op it names is present.
+  time python test/run_test.py --include functorch/test_ops -k "linear_cross_entropy and cutedsl" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+
   time python test/run_test.py --include test_linalg -k "mm or addmv" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   # Dynamically discover the DSL override tests so new ones are picked up. This
   # is the only job with CuTeDSL installed, so they skip everywhere else.
