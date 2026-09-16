@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils.flop_counter import (
     _efficient_attention_backward_flop,
     _varlen_attn_backward_flop,
@@ -567,7 +567,7 @@ class TestFlopCounter(TestCase):
 class TestFlopCounterDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_cuda_and_triton
+    @requires_triton()
     def test_flop_counter_custom_triton_manual_decomp(self, device):
         import triton
         import triton.language as tl
@@ -617,7 +617,7 @@ class TestFlopCounterDevice(TestCase):
             torch.ops.mylib.sin_op()
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
-    @requires_cuda_and_triton
+    @requires_triton()
     def test_flop_counter_custom_triton_op_two_kernels_manual_decomp(self, device):
         import triton
         import triton.language as tl
@@ -691,7 +691,7 @@ class TestFlopCounterDevice(TestCase):
             torch.ops.mylib.trig_op()
         self.assertExpectedInline(get_total_flops(m2), """2""")
 
-    @requires_cuda_and_triton
+    @requires_triton()
     @torch._functorch.config.patch("activation_memory_budget", 0.1)
     @torch._functorch.config.patch("activation_memory_budget_solver", "dp")
     @torch._functorch.config.patch("is_non_builtin_to_include", True)
@@ -805,7 +805,9 @@ class TestFlopCounterDevice(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
 
-instantiate_device_type_tests(TestFlopCounterDevice, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestFlopCounterDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 @unittest.skipIf(
