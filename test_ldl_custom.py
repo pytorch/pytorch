@@ -17,10 +17,12 @@ Two things shape how correctness is measured:
     hermitian=True on CUDA -- exactly the combination the custom kernel exists
     for -- so CPU is the only available vehicle for checking it.
 
-Only complex dtypes with hermitian=True dispatch to the custom kernel; real
-dtypes take a different backend. The real-dtype cases below are therefore
-general ldl_factor coverage, and anything asserting kernel-specific behaviour
-(info semantics, determinism) is restricted to complex.
+Reaching the kernel at all takes two things. It sits under
+LinalgBackend::Cusolver and is gated on hermitian, so the tests force the
+cusolver backend in setUp and pass hermitian=True. Under the default backend
+complex+hermitian goes to MAGMA and everything else to cuSOLVER, so the custom
+kernel is never called and the whole file silently tests something else. The
+gate is on hermitian only -- real dtypes reach it just as complex ones do.
 """
 
 import torch
@@ -300,6 +302,19 @@ def mostly_2x2_pattern(n, frac2, seed):
 
 
 class TestLDLCustomKernel(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._prev_backend = None
+        if torch.cuda.is_available():
+            # Without this the custom kernel is unreachable -- see module docstring.
+            self._prev_backend = torch.backends.cuda.preferred_linalg_library()
+            torch.backends.cuda.preferred_linalg_library("cusolver")
+
+    def tearDown(self):
+        if self._prev_backend is not None:
+            torch.backends.cuda.preferred_linalg_library(self._prev_backend)
+        super().tearDown()
+
     def _check(self, A, hermitian, nrhs=3):
         """Factor A on its own device, verify via the solve residual on CPU."""
         LD, pivots, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
@@ -583,7 +598,7 @@ class TestLDLCustomKernel(TestCase):
 
     @parametrize("k", [0, 1, 5, 31, 32, 33, 60])
     @parametrize("n", [64, 150])
-    @dtypes(torch.complex64, torch.complex128)
+    @dtypes(*floating_and_complex_types())
     def test_zero_row_col_completes_and_sets_info(self, device, dtype, n, k):
         """A zero row/column makes the matrix singular without stopping the work.
 
@@ -614,7 +629,7 @@ class TestLDLCustomKernel(TestCase):
         self.assertGreater(sum(1 for v in piv.cpu().tolist() if v < 0), 0)
 
     @parametrize("n", [64, 150])
-    @dtypes(torch.complex64, torch.complex128)
+    @dtypes(torch.float64, torch.complex128)
     def test_zero_row_col_batched(self, device, dtype, n):
         """info is reported per batch element: only the singular ones are flagged."""
         torch.manual_seed(n)
@@ -629,7 +644,7 @@ class TestLDLCustomKernel(TestCase):
         self.assertTrue((piv.abs() >= 1).all())
 
     @parametrize("n", [64, 150])
-    @dtypes(torch.complex64, torch.complex128)
+    @dtypes(torch.float64, torch.complex128)
     def test_info_zero_when_nonsingular(self, device, dtype, n):
         """Merely near-singular is not reported: the test is an exact zero pivot,
         so a tiny-but-nonzero eigenvalue must still give info == 0."""
