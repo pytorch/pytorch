@@ -3511,7 +3511,47 @@ class SIMDScheduling(BaseScheduling):
             # this decline before a staged identity is committed; codegen still
             # revalidates the committed plan and treats a mismatch as an ICE.
             return None
+        if any(
+            relation.translation is not None
+            for stage in plan.sub_parent_stages
+            for relation in stage.access_relations
+        ) and not self._translated_projection_is_persistent(plan):
+            # The translated projection currently forwards a complete parent
+            # register tile.  Looped reductions expose only loop-local tiles,
+            # so decline before forming the staged identity rather than letting
+            # the resolver fail after commitment.
+            return None
         return plan
+
+    def _translated_projection_is_persistent(
+        self, plan: scheduler.StagedReductionPlan
+    ) -> bool:
+        """Whether the selected Triton reduction owns a complete parent tile."""
+        if not plan.parent_nodes:
+            # Synthetic capability tests may omit the parent schedule.  The
+            # physical geometry gate remains the relevant check there.
+            return True
+        parent_schedule = self.generate_node_schedule(
+            plan.parent_nodes,
+            plan.parent_numel,
+            plan.parent_rnumel,
+            required_post_reduction_index=plan.required_post_reduction_index,
+        )
+        features = SIMDKernelFeatures(
+            parent_schedule,
+            plan.parent_numel,
+            plan.parent_rnumel,
+        )
+        _, tiling_scores = self.get_tiling_and_scores(
+            parent_schedule,
+            plan.parent_numel,
+            plan.parent_rnumel,
+            features.coalesce_analysis,
+        )
+        return V.choices.should_use_persistent_reduction(
+            features.with_tiling_scores(tiling_scores),
+            cooperative_reduction=False,
+        )
 
     @staticmethod
     def _translated_projection_geometry(
