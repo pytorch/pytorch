@@ -5,8 +5,6 @@ import unittest
 import weakref
 from unittest.mock import patch
 
-import pytest
-
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -2783,34 +2781,8 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
-    @pytest.mark.multigpu
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
-    def test_synchronize_indexless_device_uses_caller_device(self):
-        from torch._inductor.utils import fresh_cache
-
-        def f(x):
-            y = x + 1
-            torch.cuda.synchronize(torch.device("cuda"))
-            return y + 2
-
-        torch._dynamo.reset()
-        with fresh_cache(), torch.cuda.device(0):
-            compiled = torch.compile(f, backend="inductor", fullgraph=True)
-            x = torch.zeros(1, device="cuda:1")
-            compiled_target = []
-            with patch.object(
-                torch._C,
-                "_accelerator_synchronizeDevice",
-                side_effect=compiled_target.append,
-            ):
-                compiled(x)
-                with torch.cuda.device(1):
-                    compiled(x)
-
-        self.assertEqual(compiled_target, [0, 1])
-
     @torch.compiler.config.patch(compile_on_one_rank=True)
-    def test_synchronize_preserves_indexless_device_under_coor(self):
+    def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
         def f(x):
             torch.cuda.synchronize(torch.device("cuda"))
             return x + 1
@@ -2818,13 +2790,28 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
         compiled = torch.compile(f, backend=backend, fullgraph=True)
-        with torch.cuda.device(0):
-            x = torch.zeros(1, device="cuda:0")
-            compiled(x)
-            with patch.object(torch.accelerator, "synchronize") as synchronize:
+        x = torch.zeros(1, device="cuda:0")
+        # Cycling the current device must not recompile: a guard pinning the index
+        # is what would stop one artifact from serving every rank. Asserting only
+        # one graph under a single current device cannot tell "no guard" from
+        # "guard satisfied", so vary the device and pin the unresolved index too.
+        for index in range(torch.cuda.device_count()):
+            with torch.cuda.device(index):
                 compiled(x)
 
         self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(
+            [
+                node.args
+                for node in backend.graphs[0].graph.nodes
+                if "synchronize_device" in str(node.target)
+            ],
+            [("cuda", None)],
+        )
+
+        with torch.cuda.device(0):
+            with patch.object(torch.accelerator, "synchronize") as synchronize:
+                compiled(x)
         self.assertEqual(synchronize.call_args.args, (torch.device("cuda"),))
 
     def test_wait_stream_anchors_following_record(self) -> None:

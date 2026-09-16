@@ -991,36 +991,6 @@ def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
-def _guard_device_index_is_current(
-    value: torch.Tensor, source: Source, output_graph: OutputGraphGuardsState
-) -> bool:
-    """Whether this tensor's device index may be guarded as "the current device".
-
-    Only under compile_on_one_rank, and only when the tensor really is on the
-    current accelerator. CooR enforces a single-accelerator invariant while tracing
-    -- one accelerator device, though cpu tensors may coexist with it freely -- so
-    for an accelerator tensor the recorded index is just the compiling rank's and
-    carries no information. cpu is left alone: it is portable across ranks already,
-    and its index is not a rank identity. Outside CooR several accelerator devices
-    can legitimately be live at once, so there the index stays pinned.
-
-    The answer is memoized per source so that a guard state serialized on one rank
-    replays the compiling rank's decision instead of re-deriving it on load, where
-    the current device differs.
-    """
-    decisions = output_graph.tensor_device_index_is_current
-    if decisions is None:
-        return False
-    if source in decisions:
-        return decisions[source]
-
-    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
-
-    result = _coor_device_index_is_current(value.device)
-    decisions[source] = result
-    return result
-
-
 def get_tensor_guard_code_part(
     value: torch.Tensor,
     name: str,
@@ -1028,17 +998,12 @@ def get_tensor_guard_code_part(
     strides: list[int | None],
     pytype: type,
     dispatch_keys: DispatchKeySet,
-    device_index_is_current: bool = False,
 ) -> str:
     dispatch_key = (
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
-    # Render the relaxed form as "current" so diagnostics describe the
-    # rank-relative runtime check rather than the compiling rank's device index.
-    device_index: int | str | None = (
-        "current" if device_index_is_current else value.device.index
-    )
+    device_index = value.device.index
     requires_grad = value.requires_grad
     guard_str = (
         f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
@@ -3872,9 +3837,6 @@ class GuardBuilder(GuardBuilderBase):
                 ]
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
-                device_index_is_current = _guard_device_index_is_current(
-                    value, guard.originating_source, output_graph
-                )
 
                 verbose_code_parts = get_verbose_code_parts(
                     get_tensor_guard_code_part(
@@ -3884,7 +3846,6 @@ class GuardBuilder(GuardBuilderBase):
                         stride,
                         pytype,
                         dispatch_keys,
-                        device_index_is_current,
                     ),
                     guard,
                 )
@@ -3898,7 +3859,6 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
-                    device_index_is_current,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be

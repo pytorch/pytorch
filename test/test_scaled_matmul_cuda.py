@@ -1213,6 +1213,36 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_inplace_tunableop(self, device):
+        # The tunable scaled-gemm path only computes the plain product, so an
+        # in-place scaled_addmm_ with TunableOp enabled must bypass it and still
+        # accumulate beta * input rather than overwriting it with the product.
+        torch.manual_seed(42)
+        alpha, beta = 1.25, -0.5
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            64, 48, 32, device, torch.bfloat16
+        )
+        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        kwargs = {"beta": beta, "alpha": alpha}
+        reference = (
+            beta * input.float()
+            + alpha * ((mat1.float() * scale_a) @ (mat2.float() * scale_b))
+        ).to(input.dtype)
+
+        prev_enabled = torch.cuda.tunable.is_enabled()
+        prev_tuning = torch.cuda.tunable.tuning_is_enabled()
+        torch.cuda.tunable.enable(True)
+        # Default selection (no tuning), matching the reviewer's repro.
+        torch.cuda.tunable.tuning_enable(False)
+        try:
+            self.assert_scaled_addmm_inplace(input.clone(), reference, args, **kwargs)
+        finally:
+            torch.cuda.tunable.tuning_enable(prev_tuning)
+            torch.cuda.tunable.enable(prev_enabled)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_addmm_wgrad_accumulation(self, device):
         torch.manual_seed(42)
         _, mat1_a, mat2_a, scale_a_a, scale_b_a = make_tensorwise_scaled_addmm_inputs(
