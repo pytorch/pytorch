@@ -100,6 +100,25 @@ class TestFunctorchBenchmarkUtils(TestCase):
         with self.assertRaisesRegex(ValueError, "must not be empty"):
             self._dump(devices=[])
 
+    def test_invalid_device_string_raises(self):
+        with self.assertRaisesRegex(ValueError, "Invalid device entry"):
+            self._dump(devices=["not-a-device"])
+
+    def test_explicit_devices_without_accelerator_raises(self):
+        with patch.object(torch.accelerator, "is_available", return_value=False):
+            with self.assertRaisesRegex(ValueError, "Accelerator is not available"):
+                benchmark_utils._synchronize_for_devices(["cuda:0"])
+
+    def test_invalid_device_string_without_accelerator_raises(self):
+        with patch.object(torch.accelerator, "is_available", return_value=False):
+            with self.assertRaisesRegex(ValueError, "Invalid device entry"):
+                benchmark_utils._synchronize_for_devices(["not-a-device"])
+
+    def test_sentinel_noop_without_accelerator(self):
+        with patch.object(torch.accelerator, "is_available", return_value=False):
+            benchmark_utils._synchronize_for_devices(None)
+            benchmark_utils._synchronize_for_devices(["cuda"])
+
     def test_multiple_cpu_devices_does_not_sync(self):
         calls = self._dump(devices=["cpu", "cpu"])
         self.assertEqual(calls, [])
@@ -118,7 +137,9 @@ class TestFunctorchBenchmarkUtils(TestCase):
             patch.object(torch.accelerator, "is_available", return_value=True),
             self._mock_accelerator("mps"),
         ):
-            with self.assertRaisesRegex(RuntimeError, "not supported for accelerator 'mps'"):
+            with self.assertRaisesRegex(
+                RuntimeError, "not supported for accelerator 'mps'"
+            ):
                 benchmark_utils._device_profiler_activity()
 
     def test_privateuse1_fallback_only_for_registered_backend(self):
@@ -154,7 +175,9 @@ class TestFunctorchBenchmarkUtils(TestCase):
                 self.skipTest("ProfilerActivity.NPU aliases npu in this build")
             if torch._C._get_privateuse1_backend_name() == "npu":
                 self.skipTest("privateuse1 backend is registered as npu")
-            with self.assertRaisesRegex(RuntimeError, "not supported for accelerator 'npu'"):
+            with self.assertRaisesRegex(
+                RuntimeError, "not supported for accelerator 'npu'"
+            ):
                 benchmark_utils._device_profiler_activity()
 
     def test_renamed_privateuse1_with_enum_uses_enum(self):
