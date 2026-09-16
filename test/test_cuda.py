@@ -44,6 +44,7 @@ from torch.testing._internal.common_cuda import (
     has_device_side_assert,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     PLATFORM_SUPPORTS_WORKQUEUE_CONFIG,
+    ROCM_VERSION,
     SM70OrLater,
     SM89OrLater,
     TEST_CUDNN,
@@ -82,7 +83,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
-    MI200_ARCH,
     MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -926,7 +926,6 @@ print("RECOVERED")
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 # Mirror CUDAHooks::getHipblasltPreferredArchs in CUDAHooks.cpp
-                ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split(".")[:2])
                 archs = ["gfx90a", "gfx942"]
                 if ROCM_VERSION >= (6, 4):
                     archs.extend(["gfx1200", "gfx1201"])
@@ -2012,7 +2011,6 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
                 tmp3 = torch.cuda.FloatTensor(t.size())
                 self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/120318")
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
@@ -2388,6 +2386,78 @@ if __name__ == '__main__':
         self.assertTrue(
             has_device_side_assert(stderr),
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+
+    @slowTest
+    @unittest.skipIf(
+        not TEST_WITH_ROCM
+        or (
+            "USE_ROCM_KERNEL_ASSERT=1" not in torch.__config__.show()
+            and "USE_ROCM_KERNEL_ASSERT=ON" not in torch.__config__.show()
+        ),
+        "requires ROCm build with USE_ROCM_KERNEL_ASSERT enabled",
+    )
+    def test_rocm_kernel_assert_percent_in_condition(self):
+        # Device assert with '%' in #cond; stderr must match stock HIP format and
+        # the subprocess must fail (assert must not compile away silently).
+        code = """\
+import torch
+from torch.utils.cpp_extension import load_inline
+
+cuda_source = r'''
+#include <c10/macros/Macros.h>
+#include <cuda_runtime.h>
+
+__global__ void assert_mod_kernel(const int* x) {
+  CUDA_KERNEL_ASSERT(x[0] % 2 == 0);
+}
+
+void trigger_device_assert() {
+  int h = 1;
+  int* d = nullptr;
+  cudaMalloc(&d, sizeof(int));
+  cudaMemcpy(d, &h, sizeof(int), cudaMemcpyHostToDevice);
+  assert_mod_kernel<<<1, 1>>>(d);
+  cudaDeviceSynchronize();
+}
+'''
+cpp_source = "void trigger_device_assert();"
+
+mod = load_inline(
+    name="rocm_kernel_assert_percent_test",
+    cpp_sources=cpp_source,
+    cuda_sources=cuda_source,
+    functions=["trigger_device_assert"],
+    verbose=False,
+)
+mod.trigger_device_assert()
+raise RuntimeError("device assert did not fire")
+"""
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            env=env,
+        )
+        stderr = proc.stderr.decode("ascii", errors="replace")
+        self.assertNotEqual(
+            proc.returncode,
+            0,
+            msg=(
+                "expected subprocess failure after device assert, "
+                f"got rc={proc.returncode}\n{stderr}"
+            ),
+        )
+        self.assertRegex(
+            stderr,
+            (
+                r"[^\n]+:\d+: assert_mod_kernel: "
+                r"Device-side assertion `x\[0\] % 2 == 0' failed\."
+            ),
+            msg=f"expected full HIP-format assert line in stderr, got:\n{stderr}",
         )
 
     @slowTest
@@ -7804,6 +7874,7 @@ print(value, end="")
             self.assertTrue(torch.cuda._get_amdsmi_handler() is not None)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI350_ARCH)
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
@@ -7844,7 +7915,9 @@ print(value, end="")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
+    @skipIfRocmVersionAtLeast([10, 1])  # ROCM-30651
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @skipIfRocmArch(MI350_ARCH)
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
@@ -9220,7 +9293,6 @@ class TestMemPool(TestCase):
             torch.cuda.empty_cache()
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176145")
-    @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
         """
@@ -10273,7 +10345,6 @@ class TestMemPool(TestCase):
                 f"expandable_segments:{EXPANDABLE_SEGMENTS}"
             )
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm(self):
         with torch.cuda._use_uvm():
@@ -10283,7 +10354,6 @@ class TestMemPool(TestCase):
         self.assertEqual(z.shape, (256, 256))
         self.assertTrue(z.is_cuda)
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_numerics(self):
         torch.manual_seed(42)
@@ -10293,7 +10363,6 @@ class TestMemPool(TestCase):
         a_reg = torch.randn(128, 128, device="cuda")
         self.assertEqual(a_uvm, a_reg)
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_backward(self):
         with torch.cuda._use_uvm():
@@ -10304,7 +10373,6 @@ class TestMemPool(TestCase):
         self.assertIsNotNone(model.weight.grad)
         self.assertEqual(model.weight.grad.shape, (512, 512))
 
-    @skipIfRocm(msg="cudaMallocManaged (UVM) is not supported on ROCm")
     @requires_cuda_python_bindings
     def test_use_uvm_tensor_outlives_context(self):
         # Regression test: a tensor allocated inside _use_uvm() can outlive the

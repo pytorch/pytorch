@@ -40,7 +40,6 @@ from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
     raise_attribute_error,
-    raise_observed_exception,
     raise_type_error,
     unimplemented,
     Unsupported,
@@ -487,6 +486,19 @@ def unmodeled_setter(
     )
 
 
+def type_qualified_name(type_: type) -> str:
+    """Equivalent to _PyType_GetFullyQualifiedName, for a raw type object.
+
+    See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+    """
+    mod = type_.__module__
+    qn = type_.__qualname__
+    if mod not in ("__main__", "builtins"):
+        return f"{mod}.{qn}"
+    else:
+        return qn
+
+
 def getset_build(
     accessor: Callable[[Any], Any],
 ) -> Getter:
@@ -502,6 +514,7 @@ def store_attr_mutation(
 ) -> None:
     """Store an attribute mutation in the side effects tracker."""
     se = tx.output.side_effects
+    item = item.realize()
     if not se.is_attribute_mutation(item):
         if item.source is not None:
             raise AssertionError(
@@ -911,6 +924,10 @@ def _wrap_descr_get(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) not in (1, 2):
         raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    # wrap_descr_get treats None as absent for both arguments and rejects the
+    # call when both are absent.
+    if all(a.is_constant_none() for a in args):
+        raise_type_error(tx, "__get__(None, None) is invalid")
     obj = args[0]
     owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
     return func(self, tx, obj, owner)
@@ -1933,12 +1950,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return "<unknown type>"
         # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
         # (and not execute user code)
-        mod = type_.__module__
-        qn = type_.__qualname__
-        if mod not in ("__main__", "builtins"):
-            return f"{mod}.{qn}"
-        else:
-            return qn
+        return type_qualified_name(type_)
 
     def as_python_constant(self) -> Any:
         """For constants"""
@@ -2366,19 +2378,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when mp_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_subscript_impl(
         self,
@@ -2816,12 +2820,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         The base implementation raises TypeError, matching CPython's behavior
         when tp_as_number->nb_index is NULL (_PyIndex_Check fails).
         """
-        raise_observed_exception(
-            TypeError,
+        raise_type_error(
             tx,
-            args=[
-                f"'{self.python_type_name()}' object cannot be interpreted as an integer"
-            ],
+            f"'{self.python_type_name()}' object cannot be interpreted as an integer",
         )
 
     def tp_repr_impl(

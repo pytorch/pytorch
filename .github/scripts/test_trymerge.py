@@ -19,7 +19,7 @@ from typing import Any
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
-from github_utils import gh_graphql
+from github_utils import gh_graphql, GHGraphQLError
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
     GREENLIGHT_LOGIN,
@@ -42,8 +42,12 @@ from trymerge import (
     get_docker_build_checks,
     get_drci_classifications,
     get_topmost_docker_pr,
+    gh_get_pr_info,
     gh_get_team_members,
     GitHubPR,
+    HAS_NO_CONNECTED_DIFF_TITLE,
+    IMPORT_STATUS_CHECKRUN_NAME,
+    INTERNAL_CHANGES_CHECKRUN_NAME,
     is_authorized_without_greenlight,
     is_bot_initiated_codev_merge,
     is_docker_affecting_files,
@@ -332,6 +336,48 @@ class DummyGitRepo(GitRepo):
 
     def commit_message(self, ref: str) -> str:
         return "super awesome commit message"
+
+
+class TestGetPRInfoForbiddenHeadRepository(TestCase):
+    """gh_get_pr_info tolerates a FORBIDDEN error on the headRepository path
+    (org fork blocking classic PATs) and nothing else."""
+
+    forbidden_error = {
+        "type": "FORBIDDEN",
+        "path": ["repository", "pullRequest", "headRepository"],
+        "message": "`SomeOrg` forbids access via a personal access token (classic).",
+    }
+
+    def graphql_response(self, errors: list[dict[str, Any]]) -> dict[str, Any]:
+        pull_request = {"headRefName": "some-branch", "headRepository": None}
+        return {"data": {"repository": {"pullRequest": pull_request}}, "errors": errors}
+
+    def test_forbidden_head_repository_is_tolerated(self) -> None:
+        rc = self.graphql_response([self.forbidden_error])
+        with mock.patch(
+            "trymerge.gh_graphql", side_effect=GHGraphQLError("failed", rc)
+        ):
+            info = gh_get_pr_info("pytorch", "pytorch", 123)
+        self.assertIsNone(info["headRepository"])
+        self.assertEqual(info["headRefName"], "some-branch")
+
+    def test_other_errors_still_raise(self) -> None:
+        other_error = {"type": "NOT_FOUND", "path": ["repository", "pullRequest"]}
+        for errors in ([other_error], [self.forbidden_error, other_error], []):
+            rc = self.graphql_response(errors)
+            with mock.patch(
+                "trymerge.gh_graphql", side_effect=GHGraphQLError("failed", rc)
+            ):
+                with self.assertRaises(GHGraphQLError):
+                    gh_get_pr_info("pytorch", "pytorch", 123)
+
+    def test_missing_pull_request_still_raises(self) -> None:
+        rc = {"data": {"repository": None}, "errors": [self.forbidden_error]}
+        with mock.patch(
+            "trymerge.gh_graphql", side_effect=GHGraphQLError("failed", rc)
+        ):
+            with self.assertRaises(GHGraphQLError):
+                gh_get_pr_info("pytorch", "pytorch", 123)
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -1694,6 +1740,120 @@ class TestTimelineFunctions(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 77700)
         sha = pr.get_commit_sha_at_comment(100)
         self.assertIsNone(sha)
+
+
+class TestImportStatusCheck(TestCase):
+    """CodeSync leaves `Import Status` queued on an unimported revision (#189303), so
+    a pending one must not make the merge wait once CodeSync has cleared the commit."""
+
+    BUILD_CHECK = "pull / linux-jammy-py3.10-gcc11 / build"
+
+    @staticmethod
+    def check(name: str, status: str | None, title: str | None = None) -> JobCheckState:
+        return JobCheckState(name, "", status, None, None, title, None)
+
+    def cleared_by_codesync(self) -> dict[str, JobCheckState]:
+        return {
+            INTERNAL_CHANGES_CHECKRUN_NAME: self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME,
+                "SUCCESS",
+                HAS_NO_CONNECTED_DIFF_TITLE,
+            )
+        }
+
+    def test_pending_import_status_is_not_pending(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(IMPORT_STATUS_CHECKRUN_NAME, None),
+            self.BUILD_CHECK: self.check(self.BUILD_CHECK, "SUCCESS"),
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(pending, [])
+        self.assertEqual(failed, [])
+
+    def test_other_pending_checks_still_block(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(IMPORT_STATUS_CHECKRUN_NAME, None),
+            self.BUILD_CHECK: self.check(self.BUILD_CHECK, None),
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual([name for name, _, _ in pending], [self.BUILD_CHECK])
+        self.assertEqual(failed, [])
+
+    def test_pending_import_status_blocks_while_a_diff_is_connected(self) -> None:
+        # The internal Diff has yet to land, so the import is still meaningful and
+        # waiting on it is the pre-existing behaviour.
+        checks = {
+            INTERNAL_CHANGES_CHECKRUN_NAME: self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "SUCCESS", "Diff is not landed yet"
+            ),
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(IMPORT_STATUS_CHECKRUN_NAME, None),
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(
+            [name for name, _, _ in pending], [IMPORT_STATUS_CHECKRUN_NAME]
+        )
+        self.assertEqual(failed, [])
+
+    def test_pending_import_status_blocks_without_a_codesync_verdict(self) -> None:
+        for internal_check in (
+            None,
+            self.check(INTERNAL_CHANGES_CHECKRUN_NAME, None, None),
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, None, HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "FAILURE", HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+            # SKIPPED and NEUTRAL pass is_passing_status, but neither is a verdict
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "SKIPPED", HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "NEUTRAL", HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+        ):
+            with self.subTest(internal_check=internal_check):
+                checks = {
+                    IMPORT_STATUS_CHECKRUN_NAME: self.check(
+                        IMPORT_STATUS_CHECKRUN_NAME, None
+                    )
+                }
+                if internal_check is not None:
+                    checks[INTERNAL_CHANGES_CHECKRUN_NAME] = internal_check
+                pending, _, _ = categorize_checks(checks, list(checks.keys()))
+                self.assertIn(
+                    IMPORT_STATUS_CHECKRUN_NAME, [name for name, _, _ in pending]
+                )
+
+    def test_failed_import_status_still_blocks(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(
+                IMPORT_STATUS_CHECKRUN_NAME, "FAILURE"
+            )
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(pending, [])
+        self.assertEqual([name for name, _, _ in failed], [IMPORT_STATUS_CHECKRUN_NAME])
+
+    def test_successful_import_status_is_not_a_failure(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(
+                IMPORT_STATUS_CHECKRUN_NAME, "SUCCESS"
+            )
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(pending, [])
+        self.assertEqual(failed, [])
+
+    def test_import_status_is_not_a_mandatory_check(self) -> None:
+        # A pending `Import Status` is skipped by name, so listing it in
+        # merge_rules.yaml would look like a gate while never acting as one.
+        rules = read_merge_rules(DummyGitRepo(), "pytorch", "pytorch")
+        self.assertGreater(len(rules), 0)
+        for rule in rules:
+            for mandatory_check in rule.mandatory_checks_name or []:
+                # Mandatory names match check-runs by substring, not equality
+                self.assertNotIn(mandatory_check, IMPORT_STATUS_CHECKRUN_NAME)
 
 
 class TestDockerCiGates(TestCase):

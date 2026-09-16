@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import operator
 import sys
 import types
 import typing
@@ -36,6 +37,7 @@ from ..exc import (
     unimplemented,
 )
 from ..source import AttrSource, Source
+from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
@@ -82,7 +84,10 @@ def vt_identity_compare(
     # Objects created during tracing: VT identity = Python identity. Exception
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
+    # A bound method is materialized afresh by every attribute access, so it
+    # behaves the same way: `obj.m is obj.m` is False in CPython.
     from .dicts import ConstDictVariable
+    from .functions import UserMethodVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
     from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
@@ -97,6 +102,7 @@ def vt_identity_compare(
             DictKeySetVariable,
             TracebackVariable,
             ExceptionVariable,
+            UserMethodVariable,
         ),
     ):
         return ConstantVariable.create(False)
@@ -323,6 +329,12 @@ def pysequence_check(obj_type: type) -> bool:
     if issubclass(obj_type, dict):
         return False
     return type_implements_sq_item(obj_type)
+
+
+def pylong_check(obj_type: type) -> bool:
+    """Implements PyLong_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/longobject.h#L12-L13
+    return issubclass(obj_type, int)
 
 
 def pyindex_check(obj_type: type) -> bool:
@@ -822,16 +834,18 @@ def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> 
     """
     # Starting on Python 3.16, this will explicitly require an integer instance
     # https://docs.python.org/3/deprecations/index.html#pending-removal-in-python-3-16
-    if not issubclass(obj.python_type(), int):
+    if not pylong_check(obj.python_type()):
         raise_type_error(tx, "an integer is required")
-    val = obj.as_python_constant()
+    # A Py_ssize_t holds no symbol, so a backed SymInt has to specialize here.
+    val = specialize_symnode(obj).as_python_constant()
     if not -sys.maxsize - 1 <= val <= sys.maxsize:
         raise_observed_exception(
             OverflowError,
             tx,
             args=["Python int too large to convert to C ssize_t"],
         )
-    return val
+    # A C ssize_t, so a bool or an int subclass comes back as a plain int.
+    return int(val)
 
 
 def pynumber_as_ssize_t(
@@ -877,6 +891,13 @@ def pynumber_index(
 ) -> "VariableTracker":
     """Mirrors PyNumber_Index (index(x) dispatch)."""
 
+    # An int or subclass never sees its own __index__, then normalizes to an
+    # exact int. A SymInt is not constant: nb_index is where it specializes.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1417-L1419
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c#L1456-L1464
+    if obj.is_python_constant() and pylong_check(obj.python_type()):
+        return ConstantVariable.create(operator.index(obj.as_python_constant()))
+
     if obj.tp_as_number.nb_index is None:
         raise_type_error(
             tx,
@@ -885,7 +906,7 @@ def pynumber_index(
 
     result = obj.nb_index_impl(tx)
 
-    if not issubclass(result.python_type(), int):
+    if not pylong_check(result.python_type()):
         raise_type_error(
             tx,
             f"__index__ returned non-int (type {result.python_type_name()})",
@@ -2150,7 +2171,13 @@ def _resolve_descriptor_get(
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
-        return variables.UserMethodVariable(type_attr, obj, source=source)
+        return variables.UserMethodVariable(
+            variables.UserFunctionVariable(
+                type_attr, source=source and AttrSource(source, "__func__")
+            ),
+            obj,
+            source=source,
+        )
 
     return None
 

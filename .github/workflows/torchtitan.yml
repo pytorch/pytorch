@@ -34,6 +34,7 @@ jobs:
   # Resolve the stable CUDA version from generate_binary_build_matrix.py
   # (CUDA_STABLE) so the build/test environment tracks it without hardcoding.
   get-cuda-version:
+    needs: get-label-type
     name: get-cuda-version
     runs-on: ubuntu-24.04
     if: github.repository_owner == 'pytorch'

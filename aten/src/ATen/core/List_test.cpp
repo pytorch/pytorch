@@ -21,6 +21,37 @@ static_assert(list_iterators_conform<
               int64_t,
               at::Tensor,
               std::optional<std::string>>);
+
+// The random_access_iterator check above passes via a stdlib fallback on
+// libstdc++/libc++ even without the specialization; this instantiates
+// basic_common_reference's ::type directly so removing it fails to compile.
+template <class T>
+using ListRef =
+    c10::impl::ListElementReference<T, c10::detail::ListImpl::list_type::iterator>;
+
+template <class... Ts>
+constexpr bool list_element_reference_has_basic_common_reference =
+    ((std::is_same_v<
+          typename std::basic_common_reference<
+              Ts,
+              ListRef<Ts>,
+              std::type_identity_t,
+              std::type_identity_t>::type,
+          Ts> &&
+      std::is_same_v<
+          typename std::basic_common_reference<
+              ListRef<Ts>,
+              Ts,
+              std::type_identity_t,
+              std::type_identity_t>::type,
+          Ts>) &&
+     ...);
+
+static_assert(list_element_reference_has_basic_common_reference<
+              c10::IValue,
+              int64_t,
+              at::Tensor,
+              std::optional<std::string>>);
 } // namespace
 
 using std::string;

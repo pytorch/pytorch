@@ -2798,6 +2798,25 @@ Call this whenever a new thread is created in order to propagate values from
     at::caching::set_cached_tensors_enabled(enabled);
   });
 
+  py_module.def("_set_native_aot_enabled", [](bool enabled) {
+    at::globalContext().setAllowNativeAot(enabled);
+  });
+
+  py_module.def("_get_native_aot_enabled", []() {
+    return at::globalContext().allowNativeAot();
+  });
+
+  // Not a user-facing switch, unlike _set_native_aot_enabled: it masks ops
+  // whose AOT kernels ARE the implementation, changing what the op computes.
+  // Called only by torch._native._unconditional_masked().
+  py_module.def("_set_native_aot_unconditional_masked", [](bool masked) {
+    at::globalContext().setMaskUnconditionalNativeAot(masked);
+  });
+
+  py_module.def("_get_native_aot_unconditional_masked", []() {
+    return at::globalContext().maskUnconditionalNativeAot();
+  });
+
   py_module.def("_add_cached_tensor", [](const at::Tensor& t) {
     at::caching::add_cached_tensor(t);
   });
@@ -3070,6 +3089,13 @@ Call this whenever a new thread is created in order to propagate values from
         return false;
 #endif
       });
+  py_module.def("_is_cudnn_attention_decode_disabled", []() {
+#ifdef USE_CUDA
+    return sdp::is_cudnn_attention_decode_disabled();
+#else
+    return false;
+#endif
+  });
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
@@ -3130,7 +3156,11 @@ Call this whenever a new thread is created in order to propagate values from
       .value(
           "SWIZZLE_32_4_4",
           at::blas::SwizzleType::SWIZZLE_32_4_4,
-          "Blackwell-style 32x4x4 swizzle");
+          "Blackwell-style 32x4x4 swizzle")
+      .value(
+          "SWIZZLE_32_8",
+          at::blas::SwizzleType::SWIZZLE_32_8,
+          "gfx950-style 32x8 swizzle (hipBLASLt BLK32_UE8M0_32_8)");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
