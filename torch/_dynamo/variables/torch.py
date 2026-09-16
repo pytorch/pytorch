@@ -1189,6 +1189,56 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Use math.fma if constants
                 return None
 
+        @register(math.gcd)
+        def handle_gcd(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            from .object_protocol import pynumber_index
+
+            return self.call_function(
+                tx,
+                [
+                    pynumber_index(tx, arg)
+                    if isinstance(arg, UserDefinedObjectVariable)
+                    else arg
+                    for arg in args
+                ],
+                {},
+            )
+
+        @register(math.lcm)
+        def handle_lcm(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            from .object_protocol import pynumber_index
+
+            return self.call_function(
+                tx,
+                [
+                    pynumber_index(tx, arg)
+                    if isinstance(arg, UserDefinedObjectVariable)
+                    else arg
+                    for arg in args
+                ],
+                {},
+            )
+
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
             self, tx: "InstructionTranslatorBase"
