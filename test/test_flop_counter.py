@@ -15,6 +15,8 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1355,63 +1357,63 @@ class TestFlopCounter(TestCase):
         self.assertEqual(fw_bw_flops, fw_flops * 7 // 2)
         self.assertExpectedInline(str(fw_bw_flops), """146800640""")
 
-    def test_nested_attn_backward_flops_with_unequal_qk_value_dims(self):
-        total_tokens = 16
-        offsets = torch.empty(3, dtype=torch.int32, device="meta")
-        cases = (
+    @parametrize(
+        "backward_flop,q_shape,k_shape,v_shape,grad_shape",
+        [
             (
-                "flash",
                 _varlen_attn_backward_flop,
-                (total_tokens, 4, 192),
-                (total_tokens, 2, 192),
-                (total_tokens, 2, 128),
-                (total_tokens, 4, 128),
+                (16, 4, 192),
+                (16, 2, 192),
+                (16, 2, 128),
+                (16, 4, 128),
             ),
             (
-                "efficient",
                 _efficient_attention_backward_flop,
-                (1, total_tokens, 4, 192),
-                (1, total_tokens, 2, 192),
-                (1, total_tokens, 2, 128),
-                (1, total_tokens, 4, 128),
+                (1, 16, 4, 192),
+                (1, 16, 2, 192),
+                (1, 16, 2, 128),
+                (1, 16, 4, 128),
             ),
+        ],
+    )
+    def test_nested_attn_backward_flops_with_unequal_qk_value_dims(
+        self, backward_flop, q_shape, k_shape, v_shape, grad_shape
+    ):
+        # Meta offsets represent two sequences of maximum length eight.
+        offsets = torch.empty(3, dtype=torch.int32, device="meta")
+        query = torch.empty(q_shape, device="meta")
+        key = torch.empty(k_shape, device="meta")
+        value = torch.empty(v_shape, device="meta")
+        grad_out = torch.empty(grad_shape, device="meta")
+        # These positions are out/lse for flash and bias/out for efficient attention.
+        actual = backward_flop(
+            grad_out,
+            query,
+            key,
+            value,
+            None,
+            None,
+            offsets,
+            offsets,
+            8,
+            8,
         )
-        for name, backward_flop, q_shape, k_shape, v_shape, grad_shape in cases:
-            with self.subTest(name=name):
-                query = torch.empty(q_shape, device="meta")
-                key = torch.empty(k_shape, device="meta")
-                value = torch.empty(v_shape, device="meta")
-                grad_out = torch.empty(grad_shape, device="meta")
-                actual = backward_flop(
-                    grad_out,
-                    query,
-                    key,
-                    value,
-                    None,
-                    None,
-                    offsets,
-                    offsets,
-                    8,
-                    8,
-                )
-                self.assertExpectedInline(str(actual), """851968""")
+        self.assertEqual(actual, 851968)
 
-                bad_grad_out = torch.empty((*grad_shape[:-1], 64), device="meta")
-                with self.assertRaisesRegex(
-                    AssertionError, "grad_out has shape.*expected"
-                ):
-                    backward_flop(
-                        bad_grad_out,
-                        query,
-                        key,
-                        value,
-                        None,
-                        None,
-                        offsets,
-                        offsets,
-                        8,
-                        8,
-                    )
+        bad_grad_out = torch.empty((*grad_shape[:-1], 64), device="meta")
+        with self.assertRaisesRegex(AssertionError, "grad_out has shape.*expected"):
+            backward_flop(
+                bad_grad_out,
+                query,
+                key,
+                value,
+                None,
+                None,
+                offsets,
+                offsets,
+                8,
+                8,
+            )
 
 
 class TestFlexAttentionEstimation(TestCase):
@@ -1582,6 +1584,9 @@ class TestFlexAttentionEstimation(TestCase):
         sparse_flops = get_flops(sparse_node)
         self.assertGreater(dense_flops, 0)
         self.assertEqual(sparse_flops, dense_flops // 2)
+
+
+instantiate_parametrized_tests(TestFlopCounter)
 
 
 if __name__ == "__main__":
