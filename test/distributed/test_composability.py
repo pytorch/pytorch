@@ -290,9 +290,6 @@ class ComposabilityTest(MultiProcContinuousTest):
         ],
     )
     def test_pp_fsdp(self, dp_type, ScheduleClass):
-        if TEST_WITH_ROCM:
-            return
-
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
