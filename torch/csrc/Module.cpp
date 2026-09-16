@@ -3089,6 +3089,13 @@ Call this whenever a new thread is created in order to propagate values from
         return false;
 #endif
       });
+  py_module.def("_is_cudnn_attention_decode_disabled", []() {
+#ifdef USE_CUDA
+    return sdp::is_cudnn_attention_decode_disabled();
+#else
+    return false;
+#endif
+  });
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
