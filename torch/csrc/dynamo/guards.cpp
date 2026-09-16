@@ -1139,10 +1139,6 @@ static PyObject* assert_size_stride_grouped(PyObject* dummy, PyObject* args) {
 }
 
 static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
-  /*
-   * Asserts that a given tensor meets certain alignment.
-   * This C++ version of torch._inductor.utils.tensor_is_aligned
-   */
   PyObject* item = nullptr;
   unsigned long alignment = 0;
   const char* op_name = nullptr;
@@ -1171,16 +1167,14 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
 
   at::Tensor tensor = THPVariable_Unpack(item);
 
-  int64_t storage_offset = tensor.storage_offset();
-  size_t itemsize = tensor.itemsize();
-  if (storage_offset * itemsize % alignment != 0) {
+  const auto data_ptr = reinterpret_cast<uintptr_t>(tensor.data_ptr());
+  if (data_ptr % alignment != 0) {
     std::stringstream msg;
     if (op_name) {
       msg << "\nError in op: " << op_name;
     }
     msg << "\nExpect the tensor to be " << alignment
-        << " bytes aligned. Fail due to storage_offset=" << storage_offset
-        << " itemsize=" << itemsize;
+        << " bytes aligned. Got data_ptr=" << data_ptr;
     PyErr_SetString(PyExc_AssertionError, std::move(msg).str().c_str());
     return nullptr;
   }
