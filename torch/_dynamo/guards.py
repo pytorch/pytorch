@@ -991,34 +991,28 @@ def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
-def _guard_device_index_is_current(
-    value: torch.Tensor, source: Source, output_graph: OutputGraphGuardsState
-) -> bool:
+def _guard_device_index_is_current(value: torch.Tensor) -> bool:
     """Whether this tensor's device index may be guarded as "the current device".
 
-    Only under compile_on_one_rank, and only when the tensor really is on the
-    current accelerator. CooR enforces a single-accelerator invariant while tracing
-    -- one accelerator device, though cpu tensors may coexist with it freely -- so
-    for an accelerator tensor the recorded index is just the compiling rank's and
-    carries no information. cpu is left alone: it is portable across ranks already,
-    and its index is not a rank identity. Outside CooR several accelerator devices
-    can legitimately be live at once, so there the index stays pinned.
+    Only under compile_on_one_rank, and only for an accelerator tensor. There the
+    index is just the compiling rank's and carries no information: any tensor on a
+    different accelerator was already refused while tracing, by
+    _coor_check_tensor_device. cpu is left alone -- it is portable across ranks
+    already, and its index is not a rank identity. Outside CooR several accelerator
+    devices can legitimately be live at once, so there the index stays pinned.
 
-    The answer is memoized per source so that a guard state serialized on one rank
-    replays the compiling rank's decision instead of re-deriving it on load, where
-    the current device differs.
+    This deliberately does not compare against the current index. Guards are rebuilt
+    when a serialized state is loaded on another rank, where the saved tensor carries
+    the *saving* rank's device; anything derived from that comparison would be the
+    wrong answer there. Keyed on the device type alone, the answer is the same on
+    every rank, so there is nothing to record and replay.
     """
-    decisions = output_graph.tensor_device_index_is_current
-    if decisions is None:
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if not _coor_enabled():
         return False
-    if source in decisions:
-        return decisions[source]
-
-    from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
-
-    result = _coor_device_index_is_current(value.device)
-    decisions[source] = result
-    return result
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and value.device.type == acc.type
 
 
 def _stream_is_current(stream: torch.Stream) -> bool:
@@ -3912,9 +3906,7 @@ class GuardBuilder(GuardBuilderBase):
                 ]
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
-                device_index_is_current = _guard_device_index_is_current(
-                    value, guard.originating_source, output_graph
-                )
+                device_index_is_current = _guard_device_index_is_current(value)
 
                 verbose_code_parts = get_verbose_code_parts(
                     get_tensor_guard_code_part(
