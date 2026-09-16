@@ -1,7 +1,8 @@
+import asyncio
 import pickle
 
 import torch
-from torch.distributed._transport import Work
+from torch.distributed._transport import wait_all, Work
 
 
 class TransportTestMixin:
@@ -84,3 +85,36 @@ class TransportTestMixin:
         finally:
             first.close()
             second.close()
+
+    def test_transport_asyncio_put_get(self) -> None:
+        client, server = self.make_transport_pair()
+        try:
+            source = torch.arange(64, dtype=torch.uint8)
+            stored = torch.zeros_like(source)
+            destination = torch.zeros_like(source)
+            source_memory = client.register_memory(source)
+            stored_memory = server.register_memory(stored)
+
+            async def run():
+                await server.read_async(
+                    stored_memory.to_mutable_view(), source_memory.to_remote_buffer()
+                )
+                destination_memory = client.register_memory(destination)
+                await server.write_async(
+                    stored_memory.to_view(), destination_memory.to_remote_buffer()
+                )
+                await wait_all(
+                    server.write(
+                        stored_memory.to_view(),
+                        destination_memory.to_remote_buffer(),
+                        async_op=True,
+                    )
+                    for _ in range(2)
+                )
+
+            asyncio.run(run())
+            self.assertEqual(stored, source)
+            self.assertEqual(destination, source)
+        finally:
+            server.close()
+            client.close()
