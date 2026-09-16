@@ -19643,6 +19643,12 @@ op_db: list[OpInfo] = [
                # Compiler issue on ROCm. Regression started in ROCm 6.4.
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+               # These do float8-unsupported arithmetic (mul, allclose, randn_like) on the samples
+               DecorateInfo(unittest.skip('Skipped!'), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=float8_types()),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestTensorMetaProp', 'test_inplace_ops_propagate_requires_grad_metadata',
+                            dtypes=float8_types()),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive', dtypes=float8_types()),
            )),
     UnaryUfuncInfo(
         'bfloat16',
