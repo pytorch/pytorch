@@ -7863,7 +7863,7 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
     for tensor, args in test_cases:
         yield SampleInput(tensor, *args)
 
-        if not requires_grad:
+        if not requires_grad and dtype not in float8_types():
             yield SampleInput(tensor.detach().clone(), *args, reduce='add')
 
             if dtype.is_floating_point:
@@ -19634,6 +19634,7 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_scatter,

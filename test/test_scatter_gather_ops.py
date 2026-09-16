@@ -23,7 +23,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_passthru_types,
     all_passthru_types_and,
-    float8_types,
     get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
@@ -380,9 +379,7 @@ class TestScatterGatherDevice(TestCase):
         else:
             actual = fn(base.clone(), dim, idx, src)
 
-        if dtype in float8_types():
-            self.assertEqual(actual, expected, atol=0, rtol=0)
-        elif dtype == torch.float16 or dtype == torch.bfloat16:
+        if dtype == torch.float16 or dtype == torch.bfloat16:
             # Some CUDA kernels (e.g. indexing_backward_kernel_stride_1) that are called during
             # the test use fp32 for internal accumulation for improved accuracy. When using 16 bit
             # precision types can be small differences
@@ -414,7 +411,6 @@ class TestScatterGatherDevice(TestCase):
                                         is_scalar=False, reduction=None)
 
     @dtypes(torch.float16, torch.float32, torch.complex64)
-    @dtypesIfCUDA(torch.float16, torch.float32, torch.complex64, *float8_types())
     def test_scatter__scalar(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
                                 is_scalar=True, reduction=None)
