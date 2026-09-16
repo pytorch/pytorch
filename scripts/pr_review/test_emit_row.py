@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
-from _suite_manifest import TestTheSuiteIsWhole  # noqa: E402,F401
+from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
 from emit_row import safe_model, usage_metrics  # noqa: E402
 
 
@@ -98,4 +98,4 @@ class TestSafeModelIsFullyAnchored(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_this_suite()
