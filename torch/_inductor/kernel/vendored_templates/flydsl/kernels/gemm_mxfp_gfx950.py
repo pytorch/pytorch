@@ -281,6 +281,10 @@ def make_mxfp_param_and_validate(
 
     if k % MXFP_MFMA_K or k > 2**31 - 1:
         return None
+    if (a_is_transposed and m % GFX950_DMA_BYTES) or (
+        not b_is_transposed and n % GFX950_DMA_BYTES
+    ):
+        return None
     k_tiles = (k + block_k - 1) // block_k
     derived_fields = asdict(derived)
     derived_fields["use_cshuffle"] = (

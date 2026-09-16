@@ -1256,6 +1256,8 @@ def get_flydsl_mxfp_template_kwargs(
         for node in nodes
     ):
         return []
+    if is_unaligned(scale_a) or is_unaligned(scale_b):
+        return []
 
     if mxfp_format not in ("mxfp4", "mxfp8"):
         raise AssertionError(f"unsupported MXFP format: {mxfp_format}")
@@ -1432,13 +1434,15 @@ def tuned_scaled_mm_v2(
             out_dtype=out_dtype,
         )
         mxfp_nodes = mxfp_kernel_inputs.nodes()
-        mxfp_choices: list[ChoiceCaller] = [
-            aten__scaled_mm_v2_mxfp.bind(
-                mxfp_nodes,
-                mxfp_layout,
-                out_dtype=out_dtype,
+        mxfp_choices: list[ChoiceCaller] = []
+        if use_aten_gemm_kernels():
+            mxfp_choices.append(
+                aten__scaled_mm_v2_mxfp.bind(
+                    mxfp_nodes,
+                    mxfp_layout,
+                    out_dtype=out_dtype,
+                )
             )
-        ]
         for mxfp_kwargs in get_flydsl_mxfp_template_kwargs(
             mxfp_format,
             mxfp_layout,
@@ -1453,7 +1457,7 @@ def tuned_scaled_mm_v2(
                 layout=mxfp_layout,
                 **mxfp_kwargs,
             )
-        if len(mxfp_choices) > 1:
+        if mxfp_choices:
             counters["aten_mm_info"][f"aten._scaled_mm_v2.default_{m}_{n}_{k}"] += 1
             node, _ = autotune_select_algorithm(
                 "scaled_mm",

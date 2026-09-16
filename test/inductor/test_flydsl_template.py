@@ -1327,6 +1327,29 @@ class TestFlyDSLMXFPMetadata(TestCase):
                     mxfp_format, 65, 97, 160, "bfloat16", config_
                 )
             )
+        config_ = asdict(FlyDSLMXFPConfig(32, 32, 256, 2, 1, 1, 0, 0))
+        self.assertIsNone(
+            make_mxfp_param_and_validate(
+                mxfp_format,
+                65,
+                96,
+                256,
+                "bfloat16",
+                config_,
+                a_is_transposed=True,
+            )
+        )
+        self.assertIsNone(
+            make_mxfp_param_and_validate(
+                mxfp_format,
+                64,
+                97,
+                256,
+                "bfloat16",
+                config_,
+                b_is_transposed=False,
+            )
+        )
 
     @parametrize(
         "tile,error",
@@ -1395,15 +1418,18 @@ class TestFlyDSLMXFPMetadata(TestCase):
             (64, 96, 160, False, True, False),
             (65, 96, 256, True, True, False),
             (64, 97, 256, False, False, False),
+            (80, 112, 384, False, True, False, "scale_a"),
+            (80, 112, 384, False, True, False, "scale_b"),
         ),
     )
     @config.patch(flydsl_enable_autotuning=False)
     @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
     def test_config_filtering(self, mxfp_format, case):
-        m, n, k, a_is_transposed, b_is_transposed, expected = case
+        m, n, k, a_is_transposed, b_is_transposed, expected, *unaligned = case
         args = _candidate_args(
             mxfp_format, (m, n, k), (a_is_transposed, b_is_transposed)
         )
+        unaligned_node = args[unaligned[0]][0] if unaligned else None
         layout = FixedLayout(
             torch.device("cuda", 0), torch.bfloat16, [m, n], [n, 1], offset=0
         )
@@ -1417,6 +1443,9 @@ class TestFlyDSLMXFPMetadata(TestCase):
         with (
             V.set_graph_handler(graph),
             mock.patch.object(mm, "use_flydsl_gemm_template", return_value=True),
+            mock.patch.object(
+                mm, "is_unaligned", side_effect=lambda node: node is unaligned_node
+            ),
         ):
             configs = mm.get_flydsl_mxfp_template_kwargs(
                 mxfp_format,
@@ -1463,7 +1492,6 @@ class TestFlyDSLMXFPDevice(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "FLYDSL",
                 "flydsl_enable_autotuning": False,
-                "test_configs.autotune_choice_name_regex": "flydsl",
             }
         ):
             torch._dynamo.reset()
