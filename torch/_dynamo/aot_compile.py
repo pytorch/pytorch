@@ -1770,7 +1770,11 @@ class AOTCompiledModel:
         key -- which are re-taken from that live dict on every call. So a value
         the graph reads live is one a passing guard certifies, every other global
         is the one it was traced with, and a guarded global the live dict lacks
-        fails the guard rather than falling back to the serialized value.
+        fails the guard rather than falling back to the serialized value. The
+        re-take writes into the artifact's own ``fn.__globals__``, which every
+        call of it shares, so two threads serving one loaded model while either
+        rebinds a guarded global race on that dict, with or without the GIL; a
+        caller who needs isolation loads once per thread.
         Rebinding a guarded global after the load is therefore what the graph
         computes with once the guards accept it, and the certification is only as
         strong as the guard's type: a kept ``TENSOR_MATCH`` accepts a same-metadata
