@@ -3347,13 +3347,49 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.fixed_config = fixed_config
         self.is_combo_kernel: bool = is_combo_kernel
         self.per_subkernel_blocks: bool = per_subkernel_blocks
+        self.batch_invariant_split_size: sympy.Expr | None = None
+        self.batch_invariant_split_size_arg: str | None = None
         super().__init__(tiling, **kwargs)
+        if (
+            self.persistent_reduction
+            and self.features.batch_invariant_chunk_size() == 1024
+            and not self.is_combo_kernel
+            and not self.cooperative_reduction
+            and not self.mix_order_reduction
+            and not config.triton.use_block_ptr
+            and not config.triton.use_tensor_descriptor
+            and OrderedSet(self.numels) == OrderedSet(["x", "r0_"])
+            and self.features.get_reduction_hint(self.tiling_scores)
+            == ReductionHint.INNER
+        ):
+            self.batch_invariant_split_size = self.features.batch_invariant_split_size()
+            if (
+                self.batch_invariant_split_size is not None
+                and self.index_dtype != "tl.int32"
+                and not (
+                    V.graph.sizevars.statically_known_leq(
+                        self.batch_invariant_split_size, 2**31 - 1
+                    )
+                    and V.graph.sizevars.statically_known_leq(
+                        FloorDiv(self.numels["x"], self.batch_invariant_split_size),
+                        get_max_y_grid() ** 2,
+                    )
+                )
+            ):
+                self.batch_invariant_split_size = None
+            if self.batch_invariant_split_size is not None:
+                split_symbol = V.graph.sizevars.lookup_precomputed_size(
+                    self.batch_invariant_split_size
+                )
+                self.batch_invariant_split_size_arg = self.args.size(split_symbol)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
         self.prologue_cache: dict[str, str] = {}
         self.prologue: IndentedBuffer = IndentedBuffer()
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
+        self._reduction_count = 0
+        self._batch_invariant_sum = False
         # Derived families share constants emitted in the function prologue.
         self._named_constants: dict[str, str] = {}
         self._named_constant_defs: IndentedBuffer = IndentedBuffer()
@@ -3729,7 +3765,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return triton_type(dtype)
 
     def should_use_cooperative_reduction(self) -> bool:
-        if self._strict_reduction_rblock() is not None:
+        if (
+            self._strict_reduction_rblock() is not None
+            or self.features.has_batch_invariant_reduction()
+        ):
             return False
         return self.inside_reduction and V.choices.should_use_cooperative_reduction(
             V.graph.get_current_device_or_throw(),
@@ -3855,6 +3894,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def want_no_x_dim(self):
         return (
             self.persistent_reduction
+            and self.features.batch_invariant_chunk_size() is None
             and len(self.numels) == self.num_reduction_dims + 1
             and self.fixed_config
             and self.fixed_config["XBLOCK"] == 1
@@ -5540,6 +5580,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and reduction_type in ("sum", "prod")
         )
         strict_reduction_loop = strict_reduction and not self.persistent_reduction
+        batch_invariant = (
+            reduction_type == "sum"
+            and original_dtype.is_floating_point
+            and self.features.has_batch_invariant_reduction()
+        )
+        self._reduction_count += 1
+        self._batch_invariant_sum = batch_invariant
+        batch_invariant_chunk_size = (
+            self.features.batch_invariant_chunk_size() if batch_invariant else None
+        )
+        ordered_reduction = strict_reduction or batch_invariant
         # Combiner for the persistent strict path: "+" for sum, "*" for prod
         # (identity 0.0 / 1.0 comes from `default`); the loop uses combine_fn.
         strict_op = "*" if reduction_type == "prod" else "+"
@@ -5632,7 +5683,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 reduction_ordering = (
                     ", reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE)"
-                    if strict_reduction
+                    if ordered_reduction and reduction_type in ("sum", "prod")
                     else ""
                 )
                 result, shape = self.reduction_resize_and_shape(  # type: ignore[assignment]
@@ -5646,6 +5697,47 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result_type = value.dtype
 
             return result, result_type, shape
+
+        def batch_invariant_sum_partials(
+            buffer,
+            value: CSEVariable,
+        ) -> tuple[CSEVariable, str]:
+            # R0_BLOCK may vary, but each partial always covers one logical chunk.
+            if batch_invariant_chunk_size is None:
+                raise AssertionError("expected a batch-invariant chunk size")
+            value = self.reduction_collapse_dims(buffer, value, dtype)
+            if value.shape is None or len(value.shape) != 2:
+                raise AssertionError(
+                    f"expected a two-dimensional batch-invariant sum, got {value.shape}"
+                )
+            num_chunks = f"R0_BLOCK // {batch_invariant_chunk_size}"
+            chunked_shape = [
+                value.shape[0],
+                num_chunks,
+                batch_invariant_chunk_size,
+            ]
+            chunked = self.cse.generate(
+                buffer,
+                triton_reshape(str(value), list(value.shape), chunked_shape),
+                dtype=value.dtype,
+                shape=tuple(chunked_shape),
+            )
+            partial_shape = (value.shape[0], num_chunks, 1)
+            partials = self.cse.generate(
+                buffer,
+                f"tl.sum({chunked}, 2, keep_dims=True, "
+                "reduction_ordering=tl.constexpr(tl.ReductionOrdering.INNER_TREE))",
+                dtype=value.dtype,
+                shape=partial_shape,
+            )
+            flat_shape = (value.shape[0], num_chunks)
+            partials = self.cse.generate(
+                buffer,
+                triton_reshape(str(partials), list(partial_shape), list(flat_shape)),
+                dtype=value.dtype,
+                shape=flat_shape,
+            )
+            return partials, num_chunks
 
         def final_reduction_define(
             buffer,
@@ -5894,18 +5986,45 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     raise AssertionError(
                         f"expected CSEVariable, got {type(masked_value)}"
                     )
-                _result, _dtype, _shape = final_reduction(
-                    self.compute, masked_value, masked_value.dtype
+                single_chunk = (
+                    batch_invariant_chunk_size is not None
+                    and batch_invariant_chunk_size > 1
+                    and self.num_reduction_dims == 1
+                    and not self.is_native_matmul
+                    and self._get_persistent_reduction_block(self.range_trees[-1].numel)
+                    == batch_invariant_chunk_size
                 )
-                if (
-                    strict_reduction
-                    and not self.features.has_strict_multirow_reduction()
-                ):
-                    zero = constant_repr(cast(Any, default))
-                    _result = f"{zero} {strict_op} ({_result})"
-                result_var = self.cse.generate(
-                    self.compute, _result, dtype=_dtype, shape=_shape
-                )
+                if batch_invariant_chunk_size is not None and not single_chunk:
+                    partials, num_chunks = batch_invariant_sum_partials(
+                        self.compute, masked_value
+                    )
+                    identity = self.cse.generate(
+                        self.compute,
+                        f"tl.full({triton_shape_str(result_shape)}, "
+                        f"{constant_repr(cast(Any, default))}, {acc_type})",
+                        dtype=torch_acc_type,
+                        shape=tuple(result_shape),
+                    )
+                    result_var = self.cse.generate(
+                        self.compute,
+                        f"triton_helpers.batch_invariant_sum({identity}, {partials}, "
+                        f"roffset, rnumel, {num_chunks}, {batch_invariant_chunk_size})",
+                        dtype=torch_acc_type,
+                        shape=tuple(result_shape),
+                    )
+                else:
+                    _result, _dtype, _shape = final_reduction(
+                        self.compute, masked_value, masked_value.dtype
+                    )
+                    if single_chunk or (
+                        strict_reduction
+                        and not self.features.has_strict_multirow_reduction()
+                    ):
+                        identity = constant_repr(cast(Any, default))
+                        _result = f"{identity} {strict_op} ({_result})"
+                    result_var = self.cse.generate(
+                        self.compute, _result, dtype=_dtype, shape=_shape
+                    )
         else:
             result_prefix = (
                 cast(Any, result_var)[0]
@@ -5919,8 +6038,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
             default = self._map_tuple_or_scalar(constant_repr, default)
-            scalar_loop = (
-                reduction_type in PLAIN_REDUCTION_TYPES and self.use_scalar_accumulators
+            scalar_loop = reduction_type in PLAIN_REDUCTION_TYPES and (
+                self.use_scalar_accumulators or batch_invariant
             )
             scalar_argreduce = (
                 reduction_type in arg_reduction_types and self.use_scalar_accumulators
@@ -6127,19 +6246,35 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     dtype=value.dtype,
                     shape=value.shape,
                 )
-                chunk_expr, chunk_dtype, chunk_shape = final_reduction(
-                    self.compute, masked, None
-                )
-                # tl.sum widens sub-32-bit ints; keep the loop-carried type.
-                chunk = self.cse.generate(
-                    self.compute,
-                    f"({chunk_expr}).to({acc_type})",
-                    dtype=chunk_dtype,
-                    shape=chunk_shape,
-                )
-                self.compute.writeline(
-                    f"{accumulator} = {combine_fn(accumulator, chunk)}"
-                )
+                if batch_invariant_chunk_size is not None:
+                    partials, num_chunks = batch_invariant_sum_partials(
+                        self.compute, masked
+                    )
+                    partials = self.cse.generate(
+                        self.compute,
+                        f"{partials}.to({acc_type})",
+                        dtype=torch_acc_type,
+                        shape=partials.shape,
+                    )
+                    self.compute.writeline(
+                        f"{accumulator} = triton_helpers.batch_invariant_sum("
+                        f"{accumulator}, {partials}, roffset, rnumel, {num_chunks}, "
+                        f"{batch_invariant_chunk_size})"
+                    )
+                else:
+                    chunk_expr, chunk_dtype, chunk_shape = final_reduction(
+                        self.compute, masked, None
+                    )
+                    # tl.sum widens sub-32-bit ints; keep the loop-carried type.
+                    chunk = self.cse.generate(
+                        self.compute,
+                        f"({chunk_expr}).to({acc_type})",
+                        dtype=chunk_dtype,
+                        shape=chunk_shape,
+                    )
+                    self.compute.writeline(
+                        f"{accumulator} = {combine_fn(accumulator, chunk)}"
+                    )
                 self.post_loop_combine.writeline(f"{result_var} = {accumulator}")
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
@@ -6287,9 +6422,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not all(isinstance(x, TritonCSEVariable) for x in result_tuple):
             raise AssertionError("all result_tuple entries must be TritonCSEVariable")
 
-        # If BF16/F16 upcasting was done, ensure the output is downcast to the
-        # expected dtype.
-        if do_upcast:
+        # Preserve the reduction's declared low-precision boundary even when a
+        # consumer is fused.
+        if do_upcast or batch_invariant:
             for i, result in enumerate(result_tuple):
                 if reduction_type in arg_with_value_reduction_types and i > 0:
                     continue
@@ -6299,7 +6434,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     in (arg_value_reduction_types + arg_with_value_reduction_types)
                     else original_dtype
                 )
-                if result.dtype != target_dtype:
+                if batch_invariant and should_upcast(target_dtype):
+                    cast_buffer = (
+                        self.compute
+                        if self.persistent_reduction
+                        else self.post_loop_combine
+                    )
+                    cast_buffer.writeline(
+                        f"{result} = {result}.to({triton_store_type(target_dtype)})"
+                        f".to({triton_compute_type(target_dtype)})"
+                    )
+                elif do_upcast and result.dtype != target_dtype:
                     self.post_loop_combine.writeline(
                         f"{result} = {result}.to({triton_compute_type(target_dtype)})"
                     )
@@ -6992,6 +7137,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.prologue.clear()
         self.prologue_cache.clear()
 
+    def _should_peel_reduction_tail(
+        self, loop_trees: list[IterationRangesRoot]
+    ) -> bool:
+        return (
+            self._reduction_count == 1
+            and self._batch_invariant_sum
+            and self.features.batch_invariant_chunk_size() == 1024
+            and not torch.version.hip
+            and self.features.get_reduction_hint(self.tiling_scores)
+            == ReductionHint.INNER
+            and self.num_reduction_dims == 1
+            and len(loop_trees) == 1
+            and isinstance(loop_trees[0].numel, sympy.Integer)
+            and not loop_trees[0].has_custom_codegen_header()
+            and self.features.indexing_node_schedule is self.features.node_schedule
+            and not self.cooperative_reduction
+            and not self.mix_order_reduction
+            and not self.is_combo_kernel
+            and not self.block_ptr_to_buffer
+            and not self.uses_tma
+            and not any(self.pointer_advancements.values())
+        )
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -7010,6 +7178,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             or self.post_loop_combine
             or self.post_loop_store
         ):
+            self._reduction_count = 0
+            self._batch_invariant_sum = False
             return
 
         loop_trees = [tree for tree in self.range_trees if tree.is_loop]
@@ -7088,6 +7258,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"tl.store(ws_ptr + (tl.program_id(0) + {idx} * tl.num_programs(0)) * r0_numel + r0_index, accum{idx}, r0_mask)"
                 )
 
+        elif self.inside_reduction and self._should_peel_reduction_tail(loop_trees):
+            (tree,) = loop_trees
+            prefix = tree.prefix
+            block = f"{prefix.upper()}BLOCK"
+            full_numel = f"{prefix}full_numel"
+            self.body.writeline(f"{full_numel} = ({prefix}numel // {block}) * {block}")
+            loop_body = IndentedBuffer()
+            self.iteration_ranges_codegen_header(tree, loop_body)
+            self.codegen_reduction_indices(loop_body)
+            loop_body.splice(self.indexing_code)
+            loop_body.splice(self.loads)
+            loop_body.splice(self.compute)
+            loop_body.splice(self.stores)
+
+            self.body.writeline(
+                f"for {prefix}offset in tl.range(0, {full_numel}, {block}):"
+            )
+            with self.body.indent():
+                self.body.splice(loop_body)
+            self.body.writeline(f"if {prefix}numel % {block}:")
+            with self.body.indent():
+                self.body.writeline(f"{prefix}offset = {full_numel}")
+                self.body.splice(loop_body)
+
+            self.cse.invalidate(self.outside_loop_vars)
+            tree.cache_clear()
         elif self.inside_reduction and len(loop_trees) > 0:
             # Write the loop headers.
             for level, tree in enumerate(loop_trees):
@@ -7186,6 +7382,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.stores.clear()
         self.post_loop_combine.clear()
         self.post_loop_store.clear()
+        self._reduction_count = 0
+        self._batch_invariant_sum = False
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         args = []
@@ -7404,7 +7602,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     @classmethod
     def triton_meta_common(cls) -> TritonMeta:
         return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
+            "enable_fp_fusion": not (
+                config.emulate_precision_casts or V.graph.has_batch_invariant_reduction
+            ),
             "launch_pdl": cls._enable_pdl_codegen(),
             "disable_ftz": config.eager_numerics.disable_ftz,
         }
@@ -7425,8 +7625,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
-            "deterministic": config.deterministic or config.batch_invariant,
-            "batch_invariant": config.batch_invariant,
+            "deterministic": config.deterministic,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
             "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
             "dynamic_disable_pipelining": config.triton.dynamic_disable_pipelining,
@@ -7503,6 +7702,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             out["add_persistent_rblock"] = True
         if (rblock := self._strict_reduction_rblock()) is not None:
             out["strict_reduction_rblock"] = rblock
+        if (chunk_size := self.features.batch_invariant_chunk_size()) is not None:
+            out["batch_invariant_chunk_size"] = chunk_size
+        if self.batch_invariant_split_size_arg is not None:
+            out["batch_invariant_split_size_arg"] = self.batch_invariant_split_size_arg
         if (
             config.benchmark_kernel
             or config.profile_bandwidth
@@ -7939,14 +8142,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return math.prod(rblocks) if rblocks else None
 
     def _get_persistent_reduction_block(self, rnumel) -> int:
-        if (rblock := self._strict_reduction_rblock()) is not None:
+        rblock = self._strict_reduction_rblock()
+        if rblock is not None:
             if V.graph.sizevars.statically_known_geq(rblock, rnumel):
                 return rblock
             raise AssertionError(
-                "persistent strict reduction requires its planned reduction block "
+                "persistent reduction requires its planned reduction block "
                 "to cover the reduction"
             )
-        return self._get_persistent_RBLOCK(rnumel)
+        rblock = self._get_persistent_RBLOCK(rnumel)
+        if (chunk_size := self.features.batch_invariant_chunk_size()) is not None:
+            rblock = max(rblock, chunk_size)
+        return rblock
 
     @staticmethod
     def has_persistent_RBLOCK(rnumel):
@@ -8019,6 +8226,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 code.writeline("XBLOCK: tl.constexpr = 1")
 
     def _get_grid_type(self) -> type[triton_heuristics.GridExpr]:
+        if self.batch_invariant_split_size_arg is not None:
+            return triton_heuristics.BatchInvariantSplitGrid
         n = sum([int(not tree.is_reduction) for tree in self.range_trees])
         if self.mix_order_reduction:
             if n != 1:
@@ -8095,6 +8304,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry):
         line = f"{entry.name} = {self.kexpr(self.rename_indexing(entry.expr))}"
+        split = self.batch_invariant_split_size
+        if split is not None and entry.prefix == "x":
+            sizevars = V.graph.sizevars
+            if entry.divisor == 1 and sizevars.statically_known_equals(
+                entry.length, split
+            ):
+                line = f"{entry.name} = xchunk"
+            elif sizevars.statically_known_equals(
+                entry.divisor, split
+            ) and sizevars.statically_known_equals(
+                entry.divisor * entry.length, entry.root.numel
+            ):
+                line = f"{entry.name} = xrow"
 
         # mix order reduction introduces an extra loop across the x
         # dimension
@@ -8176,6 +8398,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return TRITON_MAX_BLOCK[prefix.upper()]
 
     def _has_constant_mask(self, tree: IterationRangesRoot) -> bool:
+        if self.batch_invariant_split_size_arg is not None and tree.prefix == "x":
+            # Divisibility of the flattened extent does not prove row divisibility.
+            return False
         if not tree.supports_constant_mask():
             return False
 
@@ -8340,6 +8565,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         entry: IterationRangesRoot,
         code: IndentedBuffer,
     ) -> None:
+        if self.batch_invariant_split_size_arg is not None and entry.prefix == "x":
+            split_arg = self.batch_invariant_split_size_arg
+            code.writelines(
+                [
+                    f"xchunkoffset = tl.program_id(0).to({self.index_dtype}) * XBLOCK",
+                    f"xchunk = xchunkoffset + {self.iteration_ranges_ranges_code(entry)}",
+                    f"xrow = tl.program_id(1).to({self.index_dtype}) + "
+                    f"tl.program_id(2).to({self.index_dtype}) * tl.num_programs(1)",
+                    f"xoffset = xrow * {split_arg} + xchunkoffset",
+                    f"{entry.name} = xrow * {split_arg} + xchunk",
+                    f"{entry.mask_name()} = (xchunk < {split_arg}) & ({entry.name} < xnumel)",
+                ]
+            )
+            return
         if entry.has_custom_codegen_header():
             if (
                 self.cooperative_reduction

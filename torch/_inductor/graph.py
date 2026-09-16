@@ -485,6 +485,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.buffers: list[ir.Buffer] = []
         self.operations: list[ir.Operation] = []
+        self.has_batch_invariant_reduction: bool = False
         self.const_output_index: dict[str, int] = (
             const_output_index if const_output_index else {}
         )

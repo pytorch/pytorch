@@ -358,7 +358,7 @@ class MixOrderReduction:
             return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
-        if node1.has_strict_reduction() or node2.has_strict_reduction():
+        if node1.has_planned_reduction() or node2.has_planned_reduction():
             return False
 
         if (node1.ancestors & node2.get_operation_names()) or (
@@ -552,13 +552,13 @@ class NestedReduction:
     def _is_enabled_for(
         outer_node: BaseSchedulerNode, grouped_node: BaseSchedulerNode
     ) -> bool:
-        # TODO: Support strict reductions by preserving each stage's planned
+        # TODO: Support planned reductions by preserving each stage's
         # R0_BLOCK and accumulation order.
         return (
             config.triton.nested_reduction
             and _is_gpu_triton_backend(outer_node, grouped_node)
-            and not outer_node.has_strict_reduction()
-            and not grouped_node.has_strict_reduction()
+            and not outer_node.has_planned_reduction()
+            and not grouped_node.has_planned_reduction()
         )
 
     @classmethod
@@ -2913,6 +2913,70 @@ class BaseSchedulerNode:
             for node in self.get_nodes()
         )
 
+    @cache_on_self
+    def has_batch_invariant_reduction(self) -> bool:
+        return any(
+            isinstance(node, SchedulerNode)
+            and isinstance(node.node, ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.batch_invariant_chunk_size is not None
+            for node in self.get_nodes()
+        )
+
+    @cache_on_self
+    def has_planned_reduction(self) -> bool:
+        return self.has_strict_reduction() or self.has_batch_invariant_reduction()
+
+    @cache_on_self
+    def can_fuse_with_batch_invariant_reduction(self) -> bool:
+        compatible_reductions = OrderedSet(
+            [
+                "argmax",
+                "argmin",
+                "argmax_value",
+                "argmin_value",
+                "argmax_with_value",
+                "argmin_with_value",
+                "any",
+                "max",
+                "min",
+                "sum",
+                "xor_sum",
+            ]
+        )
+        return all(
+            isinstance(node, SchedulerNode)
+            and isinstance(node.node, ComputedBuffer)
+            and isinstance(node.node.data, ir.Reduction)
+            and node.node.data.strict_reduction_rblock is None
+            and node.node.data.batch_invariant_chunk_size != 1
+            and node.node.data.reduction_type in compatible_reductions
+            for node in self.get_nodes()
+            if node.is_reduction()
+        )
+
+    @cache_on_self
+    def is_batch_invariant_final_reduction(self) -> bool:
+        found_reduction = False
+        for node in self.get_nodes():
+            if not node.is_reduction():
+                continue
+            if not (
+                isinstance(node, SchedulerNode)
+                and isinstance(node.node, ComputedBuffer)
+                and isinstance(node.node.data, ir.Reduction)
+            ):
+                return False
+            reduction = node.node.data
+            if (
+                reduction.reduction_type != "sum"
+                or reduction.strict_reduction_rblock is not None
+                or reduction.batch_invariant_chunk_size != 1
+            ):
+                return False
+            found_reduction = True
+        return found_reduction
+
     def get_outputs(self) -> Sequence[SchedulerBuffer]:
         return self.outputs
 
@@ -4476,7 +4540,7 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         )
 
     def can_fuse_with(self, other: BaseSchedulerNode):
-        if self.has_strict_reduction() or other.has_strict_reduction():
+        if self.has_planned_reduction() or other.has_planned_reduction():
             return False
         # Limit tl.load() count in the fused RSPLIT loop to avoid register
         # spills. See https://github.com/pytorch/pytorch/issues/179423
@@ -5012,9 +5076,9 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
 
-        # Keep strict reductions standalone so their planned R0_BLOCK cannot change.
+        # Keep planned reductions out of foreach kernels.
         filtered_nodes = [
-            node for node in filtered_nodes if not node.has_strict_reduction()
+            node for node in filtered_nodes if not node.has_planned_reduction()
         ]
 
         # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
@@ -9914,16 +9978,26 @@ class Scheduler:
             why("incompatible reduction contracts")
             return False
 
-        if node1.is_template() and node2.has_strict_reduction():
-            why("template fusion does not preserve strict reduction ordering")
+        if node1.is_template() and node2.has_planned_reduction():
+            why("template fusion does not preserve planned reduction ordering")
             return False
 
         if (
-            (node1.has_strict_reduction() or node2.has_strict_reduction())
+            (node1.has_planned_reduction() or node2.has_planned_reduction())
             and node1.is_reduction()
             and node2.is_reduction()
+            and not (
+                (
+                    node1.can_fuse_with_batch_invariant_reduction()
+                    and node2.can_fuse_with_batch_invariant_reduction()
+                )
+                or (
+                    node1.is_batch_invariant_final_reduction()
+                    and node2.is_batch_invariant_final_reduction()
+                )
+            )
         ):
-            why("reduction fusion does not preserve strict reduction ordering")
+            why("reduction fusion does not preserve planned reduction ordering")
             return False
 
         if node1.is_template() and self.get_backend(

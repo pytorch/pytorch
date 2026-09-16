@@ -197,6 +197,8 @@ class CoordescTuner:
             min_block = self.inductor_meta.get("min_xblock")
         elif name == "R0_BLOCK":
             min_block = self.inductor_meta.get("min_rblock")
+            if chunk_size := self.inductor_meta.get("batch_invariant_chunk_size"):
+                min_block = max(min_block or 1, chunk_size)
         if min_block is not None and val < min_block:
             return True
 

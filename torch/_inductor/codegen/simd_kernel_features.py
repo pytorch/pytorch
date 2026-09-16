@@ -157,30 +157,73 @@ class SIMDKernelFeatures:
         return [n for n in self.scheduler_nodes() if n.is_reduction()]
 
     @cache_on_self
-    def strict_reductions(self) -> tuple[ir.Reduction, ...]:
+    def reductions(self) -> tuple[ir.Reduction, ...]:
         return tuple(
             node.node.data
             for node in self.reduction_nodes()
             if isinstance(node.node, ir.ComputedBuffer)
             and isinstance(node.node.data, ir.Reduction)
-            and node.node.data.strict_reduction_rblock is not None
         )
 
     def has_strict_multirow_reduction(self) -> bool:
-        return any(r.strict_reduction_multirow for r in self.strict_reductions())
+        return any(
+            reduction.strict_reduction_multirow for reduction in self.reductions()
+        )
+
+    def _reduction_metadata(
+        self,
+        field: typing.Literal[
+            "strict_reduction_rblock",
+            "batch_invariant_chunk_size",
+        ],
+    ) -> int | None:
+        values = OrderedSet(
+            getattr(reduction, field) for reduction in self.reductions()
+        )
+        values.discard(None)
+        if not values:
+            return None
+        if len(values) != 1:
+            raise AssertionError(f"expected one value for {field}, got {values}")
+        return next(iter(values))
 
     @cache_on_self
     def strict_reduction_rblock(self) -> int | None:
-        rblocks = OrderedSet(
-            reduction.strict_reduction_rblock for reduction in self.strict_reductions()
-        )
-        if not rblocks:
+        return self._reduction_metadata("strict_reduction_rblock")
+
+    @cache_on_self
+    def batch_invariant_chunk_size(self) -> int | None:
+        return self._reduction_metadata("batch_invariant_chunk_size")
+
+    @cache_on_self
+    def has_batch_invariant_reduction(self) -> bool:
+        return self.batch_invariant_chunk_size() is not None
+
+    @cache_on_self
+    def batch_invariant_split_size(self) -> sympy.Expr | None:
+        if (
+            self.batch_invariant_chunk_size() != 1024
+            or self.indexing_node_schedule is not self.node_schedule
+            or len(self.reductions()) != 1
+        ):
             return None
-        if len(rblocks) != 1:
-            raise AssertionError(
-                f"strict reductions require one reduction block size, got {rblocks}"
+        reduction = self.reductions()[0]
+        if len(reduction.ranges) != 2 or reduction.reduction_ranges != [1024]:
+            return None
+        split = reduction.ranges[-1]
+        if not isinstance(split, FloorDiv) or split.args[1] != 1024:
+            return None
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_equals(reduction.ranges[0], 1):
+            return None
+        if not (
+            sizevars.statically_known_gt(split, 0)
+            and sizevars.statically_known_equals(
+                sympy.prod(reduction.ranges), self.numel
             )
-        return next(iter(rblocks))
+        ):
+            return None
+        return split
 
     @cache_on_self
     def buf_accesses(self) -> dict[str, list[Dep]]:

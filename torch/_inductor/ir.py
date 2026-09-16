@@ -90,6 +90,8 @@ from torch.utils._sympy.functions import (
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import SymT
+from torch.utils._sympy.value_ranges import bound_sympy
+from torch.utils._triton import has_triton_reduction_ordering
 
 from . import config, dependencies
 from .codegen.common import (
@@ -1225,6 +1227,23 @@ class Pointwise(Loops):
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.dtype)
 
+        if (
+            config.batch_invariant
+            and self.device.type == "cuda"
+            and self.dtype in (torch.float16, torch.bfloat16)
+        ):
+            graph = V.graph
+
+            def loader(index: Sequence[Expr]) -> OpsValue:
+                value = self.inner_fn(index)
+                # A later reduction can enable this policy after the loader is made.
+                if graph.has_batch_invariant_reduction:
+                    value = ops.to_dtype(value, self.dtype, use_compute_types=False)
+                    value = ops.to_dtype(value, self.dtype)
+                return value
+
+            return loader
+
         return self.inner_fn
 
     def __str__(self) -> str:
@@ -1409,6 +1428,32 @@ class Reduction(Loops):
     # Exact eager tile; rblock 1 is the split final stage.
     strict_reduction_multirow: bool = False
     strict_reduction_rblock: int | None = None
+    # The logical arithmetic chunk is independent of the physical R0_BLOCK.
+    batch_invariant_chunk_size: int | None = None
+
+    @staticmethod
+    def batch_invariant_block(
+        device: torch.device,
+        dtype: torch.dtype,
+        reduction_type: ReductionType,
+        *,
+        require_reduction_ordering: bool = True,
+    ) -> int | None:
+        # Product, Welford, online softmax, scans, and dot need separate plans.
+        if not (
+            config.batch_invariant
+            and device.type == "cuda"
+            and torch.version.hip is None
+            and is_triton(device)
+            and dtype.is_floating_point
+            and reduction_type == "sum"
+        ):
+            return None
+        if require_reduction_ordering and not has_triton_reduction_ordering():
+            raise RuntimeError(
+                "batch-invariant sum requires Triton reduction-ordering support"
+            )
+        return 1024
 
     def __str__(self) -> str:
         return self._to_str(("ranges", "reduction_ranges", "reduction_type"))
@@ -1472,6 +1517,7 @@ class Reduction(Loops):
             reduction_hint=ReductionHint.DEFAULT,
             strict_reduction_multirow=self.strict_reduction_multirow,
             strict_reduction_rblock=self.strict_reduction_rblock,
+            batch_invariant_chunk_size=self.batch_invariant_chunk_size,
         )
 
     @staticmethod
@@ -1770,6 +1816,17 @@ class Reduction(Loops):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
+            if (
+                cls.batch_invariant_block(
+                    device,
+                    dst_dtype,
+                    reduction_type,
+                    require_reduction_ordering=False,
+                )
+                is not None
+            ):
+                V.graph.has_batch_invariant_reduction = True
+
             # N.B. This is a hack to generate the literal of the given type
             # Ideally, we should be fixing `def constant` in triton.py
             # but it breaks due to hardcoded dtypes in other places
@@ -1884,6 +1941,20 @@ class Reduction(Loops):
             reduction_ranges = [sympy.Integer(strict_reduction_rblock)]
             reduction_numel = sympy.Integer(strict_reduction_rblock)
 
+        # Keep strict's eager-compatible plan when it applies. Batch invariance
+        # still applies to reductions that strict does not plan.
+        batch_invariant_block = None
+        if not strict_reduction:
+            batch_invariant_block = cls.batch_invariant_block(
+                device,
+                dst_dtype,
+                reduction_type,
+                require_reduction_ordering=reduction_numel != 1,
+            )
+        if batch_invariant_block is not None:
+            V.graph.has_batch_invariant_reduction = True
+
+        # A length-one reduction has no association order to stabilize.
         if reduction_numel == 1 and not strict_reduction:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
@@ -1901,12 +1972,26 @@ class Reduction(Loops):
                 device=device, dtype=dst_dtype, inner_fn=fn, ranges=ranges
             )
 
+        if batch_invariant_block is not None:
+            reduction_upper = bound_sympy(reduction_numel).upper
+            reduction_size = (
+                int(reduction_upper)
+                if isinstance(reduction_upper, (int, Integer))
+                else batch_invariant_block
+            )
+            batch_invariant_block = min(
+                batch_invariant_block,
+                1 << (reduction_size - 1).bit_length(),
+            )
+        batch_invariant_chunk_size = batch_invariant_block
+
         if (
             isinstance(reduction_numel, Integer)
             and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
             and not strict_reduction
+            and batch_invariant_block is None
         ):
             # When native matmul, don't unroll the dot reduction.
 
@@ -1949,6 +2034,14 @@ class Reduction(Loops):
         if strict_split is None:
             split = _maybe_increase_split(split)
 
+        if batch_invariant_block is not None:
+            # Preserve the loop's chunk boundaries when distributing work.
+            if split != 1:
+                split = ceildiv(reduction_numel, batch_invariant_block)
+            should_split = split != 1
+        else:
+            should_split = split > 1
+
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
@@ -1977,7 +2070,7 @@ class Reduction(Loops):
                 reduction_type,
                 reduction_hint,
             )
-        elif split > 1:
+        elif should_split:
             # triton doesn't support reduce to single element well, so break it up
             out = cls.create_multilayer(
                 device,
@@ -1991,6 +2084,7 @@ class Reduction(Loops):
                 reduction_hint,
                 input_node,
                 strict_reduction=strict_reduction,
+                batch_invariant_block=batch_invariant_block,
             )
 
             # Find the reduction that get split
@@ -2047,6 +2141,7 @@ class Reduction(Loops):
                 reduction_hint=reduction_hint,
                 strict_reduction_multirow=strict_reduction_multirow,
                 strict_reduction_rblock=strict_reduction_rblock,
+                batch_invariant_chunk_size=batch_invariant_chunk_size,
             )
         )
         return out
@@ -2156,6 +2251,7 @@ class Reduction(Loops):
         block_size: _IntLike,
         default: _NumLike | Sequence[_NumLike],
         input_node: IRNode | None = None,
+        fixed_block_size: bool = False,
     ) -> Callable[..., object]:
         dense_index = cls.check_for_split_dense_dim_reindexing(
             reduction_numel, input_node
@@ -2163,9 +2259,12 @@ class Reduction(Loops):
         reindex = View.dynamic_reshape_indexer(
             reduction_ranges, [reduction_numel], dense_index
         )
-        need_mask = not V.graph.sizevars.statically_known_true(
-            sympy.Eq(Mod(reduction_numel, split), 0)
+        exact_split = (
+            sympy.Eq(block_size * split, reduction_numel)
+            if fixed_block_size
+            else sympy.Eq(Mod(reduction_numel, split), 0)
         )
+        need_mask = not V.graph.sizevars.statically_known_true(exact_split)
 
         def wrapper_fn(
             index: Sequence[Symbol], reduction_index: Sequence[Symbol]
@@ -2234,6 +2333,7 @@ class Reduction(Loops):
         split: _IntLike,
         reduction_hint: ReductionHint,
         strict_reduction: bool = False,
+        batch_invariant_block: int | None = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2267,14 +2367,20 @@ class Reduction(Loops):
             return intermediate_loader([*index, *reduction_index])
 
         numel_hint = V.graph.sizevars.optimization_hint(sympy_product(original_ranges))
+        split_hint = (
+            V.graph.sizevars.optimization_hint(split)
+            if batch_invariant_block is not None
+            else split
+        )
         reduction_hint = cls._multilayer_second_step_hint(
-            split, numel_hint, reduction_hint
+            split_hint, numel_hint, reduction_hint
         )
 
         if original_ranges != new_ranges[: len(original_ranges)]:
             raise AssertionError(
                 "Expected original_ranges == new_ranges[: len(original_ranges)]"
             )
+        # Load final-stage partials in blocks but add them one at a time.
         return TensorBox.create(
             Reduction(
                 device=device,
@@ -2286,6 +2392,9 @@ class Reduction(Loops):
                 src_dtype=src_dtype,
                 reduction_hint=reduction_hint,
                 strict_reduction_rblock=1 if strict_reduction else None,
+                batch_invariant_chunk_size=(
+                    1 if batch_invariant_block is not None else None
+                ),
             )
         )
 
@@ -2304,6 +2413,7 @@ class Reduction(Loops):
         input_node: IRNode | None = None,
         *,
         strict_reduction: bool = False,
+        batch_invariant_block: int | None = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
@@ -2311,7 +2421,11 @@ class Reduction(Loops):
         """
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_numel = sympy_product(reduction_ranges)
-        block_size = FloorDiv(reduction_numel + (split - 1), split)
+        block_size = (
+            sympy.Integer(batch_invariant_block)
+            if batch_invariant_block is not None
+            else FloorDiv(reduction_numel + (split - 1), split)
+        )
         default = cls.default_value(reduction_type, dst_dtype)
         wrapper_fn = cls._multilayer_wrap_loader(
             inner_fn,
@@ -2320,7 +2434,8 @@ class Reduction(Loops):
             split,
             block_size,
             default,
-            input_node,
+            input_node if batch_invariant_block is None else None,
+            fixed_block_size=batch_invariant_block is not None,
         )
 
         return cls.create_multilayer_helper(
@@ -2336,6 +2451,7 @@ class Reduction(Loops):
             split,
             reduction_hint,
             strict_reduction,
+            batch_invariant_block,
         )
 
     @classmethod
@@ -5573,6 +5689,7 @@ class ComputedBuffer(OperationBuffer):
                 reduction_hint=old_data.reduction_hint,
                 strict_reduction_multirow=old_data.strict_reduction_multirow,
                 strict_reduction_rblock=old_data.strict_reduction_rblock,
+                batch_invariant_chunk_size=old_data.batch_invariant_chunk_size,
             )
             self.data = new_data
             # this layout does not matter since we skip tl.store
@@ -5840,9 +5957,22 @@ class ComputedBuffer(OperationBuffer):
             Callable[[Sequence[int]], Sequence[int]],
             Callable[[Sequence[int]], Sequence[int]],
         ]:
-            newsizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, support_vars, sizes, memory_addrs
-            )
+            if (
+                isinstance(self.data, Reduction)
+                and self.data.batch_invariant_chunk_size is not None
+                and x_vars is reduce_vars
+            ):
+                # Split reductions already fix logical chunk boundaries. Reordering
+                # unsplit reduction axes here would change chunk membership and
+                # could change results when batch size changes the split decision.
+                # TODO: Reorder reduction axes based on memory strides before
+                # splitting, preserving the order across batch sizes and execution paths.
+                newsizes = list(sizes)
+                reindex0 = reindex1 = same_reorder(list(range(len(sizes))))
+            else:
+                newsizes, reindex0, reindex1 = self._apply_loop_reordering(
+                    x_vars, support_vars, sizes, memory_addrs
+                )
 
             # When using native matmul, the codegen assumes the following loop order,
             # regardless of the stride of A and B:
