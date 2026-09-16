@@ -1990,6 +1990,13 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn([1, 2, 3], expected))
         self.assertFalse(handler.eval_fn([1, 2], expected))
 
+        expected = handler.get_metadata_fn(guard, [(0.0,), frozenset({0.0})])
+        self.assertFalse(handler.eval_fn([(-0.0,), frozenset({0.0})], expected))
+        self.assertFalse(handler.eval_fn([(0.0,), frozenset({-0.0})], expected))
+
+        expected = handler.get_metadata_fn(guard, [float("nan")])
+        self.assertTrue(handler.eval_fn([float("nan")], expected))
+
     def test_id_match(self):
         from torch._dynamo.guards import GuardBuilder
 
@@ -2343,6 +2350,18 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         )
         self.assertFalse(handler.eval_fn(types.MappingProxyType({"x": 1}), expected))
 
+        expected = handler.get_metadata_fn(guard, types.MappingProxyType({0.0: None}))
+        self.assertFalse(
+            handler.eval_fn(types.MappingProxyType({-0.0: None}), expected)
+        )
+
+        expected = handler.get_metadata_fn(
+            guard, types.MappingProxyType({float("nan"): None})
+        )
+        self.assertTrue(
+            handler.eval_fn(types.MappingProxyType({float("nan"): None}), expected)
+        )
+
     @unittest.skipIf(
         sys.platform != "linux",
         "Only support mem leak checking on Linux.",
@@ -2393,6 +2412,12 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn({"a": 10, "b": 20, "c": 30}, expected))
         self.assertFalse(handler.eval_fn({"a": 1, "b": 2}, expected))
         self.assertFalse(handler.eval_fn({"x": 1, "y": 2, "z": 3}, expected))
+
+        expected = handler.get_metadata_fn(guard, {0.0: None})
+        self.assertFalse(handler.eval_fn({-0.0: None}, expected))
+
+        expected = handler.get_metadata_fn(guard, {float("nan"): None})
+        self.assertTrue(handler.eval_fn({float("nan"): None}, expected))
 
 
 if __name__ == "__main__":
