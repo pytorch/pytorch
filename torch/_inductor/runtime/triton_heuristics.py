@@ -77,6 +77,7 @@ from .runtime_utils import (
     get_first_attr,
     get_max_y_grid,
     get_num_bytes,
+    is_power_of_2,
     next_power_of_2,
     triton_cache_dir,
     triton_config_to_hashable,
@@ -394,6 +395,27 @@ def _could_dynamic_scale_rblock(
     )
 
 
+def _validate_reduction_configs(
+    configs: list[Config], inductor_meta: InductorMeta
+) -> None:
+    rblock = inductor_meta.get("strict_reduction_rblock")
+    if rblock is not None:
+        if any(cfg.kwargs.get("R0_BLOCK", rblock) != rblock for cfg in configs):
+            raise AssertionError("reduction requires its planned R0_BLOCK")
+    if (chunk_size := inductor_meta.get("batch_invariant_chunk_size")) is not None:
+        rblocks = [cfg.kwargs.get("R0_BLOCK", chunk_size) for cfg in configs]
+        if any(
+            rblock < chunk_size
+            or rblock % chunk_size != 0
+            or not is_power_of_2(rblock // chunk_size)
+            for rblock in rblocks
+        ):
+            raise AssertionError(
+                "batch-invariant reduction requires R0_BLOCK to contain a power-of-two "
+                "number of whole chunks"
+            )
+
+
 def check_autotune_cache(
     configs: list[Config],
     filename: str | None,
@@ -612,6 +634,7 @@ class CachingAutotuner(KernelInterface):
         self.optimize_mem = optimize_mem
         cached_config = lookup_autotune_config(size_hints, fn)
         self.configs = [cached_config] if cached_config else configs
+        _validate_reduction_configs(self.configs, self.inductor_meta)
 
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
@@ -971,6 +994,8 @@ class CachingAutotuner(KernelInterface):
             )
             new_rblock = triton_config.kwargs[largest_rkwarg] // 2
             min_rblock = self.inductor_meta.get("min_rblock")
+            if chunk_size := self.inductor_meta.get("batch_invariant_chunk_size"):
+                min_rblock = max(min_rblock or 1, chunk_size)
             if (
                 min_rblock is not None
                 and largest_rkwarg.startswith("R0_BLOCK")
@@ -3637,6 +3662,7 @@ def cached_autotune(
             configs, size_hints, inductor_meta
         )
     configs = unique_configs(configs)
+    _validate_reduction_configs(configs, inductor_meta)
     if len(configs) != 1 and not filename:
         raise AssertionError("filename required when multiple configs are provided")
 
@@ -3814,6 +3840,8 @@ def _enforce_reduction_config_block_minimums(
 ) -> list[Config]:
     min_xblock = inductor_meta.get("min_xblock")
     min_rblock = inductor_meta.get("min_rblock")
+    if (chunk_size := inductor_meta.get("batch_invariant_chunk_size")) is not None:
+        min_rblock = max(min_rblock or 1, chunk_size)
     if min_xblock is None and min_rblock is None:
         return configs
 
@@ -3829,6 +3857,12 @@ def _enforce_reduction_config_block_minimums(
 
         x_floor = min_xblock if min_xblock is not None else 1
         r_floor = min_rblock if min_rblock is not None else 1
+        if (
+            has_xblock
+            and chunk_size is not None
+            and inductor_meta.get("grid_type", "Grid1D") == "Grid1D"
+        ):
+            x_floor, _ = _check_max_grid_x(size_hints, x_floor, cfg.num_warps)
         target_tile_product = (cfg.kwargs["XBLOCK"] if has_xblock else 1) * (
             cfg.kwargs["R0_BLOCK"] if has_rblock else 1
         )
@@ -4086,6 +4120,7 @@ def triton_config_reduction(
     min_num_warps=None,
     *,
     warp_size: int = 32,
+    enforce_max_grid_x: bool = True,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -4132,7 +4167,10 @@ def triton_config_reduction(
         warp_size=warp_size,
     )
 
-    x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
+    if enforce_max_grid_x:
+        x, _num_blocks = _check_max_grid_x(
+            size_hints, x, num_warps, warp_size=warp_size
+        )
 
     for prefix in sorted(rnumels):
         while total_numel() > target:
@@ -4899,12 +4937,6 @@ def reduction(
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
-    strict_rblock = inductor_meta.get("strict_reduction_rblock")
-    if strict_rblock is not None and any(
-        triton_config.kwargs.get("R0_BLOCK", strict_rblock) != strict_rblock
-        for triton_config in configs
-    ):
-        raise AssertionError("strict reduction requires its planned R0_BLOCK")
 
     if return_configs:
         return configs
@@ -5416,6 +5448,28 @@ class Grid2DWithYZOverflow(GridExpr):
         else:
             self.y_grid = f"(y_grid_div_ == 0 ? 0 : {ceildiv_expr})"
         self.z_grid = "y_grid_div_"
+
+
+class BatchInvariantSplitGrid(Grid2DWithYZOverflow):
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
+        split_size = self.inductor_meta["batch_invariant_split_size_arg"]
+        rows = (
+            f"xnumel // {split_size}"
+            if self.mode == "python"
+            else f"xnumel / {split_size}"
+        )
+        chunks = self.ceildiv(split_size, meta.get("XBLOCK"))
+        if self.mode == "python":
+            rows = f"(0 if xnumel == 0 else {rows})"
+            chunks = f"(0 if xnumel == 0 else {chunks})"
+        else:
+            rows = f"(xnumel == 0 ? 0 : {rows})"
+            chunks = f"(xnumel == 0 ? 0 : {chunks})"
+        self.prefix.append(self.assign_tmp("ynumel", rows))
+        # The logical X dimension is split across chunks and rows. Only chunks
+        # use XBLOCK; rows have no corresponding block parameter.
+        super().generate({"XBLOCK": meta.get("XBLOCK", 1)}, is_lazy=is_lazy)
+        self.x_grid = chunks
 
 
 class MixOrderReductionGrid(GridExpr):

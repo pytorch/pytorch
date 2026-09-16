@@ -270,9 +270,12 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     warp_size=warp_size,
                 )
 
-        contiguous_rblock = (
-            4096 if scalar_accumulators and "y" in size_hints else MAX_R0_BLOCK
-        )
+        if inductor_meta.get("batch_invariant_chunk_size") == 1:
+            contiguous_rblock = 128
+        else:
+            contiguous_rblock = (
+                4096 if scalar_accumulators and "y" in size_hints else MAX_R0_BLOCK
+            )
         contiguous_config = make_config(
             # Default XBLOCK=2 launches too few programs to fill
             # the device. Prefer XBLOCK=1 so the autotuner has a candidate
@@ -323,11 +326,18 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         scalar_acc_configs: list[Config] = []
         if scalar_accumulators and "y" not in size_hints:
-            scalar_acc_configs = [
-                make_config(1, min(rnumel, 4096)),
-                make_config(1, min(rnumel, 8192), num_warps=4),
-                make_config(1, min(rnumel, 16384), num_warps=8),
-            ]
+            if inductor_meta.get("batch_invariant_chunk_size") == 1:
+                scalar_acc_configs = [
+                    make_config(1, min(rnumel, 128)),
+                    make_config(1, min(rnumel, 256), num_warps=4),
+                    make_config(1, min(rnumel, 512), num_warps=8),
+                ]
+            else:
+                scalar_acc_configs = [
+                    make_config(1, min(rnumel, 4096)),
+                    make_config(1, min(rnumel, 8192), num_warps=4),
+                    make_config(1, min(rnumel, 16384), num_warps=8),
+                ]
 
         configs: list[Config] = []
 
@@ -393,18 +403,12 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         )
 
         inductor_meta = {} if inductor_meta is None else inductor_meta
-        # Under deterministic mode, canonicalize the batch-dim hint so the
-        # candidate-config branching below (e.g. xnumel // 8 < 128) doesn't pick
-        # a different (XBLOCK, num_warps) for bs=N vs bs=N/2. Different picks
-        # change the bf16 reduction order and break batch invariance in
-        # persistent reductions like LayerNorm.
-        if inductor_meta.get("batch_invariant"):
-            size_hints = dict(size_hints)
-            if "x" in size_hints:
-                size_hints["x"] = max(size_hints["x"], 4096)
-
         xnumel = size_hints["x"]
         rnumel = get_total_reduction_numel(size_hints)
+
+        if (chunk_size := inductor_meta.get("batch_invariant_chunk_size")) is not None:
+            rnumel = max(rnumel, chunk_size)
+            size_hints = {**size_hints, "r0_": rnumel}
 
         MAX_PERSISTENT_BLOCK_NUMEL = 4096
         warp_size = triton_meta["device"].warp_size_or_default
@@ -439,6 +443,8 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         )
 
         xblock_vals = self._persistent_xblock_vals()
+        # This grid applies XBLOCK to chunks; size_hints["x"] also includes rows.
+        enforce_max_grid_x = inductor_meta.get("grid_type") != "BatchInvariantSplitGrid"
 
         if "y" not in size_hints:
             configs = [
@@ -449,6 +455,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     register_intensive=True,
                     reduction_hint=reduction_hint,
                     warp_size=warp_size,
+                    enforce_max_grid_x=enforce_max_grid_x,
                 )
                 for xblock in xblock_vals
                 if xblock == 1
@@ -481,6 +488,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
                 warp_size=warp_size,
+                enforce_max_grid_x=enforce_max_grid_x,
             )
         ]
 
@@ -572,6 +580,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                 min_num_warps=1,
                 reduction_hint=reduction_hint,
                 warp_size=warp_size,
+                enforce_max_grid_x=(
+                    inductor_meta.get("grid_type") != "BatchInvariantSplitGrid"
+                ),
             )
         ]
 

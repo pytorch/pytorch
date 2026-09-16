@@ -58,6 +58,7 @@ from torch._inductor.runtime.triton_heuristics import (
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
+    _validate_reduction_configs,
     autotune_hints_to_configs,
     cached_autotune,
     CachingAutotuner,
@@ -340,6 +341,88 @@ class TestTritonHeuristics(TestCase):
         cfg = autotuner.configs[0]
         self.assertEqual(cfg.kwargs["XBLOCK"], 128)
         self.assertEqual(cfg.kwargs["R0_BLOCK"], 512)
+
+    def test_batch_invariant_config_validation(self):
+        meta = {"batch_invariant_chunk_size": 1024}
+        valid = triton.Config({"XBLOCK": 1, "R0_BLOCK": 8192})
+        invalid = triton.Config({"XBLOCK": 1, "R0_BLOCK": 512})
+        with self.assertRaisesRegex(AssertionError, "planned R0_BLOCK"):
+            _validate_reduction_configs([invalid], {"strict_reduction_rblock": 1024})
+        with self.assertRaisesRegex(AssertionError, "power-of-two"):
+            _validate_reduction_configs(
+                [triton.Config({"XBLOCK": 1, "R0_BLOCK": 3072})], meta
+            )
+
+        class FakeJitFunction:
+            __name__ = "fake_batch_invariant_reduction"
+            src = ""
+
+        def make_autotuner():
+            return CachingAutotuner(
+                FakeJitFunction(),
+                {"device": self._fake_cuda_device_properties()},
+                [valid],
+                None,
+                [],
+                False,
+                HeuristicType.REDUCTION,
+                size_hints={"x": 1, "r0_": 8192},
+                inductor_meta=meta,
+            )
+
+        with self.assertRaisesRegex(AssertionError, "power-of-two"):
+            with patch(
+                "torch._inductor.runtime.triton_heuristics.lookup_autotune_config",
+                return_value=invalid,
+            ):
+                make_autotuner()
+
+        autotuner = make_autotuner()
+        self.assertTrue(autotuner._could_rblock_scale)
+        self.assertIn("XBLOCK", autotuner.coordesc_tuner.tunable_fields)
+        self.assertIn("num_warps", autotuner.coordesc_tuner.tunable_fields)
+        self.assertIn("R0_BLOCK", autotuner.coordesc_tuner.tunable_fields)
+        neighbours = autotuner.coordesc_tuner.get_all_tuning_directions(valid)
+        self.assertTrue(neighbours)
+        self.assertEqual({cfg.kwargs["R0_BLOCK"] for cfg in neighbours}, {4096, 8192})
+        self.assertTrue(
+            all(autotuner.coordesc_tuner.is_valid_config(cfg) for cfg in neighbours)
+        )
+        self.assertNotIn(
+            512, autotuner.coordesc_tuner.get_neighbour_values("R0_BLOCK", 1024)
+        )
+
+    @parametrize("chunk_size", [1, 1024])
+    @parametrize("xnumel", [2**31, 2**34])
+    def test_batch_invariant_configs_preserve_grid_limit(self, chunk_size, xnumel):
+        sizes = {"x": xnumel, "r0_": 2048}
+        meta = {
+            "grid_type": "Grid1D",
+            "reduction_hint": ReductionHint.DEFAULT,
+            "autotune_hints": {AutotuneHint.SCALAR_ACCUMULATORS},
+            "batch_invariant_chunk_size": chunk_size,
+        }
+        configs = _reduction_configs(
+            size_hints=sizes,
+            inductor_meta=meta,
+            triton_meta={"device": self._fake_cuda_device_properties()},
+        )
+        configs = _enforce_reduction_config_block_minimums(configs, sizes, meta)
+        for cfg in configs:
+            self.assertLessEqual(triton.cdiv(xnumel, cfg.kwargs["XBLOCK"]), 2**31 - 1)
+            self.assertGreaterEqual(cfg.kwargs["R0_BLOCK"], chunk_size)
+
+    def test_batch_invariant_split_grid_keeps_xblock(self):
+        configs = _persistent_reduction_configs(
+            size_hints={"x": 2**37, "r0_": 1024},
+            reduction_hint=ReductionHint.INNER,
+            inductor_meta={
+                "grid_type": "BatchInvariantSplitGrid",
+                "batch_invariant_chunk_size": 1024,
+            },
+            triton_meta={"device": self._fake_cuda_device_properties()},
+        )
+        self.assertEqual([cfg.kwargs["XBLOCK"] for cfg in configs], [1])
 
     @staticmethod
     def _fake_cuda_device_properties():
@@ -1504,6 +1587,76 @@ class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
         self.assertEqual(x, 1)
         # y * z must cover all y blocks
         self.assertGreaterEqual(y * z, 131070)
+
+
+@instantiate_parametrized_tests
+class TestBatchInvariantSplitGrid(TestCase):
+    @parametrize("chunks", [65, 128, 129])
+    @parametrize("rows", [0, 1, 7, 65535, 65536, 65537])
+    @parametrize("xblock", [1, 4, 8, 32])
+    def test_grid(self, chunks, rows, xblock):
+        from torch._inductor.runtime.triton_heuristics import GridExpr
+
+        grid = GridExpr.from_meta(
+            {
+                "grid_type": "BatchInvariantSplitGrid",
+                "batch_invariant_split_size_arg": "ks0",
+            },
+            {"XBLOCK": xblock, "YBLOCK": 128},
+        )
+        z = triton.cdiv(rows, 65535)
+        expected = (
+            triton.cdiv(chunks, xblock) if rows else 0,
+            triton.cdiv(rows, z) if z else 0,
+            z,
+        )
+        self.assertEqual(
+            grid.eval_slow({"xnumel": rows * chunks, "ks0": chunks}), expected
+        )
+
+    def test_empty_split(self):
+        from torch._inductor.runtime.triton_heuristics import GridExpr
+
+        grid = GridExpr.from_meta(
+            {
+                "grid_type": "BatchInvariantSplitGrid",
+                "batch_invariant_split_size_arg": "ks0",
+            },
+            {"XBLOCK": 4},
+        )
+        self.assertEqual(grid.eval_slow({"xnumel": 0, "ks0": 0}), (0, 0, 0))
+
+    @parametrize("lazy", [False, True])
+    def test_cpp_grid(self, lazy):
+        from torch._inductor.runtime.triton_heuristics import GridExpr
+
+        metadata = {
+            "grid_type": "BatchInvariantSplitGrid",
+            "batch_invariant_split_size_arg": "ks2",
+        }
+        if lazy:
+            grid = GridExpr.from_meta_lazy(metadata, "kernel")
+            xblock = "kernel_result.xblocks[0]"
+        else:
+            grid = GridExpr.from_meta(metadata, {"XBLOCK": 8}, mode="cpp")
+            xblock = "8"
+        self.assertEqual(
+            grid.x_grid,
+            f"(xnumel == 0 ? 0 : ((ks2 + ({xblock} - 1)) / ({xblock})))",
+        )
+        self.assertEqual(
+            grid.prefix,
+            [
+                "uint32_t ynumel = (xnumel == 0 ? 0 : xnumel / ks2);",
+                "uint32_t y_grid_raw_ = ynumel;",
+                "uint32_t y_grid_div_ = ((y_grid_raw_ + (65535 - 1)) / (65535));",
+            ],
+        )
+        self.assertEqual(
+            grid.y_grid,
+            "(y_grid_div_ == 0 ? 0 : ((y_grid_raw_ + (y_grid_div_ - 1)) / (y_grid_div_)))",
+        )
+        self.assertEqual(grid.z_grid, "y_grid_div_")
 
 
 class TestFastLauncherDeviceSupport(TestCase):

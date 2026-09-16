@@ -1085,7 +1085,7 @@ split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 # if we know they affect numerics.  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 
-# Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
+# Fix supported reduction trees across batch sizes while retaining launch tuning.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
 # "strict_pointwise" requests eager-compatible pointwise math, and
