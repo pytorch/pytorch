@@ -8,7 +8,7 @@ import pickle
 import weakref
 from abc import abstractmethod
 from collections.abc import Callable, Generator
-from typing import Any, NewType, TypeVar
+from typing import Any, NewType, TypeGuard, TypeVar
 from typing_extensions import override, Self
 
 from torch.utils._import_utils import import_dill
@@ -37,6 +37,7 @@ from torch._subclasses.meta_utils import (
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
+
 
 log = logging.getLogger(__name__)
 
@@ -598,7 +599,7 @@ class _TensorPickleData:
         )
 
 
-def _is_pinned_cpu_tensor(obj: object) -> bool:
+def _is_pinned_cpu_tensor(obj: object) -> TypeGuard[torch.Tensor]:
     if not isinstance(obj, torch.Tensor) or is_fake_tensor(obj):
         return False
     if obj.device.type != "cpu":
