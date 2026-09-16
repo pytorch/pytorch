@@ -581,6 +581,10 @@ class TokenSwitchNCCLTest(_TokenSwitchContractTests, MultiProcContinuousTest):
 
     def _init(self):
         torch.cuda.set_device(self.device)
+        # Zero-copy dispatch/combine needs NCCL window handles.
+        # The default CUDA backend would silently fall back to a device-pointer copy.
+        if symm_mem.get_backend(self.device) != "NCCL":
+            symm_mem.set_backend("NCCL")
         dist.barrier()
 
     def _weight_grad_inputs(self):
