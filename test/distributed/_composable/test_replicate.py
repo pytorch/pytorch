@@ -12,7 +12,7 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
+    MultiProcContinuousForInstantiateTest,
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
@@ -80,17 +80,10 @@ class ReplicateStateDictTest(MultiThreadedTestCase):
         self._check_state_dict_parity(local_sd, ddp_sd)
 
 
-class ReplicateTest(MultiProcContinuousTest):
+class ReplicateTest(MultiProcContinuousForInstantiateTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 2
-
-    @classmethod
-    def backend_str(cls) -> str:
-        device_type = cls.device_type
-        if callable(device_type):
-            device_type = device_type()
-        return dist.get_default_backend_for_device(device_type)
 
     def _compare_module(self, mod, replicate_mod, device):
         local_batch_size = 1
@@ -165,14 +158,10 @@ class ReplicateTest(MultiProcContinuousTest):
             replicate(model, device_id=[torch.device(device)])
 
 
-class ReplicateTestNoXPU(MultiProcContinuousTest):
+class ReplicateTestNoXPU(MultiProcContinuousForInstantiateTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 2
-
-    @classmethod
-    def backend_str(cls) -> str:
-        return dist.get_default_backend_for_device(cls.device_type())
 
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/179948"
