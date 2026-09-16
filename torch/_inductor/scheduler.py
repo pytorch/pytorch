@@ -777,6 +777,8 @@ class NestedReduction:
         # A fraction of the parent tile, with the grouped axis split into lanes.
         SUB_PARENT = enum.auto()
 
+    SUB_PARENT_RATES = ((2, 1), (4, 1), (4, 3))
+
     class GroupedAxis(enum.Enum):
         R = enum.auto()
         X = enum.auto()
