@@ -415,6 +415,7 @@ jobs:
       - job-filter
     with:
       build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
+      rocm-arch-list: gfx950
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
       # The default config picks these up by discovery; the inductor config in

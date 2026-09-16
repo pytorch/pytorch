@@ -67,6 +67,7 @@ jobs:
       - target-determination
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
+      rocm-arch-list: gfx90a
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit

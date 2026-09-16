@@ -20,6 +20,11 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      rocm-arch-list:
+        required: false
+        type: string
+        default: ""
+        description: List of ROCm architectures the test image targets.
       sync-tag:
         required: false
         type: string
@@ -197,6 +202,7 @@ jobs:
         id: test
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PYTORCH_ROCM_ARCH: ${{ inputs.rocm-arch-list }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_WORKFLOW: ${{ github.workflow }}
@@ -271,6 +277,7 @@ jobs:
             -e TEST_SHOWLOCALS \
             -e NO_TEST_TIMEOUT \
             -e NO_TD \
+            -e PYTORCH_ROCM_ARCH \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \

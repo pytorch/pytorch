@@ -114,6 +114,7 @@ jobs:
     needs: rocm-periodic-dynamo-benchmarks-build
     with:
       build-environment: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.build-environment }}
+      rocm-arch-list: gfx950
       docker-image: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit

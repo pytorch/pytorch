@@ -63,6 +63,7 @@ jobs:
     needs: linux-noble-rocm-py3_11-inductor-build
     with:
       build-environment: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.build-environment }}
+      rocm-arch-list: gfx950
       docker-image: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.test-matrix }}
     secrets: inherit

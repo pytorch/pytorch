@@ -68,6 +68,7 @@ jobs:
       - target-determination
     with:
       build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
+      rocm-arch-list: gfx942
       docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
       # The default config picks these up by discovery; inductor-rocm-mi300.yml already

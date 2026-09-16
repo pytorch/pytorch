@@ -57,6 +57,7 @@ jobs:
     needs: linux-jammy-rocm-py3_10-inductor-build
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.build-environment }}
+      rocm-arch-list: gfx90a
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.test-matrix }}
     secrets: inherit

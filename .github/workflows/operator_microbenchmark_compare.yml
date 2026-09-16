@@ -145,6 +145,7 @@ jobs:
     with:
       timeout-minutes: 120
       build-environment: ${{ needs.build-rocm.outputs.build-environment }}
+      rocm-arch-list: gfx950
       docker-image: ${{ needs.build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.build-rocm.outputs.test-matrix }}
     secrets: inherit
