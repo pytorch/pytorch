@@ -4,7 +4,7 @@ Prototype API: capture ``fn`` ahead of time from the caller's own calls and lowe
 it to a self-contained Python source artifact plus an acceleration cache, then
 reload it in a fresh process. This module exports the types a capture takes and
 returns: the ``MakeFxTracer`` configuration, the ``Capture`` handle, and the
-``PrecompileSummary`` / ``FrameInvariants`` / ``GuardFact`` reports. The capture
+``PrecompileSummary`` report. The capture
 session's entry points (``capture``, ``accumulate``, ``load``) build on them. See
 Note [precompile programming model] in ``torch/_precompile.py`` for the contract.
 Signatures, error types and the artifact format may change between releases
@@ -21,11 +21,7 @@ from torch._precompile import (
     MakeFxTracer,
     PrecompileError,  # noqa: F401
 )
-from torch.compiler._precompile_types import (
-    FrameInvariants,
-    GuardFact,
-    PrecompileSummary,
-)
+from torch.compiler._precompile_types import PrecompileSummary
 
 
 # These types are defined in torch._precompile / torch.compiler._precompile_types
@@ -33,13 +29,7 @@ from torch.compiler._precompile_types import (
 # decorating, so a class body cannot name a module that is still being imported).
 # Declare this module their home so introspection (pickle, test_public_bindings,
 # Sphinx) resolves them under torch.compiler.precompile, where they are re-exported.
-for _t in (
-    Capture,
-    MakeFxTracer,
-    PrecompileSummary,
-    FrameInvariants,
-    GuardFact,
-):
+for _t in (Capture, MakeFxTracer, PrecompileSummary):
     # torch._precompile uses ``from __future__ import annotations``, and
     # typing.get_type_hints resolves a class's string annotations through its
     # __module__. MakeFxTracer's only annotation today (``dict | None``) would resolve
@@ -55,10 +45,4 @@ del typing  # not part of the public surface
 # (torch.compiler.PrecompileError, for the conventional ``except`` spelling), so
 # its __module__ is "torch.compiler". It is re-exported here only so
 # ``torch.compiler.precompile.PrecompileError`` also resolves.
-__all__ = [
-    "Capture",
-    "MakeFxTracer",
-    "PrecompileSummary",
-    "FrameInvariants",
-    "GuardFact",
-]
+__all__ = ["Capture", "MakeFxTracer", "PrecompileSummary"]
