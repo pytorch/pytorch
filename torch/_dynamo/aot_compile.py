@@ -1503,16 +1503,19 @@ class AOTCompiledModel:
     report below. That is all the flag does here: ``check()`` never reads it,
     so an opted-out result is scanned and re-checked like any other and is
     served in index order when its check accepts, and on the strength of its
-    opt-out alone only after both the scan and the re-check found no match; one
-    opt-out replaces the ``No AOT compiled graph matched this call`` error for
-    the whole model.
+    opt-out alone only after both the scan and the re-check found no match.
 
-    When no result matches and none opted out, the call raises ``RuntimeError``
-    with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, carrying the
-    missing-global hint when those guards failed on a global the process does
-    not define, and the advice to add a ``ModelInput`` or check which guards
-    ``guard_filter_fn`` kept.
+    The report is a ``RuntimeError`` headed ``No AOT compiled graph matched
+    this call``, then one line per compiled result quoting the verbose parts
+    of the guard that refused it, or, for a result whose guards accept the call
+    on the report's own evaluation after refusing it in both dispatch passes, a
+    ``<guards rejected this call twice and then accepted it here: ...>``
+    explanation in place of any guards, or, for a result whose refusal quotes
+    nothing -- an accessor that answered false with no parts, or a guard that
+    raised with a blank message -- ``<guard check failed without naming a
+    guard>``; the missing-global hint appended to each entry whose guards
+    failed on a global the process does not define; and the advice to add a
+    ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
@@ -1583,17 +1586,33 @@ class AOTCompiledModel:
     ) -> str:
         """A report naming every compiled input and what its guards said.
 
-        ``results`` and ``bound`` are the results the dispatch above judged and
-        the f_locals it judged them on, one per result, so the report explains
-        the same call rather than a fresh one."""
+        ``results`` and ``bound`` are the results ``AOTCompiledModel.__call__``
+        judged and the f_locals it judged them on, one per result, so the report
+        explains the same call rather than a fresh one."""
         lines = [
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
         ]
         for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
+            if reason.result:
+                lines.append(
+                    f"  [{i}] <guards rejected this call twice and then accepted "
+                    "it here: a guard that does not answer consistently, or "
+                    "guarded state that changed between those evaluations>"
+                )
+                continue
             parts = reason.verbose_code_parts
-            line = f"  [{i}] {'; '.join(parts)}"
+            # Collapse every separator splitlines() reads the report back on.
+            # Done here, not in get_verbose_code_part: the recompile logs consume
+            # the same parts and are out of this report's scope.
+            joined = " ".join("; ".join(parts).splitlines())
+            if not joined.strip():
+                # A failing accessor can answer false with no parts to quote, and
+                # a guard that raised quotes str(exc), which can be blank.
+                lines.append(f"  [{i}] <guard check failed without naming a guard>")
+                continue
+            line = f"  [{i}] {joined}"
             if any(map(_names_a_missing_global, parts)):
                 line += result._missing_global_hint()
             lines.append(line)
