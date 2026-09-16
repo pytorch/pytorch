@@ -47,6 +47,7 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     skipXPU,
     skipCUDAIf,
+    skipCUDAIfNotRocm,
 )
 
 from torch.testing._internal.common_xpu import Xe2_Or_Later
@@ -67,6 +68,7 @@ from torch.testing._internal.common_quantized import (
     _floatx_unpacked_to_f32,
     ceil_div, to_blocked,
     to_mxfp,
+    data_to_nvfp4_scale,
     from_blocked_format,
     generate_jagged_offs,
     pack_uint4,
@@ -518,26 +520,6 @@ def data_to_mx_scale(x, block_size, recipe):
     return scale_e8m0_biased.reshape(orig_shape[0], -1)
 
 
-def data_to_nvfp4_scale(x, block_size):
-    orig_shape = x.shape
-    x = x.reshape(-1, block_size)
-    max_abs = torch.amax(torch.abs(x), 1) + 1e-12
-
-    # x_orig_max / scale = x_in_fp4_domain_max
-    # x_orig_max / x_in_fp4_domain_max = scale
-    scale = max_abs / FP4_MAX_VAL
-
-    # for the purposes of this function, just clamp to representable range of
-    # `torch.float8_e4m3fn`. In real code, we would expect the modeling code to
-    # handle this before the input data hits this function.
-    scale = scale.clamp(max=F8E4M3_MAX_VAL)
-
-    # cast to target dtype
-    scale = scale.to(torch.float8_e4m3fn)
-    scale = scale.reshape(orig_shape[0], -1)
-    return scale
-
-
 def data_to_nvfp4_with_global_scale(x, block_size):
     # Simple (slow) reference implementation of NVFP4 two-level-scaling
     orig_shape = x.shape
@@ -827,12 +809,15 @@ class TestFP8Matmul(TestCase):
     def test_float8_basics_layout_permutations(self, device) -> None:
         if "cuda" in device:
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
+                # hipBLASLt supports all permutations for tensorwise scaling
                 # SM 8.9 and 9 only support TN
                 # SM 10 and 11 support all permutations
                 # SM 12 support depends on CUDA version
                 major, minor = torch.cuda.get_device_capability(0)
                 cuda_version = _get_torch_cuda_version()
-                if major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
+                if torch.version.hip:
+                    layouts_supported = True
+                elif major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
                     layouts_supported = True
                 elif major == 12 and (minor == 1 or cuda_version >= (13, 1)):
                     layouts_supported = x_cm
@@ -844,6 +829,78 @@ class TestFP8Matmul(TestCase):
             # Non-CUDA: test basic TN layout as sanity check
             self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=True, y_cm=False)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @skipCUDAIfNotRocm
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
+    def test_rowwise_tn_only_on_rocm(self, device) -> None:
+        M, K, N = 16, 32, 16
+        x = torch.randn(M, K, device=device, dtype=torch.bfloat16)
+        y = torch.randn(N, K, device=device, dtype=torch.bfloat16)
+        x_scale = tensor_to_scale(x, e4m3_type, dim=1).float()
+        y_scale = tensor_to_scale(y, e4m3_type, dim=1).float()
+        x_fp8 = to_fp8_saturated(x * x_scale, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scale, e4m3_type)
+
+        out = scaled_mm_wrap(
+            x_fp8,
+            y_fp8.t(),
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.t().reciprocal(),
+            scale_recipe_a=ScalingType.RowWise,
+            scale_recipe_b=ScalingType.RowWise,
+            out_dtype=torch.bfloat16,
+        )
+        out_emulated = mm_float8_emulated(x_fp8, x_scale, y_fp8.t(), y_scale.t(), torch.bfloat16)
+        self.assertEqual(out, out_emulated, atol=7e-2, rtol=7e-2)
+
+        # Same operands without the transpose on B: hipBLASLt has no non-TN rowwise solution.
+        with self.assertRaisesRegex(RuntimeError, "hipBLASLt for non-tensorwise scaling"):
+            scaled_mm_wrap(
+                x_fp8,
+                y_fp8.t().contiguous(),
+                scale_a=x_scale.reciprocal(),
+                scale_b=y_scale.t().reciprocal(),
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
+                out_dtype=torch.bfloat16,
+            )
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @skipCUDAIfNotRocm
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
+    def test_mxfp8_tn_only_on_rocm(self, device) -> None:
+        M, K, N = 128, 128, 128
+        x = torch.randn(M, K, device=device).to(e4m3_type)
+        y = torch.randn(N, K, device=device).to(e4m3_type)
+        # Unit scales keep the reference exact: the only quantization is the fp8 cast above.
+        x_scale = torch.full((M, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+        y_scale = torch.full((N, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+
+        out = scaled_mm_wrap(
+            x,
+            y.t(),
+            scale_a=x_scale,
+            scale_b=y_scale,
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            out_dtype=torch.bfloat16,
+        )
+        out_ref = (x.float() @ y.t().float()).to(torch.bfloat16)
+        self.assertEqual(out, out_ref, atol=1e-2, rtol=1e-2)
+
+        # Same operands without the transpose on B: hipBLASLt has no non-TN MX solution.
+        with self.assertRaisesRegex(RuntimeError, "hipBLASLt for non-tensorwise scaling"):
+            scaled_mm_wrap(
+                x,
+                y.t().contiguous(),
+                scale_a=x_scale,
+                scale_b=y_scale,
+                scale_recipe_a=ScalingType.BlockWise1x32,
+                scale_recipe_b=ScalingType.BlockWise1x32,
+                out_dtype=torch.bfloat16,
+            )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
@@ -1153,8 +1210,10 @@ class TestFP8Matmul(TestCase):
     @parametrize("x_cm", [True, False])
     @parametrize("y_cm", [True, False])
     def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device):
-        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
-        if torch.cuda.is_available() and (x_cm, y_cm) != (True, False) and torch.cuda.get_device_properties(0).major != 10:
+        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN.
+        # hipBLASLt takes every permutation for the tensorwise scaling used here.
+        non_tn = (x_cm, y_cm) != (True, False)
+        if "cuda" in device and not torch.version.hip and non_tn and torch.cuda.get_device_properties(0).major != 10:
             raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
@@ -1228,6 +1287,36 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(actual, reference, atol=5e-2, rtol=5e-2)
 
         self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_inplace_tunableop(self, device):
+        # The tunable scaled-gemm path only computes the plain product, so an
+        # in-place scaled_addmm_ with TunableOp enabled must bypass it and still
+        # accumulate beta * input rather than overwriting it with the product.
+        torch.manual_seed(42)
+        alpha, beta = 1.25, -0.5
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            64, 48, 32, device, torch.bfloat16
+        )
+        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        kwargs = {"beta": beta, "alpha": alpha}
+        reference = (
+            beta * input.float()
+            + alpha * ((mat1.float() * scale_a) @ (mat2.float() * scale_b))
+        ).to(input.dtype)
+
+        prev_enabled = torch.cuda.tunable.is_enabled()
+        prev_tuning = torch.cuda.tunable.tuning_is_enabled()
+        torch.cuda.tunable.enable(True)
+        # Default selection (no tuning), matching the reviewer's repro.
+        torch.cuda.tunable.tuning_enable(False)
+        try:
+            self.assert_scaled_addmm_inplace(input.clone(), reference, args, **kwargs)
+        finally:
+            torch.cuda.tunable.tuning_enable(prev_tuning)
+            torch.cuda.tunable.enable(prev_enabled)
 
     @onlyCUDA
     @skipIfRocm
@@ -1324,6 +1413,36 @@ class TestFP8Matmul(TestCase):
                     self.assertEqual(
                         result, scaled_addmm(input, *args), atol=5e-2, rtol=5e-2
                     )
+
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("fake", [False, True])
+    @parametrize("use_out", [False, True])
+    @parametrize("contraction_dim,supported", [
+        ((), True), ((1, 0), True), ((-1, -2), True),
+        ((1, -2), True), ((-1, 0), True),
+        ((0, 0), False), ((1, 1), False), ((0, 1), False), ((0,), False),
+    ])
+    def test_scaled_mm_v2_contraction_dim(self, device, fake, use_out, contraction_dim, supported):
+        with FakeTensorMode() if fake else contextlib.nullcontext():
+            a = torch.randn(32, 32, device=device).to(e4m3_type)
+            b = torch.randn(32, 32, device=device).to(e4m3_type).t()
+            scale = torch.ones((), device=device)
+            args = (a, b, [scale], [0], [0], [scale], [0], [0], None, torch.bfloat16)
+            op = torch.ops.aten._scaled_mm_v2.out if use_out else torch.ops.aten._scaled_mm_v2.default
+            kwargs = {"out": torch.empty(32, 32, device=device, dtype=torch.bfloat16)} if use_out else {}
+            if not supported:
+                with self.assertRaisesRegex((ValueError, RuntimeError), "only supports contraction_dim"):
+                    op(*args, contraction_dim=contraction_dim, **kwargs)
+            else:
+                result = op(*args, contraction_dim=contraction_dim, **kwargs)
+                self.assertEqual(result.shape, (32, 32))
+                self.assertEqual(result.dtype, torch.bfloat16)
+                if use_out:
+                    self.assertIs(result, kwargs["out"])
+                if not fake:
+                    self.assertEqual(result, torch.ops.aten._scaled_mm_v2.default(*args))
 
     @onlyCUDA
     @skipIfRocm
