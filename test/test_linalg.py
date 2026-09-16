@@ -1880,6 +1880,8 @@ class TestLinalg(TestCase):
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out, expected, msg=msg)
 
+    # Test that linal.vector_norm gives the same result as numpy when inputs
+    # contain extreme values (inf, -inf, nan)
     def test_vector_norm_extreme_values(self, device):
         vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
         vectors = []
@@ -6072,8 +6074,6 @@ class TestLinalg(TestCase):
         eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         self.assertLess(eq_err, 1e-6)
 
-    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
-                     "Scipy not found or older than 1.4.1")
     def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
         dtype = t.dtype
         numpy_dtype = dtype
@@ -6766,12 +6766,6 @@ class TestLinalg(TestCase):
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
-    @onlyCPU
-    @parametrize("m", [32, 35, 36, 40, 64])
-    @parametrize("k", [32, 35, 36, 40, 64])
-    # NOTE: This is intended to cover fp16_gemv_trans in
-    # BlasKernel.cpp. Currently, bounds being divisible by 32, 8-but-not-32, and 4-but-not-8
-    # all matter.
     @slowTest
     @onlyNativeDeviceTypes
     # bfloat16 doesn't have sufficient precision to pass this test
@@ -11637,7 +11631,6 @@ class TestLinalgCpuOnly(TestCase):
         _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_eigh_lwork_lapack(self, device, dtype):
@@ -11646,8 +11639,6 @@ class TestLinalgCpuOnly(TestCase):
         y = torch.linalg.eigh(t)
         self.assertEqual(y.eigenvalues.shape, (3000,))
 
-
-    @onlyCPU
     def test_norm_complexhalf(self, device):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return f"complex norm failed for input size {input_size}, ord={ord}, keepdim={keepdim}, dim={dim}"
@@ -11673,10 +11664,6 @@ class TestLinalgCpuOnly(TestCase):
                 self.assertEqual(res_out.dtype, torch.half, msg=msg)
                 self.assertEqual(res_out, res_float, msg=msg, exact_dtype=False)
 
-    # Test that linal.vector_norm gives the same result as numpy when inputs
-    # contain extreme values (inf, -inf, nan)
-
-    @onlyCPU
     @dtypes(*floating_and_complex_types())
     def test_linalg_lu_cpu_errors(self, device, dtype):
         # Square tests
@@ -11732,10 +11719,10 @@ class TestLinalgCpuOnly(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
 
-
+    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
+                     "Scipy not found or older than 1.4.1")
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
-    @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
@@ -11899,8 +11886,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 ---(input size: {m:4}, eigenpairs:{k:2}, units: relative error, maxiter={niter:4})---
 ''')
 
-
-    @onlyCPU
     @parametrize("m", [0, 8, 17])
     @parametrize("k", [0, 16, 32])
     @parametrize("n", [16, 32])
@@ -11945,8 +11930,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-
-    @onlyCPU
     @parametrize("k", [16, 32])
     @parametrize("n", [16, 32])
     @parametrize("x_dtype", [torch.int8, torch.uint8])
@@ -11971,7 +11954,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # with a size-1 contraction dim it is the other stride that is arbitrary
         check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
 
-    @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
@@ -11997,9 +11979,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out[i], out_ref)
             start = offs[i]
 
-
     @slowTest
-    @onlyCPU
     @largeTensorTest('12GB', device='cpu')
     def test__int8_mm_large_shape(self, device):
         torch.manual_seed(1)
@@ -12024,14 +12004,13 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # should pass without segfault
         weight_int8pack_mm(a, b_int8pack, b_scales)
 
-
-    @onlyCPU
     @parametrize("m", [32, 35, 36, 40, 64])
     @parametrize("k", [32, 35, 36, 40, 64])
     # NOTE: This is intended to cover fp16_gemv_trans in
     # BlasKernel.cpp. Currently, bounds being divisible by 32, 8-but-not-32, and
     # 4-but-not-8 all matter.
     def test_fp16_mv_transposed_first_argument_arm_cpu(self, device, m, k):
+        torch.manual_seed(1)
         a = torch.rand((m, k), dtype=torch.half, device=device)
         b = torch.rand((1, k), dtype=torch.half, device=device)
 
@@ -12214,7 +12193,8 @@ class TestGroupedMM(TestCase):
 
 instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
-instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestLinalgCpuOnly, globals(), only_for=("cpu",))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
