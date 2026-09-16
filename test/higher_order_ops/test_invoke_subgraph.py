@@ -2,10 +2,12 @@
 # flake8: noqa: E731
 
 import contextlib
+import enum
 import re
 import unittest
 import unittest.mock as mock
 import warnings
+from dataclasses import dataclass
 
 from parameterized import parameterized_class
 
@@ -40,7 +42,12 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
@@ -71,6 +78,8 @@ def _aot_eager_with_runtime_epilogue():
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_simple(self):
         def gn(x, y):
             return torch.mul(x, y)
@@ -239,6 +248,8 @@ class TestInvokeSubgraph(TestCase):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
 class TestInvokeSubgraphCompile(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def count_unique_get_attr_nodes(self, gm, args, expected):
         subgraph_attr_names = set()
         for node in gm.graph.nodes:
@@ -269,6 +280,30 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+    @torch._functorch.config.patch("donated_buffer", True)
+    @requires_cuda_and_triton
+    def test_reused_subgraph_square_backward(self):
+        @nested_compile_region
+        def region(x, weight):
+            return x / torch.sqrt(x.square().mean(dim=-1, keepdim=True) + 1e-5) * weight
+
+        def fn(x, weight1, weight2):
+            return region(x, weight1).sum() + region(x, weight2).sum()
+
+        inputs = (
+            torch.randn(4, 8, device="cuda", requires_grad=True),
+            torch.randn(1, 8, device="cuda", requires_grad=True),
+            torch.randn(1, 8, device="cuda", requires_grad=True),
+        )
+        compiled_inputs = tuple(
+            value.detach().clone().requires_grad_(True) for value in inputs
+        )
+
+        fn(*inputs).backward()
+        torch.compile(fn, fullgraph=True)(*compiled_inputs).backward()
+
+        self.assertEqual(inputs[0].grad, compiled_inputs[0].grad)
 
     def test_module_forward(self):
         class Mod(torch.nn.Module):
@@ -700,40 +735,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
-
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
-    def test_sdpa(self):
-        @nested_compile_region
-        def gn(q, k, v):
-            return torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True
-            )
-
-        def fn(q, k, v):
-            with torch.nn.attention.sdpa_kernel(
-                [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
-            ):
-                return gn(q, k, v)
-
-        q = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        k = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-        v = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
-        )
-
-        ref = fn(q, k, v)
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        res = opt_fn(q, k, v)
-        res.sum().backward()
-        self.assertEqual(ref, res)
-
-        res = opt_fn(q, k, v)
-        res.sum().backward()
 
     def test_symint_from_fwd_to_bwd(self):
         @nested_compile_region
@@ -1467,7 +1468,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(exp_out, out)
         self.assertEqual(x_clone, x)
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_input_mutation_inference_mode(self):
         @nested_compile_region
@@ -2008,27 +2008,6 @@ class GraphModule(torch.nn.Module):
             return (sin,)
 """,
             )
-
-    @requires_cuda_and_triton
-    def test_return_none(self):
-        from torch.nn import functional as F
-
-        weight = torch.ones(
-            1000, device="cuda:0", dtype=torch.float32, requires_grad=True
-        )
-        ones = torch.ones(1000, device="cuda:0", dtype=torch.float32)
-
-        @nested_compile_region
-        def fn(x, train):
-            return F.dropout(x * weight, 0.33, train)
-
-        @torch._dynamo.optimize_assert("inductor")
-        def run(x, train=True):
-            return fn(x, train)
-
-        r1 = run(ones, train=False)
-        r1.sum().backward()
-        weight.grad.clone()
 
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_return_none_from_fwd(self):
@@ -2891,9 +2870,9 @@ class GraphModule(torch.nn.Module):
         getitem_3: "f32[s77, 16]" = invoke_subgraph_14[0];  invoke_subgraph_14 = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
         sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_3);  getitem_3 = None
-        add_15: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+        add: "f32[]" = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
         cos: "f32[s77, 16]" = torch.ops.aten.cos.default(getitem_1);  getitem_1 = None
-        return (add_15, getitem_16, getitem_18, getitem_20, getitem_22, cos, primals_2, getitem_17, getitem_19, getitem_21, getitem_23)
+        return (add, getitem_16, getitem_18, getitem_20, getitem_22, cos, primals_2, getitem_17, getitem_19, getitem_21, getitem_23)
     class partitioned_fw_subgraph_0_1(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]"):
             cos: "f32[s77, 16]" = torch.ops.aten.cos.default(primals_1)
@@ -2913,13 +2892,13 @@ class GraphModule(torch.nn.Module):
         partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
         invoke_subgraph_15 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_23, getitem_22, expand);  partitioned_bw_subgraph_0_0 = getitem_23 = getitem_22 = None
         getitem_5: "f32[s77, 16]" = invoke_subgraph_15[1];  invoke_subgraph_15 = None
-        add_16: "f32[s77, 16]" = torch.ops.aten.add.Tensor(expand, getitem_5);  expand = getitem_5 = None
+        add_1: "f32[s77, 16]" = torch.ops.aten.add.Tensor(expand, getitem_5);  expand = getitem_5 = None
         partitioned_bw_subgraph_0_3 = self.partitioned_bw_subgraph_0_1
-        invoke_subgraph_13 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_3, 'partitioned_bw_subgraph_0_1', getitem_21, getitem_20, add_16);  partitioned_bw_subgraph_0_3 = getitem_21 = getitem_20 = add_16 = None
+        invoke_subgraph_13 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_3, 'partitioned_bw_subgraph_0_1', getitem_21, getitem_20, add_1);  partitioned_bw_subgraph_0_3 = getitem_21 = getitem_20 = add_1 = None
         getitem_8: "f32[s77, 16]" = invoke_subgraph_13[1];  invoke_subgraph_13 = None
-        mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(getitem_8, cos);  getitem_8 = cos = None
+        mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(getitem_8, cos);  getitem_8 = cos = None
         partitioned_bw_subgraph_0_2 = self.partitioned_bw_subgraph_0_1
-        invoke_subgraph_11 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_2, 'partitioned_bw_subgraph_0_1', getitem_19, getitem_18, mul_10);  partitioned_bw_subgraph_0_2 = getitem_19 = getitem_18 = mul_10 = None
+        invoke_subgraph_11 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_2, 'partitioned_bw_subgraph_0_1', getitem_19, getitem_18, mul);  partitioned_bw_subgraph_0_2 = getitem_19 = getitem_18 = mul = None
         getitem_11: "f32[s77, 16]" = invoke_subgraph_11[1];  invoke_subgraph_11 = None
         partitioned_bw_subgraph_0_1 = self.partitioned_bw_subgraph_0_1
         invoke_subgraph_9 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_1, 'partitioned_bw_subgraph_0_1', getitem_17, getitem_16, getitem_11);  partitioned_bw_subgraph_0_1 = getitem_17 = getitem_16 = getitem_11 = None
@@ -2929,14 +2908,14 @@ class GraphModule(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
             sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
             neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_9: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul_9)
+            mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul)
     class partitioned_bw_subgraph_0_1(torch.nn.Module):
         def forward(self, primals_0: "Sym(s77)", primals_1: "f32[s77, 16]", tangents_0: "f32[s77, 16]"):
             sin: "f32[s77, 16]" = torch.ops.aten.sin.default(primals_1);  primals_1 = None
             neg: "f32[s77, 16]" = torch.ops.aten.neg.default(sin);  sin = None
-            mul_10: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
-            return (None, mul_10)""",
+            mul: "f32[s77, 16]" = torch.ops.aten.mul.Tensor(tangents_0, neg);  tangents_0 = neg = None
+            return (None, mul)""",
                 ignore_empty_lines=True,
             )
 
@@ -3495,8 +3474,80 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(ref, res)
 
 
+_reuse_test_global = None
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphCompileDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4819")
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_return_none(self, device):
+        from torch.nn import functional as F
+
+        weight = torch.ones(
+            1000, device=device, dtype=torch.float32, requires_grad=True
+        )
+        ones = torch.ones(1000, device=device, dtype=torch.float32)
+
+        @nested_compile_region
+        def fn(x, train):
+            return F.dropout(x * weight, 0.33, train)
+
+        @torch._dynamo.optimize_assert("inductor")
+        def run(x, train=True):
+            return fn(x, train)
+
+        r1 = run(ones, train=False)
+        r1.sum().backward()
+        weight.grad.clone()
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+@torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+class TestInvokeSubgraphCompileCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_cuda_and_triton
+    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
+    def test_sdpa(self):
+        @nested_compile_region
+        def gn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True
+            )
+
+        def fn(q, k, v):
+            with torch.nn.attention.sdpa_kernel(
+                [torch.nn.attention.SDPBackend.FLASH_ATTENTION]
+            ):
+                return gn(q, k, v)
+
+        q = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        v = torch.randn(
+            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+
+        ref = fn(q, k, v)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(q, k, v)
+        res.sum().backward()
+        self.assertEqual(ref, res)
+
+        res = opt_fn(q, k, v)
+        res.sum().backward()
+
+
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuse(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -4401,7 +4452,43 @@ class GraphModule(torch.nn.Module):
 
         build_input_fingerprint's has_unknown flag is set instead, which
         gates reuse off for that call (the region is simply retraced) rather
-        than raising or misclassifying the object.
+        than raising or misclassifying the object. The object is built during
+        tracing so it has no source and no guards; a sourceful one is reusable,
+        see test_subgraph_reuse_pytree_sourceful_object_leaf.
+        """
+
+        class Opaque:
+            def __init__(self, v):
+                self.v = v
+
+        @nested_compile_region
+        def gn(pair):
+            t, _opaque = pair
+            return t.sin()
+
+        def fn(x):
+            out = x
+            for _ in range(4):
+                out = gn((out, Opaque(1)))
+            return out
+
+        x = torch.randn(8)
+        ref = fn(x)
+
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        # has_unknown must actually be reached: every call retraces rather
+        # than misclassifying Opaque as something reusable.
+        self.assertEqual(count(), 4)
+        self.assertEqual(ref, res)
+
+    def test_subgraph_reuse_pytree_sourceful_object_leaf(self):
+        """An opaque object with a source is a reusable leaf inside a pytree.
+
+        classify_vt tags it InputTag.OBJECT and reuse safety comes from
+        re-evaluating the guards on its source, so unlike the sourceless case
+        above the region is traced once.
         """
 
         class Opaque:
@@ -4426,9 +4513,7 @@ class GraphModule(torch.nn.Module):
         with self._count_speculate_calls() as count:
             res = torch.compile(fn, backend="aot_eager", fullgraph=True)((x, opaque))
 
-        # has_unknown must actually be reached: every call retraces rather
-        # than misclassifying Opaque as something reusable.
-        self.assertEqual(count(), 4)
+        self.assertEqual(count(), 1)
         self.assertEqual(ref, res)
 
     def test_subgraph_reuse_pytree_registry_change_stays_correct(self):
@@ -4637,6 +4722,299 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, "exceeded maximum reuse entries"):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
+    def test_subgraph_reuse_enum_arg(self):
+        """Enum members are UserDefinedObjectVariable but reuse like constants."""
+
+        class Mode(enum.IntEnum):
+            ADD = 1
+            SUB = 2
+
+        @nested_compile_region
+        def gn(x, mode):
+            if mode == Mode.ADD:
+                return x.sin()
+            return x.cos()
+
+        def fn(x, mode):
+            return gn(x, mode) + gn(x, mode)
+
+        x = torch.randn(8)
+        for mode in (Mode.ADD, Mode.SUB):
+            torch._dynamo.reset()
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, mode)
+            self.assertEqual(res, fn(x, mode))
+            self.assertEqual(count(), 1)
+
+        # Distinct enum members must not share a traced subgraph.
+        def fn2(x):
+            return gn(x, Mode.ADD) + gn(x, Mode.SUB)
+
+        torch._dynamo.reset()
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn2, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn2(x))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_constant_equal_but_different_type(self):
+        """Constants that compare equal but differ in type must not be reused.
+
+        Mode.ADD == 1 and True == 1, yet an isinstance() check inside the
+        region traces differently for each.
+        """
+
+        class Mode(enum.IntEnum):
+            ADD = 1
+
+        @nested_compile_region
+        def gn(x, c):
+            return x.sin() if isinstance(c, Mode) else x.cos()
+
+        @nested_compile_region
+        def hn(x, c):
+            return x.sin() if isinstance(c, bool) else x.cos()
+
+        x = torch.randn(8)
+        fns = (
+            lambda x: gn(x, Mode.ADD) + gn(x, 1),
+            lambda x: hn(x, True) + hn(x, 1),
+        )
+        for fn in fns:
+            torch._dynamo.reset()
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+            self.assertEqual(res, fn(x))
+            self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_user_defined_object_arg(self):
+        """A sourceful user-defined object arg reuses via guards on its source."""
+
+        class Batch:
+            def __init__(self, delta):
+                self.delta = delta
+
+        @nested_compile_region
+        def gn(x, batch):
+            return x.sin() + batch.delta
+
+        def fn(x, batch):
+            return gn(x, batch) + gn(x, batch)
+
+        x = torch.randn(8)
+        batch = Batch(torch.randn(8))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, batch)
+        self.assertEqual(res, fn(x, batch))
+        self.assertEqual(count(), 1)
+
+        # Two distinct objects with matching attribute metadata: the guards on
+        # b1's source are re-evaluated against b2's, so this is reusable.
+        def fn3(x, b1, b2):
+            return gn(x, b1) + gn(x, b2)
+
+        torch._dynamo.reset()
+        batch2 = Batch(torch.randn(8))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn3, backend="aot_eager", fullgraph=True)(
+                x, batch, batch2
+            )
+        self.assertEqual(res, fn3(x, batch, batch2))
+        self.assertEqual(count(), 1)
+
+        # An attribute whose tensor metadata differs must not be reused.
+        def fn2(x, b1, b2):
+            return gn(x, b1) + gn(x, b2)
+
+        torch._dynamo.reset()
+        b2 = Batch(torch.randn(1))
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn2, backend="aot_eager", fullgraph=True)(x, batch, b2)
+        self.assertEqual(res, fn2(x, batch, b2))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_sourceless_object_not_eligible(self):
+        """An object created during tracing has no guards, so it is not reused."""
+
+        class Batch:
+            def __init__(self, delta):
+                self.delta = delta
+
+        @nested_compile_region
+        def gn(x, batch):
+            return x.sin() + batch.delta
+
+        def fn(x):
+            return gn(x, Batch(x.cos())) + gn(x, Batch(x.cos()))
+
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 2)
+
+    def test_subgraph_reuse_rebound_global_read_via_side_effects(self):
+        """A region reading a global that is rebound between calls must retrace."""
+        global _reuse_test_global
+
+        @dataclass
+        class RegionInput:
+            hidden: torch.Tensor
+
+        @nested_compile_region
+        def gn():
+            return _reuse_test_global.hidden + 1
+
+        def fn(hidden):
+            global _reuse_test_global
+            for _ in range(2):
+                _reuse_test_global = RegionInput(hidden)
+                hidden = gn()
+            return hidden
+
+        try:
+            x = torch.tensor(0)
+            ref = fn(x)
+            backend = EagerAndRecordGraphs()
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend=backend, fullgraph=True)(x)
+            self.assertEqual(res, ref)
+            # Both calls retrace: the global is rebound every iteration, so
+            # GlobalSource lands in both traced_sources and mutated_sources and
+            # no reuse entry is ever saved.
+            self.assertEqual(count(), 2)
+            # The captured tensor is lifted as a subgraph input, and the second
+            # trace dedups onto the first graph via are_same_graph_modules, so
+            # the retrace costs Dynamo time but yields one shared subgraph.
+            # Getting to a single trace needs the capture re-read at the new
+            # call site: it is not a user arg, so reuse would re-resolve its
+            # recorded source, and on the second call the right value is an
+            # intermediate that no source names.
+            if not TEST_WITH_CROSSREF:
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(False)),
+                    """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_hidden_: "i64[]"):
+        l_hidden_ = L_hidden_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_hidden_);  subgraph_0 = l_hidden_ = None
+        hidden: "i64[]" = invoke_subgraph[0];  invoke_subgraph = None
+        subgraph_1 = self.subgraph_0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', hidden);  subgraph_1 = None
+        hidden_1: "i64[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (hidden, hidden_1)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_hidden_: "i64[]"):
+            add: "i64[]" = l_hidden_ + 1;  l_hidden_ = None
+            return (add,)
+""",
+                )
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_rebound_global_read_via_builder(self):
+        """A rebound global whose first read predates the rebinding.
+
+        Unlike test_subgraph_reuse_rebound_global_read_via_side_effects, the
+        region's first read goes through VariableBuilder rather than being
+        served out of side effects.
+        """
+        global _reuse_test_global
+
+        @nested_compile_region
+        def gn(x):
+            return x + _reuse_test_global
+
+        def fn(x):
+            global _reuse_test_global
+            a = gn(x)
+            _reuse_test_global = torch.tensor(100)
+            return a + gn(x)
+
+        try:
+            x = torch.tensor(0)
+            _reuse_test_global = torch.tensor(10)
+            ref = fn(x)
+            _reuse_test_global = torch.tensor(10)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(res, ref)
+            # The first call saves a reuse entry, but the second call's lookup
+            # rejects it: GlobalSource is in traced_sources and the rebinding
+            # put it in mutated_sources. The global does get lifted as a
+            # subgraph input, so both call sites share one graph module and the
+            # second correctly receives the new tensor -- only the Dynamo trace
+            # is duplicated. Reaching 1 needs the read re-resolved against
+            # side-effect state at the second call site; replaying the saved
+            # source yields the pre-rebinding value, which miscompiles.
+            self.assertEqual(count(), 2)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_global_written_once_before_loop(self):
+        """Conservative: a global written once, before any region runs, blocks reuse.
+
+        has_mutated_vars asks whether a source was ever mutated, not whether it
+        changed since the entry was saved, so every call retraces even though
+        the global is stable by the time the first region runs. Results stay
+        correct; only reuse is lost. Versioning mutations per source would let
+        this collapse back to a single trace -- update the count here if that
+        lands.
+        """
+        global _reuse_test_global
+
+        class Ctx:
+            def __init__(self, scale):
+                self.scale = scale
+
+        @nested_compile_region
+        def gn(w, x):
+            return x * w + _reuse_test_global.scale
+
+        def fn(x, ws):
+            global _reuse_test_global
+            _reuse_test_global = Ctx(2.0)
+            for w in ws:
+                x = gn(w, x)
+            return x
+
+        try:
+            ws = [torch.full((4,), float(i + 1)) for i in range(4)]
+            x = torch.ones(4)
+            ref = fn(x, ws)
+            with self._count_speculate_calls() as count:
+                res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, ws)
+            self.assertEqual(res, ref)
+            self.assertEqual(count(), 4)
+        finally:
+            _reuse_test_global = None
+
+    def test_subgraph_reuse_sourceless_module_not_eligible(self):
+        """Sourceless modules carry no guards, so differing attrs must retrace."""
+
+        class Scale(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        @nested_compile_region
+        def gn(mod, x):
+            return mod(x)
+
+        def fn(x):
+            return gn(Scale(3.0), x) + gn(Scale(5.0), x)
+
+        x = torch.randn(8)
+        with self._count_speculate_calls() as count:
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(res, fn(x))
+        self.assertEqual(count(), 2)
+
     def test_subgraph_reuse_module_different_instances_retrace(self):
         """Different module instances with different weights require separate traces."""
 
@@ -4829,6 +5207,8 @@ class GraphModule(torch.nn.Module):
     params: f"{cls.__name__}{'Strict' if params['strict'] else 'Nonstrict'}",
 )
 class TestInvokeSubgraphExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
     def test_simple_func(self):
         @nested_compile_region
@@ -5076,6 +5456,8 @@ class GraphModule(torch.nn.Module):
 
 
 class NegativeTesting(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_graph_break(self):
         @nested_compile_region
         def gn(x):
@@ -5096,6 +5478,8 @@ class NegativeTesting(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInlineInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_no_invoke_subgraph(self, fn, args):
         """Compile fn and verify the backend receives no invoke_subgraph HOPs."""
         backend = EagerAndRecordGraphs()
@@ -5168,6 +5552,8 @@ class TestInlineInvokeSubgraph(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInlineSingleUseInvokeSubgraph(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_no_invoke_subgraph(self, fn, args):
         backend = EagerAndRecordGraphs()
         res = torch.compile(fn, backend=backend, fullgraph=True)(*args)
@@ -5319,6 +5705,8 @@ class TestInlineSingleUseInvokeSubgraph(TestCase):
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuseHashFn(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @contextlib.contextmanager
     def _count_speculate_calls(self):
         count = 0
@@ -5579,6 +5967,8 @@ class TestInvokeSubgraphReuseHashFn(TestCase):
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @unittest.skipIf(TEST_WITH_CROSSREF, "crossref does not support trace_autograd_ops")
 class TestInvokeSubgraphTrainStepCapture(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._dynamo.config.patch(
         trace_autograd_ops=True,
         inline_single_use_invoke_subgraph=False,
@@ -5792,6 +6182,14 @@ class GraphModule(torch.nn.Module):
             ignore_comments=True,
             ignore_empty_lines=True,
         )
+
+
+instantiate_device_type_tests(
+    TestInvokeSubgraphCompileDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":

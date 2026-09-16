@@ -13,7 +13,13 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_CI,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write("torch.compile not supported on windows")
@@ -32,6 +38,8 @@ def count_philox_rand(gm, args, freq):
 
 
 class TestFunctionalizationRngOps(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_rand_like(self, dtype, device):
@@ -367,11 +375,12 @@ class TestFunctionalizationRngOps(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
 
 
-only_for = ("cuda",)
-instantiate_device_type_tests(TestFunctionalizationRngOps, globals(), only_for=only_for)
+instantiate_device_type_tests(TestFunctionalizationRngOps, globals(), only_for="cuda")
 
 
 class NegativeTest(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_on_cpu(self, dtype, device):
@@ -387,8 +396,7 @@ class NegativeTest(TestCase):
             aot_fn(x)
 
 
-only_for = ("cpu",)
-instantiate_device_type_tests(NegativeTest, globals(), only_for=only_for)
+instantiate_device_type_tests(NegativeTest, globals(), only_for="cpu")
 
 if __name__ == "__main__":
     run_tests()

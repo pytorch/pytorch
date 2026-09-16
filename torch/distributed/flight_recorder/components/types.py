@@ -35,6 +35,8 @@ __all__ = [
 ]
 
 
+logger: FlightRecorderLogger = FlightRecorderLogger()
+
 T = TypeVar("T", bound=NamedTuple)
 
 
@@ -229,9 +231,17 @@ COLLECTIVES = {
     "split",
     "new_window",
     "allreduce_coalesced",
+    "allgather_coalesced",
     "ALLGATHER_coalesced",
     "REDUCE_SCATTER_coalesced",
 }
+
+# Collectives whose per-rank buffers legitimately differ in size, so only the
+# summed input/output numel across the group can be checked (see
+# check_size_alltoall). c10d's FlightRecorderHook records alltoall_base as
+# "all_to_all_single"; the native backends spell it "all_to_all", which is in
+# here too.
+_UNEVEN_COLLECTIVES = {"all_to_all", "all_to_all_single"}
 
 P2P = {
     "send",
@@ -409,28 +419,49 @@ class Op:
 
     examples of supported `profiling_name`s:
         nccl:broadcast
+        nccl2:all_reduce
         nccl:send 1->2
         nccl:recv 3<-0
+        gloo:recv 3<-?   (recv_any_source: the peer is unknown)
     """
 
     def __init__(
         self, event: dict[Any, Any], memberships: dict[str, set[Any]], pg_name: str
     ):
         self.profiling_name = event["profiling_name"]
-        comm_lib_backend, name = self.profiling_name.split(":")
+        # Split from the right: the op name never contains a colon, but the
+        # comm library field is a backend name and an unsanitized one might,
+        # and losing the op name is much worse than losing the library name.
+        comm_lib_backend, sep, name = self.profiling_name.rpartition(":")
+        if not sep:
+            raise AssertionError(
+                f"name formatting error? {self.profiling_name} is not '<comm_lib>:<op>'"
+            )
         _SUPPORTED_BACKENDS = {
             "nccl",
             "ncclx",
+            "nccl2",
+            "nccl-lazy",
             "xccl",
             "gloo",
             "rccl",
             "rcclx",
             "mccl",
             "hccl",
+            # Fallback written by c10d's FlightRecorderHook when it cannot
+            # identify the backend of the group it is attached to.
+            "c10d",
         }
         if comm_lib_backend not in _SUPPORTED_BACKENDS:
-            raise AssertionError(
-                f"name formatting error? {comm_lib_backend} not in {_SUPPORTED_BACKENDS}"
+            # Not fatal. The hook records under whatever name the backend
+            # reports, so every custom backend lands here, and the op name --
+            # validated below -- is what the analysis actually consumes.
+            # Rejecting the entry would silently drop the collective from every
+            # rank's timeline over a purely informational field.
+            logger.warning(
+                "unrecognized comm library '%s' in profiling name '%s'",
+                comm_lib_backend,
+                self.profiling_name,
             )
         parts = name.split(" ")
         type = parts[0]
@@ -442,6 +473,9 @@ class Op:
         if type not in COLLECTIVES | P2P | {"coalesced"}:
             raise AssertionError(f"{type} is not a supported operation")
         self.type = type
+        # None only for recv_any_source, which names no peer.
+        self._src: int | None
+        self._dst: int
         if type == "send":
             if not isinstance(meta, str):
                 raise AssertionError
@@ -451,7 +485,11 @@ class Op:
             if not isinstance(meta, str):
                 raise AssertionError
             d, s = meta.split("<-")
-            self._dst, self._src = int(d), int(s)
+            # recv_any_source has no peer: the producer writes "?" because the
+            # source is only known once a message arrives. Leave it unknown --
+            # resolving it to a rank here would silently blame a group member
+            # that never sent anything.
+            self._dst, self._src = int(d), None if s == "?" else int(s)
         else:
             self._src, self._dst = -1, -1
         self._init_global_src_dst(memberships[pg_name])
@@ -476,7 +514,7 @@ class Op:
         self._dst_g = pg_ranks_sorted[self._dst] if self._dst is not None else None
 
     @property
-    def src(self) -> int:
+    def src(self) -> int | None:
         if self.type not in P2P:
             raise AssertionError("can't get src of non-p2p op")
         return self._src
@@ -536,19 +574,39 @@ class Op:
             return True
         return False
 
+    def _gathered_numel_matches(
+        self, gathered: list[list[int]], shard: list[list[int]]
+    ) -> bool:
+        # Whether a gathered buffer holds pg_size copies of a shard. Native
+        # backends flatten it into one buffer per shard tensor, which is the
+        # first form. c10d's FlightRecorderHook instead records the caller's
+        # own list -- one shard-shaped buffer per rank -- because that is what
+        # the dispatcher hands it and no flattened tensor exists to record.
+        if math.prod(gathered[0]) == math.prod(shard[0]) * self.pg_size:
+            return True
+        gathered_numel = sum(math.prod(s) for s in gathered)
+        shard_numel = sum(math.prod(s) for s in shard)
+        return (
+            len(gathered) == self.pg_size * len(shard)
+            and gathered_numel == shard_numel * self.pg_size
+        )
+
     def match(self, other: "Op") -> MatchInfo:
         # TODO: I think this can validly not match,
         # e.g. if one PG was used for p2p ops between only some of the peers?
         # if self.seq_id != other.seq_id:
         # return False
 
+        # A recv_any_source names no peer (self._src is None), so its src
+        # matches whatever the send side says.
+        src_matches = self._src is None or other._src is None or self._src == other._src
         if self.type == "send":
             # TODO: We need more states for p2p ops.
             return (
                 MatchInfo(MatchState.FULLY_MATCHED)
                 if (
                     other.type == "recv"
-                    and self.src == other.src
+                    and src_matches
                     and self.dst == other.dst
                     and self.input_sizes == other.output_sizes
                 )
@@ -559,7 +617,7 @@ class Op:
                 MatchInfo(MatchState.FULLY_MATCHED)
                 if (
                     other.type == "send"
-                    and self.src == other.src
+                    and src_matches
                     and self.dst == other.dst
                     and self.output_sizes == other.input_sizes
                 )
@@ -572,7 +630,7 @@ class Op:
                     f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'",
                 )
             if (
-                self.type not in ["all_to_all", "scatter"]
+                self.type not in _UNEVEN_COLLECTIVES | {"scatter"}
                 and self.input_sizes != other.input_sizes
             ):
                 return MatchInfo(
@@ -581,7 +639,7 @@ class Op:
                     f"'{other.input_sizes}'",
                 )
             if (
-                self.type not in ["all_to_all", "gather"]
+                self.type not in _UNEVEN_COLLECTIVES | {"gather"}
                 and self.output_sizes != other.output_sizes
             ):
                 return MatchInfo(
@@ -597,30 +655,28 @@ class Op:
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'",
                 )
-            if (
-                self.type
-                in [
-                    "all_gather",
-                    "all_gather_base",
-                    "all_gather_into_tensor_coalesced",
-                ]
-                and math.prod(other.output_sizes[0])
-                != math.prod(self.input_sizes[0]) * self.pg_size
+            # "_all_gather_base", not "all_gather_base": no producer has ever
+            # written the latter, and it is not in COLLECTIVES either, so Op()
+            # would have rejected the entry before reaching here. The typo made
+            # this branch dead for every backend.
+            if self.type in [
+                "all_gather",
+                "_all_gather_base",
+                "all_gather_into_tensor_coalesced",
+            ] and not self._gathered_numel_matches(
+                other.output_sizes, self.input_sizes
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Found input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
                     f"does not match output numel '{math.prod(other.output_sizes[0])}'",
                 )
-            if (
-                self.type
-                in [
-                    "reduce_scatter",
-                    "_reduce_scatter_base",
-                    "reduce_scatter_tensor_coalesced",
-                ]
-                and math.prod(other.input_sizes[0])
-                != math.prod(self.output_sizes[0]) * self.pg_size
+            if self.type in [
+                "reduce_scatter",
+                "_reduce_scatter_base",
+                "reduce_scatter_tensor_coalesced",
+            ] and not self._gathered_numel_matches(
+                other.input_sizes, self.output_sizes
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
@@ -640,7 +696,7 @@ class Op:
                     MatchState.COLLECTIVE_STATE_MISMATCH,
                     f"Expected state: '{self.state}' does not match found state: '{other.state}'",
                 )
-            if self.type == "all_to_all":
+            if self.type in _UNEVEN_COLLECTIVES:
                 return MatchInfo(MatchState.UNDECIDED)
         elif self.type in [
             "coalesced",

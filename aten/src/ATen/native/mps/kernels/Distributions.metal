@@ -95,9 +95,12 @@ kernel void exponential(
   float lambda = params.x;
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
-    // Only `u = 1` is the failure mode (`log(0)`); `u = 0` gives `log(1) = 0`.
-    float u = ::metal::min(
-        c10::metal::detail::uint32_to_uniform_float(raw[i]), 1.0f - eps);
+    // Clamp `u` away from 0 to prevent `1.0f - u` from rounding to 1.0f
+    // and producing `-0.0` from `-log(1.0f - u)`.
+    float u = ::metal::clamp(
+        c10::metal::detail::uint32_to_uniform_float(raw[i]),
+        eps / 2,
+        1.0f - eps);
     output[base + i] =
         static_cast<T>(-::metal::precise::log(1.0f - u) / lambda);
   }
@@ -107,7 +110,7 @@ kernel void exponential(
 template <typename T>
 kernel void uniform_dist(
     device T* output [[buffer(0)]],
-    constant float2& params [[buffer(1)]],
+    constant float4& params [[buffer(1)]],
     constant long2& seed_base_offset [[buffer(2)]],
     constant uint& numel [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
@@ -119,7 +122,10 @@ kernel void uniform_dist(
   uint count = min(4u, numel - base);
   for (uint i = 0; i < count; ++i) {
     float u = c10::metal::detail::uint32_to_uniform_float(raw[i]);
-    output[base + i] = static_cast<T>(from + scale * u);
+    T value = static_cast<T>(from + scale * u);
+    // Casting to T can round up to the excluded upper bound.
+    output[base + i] =
+        float(value) == params.w ? static_cast<T>(params.z) : value;
   }
 }
 
@@ -214,9 +220,14 @@ REGISTER_OP(geometric, short);
 REGISTER_OP(geometric, char);
 REGISTER_OP(geometric, uchar);
 
-REGISTER_OP(uniform_dist, float);
-REGISTER_OP(uniform_dist, half);
-REGISTER_OP(uniform_dist, bfloat);
+#define REGISTER_UNIFORM(DTYPE)                              \
+  template [[host_name("uniform_dist_" #DTYPE)]] kernel void \
+  uniform_dist<DTYPE>(                                       \
+      device DTYPE*, constant float4&, constant long2&, constant uint&, uint)
+
+REGISTER_UNIFORM(float);
+REGISTER_UNIFORM(half);
+REGISTER_UNIFORM(bfloat);
 
 REGISTER_OP(normal, float);
 REGISTER_OP(normal, half);
@@ -362,9 +373,7 @@ REGISTER_EXPONENTIAL(bfloat);
 // Bernoulli with scalar probability p. Each thread processes 4 elements,
 // amortizing one Philox-4x32-10 round (4 uint32s) across the group so the
 // kernel becomes bandwidth-bound rather than RNG-bound. The mask bit is
-// converted to T via `c10::metal::cast_to`, which routes complex destinations
-// to `T(value, 0)` — matching the previous MPSGraph behaviour where bool was
-// cast to complex as "1+0j" / "0+0j".
+// converted to T via `c10::metal::cast_to`.
 template <typename T>
 kernel void bernoulli_scalar(
     device T* output [[buffer(0)]],
@@ -432,8 +441,6 @@ REGISTER_BERNOULLI(char);
 REGISTER_BERNOULLI(short);
 REGISTER_BERNOULLI(int);
 REGISTER_BERNOULLI(long);
-REGISTER_BERNOULLI(float2);
-REGISTER_BERNOULLI(half2);
 
 constant constexpr int BINOMIAL_RANDOMS_STRIDE = 32;
 

@@ -2,6 +2,9 @@ from typing import AnyStr, overload
 
 from torch import Tensor
 
+class AccumulateGrad:
+    variable: Tensor
+
 class UndefinedGrad:
     def __init__(self) -> None: ...
     def __call__(self, *inputs: Tensor) -> list[Tensor]: ...
