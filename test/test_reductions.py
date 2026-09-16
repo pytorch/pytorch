@@ -3349,6 +3349,7 @@ class TestReductions(TestCase):
         test_against_np(linear, bins=20, min=0, max=0.99)
 
     @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)  # MPS cannot allocate float64 tensors
     @expectedFailureXPU  # XPU _histc_out_xpu (out-of-tree) does not enforce dtype check yet
     def test_histc_out_dtype(self, device, dtype):
         x = torch.randn(8, dtype=dtype, device=device)
@@ -3358,8 +3359,9 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_wrong)
         # Safe widening (float32 in, float64 out) should also raise — histc
-        # enforces exact dtype equality, matching CPU/MPS behaviour.
-        if dtype == torch.float32:
+        # enforces exact dtype equality, matching CPU behaviour. This is
+        # skipped on MPS, which cannot allocate a float64 tensor at all.
+        if dtype == torch.float32 and self.device_type != "mps":
             out_wide = torch.empty(4, dtype=torch.float64, device=device)
             with self.assertRaisesRegex(RuntimeError, msg):
                 torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_wide)
