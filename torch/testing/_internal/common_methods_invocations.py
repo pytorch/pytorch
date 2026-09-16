@@ -19636,6 +19636,7 @@ op_db: list[OpInfo] = [
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.float8_e4m3fn),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_scatter,
