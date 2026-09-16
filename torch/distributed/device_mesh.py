@@ -178,7 +178,7 @@ else:
 
     def _get_device_handle(device_type: str = "cuda"):
         """
-        Get the module corresponding to the device_type which is cuda or cuda-like device.
+        Get the module corresponding to the device_type.
         For example, when the device_type is cuda, the module `torch.cuda` is returned.
         Return None when there is no corresponding module for device_type, otherwise
         return the corresponding module.
@@ -207,7 +207,7 @@ else:
             Inconsistent `mesh` will lead to silent hang.
 
         Args:
-            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like".
+            device_type (str): The device type of the mesh (e.g. "cpu", "cuda", "xpu", or any registered backend).
             mesh (ndarray): A multi-dimensional array or an integer tensor describing the layout
                 of devices, where the IDs are global IDs of the default process group.
             preserve_rank_order (bool, optional):
@@ -506,7 +506,7 @@ else:
             # set the device before DeviceMesh init, we respect the user's choice.
             device_handle = _get_device_handle(self._device_type)
             if device_handle and not device_handle.is_initialized():
-                # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
+                # auto set the device only if user has not set it, if there's LOCAL_RANK
                 # env variable from launchers, we use it to set the device.
                 if "LOCAL_RANK" in os.environ:
                     local_rank = int(os.environ["LOCAL_RANK"])
@@ -516,7 +516,7 @@ else:
                     )
                     device_handle.set_device(local_rank)
                 else:
-                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # heuristic to set the current device base on num of devices available in each host
                     # NOTE: This device selection would only work for homogeneous hardware.
                     num_devices_per_host = device_handle.device_count()
                     # Skip device setup if no devices are available (cross-compilation mode)
@@ -582,7 +582,7 @@ else:
                 ranks_match_default = ranks == pg_ranks_by_dim.flatten().tolist()
                 if not preserve_rank_order or ranks_match_default:
                     if (
-                        torch.cuda.is_available()
+                        torch.accelerator.is_available()
                         and get_backend(default_group) == "gloo"
                     ):
                         dim_group = new_group(
@@ -1149,9 +1149,9 @@ else:
             Args:
                 group (ProcessGroup or list[ProcessGroup]): the existing ProcessGroup
                     or a list of existing ProcessGroups.
-                device_type (str): The device type of the mesh. Currently supports: "cpu",
-                    "cuda/cuda-like". Passing in a device type with a GPU index, such as "cuda:0",
-                    is not allowed.
+                device_type (str): The device type of the mesh (e.g. "cpu", "cuda",
+                    "xpu", or any registered backend). Passing in a device type with a GPU index,
+                    such as "cuda:0", is not allowed.
                 mesh (torch.Tensor or ArrayLike, optional): A multi-dimensional array or an
                     integer tensor describing the layout of devices, where the IDs are global IDs
                     of the default process group. Default is None.
@@ -1597,8 +1597,9 @@ else:
             required for distributed communications behind the scene.
 
         Args:
-            device_type (str): The device type of the mesh. Currently supports: "cpu", "cuda/cuda-like", "xpu".
-                Passing in a device type with a GPU index, such as "cuda:0", is not allowed.
+            device_type (str): The device type of the mesh (e.g. "cpu", "cuda", "xpu",
+                or any registered backend). Passing in a device type with a GPU index, such as
+                "cuda:0", is not allowed.
             mesh_shape (Tuple[int]): A tuple defining the dimensions of the multi-dimensional array
                 describing the layout of devices.
             mesh_dim_names (tuple[str, ...], optional): A tuple of mesh dimension names to assign to each dimension
