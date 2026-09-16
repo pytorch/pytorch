@@ -210,6 +210,29 @@ class UserDefineSetAttr:
 
 
 class MiscTests(torch._inductor.test_case.TestCase):
+    def test_storage_offset_scalar_output(self):
+        def fn(x):
+            return x.storage_offset()
+
+        base = torch.arange(30)
+        inputs = (
+            base[:10],
+            base[5:15],
+            base[7:17],
+            base[:10],
+        )
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        for x in inputs:
+            result = compiled_fn(x)
+            self.assertIsInstance(result, int)
+            self.assertEqual(result, fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
