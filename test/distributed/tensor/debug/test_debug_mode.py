@@ -29,11 +29,11 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda,
     run_tests,
-    skipIfCppFakeTensor,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -228,7 +228,6 @@ class TestDTensorDebugMode(TestCase):
         )
         self.device_type = "cuda"
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_debug_mode_mm(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -242,7 +241,8 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
   torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$10: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$2: f32[8, 8]
@@ -260,10 +260,27 @@ class TestDTensorDebugMode(TestCase):
       aten::empty_strided([8, 32], [32, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft$11: f32[8, 32]
       aten::sum(ft$11: f32[8, 32])  ->  ft$12: f32[]
       aten::sum(t$9: f32[1, 32])  ->  t$13: f32[]""",
+                """\
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
+    aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+      -> output: S(0)
+      redistribute_input [implicit] (1, S(0) -> R)
+        redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
+          _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
+          _c10d_functional::_wrap_tensor_autograd(t$3: f32[8, 32])  ->  t$4: f32[8, 32]
+          _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
+      aten::mm(t$5: f32[1, 8], t$3: f32[8, 32])  ->  t$6: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$7: f32[8, 32]| S(0))  ->  dt$9: f32[]| P(sum)
+    aten::sum(dt$7: f32[8, 32]| S(0))
+      aten::sum(t$6: f32[1, 32])  ->  t$8: f32[]""",
+            ),
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
-        self.assertTrue(isinstance(debug_mode.operators[6], _RedistributeCall))
+        redistribute_idx = expectedIfCppFakeTensor(6, 3)
+        self.assertTrue(
+            isinstance(debug_mode.operators[redistribute_idx], _RedistributeCall)
+        )
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
         # check stringification
@@ -458,7 +475,6 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue("x = self.l2(x)" in op_calls[2].stack_trace)
         self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
@@ -473,7 +489,8 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
     aten::empty_strided([128, 8], [8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
     aten::empty_strided([8, 128], [128, 1], dtype=torch.float32, device=cuda, pin_memory=False)
@@ -495,6 +512,24 @@ class TestDTensorDebugMode(TestCase):
     aten::empty_strided([128, 128], [128, 1], dtype=torch.float32, device=cuda, pin_memory=False)
     aten::sum(ft: f32[128, 128])
     aten::sum(t: f32[16, 128])""",
+                """\
+  aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
+    redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
+        _c10d_functional::wait_tensor(t: f32[16, 16])
+        aten::chunk(t: f32[16, 16], 2)
+        aten::cat(['t: f32[8, 16]', 't: f32[8, 16]'], 1)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 32], 4, 1)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[32, 32])
+        _c10d_functional::wait_tensor(t: f32[32, 32])
+        aten::chunk(t: f32[32, 32], 4)
+        aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::sum(t: f32[16, 128])""",
+            ),
         )
 
     def test_debug_mode_explicit_redistribute(self):
@@ -529,7 +564,6 @@ class TestDTensorDebugMode(TestCase):
     aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
         )
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_output_placements(self):
         """Test that output placements are recorded for multi-output DTensor ops."""
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -545,7 +579,8 @@ class TestDTensorDebugMode(TestCase):
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
   aten::topk(dt: f32[8, 16]| S(1), 4, 1)
     aten::empty_strided([8, 16], [16, 1], dtype=torch.float32, device=cuda, pin_memory=False)  ->  ft: f32[8, 16]
     aten::topk(ft: f32[8, 16], 4, 1)  ->  ('ft: f32[8, 4]', 'ft: i64[8, 4]')
@@ -558,9 +593,20 @@ class TestDTensorDebugMode(TestCase):
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+                """\
+  aten::topk(dt: f32[8, 16]| S(1), 4, 1)
+    -> output: ('R', 'R')
+    redistribute_input [implicit] (0, S(1) -> R)
+      redistribute_input(t: f32[8, 2], trace: S(1)->R)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
+        aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
+        aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+            ),
         )
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different DebugMode output")
     def test_debug_mode_einsum(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
@@ -578,9 +624,7 @@ class TestDTensorDebugMode(TestCase):
         with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             torch.einsum("bld,dnh->blnh", a_dt, b_dt)
 
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
+        cpp_expected = """\
   torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]| P(sum)R, dt: f32[8, 4, 4]| RP(sum))
     aten::unsqueeze(dt: f32[16, 6, 8]| P(sum)R, 3)
       aten::empty_strided([16, 6, 8], [48, 8, 1], dtype=torch.float32, device=cuda, pin_memory=False)
@@ -638,7 +682,15 @@ class TestDTensorDebugMode(TestCase):
     aten::view(dt: f32[16, 6, 4, 4, 1]| P(sum)P(sum), [16, 6, 4, 4])
       aten::empty_strided([16, 6, 4, 4, 1], [96, 16, 4, 1, 16], dtype=torch.float32, device=cuda, pin_memory=False)
       aten::view(ft: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])
-      aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
+      aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])"""
+        python_expected = "\n".join(
+            line
+            for line in cpp_expected.splitlines()
+            if "aten::empty_strided" not in line and "(ft:" not in line
+        )
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            expectedIfCppFakeTensor(cpp_expected, python_expected),
         )
 
     def test_real_tensor(self):
