@@ -252,7 +252,7 @@ register_op_override(
 ```
 Register a given implementation to a library.
 
-* `lib_symbol`: namespace you're overriding -- `"aten"` for most cases.
+* `lib_symbol`: namespace you're overriding -- `"aten"` for most cases. Namespace support is opt-in: the value must be listed in the registry's `_ALLOWED_LIB_SYMBOLS`, so adding a namespace is a deliberate change that comes with its own tests. The op must also already be defined in the dispatcher when overrides are installed, so a namespace defined by a lazily-imported module has to be imported from your `register_to_dispatch()` first.
 * `op_symbol`: the op to override, either a bare name (`"bmm"`, resolving to `aten.bmm.default`) or overload-qualified (`"add_.Tensor"` → `aten.add_.Tensor`).
 * `dispatch_key`: typically `"CPU"` or `"CUDA"` (or any other backend key).
 * `cond`: predicate choosing when `impl` applies. May be `None` if `unconditional_override=True`, in which case a trivially-true predicate is substituted.
@@ -284,6 +284,8 @@ def ordering_fn(
 ```
 
 In other words, a function that takes some context and a graph describing the override order, and returning a modified graph.
+
+**NOTE**: `op_symbol` is the bare symbol, without its namespace. Overrides may be registered on namespaces other than `aten`, and the ordering function is called once per `(namespace, op_symbol, dispatch_key)` graph -- so two namespaces defining the same op symbol produce two calls with *identical* `op_symbol` and `dispatch_key` arguments. Filtering on `op_symbol` alone therefore applies to every namespace that defines it; the namespace of a given graph is available as `node.lib_symbol` on its nodes. The same is true of `deregister_op_overrides(disable_op_symbols=...)` and `reenable_op_overrides(enable_op_symbols=...)`, which match bare symbols across all namespaces. `get_dsl_operations` is the exception: it takes a `lib_symbol` (default `"aten"`) and reports one namespace per call, since op symbols are unique within a namespace but not across them.
 
 **NOTE**: Graphs are described as lists of the private class `_OverrideNode` -- while this graph re-ordering functionality is public, it is both experimental and intended for advanced users only. The `_OverrideNode` class is to be used very carefully, and may change in the future.
 
