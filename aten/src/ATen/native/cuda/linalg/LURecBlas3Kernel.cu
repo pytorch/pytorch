@@ -1002,24 +1002,13 @@ ldl_diagonal_panel_fused_kernel(
     // Update L21 {
     // L21 = dLD[curr_step + pivot_rank:, curr_step:curr_step + pivot_rank]
     // L21 = L21 @ inv(D)
-    if constexpr (c10::is_complex<scalar_t>::value) {
-      // Force Im(D11) is zero
-      auto* D11 = dLD + LinOff(curr_step, curr_step, lda);
-      *D11 = ldl::real(*D11);
-    }
-
+    // NOTE: keeping D11 and det as scalar_t is matches LAPACK better
     if (pivot_rank == 1) {
-      double D11 = ldl::real(dLD[LinOff(curr_step, curr_step, lda)]);
+      auto D11 = dLD[LinOff(curr_step, curr_step, lda)];
       for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
         dLD[LinOff(i, curr_step, lda)] /= D11;
       }
     } else {
-      if constexpr (c10::is_complex<scalar_t>::value) {
-        // Force Im(D22) is zero
-        auto* D22 = dLD + LinOff(curr_step + 1, curr_step + 1, lda);
-        *D22 = ldl::real(*D22);
-      }
-
       // NOTE: D stores inv(D) * det(D)
       D[1][1] = dLD[LinOff(curr_step, curr_step, lda)];
       D[0][1] = -dLD[LinOff(curr_step, curr_step + 1, lda)];
@@ -1027,7 +1016,7 @@ ldl_diagonal_panel_fused_kernel(
       D[0][0] = dLD[LinOff(curr_step + 1, curr_step + 1, lda)];
 
       // scale by det(D)
-      double det = ldl::real(D[0][0] * D[1][1] - D[0][1] * D[1][0]);
+      auto det = D[0][0] * D[1][1] - D[0][1] * D[1][0];
       D[1][1] /= det;
       D[0][0] /= det;
       D[0][1] /= det;
