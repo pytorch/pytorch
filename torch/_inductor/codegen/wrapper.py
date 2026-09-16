@@ -1244,9 +1244,9 @@ class AllocateLine(MemoryPlanningLine):
             # [device-as-parameter] under compile-on-one-rank the comm buffer must follow
             # the running rank's device, not the compile-time index.
             if _coor_enabled():
-                device_arg = f'torch.device("cuda", {V.graph.device_ops.current_device_idx_expr()})'
+                device_arg = f'torch.device("{device.type}", {V.graph.device_ops.current_device_idx_expr()})'
             else:
-                device_arg = f'torch.device("cuda:{device.index}")'
+                device_arg = f'torch.device("{device.type}:{device.index}")'
             line = (
                 f"{name} = empty_strided_p2p("
                 f"{self.wrapper.codegen_shape_tuple(shape)}, "
