@@ -1076,13 +1076,17 @@ ldl_diagonal_panel_fused_kernel(
     auto* __restrict__ B = dLD + LinOff(curr_step + pivot_rank, curr_step + pivot_rank, lda);
 
     // Update B[:, :curr_nb]
-    update_trailing_B(B, curr_dim, curr_nb, L21, U12);
+    if (curr_nb > 0 && curr_dim > 0) {
+      update_trailing_B(B, curr_dim, curr_nb, L21, U12);
+    }
 
     // Update B[:curr_nb, curr_nb:]
     curr_dim -= curr_nb;
     B   += LinOff(0, curr_nb, lda);
     U12 += LinOff(0, curr_nb, lda);
-    update_trailing_B(B, curr_nb, curr_dim, L21, U12);
+    if (curr_nb > 0 && curr_dim > 0) {
+      update_trailing_B(B, curr_nb, curr_dim, L21, U12);
+    }
     // }
 
     // Finish iteration
