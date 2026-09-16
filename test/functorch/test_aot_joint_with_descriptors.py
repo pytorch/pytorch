@@ -1250,10 +1250,7 @@ class inner_f(torch.nn.Module):
 class TestAOTJointWithDescriptorsFlexAttention(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @requires_capabilities(
-        Capability.attention.flex_attention_forward,
-        Capability.attention.flex_attention_backward,
-    )
+    @requires_capabilities(Capability.attention.flex_attention)
     @onlyAccelerator
     def test_preserve_annotate_flex_attention(self, device):
         def score_mod(score, b, h, m, n):
