@@ -28,6 +28,10 @@
 #include <cufft.h>
 #include <cufftXt.h>
 
+#if defined(USE_ROCM)
+#include <ATen/native/hip/RocFFTSpectralOps.h>
+#endif
+
 #include <cmath>
 
 
@@ -326,6 +330,12 @@ bool use_optimized_cufft_path(IntArrayRef dim) {
 Tensor _fft_r2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
   TORCH_CHECK(self.is_floating_point());
 
+#if defined(USE_ROCM)
+  if (use_rocfft_path(self, dim)) {
+    return _fft_r2c_rocfft(self, dim, normalization, onesided);
+  }
+#endif
+
   // Bfloat16 FFT path.
   //
   // On CUDA SM_80+ (Ampere): cuFFT supports CUDA_R_16BF → CUDA_C_16BF natively.
@@ -491,6 +501,13 @@ Tensor& _fft_r2c_cufft_out(const Tensor& self, IntArrayRef dim,
 // n-dimensional complex to real IFFT
 Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t lastdim) {
   TORCH_CHECK(self.is_complex());
+
+#if defined(USE_ROCM)
+  if (use_rocfft_path(self, dim)) {
+    return _fft_c2r_rocfft(self, dim, normalization, lastdim);
+  }
+#endif
+
   auto in_sizes = self.sizes();
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;
@@ -534,6 +551,13 @@ Tensor _fft_c2c_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   if (dim.empty()) {
     return self.clone();
   }
+
+#if defined(USE_ROCM)
+  if (use_rocfft_path(self, dim)) {
+    return _fft_c2c_rocfft(self, dim, normalization, forward);
+  }
+#endif
+
 
   auto out_sizes = self.sizes();
   auto output = at::empty(out_sizes, self.options());
