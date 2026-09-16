@@ -2415,8 +2415,15 @@ class InstructionTranslatorBase(
     # Cache note: This cache only exists for the duration of this
     # InstructionTranslator - so it should be safe to do.
     @cache_method
-    def import_source(self, module_name: str) -> GlobalSource:
-        """Create an alias to a module for use in guards"""
+    def import_source(
+        self, module_name: str, graph_break_ok: bool = False
+    ) -> GlobalSource:
+        """
+        Create an alias to a module for use in guards. A slot already holding
+        something other than the resolved module is a hard error unless the
+        caller can graph break there (positional: cache_method takes no
+        keyword arguments).
+        """
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2450,8 +2457,8 @@ class InstructionTranslatorBase(
             # os.path is named posixpath, and torch's own BC shim entries are
             # all of that shape -- so recognize a stale module by the name the
             # resolved module answers to as well as by the key. Two module
-            # names mangling onto one alias still graph break: their resolved
-            # names differ.
+            # names mangling onto one alias still graph break in practice:
+            # their resolved names differ.
             value_name = (
                 object.__getattribute__(value, "__dict__").get("__name__")
                 if isinstance(value, types.ModuleType)
@@ -2463,14 +2470,27 @@ class InstructionTranslatorBase(
                 offender = type(bound).__name__
                 if bound_name is not None:
                     offender = f"{offender} named {bound_name}"
+                # f_globals is the root frame's: an inlined callee's own module is not
+                # where the alias lives, so the message names the module whose it is.
+                scope = f_globals.get("__name__")
+                # A graph break only where the traced bytecode chose the name, IMPORT_NAME.
+                # Every other caller resolves a name of Dynamo's choosing -- torch's, the
+                # stdlib's, a class's __module__, an inlined callee's module -- and from
+                # codegen an Unsupported is not a graph break but a frame skipped after the
+                # backend ran, silent at default log levels; those keep the hard error.
+                if not graph_break_ok:
+                    raise AssertionError(
+                        f"import alias {alias} for {module_name} is already bound to "
+                        f"a {offender} in the globals of {scope}"
+                    )
                 unimplemented(
                     gb_type="Import alias already bound",
                     context=f"{alias} for {module_name}: {offender}",
-                    explanation=f"The module alias {alias} for {module_name} is already "
-                    f"bound to a {offender} in the globals of the frame being traced.",
+                    explanation=f"The module alias {alias} for {module_name} is already bound to "
+                    f"a {offender} in the globals of {scope}, the module of the frame being compiled.",
                     hints=[
-                        "Remove or rename the global of that name in the module of the frame being traced.",
-                        "If it holds a module of another name, two module names mangle onto this alias: rename one of the two modules.",
+                        f"Remove or rename the global {alias} in module {scope}.",
+                        "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
@@ -2577,11 +2597,12 @@ class InstructionTranslatorBase(
             # returned, not the module named by module_name. However, when a
             # non-empty fromlist argument is given, the module named by name is
             # returned. Therefore, we set the source correctly here.
+            # graph_break_ok: the name is the traced bytecode's own choice.
             if not fromlist:
                 top_level_module_name = module_name.partition(".")[0]
-                source = self.import_source(top_level_module_name)
+                source = self.import_source(top_level_module_name, True)
             else:
-                source = self.import_source(module_name)
+                source = self.import_source(module_name, True)
 
         if self.exec_recorder:
             # pyrefly: ignore [unbound-name]
