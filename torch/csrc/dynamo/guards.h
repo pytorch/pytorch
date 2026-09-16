@@ -36,20 +36,26 @@ struct LocalState {
       auto result =
           (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
 
-      auto masked_keys = c10::DispatchKeySet(c10::DispatchKey::Fake);
       if (should_mask_python_keys) {
-        masked_keys = masked_keys |
+        result = result -
             c10::DispatchKeySet(
-                          {c10::DispatchKey::Python,
-                           c10::DispatchKey::PythonTLSSnapshot,
-                           c10::DispatchKey::PythonDispatcher});
+                     {c10::DispatchKey::Python,
+                      c10::DispatchKey::PythonTLSSnapshot,
+                      c10::DispatchKey::PythonDispatcher});
       }
-      result = result - masked_keys;
 
       return result;
     } else {
       return override_dispatch_key_set;
     }
+  }
+
+  at::DispatchKeySet apply_for_tensor(at::DispatchKeySet ks) const {
+    auto result = apply(ks);
+    if (override_dispatch_key_set.empty()) {
+      result = result - c10::DispatchKeySet(c10::DispatchKey::Fake);
+    }
+    return result;
   }
 
   LocalState()
