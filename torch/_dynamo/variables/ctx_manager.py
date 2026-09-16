@@ -1080,8 +1080,6 @@ class AutocastModeVariable(ContextWrappingVariable):
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
-        from .torch import _is_privateuse1_autocast
-
         if not (
             isinstance(func, type)
             and issubclass(func, torch.amp.autocast_mode.autocast)
@@ -1091,7 +1089,7 @@ class AutocastModeVariable(ContextWrappingVariable):
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
-        ] and _is_privateuse1_autocast(func):
+        ]:
             signature = inspect.signature(func)
             bound_args = signature.bind(*args, **kwargs)
             bound_args.apply_defaults()
