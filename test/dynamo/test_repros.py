@@ -8892,6 +8892,26 @@ SavedForBackwardsAOTOutput(idx=5)""",
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(dual)
 
+    def test_zerotensor_input_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/197067
+        def fn(t):
+            return t[-1] + 10
+
+        x = torch.randn(3, requires_grad=True)
+        z = torch.autograd.grad(torch.sgn(x).sum(), x)[0]
+        self.assertTrue(z._is_zerotensor())
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        self.assertEqual(torch.compile(fn, backend=cnt)(z), fn(z))
+        self.assertEqual(cnt.frame_count, 0)
+
+        torch._dynamo.reset()
+        self.assertEqual(torch.compile(fn, backend="inductor")(z), fn(z))
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "ZeroTensor input"):
+            torch.compile(fn, backend="eager", fullgraph=True)(z)
+
     def test_swap_tensors_after_discarded_attempt(self):
         # Issue #186796: a discarded restart/skip attempt fakifies the real
         # params and builds guards on them, leaving weakrefs on the real params
