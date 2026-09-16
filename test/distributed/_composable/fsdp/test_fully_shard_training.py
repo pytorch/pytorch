@@ -39,6 +39,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -59,6 +60,7 @@ from torch.testing._internal.common_utils import (
     device_sleep,
     get_cycles_per_ms,
     MI200_ARCH,
+    parametrize,
     run_tests,
     skipIfRocm,
     skipIfTorchInductor,
@@ -2612,6 +2614,80 @@ class TestFullyShardShareCommContext(FSDPTest):
         check_sharded_parity(self, ref_model, model)
 
 
+class TestFullyShardInference(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(1, allow_cpu=True)
+    @parametrize(
+        "config",
+        [
+            # dtype, requires_grad, reshard_after_forward, shard_dim
+            (torch.bfloat16, False, False, 0),
+            (torch.float32, True, True, 0),
+            (torch.float32, False, False, 1),
+            (torch.bfloat16, True, True, 1),
+        ],
+    )
+    @parametrize("inference_mode", [False, True])
+    def test_inference(
+        self,
+        device,
+        config: tuple[torch.dtype, bool, bool, int],
+        inference_mode: bool,
+    ):
+        dtype, requires_grad, reshard_after_forward, shard_dim = config
+        test_device_type = torch.device(device).type
+        if test_device_type == device_type.type:
+            mesh = init_device_mesh(test_device_type, (self.world_size,))
+        else:
+            mesh = DeviceMesh.from_group(
+                dist.new_group(backend="gloo"), test_device_type
+            )
+        # FSDPTest selects the current accelerator for each worker rank.
+        device = torch.device(test_device_type)
+        torch.manual_seed(42)
+        model = nn.Linear(8, 4, device=device, dtype=dtype)
+        model.requires_grad_(requires_grad)
+        ref_model = copy.deepcopy(model)
+        fully_shard(
+            model,
+            mesh=mesh,
+            reshard_after_forward=reshard_after_forward,
+            shard_placement_fn=lambda param: Shard(shard_dim if param.ndim > 1 else 0),
+        )
+        inp = torch.ones((2, 8), device=device, dtype=dtype)
+        grad_context = torch.inference_mode if inference_mode else torch.no_grad
+        with grad_context():
+            for _ in range(2):
+                self.assertEqual(model(inp), ref_model(inp))
+
+        # Refresh the sharded weights between decode batches, then reuse the
+        # unsharded buffers allocated by the first inference call.
+        model.reshard()
+        with torch.no_grad():
+            state_dict = {
+                name: tensor.clone() for name, tensor in model.state_dict().items()
+            }
+            for name, ref_param in ref_model.named_parameters():
+                state_dict[name].add_(0.25)
+                ref_param.add_(0.25)
+            model.load_state_dict(state_dict)
+        with grad_context():
+            for _ in range(2):
+                self.assertEqual(model(inp), ref_model(inp))
+        self.assertTrue(all(param.grad is None for param in model.parameters()))
+
+
+class TestFullyShardInferenceWorldSize1(TestFullyShardInference):
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    test_inference = TestFullyShardInference.test_inference
+
+
 class TestFullyShardWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:
@@ -2735,6 +2811,20 @@ class TestFullyShardCudaGraph(FSDPTest):
                 for graph_grad, ref_grad in zip(static_output_grads, ref_grads):
                     self.assertTrue(torch.equal(graph_grad, ref_grad))
                 model.zero_grad(set_to_none=True)
+
+
+instantiate_device_type_tests(
+    TestFullyShardInferenceWorldSize1,
+    globals(),
+    only_for=(device_type.type, "cpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardInference,
+    globals(),
+    only_for=(device_type.type, "cpu"),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
