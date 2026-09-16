@@ -25,7 +25,7 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("validate_findings.py")
 sys.path.insert(0, str(SCRIPT.parent))
 
-from _suite_manifest import TestTheSuiteIsWhole  # noqa: F401,E402
+from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: F401,E402
 
 
 # A new 6-line file, so new-side lines 1..6 are anchorable and 7+ are not.
@@ -482,4 +482,4 @@ class TestTheAdvisoryChannelIsBounded(ValidatorHarness):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_this_suite()

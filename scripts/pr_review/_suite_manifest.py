@@ -63,31 +63,77 @@ EXPECTED_MODULES = {
 }
 
 
-def modules_from(path: Path) -> list:
-    """The modules currently in `sys.modules` whose file is `path`.
+def modules_by_file(paths) -> dict:
+    """Map each of `paths` to the modules this run imported from it.
 
-    Reads what this run actually imported rather than re-executing the file: a
+    Reads what this run actually imported rather than re-executing the files: a
     `load_tests` hook can be gated on `__package__` or any other import-context
     value, and a privately loaded copy does not reproduce that context, so the
     hook would be invisible here while suppressing the real module. An earlier
     revision did re-execute, and that blindness was the defect.
 
-    Empty means the file was never imported, or was dropped again — which
-    `unittest` does to a module that raises `SkipTest` while importing.
+    ONE pass over `sys.modules` for the whole manifest. Scanning per path was
+    quadratic in it, and `loaded_modules` is called by two tests in every
+    surviving module, so the cost was paid twice per module per run.
+
+    An empty list means the file was never imported, or was dropped again —
+    which `unittest` does to a module that raises `SkipTest` while importing.
     `loaded_modules` turns that into a failure rather than guessing.
     """
-    target = path.resolve()
-    found = []
+    wanted = {}
+    for p in paths:
+        wanted.setdefault(p.resolve(), []).append(p)
+    found = {p: [] for p in paths}
     for mod in list(sys.modules.values()):
         f = getattr(mod, "__file__", None)
         if not f:
             continue
         try:
-            if Path(f).resolve() == target:
-                found.append(mod)
+            resolved = Path(f).resolve()
         except OSError:
             continue
+        for p in wanted.get(resolved, ()):
+            found[p].append(mod)
     return found
+
+
+def run_this_suite() -> None:
+    """What `python3 scripts/pr_review/test_<module>.py` should do.
+
+    It runs the WHOLE suite, because one module cannot pass alone: the guard
+    below requires every sibling to have been imported, and a single-module run
+    imports one. The two obvious alternatives are both worse — dropping the
+    `__main__` block leaves the file with no entry point, and leaving
+    `unittest.main()` leaves one that always fails on a guard the reader did
+    not ask about.
+
+    TWO THINGS `unittest.main()` GAVE THAT THIS HAS TO GIVE BACK, both of them
+    silent when missing:
+
+    * IT TOOK SELECTORS. `python3 test_x.py Class.test_name`, `-k`, `-v`. This
+      runs the whole suite regardless, so a misspelled or deleted selector would
+      otherwise read as a green 300-test confirmation of a test that never ran.
+      Refused outright rather than half-supported.
+    * IT FAILED A ZERO-TEST RUN — exit 5 on 3.12, which is the behaviour this
+      module's own docstring cites above. `wasSuccessful()` is True on an empty
+      suite, so a package-level `load_tests` that suppresses discovery would
+      exit 0 here. `testsRun` is what closes that, on every interpreter.
+    """
+    if sys.argv[1:]:
+        raise SystemExit(
+            "this entry point runs the whole suite and takes no arguments; to "
+            "select, use: python3 -m unittest discover -s scripts/pr_review -t ."
+        )
+    print(
+        f"running the whole {HERE.name} suite: one module cannot satisfy the "
+        "completeness guard on its own",
+        file=sys.stderr,
+    )
+    suite = unittest.TestLoader().discover(
+        start_dir=str(HERE), top_level_dir=str(HERE.parents[1])
+    )
+    result = unittest.TextTestRunner().run(suite)
+    raise SystemExit(0 if result.wasSuccessful() and result.testsRun else 1)
 
 
 def descendant_packages(root: Path):
@@ -127,15 +173,15 @@ class TestTheSuiteIsWhole(unittest.TestCase):
         not hide the next.
         """
         loaded, unloaded = {}, []
-        for name in sorted(EXPECTED_MODULES):
-            path = HERE / name
-            if not path.is_file():
-                continue  # test_every_expected_module_is_present owns that report
-            found = modules_from(path)
-            if found:
-                loaded[name] = found
+        # test_every_expected_module_is_present owns the report on a file that
+        # is not there at all, so only present ones are scanned for here.
+        present = [p for n in sorted(EXPECTED_MODULES) if (p := HERE / n).is_file()]
+        by_file = modules_by_file(present)
+        for path in present:
+            if by_file[path]:
+                loaded[path.name] = by_file[path]
             else:
-                unloaded.append(name)
+                unloaded.append(path.name)
         self.assertEqual(
             unloaded,
             [],
