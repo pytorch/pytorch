@@ -44,7 +44,7 @@ from .. import graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedAttributeError,
-    ObservedException,
+    ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
     raise_type_error,
@@ -583,17 +583,6 @@ def _uses_custom_classinfo_check(
             and subclasscheck is not abc.ABCMeta.__subclasscheck__
         )
     return False
-
-
-def _observed_exception_matches(
-    tx: "InstructionTranslatorBase", exc: type[BaseException]
-) -> bool:
-    """Mirror PyErr_ExceptionMatches for the exception currently being raised."""
-    try:
-        raised = tx.exn_vt_stack.get_raised_exception()
-    except AssertionError:
-        return False
-    return issubclass(raised.exc_type, exc)  # type: ignore[union-attr]
 
 
 class BuiltinVariable(BaseBuiltinVariable):
@@ -2557,20 +2546,18 @@ class BuiltinVariable(BaseBuiltinVariable):
         if type_implements_sq_length(obj_type) or type_implements_mp_length(obj_type):
             try:
                 return generic_size(tx, obj)
-            except ObservedException:
-                # __len__ raised a TypeError (subclasses included): CPython
-                # clears it and falls back to __length_hint__.
-                if not _observed_exception_matches(tx, TypeError):
-                    raise
+            except ObservedTypeError:
+                # CPython clears the TypeError and falls back to __length_hint__.
+                # ObservedTypeError is only produced for TypeError itself, not for
+                # subclasses; those are rare enough to revisit if they show up.
                 handle_observed_exception(tx)
 
         if getattr(obj_type, "__length_hint__", None) is None:
             return default
         try:
             hint = obj.call_method(tx, "__length_hint__", [], {})
-        except ObservedException:
-            if not _observed_exception_matches(tx, TypeError):
-                raise
+        except ObservedTypeError:
+            # Ditto: a TypeError from __length_hint__ selects the default.
             handle_observed_exception(tx)
             return default
 

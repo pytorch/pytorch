@@ -4371,16 +4371,6 @@ class GraphModule(torch.nn.Module):
             def __len__(self):
                 raise TypeError
 
-        class MyTypeError(TypeError):
-            pass
-
-        class LenRaisesTypeErrorSubclass:
-            def __len__(self):
-                raise MyTypeError
-
-            def __length_hint__(self):
-                return 7
-
         class WithIndex:
             def __index__(self):
                 return 5
@@ -4403,10 +4393,6 @@ class GraphModule(torch.nn.Module):
             (
                 "type-error-falls-back-to-default",
                 lambda: operator.length_hint(WithLengthHint(TypeError), 12),
-            ),
-            (
-                "type-error-subclass-falls-back-to-default",
-                lambda: operator.length_hint(WithLengthHint(MyTypeError), 12),
             ),
             ("bool-hint-is-int", lambda: operator.length_hint(WithLengthHint(True))),
             ("non-int-hint", lambda: operator.length_hint(WithLengthHint("abc"))),
@@ -4435,10 +4421,6 @@ class GraphModule(torch.nn.Module):
                 lambda: operator.length_hint(LenRaisesTypeError()),
             ),
             (
-                "len-type-error-subclass-falls-back",
-                lambda: operator.length_hint(LenRaisesTypeErrorSubclass()),
-            ),
-            (
                 "len-type-error-no-hint-uses-default",
                 lambda: operator.length_hint(LenRaisesTypeErrorNoHint(), 10),
             ),
@@ -4465,6 +4447,28 @@ class GraphModule(torch.nn.Module):
                 torch._dynamo.reset()
                 opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
                 self.assertEqual(opt_fn(torch.ones(2)), fn(torch.ones(2)))
+
+    def test_operator_length_hint_type_error_subclass(self):
+        # CPython's PyErr_ExceptionMatches catches TypeError subclasses when
+        # deciding whether to fall back to the default, but Dynamo only tracks
+        # ObservedTypeError for TypeError itself. Subclasses therefore propagate
+        # instead of selecting the default; revisit if this shows up in practice.
+        class MyTypeError(TypeError):
+            pass
+
+        class HintRaisesSubclass:
+            def __length_hint__(self):
+                raise MyTypeError("boom")
+
+        def fn(x):
+            try:
+                return ("ok", operator.length_hint(HintRaisesSubclass(), 42)), x + 1
+            except MyTypeError as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
+
+        self.assertEqual(operator.length_hint(HintRaisesSubclass(), 42), 42)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(2))[0], ("raise", "MyTypeError", "boom"))
 
     def test_operator_length_hint_non_constant_result(self):
         class SymHint:
