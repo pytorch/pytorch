@@ -432,6 +432,9 @@ class StreamVariable(StreamContextVariable):
         event_arg = args[0]
         if not isinstance(event_arg, EventVariable):
             raise AssertionError(f"Expected EventVariable, got {type(event_arg)}")
+        tx.output.note_stream_waited_on_event(
+            self.value, event_arg.value, self.source is not None
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_event,
@@ -449,6 +452,9 @@ class StreamVariable(StreamContextVariable):
         other_stream = args[0]
         if not isinstance(other_stream, StreamVariable):
             raise AssertionError(f"Expected StreamVariable, got {type(other_stream)}")
+        tx.output.note_stream_waited_on_stream(
+            self.value, other_stream.value, self.source is not None
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_stream,
@@ -505,15 +511,16 @@ class StreamVariable(StreamContextVariable):
                 event_value=event,
                 event_has_source=event_var.source is not None,
             )
+            tx.output.note_event_recorded_on_stream(
+                event, self.value, event_var.source is not None
+            )
         else:
             # The real record_event() runs first because we need the
-            # event object to exist before we can register it. Safe to
-            # run ahead of the mutation check: the call below passes the
-            # literal event_has_source=False, and
-            # check_event_record_after_input_mutation's only immediate
-            # raise is gated on event_has_source being true (else it
-            # defers by appending to _pending_event_record_violations
-            # and returning) -- so this call path can never raise before
+            # event object to exist before we can register it. Safe to run
+            # ahead of both checks below: each is passed a literal False for
+            # its has-source argument, and that argument is the only thing
+            # gating their immediate raises (otherwise they just record the
+            # deferred violation and return) -- so neither can raise before
             # record_event() has already run.
             event = self.value.record_event()
             event_index = register_graph_created_object(
@@ -525,6 +532,7 @@ class StreamVariable(StreamContextVariable):
             tx.output.check_event_record_after_input_mutation(
                 id(self.value), event_value=event, event_has_source=False
             )
+            tx.output.note_event_recorded_on_stream(event, self.value, False)
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.record_event,
@@ -695,7 +703,19 @@ class EventVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        _, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
+        stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
+        # A no-arg wait() resolves to the ambient current stream, which
+        # SymbolicStreamState deliberately keeps as an unrealized
+        # LazyVariableTracker; reading .value would realize it and install a
+        # guard.  Only the object identity is needed here, and peek_value()
+        # returns the same object -- same trick as cur_stream_id().
+        if isinstance(stream_arg, LazyVariableTracker) and not stream_arg.is_realized():
+            stream_value = stream_arg.peek_value()
+        else:
+            stream_value = stream_arg.value
+        tx.output.note_stream_waited_on_event(
+            stream_value, self.value, stream_arg.source is not None
+        )
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_event,
@@ -718,6 +738,9 @@ class EventVariable(VariableTracker):
             id(stream_arg.value),
             event_value=self.value,
             event_has_source=self.source is not None,
+        )
+        tx.output.note_event_recorded_on_stream(
+            self.value, stream_arg.value, self.source is not None
         )
         tx.output.create_proxy(
             "call_function",

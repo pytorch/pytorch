@@ -593,52 +593,14 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
                 torch.ones(2, 2, device="cpu"), []
             )
 
-    def test_event_record_after_input_mutation_escapes_via_save_for_backward(self):
-        # Verifies the save_for_backward root: the event is created and
-        # recorded inside a resumed forward, then saved for backward.
-        # Dynamo's own tracking (track_save_for_backward) fires
-        # unconditionally on these args, regardless of requires_grad, so
-        # without this root the escape scan misses the event and Dynamo's
-        # diagnostic RuntimeError doesn't fire.  save_for_backward only
-        # accepts Tensors, so this isn't a retrievable miscompile either
-        # way: the REAL eager ctx.save_for_backward would neutralize the
-        # event itself, by raising its own unrelated TypeError (Event
-        # isn't a Tensor) if requires_grad=True, or by silently dropping
-        # it if requires_grad=False (its is_executable gate is then
-        # false).  This root is a conservative completeness measure, not
-        # a rescue for that path.  Use requires_grad=False so the test
-        # observes this root's own diagnostic rather than the unrelated
-        # TypeError.
-        class Fn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                torch._dynamo.graph_break()
-                s = torch.Stream(device="cpu")
-                e = torch.Event(device="cpu")
-                with s:
-                    x.add_(1)
-                    e.record()
-                ctx.save_for_backward(x, e)
-                return x + 1
-
-            @staticmethod
-            def backward(ctx, g):
-                return g
-
-        def fn(y):
-            return Fn.apply(y)
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager")(
-                torch.ones(2, 2, device="cpu", requires_grad=False)
-            )
-
     @torch._dynamo.config.patch(reorderable_logging_functions={print})
     def test_event_record_after_input_mutation_escapes_via_debug_locals(self):
-        # Verifies the tx.debug_locals root: passing the event to a
-        # reorderable logging call (print) is a real escape, because
-        # codegen_suffix always codegens debug_locals as an actual call
-        # at subgraph exit, handing the event to user code at runtime.
+        # Verifies the tx.debug_locals root: codegen_suffix always codegens
+        # debug_locals as an actual call at subgraph exit, so the event has
+        # to be reconstructed there, which the analysis conservatively
+        # treats as an escape.  (can_reorder_logs only admits the event
+        # wrapped in a StringFormatVariable, so print itself receives a
+        # string -- the event is materialized, not handed to user code.)
         def fn(x):
             s = torch.Stream(device="cpu")
             e = torch.Event(device="cpu")
@@ -647,6 +609,94 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
                 e.record()
             print("{}".format(e))  # noqa: UP032 (needs .format() to trace as StringFormatVariable)
             return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_raises_when_input_stream_waits(self):
+        # The event never leaves the region, but s2 waits on it and is
+        # therefore ordered after the record point -- and the caller owns s2,
+        # so synchronizing it outside observes the same stale input.
+        # This errors while tracing rather than through the escape scan: a
+        # stream the caller passed in is reachable from outside by
+        # construction, so there is nothing to prove about reachability.
+        def fn(x, s2):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            e.wait(s2)
+            return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu"), torch.Stream(device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_returned_waiting_stream(
+        self,
+    ):
+        # s2 waits on the event and is then returned, so synchronizing it
+        # outside observes the pre-mutation input.  Here s2 is created inside
+        # the region and has no source, so only the escape scan can catch it.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            s2 = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            return s2
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_event_on_waiting_stream(
+        self,
+    ):
+        # Neither the original event nor the waiting stream escapes, but a
+        # second event recorded on that stream does.  It is ordered after
+        # e.record(), which is still before the epilogue copy updates x, so
+        # synchronizing on it outside observes the stale input.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            s2 = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            e2 = torch.Event(device="cpu")
+            e2.record(s2)
+            return e2
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    def test_event_record_after_input_mutation_escapes_via_waited_on_stream(self):
+        # Ordering is transitive: s2 waits on the event, s3 waits on s2, so s3
+        # is ordered after the record point as well.  Only s3 is returned, so
+        # synchronizing it outside observes the stale input even though neither
+        # the event nor s2 ever leaves the region.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            s2 = torch.Stream(device="cpu")
+            s3 = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            s3.wait_stream(s2)
+            return s3
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
             torch.compile(fn, backend="eager", fullgraph=True)(
@@ -2281,6 +2331,37 @@ class GraphModule(torch.nn.Module):
                 torch.ones(2, 2, device=device)
             )
 
+    @parametrize("record_via", ("explicit_event", "no_arg"))
+    def test_event_record_after_input_mutation_escapes_via_stream_record_event(
+        self, device, record_via
+    ):
+        # A second event recorded on the waiting stream is ordered after the
+        # record point as well, so returning it observes the stale input even
+        # though neither the original event nor the waiting stream ever leaves
+        # the region.  Parametrized over stream.record_event(event) and the
+        # no-argument form that creates the event itself, which are separate
+        # implementations.
+        # Accelerator-only: the no-argument form calls the real record_event()
+        # while tracing, which CPU rejects before the check is ever reached.
+        def fn(x):
+            s = torch.Stream(device=device)
+            s2 = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            if record_via == "no_arg":
+                return s2.record_event()
+            e2 = torch.Event(device=device)
+            s2.record_event(e2)
+            return e2
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device=device)
+            )
+
     def test_event_record_after_input_mutation_through_view(self, device):
         def fn(x):
             s = torch.Stream(device=device)
@@ -2318,9 +2399,8 @@ class GraphModule(torch.nn.Module):
         # compiled region; an event created during tracing that never
         # escapes (not returned, not stored) cannot have one, so this
         # must compile.  Parametrized over how the event is obtained --
-        # torch.Event(...).record() vs. stream.record_event() -- since
-        # both go through EventVariable.record but reach it from
-        # different call sites (streams.py:record vs. record_event).
+        # torch.Event(...).record() vs. stream.record_event() -- since those
+        # are separate implementations that share only the record-time check.
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         def fn(x):
@@ -2333,11 +2413,15 @@ class GraphModule(torch.nn.Module):
                     e = torch.Event(device=device)
                     e.record()
                 e.wait()
-            return x + 1
+            return x
 
-        torch.compile(fn, backend=backend, fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
 
         self.assertEqual(len(backend.graphs), 1)
         nodes = list(backend.graphs[0].graph.nodes)
@@ -2353,13 +2437,12 @@ class GraphModule(torch.nn.Module):
     def test_event_record_after_input_mutation_non_escaping_cross_stream_wait(
         self, device
     ):
-        # The premise the PR rests on is that an in-graph wait reads the
-        # functionalized dataflow and is therefore correct regardless of
-        # the input-mutation epilogue -- but that is only genuinely
-        # exercised by a wait issued from a stream other than the
-        # recording one; _get_stream_arg resolves a no-arg wait() to the
-        # ambient current (i.e. recording) stream, so the tests above
-        # never leave that stream.
+        # An in-graph wait is safe because downstream ops read the
+        # functionalized buffer rather than x's real storage, so the pending
+        # epilogue copy cannot make them stale.  That is only genuinely
+        # exercised when the wait is issued from a stream other than the
+        # recording one, hence passing s2 explicitly -- a no-argument wait()
+        # would resolve to whatever stream happens to be current instead.
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
 
         def fn(x):
@@ -2369,13 +2452,16 @@ class GraphModule(torch.nn.Module):
             with s:
                 x.add_(1)
                 e.record()
-            with s2:
-                e.wait()
-            return x + 1
+            e.wait(s2)
+            return x
 
-        torch.compile(fn, backend=backend, fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
 
         self.assertEqual(len(backend.graphs), 1)
         nodes = list(backend.graphs[0].graph.nodes)
@@ -2389,6 +2475,60 @@ class GraphModule(torch.nn.Module):
         # resolve a no-arg wait() to.
         self.assertEqual(record_node.args[0], wait_node.args[0])
         self.assertNotEqual(record_node.args[1], wait_node.args[1])
+
+    @parametrize("propagate_via", ("wait_event", "wait_stream", "record_event"))
+    def test_event_record_after_input_mutation_non_escaping_propagated(
+        self, device, propagate_via
+    ):
+        # Each variant adds another object ordered after the record point: a
+        # stream waiting on the event, a stream waiting on that stream, an
+        # event recorded on it.  None of them leaves the region, so nothing
+        # outside can observe the stale input and all three must compile.
+        # This is the guard against the propagation over-firing.
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def fn(x):
+            s = torch.Stream(device=device)
+            s2 = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            with s:
+                x.add_(1)
+                e.record()
+            s2.wait_event(e)
+            if propagate_via == "wait_stream":
+                torch.Stream(device=device).wait_stream(s2)
+            elif propagate_via == "record_event":
+                s2.record_event(torch.Event(device=device))
+            return x
+
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
+
+        self.assertEqual(len(backend.graphs), 1)
+        # Compiling at all is the real assertion; comparing the full sequence
+        # is what keeps the three variants distinguishable, since they share
+        # the same record/wait prefix.
+        stream_ops = [
+            node.target
+            for node in backend.graphs[0].graph.nodes
+            if node.target
+            in (
+                torch.ops.streams.record_event,
+                torch.ops.streams.wait_event,
+                torch.ops.streams.wait_stream,
+            )
+        ]
+        expected_ops = [torch.ops.streams.record_event, torch.ops.streams.wait_event]
+        if propagate_via == "wait_stream":
+            expected_ops.append(torch.ops.streams.wait_stream)
+        elif propagate_via == "record_event":
+            expected_ops.append(torch.ops.streams.record_event)
+        self.assertEqual(stream_ops, expected_ops)
 
     def test_event_record_after_input_mutation_non_escaping_generator_finally(
         self, device
@@ -2412,11 +2552,15 @@ class GraphModule(torch.nn.Module):
                 x.add_(1)
                 g = gen(s)
                 next(g)
-            return x + 1
+            return x
 
-        torch.compile(fn, backend=backend, fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
 
         self.assertEqual(len(backend.graphs), 1)
         nodes = list(backend.graphs[0].graph.nodes)
@@ -2447,17 +2591,22 @@ class GraphModule(torch.nn.Module):
                 holder.pop("a")
             return holder
 
-        out = torch.compile(fn, backend="eager", fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
+        # Separate inputs because fn mutates its argument.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(x_compiled)
         self.assertEqual(len(out), 0)
+        self.assertEqual(out, expected)
+        self.assertEqual(x_eager, x_compiled)
 
     def test_event_record_after_input_mutation_non_escaping_generator_local_holder(
         self, device
     ):
-        # The finally block records an event onto an object it also creates and
-        # drops. That object outlives pruning only so the generator can be
-        # closed, so it must not be treated as a surviving escape root.
+        # The finally block records an event on a stream, then stores it on an
+        # object it also creates and drops. That object outlives pruning only
+        # so the generator can be closed, so it must not be treated as a
+        # surviving escape root.
         class Holder:
             pass
 
@@ -2478,11 +2627,15 @@ class GraphModule(torch.nn.Module):
                 x.add_(1)
                 g = gen(s)
                 next(g)
-            return x + 1
+            return x
 
-        torch.compile(fn, backend=backend, fullgraph=True)(
-            torch.ones(2, 2, device=device)
-        )
+        # fn returns the mutated input, so comparing results checks the
+        # mutation; separate inputs because fn mutates in place.
+        x_eager = torch.ones(2, 2, device=device)
+        x_compiled = torch.ones(2, 2, device=device)
+        expected = fn(x_eager)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(x_compiled)
+        self.assertEqual(expected, actual)
 
         self.assertEqual(len(backend.graphs), 1)
         nodes = list(backend.graphs[0].graph.nodes)

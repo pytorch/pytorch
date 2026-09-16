@@ -887,8 +887,14 @@ class OutputGraph(OutputGraphCommon):
         # compiled region if it escapes (is returned, survives a graph
         # break, or is stored to reachable state), so the error is
         # deferred until compile_subgraph can run that escape analysis.
-        # Each entry keeps a strong ref to the event so id()s stay valid.
-        self._pending_event_record_violations: list[tuple[Any, str]] = []
+        # Each entry is (handles, msg).  handles[0] is the recorded event;
+        # the rest are objects that would expose the same violation if they
+        # escaped -- a stream that waited on the event is ordered after the
+        # record, which is still before the epilogue copy, so an outside
+        # sync on it observes the same stale state, as does an event later
+        # recorded on that stream.  The
+        # list holds strong refs so the identity checks stay meaningful.
+        self._pending_event_record_violations: list[tuple[list[Any], str]] = []
 
         # A list of register_finalizer_fns to apply to the output graph module
         self.register_finalizer_fns: list[Callable[[fx.GraphModule], None]] = []
@@ -1383,10 +1389,13 @@ class OutputGraph(OutputGraphCommon):
         waits only see the functionalized dataflow, which is correct
         regardless).  An event constructed during tracing can only gain
         such an observer by escaping the region, so for those
-        (``event_has_source=False``) the error is deferred and only raised
-        by :meth:`raise_pending_event_record_violations_if_escaping` when
-        the event actually escapes.  Pre-existing events (reachable from
-        outside by construction) error immediately.
+        (``event_has_source=False``) the error is deferred: the violation
+        records the event as its first handle and is raised either by
+        :meth:`raise_pending_event_record_violations_if_escaping` when any
+        handle escapes, or by
+        :meth:`_add_event_record_violation_handle` as soon as a handle that
+        is reachable from outside by construction picks it up.  Pre-existing
+        events (reachable from outside by construction) error immediately.
         """
         if stream_index not in self._input_mutation_streams:
             return
@@ -1406,9 +1415,56 @@ class OutputGraph(OutputGraphCommon):
             f"{''.join(record_stack.format())}\n" + self._EVENT_INPUT_MUTATION_FIX
         )
         if not event_has_source:
-            self._pending_event_record_violations.append((event_value, msg))
+            self._pending_event_record_violations.append(([event_value], msg))
             return
         raise RuntimeError(msg)
+
+    def _add_event_record_violation_handle(
+        self, carrier: Any, exposed_by: Any, carrier_has_source: bool
+    ) -> None:
+        for handles, msg in self._pending_event_record_violations:
+            if not any(h is exposed_by for h in handles):
+                continue
+            if carrier_has_source:
+                # Came from outside the region, so it is reachable there by
+                # construction and no escape analysis is needed -- the same
+                # reason a pre-existing event errors at record time.
+                # Deliberately conservative: whether the caller ever
+                # synchronizes on it is not knowable from in here, so a handle
+                # that reaches outside errors even if it is never used that way.
+                raise RuntimeError(msg)
+            if not any(h is carrier for h in handles):
+                handles.append(carrier)
+            return
+
+    def note_stream_waited_on_event(
+        self, stream_value: Any, event_value: Any, stream_has_source: bool
+    ) -> None:
+        """Waiting on an event orders the waiting stream after that event, so
+        if the event has a deferred violation the stream becomes another way to
+        observe it from outside the compiled region."""
+        self._add_event_record_violation_handle(
+            stream_value, event_value, stream_has_source
+        )
+
+    def note_stream_waited_on_stream(
+        self, waiting_value: Any, waited_on_value: Any, waiting_has_source: bool
+    ) -> None:
+        """wait_stream orders the waiting stream after everything already queued
+        on the waited-on stream, so if that stream exposes a deferred violation
+        the waiting stream becomes another way to observe it."""
+        self._add_event_record_violation_handle(
+            waiting_value, waited_on_value, waiting_has_source
+        )
+
+    def note_event_recorded_on_stream(
+        self, event_value: Any, stream_value: Any, event_has_source: bool
+    ) -> None:
+        """Recording onto a stream that already exposes a deferred violation
+        makes the new event expose it too."""
+        self._add_event_record_violation_handle(
+            event_value, stream_value, event_has_source
+        )
 
     def raise_pending_event_record_violations_if_escaping(
         self,
@@ -1418,28 +1474,45 @@ class OutputGraph(OutputGraphCommon):
         """Escape analysis for deferred record-after-input-mutation
         violations (see :meth:`check_event_record_after_input_mutation`).
 
-        An event escapes if its VariableTracker is reachable from the
-        values reconstructed at subgraph exit (return values and locals
-        live across a graph break, via ``all_stack_values``) or from
-        surviving side effects (attribute stores etc.; dead sourceless
-        objects have already been pruned by the caller).
+        A violation escapes if the VariableTracker of any of its handles --
+        the recorded event, or a stream or event that later picked the
+        violation up -- is reachable from the values reconstructed at
+        subgraph exit (return values and locals live across a graph break,
+        via ``all_stack_values``) or from surviving side effects (attribute
+        stores etc.; dead sourceless objects have already been pruned by the
+        caller).
         """
         if not self._pending_event_record_violations:
             return
-        from .variables.streams import EventVariable
+        from .variables.streams import EventVariable, StreamVariable
 
-        pending_ids = {id(value) for value, _ in self._pending_event_record_violations}
+        # id() of each handle -> index of the violation it would expose.  Safe
+        # to snapshot: handles are only appended while tracing, never during a
+        # scan, and the violations list keeps each one alive for the lookup.
+        handle_to_violation = {
+            id(handle): i
+            for i, (handles, _) in enumerate(self._pending_event_record_violations)
+            for handle in handles
+        }
         escaped: set[int] = set()
 
         def _check(var: VariableTracker) -> None:
             # type.__instancecheck__ avoids realizing lazy
             # VariableTrackers, which would install guards inside
-            # compile_subgraph.
-            if not type.__instancecheck__(EventVariable, var):
+            # compile_subgraph.  Skipping unrealized lazy VTs cannot hide a
+            # handle: every handle is sourceless (see
+            # check_event_record_after_input_mutation and
+            # _add_event_record_violation_handle, which raise rather than
+            # defer once a source is involved) and a lazy VT always has one.
+            if type.__instancecheck__(EventVariable, var):
+                value = cast(EventVariable, var).value
+            elif type.__instancecheck__(StreamVariable, var):
+                value = cast(StreamVariable, var).value
+            else:
                 return
-            value = cast(EventVariable, var).value
-            if id(value) in pending_ids:
-                escaped.add(id(value))
+            violation = handle_to_violation.get(id(value))
+            if violation is not None:
+                escaped.add(violation)
 
         roots: list[Any] = [all_stack_values]
         # Attribute stores AND value mutations on tracked objects (list
@@ -1460,19 +1533,19 @@ class OutputGraph(OutputGraphCommon):
             or id(k) in live_vars
         )
         roots.extend(self.side_effects._get_modified_vars())
-        # backward_state, tensor_hooks, and save_for_backward can also
-        # keep objects alive across the subgraph boundary; include them
-        # so the escape scan sees any event reachable from them.
+        # backward_state and tensor_hooks can also keep objects alive across
+        # the subgraph boundary; include them so the escape scan sees any
+        # event reachable from them.
         #
-        # Escaping through the save_for_backward root specifically requires
-        # the event to be created inside a resumed forward -- see
-        # test_event_record_after_input_mutation_escapes_via_save_for_backward.
-        # This root is a conservative completeness measure -- it doesn't
-        # rely on the real ctx.save_for_backward to catch a non-Tensor arg
-        # for us (that check is downstream, gated on is_executable, and
-        # can silently no-op).
+        # save_for_backward is excluded: an Event handed to it never comes
+        # back out.  _get_tensors_to_save (a static helper in
+        # torch/csrc/autograd/python_function.cpp, so it will not turn up in
+        # a Python grep) keeps only Tensors, erroring on anything else when
+        # is_executable and silently dropping it otherwise, and clears
+        # to_save either way, so ctx.saved_tensors can never hand the event
+        # to an outside waiter.
         #
-        # local_generators is excluded: a returned generator
+        # local_generators is excluded: a directly returned generator
         # is rewritten to a ListIteratorVariable before compile_subgraph
         # (so its items are already in all_stack_values), and one
         # surviving a graph break is itself in all_stack_values with
@@ -1481,7 +1554,6 @@ class OutputGraph(OutputGraphCommon):
         # -- see the comment there.
         roots.append(self.backward_state)
         roots.append(self.side_effects.tensor_hooks)
-        roots.extend(args for _, args in self.side_effects.save_for_backward)
         # tx.debug_locals holds args to reorderable logging calls (e.g.
         # print).  This method and codegen_suffix are always called with
         # the same tx within one compile_subgraph invocation, and
@@ -1502,21 +1574,14 @@ class OutputGraph(OutputGraphCommon):
 
         escaped_violations = [
             msg
-            for value, msg in self._pending_event_record_violations
-            if id(value) in escaped
+            for i, (_, msg) in enumerate(self._pending_event_record_violations)
+            if i in escaped
         ]
-        # Only drop the entries resolved as escaped here; a violation that
-        # is still pending-but-not-yet-escaped is left in place so a later
-        # scan within this same compile_subgraph call can still catch it --
-        # close_local_generators and codegen_suffix run between the two
-        # scans and can make a pending event escape through a mutation this
-        # scan can't see yet. Anything left pending after the final scan
-        # never escaped and is correctly never raised.
-        self._pending_event_record_violations = [
-            (value, msg)
-            for value, msg in self._pending_event_record_violations
-            if id(value) not in escaped
-        ]
+        # Violations that did not escape stay pending rather than being
+        # cleared: close_local_generators and codegen_suffix run between the
+        # two scans in compile_subgraph and can make one escape through a
+        # mutation this scan cannot see yet.  Anything still pending after
+        # the final scan never escaped and is correctly never raised.
         if escaped_violations:
             raise RuntimeError("\n\n".join(escaped_violations))
 
