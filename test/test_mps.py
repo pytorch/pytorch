@@ -2235,7 +2235,7 @@ class TestMPS(TestCaseMPS):
     @parametrize("num_alpha", [10, 1000, 10_000])
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.float16])
     def test_dirichlet(self, num_alpha, dtype):
-        alpha = torch.rand(num_alpha, device='mps', dtype=dtype)
+        alpha = make_tensor(num_alpha, device='mps', dtype=dtype, low=0, high=1, exclude_zero=True)
         dist = Dirichlet(alpha)
         batch_shape = (30000 // num_alpha, 400)
         x = dist.sample(batch_shape)
