@@ -118,6 +118,7 @@ capture block.
 
 from __future__ import annotations
 
+import collections
 import functools
 import hashlib
 import importlib.machinery
@@ -146,6 +147,7 @@ if TYPE_CHECKING:
     import traceback
     from collections.abc import Callable, Mapping, Sequence
 
+    from .package import _DynamoCacheEntry
     from .types import GuardFilterEntry
 
 
@@ -1073,3 +1075,73 @@ def _wont_generalize(
             # graph that serves other values.
             pinned -= mentioned - pins_here
     return tuple(sorted(pinned))
+
+
+# Healing re-serializes, which can in principle prune something new. Bounded
+# rather than open: in practice one pass is always enough.
+_VALIDATION_PASSES = 4
+
+
+def varying_guard_slots(
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> frozenset[tuple[str, str]]:
+    """The guard slots that actually discriminate between captured variants.
+
+    A slot is ``(guard_type, normalized source)``. It varies when two variants
+    of one frame recorded DIFFERENT facts for it, and also when it is present in
+    some variants and absent in others -- a guard only one variant carries is
+    what tells that variant apart, and comparing values alone would call it
+    invariant and drop it. That present-in-some case is the majority of what is
+    kept, not an edge.
+
+    Everything else held identically in every variant, which is what licenses a
+    caller to leave it out of the serialized copy.
+    """
+    varying: set[tuple[str, str]] = set()
+    for variants in guard_sets.values():
+        seen: dict[tuple[str, str], set[tuple[tuple[str, ...], str]]] = {}
+        present: collections.Counter[tuple[str, str]] = collections.Counter()
+        for facts in variants:
+            for slot in {(f.guard_type, f.source) for f in facts}:
+                present[slot] += 1
+            for f in facts:
+                seen.setdefault((f.guard_type, f.source), set()).add((f.code, f.value))
+        for slot, rendered in seen.items():
+            if len(rendered) > 1 or present[slot] != len(variants):
+                varying.add(slot)
+    return frozenset(varying)
+
+
+def _summarize(
+    entry: _DynamoCacheEntry,
+    dropped: set[tuple[str, str]],
+    kept: set[tuple[str, str]],
+    policy_dropped: set[tuple[str, str]],
+    risky: set[tuple[str, str]],
+    truncated: frozenset[str],
+    uncovered: frozenset[str],
+    capture_errors: Sequence[str],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+    dropped_code: Mapping[tuple[str, str], str],
+) -> PrecompileSummary:
+    wont_generalize = _wont_generalize(kept, guard_sets)
+    return PrecompileSummary(
+        frames=len(entry.codes),
+        resume_functions=sum(1 for c in entry.codes if c.install_to_global),
+        guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
+        backend_graphs=len(entry.backend_ids),
+        bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
+        truncated=tuple(sorted(truncated)),
+        uncovered_frames=tuple(sorted(uncovered)),
+        wont_generalize=wont_generalize,
+        dropped_guards=tuple(sorted(dropped)),
+        dropped_guard_code=tuple(
+            (gtype, name, dropped_code[(gtype, name)])
+            for gtype, name in sorted(dropped | policy_dropped | risky)
+            if (gtype, name) in dropped_code
+        ),
+        kept_guards=tuple(sorted(kept)),
+        risky_dropped_guards=tuple(sorted(risky)),
+        policy_dropped_guards=tuple(sorted(policy_dropped)),
+        capture_errors=tuple(capture_errors),
+    )
