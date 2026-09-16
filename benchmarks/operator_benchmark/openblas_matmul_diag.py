@@ -4,6 +4,7 @@ import subprocess
 import statistics
 import time
 from pathlib import Path
+from typing_extensions import runtime
 
 import torch
 
@@ -70,6 +71,10 @@ def print_runtime_information():
     print("===== Diagnostic identity =====")
     print(f"pid: {os.getpid()}")
     print(f"configuration: {os.environ.get('MATMUL_DIAGNOSTIC_CONFIG')}")
+
+    get_affinity = getattr(os, "sched_getaffinity", None)
+    if get_affinity is None:
+        raise RuntimeError("This diagnostic requires linux sched_getaffinity()")
     print(f"sched_getaffinity: {sorted(os.sched_getaffinity(0))}")
 
     print("\n===== Relevant environment =====")
@@ -166,6 +171,11 @@ def run_benchmark():
 
     print(f"all batch times: {batch_times_us}")
     print(f"median: {statistics.median(batch_times_us):.3f} us/call")
+
+    if output is None:
+        raise RuntimeError("No benchmark iterations ran")
+
+
     print(f"checksum: {output[0, 0].item()}")
 
 

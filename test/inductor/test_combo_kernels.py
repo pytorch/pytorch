@@ -22,6 +22,7 @@ from torch._inductor.codegen.triton_combo_kernel import (
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
+from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -507,9 +508,14 @@ class ComboKernelTests(TestCase):
         # meta keys (XBLOCK, YBLOCK) but SequentialFlattenComboKernelGrid looks
         # up XBLOCK_0, XBLOCK_1 etc. — dict.get returns None, and ceildiv treats
         # None as block=1, hardcoding the grid to xnumel*ynumel per subkernel.
+        # kineto_available: CI runs this file with TORCHINDUCTOR_CPP_WRAPPER=1, so on a
+        # USE_KINETO=0 build both halves above are true and the GPU-only profile below
+        # raises. Extending the condition rather than gating the whole method keeps the
+        # eager-path coverage above.
         if (
             torch._inductor.config.cpp_wrapper
             and self.combo_kernel_per_subkernel_blocks
+            and kineto_available()
         ):
             from torch.profiler import ProfilerActivity
 
@@ -855,6 +861,7 @@ class ComboKernelTests(TestCase):
         # 3D poi (x, y, z) are separated from combo kernels
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
@@ -934,6 +941,7 @@ class ComboKernelTests(TestCase):
         else:
             FileCheck().check("pid_offset = pid").run(code[0])
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
@@ -1076,6 +1084,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
@@ -1243,7 +1252,7 @@ class ComboKernelTests(TestCase):
     def test_combo_kernel_split_large_reductions(self):
         # squeezenet1_1 backward (combo regression sum_sum_8bcd6e12dcd4):
         # two very large reductions (sum over [0,2,3] of [512,64,55,55]) must NOT be
-        # co-fused into one combo kernel -- each is split out (5 kernels, vs 4 if fused).
+        # co-fused into one combo kernel -- each is split out into its own kernel.
         import torch._inductor.inductor_prims
 
         class Model(torch.nn.Module):
@@ -1287,12 +1296,22 @@ class ComboKernelTests(TestCase):
 
         m = Model()
         torch._dynamo.reset()
-        torch._inductor.metrics.reset()
         out_eager = m(*inps)
-        out_compiled = torch.compile(m)(*inps)
+        with fresh_cache():
+            out_compiled, code = run_and_get_code(torch.compile(m), *inps)
         torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
-        # Very-large reductions split out instead of co-fused: 5 kernels (4 = the regression).
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        # The total kernel count is device dependent: reduction_split_factor only
+        # splits these 64-output reductions into a second phase when
+        # 2 * multi_processor_count > 64, so a low-SM GPU legitimately emits one
+        # kernel fewer. Assert the invariant instead -- each very-large reduction
+        # (the same numel gate the partitioner uses) gets a kernel of its own.
+        # Co-fusing them emits both sub-kernels in a single async_compile block.
+        separated = 0
+        for kernel_src in " ".join(code).split("async_compile.triton(")[1:]:
+            numels = re.findall(r"xnumel = (\d+)\s+r0_numel = (\d+)", kernel_src)
+            if any(int(x) * int(r) > LARGE_NUMELS for x, r in numels):
+                separated += 1
+        self.assertEqual(separated, 2)
 
     @requires_gpu_and_triton
     @skipIfXpu(
