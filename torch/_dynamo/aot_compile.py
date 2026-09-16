@@ -101,6 +101,31 @@ def _names_a_missing_global(text: str) -> bool:
     return not match["name"].strip("\"'").startswith(_MINTED_GLOBAL_PREFIXES)
 
 
+def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
+    """What a guard tree meant to raise, as ``(type name, exception)``; the one
+    reading the report line and the warning share, so they cannot drift."""
+    # A tree returning to pybind with an exception still set arrives as a
+    # SystemError whose str() is the bound method's repr, so report what
+    # _PyErr_FormatFromCause chained behind it. __cause__, not __context__: that
+    # call sets both, but PEP 3134 sets __context__ for ANY exception raised while
+    # another was handled, so it would quote what the CALLER was handling.
+    cause = e.__cause__ if isinstance(e, SystemError) else None
+    reason: BaseException = e if cause is None else cause
+    return type(reason).__name__, reason
+
+
+def _raised_line(index: int, e: Exception) -> str:
+    kind, reason = _unwrapped_raise(e)
+    # Keyed on that chain, not on where the raise came from: the clause explains
+    # why the line quotes a chained exception rather than the tree's own, so a
+    # raise with nothing chained (a TORCH_CHECK, which pybind translates at the
+    # same boundary into a plain RuntimeError) gets the line without it.
+    boundary = "" if reason is e else " (through the guard tree's pybind boundary)"
+    line = f"  [{index}] <guard check raised {kind}: {reason}{boundary}>"
+    # str(reason) is user text and the report is read back with splitlines().
+    return " ".join(line.splitlines())
+
+
 class _GuardScope(enum.Enum):
     """Which dict the artifact's global guards resolve names against."""
 
@@ -1559,6 +1584,13 @@ def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
     )
 
 
+def _same_results(
+    prior: tuple[weakref.ref[AOTCompiledFunction], ...],
+    results: tuple[AOTCompiledFunction, ...],
+) -> bool:
+    return len(prior) == len(results) and all(w() is r for w, r in zip(prior, results))
+
+
 @dataclass
 class AOTCompiledModel:
     """A module's forward compiled for several calls, with dispatch over them.
@@ -1588,22 +1620,41 @@ class AOTCompiledModel:
     report below. That is all the flag does here: ``check()`` never reads it,
     so an opted-out result is scanned and re-checked like any other and is
     served in index order when its check accepts, and on the strength of its
-    opt-out alone only after both the scan and the re-check found no match; one
-    opt-out replaces the ``No AOT compiled graph matched this call`` error for
-    the whole model.
+    opt-out alone only after both the scan and the re-check found no match and
+    no checked input's guard tree raised while being evaluated; one opt-out
+    replaces the ``No AOT compiled graph matched this call`` error for the
+    whole model. A tree that raises rejects nothing, so a raise from a checked
+    input withholds the opt-out, and the call raises the no-match
+    ``RuntimeError`` with the raise chained as its ``__cause__`` and the report
+    naming the input that raised. A raise beside an input whose guards did
+    match is served over: the matching graph runs, and the raise is logged once
+    per ``(input index, exception type)`` per model on the
+    ``torch._dynamo.aot_compile`` logger, starting over when ``compiled_results``
+    changes. A ``KeyboardInterrupt`` or ``SystemExit`` out of a guard tree is
+    never read as an answer and propagates.
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
     per compiled result quoting the guards that refused it, or, for a result
-    whose guards accept the call on the report's own evaluation after refusing
-    it in both dispatch passes, a ``<guards rejected this call twice and then
-    accepted it here: ...>`` explanation in place of any guards, or, for a
+    whose guards accept the call on the report's own evaluation after not
+    accepting it in dispatch, a ``<guards did not accept this call in dispatch
+    and accepted it here: ...>`` explanation in place of any guards, or, for a
     result whose refusal quotes nothing -- an accessor that answered false with
     no parts, or a guard that raised with a blank message -- ``<guard check
     failed without naming a guard>``; one
     ``For [i, j]:`` line per distinct missing-global hint naming the entries
-    whose guards failed on a global the process does not define; and the advice
-    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
+    whose guards failed on a global the process does not define; and -- when
+    some checked tree reached an answer, or the artifact holds no input at all
+    -- the advice to add a ``ModelInput`` or check which guards
+    ``guard_filter_fn`` kept. When no checked tree ever answered and two or
+    more trees raised, a line saying every guard tree raised replaces it,
+    unless an opted-out result's line has already said the raise withheld it;
+    a single raiser's own line already says as much. When some checked input's
+    guard tree raised, that exception is the ``__cause__`` of the
+    ``RuntimeError`` rather than the exception the caller sees, so a caller
+    catching the tree's own type (``SystemError`` for a leaf that returned with
+    an error set, ``RuntimeError`` for a ``TORCH_CHECK``) catches the report
+    instead.
     """
 
     model: torch.nn.Module
@@ -1617,10 +1668,21 @@ class AOTCompiledModel:
     _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
         dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
+    # The results warn_swallowed last logged about and the (index, exception type)
+    # pairs it logged, so a hot loop over a broken artifact logs once per defect.
+    # Per model, not torch._logging.warning_once, whose cache is process-global.
+    # Kept beside the results because a changed compiled_results can put another
+    # artifact at a warned-about index; judged where the warning is logged, since
+    # a one-result model never re-decides the binding verdict. One field, as above.
+    _warned: tuple[
+        tuple[weakref.ref[AOTCompiledFunction], ...], set[tuple[int, str]]
+    ] = dataclasses.field(
+        default_factory=lambda: ((), set()), init=False, compare=False, repr=False
+    )
 
     def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
         prior, shared = self._binding_verdict
-        if len(results) == len(prior) and all(w() is r for w, r in zip(prior, results)):
+        if _same_results(prior, results):
             return shared
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
@@ -1633,30 +1695,103 @@ class AOTCompiledModel:
         # compiled_results is public, so read it once: every stage below judges
         # the results this call began with, on the binding decided over them.
         results = tuple(self.compiled_results)
-        # check() ignores _guard_check_enabled, so scan every result. The first
-        # is bound and checked as at a single-result model; only a call it
-        # refuses asks whether the rest bind alike and can reuse its binding, a
-        # bind costing more than a check(). The reuse rests on check() only
-        # reading the f_locals it is handed, so one dict can serve every tree.
-        first = results[0]
-        f_locals = first.prepare_f_locals(self.model, *args, **kwargs)
-        if first._live_guard_manager().check(f_locals):
-            # The guard manager already passed; go through _serve rather
-            # than result(), which would re-run the ~1us guard eval on this
-            # hot dispatch path. _serve costs one Python frame instead
-            # (measured 0.164us), and is what hands the graph the globals
-            # that check just accepted. Gating that frame out per site is
-            # not worth it: _serve is the only caller of the raw fn, and a
-            # site that got the gate wrong would serve a stale global with
-            # every guard passing.
-            return first._serve(self.model, *args, **kwargs)
-        bound = [f_locals]
-        shared = len(results) > 1 and self._binds_alike(results)
-        for result in results[1:]:
-            if not shared:
-                f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
-            bound.append(f_locals)
-            if result._live_guard_manager().check(f_locals):
+        # check() ignores _guard_check_enabled, which only the last resort and
+        # the report read, so scan every result.
+        raised: dict[int, Exception] = {}
+        # Indices whose LAST evaluation reached no answer: no guard to quote.
+        unanswered: set[int] = set()
+        # Indices that ever reached an answer, which a ModelInput could have covered.
+        answered: set[int] = set()
+        # Per-result bindings, filled on first use, kept for the re-check and report.
+        bound: dict[int, dict[str, object]] = {}
+        # Whether results that bind alike reuse the first one's binding (a bind
+        # costs more than a check()), decided once a second result is reached so
+        # a call the first result serves pays nothing for it; the reuse rests on
+        # check() only reading the f_locals it is handed.
+        shared: bool | None = None
+
+        def accepts(i: int, result: AOTCompiledFunction) -> bool:
+            nonlocal shared
+            # prepare_f_locals stays outside the try, so a call the signature cannot
+            # bind surfaces as bind_locals' TypeError, not as a tree that did not match.
+            f_locals = bound.get(i)
+            if f_locals is None:
+                if bound and shared is None:
+                    shared = self._binds_alike(results)
+                if shared:
+                    f_locals = bound[0]
+                else:
+                    f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
+                bound[i] = f_locals
+            try:
+                answer = result._live_guard_manager().check(f_locals)
+            except Exception as e:
+                # Keep going so another result can still match.
+                raised[i] = e
+                unanswered.add(i)
+                return False
+            if answer:
+                return True
+            # Recorded on a rejection only: an accept serves and builds no report.
+            unanswered.discard(i)
+            answered.add(i)
+            return False
+
+        def warn_swallowed(served: int) -> None:
+            # A raise is not a rejection, so it says nothing about the result
+            # that did answer -- but no report is built on this path, so nothing
+            # else records it. Also where the result that answered IS the one that
+            # raised: its accept is the only answer about this call, and vetoing
+            # it would not contain the stale relational state below, which a scan
+            # raise leaves for the NEXT call, with no raise on record at all.
+            over, warned = self._warned
+            if not _same_results(over, results):
+                warned = set()
+                self._warned = (tuple(weakref.ref(r) for r in results), warned)
+            for i, e in raised.items():
+                kind, reason = _unwrapped_raise(e)
+                if (i, kind) in warned:
+                    continue
+                warned.add((i, kind))
+                if results[i]._guard_check_enabled:
+                    advice = (
+                        f"Fix or drop input [{i}]: a tree that raises rejects "
+                        "nothing, and a C++ throw out of it leaves its own "
+                        "relational guard state stale, so its next check can "
+                        "reject a call it fits or accept one it does not."
+                    )
+                else:
+                    # The last resort serves an opted-out result whatever its
+                    # guards say, so a stale rejection costs it nothing; what the
+                    # raise costs it is the match the scan can never find.
+                    advice = (
+                        f"Input [{i}] opted out of guard checks, but a tree that "
+                        "raises never matches in the scan, so its graph is "
+                        "reachable only through the last resort, which a raise "
+                        "from any enabled tree withholds."
+                    )
+                log.warning(
+                    "AOT compiled input [%d]'s guard check raised %s: %s; "
+                    "dispatch served [%d] rather than propagating it. %s",
+                    i,
+                    kind,
+                    reason,
+                    served,
+                    advice,
+                )
+
+        for i, result in enumerate(results):
+            if accepts(i, result):
+                if raised:
+                    warn_swallowed(i)
+                # The guard manager already passed; go through _serve rather
+                # than result(), which would re-run the ~1us guard eval on this
+                # hot dispatch path. _serve costs one Python frame instead
+                # (measured 0.164us), and is what hands the graph the globals
+                # that check just accepted. Gating that frame out per site is
+                # not worth it: _serve is the only caller of the raw fn, and a
+                # site that got the gate wrong would serve a stale global with
+                # every guard passing.
                 return result._serve(self.model, *args, **kwargs)
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
@@ -1665,20 +1800,42 @@ class AOTCompiledModel:
         # safe and this pass re-runs trees that genuinely failed, lambda guards
         # included, bumping the failing node's _fail_count a second time; about
         # 1us per result, accepted.
-        for result, f_locals in zip(results, bound):
-            if result._live_guard_manager().check(f_locals):
+        for i, result in enumerate(results):
+            if accepts(i, result):
+                if raised:
+                    warn_swallowed(i)
                 return result._serve(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
-        # only after both passes above have failed to find a real match.
-        for result in results:
-            if not result._guard_check_enabled:
-                return result._serve(self.model, *args, **kwargs)
-        raise RuntimeError(self._no_match_report(results, bound))
+        # only after both passes failed to find a real match and no tree whose
+        # guards someone did ask about raised -- even if a later pass answered: a
+        # rejection after a throw can be about the relational guard state the
+        # throw left stale (see warn_swallowed), not about this call. A raise from
+        # the opted-out result itself withholds nothing: nobody wanted its answer.
+        if not any(results[i]._guard_check_enabled for i in raised):
+            for i, result in enumerate(results):
+                if not result._guard_check_enabled:
+                    if raised:
+                        warn_swallowed(i)
+                    return result._serve(self.model, *args, **kwargs)
+        report = self._no_match_report(results, raised, unanswered, answered, bound)
+        if raised:
+            # `raised` is in recording order, so this chains the first index that
+            # raised, not always the raiser the advice names: they differ when an
+            # opted-out result raised first, whose line quotes no exception text.
+            raise RuntimeError(report) from next(iter(raised.values()))
+        # Not `from None`: an ordinary no-match must not suppress an exception
+        # this call was made while handling.
+        raise RuntimeError(report)
 
     def _no_match_report(
-        self, results: tuple[AOTCompiledFunction, ...], bound: list[dict[str, object]]
+        self,
+        results: tuple[AOTCompiledFunction, ...],
+        raised: dict[int, Exception],
+        unanswered: set[int],
+        answered: set[int],
+        bound: dict[int, dict[str, object]],
     ) -> str:
-        """A report naming every compiled input and what its guards said.
+        """A report naming every compiled input and what its guard check said or raised.
 
         ``results`` and ``bound`` are the results the dispatch above judged and
         the f_locals it judged them on, one per result, so the report explains
@@ -1693,12 +1850,48 @@ class AOTCompiledModel:
         hinted: dict[str, list[int]] = {}
         resolved: dict[str, Any] | None = None
         tried_forward = False
+        # An opted-out result is reported at all only because a raise vetoed the
+        # last resort above; without one it is served and there is no report.
+        # One read, before check_verbose runs user code that could opt a result
+        # out under the loop: the entries and the raiser they name must agree.
+        enabled = [result._guard_check_enabled for result in results]
+        raiser = next((i for i in raised if enabled[i]), None)
+        # An entry that answered in either dispatch pass rejected this call, so a
+        # ModelInput could have covered it even where its line below is a raise.
+        coverable = any(results[i]._guard_check_enabled for i in answered)
+        withheld = False
         for i, result in enumerate(results):
-            reason = result._live_guard_manager().check_verbose(bound[i])
+            if not enabled[i]:
+                # Nobody asked about this result's guards, so quoting them -- a
+                # raise out of them included -- would name the wrong thing, and no
+                # ModelInput covers what kept it from serving: the raise above.
+                # Decided before the raise below, so an opted-out tree that raised
+                # is reported once, as the opt-out it is.
+                lines.append(
+                    f"  [{i}] <opted out of guard checks; withheld because "
+                    f"[{raiser}]'s guard check raised>"
+                )
+                withheld = True
+                continue
+            if i in unanswered:
+                # No rejection to quote, so report the raise rather than evaluate
+                # the tree a third time, whose answer would not be the one dispatch
+                # acted on. An entry that raised and THEN answered is not here: its
+                # rejection is quoted below, and its raise survives only where it
+                # is the one the chain carries -- the FIRST index that raised.
+                lines.append(_raised_line(i, raised[i]))
+                continue
+            try:
+                reason = result._live_guard_manager().check_verbose(bound[i])
+            except Exception as e:
+                # check_verbose runs paths check() did not (a repr of a user
+                # object, for one); one entry raising must not cost the others.
+                lines.append(_raised_line(i, e))
+                continue
             if reason.result:
                 lines.append(
-                    f"  [{i}] <guards rejected this call twice and then accepted "
-                    "it here: a guard that does not answer consistently, or "
+                    f"  [{i}] <guards did not accept this call in dispatch and "
+                    "accepted it here: a guard that does not answer consistently, or "
                     "guarded state that changed between those evaluations>"
                 )
                 continue
@@ -1732,12 +1925,37 @@ class AOTCompiledModel:
             lines.append(f"  [{i}] {joined}")
         for hint, at in hinted.items():
             lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
-        lines.append(
-            "Add a ModelInput covering this call, or check whether "
-            "guard_filter_fn kept a guard this call cannot satisfy -- both "
-            "belong to the process that compiles the artifacts, which need not "
-            "be the one that loaded them."
-        )
+        if withheld:
+            lines.append(
+                f"[{raiser}]'s raise, not a guard failure, is what withheld "
+                "the opted-out input(s) above; fix or drop that artifact."
+            )
+        elif raiser is not None:
+            # Same advice with no opt-out to withhold: a tree that raised has to
+            # be fixed whether or not its raise also cost the caller a graph.
+            lines.append(
+                f"[{raiser}]'s guard check raised while checking this call; fix "
+                "or drop that artifact."
+            )
+        # An artifact holding no inputs at all -- which deserialize() accepts --
+        # has no entry to answer, and adding an input is exactly the advice for it.
+        if coverable or not results:
+            lines.append(
+                "Add a ModelInput covering this call, or check whether "
+                "guard_filter_fn kept a guard this call cannot satisfy -- both "
+                "belong to the process that compiles the artifacts, which need "
+                "not be the one that loaded them."
+            )
+        if len(raised) > 1 and not withheld and not coverable:
+            # `not coverable`: no checked tree answered, so every entry line above
+            # is a raise and the advice above is off. Not beside a withheld line,
+            # which has already said what the raise cost, and only where the
+            # raiser line above names one raiser of several: for a single entry
+            # it already says all of this.
+            lines.append(
+                "Every guard tree raised while checking this call; the reasons "
+                "above are those raises, not guards this call failed."
+            )
         return "\n".join(lines)
 
     def serialize(self) -> bytes:
