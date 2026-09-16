@@ -59,6 +59,9 @@ torch::stable::Device cuda_device(torch::headeronly::DeviceType::CUDA, 0);
 ```{doxygenfunction} torch::stable::from_blob(void *data, torch::headeronly::IntHeaderOnlyArrayRef sizes, torch::headeronly::IntHeaderOnlyArrayRef strides, torch::stable::Device device, torch::headeronly::ScalarType dtype, int64_t storage_offset, torch::headeronly::Layout layout)
 ```
 
+```{doxygenfunction} torch::stable::from_file
+```
+
 **Example:**
 
 ```cpp
