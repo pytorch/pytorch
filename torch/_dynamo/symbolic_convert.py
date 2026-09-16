@@ -260,11 +260,9 @@ ExceptionTypes: TypeAlias = (
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
-    The process's first resolution of the name, kept for its lifetime: nothing
-    invalidates the memo, so after a sys.modules handover it is an older object
-    than the live entry. import_source binds it into an empty alias slot
-    regardless, and replaces another writer's same-named binding with it only
-    when it is that entry.
+    Import the named module and cache the result. importlib.import_module()
+    seems to do some filesystem checking to validate the name so not caching
+    this can be slow.
     """
     return importlib.import_module(name)
 
@@ -2384,9 +2382,6 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        # import_source leaves a writer's same-named module in the alias slot
-        # when the memo is not the live entry; the value stays the memo, the
-        # module whose __globals__ _call_impl reads the hook dicts through.
         fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
@@ -2426,14 +2421,11 @@ class InstructionTranslatorBase(
             value = torch.package.package_importer._package_imported_modules[
                 module_name
             ]
-            # A registry lookup, not a memo: the module the name resolves to now.
-            live = True
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
             value = _import_module(module_name)
-            live = module_name in sys.modules and sys.modules[module_name] is value
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope
@@ -2442,8 +2434,7 @@ class InstructionTranslatorBase(
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
         # this checks for (two module names still mangle to one alias).
-        conflict = alias in f_globals and f_globals[alias] is not value
-        if conflict:
+        if alias in f_globals and f_globals[alias] is not value:
             bound = f_globals[alias]
             # __name__ is read out of the instance dict through
             # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
@@ -2489,21 +2480,6 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-        # An empty slot, or one already holding value, takes value.
-        # A writer's same-named module in the slot was the live entry when the
-        # writer ran, and the memo can predate or postdate a handover of the
-        # name since. The memo replaces it only when it is the live entry now:
-        # the graph is specialized on what IMPORT_NAME pushed, the live entry,
-        # and this alias roots its guards.
-        # When neither is live the writer's module stays; the memo would be no
-        # less stale. The guards then read a module the graph was not built
-        # from.
-        # An empty slot has that same blindness whenever the memo is not the
-        # live entry. There the alias has a write side too: on the
-        # get_globals_source_and_value path an inlined STORE_GLOBAL replays
-        # through the alias onto the memo, while the trace read the live
-        # module, the one whose __dict__ is the frame's globals.
-        write_value = not conflict or live
         # Recorded only once the check has passed: the package entry outlives a
         # graph break here, and install() binds every recorded alias.
         if self.package is not None:
@@ -2513,8 +2489,7 @@ class InstructionTranslatorBase(
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
         # trace that graph-breaks or restarts, as does the write install makes
         # to this name.
-        if write_value:
-            f_globals[alias] = value
+        f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
