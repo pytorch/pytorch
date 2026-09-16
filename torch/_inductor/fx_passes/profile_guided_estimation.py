@@ -39,8 +39,6 @@ from torch.utils._ordered_set import OrderedSet
 
 log = logging.getLogger(__name__)
 
-_OpInputMetadata = tuple[tuple[object, ...], ...]
-
 
 def _rank_stride(ranks: tuple[int, ...]) -> int | None:
     """Compute the stride of a sorted rank tuple, or None if non-uniform.
@@ -80,13 +78,13 @@ class OpRecord:
     """A single op observation from the profile (any CPU op with GPU kernels)."""
 
     op_name: str  # normalized name, e.g. "aten::mm", "mylib::my_custom_op"
-    input_shapes: _OpInputMetadata
-    input_strides: _OpInputMetadata
+    input_shapes: tuple[tuple[int, ...], ...]
+    input_strides: tuple[tuple[int, ...], ...]
     dtype: torch.dtype | None
     duration_us: float  # sum of all GPU kernels for this CPU op
 
 
-def _to_nested_tuple(x: object) -> object:
+def _to_nested_tuple(x: Any) -> Any:
     """Recursively convert nested lists to tuples for hashability."""
     if isinstance(x, (list, tuple)):
         return tuple(_to_nested_tuple(i) for i in x)
@@ -118,8 +116,8 @@ class ProfileData:
     _op_index: dict[
         tuple[
             str,
-            _OpInputMetadata,
-            _OpInputMetadata,
+            tuple[tuple[int, ...], ...],
+            tuple[tuple[int, ...], ...],
             torch.dtype | None,
         ],
         float,
@@ -262,15 +260,15 @@ class ProfileData:
             return
         dtype_str = input_types[0] if input_types else ""
         dtype = _dtype_map.get(dtype_str)
-        # Skip empty entries for non-tensor args. Flat entries match the FX lookup
-        # keys; nested TensorList entries remain hashable but cannot match them.
+        # Skip empty entries (non-tensor args like scalars/None) so the
+        # tuples match what _get_node_input_shapes/strides extract from FX nodes.
         shapes = tuple(
-            tuple(_to_nested_tuple(i) for i in d)
+            _to_nested_tuple(d)
             for d in input_dims
             if isinstance(d, (list, tuple)) and d
         )
         strides = tuple(
-            tuple(_to_nested_tuple(i) for i in d)
+            _to_nested_tuple(d)
             for d in input_strides
             if isinstance(d, (list, tuple)) and d
         )
@@ -324,8 +322,8 @@ class ProfileData:
         op_groups: defaultdict[
             tuple[
                 str,
-                _OpInputMetadata,
-                _OpInputMetadata,
+                tuple[tuple[int, ...], ...],
+                tuple[tuple[int, ...], ...],
                 torch.dtype | None,
             ],
             list[float],

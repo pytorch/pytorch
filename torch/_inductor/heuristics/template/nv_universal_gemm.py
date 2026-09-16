@@ -154,21 +154,15 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             log.debug("No heuristic configs found, using first %d kernels", count)
             return kernels[:count]
 
-        # Match kernels to each distinct heuristic config at its best estimate.
-        config_runtimes: dict[ConfigKey, float] = {}
+        # Match kernels to heuristic configs
+        matched: list[tuple] = []
         for cfg in heuristic_configs:
             key = _make_config_key_from_heuristic(cfg)
-            config_runtimes[key] = min(
-                cfg.estimated_runtime, config_runtimes.get(key, float("inf"))
-            )
-
-        matched: list[tuple] = []
-        for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                matched.append((kernel, runtime))
+                matched.append((kernel, cfg.estimated_runtime))
 
         if not matched:
             log.debug(

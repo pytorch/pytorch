@@ -248,9 +248,12 @@ Function& Function::registerFunc(
   static std::unordered_map<c10::QualifiedName, Function>
       upgrader_function_holder;
   c10::QualifiedName name = c10::QualifiedName(qualified_name);
-  auto [it, inserted] = upgrader_function_holder.try_emplace(name, name);
-  if (inserted) {
-    auto& func = it->second;
+  auto found = upgrader_function_holder.find(name);
+  // Register the function if it's not found in the map.
+  if (found == upgrader_function_holder.end()) {
+    auto name_function_pair =
+        upgrader_function_holder.emplace(name, Function(name));
+    auto& func = name_function_pair.first->second;
     for (auto const& inst : instructions) {
       func.append_instruction(inst.op, inst.X, inst.N);
     }
@@ -263,7 +266,8 @@ Function& Function::registerFunc(
     func.set_register_size(register_size);
     return func;
   }
-  return it->second;
+  auto& upgrader_function_in_holder = found->second;
+  return upgrader_function_in_holder;
 }
 
 } // namespace mobile

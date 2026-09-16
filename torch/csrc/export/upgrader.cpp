@@ -1,8 +1,10 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/export/upgrader.h>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 namespace torch::_export {
@@ -99,7 +101,7 @@ void registerUpgrader(
   while (std::getline(ss, component, '.')) {
     TORCH_CHECK_VALUE(
         !component.empty(), "Empty component in keypath: ", dot_keypath);
-    keypath_vector.push_back(std::move(component));
+    keypath_vector.push_back(component);
   }
 
   TORCH_CHECK_VALUE(!keypath_vector.empty(), "Empty keypath provided");
@@ -142,7 +144,7 @@ bool deregisterUpgrader(int version, const std::string& dot_keypath) {
   while (std::getline(ss, component, '.')) {
     TORCH_CHECK_VALUE(
         !component.empty(), "Empty component in keypath: ", dot_keypath);
-    keypath_vector.push_back(std::move(component));
+    keypath_vector.push_back(component);
   }
 
   TORCH_CHECK_VALUE(!keypath_vector.empty(), "Empty keypath provided");

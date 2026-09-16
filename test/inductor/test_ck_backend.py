@@ -2,7 +2,6 @@
 import contextlib
 import logging
 import os
-import re
 import shlex
 import subprocess
 import tempfile
@@ -46,17 +45,6 @@ log = logging.getLogger(__name__)
 _test_env = {}
 
 
-def _dtype_test_name(dtype):
-    return {torch.float16: "float16", torch.bfloat16: "bfloat16"}[dtype]
-
-
-_parametrize_dtype = parametrize(
-    "dtype",
-    (torch.float16, torch.bfloat16),
-    name_fn=_dtype_test_name,
-)
-
-
 @instantiate_parametrized_tests
 class TestCKBackend(TestCase):
     def setUp(self):
@@ -86,24 +74,22 @@ class TestCKBackend(TestCase):
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize(
-        "max_autotune_gemm_backends,dtype",
+        "max_autotune_gemm_backends",
         (
-            # CK float16 is covered by test_max_autotune_precompile_preselected
-            # and test_max_autotune_addmm. Only CKTILE needs a float16 cell here.
-            subtest(
-                ("CK", torch.bfloat16),
-                name="standalone_ck",
-                decorators=[skipIfRocmVersionAtLeast([7, 14])],
-            ),
-            subtest(("CKTILE", torch.float16), name="standalone_cktile_float16"),
-            subtest(("CKTILE", torch.bfloat16), name="standalone_cktile_bfloat16"),
-            subtest(("ATen,CK", torch.bfloat16), name="fallback"),
+            subtest("CK", decorators=[skipIfRocmVersionAtLeast([7, 14])]),
+            "CKTILE",
+            "ATen,CK",
         ),
+        name_fn=lambda b: {
+            "CK": "standalone_ck",
+            "CKTILE": "standalone_cktile",
+            "ATen,CK": "fallback",
+        }[b],
     )
     @parametrize("autotune_in_subproc", (True, False))
     @parametrize("use_aoti", (True, False))
     def test_max_autotune_precompile_matmul(
-        self, max_autotune_gemm_backends, dtype, autotune_in_subproc, use_aoti
+        self, max_autotune_gemm_backends, autotune_in_subproc, use_aoti
     ):
         """
         Make sure autotuning mm doesn't crash.
@@ -112,7 +98,7 @@ class TestCKBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        tensor_options = {"device": "cuda", "dtype": dtype}
+        tensor_options = {"device": "cuda", "dtype": torch.bfloat16}
 
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
@@ -350,7 +336,11 @@ class TestCKBackend(TestCase):
         ([4096, 2048], [2048], [4096, 1]),
         name_fn=lambda x_shape: f"x_shape_{'x'.join(map(str, x_shape))}",
     )
-    @_parametrize_dtype
+    @parametrize(
+        "dtype",
+        (torch.float16, torch.bfloat16),
+        name_fn=lambda d: {torch.float16: "float16", torch.bfloat16: "bfloat16"}[d],
+    )
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape, dtype):
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
@@ -627,21 +617,26 @@ class TestCKTileUniversalGemmTemplate(TestCase):
         # _ck_tile_universal_gemm_v2_api is functools.cache'd on the search path.
         self._ck_tile._ck_tile_universal_gemm_v2_api.cache_clear()
 
-    def _make_template(self, m=2048, n=2048, k=2048, *, dtype):
+    # ops() names the half-precision instances "FP16", but _TORCH_DTYPE_TO_CK maps
+    # torch.float16 to "F16", so check_dtypes never matches them. bfloat16 is the
+    # only dtype for which CK-Tile instances are currently reachable.
+    _DTYPE = torch.bfloat16
+    _CK_DTYPE = "BF16"
+
+    def _make_template(self, m=2048, n=2048, k=2048):
         device = torch.device("cuda")
-        X = Buffer(name="X", layout=FixedLayout(device, dtype, [m, k]))
-        W = Buffer(name="W", layout=FixedLayout(device, dtype, [k, n]))
+        X = Buffer(name="X", layout=FixedLayout(device, self._DTYPE, [m, k]))
+        W = Buffer(name="W", layout=FixedLayout(device, self._DTYPE, [k, n]))
         return self._ck_tile.CKTileGemmTemplate(
-            [X, W], FixedLayout(device, dtype, [m, n])
+            [X, W], FixedLayout(device, self._DTYPE, [m, n])
         )
 
-    def _find_ck_tile_op(self, pipeline="CompV3", epilogue="Default", *, dtype):
-        ck_dtype = self._ck_tile.CKTileGemmTemplate._TORCH_DTYPE_TO_CK[dtype]
+    def _find_ck_tile_op(self, pipeline="CompV3", epilogue="Default"):
         for op in self._ck_tile.ops():
             if (
                 (op.pipeline, op.epilogue) == (pipeline, epilogue)
                 and (op.layout_a, op.layout_b, op.layout_c) == ("Row", "Row", "Row")
-                and op.datatype_a == ck_dtype
+                and op.datatype_a == self._CK_DTYPE
             ):
                 return op
         raise AssertionError(f"no CK-Tile gemm op for {pipeline=} {epilogue=}")
@@ -805,27 +800,10 @@ struct FlatmmPipelineProblem
         with self._probe_env() as rocm_home:
             self.assertFalse(self._probe(rocm_home))
 
-    def test_ops_dtype_labels_agree_with_maps(self):
-        template_cls = self._ck_tile.CKTileGemmTemplate
-        globals_src = self._make_template(dtype=torch.float16).globals().getvalue()
-        cpp_aliases = set(re.findall(r"using (\w+) =", globals_src))
-        labels = {
-            dt
-            for op in self._ck_tile.ops()
-            for dt in (op.datatype_a, op.datatype_b, op.datatype_c)
-        }
-        self.assertTrue(labels)
-        self.assertEqual(labels, set(self._ck_tile.GEMM_DTYPES))
-        # emit_ck_instance splices these labels into `using ADataType = ...;`, so a
-        # label without a rendered alias produces HIP that does not compile.
-        self.assertLessEqual(labels, cpp_aliases)
-        self.assertLessEqual(labels, set(template_cls.ck_dtype_to_size))
-
-    @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))
-    def test_emit_v1_legacy_instance(self, dtype, epilogue):
-        code = self._make_template(dtype=dtype).emit_ck_instance(
-            self._find_ck_tile_op(epilogue=epilogue, dtype=dtype), use_v2_api=False
+    def test_emit_v1_legacy_instance(self, epilogue):
+        code = self._make_template().emit_ck_instance(
+            self._find_ck_tile_op(epilogue=epilogue), use_v2_api=False
         )
         self.assertIn("has_hot_loop_v", code)
         # "GemmPipelineProblem" alone would also match "UniversalGemmPipelineProblem",
@@ -833,11 +811,10 @@ struct FlatmmPipelineProblem
         self.assertIn("ck_tile::GemmPipelineProblem<", code)
         self.assertIn("BaseGemmPipeline", code)
 
-    @_parametrize_dtype
     @parametrize("epilogue", ("Default", "CShuffle"))
-    def test_emit_v2_simplified_instance(self, dtype, epilogue):
-        code = self._make_template(dtype=dtype).emit_ck_instance(
-            self._find_ck_tile_op(epilogue=epilogue, dtype=dtype), use_v2_api=True
+    def test_emit_v2_simplified_instance(self, epilogue):
+        code = self._make_template().emit_ck_instance(
+            self._find_ck_tile_op(epilogue=epilogue), use_v2_api=True
         )
         self.assertNotIn("has_hot_loop_v", code)
         self.assertNotIn("BaseGemmPipeline", code)
@@ -863,14 +840,13 @@ struct FlatmmPipelineProblem
         self.assertNotIn("BaseGemmPipeline", code)
         self.assertIn("Kernel::GridSize", code)
 
-    @_parametrize_dtype
     @parametrize("use_v2_api", (True, False))
-    def test_cshuffle_epilogue_offered_only_with_v2_api(self, dtype, use_v2_api):
+    def test_cshuffle_epilogue_offered_only_with_v2_api(self, use_v2_api):
         """
         Pre-change ck_tile cannot compile the CShuffle epilogue we emit, so those
         instances must not reach autotuning and burn a compile each.
         """
-        template = self._make_template(dtype=dtype)
+        template = self._make_template()
         with (
             config.patch({"rocm.ck_tile_max_profiling_configs": None}),
             patch.object(
@@ -883,10 +859,9 @@ struct FlatmmPipelineProblem
         self.assertIn("Default", epilogues)
         self.assertEqual("CShuffle" in epilogues, use_v2_api)
 
-    @_parametrize_dtype
     @parametrize("pipeline", ("CompV3", "CompV4", "Mem"))
     @parametrize("epilogue", ("Default", "CShuffle"))
-    def test_offered_instance_compiles(self, dtype, epilogue, pipeline):
+    def test_offered_instance_compiles(self, epilogue, pipeline):
         """
         Every instance filter_op accepts must compile against the ck_tile headers
         installed on this host, whichever universal GEMM API they expose.
@@ -894,8 +869,8 @@ struct FlatmmPipelineProblem
         rocm = config.rocm
         if self._ck_tile._find_ck_tile_header(rocm.rocm_home, rocm.ck_dir) is None:
             raise unittest.SkipTest("ck_tile headers are not installed")
-        template = self._make_template(dtype=dtype)
-        op = self._find_ck_tile_op(pipeline=pipeline, epilogue=epilogue, dtype=dtype)
+        template = self._make_template()
+        op = self._find_ck_tile_op(pipeline=pipeline, epilogue=epilogue)
         if template.filter_op(op) is None:
             raise unittest.SkipTest(f"{pipeline}/{epilogue} not offered on this ROCm")
         use_v2_api = self._probe(config.rocm.rocm_home)

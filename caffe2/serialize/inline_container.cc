@@ -11,6 +11,7 @@
 #include <thread>
 
 #include <c10/core/Allocator.h>
+#include <c10/core/Backend.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>

@@ -137,8 +137,7 @@ def fully_shard(
     assigned to a group from an earlier call on a submodule. This means that
     :meth:`fully_shard` should be called bottom-up on your model. Each group's
     parameters are all-gathered in one collective. Its gradients are normally
-    reduce-scattered in one collective; if the mixed precision policy resolves
-    to multiple reduction dtypes, FSDP issues one reduce-scatter per dtype.
+    reduce-scattered in one collective.
     Partitioning the model into multiple groups ("layer by layer") allows for
     peak memory savings and communication/computation overlap. Users generally
     should *not* call :meth:`fully_shard` only on the topmost root module.
@@ -420,6 +419,20 @@ class FSDPModule:
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
 
+        After a backward without synchronization, ``model.parameters()`` exposes
+        the accumulated gradients as DTensors with ``Partial("avg")`` placements
+        on the data-parallel mesh dimensions. Their local tensors contain the
+        unsharded gradients in the effective ``MixedPrecisionPolicy.reduce_dtype``.
+        The visible parameter's ``grad_dtype`` temporarily matches this dtype;
+        synchronization restores the sharded gradient dtype specified before
+        :func:`fully_shard`. Clearing these gradients with ``zero_grad()`` clears
+        the accumulation. With a custom gradient divide factor, the placements
+        are ``Partial("sum")`` and the factor is applied during synchronization.
+        Before starting unsynchronized fp16 accumulation, clear any previously
+        reduced gradients with ``zero_grad(set_to_none=True)``.
+        This is also required for ``spmd_types`` gradients whose non-DP
+        placements differ from the parameter's placements.
+
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
                 module's parameters.
@@ -496,6 +509,9 @@ class FSDPModule:
         be used during gradient accumulation to trade off higher memory for
         reduced communication since the unsharded parameters do not need to be
         re-all-gathered before the next forward.
+
+        When retaining unsharded parameters, call :meth:`reshard` on each FSDP
+        module on every rank before updating its sharded parameters.
 
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after
@@ -596,10 +612,6 @@ class FSDPModule:
         stream: torch.cuda.Stream | None = None,
     ):
         """
-        All parameters must use the same effective reduction dtype. All-reduce
-        hooks are not supported when per-parameter mixed precision configures
-        multiple reduction dtypes.
-
         Args:
             hook (Callable[[torch.Tensor], None]): User-defined all-reduce hook
                 with expected signature ``hook(reduce_output: torch.Tensor) -> None``
@@ -618,8 +630,6 @@ class FSDPModule:
                 "The hook would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
-            fsdp_param_group._init_mp_dtypes()
-            fsdp_param_group._validate_all_reduce_hook()
             fsdp_param_group._all_reduce_hook = hook
             if stream is not None:
                 if fsdp_param_group._is_hsdp:
@@ -726,9 +736,7 @@ class FSDPModule:
         **fresh** buffer instead of waiting -- removing the stall -- at the cost
         of extra peak memory for the retained buffers. The copy-in stays on the
         compute stream; there is no extra stream and no ``record_stream``. This
-        helps only when the reduce-scatter is exposed. If a parameter group has
-        multiple reduction dtypes, then each in-flight group retains one buffer
-        per dtype and counts as one slot toward this limit.
+        helps only when the reduce-scatter is exposed.
 
         Args:
             max_input_buffers (int): Max reduce-scatter input buffers retained in
@@ -895,8 +903,14 @@ class FSDPModule:
     def _apply(self, *args: Any, **kwargs: Any) -> Any:
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
-        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         state = self._get_fsdp_state()
+        with torch.no_grad():
+            for group in state._fsdp_param_groups:
+                for param in group.fsdp_params:
+                    if not param._sharded_grad_dtype_initialized:
+                        # Conversion may replace the parameter's policy metadata.
+                        param.reset_sharded_param()
+        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         if not state._fsdp_param_groups:
             return ret
         # TODO: Remove this padding logic once DTensor pads the local tensor:

@@ -2,7 +2,6 @@
 
 #include <c10/util/Synchronized.h>
 #include <c10/util/WaitCounterDynamicBackend.h>
-#include <c10/util/string_view.h>
 
 #include <chrono>
 #include <memory>
@@ -88,14 +87,12 @@ std::unique_ptr<WaitCounterBackendIf> getDynamicBackend(std::string_view key) {
 class WaitCounterImpl {
  public:
   static WaitCounterImpl& getInstance(std::string_view key) {
-    static auto& implMapSynchronized = *new Synchronized<std::unordered_map<
-        std::string,
-        std::unique_ptr<WaitCounterImpl>,
-        TransparentStringHash,
-        std::equal_to<>>>();
+    static auto& implMapSynchronized = *new Synchronized<
+        std::unordered_map<std::string, std::unique_ptr<WaitCounterImpl>>>();
 
     return *implMapSynchronized.withLock([&](auto& implMap) {
-      if (auto implIt = implMap.find(key); implIt != implMap.end()) {
+      if (auto implIt = implMap.find(std::string(key));
+          implIt != implMap.end()) {
         return implIt->second.get();
       }
 

@@ -201,16 +201,14 @@ std::optional<IValue> toIValueProp(const Value* v) {
     auto listType = v->node()->output()->type();
     auto containedType = listType->containedTypes().at(0);
     if (containedType == IntType::get()) {
-      return IValue(fmap(
-          std::move(genericList), [](const IValue& v) { return v.toInt(); }));
+      return IValue(
+          fmap(genericList, [](const IValue& v) { return v.toInt(); }));
     } else if (containedType == FloatType::get()) {
-      return IValue(fmap(std::move(genericList), [](const IValue& v) {
-        return v.toDouble();
-      }));
+      return IValue(
+          fmap(genericList, [](const IValue& v) { return v.toDouble(); }));
     } else if (containedType->isSubtypeOf(*TensorType::get())) {
-      return IValue(fmap(std::move(genericList), [](const IValue& v) {
-        return v.toTensor();
-      }));
+      return IValue(
+          fmap(genericList, [](const IValue& v) { return v.toTensor(); }));
     } else {
       return std::nullopt;
     }

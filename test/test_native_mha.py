@@ -10,16 +10,12 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     skipMeta,
+    skipXPUIf,
 )
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, HardwareClassification
 from torch.nn.attention import SDPBackend
 
-class TestMHADevice(TestCase):
+class TestMHADeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @torch.no_grad()
@@ -113,6 +109,7 @@ class TestMHADevice(TestCase):
     @dtypes(torch.float)
     @skipMeta
     @onlyAccelerator
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2182")
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -353,7 +350,7 @@ class TestMHADevice(TestCase):
         )
 
 
-instantiate_device_type_tests(TestMHADevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMHADeviceType, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

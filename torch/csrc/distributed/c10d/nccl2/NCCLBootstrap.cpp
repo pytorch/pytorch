@@ -2,6 +2,7 @@
 
 #ifdef USE_C10D_NCCL
 
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <fmt/core.h>
 #include <nccl.h>
@@ -10,6 +11,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 #include <cstring>
 #include <exception>
 #include <set>
@@ -65,10 +67,11 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   if (rootIndex >= 0) {
     ncclUniqueId uniqueId;
     const ncclResult_t ncclErr = nccl_api_->getUniqueId(&uniqueId);
-    TORCH_CHECK(
-        ncclErr == ncclSuccess,
-        "Failed to get NCCL unique ID: ",
-        nccl_api_->getErrorString(ncclErr));
+    if (ncclErr != ncclSuccess) {
+      throw std::runtime_error(
+          "Failed to get NCCL unique ID: " +
+          std::string(nccl_api_->getErrorString(ncclErr)));
+    }
 
     std::vector<uint8_t> vec(
         reinterpret_cast<uint8_t*>(&uniqueId),
@@ -80,9 +83,9 @@ std::vector<ncclUniqueId> NCCLBootstrap::exchangeUniqueIds(
   auto values = store->multiGet(keys);
   std::vector<ncclUniqueId> uniqueIds(numIds);
   for (int index = 0; index < numIds; ++index) {
-    TORCH_CHECK(
-        values[index].size() == sizeof(ncclUniqueId),
-        "Invalid NCCL unique ID size");
+    if (values[index].size() != sizeof(ncclUniqueId)) {
+      throw std::runtime_error("Invalid NCCL unique ID size");
+    }
     std::memcpy(&uniqueIds[index], values[index].data(), sizeof(ncclUniqueId));
   }
   return uniqueIds;
@@ -224,10 +227,11 @@ ncclComm_t NCCLBootstrap::createNcclComm(
     ncclErr = nccl_api_->commInitRankConfig(
         &nccl_comm, comm_size_, uniqueId, rank_, &config);
   }
-  TORCH_CHECK(
-      nccl_comm != nullptr,
-      "Failed to initialize NCCL communicator: ",
-      nccl_api_->getErrorString(ncclErr));
+  if (nccl_comm == nullptr) {
+    throw std::runtime_error(
+        "Failed to initialize NCCL communicator: " +
+        std::string(nccl_api_->getErrorString(ncclErr)));
+  }
   try {
     waitForNcclCompletion(
         *nccl_api_,

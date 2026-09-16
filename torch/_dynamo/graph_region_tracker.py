@@ -54,7 +54,7 @@ GlobalStateKey = tuple[
     tuple[bool, bool],
     torch.dtype,
     bool,
-    str,
+    bool,
     bool,
     bool,
 ]
@@ -71,7 +71,7 @@ def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
 
 def _extract_tensor_metadata_for_node_hash(
     x: torch.Tensor,
-) -> tuple[Callable[[T], T], tuple[object, ...]]:
+) -> tuple[Callable[[T], T], tuple[Any, ...]]:
     from torch._inductor.codecache import _ident, extract_tensor_metadata_for_cache_key
 
     out = []
@@ -104,7 +104,7 @@ class InputPickler(pickle.Pickler):
         )
         self.fast = True
 
-    def dumps(self, obj: object) -> bytes:
+    def dumps(self, obj: Any) -> bytes:
         """
         Pickle an object and return a byte string.
         """
@@ -118,7 +118,7 @@ class InputPickler(pickle.Pickler):
             self._stream.truncate(0)
 
 
-def _extract_args(arg: object) -> object:
+def _extract_args(arg: Any) -> Any:
     if isinstance(arg, Node):
         return arg.meta.get("example_value")
     elif isinstance(arg, (torch.Tensor, int)):
@@ -129,7 +129,7 @@ def _extract_args(arg: object) -> object:
 
 def _normalize_args(
     node: Node,
-) -> tuple[tuple[str, ...], tuple[object, ...]]:
+) -> tuple[tuple[str, ...], tuple[Any | None, ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=operator.itemgetter(0))
     sorted_keys = tuple(sorted(node.kwargs.keys()))
@@ -139,7 +139,7 @@ def _normalize_args(
 
 
 def _sort_with_ref_region(
-    index_to_rank: dict[int, int], regions: list[list[T]]
+    index_to_rank: dict[int, int], regions: list[list[Any]]
 ) -> None:
     # sort topologically
     # we need to handle edge cases where some nodes have no dependencies
@@ -159,7 +159,7 @@ def get_global_state_key() -> GlobalStateKey:
         torch._C._get_cublas_allow_bf16_reduced_precision_reduction(),
         torch.get_default_dtype(),
         torch.are_deterministic_algorithms_enabled(),
-        torch._C._get_fp32_precision_getter("cuda", "matmul"),
+        torch._C._get_cublas_allow_tf32(),
         torch.is_deterministic_algorithms_warn_only_enabled(),
         torch._C._autograd._saved_tensors_hooks_is_enabled(),  # type: ignore[attr-defined]
     )

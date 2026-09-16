@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #include <sstream>
@@ -83,7 +82,9 @@ struct TemplateEnv {
 
  private:
   [[noreturn]] void notFound(const std::string& k) const {
-    TORCH_CHECK(false, "key not found: ", k);
+    std::stringstream ss;
+    ss << "key not found: " << k;
+    throw std::logic_error(std::move(ss).str());
   }
 
   std::unordered_map<std::string, std::string> strings_;
@@ -149,7 +150,7 @@ struct CodeTemplate {
   using string_list = std::vector<std::string>;
   char charAt(size_t p) const {
     if (p >= template_text.size())
-      TORCH_CHECK(false, "EOS found in key");
+      throw std::logic_error("EOS found in key");
     return template_text[p];
   }
   size_t parseKey(
@@ -172,7 +173,7 @@ struct CodeTemplate {
         pos++;
       }
       if (charAt(pos) != '}')
-        TORCH_CHECK(false, "missing terminating '}'");
+        throw std::logic_error("missing terminating '}'");
       pos++;
       return pos;
     } else {

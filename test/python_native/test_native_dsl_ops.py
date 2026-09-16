@@ -79,8 +79,7 @@ class TestNativeDSLOps(TestCase):
                 "torch._native.flydsl_utils",
                 [
                     "_check_runtime_available",
-                    "_get_flydsl_device_arch",
-                    "_is_supported_arch",
+                    "_resolve_rocm_arch",
                     "_version_is_ok",
                     "check_native_jit_disabled",
                     "check_native_version_skip",

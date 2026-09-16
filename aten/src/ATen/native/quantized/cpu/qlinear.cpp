@@ -1135,11 +1135,10 @@ static at::Tensor linear_int8_with_onednn_weight(
           context_cache_enabled && !(is_fp8 && !cpuinfo_has_x86_amx_fp16());
 #endif
   if (allow_cache) {
-    if (auto it = qlinear_forward_params_map.find(cache_key);
-        it != qlinear_forward_params_map.end()) {
+    if (qlinear_forward_params_map.contains(cache_key)) {
       auto input_contig =
           dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-      auto& params = it->second;
+      auto& params = qlinear_forward_params_map.at(cache_key);
       if (params.K == K && params.N == N) {
         at::Tensor output = binary_post_op == "sum"
             ? other.value()

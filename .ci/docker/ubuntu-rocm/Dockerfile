@@ -5,7 +5,6 @@ FROM ubuntu:${UBUNTU_VERSION}
 ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
-ENV PIP_NO_CACHE_DIR=1
 
 # Set AMD gpu targets to build for
 ARG PYTORCH_ROCM_ARCH

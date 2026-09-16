@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/ScalarOps.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Pool.h>
 
@@ -140,7 +141,7 @@ const Tensor& indices) {
   const int64_t outputHeight_for_shape_check = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth_for_shape_check = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  pool2d_backward_shape_check(
+  max_pool2d_backward_shape_check(
     input,
     gradOutput,
     indices,

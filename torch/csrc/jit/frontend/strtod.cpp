@@ -4,6 +4,7 @@
 
 #include <c10/macros/Macros.h>
 #include <clocale>
+#include <cstdlib>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <xlocale.h>

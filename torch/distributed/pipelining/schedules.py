@@ -17,7 +17,6 @@ from typing import Any, cast, Literal, NamedTuple, Protocol
 import torch
 import torch.distributed as dist
 from torch._dynamo import OptimizedModule
-from torch.cuda.graph_annotations import mark_kernels
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
@@ -2877,14 +2876,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 action,
             )
             try:
-                profiler_name = _get_profiler_function_name(action)
-                # backward=False: each backward action gets its own scope below, so
-                # letting a forward scope also claim its backward kernels would
-                # double-attribute them.
-                with (
-                    record_function(profiler_name),
-                    mark_kernels(profiler_name, backward=False),
-                ):
+                with record_function(_get_profiler_function_name(action)):
                     if action.computation_type in self._comp_type_to_function_map:
                         ctx = _PipelineContext(
                             self,

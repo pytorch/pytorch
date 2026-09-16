@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
 #include <string_view>
+#include <tuple>
 
 namespace c10d::nccl2 {
 
@@ -154,11 +155,9 @@ ncclResult_t DefaultNcclApi::commRegister(
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
   return ncclCommRegister(comm, buffer, size, handle);
 #else
-  TORCH_CHECK(
-      false,
-      fmt::format(
-          "NCCL version {} does not support ncclCommRegister API",
-          NCCL_VERSION_CODE));
+  throw std::runtime_error(fmt::format(
+      "NCCL version {} does not support ncclCommRegister API",
+      NCCL_VERSION_CODE));
 #endif
 }
 
@@ -167,11 +166,9 @@ ncclResult_t DefaultNcclApi::commDeregister(ncclComm_t comm, void* handle) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
   return ncclCommDeregister(comm, handle);
 #else
-  TORCH_CHECK(
-      false,
-      fmt::format(
-          "NCCL version {} does not support ncclCommDeregister API",
-          NCCL_VERSION_CODE));
+  throw std::runtime_error(fmt::format(
+      "NCCL version {} does not support ncclCommDeregister API",
+      NCCL_VERSION_CODE));
 #endif
 }
 
@@ -335,11 +332,8 @@ ncclResult_t DefaultNcclApi::memAlloc(void** buff, size_t size) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
   return ncclMemAlloc(buff, size);
 #else
-  TORCH_CHECK(
-      false,
-      fmt::format(
-          "NCCL version {} does not support ncclMemAlloc API",
-          NCCL_VERSION_CODE));
+  throw std::runtime_error(fmt::format(
+      "NCCL version {} does not support ncclMemAlloc API", NCCL_VERSION_CODE));
 #endif
 }
 
@@ -348,11 +342,8 @@ ncclResult_t DefaultNcclApi::memFree(void* buff) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
   return ncclMemFree(buff);
 #else
-  TORCH_CHECK(
-      false,
-      fmt::format(
-          "NCCL version {} does not support ncclMemFree API",
-          NCCL_VERSION_CODE));
+  throw std::runtime_error(fmt::format(
+      "NCCL version {} does not support ncclMemFree API", NCCL_VERSION_CODE));
 #endif
 }
 

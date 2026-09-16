@@ -68,9 +68,7 @@ class BottomHalfLSTMPruner(BaseStructuredSparsifier):
                 mask.data = new_mask.data
 
 
-class TestSaliencyPrunerDevice(TestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
+class TestSaliencyPruner(TestCase):
     @dtypes(torch.float)
     def test_saliency_pruner_update_mask(self, device, dtype):
         """Test that we prune out the row with the lowest saliency (first row)"""

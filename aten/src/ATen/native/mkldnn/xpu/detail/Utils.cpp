@@ -1,5 +1,4 @@
 #include <ATen/Context.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 

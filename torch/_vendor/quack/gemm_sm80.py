@@ -12,9 +12,9 @@ import cutlass.cute as cute
 import cutlass.pipeline as pipeline
 from cutlass.cute.nvgpu import warp
 
-from torch._vendor.quack.gemm_base import GemmBase, NamedBarrierGemm
-from torch._vendor.quack.tile_scheduler import TileSchedulerOptions
-from torch._vendor.quack.varlen_utils import VarlenArguments
+from .gemm_base import GemmBase, NamedBarrierGemm
+from .tile_scheduler import TileSchedulerOptions
+from .varlen_utils import VarlenArguments
 
 
 class GemmSm80(GemmBase):
@@ -145,9 +145,6 @@ class GemmSm80(GemmBase):
         scheduler_args: TileSchedulerOptions,
         varlen_args: Optional[VarlenArguments],
         stream: cuda.CUstream,
-        # unified signature across archs; blockscaled is SM120-only
-        mSFA: Optional[cute.Tensor] = None,
-        mSFB: Optional[cute.Tensor] = None,
+        trace_ptr: Optional[cutlass.Int64] = None,
     ):
-        assert mSFA is None and mSFB is None, "mSFA/mSFB require a blockscaled GEMM"
         raise NotImplementedError("Gemm Sm80 is not implemented yet")

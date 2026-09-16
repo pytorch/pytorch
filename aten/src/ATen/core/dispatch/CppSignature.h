@@ -4,7 +4,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/Type.h>
-#include <cstring>
 #include <typeindex>
 
 namespace c10::impl {
@@ -48,7 +47,7 @@ class TORCH_API CppSignature final {
     // linking libraries of different compilers together, they might have
     // different ways to serialize a type name. That, together with a missing
     // RTLD_GLOBAL, would still fail this.
-    if (0 == std::strcmp(lhs.signature_.name(), rhs.signature_.name())) {
+    if (0 == strcmp(lhs.signature_.name(), rhs.signature_.name())) {
       return true;
     }
 

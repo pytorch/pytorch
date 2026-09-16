@@ -25,8 +25,6 @@ inline void call_c10_accelerator_check_implementation(
 
 AOTITorchError torch_get_current_cuda_blas_handle(void** ret_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    // Internal ATen operations restore the handle's default workspace before
-    // releasing their eager workspace allocations.
     *(cublasHandle_t*)(ret_handle) = at::cuda::getCurrentCUDABlasHandle();
   });
 }

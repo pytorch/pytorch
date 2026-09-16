@@ -8,8 +8,6 @@ install_ubuntu() {
     apt-get install -y --no-install-recommends kmod libc++1 libc++abi1
     # FIXME: Needed for rocSHMEM in ROCm7.14 since it had a dependency on libnuma.so
     apt-get install -y libnuma-dev
-    # AOTriton configure calls pkg_search_module(liblzma); liblzma-dev provides the .pc file.
-    apt-get install -y --no-install-recommends liblzma-dev
 
     install_rocm
 

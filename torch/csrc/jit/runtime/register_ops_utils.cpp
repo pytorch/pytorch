@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <limits>
-#include <numeric>
 
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -71,8 +70,10 @@ template <>
 void listSort<at::Tensor>(Stack& stack) {
   bool reverse = pop(stack).toBool();
   c10::List<at::Tensor> list = pop(stack).toTensorList();
-  std::ranges::sort(
-      list, [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
+  std::sort(
+      list.begin(),
+      list.end(),
+      [reverse](const at::Tensor& a, const at::Tensor& b) -> bool {
         // "strict weak ordering" issue - see other sort
         if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
           return false;
@@ -85,9 +86,12 @@ template <>
 void listCopyAndSort<at::Tensor>(Stack& stack) {
   c10::List<at::Tensor> list = pop(stack).toTensorList();
   auto list_copied = list.copy();
-  std::ranges::sort(list_copied, [](const at::Tensor& a, const at::Tensor& b) {
-    return at::native::is_nonzero(a.lt(b));
-  });
+  std::sort(
+      list_copied.begin(),
+      list_copied.end(),
+      [](const at::Tensor& a, const at::Tensor& b) {
+        return at::native::is_nonzero(a.lt(b));
+      });
   push(stack, list_copied);
 }
 
@@ -136,7 +140,7 @@ int64_t partProduct(int n, int m) {
     return (int64_t)n;
   if (m == (n + 2))
     return (int64_t)n * m;
-  auto k = std::midpoint(n, m);
+  auto k = n + (m - n) / 2; // Overflow-safe midpoint
   if ((k & 1) != 1)
     k = k - 1;
   return partProduct(n, k) * partProduct(k + 2, m);
@@ -187,7 +191,7 @@ void listAppend(Stack& stack) {
 void listReverse(Stack& stack) {
   c10::List<IValue> list = pop(stack).to<c10::List<IValue>>();
 
-  std::ranges::reverse(list);
+  std::reverse(list.begin(), list.end());
 }
 
 void listPopImpl(Stack& stack, const char* empty_message) {

@@ -210,7 +210,7 @@ log = logging.getLogger(__name__)
 #
 # The first instantiated test calls the original test_car() with the OpInfo
 #   for torch.add as its "op" argument, the string 'cpu' for its "device" argument,
-#   and the dtype torch.float32 for its "dtype" argument. The second instantiated
+#   and the dtype torch.float32 for is "dtype" argument. The second instantiated
 #   test calls the test_car() with the OpInfo for torch.sub, a CUDA device string
 #   like 'cuda:0' or 'cuda:1' for its "device" argument, and the dtype
 #   torch.int64 for its "dtype argument."
@@ -2251,17 +2251,6 @@ def expectedFailureMPS(fn):
 
 def expectedFailureMPSComplex(fn):
     return expectedFailure("mps", torch.complex64)(fn)
-
-
-def expectedFailureMPSPre27(fn):
-    import platform
-
-    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
-    if not version or version < 1.0:  # cpu or other unsupported device
-        return fn
-    if version < 27.0:
-        return expectedFailure("mps")(fn)
-    return fn
 
 
 def expectedFailureMPSPre15(fn):

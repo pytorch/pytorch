@@ -28,7 +28,9 @@ void initializeQSchemes() {
 
 PyObject* getTHPQScheme(at::QScheme qscheme) {
   auto qscheme_ = thp_qscheme_array[static_cast<int>(qscheme)];
-  TORCH_CHECK_VALUE(qscheme_, "unsupported QScheme");
+  if (!qscheme_) {
+    throw std::invalid_argument("unsupported QScheme");
+  }
   return qscheme_;
 }
 } // namespace torch::utils

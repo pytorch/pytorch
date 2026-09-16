@@ -2,8 +2,10 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
 
 
+#include <cstdlib>
 
 namespace at {
 

@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/string_tests.py b/test/cpython/v3_13/string_tests.py
-index 9bb0ce7bb57f8bb418c562424e0fb56ea17c21eb..648257dee259df7b3094aced951edff935a4d52b 100644
+index 9bb0ce7bb57..648257dee25 100644
 --- a/test/cpython/v3_13/string_tests.py
 +++ b/test/cpython/v3_13/string_tests.py
 @@ -1,3 +1,16 @@

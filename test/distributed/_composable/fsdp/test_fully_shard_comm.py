@@ -47,10 +47,6 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-    onlyCUDA,
-)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -75,7 +71,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
-    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -85,7 +80,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 from torch.testing._internal.inductor_utils import skipCUDAIf
-from torch.utils._python_dispatch import TorchDispatchMode
 
 
 c10d_ops = torch.ops.c10d
@@ -289,7 +283,12 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
         # Run the foreach reduce-scatter (including copy-in and view-out)
         torch.manual_seed(42)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        # Keep sums exact in fp16 across the 128 threaded ranks.
+        unsharded_grads = [
+            torch.full_like(param, self.rank % 2, dtype=reduce_scatter_dtype)
+            for param in orig_params
+        ]
+        reduced_grads = [grad.clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
@@ -329,7 +328,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
-        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
@@ -341,7 +339,10 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
-            self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+            self.assertEqual(
+                sharded_grad.full_tensor(),
+                reduced_grad.to(fsdp_param.sharded_grad_dtype),
+            )
 
 
 class TestFullyShardCommunication(FSDPTest):
@@ -2052,81 +2053,10 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
-class TestMixedDtypeChunkCat(TestCase):
-    def test_mixed_dtype_chunk_cat(self, device):
-        num_chunks = 4
-        inputs = [
-            torch.randn(2, 17, 3, device=device, dtype=torch.bfloat16),
-            torch.randn(2, 10, 3, device=device, dtype=torch.float32),
-        ]
-        fp32_inputs = [tensor.float() for tensor in inputs]
-        expected = torch._chunk_cat(fp32_inputs, dim=1, num_chunks=num_chunks)
-        actual = torch.empty_like(expected)
-        torch.ops.fsdp.chunk_cat(inputs, dim=1, num_chunks=num_chunks, out=actual)
-        self.assertEqual(actual, expected)
-
-    def test_mixed_dtype_chunk_cat_functionalization(self, device):
-        inputs = [
-            torch.arange(3, device=device, dtype=torch.bfloat16),
-            torch.arange(4, device=device, dtype=torch.float32),
-        ]
-        expected = torch._chunk_cat(
-            [tensor.float() for tensor in inputs], dim=0, num_chunks=2
-        )
-        out = torch.empty_like(expected)
-
-        def func(tensors, output):
-            torch._chunk_cat(tensors, dim=0, num_chunks=2, out=output)
-            return output
-
-        actual = torch.func.functionalize(func)(inputs, out)
-        self.assertEqual(actual, expected)
-        self.assertEqual(out, expected)
-
-    @onlyCUDA
-    def test_mixed_dtype_chunk_cat_rejects_overlap(self, device):
-        out = torch.empty((2, 2), device=device)
-        inputs = [
-            torch.tensor([1, 2], device=device, dtype=torch.bfloat16),
-            out.flatten()[:2],
-        ]
-
-        with self.assertRaisesRegex(RuntimeError, "single memory location"):
-            torch._chunk_cat(inputs, dim=0, num_chunks=2, out=out)
-
-
-instantiate_device_type_tests(
-    TestMixedDtypeChunkCat, globals(), only_for=("cpu", "cuda", "xpu")
-)
-
-
-@instantiate_parametrized_tests
 class TestFullyShardReduceOpWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:
         return 1
-
-    @parametrize("divide_factor", [None, 1.0, 2.0])
-    def test_singleton_copy_division(self, divide_factor):
-        divisions = []
-
-        class RecordDivisions(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.div.Tensor:
-                    divisions.append(func)
-                return func(*args, **(kwargs or {}))
-
-        model = nn.Linear(8, 4, bias=False, device=device_type)
-        fully_shard(model, mesh=init_device_mesh(device_type.type, (1,)))
-        if divide_factor is not None:
-            model.set_gradient_divide_factor(divide_factor)
-        inp = torch.ones(3, 8, device=device_type)
-        loss = model(inp).sum()
-        with RecordDivisions():
-            loss.backward()
-        self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
-        expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
-        self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp

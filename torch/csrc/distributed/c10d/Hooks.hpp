@@ -82,8 +82,14 @@ using AbortHook = std::function<void()>;
 // Arguments passed to a completion hook, fired when the backend establishes
 // that an operation has finished.
 struct CompletionHookArgs {
-  // Correlates completion with PostHookArgs::work.
-  uint64_t completionKey = 0;
+  // The Work the backend returned when the op was issued, and the only
+  // correlation key available here: op_id is assigned above the backend
+  // (PreHookArgs/PostHookArgs) and a Work does not carry it, so a consumer that
+  // works in op_ids maps this pointer back to the one it saw in
+  // PostHookArgs::work. Non-owning and const: it is valid for the duration of
+  // the call only, and polling a Work from a backend watchdog thread is what
+  // this hook exists to replace.
+  const Work* work = nullptr;
   // The backend's own measurement of the op in ms, or nullopt if it does not
   // time its collectives. The backend supplies it because only the backend
   // knows whether timing is on -- Work::getDuration() throws when it is not,

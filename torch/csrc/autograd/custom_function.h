@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
@@ -453,8 +452,13 @@ inline void extract_vars(
 template <typename T>
 std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
     std::vector<std::optional<Variable>>& output_list) {
-  return c10::fmap(
-      output_list, [](const std::optional<Variable>& var) { return *var; });
+  variable_list result;
+  std::transform(
+      output_list.begin(),
+      output_list.end(),
+      std::back_inserter(result),
+      [](const std::optional<Variable>& var) { return *var; });
+  return result;
 }
 
 template <typename T>
@@ -468,7 +472,13 @@ inline std::vector<std::optional<Variable>> to_optional(Variable& output) {
 }
 
 inline std::vector<std::optional<Variable>> to_optional(variable_list& output) {
-  return c10::fmap<std::optional<Variable>>(output);
+  std::vector<std::optional<Variable>> result;
+  std::transform(
+      output.begin(),
+      output.end(),
+      std::back_inserter(result),
+      [](const Variable& var) { return var; });
+  return result;
 }
 
 template <class T>

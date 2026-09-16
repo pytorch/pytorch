@@ -590,10 +590,6 @@ bool ProcessGroupWrapper::supportsSplitting() const {
   return backend_->supportsSplitting();
 }
 
-bool ProcessGroupWrapper::isInitialized() {
-  return backend_->isInitialized();
-}
-
 bool ProcessGroupWrapper::supportsCoalescing() const {
   return backend_->supportsCoalescing();
 }

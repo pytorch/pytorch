@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 
@@ -49,6 +50,8 @@ Tensor cudnn_affine_grid_generator_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
+#include <ATen/cudnn/Utils.h>
+#include <ATen/cudnn/cudnn-wrapper.h>
 
 #include <ATen/TensorUtils.h>
 

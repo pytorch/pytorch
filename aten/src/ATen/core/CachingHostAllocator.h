@@ -18,6 +18,7 @@
 #include <mutex>
 #include <shared_mutex>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 using c10::CachingAllocator::Stat;
@@ -1328,25 +1329,25 @@ struct TORCH_API HostAllocator : public at::Allocator {
   virtual void reset_peak_stats() = 0;
 
   virtual void begin_allocate_to_pool(
-      c10::MempoolId_t /*pool_id*/,
-      std::function<bool(c10::Stream)> /*filter*/) {
+      c10::MempoolId_t pool_id,
+      std::function<bool(c10::Stream)> filter) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for begin_allocate_to_pool");
   }
 
-  virtual void end_allocate_to_pool(c10::MempoolId_t /*pool_id*/) {
+  virtual void end_allocate_to_pool(c10::MempoolId_t pool_id) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for end_allocate_to_pool");
   }
 
-  virtual void release_pool(c10::MempoolId_t /*pool_id*/) {
+  virtual void release_pool(c10::MempoolId_t pool_id) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for release_pool");
   }
 
   virtual void record_history(
-      bool /*enabled*/,
-      c10::CachingDeviceAllocator::CreateContextFn /*context_recorder*/,
-      size_t /*max_entries*/,
-      c10::CachingDeviceAllocator::RecordContext /*when*/,
-      bool /*clearHistory*/) {}
+      bool enabled,
+      c10::CachingDeviceAllocator::CreateContextFn context_recorder,
+      size_t max_entries,
+      c10::CachingDeviceAllocator::RecordContext when,
+      bool clearHistory) {}
 
   virtual bool is_history_enabled() const {
     return false;
@@ -1491,3 +1492,4 @@ struct HostAllocatorRegistry {
   }
 
 } // namespace at
+C10_DIAGNOSTIC_POP()

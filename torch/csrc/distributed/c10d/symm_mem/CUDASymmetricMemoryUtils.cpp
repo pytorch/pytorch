@@ -12,6 +12,7 @@
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>

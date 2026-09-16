@@ -20,7 +20,6 @@ from ..select_algorithm import (
 )
 from ..utils import (
     _use_cutlass_for_op,
-    is_bf16x9_matmul,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_cpp_bmm_template,
@@ -166,7 +165,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     sizevars = V.graph.sizevars
     dtype = mat1.get_dtype()
     device_type = mat1.get_device().type
-    use_bf16x9 = is_bf16x9_matmul(device_type, dtype)
 
     def dim_is_one_or_hint(dim):
         # The mul+sum decomposition is valid for any M/N. The size-1 hint is
@@ -179,8 +177,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         return not sizevars.statically_known_gt(dim, threshold)
 
     if (
-        not use_bf16x9
-        and out_dtype is None
+        out_dtype is None
         and device_type in ("cuda", "xpu")
         and device_type == mat2.get_device().type
         and dtype == mat2.get_dtype()
@@ -290,20 +287,6 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
     choices: list[ChoiceCaller] = []
-    if use_bf16x9:
-        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
-        choices.extend(
-            V.choices.get_template_configs(
-                kernel_inputs,
-                [aten_handler],
-                name,
-                kwarg_overrides={aten_handler.uid: aten_extra_kwargs},
-            )
-        )
-        node, _ = autotune_select_algorithm(
-            name, choices, kernel_inputs.nodes(), layout
-        )
-        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
@@ -386,7 +369,6 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    use_bf16x9 = is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
@@ -425,19 +407,6 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     name = "baddbmm"
     # options to tune from
     choices: list[ChoiceCaller] = []
-    if use_bf16x9:
-        # See Note [BF16x9 precision] in torch/_inductor/utils.py.
-        choices.extend(
-            V.choices.get_template_configs(
-                kernel_inputs,
-                [aten_baddbmm],
-                name,
-            )
-        )
-        node, _ = autotune_select_algorithm(
-            name, choices, kernel_inputs.nodes(), layout
-        )
-        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []

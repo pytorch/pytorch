@@ -27,12 +27,11 @@ import dataclasses
 import enum
 import inspect
 import logging
-import sys
 import textwrap
 import traceback
 import weakref
 from collections.abc import Callable, Generator, MutableMapping
-from types import CellType, SimpleNamespace
+from types import CellType
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -66,9 +65,6 @@ from .variables.base import (
     AttributeMutationNew,
     AttrMutationKind,
     is_side_effect_safe,
-    MutationType,
-    ValueAndAttributeMutationExisting,
-    ValueAndAttributeMutationNew,
     ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
@@ -194,25 +190,6 @@ def _manual_deque_update(deque_from: Any, deque_to: Any) -> None:
     # deque_to keeps its (read-only) maxlen, so extend re-applies eviction.
     collections.deque.clear(deque_to)
     collections.deque.extend(deque_to, deque_from)
-
-
-_MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
-    object.__getattribute__,
-    dict.__getattribute__,
-    set.__getattribute__,
-    frozenset.__getattribute__,
-    int.__getattribute__,
-    str.__getattribute__,
-    list.__getattribute__,
-    tuple.__getattribute__,
-    collections.deque.__getattribute__,
-    BaseException.__getattribute__,
-)
-if sys.version_info < (3, 13):
-    # SimpleNamespace names tp_getattro in its static struct before 3.13, so
-    # PyType_Ready publishes its own __getattribute__ wrapper even though the
-    # slot is PyObject_GenericGetAttr. BaseException above is the same case.
-    _MUTABLE_GETATTRIBUTES += (SimpleNamespace.__getattribute__,)
 
 
 class SideEffects:
@@ -705,8 +682,18 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls: type) -> bool:
-        getattribute = inspect.getattr_static(cls, "__getattribute__", None)
-        return getattribute in _MUTABLE_GETATTRIBUTES
+        return inspect.getattr_static(cls, "__getattribute__", None) in (
+            object.__getattribute__,
+            dict.__getattribute__,
+            set.__getattribute__,
+            frozenset.__getattribute__,
+            int.__getattribute__,
+            str.__getattribute__,
+            list.__getattribute__,
+            tuple.__getattribute__,
+            collections.deque.__getattribute__,
+            BaseException.__getattribute__,
+        )
 
     def is_attribute_mutation(self, item: VariableTracker) -> bool:
         return isinstance(item.mutation_type, AttributeMutation)
@@ -740,16 +727,15 @@ class SideEffects:
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
             return True
 
-        # Either axis counts: a value-axis content mutation (is_modified on
-        # ValueMutation[AndAttribute]Existing) or an attribute-axis store.
-        # Subclasses of builtin containers carry the composite mutation type,
-        # so both checks apply to the same object.
-        modified = False
-        if isinstance(item.mutation_type, ValueMutationExisting):
-            modified = item.mutation_type.is_modified
+        if isinstance(item, variables.UserDefinedObjectVariable):
+            # Checks if the underlying dict or tuple vt has been modified
+            return item in self.store_attr_mutations or item.is_base_vt_modified(self)
+
         if self.is_attribute_mutation(item):
-            modified = modified or item in self.store_attr_mutations
-        return modified
+            return item in self.store_attr_mutations
+        if item.mutation_type is None:
+            raise AssertionError(f"mutation_type is None for {item} in is_modified")
+        return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(
         self,
@@ -767,37 +753,12 @@ class SideEffects:
                 f"Source of previously tracked object: {self.id_to_variable[id(item)].source}."
             )
 
-        variable.mutation_type = self._maybe_composite_mutation(
-            variable, mutation_type_cls()
-        )
+        variable.mutation_type = mutation_type_cls()
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
 
     track_mutable = _track_obj
-
-    @staticmethod
-    def _maybe_composite_mutation(
-        variable: VariableTracker, mutation_type: MutationType
-    ) -> MutationType:
-        """Subclasses of builtin containers have two mutable compartments: the
-        builtin layout storage and the instance __dict__. Give them the
-        composite mutation type and share the instance with the backing
-        container VT, so a content mutation recorded through the base VT and
-        an attribute mutation recorded on the object report through the same
-        mutation_type."""
-        base_vt = getattr(variable, "_base_vt", None)
-        if base_vt is None:
-            return mutation_type
-        composite: MutationType
-        if isinstance(mutation_type, AttributeMutationNew):
-            composite = ValueAndAttributeMutationNew(mutation_type.cls_source)
-        elif isinstance(mutation_type, AttributeMutationExisting):
-            composite = ValueAndAttributeMutationExisting()
-        else:
-            return mutation_type
-        base_vt.mutation_type = composite
-        return composite
 
     def track_object_existing(
         self,
@@ -834,9 +795,6 @@ class SideEffects:
             obj,
             mutation_type=AttributeMutationNew(cls_source),
             **options,
-        )
-        variable.mutation_type = self._maybe_composite_mutation(
-            variable, variable.mutation_type
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
@@ -890,8 +848,6 @@ class SideEffects:
             variable_cls = variables.UserDefinedConstantVariable
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
-        elif variables.SimpleNamespaceVariable.is_matching_cls(user_cls):
-            variable_cls = variables.SimpleNamespaceVariable
         if not issubclass(variable_cls, variables.UserDefinedObjectVariable):
             raise AssertionError(
                 f"Expected subclass of UserDefinedObjectVariable, got {variable_cls}"
@@ -1948,27 +1904,25 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     if _skip_attribute_mutation_replay(var):
         return
 
-    # The composite mutation type is shared with var._base_vt, so a content
-    # mutation recorded through the base VT is visible here directly. New
-    # objects always count: their contents must be materialized by the replay.
-    mt = var.mutation_type
-    if isinstance(mt, (ValueMutationNew, ValueMutationExisting)):
-        contents_modified = isinstance(mt, ValueMutationNew) or mt.is_modified
-    else:
-        # TODO: remove once every UD container is registered through
-        # SideEffects tracking and carries the composite mutation type.
-        contents_modified = getattr(var, "_base_vt", None) is not None and (
-            side_effects.is_modified(var._base_vt)
-        )
     if (
         isinstance(var, variables.UserDefinedDictVariable)
-        and contents_modified
+        and side_effects.is_modified(
+            var._base_vt  # pyrefly: ignore[bad-argument-type]
+        )
         and var._base_vt.has_new_items()  # type: ignore[union-attr]
     ):
         _codegen_user_defined_dict_mutation(ctx)
-    elif isinstance(var, variables.UserDefinedListVariable) and contents_modified:
+    elif isinstance(
+        var, variables.UserDefinedListVariable
+    ) and side_effects.is_modified(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    ):
         _codegen_user_defined_list_mutation(ctx)
-    elif isinstance(var, variables.UserDefinedDequeVariable) and contents_modified:
+    elif isinstance(
+        var, variables.UserDefinedDequeVariable
+    ) and side_effects.is_modified(
+        var._base_vt  # pyrefly: ignore[bad-argument-type]
+    ):
         _codegen_user_defined_deque_mutation(ctx)
 
     # Applying mutations involves two steps: 1) Push all reconstructed objects

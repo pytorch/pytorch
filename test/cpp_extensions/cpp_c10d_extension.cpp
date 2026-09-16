@@ -38,27 +38,27 @@ c10::intrusive_ptr<Work> ProcessGroupTest::allreduce(
 c10::intrusive_ptr<Work> ProcessGroupTest::allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support allreduce_coalesced");
+  throw std::runtime_error("ProcessGroupTest does not support allreduce_coalesced");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support reduce");
+  throw std::runtime_error("ProcessGroupTest does not support reduce");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support allgather");
+  throw std::runtime_error("ProcessGroupTest does not support allgather");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const AllgatherOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support _allgather_base");
+  throw std::runtime_error("ProcessGroupTest does not support _allgather_base");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::barrier(
@@ -70,41 +70,41 @@ c10::intrusive_ptr<Work> ProcessGroupTest::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support gather");
+  throw std::runtime_error("ProcessGroupTest does not support gather");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support scatter");
+  throw std::runtime_error("ProcessGroupTest does not support scatter");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support reduce_scatter");
+  throw std::runtime_error("ProcessGroupTest does not support reduce_scatter");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support send");
+  throw std::runtime_error("ProcessGroupTest does not support send");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support recv");
+  throw std::runtime_error("ProcessGroupTest does not support recv");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTest::recvAnysource(
     std::vector<at::Tensor>& tensor,
     int tag) {
-  TORCH_CHECK(false, "ProcessGroupTest does not support recvAnysource");
+  throw std::runtime_error("ProcessGroupTest does not support recvAnysource");
 }
 
 c10::intrusive_ptr<ProcessGroup> ProcessGroupTest::createProcessGroupTest(

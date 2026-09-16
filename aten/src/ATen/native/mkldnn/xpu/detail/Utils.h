@@ -1,5 +1,7 @@
 #pragma once
+#include <ATen/ATen.h>
 #include <ATen/Tensor.h>
+#include <ATen/core/Tensor.h>
 #include <iostream>
 #include <optional>
 
@@ -12,7 +14,6 @@
 #include <oneapi/dnnl/dnnl_version.h>
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
-#include <ATen/ops/empty.h>
 
 #define ONEDNN_SUPPORT_DETERMINISTIC \
   (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 4)

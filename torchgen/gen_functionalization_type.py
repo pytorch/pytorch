@@ -72,9 +72,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         "resize_as_",
         # This function is used as for testing purposes only.
         "_fill_mem_eff_dropout_mask_",
-        # Inference-only ops called behind a custom op graph break.
+        # Inference-only op called behind a custom op graph break.
         "_flash_attention_forward_no_dropout_inplace",
-        "_cudnn_attention_forward_no_dropout_inplace",
     ]
 )
 
@@ -85,10 +84,6 @@ CUMULATIVE_OUT_OPS_PRESERVING_OUT_DTYPE = {
     OperatorName.parse("cumsum.out"),
     OperatorName.parse("cumprod.out"),
 }
-
-# The functional _chunk_cat overload has no dtype argument, so its inputs must
-# be converted to the out dtype when functionalizing _chunk_cat.out.
-CHUNK_CAT_OUT = OperatorName.parse("_chunk_cat.out")
 
 # This file contains codegen that relates to the functionalization pass.
 # It includes:
@@ -649,33 +644,6 @@ def maybe_replace_cumulative_out_dtype_exprs(
     return adjusted_exprs
 
 
-def maybe_replace_chunk_cat_out_exprs(
-    f: NativeFunction,
-    functional_sig: DispatcherSignature,
-    functional_exprs: list[str],
-) -> list[str]:
-    if f.func.name != CHUNK_CAT_OUT:
-        return functional_exprs
-
-    tensors_arg_idx = next(
-        (
-            i
-            for i, arg in enumerate(functional_sig.arguments())
-            if arg.name == "tensors"
-        ),
-        None,
-    )
-    if tensors_arg_idx is None or len(f.func.arguments.out) != 1:
-        raise AssertionError(f"Unexpected _chunk_cat.out schema: {f.func}")
-    adjusted_exprs = functional_exprs.copy()
-    tensors_expr = adjusted_exprs[tensors_arg_idx]
-    adjusted_exprs[tensors_arg_idx] = (
-        f"cast_tensor_list_to_dtype({tensors_expr}, "
-        f"{f.func.arguments.out[0].name}_.scalar_type())"
-    )
-    return adjusted_exprs
-
-
 # Generates the Functionalization kernel for:
 # - mutation ops (inplace and out= ops)
 @with_native_function_and
@@ -750,9 +718,6 @@ def emit_inplace_functionalization_body(
     functional_exprs = maybe_replace_cumulative_out_dtype_exprs(
         f, functional_sig, functional_exprs
     )
-    functional_exprs = maybe_replace_chunk_cat_out_exprs(
-        f, functional_sig, functional_exprs
-    )
 
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     # We don't want to run the inplace meta func for ops like .set_(), because:
@@ -820,37 +785,6 @@ def gen_functionalization_view_inverse_declaration(
         return view_inverse_sig.decl()
 
     return emit_decl_helper(g)
-
-
-# Replaying a multi-output view op to regenerate a single output builds every
-# sibling view and discards all but one, so regenerating the N views of one base
-# costs O(N^2) tensors. Under torch.compile that is O(N^2) fake tensors and
-# proxies, and it shows up as an N-long run of identical view nodes in the traced
-# graph. These are the only multi-output view ops, and each of their outputs is
-# exactly one slice or select of the base, which we can build directly. The
-# original op already validated its arguments when the view was first created.
-#
-# Autograd's restriction on mutating one output of a multi-output view is keyed
-# off CreationMeta, not off the grad_fn, so apply_view_meta_sequence restores it
-# directly. See [Note: multi-output view replay].
-#
-# Keyed by operator name; the body is formatted with the view op to call, which
-# differs between the view and the view_copy variant.
-SINGLE_OUTPUT_VIEW_REPLAY: dict[str, str] = {
-    "split.Tensor": """\
-  // split() chunk `i` is base[i * split_size : (i + 1) * split_size] along dim,
-  // and slice clamps the end, which gives the short final chunk for free.
-  auto start = split_size * out_index;
-  return {slice}(base, dim, start, start + split_size, 1);""",
-    "split_with_sizes": """\
-  c10::SymInt start = 0;
-  for (int64_t i = 0; i < out_index; ++i) {{
-    start += split_sizes[i];
-  }}
-  return {slice}(base, dim, start, start + split_sizes[out_index], 1);""",
-    "unbind.int": """\
-  return {select}(base, dim, out_index);""",
-}
 
 
 # Helper class for generating `ViewMeta` specializations.
@@ -1010,42 +944,14 @@ struct TORCH_API {self.classname} : public ViewMeta {{
 
         return f"{opname}({arguments}){maybe_index}"
 
-    @property
-    def single_output_body(self) -> str | None:
-        # A new multi-output view op would otherwise silently keep replaying the
-        # whole operation and stay quadratic, with no golden to flag it.
-        name = str(self.f.func.name)
-        if self.is_multi_output and name not in SINGLE_OUTPUT_VIEW_REPLAY:
-            raise AssertionError(f"no single-output replay for {name}")
-        return SINGLE_OUTPUT_VIEW_REPLAY.get(name)
-
-    # The two arms of `forward`, one per value of `reapply_views`.
-    def forward_arms(self) -> tuple[str, str]:
-        body = self.single_output_body
-        if body is None:
-            return (
-                f"    return {self.opcall(is_reverse=False, reapply_views=True)};",
-                f"    return {self.opcall(is_reverse=False, reapply_views=False)};",
-            )
-
-        def arm(slice_op: str, select_op: str) -> str:
-            filled = body.format(slice=slice_op, select=select_op)
-            return "\n".join("  " + line for line in filled.splitlines())
-
-        return (
-            arm("at::_ops::slice_Tensor::call", "at::_ops::select_int::call"),
-            arm("at::_ops::slice_copy_Tensor::call", "at::_ops::select_copy_int::call"),
-        )
-
     def impl(self) -> list[str]:
-        views_arm, view_copy_arm = self.forward_arms()
         functions = [
             f"""
 at::Tensor {self.classname}::forward(const at::Tensor& base) {{
   if (reapply_views) {{
-{views_arm}
+    return {self.opcall(is_reverse=False, reapply_views=True)};
   }} else {{
-{view_copy_arm}
+    return {self.opcall(is_reverse=False, reapply_views=False)};
   }}
 }}""",
             f"""

@@ -148,7 +148,6 @@ class TORCH_API ProcessGroupWrapper : public Backend {
 
   // Forward methods to wrapped backend
   bool supportsSplitting() const override;
-  bool isInitialized() override;
   bool supportsCoalescing() const override;
   bool supportsTimeEstimation() const override;
   void startTimeEstimate() override;

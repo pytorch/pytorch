@@ -361,9 +361,8 @@ class ShapePropagator : public PropertyPropBase {
   // know whether the dependency has been executed.
   std::unordered_map<Node*, bool> dependsOnMutationMemo_;
   bool dependsOnMutation(Node* node) {
-    if (auto it = dependsOnMutationMemo_.find(node);
-        it != dependsOnMutationMemo_.end()) {
-      return it->second;
+    if (dependsOnMutationMemo_.contains(node)) {
+      return dependsOnMutationMemo_[node];
     }
 
     if (aliasDb_.hasWriters(node)) {
@@ -2002,7 +2001,7 @@ class ShapePropagator : public PropertyPropBase {
       auto sizes = tp->sizes().concrete_sizes().value();
       auto dims = node->get<c10::List<int64_t>>(attr::dim).value();
       bool keepdim = node->get<bool>(attr::keepdim).value();
-      std::ranges::reverse(dims);
+      std::reverse(dims.begin(), dims.end());
       for (int64_t dim : dims) {
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         if (keepdim) {

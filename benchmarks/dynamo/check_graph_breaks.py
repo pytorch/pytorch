@@ -89,6 +89,8 @@ def check_graph_breaks(
                 "resnet152",
                 "sam",
                 "sam_fast",
+                "stable_diffusion_text_encoder",
+                "stable_diffusion_unet",
                 "timm_efficientdet",
                 "torchrec_dlrm",
                 "vgg16",

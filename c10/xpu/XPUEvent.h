@@ -107,9 +107,15 @@ struct XPUEvent {
   void record(const XPUStream& stream) {
     namespace syclex = sycl::ext::oneapi::experimental;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    const bool first_record = !isCreated();
-    if (first_record) {
+    if (!isCreated()) {
       createEvent(stream.device_index());
+      if (!reusable_) {
+        assignEvent(stream.queue());
+      }
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_event_creation(
+            c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
+      }
     }
     TORCH_CHECK(
         device_index_ == stream.device_index(),
@@ -123,17 +129,11 @@ struct XPUEvent {
 #if SYCL_COMPILER_VERSION >= 20260200
       syclex::enqueue_signal_event(stream.queue(), *event_);
 #endif
-    } else if (first_record) {
-      assignEvent(stream.queue());
     } else {
       reassignEvent(stream.queue());
     }
 
     if (C10_UNLIKELY(interp)) {
-      if (first_record) {
-        (*interp)->trace_gpu_event_creation(
-            c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
-      }
       (*interp)->trace_gpu_event_record(
           c10::kXPU,
           reinterpret_cast<uintptr_t>(event_.get()),

@@ -34,18 +34,9 @@ class Socket {
   }
 
   struct sockaddr_un prepare_address(const char* path) {
-    struct sockaddr_un address{};
+    struct sockaddr_un address;
     address.sun_family = AF_UNIX;
-    const size_t path_len = std::strlen(path);
-    TORCH_CHECK(
-        path_len < sizeof(address.sun_path),
-        "Unix socket path is ",
-        path_len,
-        " bytes, but the limit is ",
-        sizeof(address.sun_path) - 1,
-        ". Path: ",
-        path);
-    std::memcpy(address.sun_path, path, path_len + 1);
+    strcpy(address.sun_path, path);
     return address;
   }
 

@@ -12,6 +12,8 @@
 #include <c10/util/Exception.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/cuda/MiscUtils.h>
+#include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
@@ -23,8 +25,13 @@
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/linalg_eigh.h>
+#include <ATen/ops/linalg_eigvalsh.h>
 #include <ATen/ops/linalg_solve_triangular.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/_linalg_check_errors.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -54,9 +61,6 @@ struct MagmaInitializer {
 #endif
 
 namespace at::native {
-
-void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos);
-
 #if defined(BUILD_LAZY_CUDA_LINALG)
 // All registrations with PyTorch runtime should be done dynamically
 // so if library is lazy loaded it must not export anything, otherwise
@@ -857,10 +861,7 @@ static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, c
 #ifdef USE_LINALG_SOLVER
 enum class SolverBackend : char {
   CUSOLVER,
-  CUBLAS,
-  // a temporary backend for custom kernels before/when cuSOLVER/cuBLAS catches up with MAGMA,
-  // these are mostly batched cases (>= 4) of shapes above 256.
-  CUSTOM
+  CUBLAS
 };
 #ifndef USE_ROCM
 namespace {
@@ -899,13 +900,7 @@ namespace {
   // NOTE: additionally validated on Blackwell CUDA 13.2 with FP64 emulation
   // on/off for cuSOLVER (on by default for cuBLAS).
   // No severe mispredictions observed.
-  inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype, bool compute_pivots = true) {
-    // Select a custom pivoted LU factorization kernel over cuSOLVER/cuBLAS.
-    // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
-    if (compute_pivots && (m == n) && (4 <= batch && batch <= 65535) && m >= 256) {
-      return SolverBackend::CUSTOM;
-    }
-
+  inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype) {
     // cuBLAS does not support rectangular inputs.
     if (m != n) {
       return SolverBackend::CUSOLVER;
@@ -982,17 +977,11 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
     }
 #else
-    const auto solver_backend = get_lu_factor_solver_backend(batch_size, m, n, input.scalar_type(), compute_pivots);
-    switch (solver_backend) {
-      case SolverBackend::CUSOLVER:
-        lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
-        break;
-      case SolverBackend::CUBLAS:
-        lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
-        break;
-      case SolverBackend::CUSTOM:
-        ::at::native::lu_batched_blas3_kernel(input, pivots, infos);
-        break;
+    const auto solver_backend = get_lu_factor_solver_backend(batch_size, m, n, input.scalar_type());
+    if (solver_backend == SolverBackend::CUSOLVER) {
+      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
+    } else {
+      lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
     }
 #endif
   };

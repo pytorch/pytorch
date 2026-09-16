@@ -1,6 +1,5 @@
 from inspect import getattr_static
-from typing import Any, TYPE_CHECKING
-from typing_extensions import TypeIs
+from typing import Any, TYPE_CHECKING, TypeGuard
 
 from torch._guards import Source
 from torch.backends.cuda import SDPAParams
@@ -100,5 +99,5 @@ class SDPAParamsVariable(VariableTracker):
             return wrap_fx_proxy(tx=tx, proxy=proxy)
 
     @staticmethod
-    def is_sdpa_params(value: object) -> TypeIs[type[SDPAParams]]:
+    def is_sdpa_params(value: Any) -> TypeGuard["SDPAParams"]:
         return value is SDPAParams

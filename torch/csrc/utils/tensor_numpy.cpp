@@ -54,6 +54,8 @@ bool is_numpy_dlpack_deleter_bugged() {
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
+#include <memory>
+#include <stdexcept>
 
 using namespace at;
 using namespace torch::autograd;

@@ -395,8 +395,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if output_type == "graph_out":
                 new_outputs.append(original_outputs[cast(int, val)])
             elif output_type == "input":
-                input_source = cast(GetItemSource, val)
-                input_idx = cast(int, input_source.index)
+                input_idx = cast(GetItemSource, val).index
                 new_outputs.append(self.new_input_nodes[input_idx])
             elif output_type == "constant":
                 new_outputs.append(val)
@@ -1067,7 +1066,7 @@ def _dynamo_graph_capture_for_export(
             graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
-                if isinstance(source, GetItemSource) and isinstance(source.index, int):
+                if isinstance(source, torch._dynamo.source.GetItemSource):
                     graph_input_order[source.index] = len(graph_input_order)
 
             for real_idx, graph_idx in graph_input_order.items():
