@@ -1438,10 +1438,9 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         (a member of both incarnations of "1") would still hold that
         counter's value from before teardown, 1, while rank 2 (new to "1")
         started at 0: the two members of the new "1" disagreed on the store
-        key and the rendezvous hung. With the sequence number taken from the
-        store instead, the fresh store's counter starts at zero for every
-        member, so both incarnations of "1" agree independently of what any
-        process did before.
+        key and the rendezvous hung. The counter is dropped when the group is
+        unregistered, which destroy_process_group() does before it resets the
+        name counter, so the reused name starts from zero on every member.
         """
         self._init_process(set_device=True)
 
