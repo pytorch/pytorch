@@ -26,11 +26,10 @@ The calls the caller makes ARE the capture: inputs flow through naturally and ea
 call returns what ``fn`` returned, so the capture drops into an ordinary
 training/pipeline loop where intermediate values are needed. ``tracer`` picks the
 capture front-end and carries its tracer-specific configuration -- ``DynamoTracer()``
-takes as many calls as you make, ``MakeFxTracer()`` takes exactly one and is the
-default until the dynamo front-end lands. ``backend`` and ``training`` are shared
-across both tracers.
+(the default) takes as many calls as you make, ``MakeFxTracer()`` takes exactly one.
+``backend`` and ``training`` are shared across both tracers.
 
-``DynamoTracer`` analyzes the Python (bytecode) rather than tracing one
+``DynamoTracer`` (the default) analyzes the Python (bytecode) rather than tracing one
 path. It inlines the TRANSFORMED BYTECODE Dynamo produces into ``python_code``
 (marshalled, rehydrated at load) and lowers the compiled subgraphs through the chosen
 backend; forward and training computations and ``mark_unbacked`` dynamic shapes work
@@ -341,6 +340,7 @@ import logging
 import os
 import pickle
 import sys
+import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence  # noqa: TC003
 from types import MappingProxyType
@@ -360,6 +360,7 @@ if TYPE_CHECKING:
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
 
 import base64
 import types
@@ -456,10 +457,8 @@ class MakeFxTracer:
 
 @dataclasses.dataclass(frozen=True)
 class DynamoTracer:
-    """The ``dynamo`` capture front-end, passed as ``tracer=`` to
-    :func:`torch.compiler.precompile.capture`. Not available in this build yet:
-    ``capture`` raises ``PrecompileError`` for it until the front-end lands, and
-    :class:`MakeFxTracer` stays the default until then.
+    """The ``dynamo`` capture front-end (the default), passed as ``tracer=`` to
+    :func:`torch.compiler.precompile.capture`.
 
     An execution-driven multi-graph capture that analyzes the Python (bytecode) rather
     than tracing one path: it records graph-break continuations and every guarded
@@ -686,6 +685,211 @@ class _MakeFxCapture(Capture):
             python_code = self._module.to_python_code()
             self._rendered = (python_code, self._module.to_cache_bytes(python_code))
             return _runnable_from_pair(*self._rendered, _trusted=True)(*args)
+
+
+class _DynamoCapture(Capture):
+    r"""Multi-call capture: the :class:`DynamoTracer` front-end.
+
+    Enter the ``with`` block, call it as many times as you need to exercise the
+    graph breaks and recompiled variants you want captured; the artifact is
+    rendered and written to disk when the block exits. Call :meth:`save` inside
+    the block to checkpoint everything captured so far to the same files without
+    ending the capture, so a job that dies mid-loop leaves the last checkpoint
+    loadable. Calls and saves are serialized: a second thread waits for the one
+    in flight, artifact rewrite included.
+    """
+
+    def __init__(
+        self,
+        session: Any,
+        artifact_path: str | os.PathLike[str],
+        cache_path: str | os.PathLike[str],
+        *,
+        backend: str,
+        require_complete: bool,
+        require_no_risky_drops: bool,
+        require_no_dropped_guards: bool,
+    ) -> None:
+        self._session = session
+        self._artifact_path = artifact_path
+        self._cache_path = cache_path
+        self._backend = backend
+        self._require_complete = require_complete
+        self._require_no_risky_drops = require_no_risky_drops
+        self._require_no_dropped_guards = require_no_dropped_guards
+        self._call: Callable[..., object] | None = None
+        self._fresh_cache: Any = None
+        self._exited = False
+        self._calls = 0
+        # The call count the last save() (or exit) wrote. -1, not 0, so a block
+        # that never called the capture is still "dirty" at exit and raises the
+        # nothing-captured error rather than writing an empty artifact.
+        self._saved_calls = -1
+        self._in_call = False
+        self._rendered: tuple[str, bytes] | None = None
+        self._render_error: BaseException | None = None
+        self._lock = threading.RLock()
+
+    def _map(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        try:
+            return method(*args, **kwargs)
+        except (PackageError, RecompileError) as e:
+            raise PrecompileError(str(e)) from e
+
+    def __enter__(self) -> Self:
+        from torch.compiler._cache import CacheArtifactManager
+
+        with self._lock:
+            if self._call is not None or self._exited:
+                raise PrecompileError(
+                    "this capture has already been entered; capture() returns a "
+                    "fresh capture per call."
+                )
+            # The capture's compiles record into the process-global cache-artifact
+            # list, which result() serializes. A fresh one so the bundle holds
+            # only this capture rather than unrelated pending compiles; entered
+            # here and left in __exit__, spanning every captured call.
+            self._fresh_cache = CacheArtifactManager.with_fresh_cache()
+            self._fresh_cache.__enter__()
+            try:
+                self._call = self._map(self._session.__enter__)
+            except BaseException:
+                self._fresh_cache.__exit__(*sys.exc_info())
+                self._fresh_cache = None
+                raise
+        return self
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        # The lock is held for the whole call so a save() (or another thread's
+        # call) never snapshots the capture mid-compile. It is reentrant, so a
+        # call made from inside fn reaches here while another is running; the
+        # _in_call flag turns that into a clear error rather than a nested run.
+        with self._lock:
+            if self._call is None or self._exited:
+                raise PrecompileError(
+                    "capture is not active: enter it with a `with` block before "
+                    "calling it."
+                )
+            if self._in_call:
+                raise PrecompileError(
+                    "this capture is being re-entered recursively: fn called the "
+                    "capture it is being captured through. Call fn itself from "
+                    "inside fn."
+                )
+            self._in_call = True
+            try:
+                result = self._map(self._call, *args, **kwargs)
+            finally:
+                self._in_call = False
+            self._calls += 1
+            return result
+
+    def save(self) -> None:
+        r"""save() -> None
+
+        Checkpoint everything captured so far to the ``artifact_path`` /
+        ``cache_path`` files, without ending the capture. Call it as often as
+        you like inside the block; each call re-renders and rewrites both files,
+        so a job that dies between saves leaves the last checkpoint loadable.
+
+        A gate refusal (``require_*``) or a write failure raises but writes
+        nothing partial: the previous files stay intact and the capture stays
+        open, so a transient failure can be retried on the next call.
+        """
+        with self._lock:
+            if self._call is None or self._exited:
+                raise PrecompileError(
+                    "capture is not active: enter it with a `with` block before "
+                    "calling save()."
+                )
+            if self._in_call:
+                raise PrecompileError(
+                    "save() was called from inside fn while the capture is "
+                    "running it; save after the call returns."
+                )
+            rendered = self._map(
+                self._session.snapshot_artifact,
+                require_complete=self._require_complete,
+                require_no_risky_drops=self._require_no_risky_drops,
+                require_no_dropped_guards=self._require_no_dropped_guards,
+            )
+            try:
+                _write_artifact(self._artifact_path, self._cache_path, *rendered)
+            except OSError as e:
+                # Only the on-disk rewrite failed (full disk, permissions); the
+                # capture is intact. _write_artifact leaves the previous pair in
+                # place, so the last good checkpoint is still loadable and the
+                # next save() can retry.
+                raise PrecompileError(
+                    f"precompile could not write the artifact: {e}"
+                ) from e
+            self._rendered = rendered
+            self._saved_calls = self._calls
+
+    def __exit__(self, *exc: object) -> None:
+        with self._lock:
+            try:
+                # A clean block with calls the last save() did not cover writes a
+                # final checkpoint while the region is still live and the fresh
+                # cache still holds this capture's compiles, so the invariants
+                # report the session writes on close reflects it. A block that
+                # raised, or one whose last save() already covered every call,
+                # writes nothing new here. A gate refusal (or write failure) is
+                # held and re-raised below, after teardown, so summary() and
+                # invariants() stay readable.
+                if exc[0] is None and self._calls > self._saved_calls:
+                    if self._calls == 0:
+                        raise PrecompileError(
+                            "nothing was captured: call the capture with your "
+                            "example arguments inside the `with` block."
+                        )
+                    try:
+                        self._rendered = self._map(
+                            self._session.snapshot_artifact,
+                            require_complete=self._require_complete,
+                            require_no_risky_drops=self._require_no_risky_drops,
+                            require_no_dropped_guards=self._require_no_dropped_guards,
+                        )
+                        _write_artifact(
+                            self._artifact_path, self._cache_path, *self._rendered
+                        )
+                        self._saved_calls = self._calls
+                    except BaseException as e:
+                        self._render_error = e
+                self._exited = True
+                self._map(self._session.__exit__, *exc)
+            finally:
+                if self._fresh_cache is not None:
+                    self._fresh_cache.__exit__(*sys.exc_info())
+                    self._fresh_cache = None
+        # A clean block whose render/write failed surfaces the failure here; a
+        # block that itself raised propagates its own error and we stay quiet.
+        if exc[0] is None and self._render_error is not None:
+            raise self._render_error
+
+    def summary(self) -> PrecompileSummary:
+        r"""summary() -> PrecompileSummary
+
+        Coverage, recompilation, failure and guard information for everything
+        captured so far.
+        """
+        return self._map(self._session.summary)
+
+    def invariants(self) -> tuple[FrameInvariants, ...]:
+        r"""invariants() -> tuple
+
+        The guards that held across every captured variant of each frame.
+        """
+        return self._map(self._session.invariants)
+
+    def calls(self) -> int:
+        r"""calls() -> int
+
+        How many calls have been folded into this capture.
+        """
+        return self._calls
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -2703,11 +2907,24 @@ def _make_inlined_forward(
 
 
 def _capture_session(fn, **kwargs):
-    """Start the dynamo tracer's multi-graph capture; not available in this build yet."""
-    raise PrecompileError(
-        "precompile.capture with tracer=DynamoTracer() is not available in this "
-        "build yet; pass tracer=MakeFxTracer()."
-    )
+    """Start an internal multi-graph capture, mapping package errors to ours.
+
+    precompile.capture() drives the capture through the caller-driven capture
+    objects, so this exists to keep the error translation of starting the
+    underlying session in one place.
+    """
+    from torch._dynamo.exc import PackageError
+    from torch._dynamo.precompile_package import precompile_capture
+
+    if isinstance(fn, functools.partial):
+        raise PrecompileError(
+            "precompile cannot capture a partial. Pass the underlying function "
+            "and give its bound arguments as call arguments."
+        )
+    try:
+        return precompile_capture(fn, **kwargs)
+    except PackageError as e:
+        raise PrecompileError(str(e)) from e
 
 
 def _artifact_paths(
@@ -3006,7 +3223,7 @@ def capture(
     *,
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
-    tracer: MakeFxTracer | DynamoTracer = MakeFxTracer(),
+    tracer: MakeFxTracer | DynamoTracer = DynamoTracer(),
     backend: str = "inductor",
     training: bool = False,
 ) -> Capture:
@@ -3045,12 +3262,11 @@ def capture(
     artifact that carries a backward (it lowers the backward eagerly).
 
     ``tracer`` picks the capture front-end and carries its tracer-specific
-    configuration. :class:`DynamoTracer` is an execution-driven
+    configuration. :class:`DynamoTracer` (the default) is an execution-driven
     multi-graph capture that records graph-break continuations and every guarded
     recompilation the calls exercise, and takes as many calls as you make.
     :class:`MakeFxTracer` is one non-strict ATen trace, so the capture takes
-    exactly ONE call and refuses a second, and is the default until the dynamo
-    front-end lands. ``backend`` and ``training`` are
+    exactly ONE call and refuses a second. ``backend`` and ``training`` are
     shared across both tracers; the guard/variant knobs live on
     :class:`DynamoTracer` and the decomposition table on :class:`MakeFxTracer`.
 
@@ -3251,9 +3467,37 @@ def capture(
             "precompile.capture tracer must be a MakeFxTracer or DynamoTracer, "
             f"got {type(tracer).__name__}."
         )
-    raise PrecompileError(
-        "precompile.capture with tracer=DynamoTracer() is not available in this "
-        "build yet; pass tracer=MakeFxTracer()."
+    # Serialize only the guards that DISCRIMINATE -- differed across the
+    # captured variants, or only some variants carry -- and drop the
+    # invariant rest. This rests on precompile's contract (environment
+    # identical at capture and runtime, all variation from inputs), so an
+    # invariant guard is either pinned by that contract or an input
+    # dimension the calls did not vary; the cost is that an out-of-domain
+    # call is served rather than refused. Which guards discriminate is only
+    # knowable once every variant exists, but guards are serialized per
+    # compilation as produced, so capture keeps them all and applies the policy
+    # to a copy at each render (PrecompileSession.snapshot_artifact).
+    _reject_uninstallable_entry_defaults(fn)
+    session = _capture_session(
+        fn,
+        backend=backend,
+        guard_filter_fn=tracer.guard_filter_fn,
+        recompile_limit=tracer.recompile_limit,
+        dynamic=tracer.dynamic,
+        invariants=tracer.invariants,
+        training=bool(training),
+        # Retain graphs only where they will actually be rendered: an
+        # eager "backend" is an fx graph with no source to emit.
+        keep_graphs=backend != "eager",
+    )
+    return _DynamoCapture(
+        session,
+        artifact_path,
+        cache_path,
+        backend=backend,
+        require_complete=tracer.require_complete,
+        require_no_risky_drops=tracer.require_no_risky_drops,
+        require_no_dropped_guards=tracer.require_no_dropped_guards,
     )
 
 

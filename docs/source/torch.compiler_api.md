@@ -61,7 +61,7 @@ deprecation cycle.
 % precompile is a module whose members are documented manually below.
 
 ```{eval-rst}
-.. py:function:: precompile.capture(fn, *, artifact_path, cache_path, tracer=MakeFxTracer(), backend="inductor", training=False)
+.. py:function:: precompile.capture(fn, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
 
    Return a caller-driven capture of ``fn`` as a :class:`precompile.Capture`. Capture is
    caller-driven: this runs nothing on its own. Enter the returned object as a context
@@ -82,12 +82,11 @@ deprecation cycle.
    intermediate values are needed; to checkpoint the artifact partway instead of only at
    exit, call ``cap.save()`` inside the block, which re-renders and rewrites both files.
    ``tracer`` picks the capture front-end and carries its tracer-specific
-   configuration: :class:`precompile.MakeFxTracer` (the default) is one non-strict ATen
-   trace and takes exactly one call (a second call raises); :class:`precompile.DynamoTracer`
-   takes as many calls as you give it and captures every graph-break continuation and
-   guarded recompilation those calls exercise, and is not available in this build yet
-   (``capture`` raises ``PrecompileError`` for it). ``backend`` and ``training`` are shared
-   across both tracers. This is execution-driven coverage, not an exhaustive analysis: paths and
+   configuration: :class:`precompile.DynamoTracer` (the default) takes as many calls as you
+   give it and captures every graph-break continuation and guarded recompilation those
+   calls exercise; :class:`precompile.MakeFxTracer` is one non-strict ATen trace and takes
+   exactly one call (a second call raises). ``backend`` and ``training`` are shared across
+   both tracers. This is execution-driven coverage, not an exhaustive analysis: paths and
    values that no call executes are absent. ``fn`` is the whole computation, taking the
    model(s) as explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step.
    The ``nn.Module`` arguments have their parameters/buffers lifted to graph inputs, so no
@@ -132,7 +131,7 @@ deprecation cycle.
    :param artifact_path: File to write ``python_code`` to when the block exits. Required.
    :param cache_path: File to write the acceleration cache to. Required.
    :param tracer: The capture front-end and its configuration, a
-       :class:`precompile.MakeFxTracer` (default) or :class:`precompile.DynamoTracer`.
+       :class:`precompile.DynamoTracer` (default) or :class:`precompile.MakeFxTracer`.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the captured call).
@@ -164,11 +163,10 @@ deprecation cycle.
            scale = y.sum().item()  # a graph break
            return y * scale
 
-       # Graph breaks and several variants need the dynamo tracer, once it lands;
+       # Graph breaks and several variants need the dynamo tracer (the default);
        # make_fx captures a single call as one graph.
        with torch.compiler.precompile.capture(
-           staged, artifact_path="s.py", cache_path="s.cache",
-           tracer=torch.compiler.precompile.DynamoTracer(),
+           staged, artifact_path="s.py", cache_path="s.cache"
        ) as cap:
            cap(example_a)
            cap(example_b)
@@ -257,10 +255,8 @@ deprecation cycle.
 
 .. py:class:: precompile.DynamoTracer(guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False)
 
-   The ``dynamo`` capture front-end, passed as ``tracer=`` to
-   :func:`precompile.capture`. Not available in this build yet: ``capture`` raises
-   ``PrecompileError`` for it until the front-end lands, and
-   :class:`precompile.MakeFxTracer` stays the default until then. An execution-driven
+   The ``dynamo`` capture front-end (the default), passed as ``tracer=`` to
+   :func:`precompile.capture`. An execution-driven
    multi-graph capture that analyzes the Python (bytecode) rather than tracing one path: it
    records graph-break continuations and every guarded recompilation the calls exercise, so
    a capture with this tracer takes as many calls as you make. The dynamo driver re-evaluates
