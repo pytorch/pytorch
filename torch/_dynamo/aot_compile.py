@@ -1955,10 +1955,7 @@ class AOTCompiledModel:
         # One read, before check_verbose runs user code that could opt a result
         # out under the loop: the entries and the raiser they name must agree.
         enabled = [result._guard_check_enabled for result in results]
-        raiser = next(
-            (i for i in raised if enabled[i]),
-            None,
-        )
+        raiser = next((i for i in raised if enabled[i]), None)
         # An entry that answered in either dispatch pass rejected this call, so a
         # ModelInput could have covered it even where its line below is a raise.
         coverable = any(results[i]._guard_check_enabled for i in answered)
