@@ -10,6 +10,7 @@ import os
 import pickle
 import random
 import shutil
+import sys
 import unittest
 from collections.abc import Sequence
 from typing import Literal
@@ -67,6 +68,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_XPU,
+    xfailIf,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -532,6 +534,77 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_lookup_races_with_concurrent_clear(self):
+        """
+        The local cache root is shared by every process of this user, so another
+        process can clear it while we are looking a key up. That must degrade to
+        a miss rather than raising out of the compile.
+        """
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        real_listdir = os.listdir
+        aotautograd_dir = AOTAutogradCache._get_tmp_dir()
+
+        def clear_then_listdir(path, *args, **kwargs):
+            # Stands in for another process rmtree'ing the cache root after we
+            # resolved the subdir for this key but before we list it. Only the
+            # AOTAutograd cache root is raced; everything else lists normally.
+            if os.fspath(path).startswith(aotautograd_dir):
+                AOTAutogradCache.clear()
+            return real_listdir(path, *args, **kwargs)
+
+        with patch("torch._inductor.codecache.os.listdir", clear_then_listdir):
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_save_races_with_concurrent_clear(self):
+        """
+        A local cache write can lose the same race, with the key's subdir going
+        away between write_atomic()'s temp write and its rename. Skipping the
+        save is not a bypass and must not fail the compile, even in strict mode.
+        """
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        def raise_missing_dir(path, content, make_dirs=False, encode_utf_8=False):
+            raise FileNotFoundError(f"No such file or directory: {path}")
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        with patch.object(autograd_cache, "write_atomic", raise_missing_dir):
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch({"fx_graph_cache": True, "compile_threads": 1})
     @functorch_config.patch({"enable_autograd_cache": True})
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
@@ -648,6 +721,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"autograd_cache_normalize_inputs": True})
     def test_multi_graph_specialization(self):
         """
         Verify multi graph specializations all cache hit
@@ -3637,6 +3711,22 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         c2 = self.gen_cache_key(fn, config)
         self.assertEqual(c1, c2)
 
+    def test_region_activation_memory_budget_cache_key(self):
+        def make_fn(budget):
+            def fn(x):
+                size = x.shape[0]
+                with torch.autograd.graph.region_activation_memory_budget(budget):
+                    return x.sin() + size
+
+            return fn
+
+        config = self.default_config()
+        low = self.gen_cache_key(make_fn(0.2), config)
+        high = self.gen_cache_key(make_fn(0.7), config)
+        low_again = self.gen_cache_key(make_fn(0.2), config)
+        self.assertNotEqual(low, high)
+        self.assertEqual(low, low_again)
+
     def test_runtime_only_configs_do_not_change_key(self):
         def fn(x):
             return x.sin().cos()
@@ -4065,6 +4155,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(c1, c3)
             self.assertEqual(c1, c4)
 
+    # dill doesn't support 3.15 yet
+    @xfailIf(sys.version_info >= (3, 15))
     def test_dill_serialization_with_inner_functions(self):
         """
         Test that with dill, we can now serialize graphs that contain inner functions
