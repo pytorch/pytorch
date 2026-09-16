@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: In Progress PR Review Run
 
 # Stage 2 of the hardened PR review.
@@ -107,6 +108,37 @@ jobs:
       too_large: ${{ steps.freshness.outputs.too_large }}
       prompt_hash: ${{ steps.prompt.outputs.hash }}
     steps:
+      # FIRST, before anything is checked out or downloaded. The `if:` above
+      # pins the same path, but GitHub's `==` IGNORES CASE (docs.github.com,
+      # "Evaluate expressions in workflows and actions"), so a second
+      # default-branch workflow at `.github/workflows/Hardened-pr-review.yml`
+      # satisfies it. Shell `=` is byte-exact, so the answer is decided here
+      # and the expression is the readable statement of intent, not the
+      # control. Still the SECOND fence overall: `workflow_run.event ==
+      # 'pull_request_target'` already refuses anything a pull request can
+      # produce, and this only separates two default-branch files sharing
+      # Stage 1's name — the case TestNoOtherWorkflowClaimsTheStage1Name
+      # forbids outright.
+      - name: Re-derive the triggering workflow path
+        env:
+          TRIGGERING_WORKFLOW_PATH: ${{ github.event.workflow.path }}
+        run: |
+          set -euo pipefail
+          EXPECTED='.github/workflows/hardened-pr-review.yml'
+          [ "$TRIGGERING_WORKFLOW_PATH" = "$EXPECTED" ] || {
+            # FENCED, like every other place in this pair that logs a name it
+            # did not choose. The value is default-branch-controlled, so there
+            # is no live exposure — but it is a value this line has just
+            # declared unexpected, and putting one of those into the runner's
+            # `::command::` parser unfenced is the habit, not the incident.
+            echo "::error::Stage 2 was triggered by a workflow other than ${EXPECTED}; the path follows, fenced"
+            FENCE=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            echo "::stop-commands::${FENCE}"
+            printf '  %q\n' "$TRIGGERING_WORKFLOW_PATH"
+            echo "::${FENCE}::"
+            exit 1
+          }
+
       - name: Trusted checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -316,9 +348,19 @@ jobs:
         if: steps.freshness.outputs.eligible == 'true'
         run: |
           set -euo pipefail
+          # EVERY trusted file the review job executes, not just the ones that
+          # shape the prompt: the hooks are the write boundary and
+          # validate_findings.py decides what a finding may say, so two runs
+          # differing only there behaved differently under one hash. The set is
+          # pinned by TestThePromptHashCoversTheTrustedSurface.
           HASH=$(cat .github/workflows/hardened-pr-review-run.yml \
                      scripts/pr_review/extract_verdict.py \
                      scripts/pr_review/emit_row.py \
+                     scripts/pr_review/validate_findings.py \
+                     .claude/hooks/pr_review/restrict-write.sh \
+                     .claude/hooks/pr_review/validate-findings.sh \
+                     .claude/hooks/pr_review/validate-on-stop.sh \
+                     .claude/hooks/pr_review/validate-post-write.sh \
                      .claude/skills/pr-review-readiness/SKILL.md | sha256sum | cut -c1-16)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
 
@@ -475,6 +517,14 @@ jobs:
           persist-credentials: false
           submodules: false
           lfs: false
+          # A REAL INPUT OF THE PINNED SHA, and the reason this file pins a
+          # NEWER actions/checkout than the 52 other workflows here. Verified
+          # against `action.yml` at 11d5960a: `allow-unsafe-pr-checkout`
+          # defaults to false and is "Required to check out fork pull request
+          # code from a workflow triggered by `pull_request_target` or
+          # `workflow_run`". The repo-dominant 11bd7190 predates it, so with
+          # that SHA this input would be silently ignored and the checkout
+          # would refuse. Do not "align" the pin without re-reading that file.
           allow-unsafe-pr-checkout: true
 
       - name: Remove symlinks that escape the PR tree

@@ -1,3 +1,4 @@
+# Owner(s): ["module: ci"]
 name: Hardened PR Review
 
 # Stage 1 of the hardened PR review. It records seven fields about the pull
@@ -90,26 +91,37 @@ on:
 permissions: {}
 
 
-# The trailing label is load-bearing. GitHub claims a workflow-level group
-# BEFORE evaluating the job `if:`, so without that suffix a run this workflow
-# will skip - a CLA bot labelling the PR - still joins the group and cancels a
-# review already in flight. Observed in pytorch/ciforge.
+# NO WORKFLOW-LEVEL `concurrency:`, and that is the fix for a live defect rather
+# than a style choice. GitHub claims a workflow-level group BEFORE evaluating the
+# job `if:`, so a run this workflow is going to SKIP still joins the group and,
+# with `cancel-in-progress`, kills a review already running.
 #
-# KEPT DELIBERATELY, and note what the suffix is FOR. The group itself is what
-# creates the cross-cancellation hazard; the suffix is what defuses it.
-# Deleting the whole `concurrency:` block would ALSO prevent the incident -
-# this is not a control whose absence is unsafe. It stays because
-# `.github/scripts/ensure_actions_will_cancel.py` requires this exact prefix on
-# every other pull-request workflow in the repository, and being the one file
-# shaped differently invites a "fix" later. That checker tests
-# `"pull_request" in on`, an exact key match, so this file is no longer in its
-# scope - which also cost us its duplicate-workflow-name check, replaced by
-# `TestNoOtherWorkflowClaimsTheStage1Name`. What must not happen is keeping the
-# group and DROPPING the suffix. The job-level group below still collapses
-# pushes.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.label.name }}
-  cancel-in-progress: true
+# The group that used to be here ended `-${{ github.event.label.name }}`, and
+# that suffix separates `labeled` runs ONLY. Three of the four declared types
+# carry no label object, so it renders empty and they all share one group:
+#
+#   labeled   + 'in progress'        runs     ...-false-in progress
+#   labeled   + 'cla signed' (bot)   SKIPS    ...-false-cla signed
+#   synchronize, non-draft, labelled runs     ...-false-
+#   synchronize, DRAFT, labelled     SKIPS    ...-false-     <- same group
+#   synchronize + 'ready for review' SKIPS    ...-false-     <- same group
+#
+# So: push, `capture` starts; the PR is converted to draft or picks up
+# `ready for review` inside that window; push again, and the second run joins
+# `...-false-`, cancels the first, then skips its own `capture`. The first run
+# ends `cancelled`, Stage 2 requires `conclusion == 'success'`, and the PR gets
+# no review, no telemetry row and nothing to say so. That is the pytorch/ciforge
+# incident, reachable here with one trigger and no stale file anywhere.
+#
+# `.github/scripts/ensure_actions_will_cancel.py` is why one used to be here: it
+# demands a cancelling workflow-level group with a fixed prefix on every
+# pull-request workflow. It selects files with `"pull_request" in on`, an exact
+# key match, so `pull_request_target` took this file out of its scope — verified
+# by running the checker, which exits 0. pytorch/ciforge removed its group after
+# the same incident, so the two repositories now agree.
+#
+# The collapse group therefore lives on the `capture` JOB below, where a run the
+# `if:` rejects never enters it.
 
 env:
   # The PR-lifecycle state label that gates automated review.
@@ -126,8 +138,35 @@ jobs:
          contains(github.event.pull_request.labels.*.name, 'in progress') &&
          !contains(github.event.pull_request.labels.*.name, 'ready for review'))
       )
+    # `github.event_name` is a CONSTANT while this file has one trigger, and it
+    # is here for the run this file does not produce. `pull_request` reads the
+    # workflow from the PULL REQUEST'S OWN REF, so a PR that adds its own copy
+    # of this file fires a second run under the same workflow name, which no
+    # contract test can forbid — they all read one tree. Unkeyed, both runs
+    # claim this group and `cancel-in-progress` kills whichever started first;
+    # if the survivor is the `pull_request` one, Stage 2 refuses its event and
+    # the review ends `skipped` with no row.
+    #
+    # WHAT IT IS NOT: a fence against anyone who WANTS to suppress a review,
+    # and the residual is bigger than it first looks. A group is a STRING the
+    # attacker types, groups are repository-scoped and shared across workflows,
+    # and nothing binds the PR number in that string to the PR carrying the
+    # file. So a contributor whose CI has been approved once can write
+    # `hardened-pr-review-pytorch/pytorch-<someone-else's-number>-pull_request_target`
+    # with `cancel-in-progress: true` and cancel THAT contributor's capture —
+    # cross-PR, not self-inflicted. Aimed at `capture` it leaves no telemetry
+    # row at all, because Stage 2 requires `conclusion == 'success'`; aimed at
+    # Stage 2's own group it costs the review but does leave a `blocked` row.
+    # A per-SHA check run would make the missing review VISIBLE; it would not
+    # prevent the cancellation. Closing it means not sharing a group with
+    # anything a pull request can name.
+    #
+    # What the suffix buys, then, is separation from an HONEST PR-ref copy —
+    # someone iterating on this very file in a pull request — which is the case
+    # that actually happens. Bursts still collapse: the value is one string for
+    # all four declared types.
     concurrency:
-      group: hardened-pr-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      group: hardened-pr-review-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event_name }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 5

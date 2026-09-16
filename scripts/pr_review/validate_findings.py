@@ -3,8 +3,11 @@
 The model writes its verdict to a JSON file instead of returning it as the
 action's structured output, so that it can be checked WHILE the session is still
 running and corrected. Two hooks call this: a PostToolUse hook after every Write
-(advisory — the model reads the errors and rewrites) and a Stop hook (blocking —
-the session cannot end on an invalid file).
+(advisory — the model reads the errors and rewrites) and a Stop hook, which
+blocks ONCE. Claude Code sets `stop_hook_active` on the retry, and
+`validate-on-stop.sh` lets that second stop through, so the model gets one
+forced turn to fix the file rather than being held until it succeeds. That is
+deliberate: an unfixable file would otherwise loop the session to its limit.
 
 THE POINT OF SHARING CODE WITH `extract_verdict.py`. Every check below runs
 through that module's own `load_structured` / `parse_diff` / `build`, so the
@@ -22,8 +25,24 @@ prompt-injected model can simply not call it. The boundary is still the separate
 role scoping. This only makes the honest failure mode — a model that miscounts —
 visible and fixable while there is still a turn left to fix it.
 
-Exit 0 when the file would publish exactly what it says. Exit 1 otherwise, with
-every problem on stderr in the order a reader would fix them.
+Exit 0 when every finding in the file SURVIVES to publication — anchored to a
+line the PR touched, with a severity and a path the sanitizer accepts. Exit 1
+otherwise, with every problem on stderr in the order a reader would fix them.
+
+A pass is about WHICH findings publish, not about their text arriving character
+for character. `neutralize` runs on the verdict summary (capped at
+`MAX_SUMMARY`) and on every finding's `message` (capped at `MAX_MESSAGE`), and
+in both it silently drops out-of-charset codepoints and backslashes. That is by
+design: each is a bounded rewrite of one field, none loses a finding, and the
+alternative to dropping a stray em dash was discarding the whole review. So a
+passing file can publish a shortened summary or a shortened finding message; it
+cannot publish fewer findings than it names. A message that neutralizes to
+nothing IS a lost finding, and is reported as `message_empty_after_neutralize`.
+
+A kept finding's `path` is rewritten too, by `neutralize_path`, which
+backslash-escapes the markdown-active characters — so `torch/_dynamo/x.py`
+publishes as ``torch/\\_dynamo/x.py``. Same file, different text, and in this
+repository it fires on most findings.
 """
 
 from __future__ import annotations

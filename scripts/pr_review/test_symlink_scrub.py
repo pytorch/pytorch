@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from _suite_manifest import TestTheSuiteIsWhole  # noqa: E402,F401
+from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
 
 
 WORKFLOW = (
@@ -486,4 +486,4 @@ class TestAFailedScanWriteCannotReportClean(ScrubHarness):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_this_suite()

@@ -30,17 +30,21 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import itertools
 import json
 import os
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -49,7 +53,11 @@ sys.path.insert(0, str(HERE))
 
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
-from _suite_manifest import TestTheSuiteIsWhole  # noqa: E402,F401
+from _suite_manifest import (  # noqa: E402,F401
+    EXPECTED_MODULES,
+    run_this_suite,
+    TestTheSuiteIsWhole,
+)
 
 # Imported, not restated: the rubric contract below has to compare against the
 # set the sanitizer actually enforces, or the two drift apart silently.
@@ -61,6 +69,14 @@ WORKFLOWS = REPO / ".github" / "workflows"
 STAGE1 = WORKFLOWS / "hardened-pr-review.yml"
 STAGE2 = WORKFLOWS / "hardened-pr-review-run.yml"
 SUITE_CI = WORKFLOWS / "pr-review-scripts-test.yml"
+# The guard module itself, copied into a synthesized tree by the preflight test.
+HERE_MANIFEST = Path(__file__).resolve().parent / "_suite_manifest.py"
+# Set by `test_the_real_entry_point_runs_this_suite_and_passes` in the child it
+# spawns, TO THE SPAWNER'S PID. Without it that test recurses forever: the child
+# runs the whole suite, which contains the test, which spawns another child. The
+# value matters as much as the key — a bare `1` inherited from anywhere else
+# disables the test in the parent too, silently.
+REENTRY_MARKER = "PR_REVIEW_ENTRY_POINT_CHILD"
 RUBRIC = REPO / ".claude" / "skills" / "pr-review-readiness" / "SKILL.md"
 HOOK = REPO / ".claude" / "hooks" / "pr_review" / "restrict-write.sh"
 
@@ -70,19 +86,220 @@ def strip_comments(text: str) -> str:
     return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
 
 
+# A job header may carry a TRAILING comment, and that is the same key:
+# `  Audit: # dependency audit` declares the job `Audit`. `strip_comments`
+# drops only WHOLE-LINE comments, so a header anchored with `:\s*$` matched
+# neither the key nor anything under it — a job declared that way escaped
+# enumeration completely while the count of the three known jobs still passed,
+# and "every job is covered by construction" was false for a second time.
+# Measured on this tree: that job could carry `container:` with the suite green.
+HEADER_TAIL = r"(?:[ \t]+#.*)?[ \t]*$"
+
+
 def job_block(text: str, name: str) -> str:
     """The lines of one job, from `  name:` to the next job key at that indent."""
     lines = text.splitlines()
     start = None
     for i, ln in enumerate(lines):
-        if re.match(rf"^  {re.escape(name)}:\s*$", ln):
+        if re.match(rf"^  {re.escape(name)}:{HEADER_TAIL}", ln):
             start = i
             break
     assert start is not None, f"job {name!r} not found"
     for j in range(start + 1, len(lines)):
-        if re.match(r"^  [A-Za-z_][\w-]*:\s*$", lines[j]):
+        if re.match(rf"^  [A-Za-z_][\w-]*:{HEADER_TAIL}", lines[j]):
             return "\n".join(lines[start:j])
     return "\n".join(lines[start:])
+
+
+# Job-level keys that introduce execution WITHOUT adding a step, or change what
+# executes one. A `services:`/`container:` image runs before step 1;
+# `defaults.run` rewrites every step's shell, so an executable test that runs a
+# step's body under bash would be measuring a program CI never runs; a job-level
+# `uses:` makes the whole job a call to a workflow defined elsewhere.
+FORBIDDEN_JOB_KEYS = ("container", "services", "defaults", "uses", "strategy")
+
+
+def refuse_execution_outside_steps(
+    case: unittest.TestCase, text: str, job: str, keys=FORBIDDEN_JOB_KEYS
+) -> None:
+    """Refuse `keys` at workflow level and on `job`, in every legal spelling.
+
+    TWO SCOPES AND TWO SPELLINGS, each of which has been a measured hole:
+
+    * THE WHOLE FILE at column 0, never the region before `jobs:`. YAML does not
+      constrain key order, so a `defaults:` block written AFTER the jobs mapping
+      is still workflow-level and a header-only scan cannot see it.
+    * QUOTED AND SPACED keys. `"defaults":` and `defaults :` are the same key,
+      and a bare `^    defaults:` regex sees neither.
+
+    `continue-on-error` is deliberately NOT in the default list: it is legal and
+    ordinary on many jobs. Where it is fatal — a job whose whole purpose is to
+    fail — it is refused explicitly at that call site.
+
+    AND IT FAILS CLOSED on the two spellings it cannot model, rather than
+    passing them: a job whose keys are not at four spaces (legal YAML, and the
+    regexes below assume four), and a quoted key carrying a backslash escape
+    (`"\u0064efaults":` decodes to `defaults` and matches nothing here). Both
+    were found by review as silent bypasses. Stage 1 is additionally fenced by
+    `test_stage1_uses_only_spellings_this_class_can_read`; Stage 2 and the
+    suite-CI file have no such grammar test, which is why the check lives here.
+    """
+    job_block_text = strip_comments(job_block(text, job))
+    whole = strip_comments(text)
+    body = [ln for ln in job_block_text.splitlines()[1:] if ln.strip()]
+    indents = {len(ln) - len(ln.lstrip()) for ln in body}
+    case.assertEqual(
+        min(indents, default=4),
+        4,
+        f"the {job!r} job's keys are not at four spaces ({sorted(indents)}); "
+        "this reader assumes four, so it would silently see no keys at all.",
+    )
+    for scope, lines in (
+        ("workflow level", whole),
+        (f"the {job!r} job", job_block_text),
+    ):
+        undecodable = [
+            ln for ln in lines.splitlines() if re.match(r'^ *"[^"]*\\[^"]*"[ \t]*:', ln)
+        ]
+        case.assertEqual(
+            undecodable,
+            [],
+            f"{scope} spells a key with a YAML escape ({undecodable}); this "
+            "reader compares raw text, so it cannot tell what that key IS.",
+        )
+    for key in keys:
+        case.assertIsNone(
+            re.search(rf"(?m)^[\"']?{key}[\"']?[ \t]*:", whole),
+            f"`{key}:` is declared at workflow level, which reaches the {job!r} "
+            "job without appearing in it.",
+        )
+        case.assertIsNone(
+            re.search(rf"(?m)^    [\"']?{key}[\"']?[ \t]*:", job_block_text),
+            f"the {job!r} job declares `{key}:`. That introduces execution, or "
+            "changes the interpreter, outside everything the step-level checks "
+            "and the executable tests can see.",
+        )
+
+
+# Bash reads these from the ENVIRONMENT at startup, before the first line of a
+# `run:` body. `SHELLOPTS=noexec` makes every step in scope parse its script and
+# execute none of it while still exiting 0; `BASH_ENV` names a file bash sources
+# first, so a step can be made to run a program the step does not contain.
+# `BASHOPTS` and `ENV` are the same mechanism under other names.
+#
+# WHY THE OTHER GUARDS CANNOT SEE IT. These add no step key, so
+# `refuse_disabling_keys` is blind; they add no job key that introduces
+# execution, so `refuse_execution_outside_steps` is blind; and they do not touch
+# the text the executable tests extract, so those keep running the real body
+# under their own bash. One `env:` entry at workflow level therefore leaves all
+# 320 tests green while CI runs nothing. Measured.
+SHELL_STARTUP_ENV = ("SHELLOPTS", "BASHOPTS", "BASH_ENV", "ENV")
+
+
+def refuse_unsafe_env_keys(
+    case: unittest.TestCase, text: str, what: str, allowed: frozenset
+) -> None:
+    """Every `env:` name in `what`, held to the subset the readers here model.
+
+    A DENYLIST OF NAMES WAS THE WRONG SHAPE, and the round that shipped one had
+    it broken the same day: `BASH_FUNC_python3%%: '() { return 0; }'` replaces
+    `python3` itself for every step in scope — bash imports exported functions
+    from the environment — and it is on nobody's list of dangerous variables.
+    So the rule is inverted, as `test_stage1_uses_only_spellings_this_class_can
+    _read` already does for grammar: a name must be plain `SCREAMING_SNAKE`,
+    which `BASH_FUNC_python3%%` is not, and must not be one of the startup
+    variables, which are the legal-looking names that still execute code.
+
+    AND `env:` MUST BE A BLOCK. `env: {SHELLOPTS: noexec}` is a legal flow
+    mapping that `indented_blocks` skips entirely — it yields no lines, so a
+    scan over its output sees nothing and passes. Measured: one such line on
+    the suite job left all 323 tests green while CI executed nothing.
+
+    Scanned over the WHOLE file rather than per job, because `env:` at workflow
+    level reaches every job without appearing in one — the same reason
+    `refuse_execution_outside_steps` scans column 0.
+    """
+    inline = [
+        ln.strip()
+        for ln in strip_comments(text).splitlines()
+        if (m := _key_re("env").match(ln.lstrip())) and uncommented(m.group(1))
+    ]
+    case.assertEqual(
+        inline,
+        [],
+        f"{what} writes an `env:` mapping in flow style ({inline}). Every "
+        "reader here is line-oriented, so the names inside it are never "
+        "examined by anything.",
+    )
+    for block in indented_blocks(text, "env"):
+        for ln in block:
+            # The NAME as written, including characters no variable should
+            # have — capturing `[A-Za-z_][\w-]*` would quietly truncate
+            # `BASH_FUNC_python3%%` to something that passes.
+            m = re.match(r"^\s*[\"']?([^\"':]+?)[\"']?\s*:", ln)
+            if not m:
+                continue
+            name = m.group(1)
+            case.assertRegex(
+                name,
+                r"^[A-Z][A-Z0-9_]*$",
+                f"{what} sets an environment name this file does not model "
+                f"({name!r}). Bash imports exported FUNCTIONS from the "
+                "environment under names like `BASH_FUNC_python3%%`, which "
+                "replaces the program a step runs without touching the step.",
+            )
+            case.assertNotIn(
+                name,
+                SHELL_STARTUP_ENV,
+                f"{what} sets a shell-startup variable ({name!r}). Bash "
+                "applies it before the first line of every `run:` body, so a "
+                "step can parse without executing, or execute something it "
+                "does not contain, while every check here stays green.",
+            )
+            # AND AN ALLOWLIST, because the dangerous names are not the ones
+            # that look dangerous. `PYTHONPATH: pr` makes `python3 trusted/…`
+            # import a PR-authored `json.py` ahead of the stdlib, inside the
+            # job holding the AWS session; `GIT_CONFIG_GLOBAL: pr/.gitconfig`
+            # gives the job's `git` a PR-authored `diff.external`; `LD_PRELOAD`
+            # is the classic. All three are plain SCREAMING_SNAKE and on
+            # nobody's denylist, which is why Stage 1 has had an allowlist
+            # since round 5 and this is now the same rule for the other two.
+            case.assertIn(
+                name,
+                allowed,
+                f"{what} sets {name!r}, which this file does not model. Some "
+                "ordinary-looking names make an interpreter load code before "
+                "the step's own program runs (PYTHONPATH, LD_PRELOAD, "
+                "GIT_CONFIG_GLOBAL, PYTHONSTARTUP); decide which this is, "
+                "then add it to the allowlist.",
+            )
+
+
+def refuse_disabling_keys(case: unittest.TestCase, step: str, what: str) -> None:
+    """Require a step to be UNCONDITIONAL and FATAL, in every legal spelling.
+
+    A gate Actions skips, or whose failure the job tolerates, is not a gate —
+    and both were measured as edits that keep every other assertion green. The
+    naive `assertNotIn("if:", step)` is not enough either: YAML accepts
+    `if : false` and `"continue-on-error": true`, and a substring check sees
+    neither. `_key_re` is the reader that already knows those spellings.
+
+    `shell:` is refused for a different reason, and it is the one that makes
+    the executable tests honest: it selects the interpreter, so a step that
+    quietly became `shell: python3 {0}` would be TESTED by something other than
+    what runs it. Stage 1's `ALLOWED_STEP_KEYS` states the same rule.
+    """
+    for key in ("if", "continue-on-error", "shell"):
+        offenders = [
+            ln for ln in strip_comments(step).splitlines() if _key_re(key).match(ln)
+        ]
+        case.assertEqual(
+            offenders,
+            [],
+            f"{what} carries `{key}:` ({offenders}). Actions would skip it, "
+            "tolerate its failure, or run it under an interpreter the "
+            "executable tests never exercise.",
+        )
 
 
 def _key_re(key: str) -> re.Pattern:
@@ -328,6 +545,128 @@ def indented_block(text: str, key: str) -> list[str]:
     raise AssertionError(f"{key!r} not found")
 
 
+def refuse_unmodelled_spellings(case: unittest.TestCase, text: str, what: str) -> None:
+    """Require `text` to be written in the narrow YAML subset these readers parse.
+
+    Extracted from Stage 1's grammar test so Stage 2 and the suite CI get the
+    same fence. Round 8 closed four separate defects that were all one shape —
+    a flow mapping or a bare list marker in a file with no grammar — while
+    Stage 1, which has had this since round 5, produced none of them. A grammar
+    on one of three files is not a grammar.
+    """
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines):
+        raw = lines[i]
+        i += 1
+        if not raw.strip():
+            continue
+        # Step over block-scalar bodies wholesale: that is shell, not YAML.
+        m = _ANY_BLOCK_KEY.match(raw)
+        if m and BLOCK_HEADER.fullmatch(uncommented(m.group(2)) or "x"):
+            indent = len(raw) - len(raw.lstrip())
+            while i < len(lines) and (
+                not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent
+            ):
+                i += 1
+            continue
+        body = raw.rstrip()
+        case.assertNotIn(
+            "\t",
+            body,
+            f"a tab in {what} ({body!r}); every reader here measures "
+            "indentation in spaces.",
+        )
+        # YAML NODE PROPERTIES on a key's value. `env: &capture_env` is an
+        # anchor on an otherwise-empty mapping: YAML reads the indented
+        # lines under it as that mapping's entries, while every reader
+        # here sees a key WITH an inline value and steps over the block —
+        # so `BASH_ENV: '$(touch INJECTED)'` beneath it was scanned by
+        # nothing. `*alias` and `!!tag` hide content the same way.
+        inline = body.split(":", 1)[1].strip() if ":" in body else ""
+        case.assertNotRegex(
+            inline,
+            r"^[&*!]",
+            f"the {what} line {body!r} carries a YAML anchor, alias or "
+            "tag. Every reader here is line-oriented and treats such a "
+            "header as a key with a value, so it steps over the block "
+            "beneath it — which is where the content would be. EVERY "
+            "leading `!`, not just `!!`: `!<tag:yaml.org,2002:map>` is an "
+            "explicit mapping tag and hides a block exactly as well.",
+        )
+        stripped = body.lstrip()
+        # A list marker must INTRODUCE its first key on the same line.
+        #
+        # A bare `-` with the mapping beneath it is legal YAML and puts
+        # the entry's keys at an indentation nothing here derives: the
+        # step-key allowlist reads keys at `<= 8` spaces, so a bare marker
+        # at six with its mapping at ten hides every key from it — `shell:
+        # "bash -c …"` included. Rather than teach four readers to derive
+        # per-entry indentation, the spelling is refused, which keeps step
+        # keys at a fixed column and the `<= 8` bound correct by
+        # construction.
+        if re.fullmatch(r"-", stripped):
+            case.fail(
+                f"the {what} line {body!r} is a bare list marker. Write "
+                "the entry's first key on the same line (`- name: …`): a "
+                "bare marker puts the mapping at an indentation the "
+                "step-key allowlist does not scan."
+            )
+        was_marker = bool(re.match(r"^- \S", stripped))
+        if was_marker:
+            stripped = re.sub(r"^-\s*", "", stripped)
+            if not stripped:
+                continue
+        # A SEQUENCE ENTRY THAT IS A SCALAR, not a mapping — `- "scripts/
+        # pr_review/**"` under a `paths:` filter. It declares no key, so there
+        # is nothing here for a line reader to mis-read, and demanding the key
+        # form would red the suite-CI file for being written in the ordinary
+        # way. Still refused if it carries a `{` or an unquoted `:`, which are
+        # the two ways a sequence entry hides a mapping from these readers.
+        if was_marker and not re.match(r"^[\"']?[\w.-]+[\"']?[ \t]*:", stripped):
+            bare = re.sub(r"\"[^\"]*\"|'[^']*'", "", stripped)
+            case.assertNotIn(
+                "{",
+                bare,
+                f"the {what} sequence entry {body!r} is a flow mapping; "
+                "every reader here is line-oriented.",
+            )
+            case.assertNotIn(
+                ":",
+                bare,
+                f"the {what} sequence entry {body!r} carries an unquoted "
+                "`:`, so it is a mapping this grammar did not recognise as "
+                "one. Write it as `- key: value`.",
+            )
+            continue
+        # Keys are unquoted, have no space before the colon, and are
+        # either lower-case YAML keys (`runs-on`, `timeout-minutes`) or
+        # UPPER_SNAKE environment names.
+        case.assertRegex(
+            stripped,
+            r"^(?:[a-z_][a-z0-9_-]*|[A-Z_][A-Z0-9_]*):(?: .*)?$",
+            f"the {what} line {body!r} is not an unquoted, "
+            "space-free-before-the-colon mapping key in the subset these "
+            "readers parse. It may be perfectly good YAML — but the job "
+            "enumerator, the step enumerator, the key allowlist and the "
+            "env scan are all line-at-a-time and would each read it "
+            "wrong. Rewrite it in the plain form, or teach every one of "
+            "them and widen this grammar.",
+        )
+        # A flow mapping hides its keys from every line-oriented reader
+        # here. Two brace users are NOT that and must not red: a `${{ }}`
+        # expression, and the empty mapping `{}` — which is how
+        # `permissions:` is spelled, and which declares nothing at all.
+        without_exprs = re.sub(r"\$\{\{.*?\}\}", "", stripped, flags=re.S)
+        case.assertNotIn(
+            "{",
+            re.sub(r":\s*\{\s*\}\s*$", ":", without_exprs),
+            f"the {what} line {body!r} uses a flow mapping. Every "
+            "reader in this class is line-oriented and a flow mapping "
+            "hides its keys from all of them.",
+        )
+
+
 class TestPreparePermissions(unittest.TestCase):
     """`prepare` calls `gh api repos/.../pulls/N`, which needs the PR scope.
 
@@ -387,7 +726,540 @@ class TestEgressAllowlistCoversItsOwnWrites(unittest.TestCase):
         )
 
     def test_egress_policy_is_block(self):
-        self.assertIn("egress-policy: block", self.review)
+        """THE VALUE, not the presence of the string anywhere in the job.
+
+        `egress-policy: audit # egress-policy: block` satisfied a substring
+        search while the runner audited instead of blocking. Read the key's own
+        value, with its trailing comment removed.
+        """
+        hits = [
+            uncommented(m.group(1))
+            for ln in strip_comments(self.review).splitlines()
+            if (m := _key_re("egress-policy").match(ln.strip()))
+        ]
+        self.assertEqual(
+            hits,
+            ["block"],
+            f"harden-runner's egress-policy is {hits}, not ['block']; "
+            "`audit` reports outbound connections and permits all of them.",
+        )
+
+    def test_the_egress_allowlist_has_no_wildcard(self):
+        """An allowlist that admits everything reads exactly like one that does not.
+
+        `*:443` as an entry leaves `egress-policy: block` in force and permits
+        every host on 443, so the eleven specific entries become decorative and
+        every other test in this class — which check that a written bucket
+        APPEARS in the list — still pass. harden-runner accepts the wildcard.
+        """
+        entries = [
+            e
+            for ln in indented_block(self.review, "allowed-endpoints:")
+            for e in ln.split()
+        ]
+        self.assertTrue(entries, "premise changed: the allowlist is empty")
+        bad = [e for e in entries if "*" in e or e.startswith(":")]
+        self.assertEqual(
+            bad,
+            [],
+            f"the egress allowlist carries a wildcard ({bad}); every host it "
+            "matches is reachable and the specific entries stop meaning "
+            "anything.",
+        )
+
+
+class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
+    """Three things the review job leans on that nothing asserted.
+
+    Each was found by cross-model review in round 8, and each is the same
+    shape: a control whose ABSENCE changes nothing any other test can see.
+    """
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.review = job_block(self.text, "review")
+
+    # The complete tool policy, as two exact strings. "Read is path-scoped"
+    # was checked by looking for the scoped rules — which stay present when a
+    # BARE `Read` is appended, and a bare rule grants every path on the runner
+    # including `/proc/self/environ` and the AWS session in this step's
+    # environment. A list is only a policy if nothing may be added to it.
+    EXPECTED_ALLOWED_TOOLS = (
+        "Read(/${{ github.workspace }}/pr/**),"
+        "Grep(/${{ github.workspace }}/pr/**),"
+        "Glob(/${{ github.workspace }}/pr/**),"
+        "Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),"
+        "Read(//tmp/pr-diff.txt),"
+        "Read(//tmp/pr-files.txt),"
+        "Read(/${{ runner.temp }}/pr-review-findings.json),"
+        "Write"
+    )
+    EXPECTED_DISALLOWED_TOOLS = "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Task"
+
+    def test_the_tool_policy_is_exactly_what_was_reviewed(self):
+        for flag, expected in (
+            ("--allowedTools", self.EXPECTED_ALLOWED_TOOLS),
+            ("--disallowedTools", self.EXPECTED_DISALLOWED_TOOLS),
+        ):
+            with self.subTest(flag=flag):
+                body = strip_comments(self.review)
+                # EXACTLY ONE OCCURRENCE. Pinning the first match says nothing
+                # about a second `--allowedTools "Read"` appended below it, and
+                # which of two wins is the action's behaviour to change — so
+                # the ambiguity is refused rather than reasoned about.
+                self.assertEqual(
+                    body.count(flag),
+                    1,
+                    f"{flag} appears {body.count(flag)} times; which one the "
+                    "action honours is not this file's to assume.",
+                )
+                m = re.search(rf"{re.escape(flag)}\s+\"([^\"]*)\"", body)
+                self.assertIsNotNone(m, f"the review step declares no {flag}")
+                self.assertEqual(
+                    m.group(1),
+                    expected,
+                    f"the review's {flag} changed. Every entry decides what "
+                    "the model may reach on a runner holding an AWS session; "
+                    "review the change, then update this constant.",
+                )
+
+    def test_harden_runner_keeps_its_two_settings_and_cannot_be_skipped(self):
+        """Being FIRST is not the same as RUNNING.
+
+        `if: false` on the step leaves it first and leaves egress unrestricted
+        and sudo available; deleting `disable-sudo: true` leaves a process able
+        to tear the egress monitor down. Neither moved any other assertion.
+        """
+        step = self._harden_runner_step()
+        refuse_disabling_keys(self, step, "the harden-runner step")
+        # THE KEY'S VALUE. `disable-sudo: false # disable-sudo: true` satisfied
+        # a substring search while leaving passwordless sudo available.
+        seen = [
+            uncommented(m.group(1))
+            for ln in strip_comments(step).splitlines()
+            if (m := _key_re("disable-sudo").match(ln.strip()))
+        ]
+        self.assertEqual(
+            seen,
+            ["true"],
+            f"harden-runner's disable-sudo is {seen}, not ['true']; a process "
+            "in the review job could then remove the egress monitor.",
+        )
+
+    def _harden_runner_step(self) -> str:
+        rest = self.review[self.review.index("- name: Harden runner") :]
+        nxt = re.search(r"(?m)^      -(?: |$)", rest[1:])
+        return rest[: nxt.start() + 1] if nxt else rest
+
+    def test_no_secret_is_declared_where_the_review_job_inherits_it(self):
+        """The review job's own text is not the whole surface it sees.
+
+        A workflow-level `env:` reaches every job, so `GH_TOKEN: ${{
+        secrets.GITHUB_TOKEN }}` at column 0 hands a token to the job that runs
+        fork code while `test_review_job_uses_no_secrets`, which reads only the
+        job block, stays green. Column-0 `env:` is refused outright here; the
+        two jobs that legitimately need a token declare it at STEP level.
+        """
+        text = strip_comments(STAGE2.read_text())
+        top = text.split("\njobs:", 1)[0]
+        # THREE SPELLINGS OF ONE CREDENTIAL. `secrets['GITHUB_TOKEN']` is the
+        # index form of `secrets.GITHUB_TOKEN`, and `github.token` is the same
+        # token again under a different context — all three hand it to every
+        # job, including the one that runs pull-request code.
+        offenders = [
+            ln.strip()
+            for ln in top.splitlines()
+            if re.search(r"secrets\s*[.\[]|github\s*[.\[]\s*[\"']?token", ln)
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            f"Stage 2 names a secret at workflow level ({offenders}); every "
+            "job inherits it, including the one that runs pull-request code.",
+        )
+
+    def test_harden_runner_is_the_first_step(self):
+        """Its own comment says MUST be first; nothing enforced it.
+
+        Moved below the two checkouts, the egress block and `disable-sudo` are
+        not in force while the untrusted tree is fetched — and every other test
+        in the egress class, which reads the step wherever it sits, stays
+        green. Contrast the symlink scrub, whose order IS pinned.
+        """
+        entries = [
+            e.strip()
+            for e in re.split(r"(?m)^      -(?: |$)", strip_comments(self.review))[1:]
+        ]
+        self.assertTrue(entries, "premise changed: the review job has no steps")
+        self.assertIn(
+            "step-security/harden-runner@",
+            entries[0],
+            "harden-runner is not the review job's first step; until it runs, "
+            "egress is unrestricted and sudo is available.",
+        )
+
+    def test_no_step_writes_the_environment_or_the_path_at_runtime(self):
+        """The env allowlist reads `env:` mappings; a step can skip them.
+
+        `echo "PYTHONPATH=${GITHUB_WORKSPACE}/pr" >> "$GITHUB_ENV"` sets the
+        variable for every LATER step in the job without appearing in any
+        `env:` mapping, so no allowlist is consulted — and that is exactly the
+        hazard the allowlist's own comment names. `$GITHUB_PATH` is the same
+        mechanism for the program a later step resolves. Neither file needs
+        either, so both are refused outright.
+        """
+        text = strip_comments(STAGE2.read_text())
+        offenders = [
+            ln.strip()
+            for ln in text.splitlines()
+            if "GITHUB_ENV" in ln or "GITHUB_PATH" in ln
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            f"Stage 2 writes the runtime environment ({offenders}); names set "
+            "that way reach every later step without passing the `env:` "
+            "allowlist.",
+        )
+
+    # The only expressions a Stage 2 `run:` body may carry. Each is generated
+    # by GitHub or by this file, and none can hold a character a pull request
+    # chose: `repository` is fixed, `run_id`/`run_attempt` are integers,
+    # `workspace`/`runner.temp` are runner paths, and `pr_number` comes out of
+    # `prepare`, which validates it against `^[0-9]+$` before exporting it.
+    # Anything else — a branch name, a title, a label — must arrive via `env:`.
+    SHELL_SAFE_EXPRESSIONS = frozenset(
+        (
+            "github.repository",
+            "github.run_id",
+            "github.run_attempt",
+            "github.workspace",
+            "runner.temp",
+            "needs.prepare.outputs.pr_number",
+        )
+    )
+
+    def test_no_stage2_script_interpolates_an_expression(self):
+        """Stage 1 forbids this; Stage 2 had no counterpart at all.
+
+        `echo "on ${{ github.event.workflow_run.head_branch }}"` inside a
+        `publish` step is substituted by the runner before bash parses, and a
+        fork branch name may contain `$( )`, a backtick or `;` — command
+        execution in the job holding `issues: write`, `pull-requests: write`
+        and a token. Every value Stage 2 needs already arrives through `env:`,
+        which is quoting-safe; the construct is refused in `run:` bodies.
+        """
+        text = STAGE2.read_text()
+        offenders = []
+        for job in ("prepare", "review", "publish"):
+            lines = job_block(text, job).splitlines()
+            starts = [
+                i for i, ln in enumerate(lines) if re.match(r"^      -(\s|$)", ln)
+            ]
+            for a, b in zip(starts, starts[1:] + [len(lines)]):
+                entry = "\n".join(lines[a:b])
+                for _, body in block_scalars(entry, "run"):
+                    for ln in body:
+                        offenders += [
+                            (job, e)
+                            for e in re.findall(r"\$\{\{\s*(.*?)\s*\}\}", ln)
+                            if e not in self.SHELL_SAFE_EXPRESSIONS
+                        ]
+        self.assertEqual(
+            offenders,
+            [],
+            f"a Stage 2 `run:` body interpolates {offenders}. The runner "
+            "substitutes the text before bash parses it, so anything a pull "
+            "request can influence — a branch name, a title, a label — "
+            "becomes shell. Pass it through `env:` and quote the variable, "
+            "or add it here once you have established it cannot.",
+        )
+
+    def test_the_model_output_is_never_echoed_to_the_log(self):
+        """The file's own capitalised prohibition, with nothing enforcing it.
+
+        `show_full_output` / `display_report` put UNSANITIZED model output —
+        the thing `extract_verdict.py` exists to stand in front of — into a log
+        any pull-request author can read.
+        """
+        for flag in ("show_full_output", "display_report"):
+            self.assertNotIn(
+                flag,
+                strip_comments(STAGE2.read_text()),
+                f"`{flag}` is set; it bypasses the sanitizer and publishes raw "
+                "model output to a log.",
+            )
+
+    def test_stage2_declares_exactly_the_three_jobs_that_were_reviewed(self):
+        """Stage 1 pins its job set; Stage 2 did not.
+
+        A fourth job declaring `environment: bedrock`, assuming the publisher
+        role and checking out the PR head is green today, because every
+        role-separation test inspects the job literally named `review`.
+        """
+        after = strip_comments(STAGE2.read_text()).split("\njobs:", 1)[1]
+        jobs = re.findall(rf"(?m)^  (\S.*?):{HEADER_TAIL}", after)
+        self.assertEqual(
+            jobs,
+            ["prepare", "review", "publish"],
+            f"Stage 2's jobs are {jobs}. Every role, environment and "
+            "checkout assertion in this file names one of three; a fourth is "
+            "covered by none of them.",
+        )
+
+    def test_the_label_move_is_gated_on_the_row_it_records(self):
+        """The class named for this contradiction did not pin it.
+
+        It asserted only that the label step READS the row's effective status;
+        replacing the comparison with a constant lets a `model_error` row sit
+        beside a PR marked `ready for review`, which then suppresses every
+        future automatic review of it.
+        """
+        publish = strip_comments(job_block(STAGE2.read_text(), "publish"))
+        self.assertIn(
+            '[ "$STATUS" != "succeeded" ]',
+            publish,
+            "the label move no longer compares the recorded status against "
+            "`succeeded`; a failed review could still mark the PR reviewed.",
+        )
+
+    # The review job's step set, by name and in order. Stage 1 pins jobs,
+    # steps, action identities and script digests because it is the job a
+    # pull request triggers; the `review` job is the one that CHECKS THE PULL
+    # REQUEST OUT, and it had no set-pin at all — a step whose body is
+    # `bash pr/scripts/ci-hook.sh` was green.
+    EXPECTED_REVIEW_STEPS = (
+        "Harden runner",
+        "Trusted checkout (prompt, schema, sanitizer)",
+        "Untrusted checkout at the authenticated head SHA",
+        "Remove symlinks that escape the PR tree",
+    )
+
+    def test_the_review_job_opens_with_exactly_the_steps_that_were_reviewed(self):
+        names = re.findall(r"(?m)^      - name: (.+)$", strip_comments(self.review))
+        self.assertEqual(
+            list(self.EXPECTED_REVIEW_STEPS),
+            names[: len(self.EXPECTED_REVIEW_STEPS)],
+            f"the review job's opening steps are {names[:6]}. This job holds "
+            "the untrusted checkout and an AWS session; a step inserted "
+            "before the scrub runs against a tree that still has escaping "
+            "symlinks in it.",
+        )
+        unnamed = re.findall(
+            r"(?m)^      -(?: (?!name:)| *$)", strip_comments(self.review)
+        )
+        self.assertEqual(
+            unnamed,
+            [],
+            f"the review job has {len(unnamed)} step(s) with no `name:`; the "
+            "enumeration above cannot see them.",
+        )
+
+    def test_the_artifact_and_the_api_are_both_corroborated(self):
+        """Two comparisons hold the whole provenance story up.
+
+        The artifact is shape-checked and the API is queried either way, so
+        deleting EITHER comparison leaves every other assertion green while the
+        claim "the artifact is corroborated, never believed" becomes false: a
+        forged artifact could then name a different commit, or a victim PR.
+        Both are pinned literally because each is one line of shell in a job
+        nothing else re-checks.
+        """
+        prepare = strip_comments(job_block(self.text, "prepare"))
+        self.assertIn(
+            '[[ "$HEAD_SHA" == "$EVENT_HEAD_SHA" ]]',
+            prepare,
+            "the captured head_sha is no longer compared against "
+            "workflow_run.head_sha; the artifact is believed rather than "
+            "authenticated.",
+        )
+        self.assertIn(
+            '[ "$API_HEAD_REPO" != "$EVENT_HEAD_REPO" ] '
+            '|| [ "$API_HEAD_REF" != "$EVENT_HEAD_BRANCH" ]',
+            prepare,
+            "the API's head repo/branch are no longer compared against the "
+            "event's; a run could be pointed at a different pull request.",
+        )
+        # AND EACH COMPARISON MUST REJECT. Both branches read as provenance
+        # checks with their `exit 1` removed, and the step then exports
+        # `fresh=true` on a mismatch — the comparison is present and decides
+        # nothing.
+        # BOUNDED BY THE BRANCH, not by a character count: with `exit 1`
+        # deleted, the very next check's own `exit 1` sat inside a fixed
+        # window and satisfied this. Each branch runs to its closing `}`/`fi`.
+        for marker, close, what in (
+            ("::error::captured head_sha", "\n          }", "the artifact head_sha"),
+            ("but the run came from", "\n          fi", "the API/event"),
+        ):
+            i = prepare.index(marker)
+            j = prepare.index(close, i)
+            # A STATEMENT, not the substring: `echo "exit 1"` satisfied a
+            # containment check while the branch fell through.
+            self.assertIn(
+                "exit 1",
+                [ln.strip() for ln in prepare[i:j].splitlines()],
+                f"{what} mismatch branch logs but does not exit; the run "
+                "continues with the value it has just called wrong.",
+            )
+
+    def test_the_write_boundary_hook_is_declared(self):
+        """`Write` is granted BARE, and this hook is what confines it.
+
+        The grant is deliberately unqualified because a path-qualified Write
+        rule refuses with no reason recorded anywhere a workflow can read — so
+        the PreToolUse hook, not the tool list, is the boundary. Delete the
+        entry and the model may write anywhere the runner can, including over
+        `trusted/scripts/pr_review/extract_verdict.py`, which a later step
+        executes. Nothing else in this file would notice.
+        """
+        # PARSED, not searched. The value is a JSON literal, so `json.loads`
+        # is exact here where the line readers elsewhere in this file are not —
+        # and a substring search could not tell `"PreToolUse"` from
+        # `"PreToolUseDISABLED"`, which keeps every string it looks for in the
+        # file while wiring the hook to an event that never fires. Measured.
+        settings = json.loads(
+            textwrap.dedent("\n".join(indented_block(self.review, "settings:")))
+        )
+        # THE WHOLE SETTINGS OBJECT, not just its hooks. `disableAllHooks:
+        # true` beside them turns every entry below into decoration while each
+        # assertion on those entries still passes.
+        self.assertEqual(
+            sorted(settings),
+            ["hooks"],
+            f"the review's settings declare {sorted(settings)}; only `hooks` "
+            "is modelled here, and a sibling key can switch them all off.",
+        )
+        hooks = settings["hooks"]
+        for event, matcher, script in (
+            ("PreToolUse", "Write|Edit|MultiEdit|NotebookEdit", "restrict-write.sh"),
+            ("PostToolUse", "Write", "validate-post-write.sh"),
+            ("Stop", None, "validate-on-stop.sh"),
+        ):
+            self.assertIn(
+                event,
+                hooks,
+                f"the review declares no {event} hook; {script} never runs",
+            )
+            # THE MATCHER AND THE COMMAND ON THE SAME ENTRY. Checked as two
+            # independent lists, `{"matcher": "Write|…", "command": "true"}`
+            # beside `{"matcher": "Edit", "command": ".../restrict-write.sh"}`
+            # satisfied both while the bare `Write` grant ran unhooked.
+            entries = [e for e in hooks[event] if e.get("matcher") == matcher]
+            self.assertTrue(
+                entries,
+                f"the {event} hook has no entry matching {matcher!r} "
+                f"(matchers are {[e.get('matcher') for e in hooks[event]]})",
+            )
+            commands = [h["command"] for e in entries for h in e["hooks"]]
+            # EXACT, not `endswith`. `: ${{ … }}/trusted/…/restrict-write.sh`
+            # runs bash's no-op builtin and still ends with the same text, so
+            # the hook never executes and the bare `Write` is unconfined — with
+            # every assertion here green. Measured.
+            expected = (
+                "${{ github.workspace }}/trusted/.claude/hooks/pr_review/" + script
+            )
+            self.assertIn(
+                expected,
+                commands,
+                f"the {event} command is {commands}, not [{expected!r}]; "
+                "anything prefixed onto it runs instead of the hook, and the "
+                "bare `Write` grant is then unconfined.",
+            )
+
+    def test_the_prompt_hash_covers_the_trusted_surface(self):
+        """A telemetry hash that omits half of what it identifies.
+
+        `prompt_hash` is how two runs are told apart in the row table. It used
+        to cover the workflow, the sanitizer, the row builder and the rubric —
+        not the four hooks that bound what the model may write, nor the
+        validator that decides what a finding may say. Two runs differing only
+        there recorded the same hash.
+        """
+        step = "\n".join(indented_block(self.review_prepare(), "run:"))
+        hashed = set(re.findall(r"([\w./-]+\.(?:py|sh|md|yml))", step))
+        required = {
+            ".github/workflows/hardened-pr-review-run.yml",
+            "scripts/pr_review/extract_verdict.py",
+            "scripts/pr_review/emit_row.py",
+            "scripts/pr_review/validate_findings.py",
+            ".claude/skills/pr-review-readiness/SKILL.md",
+        } | {
+            f".claude/hooks/pr_review/{n}"
+            for n in (
+                "restrict-write.sh",
+                "validate-findings.sh",
+                "validate-on-stop.sh",
+                "validate-post-write.sh",
+            )
+        }
+        missing = sorted(required - hashed)
+        self.assertEqual(
+            missing,
+            [],
+            f"the prompt hash omits {missing}; a change there moves the "
+            "review's behaviour without moving the hash that identifies it.",
+        )
+        # AND THE BYTES MUST REACH `sha256sum`. Naming a file is not hashing
+        # it: `cat a b >/dev/null; cat c | sha256sum` mentions all three and
+        # hashes one, so the two discarded inputs could change with the hash
+        # unmoved. One `cat` feeding one pipe, no redirection.
+        self.assertEqual(
+            step.count("| sha256sum"), 1, "the hash is not one `cat | sha256sum`"
+        )
+        self.assertEqual(
+            step.count("cat "),
+            1,
+            "the hash step runs more than one `cat`; a second one can consume "
+            "the files this test looked for and send them somewhere else.",
+        )
+        # The `HASH=$( … )` command itself. `echo "hash=$HASH" >> $GITHUB_OUTPUT`
+        # below it is the legitimate `>` in this step.
+        assignment = step.split("HASH=", 1)[1].split("\n          echo", 1)[0]
+        self.assertNotIn(
+            ">",
+            assignment,
+            "the hash command redirects. Every named file must reach the "
+            "single `sha256sum`, or a change to a discarded input leaves the "
+            "hash that identifies the run unmoved.",
+        )
+        # AND THE COMPUTED VALUE IS WHAT IS EXPORTED. `echo "hash=disabled"`
+        # records one identifier for every version of the trusted surface,
+        # while every assertion about the `cat` above stays green.
+        self.assertIn(
+            'echo "hash=$HASH" >> "$GITHUB_OUTPUT"',
+            step,
+            "the step does not export the hash it just computed",
+        )
+        # AND ASSIGNED ONCE. `HASH=disabled` inserted just before the export
+        # satisfies every assertion above while the exported value is a
+        # constant.
+        self.assertEqual(
+            step.count("HASH="),
+            1,
+            f"the hash step assigns HASH {step.count('HASH=')} times; the "
+            "last one wins and it need not be the computed digest.",
+        )
+        # Each required file named EXACTLY ONCE, so the set above cannot be
+        # satisfied by a mention in a second, discarded command.
+        for path in sorted(required):
+            self.assertEqual(
+                step.count(path),
+                1,
+                f"{path} appears {step.count(path)} times in the hash step; "
+                "exactly one of them would be the one that is hashed.",
+            )
+        for path in sorted(required):
+            self.assertTrue(
+                (REPO / path).is_file(), f"the hash names a missing file: {path}"
+            )
+
+    def review_prepare(self) -> str:
+        """The `Hash the trusted prompt surface` step, in `prepare`."""
+        prepare = strip_comments(job_block(self.text, "prepare"))
+        i = prepare.index("Hash the trusted prompt surface")
+        rest = prepare[i:]
+        nxt = re.search(r"(?m)^      -(?: |$)", rest)
+        return rest[: nxt.start()] if nxt else rest
 
 
 class TestCredentialDuration(unittest.TestCase):
@@ -502,6 +1374,383 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         # or a PYTHONOPTIMIZE in the environment strips it and the step passes.
         self.assertEqual(
             step.count("raise SystemExit"), 2, "a checked condition does not reject"
+        )
+
+    PREFLIGHT_STEP = "- name: Refuse a suppressed or emptied suite"
+
+    def _preflight_entry(self) -> str:
+        return "\n".join(indented_block(strip_comments(self.text), self.PREFLIGHT_STEP))
+
+    def _preflight(self) -> str:
+        """The preflight step's WHOLE `run:` body, ready to run under bash.
+
+        THE WHOLE BODY, not the `python3 -c` program inside it. Extracting just
+        the program made the test blind to the shell around it: appending
+        `|| true` after the closing quote leaves the Python byte-identical, so
+        every assertion here stayed green while CI accepted both of the states
+        this step exists to refuse. What runs in CI is the block; the block is
+        what gets run.
+        """
+        step = self._preflight_entry()
+        self.assertTrue(step.strip(), "the preflight step is gone")
+        return textwrap.dedent(scalar_block(step, "run"))
+
+    def _run_preflight(self, *, hook: bool = False, delete: str = "") -> int:
+        """RUN it against a synthesized tree. Returns the exit status.
+
+        A real subtree rather than the repository's own: the two rejections are
+        about states this repository must never be in, so they can only be
+        exercised somewhere else.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            pkg = Path(td) / "scripts" / "pr_review"
+            pkg.mkdir(parents=True)
+            (pkg.parent / "__init__.py").write_text("")
+            (pkg / "__init__.py").write_text(
+                "def load_tests(*a, **k):\n    return None\n" if hook else ""
+            )
+            shutil.copy(HERE_MANIFEST, pkg / HERE_MANIFEST.name)
+            for name in EXPECTED_MODULES:
+                if name != delete:
+                    (pkg / name).write_text("")
+            bash = shutil.which("bash")
+            self.assertIsNotNone(bash, "premise changed: bash is not installed")
+            # `python3` on PATH is what the runner uses, but this sandbox's
+            # interpreter is the one that can import nothing unexpected, so it
+            # is put FIRST on PATH under that name.
+            shim = Path(td) / "bin"
+            shim.mkdir()
+            (shim / "python3").symlink_to(sys.executable or "/usr/bin/python3")
+            # `-e`, because that is the shell Actions declares. A `run:` with
+            # no `shell:` key runs under `bash -e {0}` (NOT `-o pipefail`, which
+            # only comes with an explicit `shell: bash`). Without `-e` the
+            # harness is more permissive than CI: a second command after the
+            # python masks its non-zero exit here and not there, so a legal
+            # two-command refactor reads as a false red and a body whose refusal
+            # depends on `-e` reads as accepting a state CI refuses.
+            return subprocess.run(
+                [bash, "-e", "-c", self._preflight()],
+                cwd=td,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PATH": f"{shim}:{os.environ.get('PATH', '')}"},
+            ).returncode
+
+    def test_the_preflight_actually_rejects_both_states(self):
+        """EXECUTED, because the structural test above cannot see control flow.
+
+        Counting two `raise SystemExit` and matching the condition strings is
+        satisfied by both raises nested under `if False:`, by a condition that
+        tests the wrong object, and by the second check shadowing the first.
+        The three cases below are the contract the step exists for, and the
+        healthy case is what keeps a step that rejects EVERYTHING from passing
+        the other two.
+        """
+        self.assertEqual(self._run_preflight(), 0, "the preflight rejects a good tree")
+        self.assertNotEqual(
+            self._run_preflight(hook=True),
+            0,
+            "a `load_tests` hook on scripts/pr_review/__init__.py is accepted; "
+            "it suppresses discovery of the whole suite before one test is "
+            "collected, and nothing inside the suite can see that.",
+        )
+        for name in sorted(EXPECTED_MODULES):
+            with self.subTest(deleted=name):
+                self.assertNotEqual(
+                    self._run_preflight(delete=name),
+                    0,
+                    f"deleting {name} is accepted by the preflight",
+                )
+
+    def test_the_suite_job_cannot_tolerate_its_own_failure(self):
+        """ONE LINE HERE MAKES EVERY CONTRACT IN THIS FILE ADVISORY.
+
+        `continue-on-error: true` on the `test` JOB makes GitHub report the
+        job's conclusion as `success` when a step failed, so the run concludes
+        `success` and the PR check is green while `Run the pr_review suite` red.
+        Four thousand lines of contract, including every remedy in this class,
+        then assert nothing that can block a merge. Measured: with that single
+        line the suite still reports `Ran N tests … OK` and CI stays green.
+
+        It is not an exotic spelling either — `llm_td_retrieval.yml`,
+        `upload-test-stats.yml`, `unstable.yml` and `unstable-periodic.yml` all
+        carry it at job level in this repository, so it reads as ordinary.
+
+        Scanned over the WHOLE job, so a step-level copy is covered too, and
+        through `_key_re`, so `"continue-on-error":` and `continue-on-error :`
+        are as refused as the bare spelling.
+        """
+        offenders = [
+            ln
+            for ln in strip_comments(job_block(self.text, "test")).splitlines()
+            if _key_re("continue-on-error").match(ln.lstrip())
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            f"the suite job tolerates its own failure ({offenders}); the run "
+            "still concludes `success`, so every contract in this file becomes "
+            "advisory.",
+        )
+
+    def test_the_suite_job_cannot_be_skipped(self):
+        """The guard above refuses `continue-on-error` and nothing else.
+
+        `if: false` on the `test` JOB concludes it `skipped`, not `failure`, so
+        the run is green and every contract in this file is advisory — the same
+        outcome as `continue-on-error`, reached through the key that guard does
+        not name. Measured: one line, 320 tests still green.
+
+        The job carries a LEGITIMATE `if:`, so the value is pinned rather than
+        the key forbidden. A second `if:` anywhere in the job — including on a
+        step — reds this too, which is the right direction: a step-level `if:`
+        on the preflight or the suite step is the same hole one level down.
+        """
+        expected = "github.repository_owner == 'pytorch'"
+        block = strip_comments(job_block(self.text, "test"))
+        # `needs:` IS A SKIP CONDITION. A job whose prerequisite is skipped is
+        # itself skipped, through the implicit `success()` Actions applies —
+        # so adding `needs: [gate]` with `gate` carrying `if: false` reaches
+        # exactly the outcome this test forbids, without touching this job's
+        # own `if:`. The suite job depends on nothing, and must not start to.
+        depends = [
+            ln.strip()
+            for ln in block.splitlines()
+            if _key_re("needs").match(ln.lstrip())
+        ]
+        self.assertEqual(
+            depends,
+            [],
+            f"the suite job declares {depends}; a skipped prerequisite skips "
+            "it too, and a skipped job blocks nothing.",
+        )
+        conditions = [
+            plain_scalar(m.group(1)).strip()
+            for ln in block.splitlines()
+            if (m := _key_re("if").match(ln.lstrip()))
+        ]
+        self.assertEqual(
+            conditions,
+            [expected],
+            f"the suite job's conditions are {conditions}, not [{expected!r}]. "
+            "A job Actions skips concludes `skipped`, which no required check "
+            "reads as a failure, so every contract in this file stops blocking "
+            "a merge.",
+        )
+
+    def test_the_suite_step_runs_the_discovery_command_and_cannot_dodge_it(self):
+        """The job guard above does not cover the STEP that runs the suite.
+
+        Two one-line edits make every contract in this file advisory while the
+        presence check on the command string stays green: `|| true` appended to
+        the `run:` body, and `shell: bash -c "exit 0" {0}` on the step, which
+        skips the command entirely. So the body is required to be EXACTLY the
+        fatal discovery command, and the step is put through the same
+        disabling-key refusal as the preflight and the Stage-2 path gate.
+        """
+        entry = "\n".join(
+            indented_block(strip_comments(self.text), "- name: Run the pr_review suite")
+        )
+        self.assertTrue(entry.strip(), "the step that runs the suite is gone")
+        refuse_disabling_keys(self, entry, "the suite step")
+        # An inline `run:`, not a block scalar — read it off the key line. A
+        # block-scalar spelling would give `_key_re` an empty value and fail
+        # here rather than passing, which is the right direction.
+        #
+        # AND THE LINES AFTER IT. A plain scalar CONTINUES onto more-indented
+        # lines, which YAML folds into one value, so `|| true` written on the
+        # next line is part of this command — reading only the key's own line
+        # cannot see it. Measured as a green suppression of the whole suite.
+        lines = entry.splitlines()
+        runs = [
+            (i, m.group(1))
+            for i, ln in enumerate(lines)
+            if (m := _key_re("run").match(ln.lstrip()))
+        ]
+        self.assertEqual(len(runs), 1, f"expected one `run:` in the step, got {runs}")
+        idx, first = runs[0]
+        key_indent = len(lines[idx]) - len(lines[idx].lstrip())
+        folded = []
+        for ln in lines[idx + 1 :]:
+            if not ln.strip() or len(ln) - len(ln.lstrip()) <= key_indent:
+                break
+            folded.append(ln.strip())
+        self.assertEqual(
+            folded,
+            [],
+            f"the suite step's command continues onto {folded}; YAML folds "
+            "those into the command, so `|| true` there suppresses the suite.",
+        )
+        body = plain_scalar(first).strip()
+        self.assertEqual(
+            body,
+            "python3 -m unittest discover -s scripts/pr_review -t .",
+            f"the suite step's command is {body!r}. Anything appended to it — "
+            "`|| true` above all — lets failing contracts conclude `success`.",
+        )
+
+    def test_nothing_in_the_suite_job_executes_outside_its_steps(self):
+        """The same interpreter hole as Stage 2's `prepare`, in the job that
+        decides whether any of this is enforced.
+
+        `jobs.test.defaults.run.shell: bash -c "exit 0" {0}` makes BOTH the
+        preflight and the suite step succeed without running their programs,
+        while every structural assertion here stays green — and the preflight
+        harness would go on selecting `bash -e` for itself, measuring a shell
+        CI does not use.
+        """
+        refuse_execution_outside_steps(self, self.text, "test")
+
+    def test_the_preflight_step_cannot_be_skipped_or_tolerated(self):
+        """A rejection that does not reach CI is not a rejection.
+
+        The executing test above runs the step's whole `run:` body, so a
+        swallowed failure INSIDE it is caught. These two are outside the body
+        and invisible to it: `continue-on-error: true` lets the job proceed past
+        a non-zero step, and `if:` lets Actions skip it. Either leaves the suite
+        running against a state this step exists to refuse.
+        """
+        refuse_disabling_keys(self, self._preflight_entry(), "the preflight step")
+
+    def _entry_point_exit(self, *, successful: bool, tests_run: int, argv=()):
+        """Drive `run_this_suite` with a stubbed loader/runner; return the code.
+
+        Mocked because the three states below cannot all be reached by running
+        the real suite, and NOT relied on alone: the test after next runs the
+        real entry point end to end, which is what keeps this stub honest about
+        the arguments `discover` is actually given.
+        """
+        result = unittest.mock.Mock()
+        result.wasSuccessful.return_value = successful
+        result.testsRun = tests_run
+        runner = unittest.mock.Mock()
+        runner.run.return_value = result
+        with (
+            unittest.mock.patch.object(unittest, "TestLoader"),
+            unittest.mock.patch.object(unittest, "TextTestRunner", return_value=runner),
+            unittest.mock.patch.object(sys, "argv", ["prog", *argv]),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            with self.assertRaises(SystemExit) as raised:
+                run_this_suite()
+        return raised.exception.code
+
+    def test_the_module_entry_point_reports_a_failing_suite(self):
+        """`python3 scripts/pr_review/test_<x>.py` runs the whole suite — and
+        has to exit non-zero on each way that can go wrong.
+
+        Found by mutation: replacing the status with a constant `SystemExit(0)`
+        left every other test in this repository green. An entry point that
+        cannot fail is the exact shape of "green means nothing", and this one is
+        new, so nothing else was watching it.
+
+        A ZERO-TEST RUN IS A FAILURE, and it is the case the obvious
+        implementation gets wrong: `wasSuccessful()` is True on an empty suite,
+        so a package-level `load_tests` that suppresses discovery would exit 0.
+        That is the same suppression the CI preflight refuses, arriving by a
+        route the preflight does not cover.
+        """
+        self.assertEqual(self._entry_point_exit(successful=True, tests_run=311), 0)
+        self.assertNotEqual(
+            self._entry_point_exit(successful=False, tests_run=311),
+            0,
+            "a failing suite exits 0 from the module entry point",
+        )
+        self.assertNotEqual(
+            self._entry_point_exit(successful=True, tests_run=0),
+            0,
+            "a run that collected NO tests exits 0; discovery being suppressed "
+            "then reads exactly like a clean suite.",
+        )
+
+    def test_the_module_entry_point_refuses_a_selector_it_cannot_honour(self):
+        """`unittest.main()` took `Class.test_name`, `-k` and `-v`; this does not.
+
+        Silently ignoring them is the harm: someone selecting a test they
+        misspelled, or one that no longer exists, reads a green whole-suite run
+        as confirmation that it passed.
+        """
+        for argv in (["TestX.test_y"], ["-k", "pattern"], ["-v"]):
+            with self.subTest(argv=argv):
+                self.assertNotEqual(
+                    self._entry_point_exit(successful=True, tests_run=311, argv=argv),
+                    0,
+                    f"{argv} was accepted and silently ignored",
+                )
+
+    def test_the_real_entry_point_runs_this_suite_and_passes(self):
+        """The stub above proves the STATUS mapping and nothing else.
+
+        It patches `TestLoader` out entirely, so `start_dir`, `pattern` and
+        `top_level_dir` are never exercised — a `discover` pointed at the wrong
+        directory, or given a pattern matching nothing, keeps every assertion
+        above green. This runs the shipped entry point for real, from a cwd
+        that is not the repository, and requires it to find this very suite.
+
+        IT MUST NOT RE-ENTER, and the first version did: the child runs the
+        WHOLE suite, which contains this test, which spawns another child. The
+        recursion has no base case and no timeout — it hung the run rather than
+        failing it. The env marker below is the base case, and it is the reason
+        this test cannot simply be written as "run it and see".
+        """
+        # THE MARKER NAMES OUR SPAWNER, and a bare truthy value would not do.
+        # With `if os.environ.get(MARKER)`, a value inherited from anywhere — a
+        # developer's export, a workflow `env:`, a nested invocation — skipped
+        # this test in the PARENT as well, so the only check on `run_this_suite`'s
+        # real `discover` arguments vanished and the run stayed green. Comparing
+        # against our actual parent pid means a leaked value cannot match: the
+        # test runs, spawns a child, and the child (whose ppid IS ours) skips.
+        # `!= "1"` as well: under a container init our ppid CAN be 1, and a
+        # leaked marker of `1` would then match by coincidence and skip the only
+        # real check on `run_this_suite`'s discover arguments.
+        marker = os.environ.get(REENTRY_MARKER)
+        if marker and marker != "1" and marker == str(os.getppid()):
+            self.skipTest(f"{REENTRY_MARKER} names our parent: this IS the child")
+        module = HERE_MANIFEST.parent / "test_emit_row.py"
+        # TIMEOUT, because the marker is the base case and a base case can be
+        # lost. The original defect was a hang, not a failure; if a later
+        # refactor of how the child is spawned drops the marker, this bounds the
+        # damage to a loud `TimeoutExpired` instead of a run that never ends.
+        # CI has `timeout-minutes`; a local run has nothing but this.
+        proc = subprocess.run(
+            [sys.executable or "python3", str(module)],
+            cwd=tempfile.gettempdir(),
+            capture_output=True,
+            text=True,
+            env={**os.environ, REENTRY_MARKER: str(os.getpid())},
+            timeout=300,
+        )
+        self.assertEqual(
+            proc.returncode,
+            0,
+            f"`python3 {module}` did not pass:\n{proc.stdout}\n{proc.stderr}",
+        )
+        ran = re.search(r"^Ran (\d+) tests", proc.stderr, re.M)
+        self.assertIsNotNone(ran, f"no test count in:\n{proc.stderr}")
+        # A LOOSE COUNT IS NOT ENOUGH — `> 100` was cleared by this module
+        # alone, so it never established "the whole suite" — and an exact skip
+        # count is not either: `test_symlink_scrub` skips four permission
+        # fixtures under root, so `skipped=1` red a perfectly clean run inside
+        # any container and pointed the reader at the entry point. So: `OK`
+        # (no failures, no errors) plus the count the LOCAL loader discovers.
+        # That is what actually detects "discovering something narrower", it
+        # needs no literal to keep in step, and it is indifferent to how many
+        # environment-dependent skips the suite contains.
+        self.assertRegex(
+            proc.stderr,
+            r"(?m)^OK(?: \(skipped=\d+\))?$",
+            f"the child did not finish clean. Tail:\n{proc.stderr[-2000:]}",
+        )
+        expected = (
+            unittest.TestLoader()
+            .discover(start_dir=str(HERE_MANIFEST.parent), top_level_dir=str(REPO))
+            .countTestCases()
+        )
+        self.assertEqual(
+            int(ran.group(1)),
+            expected,
+            f"the entry point ran {ran.group(1)} tests; discovery from here "
+            f"finds {expected}. It is pointed at a narrower tree or pattern.",
         )
 
     def test_the_preflight_runs_before_the_suite(self):
@@ -628,6 +1877,32 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
     def test_pull_request_triggers_it_for_python_and_for_yaml(self):
         _, pr = self._halves()
         self._assert_covers(pr, "pull_request")
+        # NO OTHER FILTER on this half. The `push:` half's `branches:` is
+        # pinned below for exactly this reason, and the `pull_request:` half
+        # was left open: `branches: [release]` or `types: [labeled]` here means
+        # no ordinary pull request touching these paths ever runs the suite,
+        # every contract in this file stops gating a merge, and this test —
+        # whose name promises the TRIGGER, not just the path list — stays
+        # green. Measured.
+        #
+        # `indented_block`, not the `_halves` slice: that half runs to the end
+        # of the file, so scanning it for keys collects the `test` job's as
+        # well.
+        keys = indented_block(strip_comments(self.text), "pull_request:")
+        extra = sorted(
+            {
+                m.group(1)
+                for ln in keys
+                if (m := re.match(r"^\s{4}([a-z-]+):", ln)) and m.group(1) != "paths"
+            }
+        )
+        self.assertEqual(
+            extra,
+            [],
+            f"the pull_request trigger carries {extra} beside `paths:`. Any "
+            "of those narrows which pull requests run the suite at all, "
+            "which no path assertion here can see.",
+        )
 
     def test_push_to_main_triggers_it_for_the_same_paths(self):
         """BOTH filters, because only one of them was ever checked.
@@ -916,6 +2191,123 @@ class TestTheFindingsPathIsPinned(unittest.TestCase):
         self.assertIn("Read(/${{ runner.temp }}/pr-review-findings.json)", self.review)
 
 
+class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
+    """The one `env:` entry that disarms every other guard in this file.
+
+    All three files, because the hazard is the same in each: in Stage 2 it
+    no-ops the symlink scrub, in Stage 1 it no-ops the capture, and in the suite
+    CI it makes the contracts themselves advisory. Covered here rather than at
+    each call site so a workflow added later is covered by the loop.
+    """
+
+    # Stage 1 keeps its own, narrower list on
+    # `TestStage1RunsNoPullRequestContent.ALLOWED_ENV_KEYS`; that test is the
+    # one that owns Stage 1's surface, and this loop uses it rather than a
+    # second copy that could drift from it.
+    STAGE2_ENV_KEYS = frozenset(
+        (
+            "AWS_REGION",
+            "BASE_SHA",
+            "CLAUDE_OUTCOME",
+            "DONE_LABEL",
+            "EFFECTIVE_STATUS",
+            "EVENT_HEAD_BRANCH",
+            "EVENT_HEAD_REPO",
+            "EVENT_HEAD_SHA",
+            "EXECUTION_FILE",
+            "FINDINGS_FILE",
+            "GH_TOKEN",
+            "HARNESS",
+            "HARNESS_VERSION",
+            "HEAD_SHA",
+            "IS_FORK",
+            "MAX_CHANGED_FILES",
+            "MAX_DIFF_BYTES",
+            "MERGE_BASE_SHA",
+            "PROMPT_HASH",
+            "PR_DIR",
+            "PR_NUMBER",
+            "PR_REVIEW_DIFF_FILE",
+            "PR_REVIEW_FILES_FILE",
+            "PR_REVIEW_FINDINGS_FILE",
+            "PR_REVIEW_HOOK_LOG",
+            "PR_REVIEW_SCRIPTS_DIR",
+            "PUBLISHER_ROLE",
+            "REPO",
+            "REVIEWED_SHA",
+            "REVIEW_LABEL",
+            "REVIEW_MODEL",
+            "REVIEW_RESULT",
+            "REVIEW_ROLE",
+            "RUN_ID",
+            "S3_BUCKET",
+            "S3_PREFIX",
+            "TOO_LARGE",
+            "TRIGGERING_WORKFLOW_PATH",
+            "TRIGGER_EVENT",
+            "TRIGGER_LABEL",
+            "TRIGGER_RUN_ID",
+            "TRUSTED_SHA",
+        )
+    )
+
+    def test_no_unmodelled_environment_name_is_set_anywhere(self):
+        allowed = {
+            STAGE1: TestStage1RunsNoPullRequestContent.ALLOWED_ENV_KEYS,
+            STAGE2: self.STAGE2_ENV_KEYS,
+            # The suite CI job needs no environment at all, and an entry there
+            # would reach both the preflight and the discovery run.
+            SUITE_CI: frozenset(),
+        }
+        for path, names in allowed.items():
+            with self.subTest(workflow=path.name):
+                refuse_unsafe_env_keys(self, path.read_text(), path.name, names)
+
+    # Names whose VALUE decides which tree a trusted program reads. Being on
+    # the allowlist above says only that the variable is expected; it says
+    # nothing about where it points, and `PR_REVIEW_SCRIPTS_DIR:
+    # ${{ github.workspace }}/pr/scripts/pr_review` makes the trusted
+    # validation hook run PR-authored Python with the review job's AWS
+    # session — every one of the 328 tests green. Measured.
+    PINNED_ENV_VALUES = {
+        "PR_REVIEW_SCRIPTS_DIR": "${{ github.workspace }}/trusted/scripts/pr_review",
+        "PR_DIR": "${{ github.workspace }}/pr",
+    }
+
+    def test_every_path_valued_variable_points_into_the_tree_it_names(self):
+        text = strip_comments(STAGE2.read_text())
+        for name, expected in self.PINNED_ENV_VALUES.items():
+            with self.subTest(variable=name):
+                seen = [
+                    uncommented(m.group(1))
+                    for ln in text.splitlines()
+                    if (m := _key_re(name).match(ln.strip()))
+                ]
+                self.assertEqual(
+                    seen,
+                    [expected],
+                    f"{name} is {seen}, not [{expected!r}]. Its value selects "
+                    "which checkout a trusted program reads; pointing it at "
+                    "`pr/` runs the pull request's own code.",
+                )
+
+    def test_all_three_workflows_are_written_in_the_readable_subset(self):
+        """The grammar Stage 1 has had since round 5, on the other two files.
+
+        Round 8 closed four defects that were all one shape — a flow mapping or
+        a bare list marker somewhere no line-oriented reader models — and every
+        one was in Stage 2 or the suite CI. Stage 1, which this already
+        covered, produced none. A grammar on one of three files is not a
+        grammar, so it is applied to all three here and the Stage 1 test now
+        calls the same function.
+        """
+        for path in (STAGE1, STAGE2, SUITE_CI):
+            with self.subTest(workflow=path.name):
+                refuse_unmodelled_spellings(
+                    self, strip_comments(path.read_text()), path.name
+                )
+
+
 class TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot(unittest.TestCase):
     """`path:` on both checkouts is what keeps PR config undiscoverable.
 
@@ -1068,7 +2460,14 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
 
     def test_review_job_uses_no_secrets(self):
         """A secret here would be readable by a process running fork code."""
-        found = sorted(set(re.findall(r"secrets\.([A-Za-z_]\w*)", self.code)))
+        # BOTH ACCESS FORMS. `secrets['CI_TOKEN']` is the same context read as
+        # `secrets.CI_TOKEN`, and a dot-only pattern matched neither it nor
+        # `secrets["X"]` — so a secret could be handed to the job that runs
+        # fork code with this test green. Any mention of the context at all is
+        # refused here: the review job needs none.
+        found = sorted(
+            set(re.findall(r"secrets\s*[.\[]\s*[\"']?([A-Za-z_]\w*)", self.code))
+        )
         self.assertEqual(found, [], f"review job now references secrets: {found}")
 
     def test_review_job_caches_nothing(self):
@@ -1121,9 +2520,18 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
     def setUp(self):
         self.text = STAGE2.read_text()
         self.review = strip_comments(job_block(self.text, "review"))
-        role = re.search(r"^\s*REVIEW_ROLE:\s*(\S+)", self.text, re.M)
-        self.assertIsNotNone(role, "REVIEW_ROLE env not found")
-        self.review_role = role.group(1)
+        # EVERY definition, not `re.search`'s first. The first match is always
+        # the workflow-level one, so a job-level `env: REVIEW_ROLE: <other>`
+        # inside `review` — which is the binding that would actually apply —
+        # was invisible to every assertion below.
+        roles = re.findall(r"^\s*REVIEW_ROLE:\s*(\S+)", strip_comments(self.text), re.M)
+        self.assertEqual(
+            len(roles),
+            1,
+            f"REVIEW_ROLE is defined {len(roles)} times ({roles}); the "
+            "innermost wins and the tests below read only one.",
+        )
+        self.review_role = roles[0]
         env = re.search(r"^\s*environment:\s*(\S+)\s*$", self.review, re.M)
         self.review_env = env.group(1) if env else None
 
@@ -1170,63 +2578,59 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
 class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
     """A WORKFLOW-level group on Stage 1 lets an ignored run cancel a real one.
 
-    GitHub claims a workflow-level concurrency group before evaluating the job
+    GitHub claims a workflow-level concurrency group BEFORE evaluating the job
     `if:`, so a run this workflow is going to skip still joins the group and,
     with `cancel-in-progress`, kills a review already in flight.
 
-    Observed in pytorch/ciforge: the CLA bot's `cla signed` label created a
-    run one second after the `in progress` label created ours. The bot's run
-    skipped its own `capture` and cancelled ours one second in — no artifact,
-    and both Stage 2 runs skipped. Moving the group onto `capture` fixes it,
-    because a job rejected by `if:` never enters the group.
+    THERE USED TO BE ONE HERE, suffixed with `github.event.label.name`, and the
+    suffix was believed to defuse it. It does not: three of the four declared
+    trigger types carry no label object, so the suffix renders EMPTY and they
+    share one group. A `synchronize` the `if:` rejects — the PR went draft, or
+    picked up the terminal label — lands in the same group as a `synchronize`
+    that is mid-review and cancels it, then skips its own `capture`. The
+    cancelled run never reaches `conclusion == 'success'`, so Stage 2 does not
+    fire: no review, no telemetry row, nothing on the PR. Measured in
+    pytorch/ciforge as the CLA-bot variant of the same thing, and reachable here
+    with a single trigger and no stale file anywhere.
 
-    The group is nonetheless PRESENT, and the suffix is the reconciliation:
-    the prefix is followed by the event's label, so two runs triggered by
-    DIFFERENT labels land in different groups and cannot cancel each other.
-    Drop the suffix and the incident above comes straight back.
-
-    WHY IT IS STILL HERE now that nothing requires it — and be precise about
-    which half does the work. The GROUP is what creates the hazard; the SUFFIX
-    is what defuses it. Deleting the whole block would also prevent the
-    incident, so this is not a control whose absence is unsafe. It used to be
-    mandatory: `.github/scripts/ensure_actions_will_cancel.py` demands a
-    workflow-level cancelling group with that exact prefix, and that checker
-    selects files with `"pull_request" in on` — an exact key match — so moving
-    to `pull_request_target` took this workflow out of scope. It stays because
-    every other pull-request workflow in the repository carries it, and being
-    the lone exception invites a later "fix". The state to forbid is the group
-    WITHOUT the suffix, which is what both tests below pin.
-
-    Reverting either half is a small edit that looks tidier and silently
-    restores the failure, which is why both are pinned rather than commented.
+    So the group lives on `capture`, which a rejected run never enters, and the
+    workflow level carries none. `.github/scripts/ensure_actions_will_cancel.py`
+    is the reason one was kept after the ciforge incident; it selects files with
+    `"pull_request" in on`, an exact key match, so this file left its scope when
+    the trigger moved and the checker exits 0 without it.
     """
 
     def setUp(self):
         self.text = STAGE1.read_text()
 
-    def test_workflow_level_group_is_differentiated_by_label(self):
-        """Column 0 == workflow level. Present is fine; undifferentiated is not."""
-        m = re.search(r"^concurrency:\n(?:[ \t]+.*\n)+", self.text, re.M)
-        self.assertIsNotNone(
-            m,
-            "Stage 1 lost its workflow-level group. No repo check enforces "
-            "that any more (see this class's docstring), so nothing else "
-            "would have caught it.",
-        )
-        group = re.search(r"^\s+group:\s*(.+)$", m.group(0), re.M)
-        self.assertIsNotNone(group, "workflow-level concurrency has no group")
-        self.assertIn(
-            "github.event.label.name",
-            group.group(1),
-            "the workflow-level group is not differentiated by label — a run "
-            "this workflow skips will cancel a live review, as it did in "
-            "pytorch/ciforge",
+    def test_there_is_no_workflow_level_group_at_all(self):
+        """THE KEY, not the cancellation. Both narrowings were measured wrong.
+
+        An earlier version forbade only `cancel-in-progress: true`, on the
+        reasoning that a non-cancelling group is harmless. It is not: GitHub
+        cancels a PENDING run when another enters the same group, so with A
+        running and an eligible B pending, a rejected C entering the group
+        cancels B before C's own job condition is evaluated. And `true` has
+        spellings — `True`, `'true'`, `${{ … }}` — each of which a value regex
+        misses while restoring the defect in full.
+
+        Nothing here needs a workflow-level group, so the whole key goes.
+        """
+        self.assertIsNone(
+            re.search(
+                r"(?m)^[\"\']?concurrency[\"\']?[ \t]*:", strip_comments(self.text)
+            ),
+            "Stage 1 declares a workflow-level `concurrency:` again. It is "
+            "claimed before the job `if:`, so a run this workflow SKIPS joins "
+            "it and can cancel — or displace as pending — a review in flight. "
+            "No suffix fixes that: three of the four declared trigger types "
+            "carry no label to differentiate by. The collapse group belongs on "
+            "the `capture` job, which a rejected run never enters.",
         )
 
     def test_capture_job_keeps_a_collapse_group(self):
         """The group must not be dropped either — bursts should still collapse."""
-        capture = job_block(self.text, "capture")
-        block = strip_comments(capture)
+        block = strip_comments(job_block(self.text, "capture"))
         # re.M matters: assertRegex uses re.search, so a bare `^` would only
         # anchor at the start of the whole block and never match the indented key.
         self.assertIsNotNone(
@@ -1234,6 +2638,50 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
             "capture lost its concurrency group",
         )
         self.assertIn("cancel-in-progress: true", block)
+
+    def test_the_capture_group_is_keyed_by_event(self):
+        """A constant under one trigger, and the reason to keep it is the run
+        this repository's tree cannot forbid.
+
+        `pull_request` reads the workflow from the PULL REQUEST'S OWN REF. A PR
+        that adds a copy of this file under this workflow's name therefore
+        produces a second run, and no contract test can stop it — every one of
+        them reads a single tree. Keyed by event the two take different groups;
+        unkeyed, whichever starts second cancels the other, and if the survivor
+        is the `pull_request` one Stage 2 refuses its event and the run ends
+        `skipped`.
+
+        NOT A FENCE AGAINST A DELIBERATE ONE, and two earlier versions of this
+        docstring understated it by a step each. The PR authors that copy, so
+        they author its group string, and the PR NUMBER in it is a literal
+        bound to nothing — so an approved contributor can name someone ELSE'S
+        pull request and cancel their capture. Cross-PR, and invisible: Stage 2
+        needs `conclusion == 'success'`, so a cancelled capture leaves no row.
+        A per-SHA check run makes that detectable, not impossible. The case
+        this key actually covers is an HONEST PR-ref copy — someone iterating
+        on this file in a PR.
+
+        It must be `github.event_name` and not `github.event.action`: the action
+        differs across the four declared types, which would stop a push from
+        collapsing a label's run.
+        """
+        block = strip_comments(job_block(self.text, "capture"))
+        group = re.search(r"^\s+group:\s*(\S.*)$", block, re.M)
+        self.assertIsNotNone(group, "the capture job has no concurrency group")
+        # THE VALUE WITHOUT ITS TRAILING COMMENT. `strip_comments` drops only
+        # whole-line comments, so moving the suffix into a comment on this very
+        # line — `group: …-${{ github.event.pull_request.number }}  # -${{
+        # github.event_name }}` — kept this green while the real group lost its
+        # event separation. Measured.
+        value = uncommented(group.group(1))
+        self.assertIn(
+            "${{ github.event_name }}",
+            value,
+            f"the capture group is {value!r}, which does not distinguish the "
+            "event; a PR-ref `pull_request` copy of this workflow would share "
+            "it and silently cancel the real review.",
+        )
+        self.assertNotIn("github.event.action", value)
 
 
 class TestStage1RunsNoPullRequestContent(unittest.TestCase):
@@ -1280,12 +2728,23 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
             "Stage 1's trigger is no longer `pull_request_target`; a fork PR's "
             "review will now wait on a maintainer approving CI.",
         )
-        # And not BOTH: a `pull_request` trigger alongside it would fire a
-        # second, PR-ref run of this same file under the same workflow NAME.
+        # And not BOTH. A `pull_request` trigger runs this file FROM THE PR'S
+        # OWN REF, under the same workflow name, so one event fires two runs of
+        # it: doubled cost, and a second Stage 2 that `prepare`'s event gate
+        # refuses — a `skipped` run with no telemetry row, which reads exactly
+        # like a PR nobody labelled.
+        #
+        # IT IS NO LONGER A CANCELLATION, and the earlier version of this
+        # comment said it was. Stage 1 has no workflow-level group any more, and
+        # the `capture` group is keyed by `github.event_name`, so the two runs
+        # take different groups. That is the sibling test at
+        # `test_the_capture_group_is_keyed_by_event`, not this one.
         self.assertIsNone(
             re.search(r"^\s+pull_request:", on, re.M),
-            "Stage 1 declares a `pull_request` trigger as well; that run comes "
-            "from the PR's own ref and shares this workflow's name.",
+            "Stage 1 declares a `pull_request` trigger as well. That run comes "
+            "from the PR's own ref and shares this workflow's name, so every "
+            "event fires two Stage 1 runs and the second Stage 2 is refused by "
+            "its own event gate — a `skipped` run with no row.",
         )
 
     def test_stage2_accepts_runs_from_exactly_that_trigger(self):
@@ -1355,7 +2814,8 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
     # and the set-pin above sees nothing. So the script itself is pinned.
     # Update these deliberately when you change the shell, which is the whole
     # point: in this file that has to be an act, not an edit.
-    EXPECTED_RUN_DIGESTS = {"Capture PR coordinates": "b7f92a5e3a939bcc"}
+    # Over the RAW body, comments included — see the test for why.
+    EXPECTED_RUN_DIGESTS = {"Capture PR coordinates": "d37176225e66e4c4"}
     # The exact action each step may use. "Pinned to a SHA" is not enough on
     # its own: `actions/github-script` at a real pinned SHA, with a
     # `with.script: |` body, executes JavaScript that can read the PR payload
@@ -1548,12 +3008,24 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         yourself it executes nothing the pull request wrote, then paste the
         digest the failure message prints.
         """
+        # FROM THE RAW TEXT. Digesting the comment-stripped body means a
+        # comment inserted INSIDE the script leaves the digest unmoved — and
+        # a `#` line dropped between a command and its continuation changes
+        # what bash runs, so the pin was not pinning the program. Measured: a
+        # comment after `jq -n \` left all 21 structural checks green while
+        # the real shell exited 127.
+        raw_capture = job_block(self.raw, "capture").splitlines()
+        starts = [
+            i for i, ln in enumerate(raw_capture) if re.match(r"^      -(\s|$)", ln)
+        ]
+        self.assertTrue(starts, "premise changed: no step entries in raw `capture`")
         seen = {}
-        for entry in self._step_entries():
-            name = self._entry_name(entry)
+        for a, b in zip(starts, starts[1:] + [len(raw_capture)]):
+            entry = "\n".join(raw_capture[a:b])
             runs = block_scalars(entry, "run")
             if not runs:
                 continue
+            name = self._entry_name(strip_comments(entry))
             self.assertEqual(
                 len(runs), 1, f"step {name!r} has {len(runs)} `run:` blocks"
             )
@@ -1566,6 +3038,53 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
             "repository's context and no CI approval, so its script is pinned "
             "rather than merely shaped. Review the change, then update "
             "EXPECTED_RUN_DIGESTS with the values above.",
+        )
+
+    def test_no_expression_is_interpolated_into_a_stage1_script_even_in_a_comment(self):
+        """ACTIONS INTERPOLATES BEFORE BASH PARSES, so a `#` is not a shield.
+
+        Every other reader in this class works on `strip_comments(self.raw)`,
+        which drops whole-line `#` comments — including comments inside a
+        `run:` body. So `# PR context: ${{ github.event.pull_request.body }}`
+        added to the capture script was invisible to the expression scan AND
+        left the pinned digest unchanged, while the runner substituted a
+        multi-line, attacker-authored body into the script text before bash saw
+        a comment at all. A body containing a newline then contributes a line
+        bash executes. Measured: all 328 tests green.
+
+        Read from RAW, therefore, and refuse the construct outright — Stage 1
+        passes everything it needs through `env:`, which is the rule the rest of
+        this class already enforces for non-comment lines.
+        """
+        # From the RAW capture job, entry by entry. `block_scalars` matches only
+        # at the OUTERMOST key indent of the text it is given, so handing it the
+        # whole file finds nothing at all — which is how the first version of
+        # this test compared [] with [] and passed on the mutation it exists to
+        # catch.
+        raw_capture = job_block(self.raw, "capture").splitlines()
+        starts = [
+            i for i, ln in enumerate(raw_capture) if re.match(r"^      -(\s|$)", ln)
+        ]
+        self.assertTrue(starts, "premise changed: no step entries in raw `capture`")
+        bounds = starts + [len(raw_capture)]
+        offenders = []
+        for a, b in zip(starts, bounds[1:]):
+            entry = "\n".join(raw_capture[a:b])
+            for _, body in block_scalars(entry, "run"):
+                offenders += [ln.strip() for ln in body if "${{" in ln]
+        self.assertTrue(
+            any(
+                block_scalars("\n".join(raw_capture[a:b]), "run")
+                for a, b in zip(starts, bounds[1:])
+            ),
+            "premise changed: no `run:` block scalar was found to scan",
+        )
+        self.assertEqual(
+            offenders,
+            [],
+            f"a Stage 1 `run:` body interpolates an expression ({offenders}). "
+            "The runner substitutes it before bash runs, and a `#` in front "
+            "does not stop that — pass the value through `env:` instead.",
         )
 
     def test_every_step_uses_exactly_the_action_that_was_reviewed(self):
@@ -1694,95 +3213,7 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         Reformatting the workflow stays legal; reformatting it into a spelling
         nothing here can parse does not.
         """
-        lines = self.text.split("\n")
-        i = 0
-        while i < len(lines):
-            raw = lines[i]
-            i += 1
-            if not raw.strip():
-                continue
-            # Step over block-scalar bodies wholesale: that is shell, not YAML.
-            m = _ANY_BLOCK_KEY.match(raw)
-            if m and BLOCK_HEADER.fullmatch(uncommented(m.group(2)) or "x"):
-                indent = len(raw) - len(raw.lstrip())
-                while i < len(lines) and (
-                    not lines[i].strip()
-                    or len(lines[i]) - len(lines[i].lstrip()) > indent
-                ):
-                    i += 1
-                continue
-            body = raw.rstrip()
-            self.assertNotIn(
-                "\t",
-                body,
-                f"a tab in Stage 1 ({body!r}); every reader here measures "
-                "indentation in spaces.",
-            )
-            # YAML NODE PROPERTIES on a key's value. `env: &capture_env` is an
-            # anchor on an otherwise-empty mapping: YAML reads the indented
-            # lines under it as that mapping's entries, while every reader
-            # here sees a key WITH an inline value and steps over the block —
-            # so `BASH_ENV: '$(touch INJECTED)'` beneath it was scanned by
-            # nothing. `*alias` and `!!tag` hide content the same way.
-            inline = body.split(":", 1)[1].strip() if ":" in body else ""
-            self.assertNotRegex(
-                inline,
-                r"^[&*!]",
-                f"the Stage 1 line {body!r} carries a YAML anchor, alias or "
-                "tag. Every reader here is line-oriented and treats such a "
-                "header as a key with a value, so it steps over the block "
-                "beneath it — which is where the content would be. EVERY "
-                "leading `!`, not just `!!`: `!<tag:yaml.org,2002:map>` is an "
-                "explicit mapping tag and hides a block exactly as well.",
-            )
-            stripped = body.lstrip()
-            # A list marker must INTRODUCE its first key on the same line.
-            #
-            # A bare `-` with the mapping beneath it is legal YAML and puts
-            # the entry's keys at an indentation nothing here derives: the
-            # step-key allowlist reads keys at `<= 8` spaces, so a bare marker
-            # at six with its mapping at ten hides every key from it — `shell:
-            # "bash -c …"` included. Rather than teach four readers to derive
-            # per-entry indentation, the spelling is refused, which keeps step
-            # keys at a fixed column and the `<= 8` bound correct by
-            # construction.
-            if re.fullmatch(r"-", stripped):
-                self.fail(
-                    f"the Stage 1 line {body!r} is a bare list marker. Write "
-                    "the entry's first key on the same line (`- name: …`): a "
-                    "bare marker puts the mapping at an indentation the "
-                    "step-key allowlist does not scan."
-                )
-            if re.match(r"^- \S", stripped):
-                stripped = re.sub(r"^-\s*", "", stripped)
-                if not stripped:
-                    continue
-            # Keys are unquoted, have no space before the colon, and are
-            # either lower-case YAML keys (`runs-on`, `timeout-minutes`) or
-            # UPPER_SNAKE environment names.
-            self.assertRegex(
-                stripped,
-                r"^(?:[a-z_][a-z0-9_-]*|[A-Z_][A-Z0-9_]*):(?: .*)?$",
-                f"the Stage 1 line {body!r} is not an unquoted, "
-                "space-free-before-the-colon mapping key in the subset these "
-                "readers parse. It may be perfectly good YAML — but the job "
-                "enumerator, the step enumerator, the key allowlist and the "
-                "env scan are all line-at-a-time and would each read it "
-                "wrong. Rewrite it in the plain form, or teach every one of "
-                "them and widen this grammar.",
-            )
-            # A flow mapping hides its keys from every line-oriented reader
-            # here. Two brace users are NOT that and must not red: a `${{ }}`
-            # expression, and the empty mapping `{}` — which is how
-            # `permissions:` is spelled, and which declares nothing at all.
-            without_exprs = re.sub(r"\$\{\{.*?\}\}", "", stripped, flags=re.S)
-            self.assertNotIn(
-                "{",
-                re.sub(r":\s*\{\s*\}\s*$", ":", without_exprs),
-                f"the Stage 1 line {body!r} uses a flow mapping. Every "
-                "reader in this class is line-oriented and a flow mapping "
-                "hides its keys from all of them.",
-            )
+        refuse_unmodelled_spellings(self, self.text, "Stage 1")
 
     def test_no_step_reaches_the_network_or_evaluates_fetched_text(self):
         """Defence in depth behind the step-set pin, and it names the hazard.
@@ -1804,6 +3235,11 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
             "sh <",
             "| bash",
             "| sh",
+            # bash opens a TCP/UDP socket on a redirect to these, with no
+            # command word at all — so no PATH lookup, nothing for the sealed
+            # run below to record, and none of the names above to match.
+            "/dev/tcp",
+            "/dev/udp",
         )
         for token in forbidden:
             self.assertNotIn(
@@ -1813,6 +3249,56 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                 "repository's context and without CI approval; it must not "
                 "fetch or evaluate anything.",
             )
+
+    def test_the_capture_script_names_no_absolute_path(self):
+        """The two holes the PATH seal cannot see, closed where they CAN be.
+
+        Both were measured, not hypothesised.
+
+        * `command_not_found_handle` fires only when bash performs a PATH
+          search, and a command word containing a slash skips that search. So
+          `/bin/cp pr-review-request.json /tmp/leaked.json || true` copies the
+          artifact out while the sealed run reports `['jq']`, exit 0, and a
+          one-file footprint.
+        * A redirect needs no command at all: `echo x > /var/tmp/leak` is two
+          builtins, so nothing is recorded, and the target is outside the
+          sandbox root so the footprint inventory never sees it either. `/tmp`
+          is the likely accident rather than the exotic one — Stage 2 writes
+          `/tmp/pr-diff.txt`, so "the same thing, in Stage 1" is exactly the
+          edit a maintainer would make.
+
+        WHAT THIS IS: a text heuristic, and the honest framing matters because
+        the first version of it was written as closure and was not. Enumerating
+        "command positions" let five measured escapes through — `&>/tmp/x`,
+        `$( /bin/cp … )`, `( exec /bin/cp … )`, `> "/tmp/x"`, and a `../`
+        relative escape — and red a legal `case … in /*)`. So this does not try
+        to know where a command is. It asserts the much simpler property the
+        script actually has: NO path-shaped token anywhere, and no absolute or
+        `..`-relative redirect target. EXPECTED_RUN_DIGESTS remains the fence;
+        this exists so the fence is not the ONLY thing that notices.
+
+        The residual false positive is deliberate and safe in direction: an
+        absolute path inside a quoted message (`echo "see /tmp/x"`) reds. Nothing
+        in the script needs one, and rephrasing costs a word.
+        """
+        script = self._capture_run()
+        # Any path-shaped token: `/x`, `./x`, `../x`. The lookbehind keeps a `/`
+        # inside a longer word out — notably the one in the character class
+        # `[A-Za-z0-9._/-]` that validates BASE_REF.
+        paths = re.findall(r"(?<![\w./-])(?:\./|/|\.\./)[\w./-]+", script)
+        # Redirect targets, which have no command word to inspect at all:
+        # `>`, `>>`, `&>`, `2>`, `13>`, `>|`, `>&`.
+        targets = re.findall(
+            r"(?:\d*>>?\||&?>>?|\d*>&?)\s*[\"']?((?:/|\.\./)\S+)", script
+        )
+        self.assertEqual(
+            paths + targets,
+            [],
+            f"the capture step names path(s) {paths + targets}. A command word "
+            "containing a slash skips the PATH lookup, and a redirect has no "
+            "command word at all, so neither the sealed run nor the footprint "
+            "inventory can see either one.",
+        )
 
     # --- nothing from the pull request is fetched, resolved or read --------
 
@@ -1897,12 +3383,20 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
 
     def test_no_secret_is_referenced(self):
         """`pull_request_target` makes the full secret store readable here."""
-        self.assertNotIn(
-            "secrets.",
-            self.text,
-            "Stage 1 reads a secret. Under this trigger that secret is "
-            "available while a pull request is the subject, and Stage 1's "
-            "output is a public artifact.",
+        # ALL THREE SPELLINGS. `secrets['X']` is the index form of
+        # `secrets.X`, and `github.token` is the same credential again — this
+        # test is the one named for the property, so it must be the one that
+        # enforces it rather than leaning on the expression allowlist to catch
+        # the other two by accident.
+        found = re.findall(
+            r"secrets\s*[.\[]\S*|github\s*[.\[]\s*[\"']?token", self.text
+        )
+        self.assertEqual(
+            found,
+            [],
+            f"Stage 1 reads a secret ({found}). Under this trigger that "
+            "secret is available while a pull request is the subject, and "
+            "Stage 1's output is a public artifact.",
         )
 
     def test_permissions_are_empty_at_both_levels(self):
@@ -1941,12 +3435,7 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         is pinned separately by TestTheLabelGateIsWhatSelectsAPr.
         """
         allowed = {
-            "github.workflow": "the workflow's own name",
             "github.repository": "owner/repo of the base repository",
-            "github.event.pull_request.number || github.sha": "PR number, integer",
-            "github.event_name == 'workflow_dispatch'": "boolean",
-            "github.event.label.name": "label name; maintainer-applied, and it "
-            "reaches a concurrency group, never a shell",
             "github.event.pull_request.number": "integer",
             "github.event.pull_request.head.sha": "40-hex, GitHub-computed",
             "github.event.pull_request.base.sha": "40-hex, GitHub-computed",
@@ -1956,10 +3445,26 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                 "a comparison: the result is a boolean, never the repo name"
             ),
             "github.event.action": "one of the four declared trigger types",
+            "github.event_name": "the trigger's own name, GitHub-set; reaches "
+            "the capture job's concurrency group and nothing else — see "
+            "test_the_capture_group_is_keyed_by_event",
         }
         found = {
             " ".join(e.split()) for e in re.findall(r"\$\{\{(.*?)\}\}", self.text, re.S)
         }
+        # DEAD ENTRIES ARE STANDING PRE-AUTHORIZATION, not harmless text, and
+        # that is not theoretical: deleting the workflow-level concurrency group
+        # left four entries behind, and a reviewer used exactly that slack to
+        # paste the deleted block back verbatim and keep this test green. So the
+        # allowlist is checked in BOTH directions.
+        stale = set(allowed) - found
+        self.assertEqual(
+            stale,
+            set(),
+            f"{sorted(stale)} is on the reviewed list but no longer appears in "
+            "Stage 1. An entry nothing uses pre-authorises whatever brings it "
+            "back — delete it with the expression it was written for.",
+        )
         unexpected = found - set(allowed)
         self.assertEqual(
             unexpected,
@@ -2101,6 +3606,187 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
                     f"can. Artifact: {doc}",
                 )
                 self.assertIsNone(doc, f"PR_NUM={value!r} reached the artifact")
+
+    # --- "executes nothing the PR wrote", as a MEASUREMENT -----------------
+    #
+    # Every test above this line reads the YAML. Reading is what the class
+    # docstring calls the obligation of `pull_request_target`, and reading is
+    # exactly what a maintainer adding a reasonable-looking step has already
+    # got past. The three below RUN the capture script inside a PATH that
+    # holds only what the script is allowed to need, so the property is
+    # measured on the shell that ships rather than asserted about its text.
+    #
+    # ALLOWLIST, NOT DENYLIST, over the routes it can see: `curl`, `wget`,
+    # `git`, `gh`, `ssh`, `nc`, `python3`, `node` and every other way to reach
+    # the network or fetch a tree are absent from PATH because they were never
+    # added, not because a list named them. A step that grows one BY NAME is
+    # caught here without this test being updated.
+    #
+    # SEALING PATH ALONE WOULD NOT BE ENOUGH, and the difference is one `||`.
+    # A new command that the script TOLERATES — `curl … | bash || true` — just
+    # fails to launch and the run still exits 0, so the absence would prove
+    # nothing. So the sandbox also installs `command_not_found_handle`, which
+    # bash calls for every unresolved name in a non-interactive shell: the
+    # attempt is RECORDED whether or not its failure is swallowed. Measured to
+    # fire in command substitution, pipelines, subshells and background jobs.
+    #
+    # WHAT THIS MEASURES IS PATH-RESOLVED COMMAND NAMES. It is blind to three
+    # routes, each closed somewhere else, and saying so here is the point —
+    # an overstated seal is worse than a narrow one:
+    #
+    #   * A command word containing a slash (`/bin/cp`, `./x`) skips the PATH
+    #     search, so nothing is recorded — wherever it appears, including inside
+    #     `$( )`, `( )` and after `exec`.
+    #   * `exec 3<>/dev/tcp/host/port` needs no command word at all.
+    #   * Anything that is not a step `run:` — a `uses:` action's JavaScript, a
+    #     `container:`, a job-level `defaults.run`.
+    #
+    # The third is closed outright, by `test_the_jobs_and_steps_are_exactly_
+    # these`, `EXPECTED_USES` and `FORBIDDEN_JOB_KEYS`. The first two are
+    # NARROWED, not closed: `test_the_capture_script_names_no_absolute_path` is
+    # a text heuristic over path shapes and the `/dev/tcp` token sits in
+    # `test_no_step_reaches_the_network_or_evaluates_fetched_text`, and neither
+    # parses shell. What actually fences all three is EXPECTED_RUN_DIGESTS,
+    # which pins this script byte for byte — so every one of those edits has to
+    # be a deliberate act that also updates a hash.
+
+    SEALED_TOOLS = ("jq",)
+
+    def _execute_sealed(self, tools=SEALED_TOOLS):
+        """Run the capture step with PATH holding ONLY `tools`.
+
+        Returns (rc, files written, commands attempted). `files` is relative
+        to a cwd that starts empty, and HOME and TMPDIR point into the same
+        sandbox, so anything the script drops anywhere it can name shows up.
+        An attempt on a command that is not on PATH is recorded as
+        `MISSING:<name>`; the script under test is otherwise verbatim.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            bin_, work, home, tmp = (root / n for n in ("bin", "work", "home", "tmp"))
+            for d in (bin_, work, home, tmp):
+                d.mkdir()
+            log = root / "calls.log"
+            for tool in tools:
+                real = shutil.which(tool)
+                assert real, f"premise changed: {tool} is not installed"
+                shim = bin_ / tool
+                # Logs the NAME, then execs the real thing, so the run is
+                # faithful and counted. `exec` keeps the exit status honest.
+                # The name alone, not argv: jq's program argument spans lines,
+                # so argv would make one call several records — and WHICH
+                # arguments is already pinned, byte for byte, by
+                # EXPECTED_RUN_DIGESTS. What is not pinned anywhere else, and
+                # is the whole point here, is how many external programs run
+                # and which.
+                shim.write_text(
+                    "#!/bin/sh\n"
+                    f'printf "%s\\n" "{tool}" >> "$CALL_LOG"\n'
+                    f'exec "{real}" "$@"\n'
+                )
+                shim.chmod(0o755)
+            # bash by ABSOLUTE path: the interpreter has to be findable even
+            # though PATH is sealed, and resolving it here rather than in the
+            # child is what keeps the seal from also hiding the shell itself.
+            bash = shutil.which("bash")
+            assert bash, "premise changed: bash is not installed"
+            # Scaffolding ABOVE the script, which is then verbatim. bash calls
+            # this for any name PATH cannot resolve, so a tolerated attempt is
+            # still recorded. 127 is what bash itself would have returned.
+            preamble = (
+                "command_not_found_handle() { "
+                'printf "MISSING:%s\\n" "$1" >> "$CALL_LOG"; return 127; }\n'
+            )
+            proc = subprocess.run(
+                [bash, "-c", preamble + self._capture_run()],
+                cwd=work,
+                capture_output=True,
+                text=True,
+                env={
+                    "PATH": str(bin_),
+                    "HOME": str(home),
+                    "TMPDIR": str(tmp),
+                    "CALL_LOG": str(log),
+                    "PR_NUM": "12345",
+                    "HEAD_SHA": "a" * 40,
+                    "BASE_SHA": "b" * 40,
+                    "BASE_REF": "main",
+                    "IS_FORK": "true",
+                    "TRIGGER_EVENT": "labeled",
+                    "REVIEW_LABEL": "in progress",
+                },
+            )
+            written = sorted(
+                str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()
+            )
+            calls = log.read_text().splitlines() if log.is_file() else []
+        # The shims and the log are ours; drop them from the footprint.
+        noise = {f"bin/{t}" for t in tools} | {"calls.log"}
+        return proc.returncode, [f for f in written if f not in noise], calls
+
+    def test_the_capture_step_needs_no_tool_but_jq(self):
+        """The positive half: sealed to `jq` alone, the real script succeeds.
+
+        That is the no-untrusted-code property stated as something a run can
+        establish. Nothing on this PATH can clone, fetch, or execute a file
+        from the pull request, and the step still does its whole job.
+        """
+        rc, written, calls = self._execute_sealed()
+        self.assertEqual(rc, 0, "the capture step needs a tool beyond jq")
+        self.assertEqual(
+            calls,
+            ["jq"],
+            "the capture step runs external programs other than a single jq",
+        )
+
+    def test_an_empty_path_fails_rather_than_passing_quietly(self):
+        """The control for the test above.
+
+        Without this, a `_execute_sealed` that silently leaked the real PATH —
+        or a script that stopped needing jq because it stopped doing anything —
+        would read as proof. An empty PATH must break it.
+        """
+        rc, _, calls = self._execute_sealed(tools=())
+        self.assertNotEqual(rc, 0, "the step succeeds with NOTHING on PATH")
+        # And the recorder is the second half of the control: `MISSING:jq`
+        # proves `command_not_found_handle` actually fires, which is what the
+        # test above relies on to see a TOLERATED command.
+        self.assertEqual(
+            calls,
+            ["MISSING:jq"],
+            "the sandbox did not record the one command the script needs; "
+            "neither the PATH seal nor the not-found recorder is working, and "
+            "the sealed test above proves nothing while that is true.",
+        )
+
+    def test_it_writes_nothing_but_its_own_artifact(self):
+        """`reads only API metadata` has a filesystem half.
+
+        cwd starts empty and HOME and TMPDIR point into the same sandbox, so a
+        step that cached a token under `~`, unpacked a tree, or dropped a
+        script shows up as a second path here. Dotfiles and dot-directories
+        included — `rglob` does see them.
+
+        WHAT IT IS: a final inventory of REGULAR FILES under the sandbox root.
+        Each word is a limit. It cannot see a write outside that root — by an
+        absolute path (`echo x > /tmp/leak`, two builtins, so the recorder above
+        is silent too) OR by a `../` escape from cwd — nor a file created and
+        removed before the inventory, an empty directory, a FIFO, or anything
+        under a symlinked directory. Verified on 3.12: `rglob` DOES see dotfiles
+        and dot-directories, so a cached credential under `HOME` is caught.
+
+        Closing the escapes properly needs `unshare -rm` and a private `/tmp`.
+        Short of that, `test_the_capture_script_names_no_absolute_path` refuses
+        the shapes that reach them — path-shaped tokens and absolute or
+        `../` redirect targets — and EXPECTED_RUN_DIGESTS pins the script.
+        """
+        rc, written, _ = self._execute_sealed()
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            written,
+            ["work/pr-review-request.json"],
+            "the capture step touches the filesystem outside its artifact",
+        )
 
 
 class TestNoJqArgumentIsAJqKeyword(unittest.TestCase):
@@ -2301,8 +3987,73 @@ class TestSymlinkScrubIsNulSafe(unittest.TestCase):
 
     def setUp(self):
         self.step = strip_comments(job_block(STAGE2.read_text(), "review"))
+        # TO THE NEXT STEP ENTRY, not to a named step further down. Cutting at
+        # `- name: Build the diff` let every step between the scrub and it into
+        # this slice, so an assertion about the scrub could be satisfied by a
+        # LATER step's text: moving the expected `PR_DIR` binding into "Fetch
+        # the merge base" kept the binding test green while the scrub itself
+        # ran against the trusted checkout. Measured.
         self.scrub = self.step[self.step.index("Remove symlinks that escape") :]
-        self.scrub = self.scrub[: self.scrub.index("- name: Build the diff")]
+        # `-(?= |$)`, so a BARE list marker ends the slice too. `^      - `
+        # with the trailing space let `      -` on its own line through, and
+        # the next step's `env:` was then inside this slice again — the same
+        # defect one spelling out. (The grammar test refuses a bare marker in
+        # Stage 2 as well; this reader does not rely on it.)
+        nxt = re.search(r"(?m)^      -(?: |$)", self.scrub)
+        self.scrub = self.scrub[: nxt.start()] if nxt else self.scrub
+        assert "- name:" not in self.scrub, "the scrub slice spans two steps"
+
+    def test_the_scrub_step_cannot_be_skipped_or_dodged(self):
+        """The scrub is the ONLY thing keeping the model's reads inside `pr/`.
+
+        Everything else in this class reads the scrub's shell, and every one of
+        those assertions passes on a step Actions never executes: `if: false`
+        skips it, and `shell: bash -c "exit 0" {0}` runs something else. Either
+        leaves a PR-authored symlink to, say, `/proc/self/environ` inside the
+        tree the review's `Read` grant covers, while the extracted-text tests
+        stay green because they run the body under their own bash.
+
+        The job-level guard cannot see this: these are STEP keys.
+        """
+        refuse_disabling_keys(self, self.scrub, "the symlink scrub step")
+
+    def test_the_scrub_is_pointed_at_the_untrusted_checkout(self):
+        """Nothing else checks WHICH directory the scrub cleans.
+
+        `test_symlink_scrub.py` sets `PR_DIR` itself, so every executable test
+        in that file passes whatever the workflow binds — repoint this `env:` at
+        `${{ github.workspace }}/trusted` and all 320 tests stay green while the
+        PR tree keeps its escaping symlinks and the model's `Read(.../pr/**)`
+        grant still reaches them. Measured.
+
+        So the binding is checked against the checkout that actually holds PR
+        code, identified by `allow-unsafe-pr-checkout`, rather than against a
+        literal written twice.
+        """
+        review = job_block(STAGE2.read_text(), "review")
+        untrusted = [
+            s
+            for s in review.split("- name:")
+            if "actions/checkout@" in s and "allow-unsafe-pr-checkout" in s
+        ]
+        self.assertEqual(
+            len(untrusted), 1, "premise changed: not exactly one PR-code checkout"
+        )
+        m = next(
+            (m for ln in with_block(untrusted[0]) if (m := _key_re("path").match(ln))),
+            None,
+        )
+        self.assertIsNotNone(m, "the untrusted checkout declares no `path:`")
+        pr_path = plain_scalar(m.group(1)).strip()
+        self.assertRegex(
+            self.scrub,
+            rf"(?m)^\s*PR_DIR:[ \t]*\$\{{\{{[ \t]*github\.workspace[ \t]*\}}\}}/"
+            rf"{re.escape(pr_path)}[ \t]*$",
+            f"the scrub's PR_DIR is not the untrusted checkout "
+            f"(`${{{{ github.workspace }}}}/{pr_path}`); it would clean a "
+            "directory the PR did not write while the PR tree keeps its "
+            "escaping symlinks.",
+        )
 
     def test_the_list_is_never_joined_with_newlines(self):
         self.assertNotIn("printf '%s\\n' \"$ESCAPED\"", self.scrub)
@@ -2768,6 +4519,210 @@ class TestStage2CannotBeTriggeredByALookalikeWorkflow(unittest.TestCase):
             f"prepare's gate ({expr!r}) is unsatisfiable on its literals alone "
             f"— the job can never run",
         )
+
+    # --- and the same pin decided BYTE-EXACTLY, in shell -------------------
+    #
+    # Everything above establishes that the expression binds. It cannot make
+    # the expression discriminate: GitHub's `==` ignores case, so a second
+    # default-branch workflow at `.github/workflows/Hardened-pr-review.yml`
+    # satisfies a binding pin. Shell `=` does not, so `prepare`'s first step
+    # re-derives the comparison and the two tests below hold it to that.
+
+    EXPECTED_PATH = ".github/workflows/hardened-pr-review.yml"
+    STEP_NAME = "Re-derive the triggering workflow path"
+
+    def _rederive_step(self) -> str:
+        """`prepare`'s first step ENTRY, required to be the path gate.
+
+        ENTRY, not "the text after the first `- name:`". Splitting on the name
+        marker skips an UNNAMED entry entirely, so `- run: echo BEFORE_THE_GATE`
+        — or an unnamed checkout — runs ahead of the gate while this helper
+        happily reports the gate as first. Any list marker at the steps indent
+        starts an entry here, whatever follows it, which turns a spelling this
+        reader cannot model into a LOUD failure rather than a step nothing
+        enumerated. Same reasoning, same shape, as
+        `TestStage1RunsNoPullRequestContent._step_entries`.
+        """
+        prepare = job_block(STAGE2.read_text(), "prepare")
+        lines = prepare.split("steps:", 1)[1].splitlines()
+        starts = [i for i, ln in enumerate(lines) if re.match(r"^      -(\s|$)", ln)]
+        self.assertTrue(starts, "premise changed: no step entries found in `prepare`")
+        bounds = starts + [len(lines)]
+        first = "\n".join(lines[starts[0] : bounds[1]])
+        body = [ln for ln in first.splitlines() if ln.strip()]
+        head = body[0]
+        # A bare `-` puts the mapping on the NEXT line.
+        if head.rstrip() == "      -" and len(body) > 1:
+            head = "      - " + body[1].lstrip()
+        m = re.match(r"^      -\s+name:\s*(\S.*)$", head)
+        self.assertIsNotNone(
+            m,
+            f"prepare's FIRST step entry is not a named step ({head.strip()!r}); "
+            "something runs before the byte-exact path check.",
+        )
+        self.assertEqual(
+            plain_scalar(m.group(1)),
+            self.STEP_NAME,
+            f"prepare's first step is not {self.STEP_NAME!r}; the byte-exact "
+            f"path check no longer runs before the checkout.",
+        )
+        return first
+
+    def test_nothing_in_prepare_executes_outside_its_steps(self):
+        """Entry zero being the gate says nothing about what runs before step 1.
+
+        Two job keys defeat it, and both survived the whole suite when this was
+        only about step ORDER. A `container:` image's entrypoint runs before any
+        step. `defaults.run.shell` is the worse one: it replaces the interpreter
+        for every `run:` in the job, so the gate's body is no longer executed by
+        bash at all — and `test_only_the_exact_path_is_accepted` would go on
+        measuring a program CI never runs, green throughout. `prepare` is the
+        job holding `secrets.GITHUB_TOKEN`, `pull-requests: read` and
+        `id-token: write`, so this is the job where that matters most.
+
+        Both scopes and both spellings, via the shared reader — an earlier
+        version of this test scanned only the text before `jobs:` and matched
+        an unquoted key, and a `defaults:` block placed after the jobs mapping
+        or written `"defaults":` went straight past it.
+        """
+        # EVERY JOB, enumerated rather than named. The first version covered
+        # `prepare` alone, and `review` is the job that most needs it: a
+        # `defaults.run.shell` there no-ops "Remove symlinks that escape the PR
+        # tree", which is the ONLY control keeping the model's `Read` grant
+        # inside `pr/` — and `test_symlink_scrub.py` would keep passing, since
+        # it runs the extracted text under its own bash. A `container:` on
+        # `review` would equally neuter harden-runner's egress block, which
+        # cannot apply from inside a job container. `publish` holds
+        # `pull-requests: write`. Looping means a job added later is covered by
+        # construction instead of by someone remembering this list.
+        text = STAGE2.read_text()
+        # EVERY header at the job indent, then FAIL CLOSED on one this reader
+        # cannot model. A lowercase-only pattern silently skipped a perfectly
+        # legal `Audit:` — the count still passed, the new job went unguarded,
+        # and "covered by construction" was false.
+        after = strip_comments(text).split("\njobs:", 1)[1]
+        # EVERY line at the job indent is a header candidate, and one that is
+        # not a plain block header is a FAILURE rather than a skip. Matching
+        # headers with a regex and scanning only the matches left the flow
+        # spelling — `Audit: {runs-on: ubuntu-latest, container: alpine}` —
+        # matching nothing at all, so the job did not appear in `headers`, the
+        # count of the three known jobs still passed, and the equality check
+        # below had nothing to compare. Measured, twice in two rounds: this is
+        # the same hole as the trailing comment, one spelling further out.
+        candidates = [ln for ln in after.splitlines() if re.match(r"^  \S", ln)]
+        headers, unmodelled = [], []
+        for ln in candidates:
+            m = re.match(rf"^  (\S.*?):{HEADER_TAIL}", ln)
+            (headers.append(m.group(1)) if m else unmodelled.append(ln))
+        self.assertEqual(
+            unmodelled,
+            [],
+            f"Stage 2 has a line at the job indent that is not a plain block "
+            f"header ({unmodelled}); whatever it declares goes unguarded.",
+        )
+        jobs = [h for h in headers if re.fullmatch(r"[A-Za-z_][\w-]*", h)]
+        self.assertEqual(
+            sorted(headers),
+            sorted(jobs),
+            f"Stage 2 declares a job id this reader cannot model "
+            f"({sorted(set(headers) - set(jobs))}); it would go unguarded.",
+        )
+        self.assertGreaterEqual(
+            len(jobs), 3, f"premise changed: Stage 2 jobs are {jobs}"
+        )
+        for job in jobs:
+            with self.subTest(job=job):
+                refuse_execution_outside_steps(self, text, job)
+
+    def test_the_path_is_re_derived_in_shell_before_anything_else_runs(self):
+        step = self._rederive_step()
+        refuse_disabling_keys(self, step, "the path gate")
+        # Through `env:`, never interpolated into the script — the same rule
+        # Stage 1 lives by, and here it also keeps the value out of the shell's
+        # parser, where a crafted path could otherwise end the command.
+        #
+        # COMMENTS STRIPPED FIRST. Reading the raw step let a COMMENTED-OUT
+        # binding satisfy this while the live `env:` set the variable to the
+        # expected path as a literal — the shell gate then compared the
+        # constant with itself and the provenance check was gone, with all 323
+        # tests green. Measured.
+        bindings = [
+            uncommented(m.group(1))
+            for ln in strip_comments(step).splitlines()
+            if (m := _key_re("TRIGGERING_WORKFLOW_PATH").match(ln.strip()))
+        ]
+        self.assertEqual(
+            bindings,
+            ["${{ github.event.workflow.path }}"],
+            f"the path gate binds TRIGGERING_WORKFLOW_PATH to {bindings}. "
+            "Anything else — a literal, or the expression demoted to a "
+            "trailing comment — makes the shell compare a constant with "
+            "itself and the provenance check is gone.",
+        )
+        # A LITERAL block, not a folded one. `run: >` joins the three
+        # same-indent lines into `set -euo pipefail EXPECTED=... [ ... ]`, which
+        # `set` swallows as positional parameters and returns 0 from — the gate
+        # then compares nothing and every assertion here still passes. Measured.
+        header, _ = block_scalars(step, "run")[0]
+        self.assertRegex(
+            header.lstrip("!").replace("str", "").strip(),
+            r"^\|[-+]?$",
+            f"the path gate's `run:` is not a plain literal block ({header!r}); "
+            "YAML folding turns the whole comparison into arguments to `set`.",
+        )
+        body = textwrap.dedent(scalar_block(step, "run"))
+        self.assertNotIn(
+            "${{", body, "the workflow path is interpolated into the script body"
+        )
+        # `=` inside `[ ]`, not `==` inside `[[ ]]`: the latter is a PATTERN
+        # match, so a path containing a glob character would be compared as a
+        # pattern rather than as bytes.
+        self.assertIn('[ "$TRIGGERING_WORKFLOW_PATH" = "$EXPECTED" ]', body)
+        # The three spellings of the path must agree, or the pin silently
+        # protects a file that does not exist.
+        self.assertIn(f"EXPECTED='{self.EXPECTED_PATH}'", body)
+        self.assertEqual(
+            posixpath.join(".github", "workflows", STAGE1.name),
+            self.EXPECTED_PATH,
+            "Stage 1 has been renamed; the shell check still names the old path",
+        )
+        self.assertRegex(
+            strip_comments(job_block(STAGE2.read_text(), "prepare")),
+            re.escape(f"github.event.workflow.path == '{self.EXPECTED_PATH}'"),
+            "the `if:` pin and the shell check name different paths",
+        )
+
+    def _execute(self, path: str) -> int:
+        body = textwrap.dedent(scalar_block(self._rederive_step(), "run"))
+        return subprocess.run(
+            ["bash", "-c", body],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "TRIGGERING_WORKFLOW_PATH": path},
+        ).returncode
+
+    def test_only_the_exact_path_is_accepted(self):
+        """RUN it. The structural test above is satisfied by a check whose
+        result is discarded, and by one that compares the wrong way round.
+        """
+        self.assertEqual(
+            self._execute(self.EXPECTED_PATH), 0, "the real path is refused"
+        )
+        for bad, why in [
+            (".github/workflows/Hardened-pr-review.yml", "differs only in case"),
+            (".github/workflows/hardened-pr-review.yaml", "the other extension"),
+            (".github/workflows/hardened-pr-review.yml.yml", "a suffixed lookalike"),
+            ("x/.github/workflows/hardened-pr-review.yml", "a prefixed lookalike"),
+            (".github/workflows/hardened-pr-review.yml ", "a trailing space"),
+            ("", "absent from the payload"),
+        ]:
+            self.assertNotEqual(
+                self._execute(bad),
+                0,
+                f"prepare accepts a run from {bad!r} ({why}); the shell check "
+                f"is not byte-exact, so the case-insensitive `if:` pin is "
+                f"still the only thing deciding.",
+            )
 
 
 class TestTheStage1ArtifactDownloadRetries(unittest.TestCase):
@@ -3300,11 +5255,13 @@ class TestTheReadersPremisesStillHold(unittest.TestCase):
     # well as the job: Stage 1's capture step is executed too, and keying this
     # list to STAGE2 alone silently exempted it.
     EXECUTED_STEPS = (
+        (STAGE2, "prepare", "Re-derive the triggering workflow path"),
         (STAGE2, "prepare", "Download Stage-1 artifact"),
         (STAGE2, "prepare", "Close out an oversized request"),
         (STAGE2, "prepare", "Corroborate the claimed PR against the trusted API"),
         (STAGE2, "review", "Fetch the merge base"),
         (STAGE1, "capture", "Capture PR coordinates"),
+        (SUITE_CI, "test", "Refuse a suppressed or emptied suite"),
     )
 
     def test_every_executed_step_uses_a_literal_block_scalar(self):
@@ -3392,4 +5349,4 @@ class TestTheReadersPremisesStillHold(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_this_suite()
