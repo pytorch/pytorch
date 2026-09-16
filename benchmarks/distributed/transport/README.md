@@ -4,6 +4,10 @@ Most backends accept `new_transport(backend)` and infer devices from registered
 tensors. Passing `device` preserves each backend's device selection and
 validation. Torchcomms and ibverbs CUDA graph mode require an explicit device.
 
+Memory can be registered at runtime, after binding, connecting, or earlier
+transfers. Register each new allocation and send its `to_remote_buffer()`
+descriptor to the connected peer before access. Rebinding is unnecessary.
+
 Reads and writes block by default. Use `async_op=True` to return a
 `torch.distributed.Work` and overlap a transfer with host computation:
 
@@ -20,6 +24,43 @@ The worker retains local buffers and waits for prior work on the submitting
 CUDA stream. Do not modify or resize buffers until completion. Peers must finish
 all accesses before releasing exposed memory; `close()` drains local work.
 Asynchronous operations cannot be captured in CUDA graphs.
+
+For asyncio callers, use `read_async` and `write_async`. They yield until the
+transfer completes and return `None`:
+
+```python
+await transport.read_async(local_destination, remote_source)
+await transport.write_async(local_source, remote_destination)
+```
+
+Use `wait_all` to await a batch. A generator also lets it drain earlier
+submissions if a later dispatch raises:
+
+```python
+from torch.distributed._transport import wait_all
+
+await wait_all(
+    transport.read(local, remote, async_op=True)
+    for local, remote in transfers
+)
+```
+
+These coroutine APIs drain every submitted transfer before raising cancellation
+or errors. `asyncio.wait_for` therefore reports a timeout after draining, even
+if completion exceeds the deadline. Keep both peers' exposed buffers alive until
+the coroutine exits.
+The bridge uses completion callbacks, without polling asyncio or adding waiter threads.
+Transfers on each transport still execute in queue order.
+
+For TorchStore, the storage actor handles put with `read_async` (client to
+storage) and get with `write_async` (storage to client). The same mapping works
+for `wait_all` batches and the actor's existing descriptor exchange. This matches
+the cancellation lifetime requirements in its
+[NIXL transfer loop](https://github.com/meta-pytorch/torchstore/blob/4ab59933150d3ed1145a2443b20df1e437833bac/torchstore/transport/nixl.py#L328-L390)
+and the awaitable
+[trainer put](https://github.com/pytorch/torchtitan/blob/26db7f2ac050065607c1a05e97ed15e658c3acde/torchtitan/experiments/rl/actors/trainer.py#L517).
+TorchStore still owns metadata, allocation/staging, dtype conversion, and RPC
+coordination; this API supplies the tensor transfers.
 
 Install the optional backend package matching the operation:
 
@@ -65,9 +106,19 @@ It includes worker dispatch overhead and keeps one transfer outstanding per pair
 
 ## NIXL transport
 
-The NIXL adapter uses UCX by default and accepts another installed NIXL plugin
-through `--options='{"plugin":"PLUGIN"}'`. Select the UCX device and transport
-with the usual UCX environment variables:
+The NIXL adapter accepts any installed plugin supporting tensor transfers.
+UCX is the default and is not initialized when another plugin is selected:
+
+```python
+transport = new_transport("nixl", plugin="LIBFABRIC")
+```
+
+Pass `--options='{"plugin":"LIBFABRIC"}'` to the benchmark. Registration,
+metadata, and transfers use only the selected plugin. Its dependencies and
+supported memory types still apply; file/object plugins require their corresponding
+descriptor types, which this tensor API does not provide.
+
+For UCX, select the device and transport with its environment variables:
 
 ```bash
 UCX_TLS=rc,cuda_copy UCX_NET_DEVICES="$HCA:1" torchrun \
@@ -76,6 +127,10 @@ UCX_TLS=rc,cuda_copy UCX_NET_DEVICES="$HCA:1" torchrun \
   benchmarks/distributed/transport/benchmark.py \
   --backend nixl --device cuda --interfaces "$INTERFACE" --rdma-counters
 ```
+
+NIXL drains transfers after backend timeouts or status-query errors before
+releasing handles. A transfer that never reaches a terminal state keeps the wait
+pending, preserving registered storage while DMA may still access it.
 
 ## Concurrent GPU/NIC pairs
 
