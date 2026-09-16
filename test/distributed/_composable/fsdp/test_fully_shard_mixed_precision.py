@@ -55,57 +55,63 @@ device_type = torch.device(get_devtype())
 
 
 class TestMixedPrecisionPolicy(TestCase):
-    def test_callable_param_dtype(self):
-        param = nn.Parameter(torch.ones(1))
+    def test_param_dtype_fn(self):
+        default_param = nn.Parameter(torch.ones(1))
+        override_param = nn.Parameter(torch.ones(1))
 
-        def param_dtype(_: nn.Parameter) -> torch.dtype:
-            return torch.bfloat16
-
-        with self.assertRaisesRegex(ValueError, "cast_forward_inputs=False"):
-            MixedPrecisionPolicy(param_dtype=param_dtype)
-
-        policy = MixedPrecisionPolicy(
-            param_dtype=param_dtype,
-            cast_forward_inputs=False,
-        )
-        self.assertEqual(policy._resolve_for_param(param).param_dtype, torch.bfloat16)
-        self.assertIsNone(policy._without_dtype_callables().param_dtype)
-
-        for return_value in (None, "torch.bfloat16"):
-            with self.subTest(return_value=return_value):
-
-                def invalid_param_dtype(_: nn.Parameter) -> Any:
-                    return return_value
-
-                policy = MixedPrecisionPolicy(
-                    param_dtype=invalid_param_dtype,
-                    cast_forward_inputs=False,
-                )
-                with self.assertRaisesRegex(ValueError, "must return a torch.dtype"):
-                    policy._resolve_for_param(param)
-
-    def test_callable_reduce_dtype(self):
-        param = nn.Parameter(torch.ones(1))
-
-        def reduce_dtype(_: nn.Parameter) -> torch.dtype:
-            return torch.float32
+        def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            return torch.float32 if param is override_param else None
 
         policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
-            reduce_dtype=reduce_dtype,
+            param_dtype_fn=param_dtype_fn,
         )
-        self.assertEqual(policy._resolve_for_param(param).reduce_dtype, torch.float32)
-        self.assertIsNone(policy._without_dtype_callables().reduce_dtype)
+        default_policy = policy._resolve_for_param(default_param)
+        override_policy = policy._resolve_for_param(override_param)
+        self.assertEqual(default_policy.param_dtype, torch.bfloat16)
+        self.assertEqual(override_policy.param_dtype, torch.float32)
+        self.assertIsNone(default_policy.param_dtype_fn)
+        self.assertIsNone(override_policy.param_dtype_fn)
+        module_policy = policy._without_dtype_fns()
+        self.assertEqual(module_policy.param_dtype, torch.bfloat16)
+        self.assertIsNone(module_policy.param_dtype_fn)
+        self.assertTrue(module_policy.cast_forward_inputs)
 
-        for return_value in (None, "torch.float32"):
-            with self.subTest(return_value=return_value):
+        def invalid_param_dtype_fn(_: nn.Parameter) -> Any:
+            return "torch.bfloat16"
 
-                def invalid_reduce_dtype(_: nn.Parameter) -> Any:
-                    return return_value
+        policy = MixedPrecisionPolicy(param_dtype_fn=invalid_param_dtype_fn)
+        with self.assertRaisesRegex(ValueError, "must return a torch.dtype or None"):
+            policy._resolve_for_param(default_param)
 
-                policy = MixedPrecisionPolicy(reduce_dtype=invalid_reduce_dtype)
-                with self.assertRaisesRegex(ValueError, "must return a torch.dtype"):
-                    policy._resolve_for_param(param)
+    def test_reduce_dtype_fn(self):
+        default_param = nn.Parameter(torch.ones(1))
+        override_param = nn.Parameter(torch.ones(1))
+
+        def reduce_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            return torch.float32 if param is override_param else None
+
+        policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16,
+            reduce_dtype_fn=reduce_dtype_fn,
+        )
+        default_policy = policy._resolve_for_param(default_param)
+        override_policy = policy._resolve_for_param(override_param)
+        self.assertEqual(default_policy.reduce_dtype, torch.bfloat16)
+        self.assertEqual(override_policy.reduce_dtype, torch.float32)
+        self.assertIsNone(default_policy.reduce_dtype_fn)
+        self.assertIsNone(override_policy.reduce_dtype_fn)
+        module_policy = policy._without_dtype_fns()
+        self.assertEqual(module_policy.reduce_dtype, torch.bfloat16)
+        self.assertIsNone(module_policy.reduce_dtype_fn)
+
+        def invalid_reduce_dtype_fn(_: nn.Parameter) -> Any:
+            return "torch.float32"
+
+        policy = MixedPrecisionPolicy(reduce_dtype_fn=invalid_reduce_dtype_fn)
+        with self.assertRaisesRegex(ValueError, "must return a torch.dtype or None"):
+            policy._resolve_for_param(default_param)
 
     def test_positional_abi(self):
         policy = MixedPrecisionPolicy(
@@ -119,10 +125,22 @@ class TestMixedPrecisionPolicy(TestCase):
             MixedPrecisionPolicy.__match_args__,
             ("param_dtype", "reduce_dtype", "output_dtype", "cast_forward_inputs"),
         )
+        fields = {
+            field.name: field for field in dataclasses.fields(MixedPrecisionPolicy)
+        }
         self.assertEqual(
-            tuple(field.name for field in dataclasses.fields(MixedPrecisionPolicy)),
-            MixedPrecisionPolicy.__match_args__,
+            tuple(fields),
+            (
+                "param_dtype",
+                "reduce_dtype",
+                "output_dtype",
+                "cast_forward_inputs",
+                "param_dtype_fn",
+                "reduce_dtype_fn",
+            ),
         )
+        self.assertTrue(fields["param_dtype_fn"].kw_only)
+        self.assertTrue(fields["reduce_dtype_fn"].kw_only)
 
 
 class KDAStyleTransformer(Transformer):
@@ -144,13 +162,15 @@ class KDAStyleTransformer(Transformer):
         self.dt_bias = nn.Parameter(torch.zeros(args.n_heads, args.dim // args.n_heads))
         self.output_norm = nn.RMSNorm(args.dim // args.n_heads)
         self.forward_dtypes: dict[str, torch.dtype] | None = None
+        self.forward_input_dtype: torch.dtype | None = None
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         self.forward_dtypes = {
             name: param.dtype for name, param in self.named_parameters()
         }
-        output = (
-            super().forward(tokens).to(torch.bfloat16).unflatten(-1, self.dt_bias.shape)
+        self.forward_input_dtype = residual.dtype
+        output = (super().forward(tokens).to(torch.bfloat16) + residual).unflatten(
+            -1, self.dt_bias.shape
         )
         decay = torch.sigmoid(self.dt_bias - self.A_log.exp().unsqueeze(1))
         return (self.output_norm(output) * decay).flatten(-2).clone()
@@ -396,15 +416,19 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         for param in ref_compute_model.parameters():
             param.grad_dtype = reduce_dtype
 
-        def param_dtype(param: nn.Parameter) -> torch.dtype:
-            return torch.float32 if param in fp32_params else torch.bfloat16
+        def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            return torch.float32 if param in fp32_params else None
 
         mp_policy = MixedPrecisionPolicy(
-            param_dtype=param_dtype,
+            param_dtype=torch.bfloat16,
             reduce_dtype=reduce_dtype,
-            cast_forward_inputs=False,
+            cast_forward_inputs=True,
+            param_dtype_fn=param_dtype_fn,
         )
         fully_shard(model, mp_policy=mp_policy)
+        state_mp_policy = fully_shard.state(model)._mp_policy
+        self.assertEqual(state_mp_policy.param_dtype, torch.bfloat16)
+        self.assertIsNone(state_mp_policy.param_dtype_fn)
         optim = torch.optim.SGD(model.parameters(), lr=1e-2)
         ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
 
@@ -419,6 +443,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         )
         tokens = (torch.arange(16, device=device_type) + self.rank).remainder(16)
         tokens = tokens.view(2, 8)
+        residual = torch.randn(2, 8, 16, device=device_type)
+        ref_residual = residual.to(torch.bfloat16)
 
         for _ in range(2):
             optim.zero_grad(set_to_none=True)
@@ -426,13 +452,15 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ref_compute_model.zero_grad(set_to_none=True)
             reduce_dtypes.clear()
 
-            output = model(tokens)
+            output = model(tokens, residual)
+            self.assertEqual(model.forward_input_dtype, torch.bfloat16)
+            self.assertEqual(residual.dtype, torch.float32)
             self.assertEqual(model.forward_dtypes, expected_dtypes)
             loss = output.sum()
             with patch_reduce_scatter(reduce_scatter):
                 loss.backward()
 
-            ref_output = ref_compute_model(tokens)
+            ref_output = ref_compute_model(tokens, ref_residual)
             self.assertEqual(output, ref_output)
             ref_loss = ref_output.sum()
             ref_loss.backward()
@@ -473,19 +501,20 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
-    def test_callable_reduce_dtype_across_groups(self):
+    def test_reduce_dtype_fn_across_groups(self):
         model = nn.Sequential(
             nn.Linear(8, 8, device=device_type),
             nn.Linear(8, 8, device=device_type),
         )
         fp32_reduce_params = set(model[0].parameters())
 
-        def reduce_dtype(param: nn.Parameter) -> torch.dtype:
-            return torch.float32 if param in fp32_reduce_params else torch.bfloat16
+        def reduce_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            return torch.float32 if param in fp32_reduce_params else None
 
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
-            reduce_dtype=reduce_dtype,
+            reduce_dtype=torch.bfloat16,
+            reduce_dtype_fn=reduce_dtype_fn,
         )
         fully_shard(model[0], mp_policy=mp_policy)
         fully_shard(model[1], mp_policy=mp_policy)
@@ -507,35 +536,38 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         self.assertEqual(set(reduce_dtypes), {torch.bfloat16, torch.float32})
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("override", ("param_dtype", "reduce_dtype"))
+    @parametrize("override", ("param_dtype_fn", "reduce_dtype_fn"))
     def test_multiple_reduce_dtypes_not_supported(self, override: str):
         model = nn.Linear(8, 8, device=device_type)
         weight = model.weight
         weight.requires_grad_(False)
 
-        def param_dtype(param: nn.Parameter) -> torch.dtype:
-            return torch.float32 if param is weight else torch.bfloat16
+        def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            return torch.float32 if param is weight else None
 
-        def reduce_dtype(param: nn.Parameter) -> torch.dtype:
-            return torch.float32 if param is weight else torch.bfloat16
+        def reduce_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
+            return torch.float32 if param is weight else None
 
-        if override == "param_dtype":
+        if override == "param_dtype_fn":
             mp_policy = MixedPrecisionPolicy(
-                param_dtype=param_dtype,
-                cast_forward_inputs=False,
+                param_dtype=torch.bfloat16,
+                param_dtype_fn=param_dtype_fn,
             )
         else:
             mp_policy = MixedPrecisionPolicy(
                 param_dtype=torch.bfloat16,
-                reduce_dtype=reduce_dtype,
+                reduce_dtype=torch.bfloat16,
+                reduce_dtype_fn=reduce_dtype_fn,
             )
         fully_shard(model, mp_policy=mp_policy)
         state_mp_policy = fully_shard.state(model)._mp_policy
-        expected_state_param_dtype = (
-            None if override == "param_dtype" else torch.bfloat16
+        self.assertEqual(state_mp_policy.param_dtype, torch.bfloat16)
+        expected_reduce_dtype = (
+            torch.bfloat16 if override == "reduce_dtype_fn" else None
         )
-        self.assertEqual(state_mp_policy.param_dtype, expected_state_param_dtype)
-        self.assertIsNone(state_mp_policy.reduce_dtype)
+        self.assertEqual(state_mp_policy.reduce_dtype, expected_reduce_dtype)
+        self.assertIsNone(state_mp_policy.param_dtype_fn)
+        self.assertIsNone(state_mp_policy.reduce_dtype_fn)
 
         with self.assertRaisesRegex(
             NotImplementedError,

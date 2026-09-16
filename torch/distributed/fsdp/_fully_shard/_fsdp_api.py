@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 import torch
 import torch.distributed as dist
@@ -13,11 +13,12 @@ _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
 @dataclass(frozen=True)
 class MixedPrecisionPolicy:
-    """
-    This configures FSDP's mixed precision. Unlike autocast, this applies mixed
-    precision at the module level, not op level, which means low-precision
-    activations are saved for backward and high-to-low-precision casts are
-    incurred only at module boundaries.
+    r"""
+    This configures FSDP's mixed precision. Unlike autocast, parameter casting
+    happens when parameters are all-gathered, while optional input and output
+    casting happens at module boundaries. This means low-precision activations
+    are saved for backward and high-to-low-precision casts are incurred only at
+    those boundaries.
 
     FSDP works well with module-level mixed precision since it keeps the
     high-precision sharded parameters in memory anyway. In other words, FSDP
@@ -25,29 +26,21 @@ class MixedPrecisionPolicy:
     parameters for the optimizer step.
 
     .. warning::
-        When ``param_dtype`` or ``reduce_dtype`` is callable, it must return the
-        same result for each logical parameter on every rank. Rank-dependent
-        results may cause ranks to build incompatible collective buffers, which
-        can fail or hang.
+        ``param_dtype_fn`` and ``reduce_dtype_fn`` must return the same result
+        for each logical parameter on every rank. Rank-dependent results may
+        cause ranks to build incompatible collective buffers, which can fail
+        or hang.
 
     Attributes:
-        param_dtype (Optional[Union[torch.dtype, Callable[[nn.Parameter], torch.dtype]]]):
-            This specifies the dtype for the unsharded parameter and hence the
-            dtype for forward/backward computation and the parameter all-gather.
-            A callable receives the original parameter when FSDP is applied and
-            must return its compute dtype. Callable policies require
-            ``cast_forward_inputs=False`` since there is no single input dtype.
-            If a callable returns multiple compute dtypes within one parameter
-            group, configure one common ``reduce_dtype`` for that group.
-            If this is ``None``, then the unsharded parameter uses the original
-            dtype. The optimizer step uses the sharded parameter in the original
-            dtype. (Default: ``None``)
-        reduce_dtype (Optional[Union[torch.dtype, Callable[[nn.Parameter], torch.dtype]]]):
-            The dtype for unsharded gradients and gradient reduction
-            (reduce-scatter or all-reduce). A callable receives the original
-            parameter when FSDP is applied and must return its reduction dtype.
-            Each FSDP parameter group must resolve to one effective reduction
-            dtype, although separate groups may resolve to different dtypes.
+        param_dtype (Optional[torch.dtype]): This specifies the default dtype
+            for the unsharded parameters and hence the dtype for
+            forward/backward computation and the parameter all-gather. Forward
+            input casting also uses this dtype. If this is ``None``, then the
+            unsharded parameters use their original dtype. The optimizer step
+            uses the sharded parameters in the original dtype. (Default:
+            ``None``)
+        reduce_dtype (Optional[torch.dtype]): The default dtype for unsharded
+            gradients and gradient reduction (reduce-scatter or all-reduce).
             FSDP sets the unsharded parameter's ``grad_dtype`` to this dtype, so
             autograd produces and accumulates gradients in this dtype regardless
             of whether gradient synchronization is enabled. FSDP packs these
@@ -63,52 +56,69 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
+        param_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
+            Optional per-parameter override for ``param_dtype``. The callable
+            is evaluated once for each managed parameter when FSDP is applied.
+            Returning a dtype overrides ``param_dtype`` for that parameter;
+            returning ``None`` uses the default ``param_dtype``. Forward input
+            casting continues to use ``param_dtype``. If parameters within one
+            group resolve to multiple compute dtypes, configure one common
+            effective reduction dtype for the group. (Default: ``None``)
+        reduce_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
+            Optional per-parameter override for ``reduce_dtype``. The callable
+            is evaluated once for each managed parameter when FSDP is applied.
+            Returning a dtype overrides ``reduce_dtype`` for that parameter;
+            returning ``None`` uses the default ``reduce_dtype``. Each FSDP
+            parameter group must resolve to one effective reduction dtype,
+            although separate groups may resolve to different dtypes. (Default:
+            ``None``)
     """
 
-    param_dtype: torch.dtype | Callable[[nn.Parameter], torch.dtype] | None = None
-    reduce_dtype: torch.dtype | Callable[[nn.Parameter], torch.dtype] | None = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
+    param_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
+        default=None, kw_only=True
+    )
+    reduce_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
+        default=None, kw_only=True
+    )
 
-    def __post_init__(self) -> None:
-        if callable(self.param_dtype) and self.cast_forward_inputs:
-            raise ValueError(
-                "MixedPrecisionPolicy requires cast_forward_inputs=False when "
-                "param_dtype is callable because there is no single input dtype"
-            )
-
-    def _without_dtype_callables(self) -> "MixedPrecisionPolicy":
-        if not callable(self.param_dtype) and not callable(self.reduce_dtype):
+    def _without_dtype_fns(self) -> "MixedPrecisionPolicy":
+        if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
             return self
-        param_dtype = None if callable(self.param_dtype) else self.param_dtype
-        reduce_dtype = None if callable(self.reduce_dtype) else self.reduce_dtype
-        return replace(self, param_dtype=param_dtype, reduce_dtype=reduce_dtype)
+        return replace(self, param_dtype_fn=None, reduce_dtype_fn=None)
 
     def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
-        if not callable(self.param_dtype) and not callable(self.reduce_dtype):
+        if self.param_dtype_fn is None and self.reduce_dtype_fn is None:
             return self
         param_dtype = self.param_dtype
-        if callable(param_dtype):
-            resolved_param_dtype = param_dtype(param)
-            if not isinstance(resolved_param_dtype, torch.dtype):
-                raise ValueError(
-                    "Callable param_dtype must return a torch.dtype but got "
-                    f"{type(resolved_param_dtype)}"
-                )
-            param_dtype = resolved_param_dtype
+        if self.param_dtype_fn is not None:
+            param_dtype_override = self.param_dtype_fn(param)
+            if param_dtype_override is not None:
+                if not isinstance(param_dtype_override, torch.dtype):
+                    raise ValueError(
+                        "param_dtype_fn must return a torch.dtype or None but got "
+                        f"{type(param_dtype_override)}"
+                    )
+                param_dtype = param_dtype_override
         reduce_dtype = self.reduce_dtype
-        if callable(reduce_dtype):
-            resolved_reduce_dtype = reduce_dtype(param)
-            if not isinstance(resolved_reduce_dtype, torch.dtype):
-                raise ValueError(
-                    "Callable reduce_dtype must return a torch.dtype but got "
-                    f"{type(resolved_reduce_dtype)}"
-                )
-            reduce_dtype = resolved_reduce_dtype
+        if self.reduce_dtype_fn is not None:
+            reduce_dtype_override = self.reduce_dtype_fn(param)
+            if reduce_dtype_override is not None:
+                if not isinstance(reduce_dtype_override, torch.dtype):
+                    raise ValueError(
+                        "reduce_dtype_fn must return a torch.dtype or None but got "
+                        f"{type(reduce_dtype_override)}"
+                    )
+                reduce_dtype = reduce_dtype_override
         return replace(
             self,
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
+            param_dtype_fn=None,
+            reduce_dtype_fn=None,
         )
 
 

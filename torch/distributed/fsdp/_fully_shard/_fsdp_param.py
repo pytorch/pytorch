@@ -814,10 +814,6 @@ class FSDPParam:
 
     def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
-        if callable(param_dtype):
-            raise AssertionError("Expected param_dtype callable to be resolved")
-        if callable(reduce_dtype):
-            raise AssertionError("Expected reduce_dtype callable to be resolved")
         self.orig_dtype = self.sharded_param.dtype
         if not self._has_sharded_grad_dtype_override:
             self.sharded_grad_dtype = self.orig_dtype

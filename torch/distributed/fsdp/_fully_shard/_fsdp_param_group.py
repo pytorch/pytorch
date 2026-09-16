@@ -297,7 +297,7 @@ class FSDPParamGroup:
             raise NotImplementedError(
                 "FSDP does not support multiple effective reduce dtypes within a "
                 "parameter group; configure one common effective reduce dtype, "
-                f"including callable reduce_dtype results, but got: {dtypes}"
+                f"including reduce_dtype_fn results, but got: {dtypes}"
             )
         if len(reduce_dtypes) == 1:
             self._reduce_dtype = next(iter(reduce_dtypes))
