@@ -1996,12 +1996,15 @@ def unique_id_unbound_in(prefix: str, scope: dict[str, Any]) -> str:
 
     unique_id's counter never repeats within a process, but a name installed into
     a module dict also has to miss whatever a DIFFERENT process baked in there:
-    CompilePackage.install() seeds a captured __builtins_dict___N key into the
-    live module globals and re-installs a loaded entry's __resume_at_* globals,
-    and a process that only loads starts counting from zero, so it regenerates
-    those names and would collide (CleanupHook.create raises). Skip forward past
-    the bound ones; each retry steps over one name already bound under this
-    prefix, so a counter already past them does not retry at all.
+    both load paths seed a captured __builtins_dict___N key -- CompilePackage.install()
+    into sys.modules[...].__dict__, where it also re-installs a loaded entry's
+    __resume_at_* globals, and AOTCompiledFunction.deserialize() through
+    _seed_guard_scope into whatever guard scope the caller passed, which can be a
+    live module dict -- and a process that only loads starts counting from zero, so
+    it regenerates those names and would collide (CleanupHook.create raises).
+    Skip forward past the bound ones; each retry steps over one name already
+    bound under this prefix, so a counter already past them does not retry at
+    all.
     """
     name = unique_id(prefix)
     while name in scope:

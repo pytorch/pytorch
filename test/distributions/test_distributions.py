@@ -120,6 +120,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
+    parametrize,
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
@@ -2271,6 +2272,24 @@ class TestDistributions(DistributionsTestCase):
             dist = RelaxedOneHotCategorical(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_rand_excludes_upper_bound(self, device, dtype):
+        values = torch.rand(65537, device=device, dtype=dtype)
+        self.assertTrue((values >= 0).all().item())
+        self.assertTrue((values < 1).all().item())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("bounds", [(0, 4), (-4, -2), (-2, 3), (2, 2)])
+    def test_uniform_excludes_upper_bound(self, device, dtype, bounds):
+        low, high = bounds
+        values = torch.empty(65537, device=device, dtype=dtype)
+        values.uniform_(low, high)
+        if low == high:
+            self.assertEqual(values, torch.full_like(values, low))
+        else:
+            self.assertTrue((values >= low).all().item())
+            self.assertTrue((values < high).all().item())
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
