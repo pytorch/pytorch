@@ -19,6 +19,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
@@ -28,7 +29,7 @@ from torch._dynamo.package import (
     DynamoCache,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.symbolic_convert import _import_module, InstructionTranslatorBase
+from torch._dynamo.symbolic_convert import _import_module, InstructionTranslator
 from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
@@ -1638,45 +1639,60 @@ def add(x, y):
             torch._dynamo.reset()
 
     def test_import_alias_check_with_a_non_module_value_accepts_the_key_alone(self):
-        # importlib.import_module hands back whatever sys.modules holds under the
-        # name, so a caller with no module-type test in front of import_source
-        # -- every one but IMPORT_NAME and get_globals_source_and_value -- can
-        # resolve a non-module value. That value has no __name__ to accept, so
-        # the accepted names are the key alone: a nameless module in the slot is
-        # refused rather than matched against None, and a module named for the
-        # key is accepted and, the value being the live entry, replaced by it.
-        # No public path hands import_source such a value short of replacing one
-        # of torch's or the stdlib's own modules in sys.modules, so the method is
-        # driven directly on a stub carrying the three things it reads off the
-        # translator: the traced globals, the package and the output's
-        # import_sources. A refused call leaves nothing in cache_method's cache.
+        # importlib.import_module hands back whatever sys.modules holds under
+        # the name, and the callers with no module-type test in front of
+        # import_source pass torch's and the stdlib's own names or a class's
+        # __module__, so a non-module value reaches it only once one of those
+        # entries has been replaced by a non-module. That value has no __name__
+        # to accept, so the accepted names are the key alone: a nameless module
+        # in the slot is refused rather than matched against None, and a module
+        # named for the key is accepted and, the value being the live entry,
+        # replaced by it. No traced bytecode reaches that arm, so a comptime
+        # callback calls import_source on the live translator mid-trace, with
+        # the frame's real globals and output behind it. A refused call stores
+        # nothing in cache_method's cache, which fills on the return path only.
         key = "torch_test_package_import_alias_non_module_value"
         alias = f"__import_{key}"
         value = types.SimpleNamespace(VALUE=1)
         nameless = types.ModuleType("nameless")
         del nameless.__dict__["__name__"]
-        f_globals = {}
-        output = types.SimpleNamespace(
-            global_scope=f_globals, import_sources={}, update_co_names=lambda name: None
-        )
-        tx = types.SimpleNamespace(output=output, package=None)
+        seen = []
+
+        def resolve(ctx):
+            tx = InstructionTranslator.current_tx()
+            seen.append(tx)
+            seen.append(tx.import_source(key))
+
+        def fn(x):
+            comptime(resolve)
+            return x + 1
+
+        args = (torch.randn(3, 2),)
         try:
             sys.modules[key] = value
-            f_globals[alias] = nameless
+            fn.__globals__[alias] = nameless
             refused = f"alias {alias} for {key}.*bound to a module in the globals"
             with self.assertRaisesRegex(Unsupported, refused):
-                InstructionTranslatorBase.import_source(tx, key)
-            self.assertIs(f_globals[alias], nameless)
-            self.assertEqual(output.import_sources, {})
+                torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            (tx,) = seen
+            self.assertIs(fn.__globals__[alias], nameless)
+            self.assertNotIn(alias, tx.output.import_sources)
+            self.assertNotIn((key,), tx._cache_method_import_source)
 
-            f_globals[alias] = types.ModuleType(key)
-            source = InstructionTranslatorBase.import_source(tx, key)
+            seen.clear()
+            torch._dynamo.reset()
+            fn.__globals__[alias] = types.ModuleType(key)
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            tx, source = seen
             self.assertEqual(source.global_name, alias)
-            self.assertIs(f_globals[alias], value)
-            self.assertEqual(output.import_sources, {alias: key})
+            self.assertIs(fn.__globals__[alias], value)
+            self.assertEqual(tx.output.import_sources[alias], key)
         finally:
             sys.modules.pop(key, None)
             _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
