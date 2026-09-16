@@ -2787,7 +2787,7 @@ PyObject* initModule() {
         });
   }
   py_module.def("_current_cpp_fake_tensor_mode", []() -> py::object {
-    return getFakeModePyObj(c10::impl::FakeTensorModeTLS::get_state());
+    return getCppFakeTensorModePyObj(c10::impl::FakeTensorModeTLS::get_state());
   });
   py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
