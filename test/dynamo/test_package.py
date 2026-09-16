@@ -1672,7 +1672,9 @@ def add(x, y):
         # module. A change to the live module recompiles; a change to the cached
         # one, which nothing guards, does not. The parent bound the cached
         # module into an empty slot, and there the first change went unseen
-        # while the second recompiled.
+        # while the second recompiled. Once the entry is gone the cache serves
+        # the module the second compile bound, not the first the process
+        # resolved: it holds what import_source last bound under the name.
         name = "torch_test_package_import_alias_stale_memo"
         alias = f"__import_{name}"
         old = types.ModuleType(name)
@@ -1706,6 +1708,21 @@ def add(x, y):
             old.VALUE = 11
             self.assertEqual(fn(*args), compiled_fn(*args))
             self.assertEqual(cnt.frame_count, 2)
+
+            # fn's import statement cannot run with the entry gone, in eager or
+            # in the trace, so import_source is driven on a stub translator
+            # over fn's globals, as the non-module-value test drives it.
+            self.assertIs(_import_source_cache[name], new)
+            sys.modules.pop(name)
+            scope = fn.__globals__
+            del scope[alias]
+            output = types.SimpleNamespace(
+                global_scope=scope, import_sources={}, update_co_names=lambda _: None
+            )
+            tx = types.SimpleNamespace(output=output, package=None)
+            source = InstructionTranslatorBase.import_source(tx, name)
+            self.assertEqual(source.global_name, alias)
+            self.assertIs(scope[alias], new)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
@@ -1985,7 +2002,10 @@ def add(x, y):
         # import system's blocked-module sentinel that makes importing the name
         # raise, is served the same way. The spy on importlib.import_module pins
         # the mechanism itself: whatever else the compile happens to import,
-        # it never asks for this name.
+        # it never asks for this name. The alias is deleted before each compile
+        # so that the binding checked afterwards is that compile's write and
+        # not the warm-up's, which is also what pins that a compile ran: every
+        # other assertion in the block holds with no compile at all.
         name = "torch.autograd.profiler"
         alias = "__import_torch_dot_autograd_dot_profiler"
         profiler = sys.modules[name]
@@ -2003,6 +2023,7 @@ def add(x, y):
             for blocked in (False, True):
                 with self.subTest(blocked=blocked):
                     torch._dynamo.reset()
+                    del fn.__globals__[alias]
                     with spy as import_module:
                         if blocked:
                             sys.modules[name] = None
