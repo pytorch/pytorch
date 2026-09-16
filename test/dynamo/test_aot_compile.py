@@ -602,6 +602,8 @@ class CountedKey:
 
 AOT_BRANCH_SCALE = 3.0
 
+_ACCEPTED_IN_THE_REPORT = "  [1] <guards rejected this call twice and then accepted it here: a guard that does not answer consistently, or guarded state that changed between those evaluations>"
+
 
 class ModeBranchGlobalModule(torch.nn.Module):
     # Only the mode == 1 branch reads a global, so one ModelInput's guards name
@@ -2440,7 +2442,7 @@ from user code:
     def test_module_dispatch_rechecks_an_opted_out_result_whose_tree_accepts(self):
         # The same false rejection of [1], with both results opted out. A
         # re-check that skipped opted-out results would leave the call to the
-        # fall-through, which serves the FIRST opted-out result: [0], whose
+        # opt-out stage, which serves the FIRST opted-out result: [0], whose
         # L['mode'] == 0 guard genuinely fails this call.
         model, x = self._aot_compile_mode_branches()
         for result in model.forward.compiled_results:
@@ -2449,10 +2451,10 @@ from user code:
 
     def test_module_dispatch_serves_an_opted_out_result_from_any_position(self):
         # With [0] still checked and [1] opted out, a call neither guards is
-        # served by [1]; the fall-through this stage precedes re-enters
-        # compiled_results[0] alone and raised its guard error. x * 3 is
-        # deliberately not eager's answer for mode=2 (x * 2): serving a graph
-        # compiled for a different call is what the opt-out exists to do.
+        # served by [1] rather than raising the no-match report, the stage after
+        # this one. x * 3 is deliberately not eager's answer for mode=2 (x * 2):
+        # serving a graph compiled for a different call is what the opt-out
+        # exists to do.
         mod = ModeBranchGlobalModule()
         model = torch.compile(mod, fullgraph=True, backend="eager")
         x = torch.randn(3, 3)
@@ -2467,14 +2469,13 @@ from user code:
         # [0]'s real match still outranks [1]'s opt-out, so this stage cannot
         # be hoisted into the scan.
         self.assertEqual(model(x, 0), x * 2)
-        # With both opted out and nothing matching, index order decides, as it
-        # did at the fall-through.
+        # With both opted out and nothing matching, index order decides.
         model.forward.compiled_results[0].disable_guard_check()
         self.assertEqual(model(x, 2), x * 2)
 
     def test_module_dispatch_rechecks_before_honouring_an_opt_out(self):
         # [0] opted out, [1] checked and falsely rejected once: the re-check
-        # finds [1]'s real match before the fall-through can hand the call to [0].
+        # finds [1]'s real match before the opt-out stage can hand the call to [0].
         model, x = self._aot_compile_mode_branches()
         model.forward.compiled_results[0].disable_guard_check()
         self._rescued_by_the_recheck(model, x)
@@ -2679,10 +2680,7 @@ from user code:
         # fast path that would skip it is off -- the probe's pop/insert bumped
         # this module dict's version past the one the last accept recorded.
         self.assertEqual(probe.compares, 3)
-        self.assertIn(
-            "  [1] <guards rejected this call twice and then accepted it here: a guard that does not answer consistently>",
-            message,
-        )
+        self.assertIn(_ACCEPTED_IN_THE_REPORT, message)
         # One entry line per result: the explanation is all [1] contributes, so
         # no blank "  [1] " line follows it from an accept's empty verbose parts.
         entries = [line for line in message.splitlines() if line.startswith("  [")]
@@ -2691,12 +2689,49 @@ from user code:
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("Add a ModelInput", message)
 
+    def test_no_match_message_when_guarded_state_changes_before_the_report(self):
+        # The entry's other cause, with every guard answering consistently:
+        # guards read live state on each evaluation and __call__ holds no lock
+        # across the dispatch, so a global that is wrong for both passes and
+        # right again by the time the report evaluates the tree gets the same
+        # accept. The rebind is placed in that window from the report's own
+        # check_verbose, where a concurrent writer could land it.
+        model, x = self._aot_compile_mode_branches()
+        g = globals()
+        saved = g["AOT_BRANCH_SCALE"]
+        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
+        g["AOT_BRANCH_SCALE"] = saved + 1
+        manager = model.forward.compiled_results[1]._artifacts.guard_manager
+        check_verbose = manager.check_verbose
+
+        def rebind_then_check(f_locals):
+            g["AOT_BRANCH_SCALE"] = saved
+            return check_verbose(f_locals)
+
+        with (
+            patch.object(manager, "check", wraps=manager.check) as check,
+            patch.object(manager, "check_verbose", side_effect=rebind_then_check),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                model(x, 1)
+        message = str(ctx.exception)
+        # Both passes ran the tree against the wrong value and refused; the
+        # accept is the report's alone, and the call is refused all the same.
+        self.assertEqual(check.call_count, 2)
+        self.assertIn(_ACCEPTED_IN_THE_REPORT, message)
+        entries = [line for line in message.splitlines() if line.startswith("  [")]
+        self.assertEqual(len(entries), 2)
+        self.assertIn("[0] L['mode'] == 0", message)
+
     def test_no_match_report_names_the_results_the_dispatch_judged(self):
         # compiled_results is public, and the report indexes the binding the
         # dispatch built, one per result the call began with. [0]'s check()
-        # appends a result mid-call: a report that re-read the list would ask for
-        # a binding the dispatch never made, and an IndexError would take its
-        # place. The appended result is the next call's to judge.
+        # splices a result in AHEAD of it mid-call: a report that re-read the
+        # list by index would ask for a binding the dispatch never made, and an
+        # IndexError would take its place; one that re-read it and zipped would
+        # describe the spliced result against [0]'s binding under the same
+        # header, so the spliced result's describer is watched as well. It is
+        # the next call's to judge.
         mod, x = ScaleModule(), torch.randn(3, 3)
         first = aot_compile_forward(mod, make_scaling_forward(2), x)
         later = aot_compile_forward(mod, make_scaling_forward(3), x)
@@ -2704,19 +2739,73 @@ from user code:
         manager = first._live_guard_manager()
         check = manager.check
 
-        def appending_check(f_locals):
-            combined.compiled_results[1:] = [later]
+        def splicing_check(f_locals):
+            # Idempotent: the re-check pass runs this check a second time.
+            combined.compiled_results[:] = [later, first]
             return check(f_locals)
 
-        with patch.object(manager, "check", appending_check):
+        later_manager = later._live_guard_manager()
+        describe = later_manager.check_verbose
+        watching = patch.object(later_manager, "check_verbose", wraps=describe)
+        with watching as described, patch.object(manager, "check", splicing_check):
             with self.assertRaises(RuntimeError) as ctx:
                 combined(x.double())
-        lines = str(ctx.exception).splitlines()
-        self.assertIn("Tried 1 compiled input(s)", lines[0])
-        self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
-        with self.assertRaises(RuntimeError) as ctx:
-            combined(x.double())
-        self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
+            lines = str(ctx.exception).splitlines()
+            self.assertIn("Tried 1 compiled input(s)", lines[0])
+            self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
+            described.assert_not_called()
+            with self.assertRaises(RuntimeError) as ctx:
+                combined(x.double())
+            self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
+            described.assert_called_once()
+
+    def test_aot_compile_module_restores_torch_function_after_a_throw(self):
+        # A tree that THROWS out of C++ returns through
+        # RootGuardManager::check_nopybind_template's non-RAII restore and leaves
+        # TorchFunction disabled on this thread. TENSOR_MATCH on a strided nested
+        # tensor is one such tree: reading its strides fires a TORCH_CHECK. Module
+        # dispatch evaluates it through GuardManagerWrapper.check, which puts the
+        # state back, and propagates the throw.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        state = torch._C._get_torch_function_state()
+        with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
+            model(nested)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_function_restores_torch_function_after_a_throw(self):
+        # load_compiled_function returns an AOTCompiledFunction, whose guard
+        # check evaluates the same kind of tree through the same wrapper, so a
+        # C++ throw would otherwise leave TorchFunction disabled on this thread
+        # and silently stop a __torch_function__ subclass from dispatching
+        # afterwards. The throw propagates; only the state it leaves is pinned.
+        self._hide_leaked_dynamo_globals()
+
+        def fn(x):
+            return x * 2
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((torch.randn(3, 3),), {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        # The same tree the module test throws out of: TENSOR_MATCH reading a
+        # strided nested tensor's strides fires a TORCH_CHECK.
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        state = torch._C._get_torch_function_state()
+        with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
+            loaded(nested)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
