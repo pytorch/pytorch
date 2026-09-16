@@ -2167,8 +2167,7 @@ class outer_fn(torch.nn.Module):
         dist.destroy_process_group()
 
     @unittest.skipUnless(
-        (IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED )
-        or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_2tier_blockmask_tensor_closure_nested_compile_aot_export(self):
