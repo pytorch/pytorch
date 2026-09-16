@@ -24,6 +24,8 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
+from ._p2p import _warmup_p2p_edge_groups
+from ._recv_buffers import _RecvInfo
 from ._utils import (
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
@@ -36,7 +38,7 @@ from .microbatch import (
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
-from .stage import _PipelineStageBase, _RecvInfo, _warmup_p2p_edge_groups, PipelineStage
+from .stage import _PipelineStageBase, PipelineStage
 
 
 __all__ = [
@@ -91,6 +93,8 @@ FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
 
+# Keep the alias private; public schedule signatures spell out the accepted
+# forms so generated API documentation remains self-contained.
 _UnshardLookahead = Literal["full", "auto"] | tuple[int, ...]
 
 
@@ -427,6 +431,8 @@ class _PipelineSchedule(ABC):
                 if use_per_edge:
                     if parent is None:
                         raise AssertionError("per-edge P2P requires a parent group")
+                    # Every parent rank must enter this setup-time vote before
+                    # any rank can create the topology-derived child groups.
                     vote = torch.tensor(
                         [
                             int(
@@ -450,6 +456,8 @@ class _PipelineSchedule(ABC):
                     dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=parent)
                     result: torch.Tensor | None = vote
                 else:
+                    # Retain the ring vote on the default path because its P2P
+                    # traffic also initializes the neighbour communicators.
                     acc: torch.Tensor | None = None
                     for stage in pp_stages:
                         acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
@@ -1565,7 +1573,7 @@ def _add_unshard_reshard(
     compute_actions: list[_Action | None],
     max_active_stages: int = 3,
     *,
-    unshard_lookahead: int,
+    unshard_lookahead: int | None = None,
 ) -> list[_Action]:
     """Given a basic schedule involving only compute actions (F,B,W,OVERLAP_F_B), add UNSHARD/RESHARD actions for FSDP.
 
@@ -1578,9 +1586,12 @@ def _add_unshard_reshard(
     resolved ``unshard_lookahead`` controls how many distinct stages are found
     while scanning upcoming atomic actions. The current atomic action must fit
     within ``max_active_stages``. A future ``OVERLAP_F_B`` action that crosses
-    a scan boundary remains atomic, so its second stage may transiently extend
-    the residency or lookahead window by one.
+    a scan boundary remains atomic, so its stages may transiently extend the
+    residency or lookahead window by up to the action's size minus one.
     """
+
+    if unshard_lookahead is None:
+        unshard_lookahead = max_active_stages
 
     def next_stage_indices(count: int, next_actions: list[_Action | None]) -> list[int]:
         """Remove duplicates (same stage, different microbatch), find next 'count' stages that will do compute."""
@@ -2593,8 +2604,19 @@ class _CustomFunctionProtocol(Protocol):
 class _PipelineScheduleRuntime(PipelineScheduleMulti):
     """Run a multi-stage schedule lowered to explicit communication actions.
 
-    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
-    addresses. ``max_active_stages`` controls FSDP parameter residency, while
+    Instantiate this class directly and call :meth:`load_csv`, or subclass it
+    and construct the schedule IR in the subclass.
+
+    ``defer_pp_recv`` moves each receive next to its consuming compute action.
+    ``reuse_recv_buffers`` gives receive destinations stable addresses by
+    retaining a schedule-colored pool. Compatible pools only grow, so switching
+    between training and inference preserves existing addresses and retains the
+    maximum slot count needed by either mode. Inference owns received contents
+    until outstanding sends finish and retains the allocated pool for the
+    schedule's lifetime. A custom ``RECV_F`` or ``RECV_B`` handler must call the
+    corresponding stage receive method, or otherwise preserve its pool acquire
+    and descriptor-population contract, when buffer reuse is enabled.
+    ``max_active_stages`` controls FSDP parameter residency, while
     ``unshard_lookahead`` independently controls all-gather issue distance; see
     :func:`_resolve_unshard_lookahead` for its policies.
     """
@@ -2685,7 +2707,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             if unshard_lookahead != (self._max_active_stages,) * len(actions):
                 raise ValueError(
                     "unshard_lookahead cannot be applied to an already-lowered "
-                    "compute_comms schedule; use format='compute_only'"
+                    "compute_comms schedule; provide a compute-only schedule "
+                    "and apply the policy while lowering it"
                 )
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = []
@@ -3044,7 +3067,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 return
 
             stage = stage_index_to_stage[action.stage_index]
-            if stage.has_backward and action.computation_type in (
+            if self._has_backward and action.computation_type in (
                 FULL_BACKWARD,
                 BACKWARD_WEIGHT,
             ):
@@ -3123,6 +3146,13 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
     What is different is that when microbatches are ready for multiple local
     stages, Loops BFS will prioritizes the earlier stage, running all available
     microbatches at once.
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
+    ``max_active_stages`` bounds FSDP parameter residency.
+    ``unshard_lookahead`` accepts ``"full"``, ``"auto"``, or one integer per
+    pipeline rank and independently controls all-gather issue distance.
     """
 
     def __init__(
@@ -3134,8 +3164,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         super().__init__(
@@ -3146,8 +3176,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
             unshard_lookahead=unshard_lookahead,
         )
 
@@ -3365,13 +3395,16 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
     1. pp_group_size = 4, n_microbatches = 10. We will have num_rounds = 2 and n_microbatches % 2 is 0.
     2. pp_group_size = 4, n_microbatches = 3. We will have num_rounds = 1 and n_microbatches % 1 is 0.
 
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
     Args:
         max_active_stages: Maximum number of local FSDP stages whose unsharded
             parameters may remain resident.
         unshard_lookahead: Number of upcoming resident stages allowed to issue
-            asynchronous unshards. ``"full"`` matches ``max_active_stages``;
-            ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
-            supplies one integer per pipeline rank.
+             asynchronous unshards. ``"full"`` matches ``max_active_stages``;
+             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
+             supplies one integer per pipeline rank.
     """
 
     def __init__(
@@ -3385,8 +3418,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         self.pp_group_size = stages[0].group_size
@@ -3400,8 +3433,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
             unshard_lookahead=unshard_lookahead,
         )
         self.n_local_stages = len(stages)
@@ -3487,6 +3520,13 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
     the pipeline bubble.
 
     In particular this is implementing the ZB1P schedule in the paper.
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
+    ``max_active_stages`` bounds FSDP parameter residency.
+    ``unshard_lookahead`` accepts ``"full"``, ``"auto"``, or one integer per
+    pipeline rank and independently controls all-gather issue distance.
     """
 
     def __init__(
@@ -3500,8 +3540,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
@@ -3517,8 +3557,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
             unshard_lookahead=unshard_lookahead,
         )
         self.n_local_stages = len(stages)
@@ -3690,6 +3730,13 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
     This ZB-V schedule would have the "zero bubble" property only if time forward == time backward input == time backward weights.
     In practice, this is not likely true for real models so alternatively
     a greedy scheduler could be implemented for unequal/unbalanced time.
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
+    ``max_active_stages`` bounds FSDP parameter residency.
+    ``unshard_lookahead`` accepts ``"full"``, ``"auto"``, or one integer per
+    pipeline rank and independently controls all-gather issue distance.
     """
 
     def __init__(
@@ -3703,8 +3750,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
@@ -3720,8 +3767,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
             unshard_lookahead=unshard_lookahead,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
@@ -3882,6 +3929,13 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
     DualPipe schedule introduced by DeepSeek in https://arxiv.org/pdf/2412.19437
 
     Based on the open sourced code from https://github.com/deepseek-ai/DualPipe
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
+    ``max_active_stages`` bounds FSDP parameter residency.
+    ``unshard_lookahead`` accepts ``"full"``, ``"auto"``, or one integer per
+    pipeline rank and independently controls all-gather issue distance.
     """
 
     def __init__(
@@ -3895,8 +3949,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
     ):
         # TODO: we don't support input/weight backward split with torch.compile
@@ -3912,8 +3966,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
             unshard_lookahead=unshard_lookahead,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
@@ -4112,6 +4166,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
 _PipelineResourceGranularity = Literal["microbatch", "stage_microbatch"]
 
 
+# Identity equality keeps this frozen plan hashable despite MappingProxyType.
 @dataclass(frozen=True, eq=False)
 class _PipelineResourceLiveness:
     """Deterministic resource-slot assignments for one pipeline rank."""
@@ -4368,8 +4423,8 @@ def _analyze_pipeline_resource_liveness(
             f"{sorted(missing_input_backwards)}"
         )
     for key in expected:
-        if releases[key] <= starts[key]:
-            raise ValueError(f"Resource lifetime {key} ends at or before its forward")
+        if releases[key] < starts[key]:
+            raise ValueError(f"Resource lifetime {key} ends before its forward")
 
     if granularity == "microbatch":
         intervals = [
@@ -4388,10 +4443,10 @@ def _analyze_pipeline_resource_liveness(
         microbatch_slots, num_slots = _assign_pipeline_resource_slots(intervals)
         assignments = {
             (stage_index, microbatch_index): microbatch_slots[microbatch_index]
-            for stage_index, microbatch_index in expected
+            for stage_index, microbatch_index in sorted(expected)
         }
     else:
-        keys = sorted(expected, key=lambda item: (starts[item], releases[item], item))
+        keys = sorted(expected)
         intervals = [(starts[key], releases[key]) for key in keys]
         slots, num_slots = _assign_pipeline_resource_slots(intervals)
         assignments = dict(zip(keys, slots, strict=True))

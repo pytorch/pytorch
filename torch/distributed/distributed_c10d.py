@@ -7826,7 +7826,7 @@ def _create_shrunk_process_group(
     else:
         group_desc = f"{metadata['original_group_name']}:shrunk"
 
-    # Create process group with new communicator (clone the parent store like split does)
+    # Preserve shrink's existing independent Store ownership for the new group.
     prefix_store = PrefixStore(
         f"{group_name}/",
         metadata["store"].clone(),

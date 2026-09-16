@@ -73,6 +73,8 @@ reference to avoid holding onto memory after forward.
 class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
+    all_gather_state: AllGatherState | None = None
+
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
         # Setting the all-gather/reduce-scatter streams to be higher priority
@@ -127,14 +129,14 @@ class FSDPCommContext:
         return current_stream, current_stream
 
     def wait_all_gather_streams_on_event(self, event: torch.Event | None) -> None:
-        """Order both all-gather streams after a copy-out event."""
+        """Order both all-gather streams after the given event."""
         if event is None:
             return
         # Calling ``unshard`` before lazy init means streams are not initialized.
-        if hasattr(self, "all_gather_copy_in_stream"):
-            self.all_gather_copy_in_stream.wait_event(event)
-        if hasattr(self, "all_gather_stream"):
-            self.all_gather_stream.wait_event(event)
+        if not hasattr(self, "all_gather_copy_in_stream"):
+            return
+        self.all_gather_copy_in_stream.wait_event(event)
+        self.all_gather_stream.wait_event(event)
 
     def release_all_gather_state(self) -> None:
         """Release deferred state after ordering streams that reuse its buffers."""

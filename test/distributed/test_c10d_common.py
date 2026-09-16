@@ -2490,6 +2490,17 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         except OSError:
             pass
 
+    def _init_process_group(self, backend):
+        # Rendezvous over the per-test temp file rather than a fixed TCP port,
+        # so concurrently running test processes cannot collide.
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+
     def test_get_backend_name(self):
         dpg = DummyProcessGroup(0, 1)
         self.assertEqual("Dummy", dpg.name())
@@ -2514,9 +2525,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         backend = dist.get_backend_impl()
         self.assertIsInstance(backend, DummyProcessGroup)
@@ -2536,9 +2545,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         dpg = DummyProcessGroup(0, 124)
         from torch.distributed.distributed_c10d import _canonicalize_group_rank
@@ -2686,11 +2693,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group(
-            "cpu:dummy,cuda:dummy,xpu:dummy", rank=self.rank, world_size=self.world_size
-        )
+        self._init_process_group("cpu:dummy,cuda:dummy,xpu:dummy")
 
         # test all_gather
         input_tensor = torch.ones(2, 2) * 7
@@ -2725,9 +2728,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         # test all_gather
         input_tensor = torch.ones(2, 2) * 7
@@ -2761,9 +2762,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         # test send
         input_tensor = torch.zeros(2, 2)
@@ -2796,9 +2795,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         pg = c10d._get_default_group()
 
@@ -2811,9 +2808,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy", PythonProcessGroupExtensionTest.create_dummy
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group("dummy", rank=self.rank, world_size=self.world_size)
+        self._init_process_group("dummy")
 
         pg = c10d._get_default_group()
 
@@ -2855,11 +2850,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             extended_api=True,
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group(
-            "delegating", rank=self.rank, world_size=self.world_size
-        )
+        self._init_process_group("delegating")
 
         try:
             sub_pg = dist.new_group(ranks=[0])
@@ -2914,11 +2905,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             devices=["cpu", "cuda"],
         )
 
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "6789"
-        dist.init_process_group(
-            "delegating", rank=self.rank, world_size=self.world_size
-        )
+        self._init_process_group("delegating")
 
         try:
             backend = "cpu:delegating,cuda:delegating"
@@ -2932,16 +2919,23 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
 
+class _CloneTrackingStore(dist.Store):
+    def __init__(self):
+        super().__init__()
+        self._values = {}
+        self.clone_count = 0
+
+    def add(self, key, value):
+        result = int(self._values.get(key, b"0")) + value
+        self._values[key] = str(result).encode()
+        return result
+
+    def clone(self):
+        self.clone_count += 1
+        return self
+
+
 class SplitGroupOptionsTest(TestCase):
-    class _CloneTrackingStore(dist.Store):
-        def __init__(self):
-            super().__init__()
-            self.clone_count = 0
-
-        def clone(self):
-            self.clone_count += 1
-            return self
-
     class _SplittingBackend(C10DBackend):
         def __init__(self, rank, size, name):
             super().__init__(rank, size)
@@ -2974,7 +2968,9 @@ class SplitGroupOptionsTest(TestCase):
         # just map keys here, the backends themselves are Python ones.
         cpu_backend = self._SplittingBackend(0, 1, "cpu-backend")
         default_backend = self._SplittingBackend(0, 1, "default-backend")
-        pg = dist.ProcessGroup(store if store is not None else dist.HashStore(), 0, 1)
+        if store is None:
+            store = dist.HashStore()
+        pg = dist.ProcessGroup(store, 0, 1)
         pg._register_backend(
             torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO, cpu_backend
         )
@@ -2986,7 +2982,7 @@ class SplitGroupOptionsTest(TestCase):
         return pg, cpu_backend, default_backend
 
     def test_split_group_passes_prefixed_parent_store_to_backend(self):
-        store = self._CloneTrackingStore()
+        store = _CloneTrackingStore()
         pg, cpu_backend, default_backend = self._make_group(store)
         child = pg.split_group([0], group_name="child")
 
@@ -2994,7 +2990,8 @@ class SplitGroupOptionsTest(TestCase):
         for backend in (cpu_backend, default_backend):
             self.assertIsInstance(backend.split_store, dist.PrefixStore)
         self.assertIs(cpu_backend.split_store, default_backend.split_store)
-        self.assertIsInstance(child.get_group_store(), dist.PrefixStore)
+        self.assertIs(cpu_backend.split_store.underlying_store, store)
+        self.assertIs(child.get_group_store(), cpu_backend.split_store)
 
     def test_split_group_clones_parent_options(self):
         # getBackendOptions() returns the backend's live options_, and split()
