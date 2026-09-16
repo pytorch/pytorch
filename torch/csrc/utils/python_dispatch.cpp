@@ -1231,6 +1231,8 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchVmapMode)
       DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
+      // Export DispatchKey::Fake to Python so Python guards and dispatch
+      // utilities can construct, inspect, include, or exclude that key.
       DEF_ONE(Fake)
       DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
@@ -1479,7 +1481,6 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_autocast_supported_devices", []() {
     std::vector<std::string> result;
-    result.reserve(at::autocast::_AUTOCAST_SUPPORTED_DEVICES.size());
     for (const auto device_type : at::autocast::_AUTOCAST_SUPPORTED_DEVICES) {
       result.emplace_back(
           c10::DeviceTypeName(device_type, /*lower_case*/ true));
