@@ -2086,27 +2086,13 @@ from user code:
         # cannot make mode=2 satisfy [1]'s L['mode'] == 1, and a new ModelInput
         # for mode=2 would not resolve the global [1] failed on. Reporting only
         # one of them asserts something untrue about the whole call.
-        model = torch.compile(
-            ModeBranchGlobalModule(),
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        x = torch.randn(3, 3)
-        model._aot_compile(
-            [
-                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
-                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
-            ]
-        )
+        model, x = self._aot_compile_mode_branches()
         g = globals()
-        saved = g.pop("AOT_BRANCH_SCALE")
-        try:
-            with self.assertRaises(RuntimeError) as ctx:
-                model(x, 2)
-            message = str(ctx.exception)
-        finally:
-            g["AOT_BRANCH_SCALE"] = saved
+        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", g["AOT_BRANCH_SCALE"])
+        del g["AOT_BRANCH_SCALE"]
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, 2)
+        message = str(ctx.exception)
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("[1] KeyError on G['AOT_BRANCH_SCALE']", message)
         self.assertIn("a guarded global is missing", message)
