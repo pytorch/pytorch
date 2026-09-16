@@ -3,6 +3,11 @@
 .. automodule:: torch.compiler
 ```
 
+```{eval-rst}
+.. py:module:: torch.compiler.precompile
+.. currentmodule:: torch.compiler
+```
+
 (torch.compiler_api)=
 # torch.compiler API reference
 
@@ -45,66 +50,132 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ## torch.compiler.precompile
 
-% precompile is a callable instance (not a plain function), which Sphinx
-% autosummary cannot render, so it is documented manually below and
-% intentionally omitted from the autosummary block above.
+```{warning}
+`torch.compiler.precompile` and everything reached through it (`precompile.capture`,
+`precompile.accumulate`, `precompile.load`, `torch.compiler.PrecompiledRunnable`,
+`torch.compiler.PrecompiledCallable`, and the objects they return) is a prototype API.
+Signatures, error types and the artifact format may change between releases without a
+deprecation cycle.
+```
+
+% precompile is a module whose members are documented manually below.
 
 ```{eval-rst}
-.. py:function:: precompile(fn, *example_inputs, backend="inductor", tracer="make_fx", decompositions=None)
+.. py:function:: precompile.capture(fn, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
 
-   Ahead-of-time precompile ``fn`` against example inputs, returning a self-contained,
-   runnable Python source string plus an acceleration cache as ``(python_code, cache)``.
-   ``fn`` is the whole computation, taking the model(s) as
-   explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step. The
-   ``nn.Module`` arguments have their parameters/buffers lifted to graph inputs, so no
+   Return a caller-driven capture of ``fn`` as a :class:`precompile.Capture`. Capture is
+   caller-driven: this runs nothing on its own. Enter the returned object as a context
+   manager and call it exactly as you would ``fn`` inside the block -- each call runs for
+   real, folds what it exercised into the capture, and returns what ``fn`` returned -- and
+   the ``(python_code, cache)`` artifact is written to ``artifact_path`` / ``cache_path``
+   when the block exits::
+
+       with torch.compiler.precompile.capture(
+           fn, artifact_path="m.py", cache_path="m.cache"
+       ) as cap:
+           y1 = cap(model, x1)
+           y2 = cap(model, x2)
+       f = torch.compiler.precompile.load("m.py", "m.cache")
+
+   Because the caller makes the calls, inputs flow through naturally and return values stay
+   available, so the capture drops into an ordinary training or pipeline loop where
+   intermediate values are needed; to rewrite the artifact after every call instead of once
+   at exit, use :func:`precompile.accumulate`, the per-call-rewrite counterpart with the
+   same model. ``tracer`` picks the capture front-end and carries its tracer-specific
+   configuration: :class:`precompile.DynamoTracer` (the default) takes as many calls as you
+   give it and captures every graph-break continuation and guarded recompilation those
+   calls exercise; :class:`precompile.MakeFxTracer` is one non-strict ATen trace and takes
+   exactly one call (a second call raises). ``backend`` and ``training`` are shared across
+   both tracers. This is execution-driven coverage, not an exhaustive analysis: paths and
+   values that no call executes are absent. ``fn`` is the whole computation, taking the
+   model(s) as explicit arguments, e.g. ``lambda model, x: model(x)`` or a training step.
+   The ``nn.Module`` arguments have their parameters/buffers lifted to graph inputs, so no
    weights are baked into the artifact -- you pass the model again at runtime to the
    reloaded callable. Reload with ``torch.compiler.precompile.load`` (below).
 
    .. note::
 
-      With the default ``make_fx`` tracer, capture is non-strict. Control flow is
-      specialized to the example inputs, and shapes are static -- each size is baked in.
-      The exception is a tensor dim explicitly marked unbacked (inductor backend only)
-      with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call; such
-      a dim is captured as an unbacked symint, so one artifact serves any runtime size of
-      it, and a graph that needs to guard on it fails at capture. Each input's dtype and
-      device are specialized too (a runtime mismatch is rejected), and the inductor backend
-      additionally specializes on input memory format. See Note [precompile programming
-      model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
-      ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
+      With :class:`precompile.MakeFxTracer`, capture is non-strict. Control flow is
+      specialized to the captured call, and shapes are static -- each size is baked in. A
+      data-dependent op (``.item()``, a branch over a tensor value) instead raises at
+      capture, since the trace runs under fake mode where the value is unknown. The
+      exception to static shapes is a tensor dim explicitly marked unbacked with
+      ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call (with
+      ``make_fx`` this requires the inductor backend; with :class:`precompile.DynamoTracer`
+      either backend works); such a dim is captured as an unbacked symint, so one artifact
+      serves any runtime size of it, and a graph that needs to guard on it fails at capture.
+      Each input's dtype and device are specialized too (a runtime mismatch is rejected),
+      and the inductor backend additionally specializes on input memory format. See Note
+      [precompile programming model] in ``torch/_precompile.py``. ``torch.compiler.precompile``
+      is distinct from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
+      caching mode).
 
-   If ``fn`` runs a backward, the artifact re-runs the whole forward and backward and
-   scatters the resulting parameter gradients onto the runtime model's ``parameters()``
-   ``.grad`` fields, accumulating (``p.grad += g``) exactly like eager ``.backward()`` --
-   so keep your usual ``zero_grad()`` / ``optimizer.step()`` loop. Which params receive a
-   grad is fixed at capture time (frozen or non-contributing params stay ``.grad = None``).
-   The artifact returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not
-   the gradients.
+   Gradients and return values keep their normal eager/``torch.compile`` semantics: your
+   calls run in whatever grad mode you set, and precompile does not snapshot or clear the
+   model's gradients -- there is no example call of its own to compensate for. If ``fn``
+   runs a backward (pass ``training=True``), the artifact re-runs the whole forward and
+   backward and scatters the resulting parameter gradients onto the runtime model's
+   ``parameters()`` ``.grad`` fields, accumulating (``p.grad += g``) exactly like eager
+   ``.backward()`` -- so keep your usual ``zero_grad()`` / ``optimizer.step()`` loop. Which
+   params receive a grad is fixed at capture time (frozen or non-contributing params stay
+   ``.grad = None``). The artifact returns ``fn``'s own result (``None`` for a bare
+   ``.backward()`` step), not the gradients.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
-       as positional arguments.
-   :param example_inputs: Example positional arguments to ``fn``; the ``nn.Module``
-       arguments are lifted and the rest are the runtime inputs.
+       as positional arguments. With :class:`precompile.DynamoTracer`, ``cap(...)`` also
+       accepts keyword arguments and the loaded artifact takes them the same way;
+       :class:`precompile.MakeFxTracer` is positional-only. Enter the returned capture and
+       call it once (make_fx) or as many times as you need (dynamo). The ``nn.Module``
+       arguments are lifted and the rest are the runtime inputs. Calls run in the caller's
+       grad mode; serve the resulting artifact under the same one.
+   :param artifact_path: File to write ``python_code`` to when the block exits. Required.
+   :param cache_path: File to write the acceleration cache to. Required.
+   :param tracer: The capture front-end and its configuration, a
+       :class:`precompile.DynamoTracer` (default) or :class:`precompile.MakeFxTracer`.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
-       are still specialized to the example).
-   :param tracer: capture front-end. ``"make_fx"`` (default) is a non-strict make_fx
-       trace and the only tracer implemented today; ``"dynamo"`` is planned and raises
-       ``NotImplementedError`` for now.
-   :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
-       decomposition function) forwarded to ``make_fx``; defaults to ``None``.
-   :returns: ``(python_code, cache)`` -- a self-contained Python source string (the
-       single source of truth for the calling convention) and a binary acceleration
-       cache (no weights, no calling-convention metadata; it carries a small
-       format/version/backend/code_hash integrity tag that ``load`` verifies).
+       are still specialized to the captured call).
+   :param training: Run with grad enabled and lower a backward into the
+       artifact; defaults to ``False``. Required for a ``fn`` that runs a backward. The
+       caller still controls the grad mode of the calls it makes; this only asks the
+       capture to keep a backward.
+   :returns: A :class:`precompile.Capture` -- a context manager and callable. The artifact
+       is written to the two files when the block exits.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
-       contract (see the exception below).
+       contract (see the exception below); a second make_fx call also raises.
+   :raises ValueError: for an unknown ``backend``, or a ``cache_path``/``artifact_path``
+       given without the other.
+   :raises TypeError: if ``tracer`` is not a :class:`precompile.MakeFxTracer` or
+       :class:`precompile.DynamoTracer`.
 
    Example::
 
-       python_code, cache = torch.compiler.precompile(lambda m, x: m(x), model, x)
-       f = torch.compiler.precompile.load(python_code, cache)
+       with torch.compiler.precompile.capture(
+           lambda m, x: m(x), artifact_path="m.py", cache_path="m.cache",
+           tracer=torch.compiler.precompile.MakeFxTracer(),
+       ) as cap:
+           y = cap(model, x)   # runs for real, returns m(x)
+       f = torch.compiler.precompile.load("m.py", "m.cache")
        out = f(model, x)   # pass the model again at runtime
+
+       def staged(x):
+           y = x + 1
+           scale = y.sum().item()  # a graph break
+           return y * scale
+
+       # Graph breaks and several variants need the dynamo tracer (the default);
+       # make_fx captures a single call as one graph.
+       with torch.compiler.precompile.capture(
+           staged, artifact_path="s.py", cache_path="s.cache"
+       ) as cap:
+           cap(example_a)
+           cap(example_b)
+       compiled = torch.compiler.precompile.load("s.py", "s.cache")
+       # staged() breaks only within its own frame, so this artifact is
+       # STANDALONE: a plain callable (an installing artifact -- one whose
+       # capture holds frames the entry cannot reach -- supports `with`).
+       with torch.no_grad():
+           out = compiled(example_a)
 ```
 
 ```{eval-rst}
