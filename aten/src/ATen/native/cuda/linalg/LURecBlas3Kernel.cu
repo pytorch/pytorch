@@ -1002,7 +1002,8 @@ ldl_diagonal_panel_fused_kernel(
     // Update L21 {
     // L21 = dLD[curr_step + pivot_rank:, curr_step:curr_step + pivot_rank]
     // L21 = L21 @ inv(D)
-    // NOTE: keeping D11 and det as scalar_t is matches LAPACK better
+    // NOTE: keeping D11 and det as scalar_t as to not cause desyncs
+    // between U12 and D
     if (pivot_rank == 1) {
       auto D11 = dLD[LinOff(curr_step, curr_step, lda)];
       for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
