@@ -6104,11 +6104,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     def test__int_mm(self, device, k, n, use_transpose_a, use_transpose_b):
-        # Skip specific failing cases on CUDA 13.0
-        if (not TEST_WITH_ROCM) and _get_torch_cuda_version() >= (13, 0):
-            if not use_transpose_a and not use_transpose_b:
-                self.skipTest("xfail on CUDA 13 until cuBLAS adds the supported kernel")
-
         def genf_int_float(x, y, use_transpose):
             if use_transpose:
                 x, y = y, x
@@ -6135,6 +6130,15 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
                 self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
             else:
                 self.assertNotEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+
+        if self.device_type != "cuda":
+            _test(17, k, n, use_transpose_a, use_transpose_b, True)
+            return
+
+        # Skip specific failing cases on CUDA 13.0
+        if (not TEST_WITH_ROCM) and _get_torch_cuda_version() >= (13, 0):
+            if not use_transpose_a and not use_transpose_b:
+                self.skipTest("xfail on CUDA 13 until cuBLAS adds the supported kernel")
 
         # NOTE: We're just exercising terrible failures here.
         version = _get_torch_cuda_version()
