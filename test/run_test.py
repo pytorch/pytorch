@@ -293,7 +293,6 @@ S390X_BLOCKLIST = [
 XPU_BLOCKLIST = [
     # Not applicable to XPU, tracked by
     # https://github.com/intel/torch-xpu-ops/issues/5205
-    "benchmark_utils/test_benchmark_utils",
     "functorch/test_control_flow_cuda_initialization",
     "inductor/test_ck_backend",
     "inductor/test_cudagraph_trees",
@@ -304,12 +303,12 @@ XPU_BLOCKLIST = [
     "inductor/test_cutlass_backend",
     "inductor/test_cutlass_evt",
     "inductor/test_cutlass_fallback",
-    "inductor/test_flex_flash",
     "inductor/test_flex_gemm",
     "inductor/test_halide",
+    "inductor/test_inductor_annotations",
     "inductor/test_nv_universal_gemm",
     "inductor/test_origami",
-    "inductor/test_utils",
+    "inductor/test_pallas",
     "python_native/test_quack_vendor",
     "python_native/test_topk_cutedsl",
     "quantization/core/test_quantized_tensor",
