@@ -1675,6 +1675,10 @@ void _linalg_check_errors(
           ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
           "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
           "linalg.lu_factor_ex(A, pivot)");
+    } else if (api_name.find("ldl_factor") != api_name.npos) {
+      TORCH_CHECK(false, api_name, batch_str,
+          ": D[", info, ",", info, "] is zero and using it on ldl_solve would result in a division by zero. "
+          "If you still want to perform the factorization, consider calling linalg.ldl_factor_ex(A)");
     } else {
       TORCH_INTERNAL_ASSERT(false, api_name, ": Unknown error code: ", info, ".");
     }
