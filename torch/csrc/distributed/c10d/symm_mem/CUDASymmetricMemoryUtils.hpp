@@ -252,7 +252,7 @@ class StoreExchange {
   //
   // The key itself needs no group component: a process group's store is
   // already a PrefixStore over the group name, so distinct groups cannot
-  // collide on keys. Only the counter was shared.
+  // collide on keys.
   //
   // The entry is dropped when the group is unregistered, so a recycled name
   // does not inherit it.
