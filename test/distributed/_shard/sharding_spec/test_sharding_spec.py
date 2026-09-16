@@ -371,7 +371,7 @@ class TestShardingSpec(TestCase):
             ShardMetadata(
                 shard_offsets=[16],
                 shard_sizes=[9],
-                placement=f"{DEVICE_TYPE}:0",
+                placement=f"{DEVICE_TYPE}:1",
             ),
         ]
         spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
