@@ -1,4 +1,3 @@
-import contextlib
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain
@@ -495,13 +494,8 @@ def foreach_all_gather_copy_out(
         # Chunk-cat from the temporary to the final all-gather output tensors
         shard_dim = fsdp_param.fsdp_placement.dim
 
-        non_inference_outs = [
-            t for t in fsdp_param.all_gather_outputs if not t.is_inference()
-        ]
-        with (
-            torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs))
-            if non_inference_outs
-            else contextlib.nullcontext()
+        with torch.autograd._unsafe_preserve_version_counter(
+            tuple(t for t in fsdp_param.all_gather_outputs if not t.is_inference())
         ):
             for param_all_gather_output, target_all_gather_output in zip(
                 param_all_gather_outputs, fsdp_param.all_gather_outputs
