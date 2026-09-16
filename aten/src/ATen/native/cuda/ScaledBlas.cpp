@@ -474,19 +474,14 @@ _scaled_gemm(
   // ROCm, so it cannot express this.
   const bool tn_only = scaling_choice_a != ScalingType::TensorWise ||
       scaling_choice_b != ScalingType::TensorWise;
+  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by hipBLASLt for non-tensorwise scaling";
 #else
   // H100 only supports row-major x column-major, but all permutations are supported on Blackwells
   const bool tn_only = scaled_mm_arch_allowed(/*sm90_only=*/true, /*sm100_only=*/false);
+  [[maybe_unused]] constexpr auto tn_only_msg = "Only multiplication of row-major and column-major matrices is supported by cuBLASLt";
 #endif
   if (tn_only) {
-    TORCH_CHECK(
-        args.transa == 't' && args.transb == 'n',
-        "Only multiplication of row-major and column-major matrices is supported by "
-#ifdef USE_ROCM
-        "hipBLASLt for non-tensorwise scaling");
-#else
-        "cuBLASLt");
-#endif
+    TORCH_CHECK(args.transa == 't' && args.transb == 'n', tn_only_msg);
   }
   std::optional<Tensor> effective_accumulator = epilogue.accumulator;
   // Some cuBLASLt algorithms skip the D write for distinct C/D when M=1.

@@ -47,6 +47,7 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     skipXPU,
     skipCUDAIf,
+    skipCUDAIfNotRocm,
 )
 
 from torch.testing._internal.common_xpu import Xe2_Or_Later
@@ -734,20 +735,6 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
 
 class TestFP8Matmul(TestCase):
 
-    def _tensorwise_layout_supported(self, x_cm: bool, y_cm: bool) -> bool:
-        # Must not be used for row-wise or block-wise: those stay TN-only on ROCm, while
-        # hipBLASLt takes every permutation for tensorwise. On CUDA, SM 8.9/9 are TN-only,
-        # SM 10/11 take all layouts, and SM 12 depends on CUDA version.
-        if torch.version.hip:
-            return True
-        major, minor = torch.cuda.get_device_capability(0)
-        cuda_version = _get_torch_cuda_version()
-        if major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
-            return True
-        if major == 12 and (minor == 1 or cuda_version >= (13, 1)):
-            return x_cm
-        return (x_cm, y_cm) == (True, False)
-
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
@@ -841,7 +828,20 @@ class TestFP8Matmul(TestCase):
     def test_float8_basics_layout_permutations(self, device) -> None:
         if "cuda" in device:
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                layouts_supported = self._tensorwise_layout_supported(x_cm, y_cm)
+                # hipBLASLt supports all permutations for tensorwise scaling
+                # SM 8.9 and 9 only support TN
+                # SM 10 and 11 support all permutations
+                # SM 12 support depends on CUDA version
+                major, minor = torch.cuda.get_device_capability(0)
+                cuda_version = _get_torch_cuda_version()
+                if torch.version.hip:
+                    layouts_supported = True
+                elif major in (10, 11) or (major == 12 and cuda_version >= (13, 4)):
+                    layouts_supported = True
+                elif major == 12 and (minor == 1 or cuda_version >= (13, 1)):
+                    layouts_supported = x_cm
+                else:
+                    layouts_supported = (x_cm, y_cm) == (True, False)
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
                     self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
         else:
@@ -850,7 +850,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @unittest.skipIf(not torch.version.hip, "hipBLASLt non-tensorwise scaled_mm is TN-only")
+    @skipCUDAIfNotRocm
     @skipIfTorchDynamo("error message checks rely on eager exception types")
     def test_rowwise_tn_only_on_rocm(self, device) -> None:
         M, K, N = 16, 32, 16
@@ -887,7 +887,7 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    @unittest.skipIf(not torch.version.hip, "hipBLASLt non-tensorwise scaled_mm is TN-only")
+    @skipCUDAIfNotRocm
     @skipIfTorchDynamo("error message checks rely on eager exception types")
     def test_mxfp8_tn_only_on_rocm(self, device) -> None:
         M, K, N = 128, 128, 128
@@ -1229,7 +1229,10 @@ class TestFP8Matmul(TestCase):
     @parametrize("x_cm", [True, False])
     @parametrize("y_cm", [True, False])
     def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device):
-        if "cuda" in device and not self._tensorwise_layout_supported(x_cm, y_cm):
+        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN.
+        # hipBLASLt takes every permutation for the tensorwise scaling used here.
+        non_tn = (x_cm, y_cm) != (True, False)
+        if "cuda" in device and not torch.version.hip and non_tn and torch.cuda.get_device_properties(0).major != 10:
             raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
