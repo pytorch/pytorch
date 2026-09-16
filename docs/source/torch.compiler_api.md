@@ -302,4 +302,140 @@ deprecation cycle.
        tag, or ``code_hash``), or if a runtime call violates the precompile contract.
 
 .. autoexception:: torch.compiler.PrecompileError
+   :members: result
+
+.. py:class:: precompile.MakeFxTracer(decompositions=None)
+
+   The ``make_fx`` capture front-end, passed as ``tracer=`` to
+   :func:`precompile.capture`. A NON-STRICT single make_fx trace: it records the ATen ops
+   of ONE execution of ``fn``, so a capture with this tracer takes exactly one call and
+   refuses a second, and control flow and shapes are specialized to that call. Frozen
+   dataclass.
+
+   :param decompositions: Optional decomposition table (``dict`` of ``OpOverload`` to a
+       decomposition function) forwarded to ``make_fx`` as its ``decomposition_table``;
+       specific to this tracer (Dynamo lowers through the backend instead). Defaults to
+       ``None``.
+
+.. py:class:: precompile.DynamoTracer(guard_filter_fn=None, recompile_limit=256, dynamic=None, invariants=None, require_complete=True, require_no_risky_drops=True, require_no_dropped_guards=False)
+
+   The ``dynamo`` capture front-end (the default), passed as ``tracer=`` to
+   :func:`precompile.capture` or :func:`precompile.accumulate`. An execution-driven
+   multi-graph capture that analyzes the Python (bytecode) rather than tracing one path: it
+   records graph-break continuations and every guarded recompilation the calls exercise, so
+   a capture with this tracer takes as many calls as you make. The dynamo driver re-evaluates
+   each variant's serialized guards, but unlike make_fx it does not otherwise re-validate the
+   runtime model/inputs, so on the eager backend a drifted model or a broadcast-compatible
+   input-shape mismatch can silently miscompute where make_fx would raise; pass a model and
+   inputs matching the captured call. The dynamo artifact inlines marshalled bytecode plus a
+   pickled state blob, so it is locked to the Python version that produced it and to a
+   compatible torch build, unlike make_fx source. Frozen dataclass.
+
+.. py:class:: precompile.Capture
+
+   The object :func:`precompile.capture` returns. Enter it as a context manager and call
+   it like ``fn`` inside the block to fold each call into the capture (see
+   :func:`precompile.capture` for the semantics); it is not constructed directly. The
+   artifact is written to the two files when the block exits. A dynamo capture also exposes
+   ``summary()``, ``invariants()`` and ``calls()``, with the same meaning as on
+   :class:`precompile.AccumulatingCapture`.
+
+.. py:class:: precompile.AccumulatingCapture
+
+   The object :func:`precompile.accumulate` returns. Call it like ``fn`` to fold one
+   call into the artifact (see :func:`precompile.accumulate` for the semantics); it is
+   not constructed directly. Also exposes:
+
+   .. py:method:: summary()
+
+      A :class:`precompile.PrecompileSummary` for everything captured so far.
+
+   .. py:method:: invariants()
+
+      A tuple of :class:`precompile.FrameInvariants`, one per captured frame -- the guards that held
+      across every captured variant of each frame.
+
+   .. py:method:: calls()
+
+      How many calls have been folded into the capture.
+
+   .. py:method:: close()
+
+      Give back the live compiled region; the two files are unaffected, and closing twice
+      is a no-op. Entering the object as a context manager closes it on exit.
+
+.. py:class:: precompile.PrecompileSummary
+
+   Coverage and guard information from a capture, returned by
+   :meth:`precompile.AccumulatingCapture.summary`. Frozen dataclass; ``str(summary)`` renders a
+   one-line digest and :attr:`complete` says whether the capture covers everything it
+   exercised.
+
+   .. py:attribute:: frames
+   .. py:attribute:: resume_functions
+   .. py:attribute:: guarded_codes
+   .. py:attribute:: backend_graphs
+
+      Counts of captured frames, graph-break continuations, guarded code objects, and
+      backend graphs.
+
+   .. py:attribute:: bypassed
+   .. py:attribute:: truncated
+   .. py:attribute:: uncovered_frames
+   .. py:attribute:: wont_generalize
+
+      Frames that fell back to eager, hit the recompile limit, were never reached, or
+      carry value-pinned guards that will not generalize.
+
+   .. py:attribute:: dropped_guards
+   .. py:attribute:: kept_guards
+   .. py:attribute:: risky_dropped_guards
+   .. py:attribute:: policy_dropped_guards
+
+      ``(guard_type, source)`` pairs for guards the artifact omitted (could not serialize),
+      kept, omitted riskily, or dropped by the invariance policy though serializable.
+
+   .. py:attribute:: dropped_guard_code
+
+      ``(guard_type, source, rendered_check)`` for each dropped slot that renders to a
+      check. The slot's ``(guard_type, source)`` alone can be ambiguous -- a dropped
+      ``HASATTR`` may be the benign companion of a kept ``TENSOR_MATCH`` or the only thing
+      guarding an optional attribute -- so the rendered check is reported alongside to tell
+      them apart.
+
+   .. py:attribute:: capture_errors
+
+      Messages from capture calls that raised.
+
+   .. py:property:: complete
+
+      Whether the capture covers everything it exercised: false if any frame produced no
+      guarded code, hit the recompile limit, was bypassed, or a capture call raised.
+
+   .. py:method:: dropped_guard_types()
+
+      Count omitted guards by guard type.
+
+   .. py:method:: kept_guard_types()
+
+      Count serialized guards by guard type.
+
+.. py:class:: precompile.FrameInvariants
+
+   Per-frame guard classification, returned by ``invariants()``. Frozen dataclass with the
+   frame's name, ``filename``, ``lineno``, the number of ``variants`` seen, and three tuples
+   of :class:`precompile.GuardFact`: ``invariant`` (held identically across every variant), ``varying``
+   (differed between variants), and ``undetermined`` (a single variant could not decide).
+
+.. py:class:: precompile.GuardFact
+
+   One guard observed while compiling a frame variant. Frozen dataclass with ``guard_type``,
+   ``source``, ``code`` (the rendered check parts), ``value``, and ``enforced`` (whether the
+   artifact still checks it). ``render()`` returns one stable, human-readable line.
+
+   .. py:method:: render()
+
+      Render the guard as one stable, human-readable line.
+
+
 ```
