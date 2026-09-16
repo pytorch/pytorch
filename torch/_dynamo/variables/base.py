@@ -40,7 +40,6 @@ from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
     raise_attribute_error,
-    raise_observed_exception,
     raise_type_error,
     unimplemented,
     Unsupported,
@@ -2375,19 +2374,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when mp_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_subscript_impl(
         self,
@@ -2825,12 +2816,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         The base implementation raises TypeError, matching CPython's behavior
         when tp_as_number->nb_index is NULL (_PyIndex_Check fails).
         """
-        raise_observed_exception(
-            TypeError,
+        raise_type_error(
             tx,
-            args=[
-                f"'{self.python_type_name()}' object cannot be interpreted as an integer"
-            ],
+            f"'{self.python_type_name()}' object cannot be interpreted as an integer",
         )
 
     def tp_repr_impl(
