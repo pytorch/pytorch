@@ -358,6 +358,7 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cutlass.cuda_template",
             "torch._inductor.codegen.cutedsl._cutedsl_utils",
             "torch._inductor.codegen.cutedsl._inline_asm",  # depends on cutlass
+            "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
             "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
@@ -422,11 +423,14 @@ class TestPublicBindings(TestCase):
             # aren't available in CPU-only CI. Registrations are no-ops when the
             # runtime is missing, so it's safe to skip them here.
             cuda_dep_prefixes = (
+                "torch._native.cutedsl.",
+                "torch._native.ops.reductions.traits",
                 "torch._native.ops.foreach_mm.",
                 "torch._native.ops.polar.",
                 "torch._native.ops.reductions.inner_tree_kernel",
                 "torch._native.ops.scatter_add.",
                 "torch._native.ops.topk.",
+                "torch._inductor.kernel.flex_gemm.quack_ops.",
                 "torch._vendor.quack",
                 "torch.profiler._cuspy.",
             )

@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import inspect
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._higher_order_ops.utils import register_fake
+from torch._C import DispatchKey
+from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch.fx.experimental.proxy_tensor import (
@@ -17,15 +19,11 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
-
-
-DispatchKey = cast(Any, torch._C).DispatchKey
 
 
 @dataclass(frozen=True)
@@ -166,6 +164,10 @@ def _register_flydsl_call_spec(
     constexpr_indices: tuple[int, ...],
     constexpr_value_signature: Callable[[Any], Any] | None,
 ) -> int:
+    if constexpr_indices and constexpr_value_signature is None:
+        raise AssertionError(
+            "FlyDSL constexpr arguments require a value-signature callback"
+        )
     constexpr_indices_set = set(constexpr_indices)
     key = tuple(
         (
@@ -173,11 +175,7 @@ def _register_flydsl_call_spec(
             (
                 (
                     "constexpr",
-                    (
-                        constexpr_value_signature(value)
-                        if constexpr_value_signature is not None
-                        else _constant_key(value)
-                    ),
+                    cast(Callable[[Any], Any], constexpr_value_signature)(value),
                 )
                 if idx in constexpr_indices_set
                 else ("type_parameter", value)
@@ -626,3 +624,7 @@ for op in (flydsl_kernel_wrapper_mutation, flydsl_kernel_wrapper_functional):
     op.fallthrough(DispatchKey.AutocastCUDA)
     op.fallthrough(DispatchKey.AutogradCPU)
     op.fallthrough(DispatchKey.AutogradCUDA)
+
+
+redirect_to_mode(flydsl_kernel_wrapper_mutation, _CachingTorchDispatchMode)
+redirect_to_mode(flydsl_kernel_wrapper_mutation, _CachedTorchDispatchMode)
