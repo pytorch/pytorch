@@ -208,6 +208,7 @@ import base64
 import dataclasses
 import functools
 import hashlib
+import inspect
 import io
 import logging
 import pickle
@@ -1478,7 +1479,6 @@ def _emit_driver_source(forward_fn_name: str) -> str:
     selected forward variant to the public ``forward``. Emitting the TEXT (rather than
     importing the module from the artifact) keeps python_code self-contained and
     version-frozen (Note [precompile programming model], invariant 7)."""
-    import inspect
 
     from torch import _precompile_driver as driver
 
@@ -1722,6 +1722,71 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"precompile.capture(step, ...), calling cap(model, x), with "
             f"'def step(model, x): return model(x)'."
         )
+
+
+def _reject_unreachable_frames(frames: list[dict[str, Any]], entry: Any) -> None:
+    """Check what a standalone artifact will actually be able to dispatch.
+
+    Dispatch here is explicit: the caller invokes the entry frame, and a
+    continuation is reached by LOAD_GLOBAL from the frame ahead of it. A frame
+    Dynamo compiled that is entered by an ordinary Python call -- an inner
+    ``nn.Module.__call__`` wrapper, an un-inlinable helper -- is reachable only
+    through the frame evaluator, which a source artifact does not use.
+
+    Such a frame runs EAGER when served. That is a coverage and performance
+    gap, not a correctness one: eager is what the graph was traced from, so the
+    answer is the same. It is therefore a warning.
+    """
+    from torch._dynamo.package import SerializedCode
+
+    reachable = _reachable_frames(frames)
+    unreachable = [
+        f for i, f in enumerate(frames) if f["variants"] and i not in reachable
+    ]
+    if unreachable:
+        # Correct but under-compiled. A frame Dynamo compiled that is entered by
+        # an ORDINARY call -- an un-inlinable helper, a separately-compiled
+        # callee -- is reached only through the frame evaluator, which a source
+        # artifact does not use. It runs eager instead, so the answer stays
+        # right and the compiled variant simply goes unused. Say so, rather than
+        # let summary() imply coverage the artifact will not deliver.
+        names = sorted(
+            SerializedCode.to_code_object(f["code"]).co_name for f in unreachable
+        )
+        log.warning(
+            "precompile: %d captured frame(s) will run EAGER when served, because a "
+            "self-contained artifact reaches only the entry frame and the "
+            "continuations its bytecode names: %s. The result stays correct; those "
+            "graphs are simply unused. Inline them into the captured callable to "
+            "get their compiled versions.",
+            len(names),
+            names,
+        )
+
+
+def _entry_binding(fn: object) -> dict[str, Any]:
+    """The default arguments an entry's code object does not carry.
+
+    The artifact rebuilds its entry from that entry's code object, which holds
+    no default arguments. Without them a defaulted parameter is simply absent at
+    the served call -- which the guard check then cannot bind, so every variant
+    misses. Closure cells are not carried: an entry that closes over free
+    variables is refused before we reach here (a rebuilt cell is a new object
+    that Dynamo's identity guard would miss), so a valid entry has none.
+    """
+    return {
+        "defaults": getattr(fn, "__defaults__", None),
+        "kwdefaults": getattr(fn, "__kwdefaults__", None),
+    }
+
+
+def _emit_multigraph_driver_source() -> str:
+    """Emit the multi-graph driver as text, the same getsource path the others use."""
+
+    from torch import _precompile_driver as driver
+
+    body = inspect.getsource(driver._build_multigraph_forward).rstrip()
+    return "\n" + body + "\n\n\nforward = _build_multigraph_forward()\n"
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
