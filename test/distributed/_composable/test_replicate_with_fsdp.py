@@ -19,7 +19,7 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard._fsdp_init import _get_managed_modules
 from torch.distributed.tensor import Replicate, Shard
 from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
+    MultiProcContinuousForInstantiateTest,
     run_subtests,
     skip_if_lt_x_gpu,
     TEST_SKIPS,
@@ -44,22 +44,10 @@ class Net(nn.Module):
         return self.fc3(self.fc2(self.fc1(x)))
 
 
-class ReplicateTest(MultiProcContinuousTest):
+class ReplicateTest(MultiProcContinuousForInstantiateTest):
     hw_classification = HardwareClassification.ACCELERATOR
 
     world_size = 4
-
-    @classmethod
-    def backend_str(cls) -> str:
-        """
-        Distributed communication backend.
-
-        Returns the default backend for the current device type.
-        """
-        device_type = cls.device_type
-        if callable(device_type):
-            device_type = device_type()
-        return dist.get_default_backend_for_device(device_type)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
