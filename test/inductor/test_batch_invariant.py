@@ -351,9 +351,7 @@ class TestBatchInvariantReductions(TestCase):
             {"triton.persistent_reductions": False, "split_reductions": True},
         )
         self._assert_bitwise_equal(loop, split)
-        cooperative = run(
-            split_value[:1], {"triton.cooperative_reductions": True}
-        )
+        cooperative = run(split_value[:1], {"triton.cooperative_reductions": True})
         self._assert_bitwise_equal(cooperative, split[:1])
 
     @dtypes(torch.float16, torch.bfloat16)
@@ -397,7 +395,9 @@ class TestBatchInvariantReductions(TestCase):
         with config.patch(BATCH_INVARIANT_CONFIG):
             for size in (batch, 7):
                 torch._dynamo.reset()
-                output = torch.compile(fn, fullgraph=True, dynamic=dynamic)(value[:size])
+                output = torch.compile(fn, fullgraph=True, dynamic=dynamic)(
+                    value[:size]
+                )
                 self.assertEqual(output, fn(value[:size]))
                 outputs.append(output)
         self._assert_bitwise_equal(tuple(x[:7] for x in outputs[0]), outputs[1])
@@ -613,9 +613,7 @@ class TestBatchInvariantReductions(TestCase):
 
     @dtypes(torch.float32, torch.bfloat16)
     @parametrize("xblock", (1, 4))
-    def test_dynamic_split_grid_preserves_chunk_boundaries(
-        self, device, dtype, xblock
-    ):
+    def test_dynamic_split_grid_preserves_chunk_boundaries(self, device, dtype, xblock):
         from torch._inductor.runtime import triton_heuristics
 
         original_configs = triton_heuristics._persistent_reduction_configs
@@ -657,9 +655,7 @@ class TestBatchInvariantReductions(TestCase):
                 self._assert_bitwise_equal(output, unsplit(value))
 
 
-instantiate_device_type_tests(
-    TestBatchInvariantReductions, globals(), only_for="cuda"
-)
+instantiate_device_type_tests(TestBatchInvariantReductions, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
