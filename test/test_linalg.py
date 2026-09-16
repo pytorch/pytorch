@@ -11742,6 +11742,7 @@ class TestGroupedMM(TestCase):
 
 instantiate_device_type_tests(TestLinalg, globals())
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestLinalgCpu, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
