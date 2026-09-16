@@ -2341,6 +2341,15 @@
   "GB0150": [
     {
       "Gb_type": "Unsupported hasattr call",
+      "Context": "generic_hasattr {obj} {name}",
+      "Explanation": "Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+      "Hints": [
+        "Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported hasattr call",
       "Context": "call_obj_hasattr {self} {name}",
       "Explanation": "Dynamo does not know how to trace the function `{self.debug_repr()}`",
       "Hints": [
