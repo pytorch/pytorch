@@ -4,6 +4,7 @@ import importlib.machinery
 import itertools
 import math
 import os
+import site
 import subprocess
 import sys
 import sysconfig
@@ -15,7 +16,7 @@ from unittest import mock
 import numpy
 
 import torch
-import torch._dynamo.precompile_package as dynamo_package_lint
+import torch._dynamo.precompile_package as precompile_package
 import torch._inductor.test_case
 import torch.nn.functional as F
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
@@ -102,43 +103,49 @@ _RISKY_DROP_CASES = {
     "cross_module_from_import": (True, GlobalSource("_user_op"), _user_op, {"user_stack": _ELSEWHERE}),
     "closure_cell": (True, LocalSource("fn"), _user_op, {}),
     "value_unreadable": (True, AttrSource(_OWN, "x"), None, {"has_value": False}),
-    "nested_resume_plumbing": (False, GetItemSource(LocalSource("__nested_frame_values"), 0), _user_op, {}),
+    "nested_resume_function": (False, GetItemSource(LocalSource("__nested_resume_fns"), 0), _user_op, {}),
+    "nested_frame_value": (True, GetItemSource(GetItemSource(LocalSource("__nested_frame_values"), 0), 1), _user_op, {}),
 }  # fmt: skip
 
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_default_guard_filter_drops_the_unserializable_types(self):
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-        identity = [_entry(GlobalSource("g"), None, guard_type=t) for t in unsupported]
+        refused = [_entry(GlobalSource("g"), None, guard_type=t) for t in unsupported]
         self.assertEqual(
-            dynamo_package_lint.default_guard_filter_fn(identity),
+            precompile_package.default_guard_filter_fn(refused),
             [False] * len(unsupported),
         )
         entries = [
             _entry(GlobalSource("g"), None, "TENSOR_MATCH"),
+            # Looser than serialize_guards, which refuses a TYPE_MATCH on a
+            # local-scope class. orig_guard._unserializable would tell, but a
+            # dropped guard ships an artifact that never checks the type; kept,
+            # the serializer refuses it loudly.
+            _entry(GlobalSource("g"), None, "TYPE_MATCH"),
             _entry(GlobalSource("g"), None, "TYPE_MATCH", derived=("NN_MODULE",)),
-            # Stricter than serialize_guards, which lets a BUILTIN_MATCH through
-            # despite its derived ID_MATCH; the drop is deliberate.
+            # Every BUILTIN_MATCH is an id_match_unchecked that records ID_MATCH
+            # as its derived type, so none survives although serialize_guards
+            # would accept them: a builtin rebound between capture and load goes
+            # unnoticed, like every other identity drop.
             _entry(GlobalSource("g"), None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
         ]
         self.assertEqual(
-            dynamo_package_lint.default_guard_filter_fn(entries), [True, False, False]
+            precompile_package.default_guard_filter_fn(entries),
+            [True, True, False, False],
         )
-        compose = dynamo_package_lint._compose_with_default
-        drop_first = compose(lambda es: [False] + [True] * (len(es) - 1))
-        self.assertEqual(drop_first(entries), [False, False, False])
-        with self.assertRaisesRegex(ValueError, "returned 1 decisions for 3 guards"):
-            compose(lambda es: [True])(entries)
 
     def test_roots_tell_the_stdlib_install_and_torch_dirs_apart(self):
-        stdlib = dynamo_package_lint._stdlib_roots()
-        install = dynamo_package_lint._install_roots()
-        torch_roots = dynamo_package_lint._torch_roots()
+        stdlib = precompile_package._stdlib_roots()
+        install = precompile_package._install_roots()
+        torch_roots = precompile_package._torch_roots()
         self.assertTrue(stdlib and install and torch_roots)
-        # purelib nests inside a stdlib root (conda) or platstdlib (venv), so
-        # the two sets must stay distinguishable for the exclusion to work.
-        self.assertEqual(set(stdlib) & set(install), set())
-        norm, within = dynamo_package_lint._norm, dynamo_package_lint._within
+        norm, within = precompile_package._norm, precompile_package._within
+        # purelib nests inside a stdlib root (conda) or platstdlib (venv), and
+        # on Windows getsitepackages() names the prefix the stdlib sits under;
+        # the exclusion only works if no stdlib root is under an install root.
+        for root in stdlib:
+            self.assertFalse(within(root, install), root)
         self.assertTrue(within(norm(os.__file__), stdlib))
         self.assertTrue(within(norm(numpy.__file__), install))
         self.assertIn(norm(os.path.dirname(torch.__file__)), torch_roots)
@@ -147,12 +154,26 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(within(os.path.join(root, "c"), (root,)))
         self.assertFalse(within(root + "c", (root,)))
 
+    def test_install_roots_drop_a_directory_the_stdlib_sits_under(self):
+        # On Windows getsitepackages() lists the bare prefix; replay that shape
+        # here so the exclusion is pinned on every platform, not just there.
+        listed = [sys.prefix, *site.getsitepackages()]
+        self.addCleanup(precompile_package._install_roots.cache_clear)
+        with mock.patch.object(site, "getsitepackages", return_value=listed):
+            precompile_package._install_roots.cache_clear()
+            install = precompile_package._install_roots()
+        norm, within = precompile_package._norm, precompile_package._within
+        self.assertNotIn(norm(sys.prefix), install)
+        for root in precompile_package._stdlib_roots():
+            self.assertFalse(within(root, install), root)
+        self.assertTrue(within(norm(numpy.__file__), install))
+
     def test_library_module_requires_the_name_to_resolve_to_the_stdlib(self):
         # The risky-drop waiver keys on the OWNER's module name, and a name is
         # not an identity: graphlib, queue, code and distutils are all stdlib
         # names a third party ships, and purelib NESTS inside stdlib (conda) or
         # platstdlib (venv), so a __file__ prefix check waived every shadow.
-        self.addCleanup(dynamo_package_lint._classify_file.cache_clear)
+        self.addCleanup(precompile_package._classify_file.cache_clear)
         stdlib_root = sysconfig.get_paths()["stdlib"]
 
         def fake(name, **attrs):
@@ -162,7 +183,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         def is_library(name, module):
             with mock.patch.dict(sys.modules, {name: module}):
-                return dynamo_package_lint._is_library_module(name)
+                return precompile_package._is_library_module(name)
 
         site_packages = os.path.join(stdlib_root, "site-packages")
         shadows = {
@@ -180,12 +201,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             "graphlib", __file__=os.path.join(vendored, "graphlib", "__init__.py")
         )
         for install_roots, expected in (
-            ((dynamo_package_lint._norm(vendored),), False),
+            ((precompile_package._norm(vendored),), False),
             ((), True),
         ):
-            dynamo_package_lint._classify_file.cache_clear()
+            precompile_package._classify_file.cache_clear()
             with mock.patch.object(
-                dynamo_package_lint, "_install_roots", return_value=install_roots
+                precompile_package, "_install_roots", return_value=install_roots
             ):
                 self.assertEqual(
                     is_library("graphlib", nested), expected, install_roots
@@ -195,17 +216,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             "collections.abc", __file__=os.path.join(site_packages, "abc.py")
         )
         self.assertFalse(is_library("collections.abc", shadowed_sub))
-        self.assertFalse(dynamo_package_lint._is_library_module("not_a_stdlib_name"))
-        self.assertFalse(dynamo_package_lint._is_library_module(None))
+        self.assertFalse(precompile_package._is_library_module("not_a_stdlib_name"))
+        self.assertFalse(precompile_package._is_library_module(None))
 
     @parametrize("name", _LIBRARY_NAMES)
     def test_library_module_keeps_the_waiver_for_the_real_library(self, name):
         self.assertTrue(
-            dynamo_package_lint._is_library_module(name), f"{name} lost its waiver"
+            precompile_package._is_library_module(name), f"{name} lost its waiver"
         )
 
-    def test_unrepointable_binding_predicates(self):
-        reads_a_builtin = dynamo_package_lint._reads_a_builtin
+    def test_reads_a_builtin_keys_on_where_the_read_comes_from(self):
+        reads_a_builtin = precompile_package._reads_a_builtin
         self.assertTrue(reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, "len"), len))
         # A builtin parked in a slot, a user table keyed by a builtin's name and
         # user code injected into builtins are all reads from a slot.
@@ -217,44 +238,61 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, "op"), _user_op)
         )
 
-        synthesized = dynamo_package_lint._is_dynamo_synthesized
-        self.assertTrue(
+    def test_dynamo_synthesized_covers_only_the_resume_function_list(self):
+        synthesized = precompile_package._is_dynamo_synthesized
+        resume_fns = LocalSource("__nested_resume_fns")
+        self.assertTrue(synthesized(resume_fns))
+        self.assertTrue(synthesized(GetItemSource(resume_fns, 0)))
+        # The frame values are the enclosing frames' live locals, so a guard
+        # rooted there is judged like the local it stands for.
+        self.assertFalse(
             synthesized(GetItemSource(LocalSource("__nested_frame_values"), 0))
         )
-        self.assertTrue(synthesized(LocalSource("__nested_resume_fns")))
         # A global spelled like one is a user binding.
-        self.assertFalse(synthesized(GlobalSource("__nested_frame_values")))
+        self.assertFalse(synthesized(GlobalSource("__nested_resume_fns")))
         self.assertFalse(synthesized(LocalSource("x")))
 
-        alias_module = dynamo_package_lint._dynamo_alias_module
+    def test_alias_module_and_owning_module(self):
+        alias_module = precompile_package._dynamo_alias_module
         self.assertIs(alias_module("__import_torch_dot_nn_dot_functional"), F)
         self.assertIsNone(alias_module("F"))
-        owning_module = dynamo_package_lint._owning_module
+        owning_module = precompile_package._owning_module
         self.assertEqual(owning_module(F), "torch.nn.functional")
         self.assertEqual(owning_module(F.gelu), "torch._C._nn")
         self.assertIsNone(owning_module(3))
 
-        defined_where_read = dynamo_package_lint._defined_where_read
-        self.assertTrue(defined_where_read(_user_op, _HERE))
+    def test_defined_where_read_needs_the_name_and_the_file(self):
+        defined_where_read = precompile_package._defined_where_read
+        self.assertTrue(defined_where_read(_user_op, "_user_op", _HERE))
         # Paths are compared normalized, so another spelling of the file matches.
         unnormalized = os.path.join(
             os.path.dirname(__file__), os.curdir, os.path.basename(__file__)
         )
         stack = traceback.StackSummary.from_list([(unnormalized, 1, "forward", "")])
-        self.assertTrue(defined_where_read(_user_op, stack))
-        self.assertFalse(defined_where_read(_user_op, _ELSEWHERE))
-        self.assertFalse(defined_where_read(_user_op, None))
-        self.assertFalse(defined_where_read(F.silu, _HERE))
+        self.assertTrue(defined_where_read(_user_op, "_user_op", stack))
+        # A same-file def bound under another name is a slot, however near.
+        self.assertFalse(defined_where_read(_user_op, "act", _HERE))
+        self.assertFalse(defined_where_read(_user_op, "_user_op", _ELSEWHERE))
+        self.assertFalse(defined_where_read(_user_op, "_user_op", None))
+        self.assertFalse(defined_where_read(F.silu, "silu", _HERE))
+        self.assertFalse(defined_where_read(3, "3", _HERE))
 
     def test_minted_global_names_match_dynamo(self):
         # The predicates restate names Dynamo mints inline, in
-        # install_builtins_dict_in_fglobals and import_source; a rename there
-        # must fail here rather than silently turn the lint off.
+        # install_builtins_dict_in_fglobals, import_source and the nested
+        # resume prologue; a rename there must fail here rather than silently
+        # turn the lint off.
         seen = []
 
         def record(entries):
             seen.extend(entries)
             return [True] * len(entries)
+
+        def roots():
+            return {
+                precompile_package._source_root(e.orig_guard.originating_source)
+                for e in seen
+            }
 
         lin = torch.nn.Linear(2, 2)
 
@@ -265,23 +303,43 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             fn, backend="eager", options={"guard_filter_fn": record}
         )
         compiled(torch.ones(2))
-        reads_a_builtin = dynamo_package_lint._reads_a_builtin
+        reads_a_builtin = precompile_package._reads_a_builtin
         self.assertTrue(
             any(reads_a_builtin(e.orig_guard.originating_source, e.value) for e in seen)
         )
-        roots = {
-            dynamo_package_lint._source_root(e.orig_guard.originating_source)
-            for e in seen
-        }
         aliases = {
             r.global_name
-            for r in roots
+            for r in roots()
             if isinstance(r, GlobalSource) and r.global_name.startswith("__import_")
         }
         alias = "__import_torch_dot_nn_dot_modules_dot_linear"
         self.assertIn(alias, aliases)
         self.assertIs(
-            dynamo_package_lint._dynamo_alias_module(alias), torch.nn.modules.linear
+            precompile_package._dynamo_alias_module(alias), torch.nn.modules.linear
+        )
+
+        def callee(y):
+            torch._dynamo.graph_break()
+            return y + 1
+
+        def nested(x):
+            z = x * 2
+            return callee(z) + z
+
+        seen.clear()
+        with torch._dynamo.config.patch(nested_graph_breaks=True):
+            compiled = torch.compile(
+                nested, backend="eager", options={"guard_filter_fn": record}
+            )
+            compiled(torch.ones(2))
+        synthesized = {
+            r.local_name: precompile_package._is_dynamo_synthesized(r)
+            for r in roots()
+            if isinstance(r, LocalSource) and r.local_name.startswith("__nested")
+        }
+        self.assertEqual(
+            synthesized,
+            {"__nested_resume_fns": True, "__nested_frame_values": False},
         )
 
     def test_module_namespaces_trust_only_bindings_config_cannot_repoint(self):
@@ -301,7 +359,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             _entry(GlobalSource("config"), torch._dynamo.config),
         ]  # fmt: skip
         with mock.patch.dict(sys.modules, {"mypkg.layers": layers}):
-            namespaces = dynamo_package_lint._module_namespaces(entries)
+            namespaces = precompile_package._module_namespaces(entries)
         self.assertEqual(
             set(namespaces),
             {
@@ -328,8 +386,57 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             (GlobalSource("config"), torch._dynamo.config),
         ]
         entries = [_entry(s, m) for s, m in modules] + [entry]
-        namespaces = dynamo_package_lint._module_namespaces(entries)
-        self.assertEqual(dynamo_package_lint._is_risky_drop(entry, namespaces), risky)
+        namespaces = precompile_package._module_namespaces(entries)
+        self.assertEqual(precompile_package._is_risky_drop(entry, namespaces), risky)
+
+    def test_risky_drop_sees_the_slot_behind_a_nested_resume(self):
+        # With nested_graph_breaks the callee's locals reach its resume frame
+        # as L['__nested_frame_values'][0][k] rather than as L['act']; a slot
+        # filled by a call config could repoint must be flagged either way,
+        # and the def read inside pick() waived either way.
+        def pick():
+            return _user_op
+
+        def flat(x):
+            act = pick()
+            torch._dynamo.graph_break()
+            return act(x * 2)
+
+        def callee(y):
+            act = pick()
+            torch._dynamo.graph_break()
+            return act(y)
+
+        def nested(x):
+            z = x * 2
+            return callee(z) + z
+
+        for fn, nested_graph_breaks, root in (
+            (flat, False, "L['act']"),
+            (nested, True, "L['__nested_frame_values']["),
+        ):
+            seen = []
+
+            def record(entries):
+                seen.extend(entries)
+                return [True] * len(entries)
+
+            with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+                compiled = torch.compile(
+                    fn, backend="eager", options={"guard_filter_fn": record}
+                )
+                compiled(torch.ones(2))
+            namespaces = precompile_package._module_namespaces(seen)
+            is_risky = precompile_package._is_risky_drop
+            verdicts = {
+                e.orig_guard.originating_source.name: is_risky(e, namespaces)
+                for e in seen
+                if e.value is _user_op
+            }
+            risky = [name for name, flagged in verdicts.items() if flagged]
+            self.assertEqual(verdicts["G['_user_op']"], False, verdicts)
+            self.assertEqual(len(risky), 1, verdicts)
+            self.assertTrue(risky[0].startswith(root), verdicts)
 
     def test_guard_policy_classification_is_total(self):
         # A guard type in no set is KEPT, so a drop policy can only ever
@@ -494,7 +601,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_value_fingerprint_dispatches_on_the_guard_type(self):
         from torch.compiler._precompile_types import GuardFact
 
-        fingerprint = dynamo_package_lint._value_fingerprint
+        fingerprint = precompile_package._value_fingerprint
         src = LocalSource("x")
         x = torch.zeros(2, 3)
         with torch.inference_mode():
@@ -511,7 +618,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(fingerprint(_entry(LocalSource("n"), 1, "TYPE_MATCH")), "")
         self.assertEqual(
             fingerprint(_entry(_OWN, _user_op, "ID_MATCH")),
-            dynamo_package_lint._object_identity(_user_op),
+            precompile_package._object_identity(_user_op),
         )
         grad_mode = _entry(src, None, "GRAD_MODE", has_value=False)
         with torch.no_grad():
@@ -527,12 +634,21 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(unrenderable, "type=Opaque, <unrenderable>")
         # Once the boilerplate parts are filtered a TENSOR_MATCH renders no code,
         # so the value is what keeps two shape specializations in a fixed order.
-        facts = [GuardFact("TENSOR_MATCH", "L['x']", (), v, True) for v in rendered]
-        ordered = sorted(facts, key=dynamo_package_lint._fact_order)
+        facts = [
+            GuardFact(
+                guard_type="TENSOR_MATCH",
+                source="L['x']",
+                code=(),
+                value=v,
+                enforced=True,
+            )
+            for v in rendered
+        ]
+        ordered = sorted(facts, key=precompile_package._fact_order)
         self.assertEqual([f.value for f in ordered], sorted(rendered))
 
     def test_saved_hooks_fingerprint_mirrors_what_the_guard_stores(self):
-        fingerprint = dynamo_package_lint._saved_hooks_fingerprint
+        fingerprint = precompile_package._saved_hooks_fingerprint
         self.assertEqual(fingerprint(), "hooks=None")
         # The guard stores None for hooks it cannot inline, so plain-Python
         # hooks are one value to it and must be one value here.
@@ -548,7 +664,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             rendered = fingerprint()
         # Named by rendered graph, never by address: two GraphModules with one
         # code read the same here although the guard compares their ids.
-        digest = dynamo_package_lint._hash_text(pack.code)
+        digest = precompile_package._hash_text(pack.code)
         self.assertEqual(rendered, f"hooks=({digest}, {digest})")
 
 
