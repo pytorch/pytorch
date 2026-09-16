@@ -212,10 +212,8 @@ import io
 import logging
 import pickle
 import types
-from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
-from typing_extensions import Self
 
 import torch
 import torch.utils._pytree as pytree
@@ -231,6 +229,7 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import os
     from collections.abc import Callable, Mapping
+    from typing_extensions import Self
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -283,14 +282,7 @@ class PrecompileError(RuntimeError):
     effectful op, a non-tensor output the inductor backend cannot lower, or a runtime
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
-
-    ``result`` carries what the call that raised returned, when it ran before the
-    refusal -- for ``precompile(...)`` the list of example results; ``None`` otherwise.
     """
-
-    # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
-    # resolve it there.
-    __module__ = "torch.compiler"
 
     #: What the call that raised this returned, when it ran before the refusal:
     #: an accumulating capture's step has already executed by the time its
@@ -300,8 +292,7 @@ class PrecompileError(RuntimeError):
 
 @dataclasses.dataclass(frozen=True)
 class MakeFxTracer:
-    """The ``make_fx`` capture front-end, passed as ``tracer=`` to
-    :func:`torch.compiler.precompile.capture`.
+    """The ``make_fx`` capture front-end, passed as ``tracer=`` to a precompile capture.
 
     A NON-STRICT single make_fx trace: it records the ATen ops of ONE execution of
     ``fn``, so a ``capture`` with this tracer takes exactly one call and refuses a
@@ -319,17 +310,15 @@ class MakeFxTracer:
 
 
 class PrecompiledRunnable:
-    """What :func:`torch.compiler.precompile.load` returns.
+    """What ``torch.compiler.precompile.load`` returns.
 
     A callable with the captured ``fn``'s calling convention that can also be
     entered as a context manager and unloaded. A standalone artifact installs
     nothing, so for it ``__enter__``/``__exit__``/:meth:`unload` are no-ops;
-    :class:`PrecompiledCallable` is the shape that installs. ``installed`` tells
-    them apart. Part of the prototype ``torch.compiler.precompile`` API, so it
-    may change without a deprecation cycle.
+    ``installed`` is ``True`` on the shape that installs onto the captured code
+    objects. Part of the prototype ``torch.compiler.precompile`` API, so it may
+    change without a deprecation cycle.
     """
-
-    __module__ = "torch.compiler"
 
     installed: bool = False
     """Whether calling this handle installs onto the captured code objects."""
@@ -348,18 +337,15 @@ class PrecompiledRunnable:
 
 
 class Capture:
-    r"""The caller-driven capture :func:`torch.compiler.precompile.capture` returns.
+    r"""The caller-driven capture ``torch.compiler.precompile.capture`` returns.
 
     Part of the prototype ``torch.compiler.precompile`` API, so it may change
     without a deprecation cycle. Enter it as a context manager to arm the
     capture, call it exactly as you would ``fn`` inside the block -- each call
     runs for real, folds what it exercised into the capture, and returns what
-    ``fn`` returned -- and the artifact is written to the ``artifact_path`` /
-    ``cache_path`` files when the block exits. It is the render-once counterpart
-    of :class:`AccumulatingCapture`, which rewrites the same files on every call.
+    ``fn`` returned -- and the artifact is written once, to the ``artifact_path``
+    / ``cache_path`` files, when the block exits.
     """
-
-    __module__ = "torch.compiler.precompile"
 
     def __enter__(self) -> Self:
         raise NotImplementedError
@@ -377,7 +363,7 @@ class _MakeFxCapture(Capture):
     A make_fx trace records the ATen ops of ONE execution of ``fn``, so this
     captures exactly one call and refuses a second -- there is no notion of
     guards or recompiled variants here, and thus nothing a further call could
-    add. Pass ``tracer=DynamoTracer()`` to capture several calls with the graph
+    add. The Dynamo front-end is what captures several calls, with the graph
     breaks and recompilations between them.
     """
 
@@ -531,7 +517,7 @@ def _reject_unsupported_marks(user_flat: list[object]) -> None:
 
 
 def _unbacked_guard_error(e: BaseException) -> PrecompileError:
-    """The shared capture-time error for a guard on a mark_unbacked dim (both tracers).
+    """The capture-time error for a guard on a mark_unbacked dim, shared by the capture paths.
 
     A mark_unbacked dim is captured as an unbacked symint (no hint), so a computation that
     needs to guard on / specialize its size (a shape-dependent branch, a reshape that pins
@@ -1013,17 +999,7 @@ def _capture(
                     tracing_mode=tracing_mode,
                 )(flat_args)
             except GuardOnDataDependentSymNode as e:
-                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
-                # the computation needs to guard on / specialize its size (e.g. a
-                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
-                # be guarded, so rather than bake a silently-wrong artifact, fail here.
-                raise PrecompileError(
-                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
-                    "(it branches on or specializes that size), which is not allowed for "
-                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
-                    "or restructure fn to avoid the size-dependent operation. Underlying: "
-                    f"{str(e).splitlines()[0]}"
-                ) from e
+                raise _unbacked_guard_error(e) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -1205,19 +1181,17 @@ def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -
     # driver validates against it when present, else skips the structure check).
     buf.writeline(f"IN_SPEC = {in_spec_str!r}")
     buf.writeline(f"OUT_SPEC = {out_spec_str!r}")
+    # Every autocast-capable device type the captured graph dispatches on, read
+    # off the GRAPH rather than the runtime tensors (see _graph_device_types);
+    # the drivers neutralize ambient autocast on these. Artifacts written before
+    # this field carry their own, older driver, which never reads it.
+    if compiled._gm is None:
+        raise PrecompileError("internal: cannot build metadata before _compile()")
+    buf.writeline(f"GRAPH_DEVICES = {_graph_device_types(compiled._gm)!r}")
     # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
     # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
     # Memory-format mismatches are caught by the inductor artifact's own
     # assert_size_stride (pinned on at capture).
-    # Every device type the captured graph dispatches on, from the GRAPH
-    # rather than from the runtime tensors: the drivers neutralize ambient
-    # autocast on these, and a graph can reach a device none of its inputs
-    # live on (an explicit .to("cuda") inside fn) or have no tensor inputs
-    # at all. Artifacts written before this field carry their own, older
-    # driver, which never reads it.
-    buf.writeline(
-        f"GRAPH_DEVICES = {_graph_device_types(compiled._gm) if compiled._gm is not None else ()!r}"
-    )
     buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
     buf.writeline(f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}")
     buf.writeline(f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}")
@@ -1226,24 +1200,6 @@ def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -
     # runtime size outside the declared range (invariant 3); see the inlined drivers.
     buf.writeline(f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}")
     buf.writeline("")
-
-
-def _read_literal(tree: object, name: str) -> object:
-    """One top-level ``NAME = <literal>`` out of a parsed artifact, else None."""
-    import ast
-
-    for node in cast("ast.Module", tree).body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id == name
-        ):
-            try:
-                return ast.literal_eval(node.value)
-            except (ValueError, SyntaxError):
-                return None
-    return None
 
 
 def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
@@ -1257,8 +1213,10 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
 
     The required constant set is tracer-dependent: the make_fx tracer emits the full
     calling-convention set the inlined driver reads (PARAM_NAMES, OUT_SPEC, ...), while
-    the dynamo tracer's driver reads its own (BACKEND_ID, IMPORT_SOURCES) and rehydrates
-    the rest from opaque blobs. TRACER is absent on artifacts predating the dynamo tracer,
+    the dynamo tracer's multi-graph driver rehydrates its frames from opaque blobs
+    (_FRAMES and _BACKENDS, or _PACKAGE once installed) and reads only the entry
+    binding and the readable frame report beside them (FN_NAME, FRAMES, the dropped
+    and risky guard lists). TRACER is absent on artifacts predating the dynamo tracer,
     so its absence means make_fx.
     """
     import ast
@@ -1270,14 +1228,35 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "python_code is not valid Python; it does not look like a "
             "torch.compiler.precompile artifact."
         ) from e
+    # The last top-level assignment to a name wins, as it would under exec, so the
+    # set selection below and the reported values read the same assignment.
+    assigns: dict[str, ast.expr] = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            assigns[node.targets[0].id] = node.value
+
+    def literal(name: str) -> object:
+        try:
+            return ast.literal_eval(assigns[name])
+        except (ValueError, SyntaxError) as e:
+            raise PrecompileError(
+                f"python_code {name!r} calling-convention metadata is malformed; "
+                "it must be a Python literal."
+            ) from e
+
     # The make_fx and dynamo drivers read different calling-convention literals,
     # so TRACER picks the required set. It is absent on artifacts predating the
     # dynamo tracer, which are all make_fx.
-    if _read_literal(tree, "TRACER") == "dynamo":
+    tracer = literal("TRACER") if "TRACER" in assigns else None
+    if tracer == "dynamo":
         # The multi-graph driver rehydrates every frame from _FRAMES and the
         # subgraphs from _BACKENDS; the readable literals beside them describe
-        # what is in those blobs and are validated so a truncated artifact fails
-        # here rather than deep inside the driver.
+        # what is in those blobs and are presence-checked so a truncated
+        # artifact fails here rather than deep inside the driver.
         wanted = {
             "BACKEND",
             "TRACER",
@@ -1289,14 +1268,16 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "_FRAMES",
             "_BACKENDS",
             "_DYNAMO_PYTHON_VERSION",
+            "_ENTRY_BINDING",
+            "TORCH_VERSION",
         }
         # An installed artifact carries the whole package in one blob instead of
         # the per-frame records, so it reads a different set. SERVING_MODE is
         # absent on artifacts predating it, which were all standalone.
-        if _read_literal(tree, "SERVING_MODE") == "installed":
+        mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
+        if mode == "installed":
             wanted -= {"_FRAMES", "_BACKENDS"}
             wanted |= {"SERVING_MODE", "_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
-        wanted |= {"_ENTRY_BINDING"}
     else:
         wanted = {
             "BACKEND",
@@ -1318,48 +1299,36 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "USER_INPUT_DEVICES",
             "USER_INPUT_BOUNDS",
         }
-    found: dict[str, object] = {}
-    # Parsed when present, never required: the guard-audit sections are
-    # reporting, and artifacts predating them load unchanged. An auditor
-    # reading a shipped artifact wants them back as data rather than by
-    # grepping the source.
-    optional = {"POLICY_DROPPED_GUARDS", "DROPPED_GUARD_CODE"}
-    for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        if target.id in wanted or target.id in optional:
-            try:
-                found[target.id] = ast.literal_eval(node.value)
-            except (ValueError, SyntaxError) as e:
-                raise PrecompileError(
-                    f"python_code {target.id!r} calling-convention metadata is "
-                    f"malformed; it must be a Python literal."
-                ) from e
-        else:
-            # Not a metadata name we consume (the driver section emits only
-            # function defs today, but a future artifact revision could add a
-            # driver-internal top-level assignment). Skipped by design, but log
-            # it at debug so a malformed / renamed artifact is diagnosable
-            # rather than silently dropped.
-            log.debug(
-                "precompile: ignoring unrecognized top-level assignment %r while "
-                "parsing artifact calling-convention metadata",
-                target.id,
-            )
+    # Parsed when present, never required, so artifacts predating each load
+    # unchanged: the serving mode and graph devices are read by the driver, and
+    # the guard-audit sections are reporting an auditor wants back as data
+    # rather than by grepping the source.
+    optional = {
+        "SERVING_MODE",
+        "GRAPH_DEVICES",
+        "POLICY_DROPPED_GUARDS",
+        "DROPPED_GUARD_CODE",
+    }
+    found = {name: literal(name) for name in assigns if name in wanted | optional}
+    for name in assigns.keys() - wanted - optional - {"forward"}:
+        # Not a metadata name we consume (``forward = ...`` is the multi-graph
+        # driver's own binding). Skipped by design, but log it at debug so a
+        # malformed / renamed artifact is diagnosable rather than silently
+        # dropped.
+        log.debug(
+            "precompile: ignoring unrecognized top-level assignment %r while "
+            "parsing artifact calling-convention metadata",
+            name,
+        )
     missing = wanted - found.keys()
     if missing:
         raise PrecompileError(
             f"python_code is missing calling-convention metadata {sorted(missing)}; "
             "it does not look like a torch.compiler.precompile artifact."
         )
-    # Reported but not required: artifacts predating the installed serving mode
-    # carry no SERVING_MODE, and they were all standalone.
-    found.setdefault(
-        "SERVING_MODE", _read_literal(tree, "SERVING_MODE") or "standalone"
-    )
+    # Artifacts predating the installed serving mode carry no SERVING_MODE, and
+    # they were all standalone.
+    found.setdefault("SERVING_MODE", "standalone")
     return found
 
 
@@ -1526,8 +1495,7 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 """
 
 
-# What the artifact does to the process, which differs by serving mode and was
-# previously described only for the standalone one -- in a banner emitted on both.
+# What the artifact does to the process, which differs by serving mode.
 _SERVING_NOTES = {
     "standalone": """\
 # Nothing is installed onto your code objects and no frame evaluator is involved, so
@@ -1557,39 +1525,32 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     which the caller invokes, and a continuation, which the frame ahead of it
     reaches by LOAD_GLOBAL on the name capture minted. Anything else Dynamo
     compiled is entered by an ordinary Python call that only the frame evaluator
-    intercepts, so it has no place in a source artifact -- see
-    _reject_unreachable_frames.
-    """
-    from torch._dynamo.package import SerializedCode
+    intercepts, so it has no place in a source artifact.
 
-    entry_name = str(entry.fn_name).rsplit(".", 1)[-1]
-    frames = []
-    seen_entry = False
-    for code in entry.codes:
-        if code.bypassed:
-            continue
-        name = SerializedCode.to_code_object(code.python_code).co_name
-        is_entry = not code.install_to_global and name == entry_name and not seen_entry
-        seen_entry = seen_entry or is_entry
-        frames.append(
-            {
-                "is_entry": is_entry,
-                "code": code.python_code,
-                "python_module": code.python_module,
-                "import_sources": dict(code.import_sources),
-                "resume_names": (
-                    list(code.function_names) if code.install_to_global else []
-                ),
-                "variants": [
-                    {
-                        "guards_state": guarded.guards_state,
-                        "dynamo_code": guarded.dynamo_code,
-                    }
-                    for guarded in code.guarded_codes
-                ],
-            }
-        )
-    return frames
+    The entry is ``codes[0]``: CompilePackage records the captured callable's
+    code first and reads it back by position (``main, *codes``). A bypassed code
+    keeps its record, flagged and without variants, the way install() keeps its
+    global binding but none of its guarded codes: a continuation the frame ahead
+    of it names must stay bound, and a bypassed code's guarded codes are dead.
+    """
+    return [
+        {
+            "is_entry": i == 0,
+            "bypassed": code.bypassed,
+            "code": code.python_code,
+            "python_module": code.python_module,
+            "import_sources": dict(code.import_sources),
+            "resume_names": list(code.function_names) if code.install_to_global else [],
+            "variants": [
+                {
+                    "guards_state": guarded.guards_state,
+                    "dynamo_code": guarded.dynamo_code,
+                }
+                for guarded in ([] if code.bypassed else code.guarded_codes)
+            ],
+        }
+        for i, code in enumerate(entry.codes)
+    ]
 
 
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
@@ -1604,93 +1565,76 @@ def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
     from torch._dynamo.package import SerializedCode
 
     def named_globals(frame: dict[str, Any]) -> set[str]:
+        # co_names of every variant's bytecode, nested code objects included.
+        # co_consts is acyclic (a code object cannot contain itself).
         out: set[str] = set()
         stack = [
             SerializedCode.to_code_object(variant["dynamo_code"])
             for variant in frame["variants"]
         ]
-        seen: set[int] = set()
         while stack:
             code = stack.pop()
-            if id(code) in seen:
-                continue
-            seen.add(id(code))
             out.update(code.co_names)
             stack.extend(c for c in code.co_consts if isinstance(c, types.CodeType))
         return out
 
     reachable = {i for i, frame in enumerate(frames) if frame["is_entry"]}
-    while True:
-        named: set[str] = set()
-        for i in reachable:
-            named |= named_globals(frames[i])
+    named: set[str] = set()
+    pending = list(reachable)
+    while pending:
+        named |= named_globals(frames[pending.pop()])
         grew = {
             i
             for i, frame in enumerate(frames)
             if i not in reachable and any(n in named for n in frame["resume_names"])
         }
-        if not grew:
-            return reachable
         reachable |= grew
+        pending.extend(grew)
+    return reachable
 
 
 def _serving_mode(frames: list[dict[str, Any]]) -> str:
-    """``"standalone"`` when a source artifact covers every captured frame.
+    """``"standalone"`` when a source artifact serves every captured frame.
 
-    Anything it cannot reach would run eager, silently giving up the compiled
-    variant, so those captures are served by installing instead.
+    A frame it cannot reach would run eager, silently giving up the compiled
+    variant; a frame it reaches but has no variant of (a bypassed continuation)
+    would raise on the very path capture exercised. Either way the capture is
+    served by installing instead, which has a compiler behind it.
     """
     reachable = _reachable_frames(frames)
-    unreachable = [
-        i for i, frame in enumerate(frames) if frame["variants"] and i not in reachable
-    ]
-    return "installed" if unreachable else "standalone"
+    covered = {i for i, frame in enumerate(frames) if frame["variants"]}
+    return "standalone" if covered == reachable else "installed"
 
 
 def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
-    """Refuse a capture whose entry an installed artifact could not rebuild.
+    """Refuse a capture whose entry the artifact could not rebuild or serve.
 
-    The installed driver rebuilds the entry from its code object, and
-    ``types.FunctionType`` cannot supply a closure or defaults it was not given:
-    a closure entry fails to build at all, and a defaulted argument silently
-    goes missing on the first served call. Both are capture-time facts, so they
-    are refused here rather than at load on the serving machine.
+    The multi-graph driver rebuilds the entry from its code object, which
+    carries no closure, so a closure entry cannot be built at all. That is a
+    capture-time fact and is refused here rather than at load on the serving
+    machine. (Defaults, which the code object does not carry either, are
+    recorded into the artifact rather than refused.) An entry with no
+    dispatchable variant is refused too, naming which of its two causes applies.
     """
     from torch._dynamo.package import SerializedCode
 
-    entry_frames = [f for f in frames if f["is_entry"]]
-    if not entry_frames or not any(f["variants"] for f in entry_frames):
-        # A missing or variant-less entry frame has very different causes, and
-        # guessing the wrong one sends the caller restructuring code that was
-        # never the problem. If Dynamo BYPASSED the entry frame, it recorded
-        # why -- and _multigraph_frames DROPS bypassed codes entirely, so the
-        # bypassed-entry case arrives here as "no entry frame at all", not as
-        # an entry with no variants. Say the recorded reason, because the
-        # thin-wrapper advice below is then simply wrong. Only the ENTRY's own
-        # bypassed codes count (matched by the same heuristic that picks entry
-        # frames): an unrelated bypassed helper frame must not relabel a
-        # thin-wrapper entry as a bypass.
-        entry_name = str(entry.fn_name).rsplit(".", 1)[-1]
-        bypassed = [
-            code
-            for code in entry.codes
-            if code.bypassed
-            and code.bypass_reason
-            and not code.install_to_global
-            and SerializedCode.to_code_object(code.python_code).co_name == entry_name
-        ]
-        if bypassed:
-            reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
-            raise PrecompileError(
-                f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
-                f"{len(bypassed)} entry frame(s) were BYPASSED during capture, so "
-                f"their guards were never written. Reason: {reasons}. Fix that "
-                f"rather than restructuring the captured callable."
-            )
-        if not entry_frames:
-            # Not bypassed and not compiled at all: nothing here can say why,
-            # and both diagnostics below would be guesses.
-            return
+    entry_frame = next((f for f in frames if f["is_entry"]), None)
+    if entry_frame is None:
+        return
+    if entry_frame["bypassed"]:
+        # Dynamo logged why when it bypassed the frame; the thin-wrapper advice
+        # below would send the caller restructuring code that was never the
+        # problem.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}: the "
+            f"entry frame was BYPASSED during capture (its guards could not be "
+            f"serialized, or a backend artifact was missing when the package was "
+            f"saved), so no variant of it can be served. Dynamo logged the reason: "
+            f"look for the package-bypass warning, or the precompile_cache_bypass / "
+            f"dynamo_cache_bypass artifacts under tlparse. Fix that rather than "
+            f"restructuring the captured callable."
+        )
+    if not entry_frame["variants"]:
         # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
         # frame (external_utils.wrap_inline's `inner`) rather than the module:
         # every graph lands there, closing over the module, and the entry frame
@@ -1706,7 +1650,7 @@ def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> Non
             f"CALLS the model, e.g. "
             f"precompile.capture(lambda m, x: m(x), ...) and calling cap(model, x)."
         )
-    code = SerializedCode.to_code_object(entry_frames[0]["code"])
+    code = SerializedCode.to_code_object(entry_frame["code"])
     if code.co_freevars:
         raise PrecompileError(
             f"precompile cannot build a self-contained artifact for {entry.fn_name!r}: "
@@ -1764,9 +1708,10 @@ class PrecompiledModule(PrecompiledRunnable):
         tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> None:
-        # ``fn`` is the whole computation: an nn.Module, or a callable that closes
-        # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
-        # step that computes a loss and torch.autograd.grad).
+        # ``fn`` is the whole computation: an nn.Module, or a callable that takes the
+        # module(s) it uses as positional arguments (e.g. ``lambda m, x: m(x)``, or a
+        # training step that computes a loss and torch.autograd.grad); a module it
+        # closed over instead would be baked in as constants (invariant 1).
         self._fn = fn
         self._backend = backend
         self._tracer = tracer
@@ -2022,7 +1967,8 @@ def _make_inlined_forward(
     was just produced in-process and so is not untrusted input."""
     # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
     # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
-    # warning_once) before the exec so the inlined fallback is never silent about it.
+    # warning_once) before the exec so a load is never silent about it; only the
+    # capture-time self-load of source this process just rendered passes warn=False.
     if warn:
         log.warning(
             "torch.compiler.precompile.load is about to EXEC python_code, which is "
