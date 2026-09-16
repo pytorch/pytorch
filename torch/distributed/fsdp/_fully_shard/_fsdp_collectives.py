@@ -495,13 +495,16 @@ def foreach_all_gather_copy_out(
         # Chunk-cat from the temporary to the final all-gather output tensors
         shard_dim = fsdp_param.fsdp_placement.dim
 
-        for param_all_gather_output, tensor in zip(
-            param_all_gather_outputs, fsdp_param.all_gather_outputs
+        non_inference_outs = [
+            t for t in fsdp_param.all_gather_outputs if not t.is_inference()
+        ]
+        with (
+            torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs))
+            if non_inference_outs
+            else contextlib.nullcontext()
         ):
-            with (
-                torch.autograd._unsafe_preserve_version_counter(tensor)
-                if not tensor.is_inference()
-                else contextlib.nullcontext()
+            for param_all_gather_output, target_all_gather_output in zip(
+                param_all_gather_outputs, fsdp_param.all_gather_outputs
             ):
                 padded_sharded_size = (
                     fsdp_param.padded_sharded_param_size
@@ -517,7 +520,7 @@ def foreach_all_gather_copy_out(
                 )
                 post_param_size = list(padded_sharded_size)
                 post_param_size[shard_dim] *= world_size
-                cat_out = tensor.view(post_param_size)
+                cat_out = target_all_gather_output.view(post_param_size)
                 torch.cat(chunks, dim=shard_dim, out=cat_out)
 
 
