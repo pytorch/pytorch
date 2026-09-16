@@ -11,11 +11,26 @@ Both are silent — the first 403s only on a private repo, the second only under
 These are text assertions, deliberately: PyYAML is not available to the runner
 and pulling it in to lint two files is a worse trade than a narrow parser.
 
+WHAT THESE TESTS DEFEND AGAINST, because it bounds how far the readers below
+have to go. Both files under contract live ONLY on the default branch — a pull
+request cannot edit them, and the one file a PR does control, Stage 1, is
+authenticated by the `github.event.workflow.path` pin these tests check. So the
+adversary here is a MAINTAINER'S ACCIDENT: a plausible edit or reformat that
+quietly removes a control. It is not someone hand-crafting YAML to fool a text
+reader, and hardening against that was tried — each round of it produced
+another legal spelling and no convergence. The readers therefore aim to be
+right on the spellings a maintainer writes, and to FAIL CLOSED with a message
+naming the reader on ones they do not model. Where that trade is live it is
+written down at the reader, and `TestTheReadersPremisesStillHold` pins the
+spellings at one place so a reformat is a loud named failure rather than a
+quiet mis-read.
+
 Run: python3 -m unittest discover -s scripts/pr_review -t .
 """
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import posixpath
@@ -67,6 +82,207 @@ def job_block(text: str, name: str) -> str:
         if re.match(r"^  [A-Za-z_][\w-]*:\s*$", lines[j]):
             return "\n".join(lines[start:j])
     return "\n".join(lines[start:])
+
+
+def _key_re(key: str) -> re.Pattern:
+    """Match `key:` however YAML lets it be spelled, capturing the rest.
+
+    Quoted (`"run":`) and block headers carrying an indentation indicator or a
+    chomping marker (`|2`, `|-`, `>-`) are all the same key with the same
+    scalar content, as is whitespace before the colon. Comparing the line to
+    one exact string rejected every one of them — a false RED on a cosmetic
+    edit, which is how a contract test earns itself a deletion.
+    """
+    return re.compile(rf"""^[ \t]*["']?{re.escape(key)}["']?[ \t]*:[ \t]*(.*)$""")
+
+
+# A block-scalar header: `|`, `>`, either chomping marker, an optional explicit
+# indentation indicator in either order, and an optional `!!str` tag — all of
+# which name the same string. Shared so the readers below cannot drift into
+# disagreeing about what a header looks like.
+BLOCK_HEADER = re.compile(r"(?:!!str[ \t]+)?[|>](?:[-+]?\d*|\d*[-+]?)")
+
+
+def uncommented(raw: str) -> str:
+    """Drop a trailing YAML comment — one introduced by WHITESPACE then `#`.
+
+    A bare `str.split("#")` is not that rule, and the difference is a real
+    path: `#` with no space before it is part of the scalar, so `trusted#/..`
+    is ONE value that normalizes to `.`, while splitting on `#` reported a
+    harmless `trusted` and validated that instead of the value.
+
+    QUOTE-AWARE, because `#` inside a quoted scalar is content: truncating
+    `"a # b"` to `"a` both corrupts the value and leaves the quotes unbalanced,
+    and doing it to a gate expression red a workflow YAML had not changed.
+    """
+    quote, i = "", 0
+    while i < len(raw):
+        c = raw[i]
+        if quote:
+            if c == quote:
+                quote = ""
+        elif c in "\"'":
+            quote = c
+        elif c == "#" and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i].strip()
+        i += 1
+    return raw.strip()
+
+
+def plain_scalar(raw: str) -> str:
+    """A scalar's VALUE, refusing any spelling this reader cannot decode.
+
+    `str.strip("\\"'")` is not unquoting: it eats characters from both ends
+    until neither is a quote, so `"'x'"` — whose value really is `'x'`, with
+    the apostrophes — came back as `x` and matched a required entry the file
+    does not contain. And a DOUBLE-quoted scalar processes escapes, so
+    `"\\u0021**"` is the exclusion `!**` while the raw text starts with a
+    backslash and passes every check written against the literal.
+    """
+    v = uncommented(raw)
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        inner = v[1:-1]
+        assert v[0] not in inner, f"nested or doubled quote in the scalar {v!r}"
+        assert not (v[0] == '"' and "\\" in inner), (
+            f"the double-quoted scalar {v!r} carries a backslash escape, which "
+            "YAML decodes and this reader does not — teach it, or unquote."
+        )
+        return inner
+    return v
+
+
+# Any mapping key, and the same with a block-scalar header as its value.
+_ANY_KEY = re.compile(r"""^([ \t]*)["']?[\w.-]+["']?[ \t]*:(?:[ \t].*|)$""")
+_ANY_BLOCK_KEY = re.compile(r"""^[ \t]*["']?([\w.-]+)["']?[ \t]*:[ \t]*(\S.*)$""")
+
+
+def block_scalars(text: str, key: str) -> list[tuple[str, list[str]]]:
+    """Every TOP-LEVEL `key:` block scalar in `text`, as (header, body lines).
+
+    Three rules, each closing a hole a simpler scan left open:
+
+    * Step over every block scalar's BODY. A scanner that walked all lines read
+      a step's own shell as YAML — a heredoc whose payload contains `run: |`
+      looked like a second key.
+    * Step over EVERY scalar's body, not just this key's. An `env:` value
+      spelled `EXAMPLE: |` holding an indented `run: |` and a script under it
+      impersonated the step's command.
+    * Match only at the OUTERMOST key indentation in `text`. Skipping bodies
+      does not establish OWNERSHIP: a block scalar genuinely named `run:` but
+      nested inside the step's `env:` mapping is not the step's command, and
+      with the real `run: ":"` left as a plain scalar the reader extracted the
+      decoy and the executable tests passed against a script Actions never
+      runs.
+    """
+    lines = text.splitlines()
+
+    def walk():
+        """(indent, key, header, body) for each block scalar, bodies skipped."""
+        i = 0
+        while i < len(lines):
+            m = _ANY_BLOCK_KEY.match(lines[i])
+            header = uncommented(m.group(2)) if m else ""
+            if not header or not BLOCK_HEADER.fullmatch(header):
+                i += 1
+                continue
+            indent = len(lines[i]) - len(lines[i].lstrip())
+            name, body, i = m.group(1), [], i + 1
+            while i < len(lines):
+                if (
+                    lines[i].strip()
+                    and len(lines[i]) - len(lines[i].lstrip()) <= indent
+                ):
+                    break
+                body.append(lines[i])
+                i += 1
+            yield indent, name, header, body
+
+    found = list(walk())
+    # The outermost mapping level, measured the same way — over key lines only,
+    # with block bodies skipped, so shell text spelled `foo: bar` cannot lower
+    # it and hide a nested decoy.
+    keys, i = [], 0
+    while i < len(lines):
+        m = _ANY_BLOCK_KEY.match(lines[i])
+        header = uncommented(m.group(2)) if m else ""
+        if (k := _ANY_KEY.match(lines[i])) is not None:
+            keys.append(len(k.group(1)))
+        if not header or not BLOCK_HEADER.fullmatch(header):
+            i += 1
+            continue
+        indent = len(lines[i]) - len(lines[i].lstrip())
+        i += 1
+        while i < len(lines):
+            if lines[i].strip() and len(lines[i]) - len(lines[i].lstrip()) <= indent:
+                break
+            i += 1
+    top = min(keys) if keys else 0
+    return [(h, b) for indent, name, h, b in found if name == key and indent == top]
+
+
+def scalar_block(text: str, key: str) -> str:
+    """The body of the one block scalar introduced by `key:`.
+
+    NOT ended on the literal next key, and NOT split on an exact `key: |\\n`.
+    `str.split` on a separator that is not present returns the whole remainder
+    with no error — or, with the newline attached, raises IndexError — so the
+    legal `run: |-`, `run: |2` and `run: | # why` each broke a reader that
+    matched one spelling.
+    """
+    blocks = block_scalars(text, key)
+    assert len(blocks) == 1, f"premise changed: {len(blocks)} `{key}` block scalars"
+    assert blocks[0][1], f"premise changed: the `{key}` block is empty"
+    return "\n".join(blocks[0][1])
+
+
+def _scopes(mapping: str) -> str:
+    """`scope: level` pairs, decoded and normalized, as `a: x, b: y`.
+
+    Comparing the RAW text meant `{contents: "read"}` — the very permission
+    required, quoted — did not equal `contents: read`, and so did quoting the
+    key. Both spellings of the mapping, inline and block, arrive here so the
+    comparison sees values rather than punctuation.
+    """
+    pairs = []
+    for part in mapping.split(","):
+        if not part.strip():
+            continue
+        k, _, v = part.partition(":")
+        pairs.append(f"{plain_scalar(k)}: {plain_scalar(v)}")
+    return ", ".join(pairs)
+
+
+def with_block(step: str) -> list[str]:
+    """The lines of a step's `with:` mapping — the action's INPUTS, only.
+
+    `path:` anywhere in the step is not the checkout's `path` input. Moving it
+    into the step's `env:` mapping leaves the same key, the same plausible
+    value and the same one match, while `actions/checkout` receives no path at
+    all and lands on the workspace root — the exact condition two tests here
+    exist to forbid.
+    """
+    lines = step.splitlines()
+    hits = [
+        i
+        for i, ln in enumerate(lines)
+        if (m := _key_re("with").match(ln)) and not uncommented(m.group(1))
+    ]
+    assert len(hits) == 1, f"expected one `with:` mapping in the step, got {len(hits)}"
+    i = hits[0]
+    indent = len(lines[i]) - len(lines[i].lstrip())
+    out = []
+    for nxt in lines[i + 1 :]:
+        # A COMMENT DOES NOT END A MAPPING, whatever column it sits in. Ending
+        # on one truncated `with:` at an ordinary explanatory comment written
+        # level with the key, dropping the `path:` under it and reddening two
+        # tests over a file YAML reads exactly as before.
+        if nxt.lstrip().startswith("#"):
+            continue
+        if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= indent:
+            break
+        out.append(nxt)
+    assert out, "the step's `with:` mapping is empty"
+    return out
 
 
 def indented_block(text: str, key: str) -> list[str]:
@@ -209,6 +425,10 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         ".github/workflows/hardened-pr-review-run.yml",
         ".claude/hooks/pr_review/**",
         ".claude/skills/pr-review-readiness/**",
+        # This file's OWN path. Without it, an edit that rewires or weakens the
+        # wiring is the one change that schedules no run of the suite checking
+        # the wiring.
+        ".github/workflows/pr-review-scripts-test.yml",
     )
 
     def setUp(self):
@@ -267,14 +487,155 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
             "the preflight runs after the suite it is supposed to gate",
         )
 
-    def test_pull_request_triggers_it_for_python_and_for_yaml(self):
+    def _halves(self) -> tuple[str, str]:
+        """(push half, pull_request half) of `on:`, split on the PR key.
+
+        It assumes `push:` precedes `pull_request:`, so the order is ASSERTED
+        below rather than relied on — reordering them used to make the PR
+        assertions silently read the push list instead.
+        """
         body = strip_comments(self.text)
         halves = body.split("pull_request:", 1)
         self.assertEqual(len(halves), 2, "no pull_request trigger: nothing gates a PR")
+        return halves[0], halves[1]
+
+    def test_the_two_triggers_are_in_the_order_the_slicing_assumes(self):
+        """The premise `_halves` rests on, asserted instead of assumed."""
+        body = strip_comments(self.text)
+        self.assertLess(
+            body.index("push:"),
+            body.index("pull_request:"),
+            "the triggers were reordered; the path assertions below now read "
+            "the wrong filter and would pass while one of them is empty",
+        )
+
+    @staticmethod
+    def _path_items(half: str) -> list[str]:
+        """The items of the `paths:` list — that exact key — each a whole entry.
+
+        Scoped to the key and its indented block, not "every `- x` in the
+        half": renaming `paths:` to `paths-ignore:` INVERTS the filter while
+        leaving every entry where a whole-half scan would still find it.
+
+        Whole entries, because substring membership is not the same test and
+        the difference defeats exactly the coverage this filter provides: both
+        `"!.claude/hooks/pr_review/**"` — an EXCLUSION — and
+        `".claude/hooks/pr_review/**/*.py"` — a NARROWING that misses
+        `restrict-write.sh` — contain the required string while the filter no
+        longer schedules the run.
+        """
+        lines = half.splitlines()
+        pat = _key_re("paths")  # `"paths":` is the same key, quoted
+        starts = [
+            i
+            for i, ln in enumerate(lines)
+            if (m := pat.match(ln)) and not m.group(1).strip()
+        ]
+        assert len(starts) == 1, f"expected one `paths:` key, found {len(starts)}"
+        i = starts[0]
+        key_indent = len(lines[i]) - len(lines[i].lstrip())
+        items, seq_indent = [], None
+        for nxt in lines[i + 1 :]:
+            if not nxt.strip():
+                continue
+            indent = len(nxt) - len(nxt.lstrip())
+            entry = re.fullmatch(r"-[ \t]+(.*)", nxt.strip())
+            if seq_indent is None:
+                # A sequence may be indented level with its key — legal YAML,
+                # and breaking on `<= key_indent` returned an EMPTY list for
+                # it, which passes nothing and fails everything.
+                if indent < key_indent or (indent == key_indent and not entry):
+                    break
+                assert entry, f"a `paths:` list starts with a non-item line: {nxt!r}"
+                seq_indent = indent
+            elif indent < seq_indent or (
+                # A SIBLING KEY ends the list. With the sequence indented level
+                # with its own key, a following `branches: [main]` sits at the
+                # entries' indentation, and stopping only on a SMALLER indent
+                # folded it into the last pattern.
+                indent == seq_indent and not entry and _ANY_KEY.match(nxt)
+            ):
+                break
+            # THE SEQUENCE'S OWN INDENTATION decides what is an entry. Matching
+            # `- …` on the stripped line counted a MORE-INDENTED `- x` as a
+            # sixth entry, when YAML folds it — hyphen and all — into the
+            # entry above; five required patterns were reported present while
+            # the filter held one folded pattern matching none of them.
+            if indent == seq_indent and entry:
+                raw = entry.group(1)
+                assert not BLOCK_HEADER.fullmatch(uncommented(raw)), (
+                    f"a `paths:` entry is a block scalar ({uncommented(raw)!r}); "
+                    "this reader does not decode one, and `>- !**` would read "
+                    "as a harmless string while excluding every path."
+                )
+                items.append(plain_scalar(raw))
+                continue
+            # A plain scalar CONTINUES onto a more-indented line and YAML FOLDS
+            # the two with a space, so `- scripts/pr_review/**` over an
+            # indented `/elsewhere` is the ONE pattern `scripts/pr_review/**
+            # /elsewhere`, which matches nothing the first line does. Folded
+            # here for the same reason, or the membership test below would see
+            # a required entry that the filter does not actually contain.
+            assert items, f"a `paths:` list starts with a continuation: {nxt!r}"
+            items[-1] = f"{items[-1]} {uncommented(nxt.strip())}".strip()
+        return items
+
+    def _assert_covers(self, half: str, which: str) -> None:
+        items = self._path_items(half)
         for path in self.REQUIRED_PATHS:
             self.assertIn(
-                path, halves[1], f"{path} is not in the pull_request paths filter"
+                path,
+                items,
+                f"{path} is not a whole entry in the {which} paths filter; "
+                f"entries are {items}",
             )
+        # An exclusion later in the list wins over every positive entry above
+        # it, so a single `!**` disables the filter while leaving each required
+        # entry exactly where this test looks for it.
+        self.assertEqual(
+            [e for e in items if e.startswith("!")],
+            [],
+            f"the {which} paths filter carries an EXCLUSION, which overrides "
+            f"the entries above it: {items}",
+        )
+
+    def test_pull_request_triggers_it_for_python_and_for_yaml(self):
+        _, pr = self._halves()
+        self._assert_covers(pr, "pull_request")
+
+    def test_push_to_main_triggers_it_for_the_same_paths(self):
+        """BOTH filters, because only one of them was ever checked.
+
+        This file carries two independent `paths:` lists. The test above reads
+        the text AFTER `pull_request:`, so a path silently dropped from the
+        `push:` list changed nothing it could see — and that is the list that
+        runs the suite on `main`. A regression merged to main would then never
+        be caught there, only on the next PR that happens to touch a path still
+        in the other filter.
+        """
+        push, _ = self._halves()
+        # The BRANCH, not merely the presence of a `branches:` key: changing
+        # `[main]` to `[release]` disables the main-branch run entirely while
+        # leaving every path assertion satisfied. `!main` is an EXCLUSION, so
+        # the `!` is kept rather than tokenized away. The one-line flow-list
+        # spelling this reads is pinned by TestTheReadersPremisesStillHold.
+        m = next(
+            (mm for ln in push.splitlines() if (mm := _key_re("branches").match(ln))),
+            None,
+        )
+        self.assertIsNotNone(m, "premise changed: push has no branches filter")
+        listed = re.findall(r"!?[\w./*-]+", uncommented(m.group(1)))
+        self.assertTrue(
+            listed,
+            "the push `branches:` filter is no longer an inline list; this "
+            "reader is line-at-a-time — see TestTheReadersPremisesStillHold."
+            "test_the_suite_ci_branch_filter_is_a_single_line_flow_list",
+        )
+        self.assertIn(
+            "main", listed, f"the push trigger does not run on main: {listed}"
+        )
+        self.assertNotIn("!main", listed, "the push trigger EXCLUDES main")
+        self._assert_covers(push, "push")
 
     def test_it_holds_no_more_capability_than_the_workflows_it_tests(self):
         """It executes PR-authored Python, so it must stay a read-only
@@ -282,10 +643,47 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         never a secret."""
         body = strip_comments(self.text)
         self.assertNotIn("pull_request_target", body)
-        self.assertNotIn("secrets.", body)
+        # BOTH ways to reach the context. `secrets.` alone missed the equally
+        # ordinary `secrets['CI_TOKEN']`, which a maintainer wiring up a test
+        # dependency would plausibly write, and which hands the value to
+        # PR-authored Python.
+        self.assertNotRegex(body, r"secrets\s*[.\[]")
         self.assertNotIn("id-token", body)
-        perms = "\n".join(indented_block(body, "permissions:"))
-        self.assertEqual(perms.strip(), "contents: read")
+        # EVERY `permissions:` block, not the first one. A job-level block
+        # OVERRIDES the workflow-level one, so `jobs.test.permissions.contents:
+        # write` left the top-level `contents: read` exactly where a
+        # first-match reader looks for it while the job ran with write.
+        lines = body.splitlines()
+        blocks = []
+        for i, ln in enumerate(lines):
+            m = _key_re("permissions").match(ln)
+            if not m:
+                continue
+            # BOTH SPELLINGS. Skipping keys that carry a value read the INLINE
+            # flow mapping `permissions: {contents: write}` as "not a
+            # permissions block", so a job-level override sat one line away
+            # from an assertion that was still passing on the workflow-level
+            # `contents: read` above it.
+            inline = uncommented(m.group(1))
+            if inline:
+                blocks.append(_scopes(inline.strip().strip("{}")))
+                continue
+            # Read the block from THIS line's indentation. Handing the key back
+            # to `indented_block`, which matches a literal `permissions:`,
+            # meant the two readers disagreed about what the key is: `_key_re`
+            # accepts `"permissions":` and `permissions :`, and either
+            # cosmetic edit then raised "not found" from the second reader.
+            indent = len(lines[i]) - len(lines[i].lstrip())
+            out = []
+            for nxt in lines[i + 1 :]:
+                if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= indent:
+                    break
+                if nxt.strip():
+                    out.append(nxt.strip())
+            blocks.append(_scopes(",".join(out)))
+        self.assertTrue(blocks, "the workflow declares no permissions block")
+        for perms in blocks:
+            self.assertEqual(perms, "contents: read")
 
 
 class TestReviewLabelAgreesAcrossStages(unittest.TestCase):
@@ -511,14 +909,57 @@ class TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot(unittest.TestCase):
         checkouts = [s for s in steps if "actions/checkout@" in s]
         self.assertEqual(len(checkouts), 2, "premise changed: not two checkouts")
         for step in checkouts:
-            found = re.search(r"\n\s+path:\s+(\S+)", step)
+            # SINGLE LINE, and the value may be empty. `\s+` after `path:`
+            # crosses newlines, so a valueless `path:` captured the next line's
+            # key and a `path: # why` captured the `#` — both pass a
+            # non-emptiness check while leaving the input unset, which is the
+            # workspace-root checkout this test exists to forbid.
+            # THE `with:` MAPPING, not the step: `path:` under `env:` is not an
+            # action input, and the checkout would land at the workspace root.
+            lines = with_block(step)
+            pat = _key_re("path")  # quoted key and space-before-colon too
+            hit = next(
+                ((i, m) for i, ln in enumerate(lines) if (m := pat.match(ln))), None
+            )
             self.assertIsNotNone(
-                found,
+                hit,
                 f"a review-job checkout declares no path: {step[:60]!r}",
             )
+            i, m = hit
+            value = plain_scalar(m.group(1))
+            self.assertNotEqual(
+                value,
+                "",
+                f"a review-job checkout declares an EMPTY path: {step[:60]!r}",
+            )
+            # A bare block header (`path: |`) with no body is an EMPTY string
+            # to YAML, while the literal `|` normalizes to a plausible-looking
+            # directory name — so read the body when there is a header, rather
+            # than rejecting the header outright (which reds the legal
+            # `path: |-` followed by an indented `trusted`).
+            #
+            # The body STOPS AT THE FIRST DEDENT. Scanning the rest of the step
+            # for any deeper-indented line walks past the scalar into a later
+            # comment, which then stands in as the path.
+            if BLOCK_HEADER.fullmatch(value):
+                indent = len(lines[i]) - len(lines[i].lstrip())
+                body = []
+                for nxt in lines[i + 1 :]:
+                    if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= indent:
+                        break
+                    if nxt.strip():
+                        body.append(nxt.strip())
+                value = body[0] if body else ""
+                self.assertNotEqual(
+                    value,
+                    "",
+                    "a review-job checkout's path is an empty block scalar; "
+                    "YAML resolves that to an empty path and the checkout "
+                    "lands at the workspace root",
+                )
             # posixpath.normpath, not a trailing-slash strip: `././` survived
             # that as `./.` and still resolves to the workspace root.
-            declared = posixpath.normpath(found.group(1).strip().strip("\"'") or ".")
+            declared = posixpath.normpath(value)
             self.assertNotIn(
                 declared,
                 {"", "."},
@@ -887,6 +1328,241 @@ class TestRubricSpeaksTheSchemaSeverities(unittest.TestCase):
         )
 
 
+# A GitHub Actions `if:` expression, tokenized. Single-quoted strings first, so
+# an operator inside a literal cannot be mistaken for one: `'&&'` is a value.
+_EXPR_TOKEN = re.compile(
+    r"'(?:[^']|'')*'"  # single-quoted string; '' escapes a quote
+    r"|&&|\|\||==|!=|<=|>="  # two-character operators
+    r"|[()!<>,]"  # grouping / call args / unary not / comparisons
+    r"|[^\s'()!<>,&|=]+"  # a bare term: identifier, number, dotted context path
+)
+
+
+def _lex_expr(expr: str) -> list[str]:
+    """Tokens of `expr`, refusing anything the grammar below cannot see.
+
+    The gaps between matches are checked rather than assumed: a lone `&` or an
+    unbalanced quote would otherwise be dropped silently and the expression
+    would be judged on a truncated reading of itself.
+    """
+    toks, pos = [], 0
+    for m in _EXPR_TOKEN.finditer(expr):
+        gap = expr[pos : m.start()]
+        assert not gap.strip(), f"unlexable text in the `if:` expression: {gap!r}"
+        toks.append(m.group(0))
+        pos = m.end()
+    tail = expr[pos:]
+    assert not tail.strip(), f"unlexable trailing text in the `if:`: {tail!r}"
+    # INDEX SYNTAX IS REFUSED, not absorbed. `github[0 && pin && 0]` lexed as
+    # the two bare terms `github[0` and `0]`, which reads as `(!A) && pin && B`
+    # — apparently binding — while GitHub evaluates the bracket first, finds a
+    # missing property and negates a null. Brackets are legal and this parser
+    # does not model their precedence, so it fails closed.
+    #
+    # AFTER tokenizing, and never inside a string: a bracket in a LITERAL is
+    # just a character, and rejecting the raw text red the perfectly ordinary
+    # `!contains(…, '[skip review]')`.
+    for t in toks:
+        if t.startswith("'"):
+            continue
+        assert "[" not in t and "]" not in t, (
+            f"the `if:` expression uses index syntax, whose precedence this "
+            f"parser does not model ({t!r}). Teach it, then allow this."
+        )
+        # GitHub Actions quotes strings with `'`. A `"` OUTSIDE a literal is an
+        # undecoded YAML quote, which would be absorbed into a condition. One
+        # INSIDE a literal is an ordinary character, and refusing it red the
+        # legitimate `!startsWith(…, 'Revert "')`.
+        assert '"' not in t, (
+            f"the `if:` expression carries a double quote this reader did not "
+            f"decode ({t!r}). Unquote it, or teach the reader."
+        )
+    return toks
+
+
+_CMP_OPS = ("==", "!=", "<=", ">=", "<", ">")
+
+
+def parse_bool_expr(expr: str):
+    """`expr` as a propositional tree whose leaves are opaque truth values.
+
+    `&&`, `||`, `!` and GROUPING parens are interpreted; a comparison, a context
+    reference and a `contains(a, b)` call are each ONE opaque leaf. That is why
+    this needs no model of GitHub's value semantics and no idea what any context
+    holds — but it does have to agree with GitHub about PRECEDENCE, and the one
+    that matters is that **`!` binds tighter than a comparison**. `!a == b` is
+    `(!a) == b` in GitHub, not `!(a == b)`, and reading it the second way makes
+    a double negation look like the identity while GitHub evaluates it to a
+    constant `true`. So `!` is resolved below the comparison level and a
+    negated term is folded into the comparison's own text.
+
+    A `(` is grouping only where a term is expected; inside a term it is a call
+    and is depth-tracked, so `'(' == '('` cannot corrupt the nesting the way a
+    paren-counting heuristic did.
+
+    Refuses rather than guesses. A comparison over a GROUPED sub-expression
+    (`(a || b) == true`) is legal and binds, but its truth is not a function of
+    the group's truth under any assignment this model can enumerate, so it is
+    rejected with a message naming the limitation instead of silently read as
+    something else.
+    """
+    toks = _lex_expr(expr)
+
+    def term(i):
+        """One value: a literal, a context path, or a `name(...)` call."""
+        assert i < len(toks), "the `if:` expression ends where a term was expected"
+        t = toks[i]
+        assert t not in ("&&", "||", "!", ")", ",") and t not in _CMP_OPS, (
+            f"the `if:` expression has {t!r} where a term was expected"
+        )
+        assert t != "(", "internal: a grouping paren reached term()"
+        start, i = i, i + 1
+        if i < len(toks) and toks[i] == "(":  # a call: absorb its balanced args
+            depth = 0
+            while i < len(toks):
+                if toks[i] == "(":
+                    depth += 1
+                elif toks[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                i += 1
+            else:
+                raise AssertionError("unbalanced call parens in the `if:`")
+        return " ".join(toks[start:i]), i
+
+    def unary(i):
+        """(node, next index, grouped?) — `!` over a term or over a group."""
+        if toks[i] == "!":
+            node, i, grouped = unary(i + 1)
+            return ("not", node), i, grouped
+        if toks[i] == "(":
+            node, i = or_(i + 1)
+            assert i < len(toks) and toks[i] == ")", "unbalanced parens in the `if:`"
+            return node, i + 1, True
+        text, i = term(i)
+        return ("atom", text), i, False
+
+    def cmp(i):
+        start = i
+        lhs, i, lhs_grouped = unary(i)
+        if i < len(toks) and toks[i] in _CMP_OPS:
+            op = toks[i]
+            _rhs, j, rhs_grouped = unary(i + 1)
+            assert not (lhs_grouped or rhs_grouped), (
+                f"the `if:` compares a PARENTHESIZED sub-expression ({op!r} at "
+                f"token {i}). That is legal, but this reader models a "
+                "comparison as one opaque condition and cannot see the "
+                "conditions inside it — teach it, then update this test."
+            )
+            # The whole comparison, INCLUDING any `!` on either operand, is one
+            # opaque condition: `!a == b` is not the negation of `a == b`.
+            return ("atom", " ".join(toks[start:j])), j
+        return lhs, i
+
+    def and_(i):
+        node, i = cmp(i)
+        while i < len(toks) and toks[i] == "&&":
+            rhs, i = cmp(i + 1)
+            node = ("and", node, rhs)
+        return node, i
+
+    def or_(i):
+        node, i = and_(i)
+        while i < len(toks) and toks[i] == "||":
+            rhs, i = and_(i + 1)
+            node = ("or", node, rhs)
+        return node, i
+
+    assert toks, "the `if:` expression is empty"
+    tree, i = or_(0)
+    assert i == len(toks), f"trailing tokens in the `if:`: {toks[i:]}"
+    return tree
+
+
+def expr_atoms(node) -> set[str]:
+    if node[0] == "atom":
+        return {node[1]}
+    if node[0] == "not":
+        return expr_atoms(node[1])
+    return expr_atoms(node[1]) | expr_atoms(node[2])
+
+
+def eval_expr(node, env: dict) -> bool:
+    if node[0] == "atom":
+        # `true` and `false` are the literals, not free variables — otherwise a
+        # gate wired to `false &&` would look satisfiable.
+        return {"true": True, "false": False}.get(node[1], env.get(node[1], False))
+    if node[0] == "not":
+        return not eval_expr(node[1], env)
+    if node[0] == "and":
+        return eval_expr(node[1], env) and eval_expr(node[2], env)
+    return eval_expr(node[1], env) or eval_expr(node[2], env)
+
+
+def job_if(job: str) -> str:
+    """The JOB-level `if:` expression — block or plain, `${{ }}` unwrapped.
+
+    Indent-scoped to the job's own keys, so a step's `if:` cannot stand in for
+    the gate, and asserted unique rather than taking the first match.
+
+    A PLAIN scalar continues onto following more-indented lines and YAML folds
+    them with a space, so `if: <pin>` with an indented `|| true` under it is the
+    single value `<pin> || true`. Reading the key's own line only returned the
+    pin and reported a gate that does not exist.
+    """
+    lines = job.splitlines()
+    pat = _key_re("if")
+    hits = [
+        (i, m)
+        for i, ln in enumerate(lines)
+        if (m := pat.match(ln)) and len(ln) - len(ln.lstrip()) == 4
+    ]
+    assert len(hits) == 1, f"premise changed: {len(hits)} job-level `if:` keys"
+    i, m = hits[0]
+    header = BLOCK_HEADER.fullmatch(uncommented(m.group(1)))
+    body = []
+    for nxt in lines[i + 1 :]:
+        if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= 4:
+            break
+        if nxt.strip():
+            body.append(nxt.rstrip())
+    # A GHA string literal may not SPAN lines here. The reader joins the
+    # scalar's lines with a space, which is right for a plain scalar and wrong
+    # inside a literal block, where YAML keeps the newline as part of the
+    # string — so `'a<newline>b' == 'a b'` is false to GitHub and true to a
+    # reader that folded it. Refused rather than mis-read.
+    #
+    # BODY LINES ONLY. The key's own line carries no expression content when it
+    # is a block header, and counting its apostrophes red the file over an
+    # ordinary comment: `if: | # Don't weaken this guard`.
+    for ln in body:
+        assert ln.count("'") % 2 == 0, (
+            f"a string literal in the job-level `if:` spans lines ({ln.strip()!r}); "
+            "this reader folds them and would change what the string contains."
+        )
+    if header:
+        # Inside a LITERAL block, `#` is content, not a comment.
+        assert body, "the job-level `if:` block is empty"
+        value = " ".join(ln.strip() for ln in body)
+    else:
+        # FOLD FIRST, THEN DECODE — one scalar, one decoding. Decoding each
+        # line on its own unquoted a continuation's own GHA string literal, so
+        # the truthy `'false'` in `pin || 'false'` became the FALSE literal and
+        # a gate that admits every path read as binding.
+        #
+        # A plain scalar's trailing ` #` IS a comment, dropped by the
+        # quote-aware `uncommented`; `plain_scalar` also unwraps a quoted whole
+        # gate, which YAML decodes away and which otherwise left every
+        # condition unrecognizable.
+        value = plain_scalar(" ".join([m.group(1)] + [ln.strip() for ln in body]))
+    # An undecoded YAML double quote is refused in `_lex_expr`, per TOKEN, so
+    # that a `"` inside a GHA string literal stays the ordinary character it is.
+    wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", value.strip(), re.S)
+    return (wrapped.group(1) if wrapped else value).strip()
+
+
 class TestStage2CannotBeTriggeredByALookalikeWorkflow(unittest.TestCase):
     """`workflows:` matches by NAME, and a pull request can claim a name.
 
@@ -895,15 +1571,105 @@ class TestStage2CannotBeTriggeredByALookalikeWorkflow(unittest.TestCase):
     lookalike triggers Stage 2 and supplies the request artifact.
     """
 
+    PIN = (
+        r"github\.event\.workflow\.path\s*==\s*"
+        r"'\.github/workflows/hardened-pr-review\.yml'"
+    )
+
     def test_prepare_pins_the_triggering_workflow_path(self):
         # Comments stripped and the whole equality matched: asserting the two
         # strings separately passed on `!=`, and on prose in a comment.
+        #
+        # The WHOLE prepare job, not "the text before `runs-on:`": narrowing
+        # the region made the test depend on job-key ORDER, so moving an
+        # unchanged `runs-on:` above `if:` emptied the region and red it.
         prepare = strip_comments(job_block(STAGE2.read_text(), "prepare"))
-        gate = prepare.split("runs-on:", 1)[0]
         self.assertRegex(
-            gate,
-            r"github\.event\.workflow\.path\s*==\s*'\.github/workflows/hardened-pr-review\.yml'",
+            prepare,
+            self.PIN,
             "prepare no longer pins which workflow file may trigger it",
+        )
+
+    def test_the_pin_is_binding_and_not_merely_present(self):
+        """Present is not the same contract, and the gap is the whole control.
+
+        A text search is satisfied by a pin that decides nothing: demote it
+        behind a top-level `||`, negate it as `!(pin)`, or move it out of `if:`
+        into a quoted job `name:`, and the assertion above stays green while
+        the gate admits a lookalike workflow. Two earlier attempts to close
+        this SYNTACTICALLY each red a legal edit instead — a paren-counting
+        rule broke on `'(' == '('`, and a no-`||` rule rejected the perfectly
+        good `(a || b) && pin`.
+
+        So this EVALUATES the gate rather than pattern-matching it. The `if:`
+        is read as a propositional formula whose conditions are opaque, and the
+        contract is: no combination of the other conditions can let a run
+        through unless THIS COMPARISON holds. Extra conjuncts, grouped
+        alternatives and a repeated pin all satisfy that and stay green.
+
+        TWO limits, stated because neither is closed here. The guarantee is
+        only as strong as the comparison it depends on, and GitHub's `==`
+        IGNORES CASE (docs.github.com, "Evaluate expressions": *"GitHub ignores
+        case when comparing strings"*), so a workflow added at a path differing
+        only in case satisfies the gate — a defect in the workflow YAML, not in
+        this test, and not one the expression language can fix. And the parser
+        FAILS CLOSED rather than completely: a handful of legal spellings it
+        does not model (index syntax, a comparison over a parenthesized group)
+        red with a message naming the limitation instead of being read wrong.
+        """
+        expr = job_if(job_block(STAGE2.read_text(), "prepare"))
+        tree = parse_bool_expr(expr)
+        atoms = expr_atoms(tree)
+        pinned = [a for a in atoms if re.fullmatch(self.PIN, a)]
+        # FAIL CLOSED on a spelling this reader cannot model. Without this, a
+        # workflow-path comparison folded into something unrecognizable — `!pin
+        # == x`, a comparison over a group — reports "no pin" with a message
+        # about the gate being gone, which reads like a different defect.
+        if not pinned:
+            self.assertNotRegex(
+                expr,
+                self.PIN,
+                f"prepare's gate mentions the workflow path but not as a "
+                f"condition this reader can evaluate: {expr!r}. Either the pin "
+                f"no longer binds, or it is spelled in a way the parser above "
+                f"does not model — establish which, then teach the parser.",
+            )
+        self.assertEqual(
+            len(pinned),
+            1,
+            f"expected exactly one workflow-path condition in prepare's `if:`, "
+            f"found {pinned} in {expr!r}. Two of them means a second file may "
+            f"trigger this workflow; none means the gate is elsewhere or gone.",
+        )
+        pin = pinned[0]
+        others = sorted(atoms - {pin, "true", "false"})
+        self.assertLessEqual(
+            len(others), 12, f"too many conditions to enumerate: {others}"
+        )
+        cases = list(itertools.product([False, True], repeat=len(others)))
+        for bits in cases:
+            env = dict(zip(others, bits))
+            env[pin] = False
+            self.assertFalse(
+                eval_expr(tree, env),
+                f"prepare's gate admits a run whose workflow path is NOT "
+                f"{'.github/workflows/hardened-pr-review.yml'!r}, given "
+                f"{env}. The pin is present but not binding, so a pull "
+                f"request can add a second workflow with the same NAME and "
+                f"drive Stage 2 with an artifact of its choosing.",
+            )
+        # The converse, to the limited extent opaque atoms can establish it: a
+        # gate wired to a literal `false` can never run, and a review that
+        # silently stops happening looks exactly like a clean one. This catches
+        # the CONSTANT, not the semantically impossible — `&& (1 == 2)` is one
+        # opaque atom here and passes. It is a liveness backstop, not a proof.
+        self.assertTrue(
+            any(
+                eval_expr(tree, {**dict(zip(others, bits)), pin: True})
+                for bits in cases
+            ),
+            f"prepare's gate ({expr!r}) is unsatisfiable on its literals alone "
+            f"— the job can never run",
         )
 
 
@@ -954,7 +1720,12 @@ class TestTheStage1ArtifactDownloadRetries(unittest.TestCase):
 
         Returns (exit status, number of `gh run download` attempts made).
         """
-        script = textwrap.dedent(self._step().split("run: |\n", 1)[1])
+        # Tolerant of the block header's spelling AND of a trailing comment:
+        # `run: |-`, `run: |2-` and `run: | # why` all change formatting, not
+        # the shell, and an exact `"run: |\n"` split raised IndexError before
+        # running anything. That the header is LITERAL rather than folded is
+        # pinned by TestTheReadersPremisesStillHold.
+        script = textwrap.dedent(scalar_block(self._step(), "run"))
         with tempfile.TemporaryDirectory() as td:
             d = Path(td)
             (d / "count").write_text("0")
@@ -1135,7 +1906,7 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
         rest = block[i:]
         nxt = rest.find("\n      - name:", 1)
         block = rest if nxt == -1 else rest[:nxt]
-        body = textwrap.dedent(block.split("run: |", 1)[1])
+        body = textwrap.dedent(scalar_block(block, "run"))
         # The runner expands `${{ ... }}` before bash ever sees it; bash reads
         # it as a bad substitution. Render them the way Actions would.
         body = re.sub(r"\$\{\{[^}]*\}\}", "CTX", body)
@@ -1225,9 +1996,7 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         i = self.text.index("Corroborate the claimed PR against the trusted API")
         rest = self.text[i:]
         nxt = rest.find("\n      - name:", 1)
-        body = textwrap.dedent(
-            (rest if nxt == -1 else rest[:nxt]).split("run: |", 1)[1]
-        )
+        body = textwrap.dedent(scalar_block(rest if nxt == -1 else rest[:nxt], "run"))
         sha = "a" * 40
         pr_json = json.dumps(
             {
@@ -1318,7 +2087,7 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         execute the extracted shell rather than to match its text.
         """
         block = self._step("Fetch the merge base", hay=self.review)
-        body = textwrap.dedent(block.split("run: |", 1)[1])
+        body = textwrap.dedent(scalar_block(block, "run"))
         with tempfile.TemporaryDirectory() as td:
             bin_dir = Path(td) / "bin"
             bin_dir.mkdir()
@@ -1345,6 +2114,182 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
             proc.returncode, 0, "a merge base that never arrived was accepted"
         )
         self.assertIn("did not arrive", proc.stdout + proc.stderr)
+
+
+class TestTheReadersPremisesStillHold(unittest.TestCase):
+    """PyYAML is not available to the runner, so this suite reads YAML as TEXT.
+
+    That is a sound way to pin a file whose spelling you also control, and an
+    unsound way to parse YAML in general — the language has many spellings for
+    one value, and a text reader silently mis-reads the ones it was not written
+    for. A `path: !!str ''` reads as a non-empty path; a `path: |-` body of two
+    lines reads as its first line only; a `run: >` yields shell that FOLDING
+    would have joined into something bash rejects; a branch list's inline
+    comment tokenizes as a branch name.
+
+    Chasing those one spelling at a time does not converge. This class is the
+    alternative: it pins the SPELLINGS the readers are written for, at ONE
+    place. Reformatting the workflow is allowed; doing it without updating the
+    reader is what must not pass silently. So a mis-read becomes a loud failure
+    HERE, naming the reader to fix, instead of a quiet false green elsewhere.
+
+    If you are here because you reformatted a workflow: nothing is wrong with
+    your YAML. Update the reader this test names, then update this test.
+    """
+
+    def test_both_review_checkout_paths_are_plain_scalars(self):
+        """The reader in TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot."""
+        review = job_block(STAGE2.read_text(), "review")
+        steps = [s for s in review.split("- name:") if "actions/checkout@" in s]
+        self.assertEqual(len(steps), 2, "premise changed: not two checkouts")
+        for step in steps:
+            lines = with_block(step)
+            hits = [
+                (i, uncommented(mm.group(1)))
+                for i, ln in enumerate(lines)
+                if (mm := _key_re("path").match(ln))
+            ]
+            self.assertEqual(len(hits), 1, f"expected one `path:` key, got {hits}")
+            i, value = hits[0]
+            # A plain scalar CONTINUES onto a following more-indented line, and
+            # YAML folds the two with a space — so `path: trusted` followed by
+            # an indented `/..` is the single value `trusted /..`, which
+            # normalizes to the workspace root while a line-at-a-time reader
+            # sees only `trusted`. A comment line is NOT a continuation.
+            indent = len(lines[i]) - len(lines[i].lstrip())
+            nxt = next(
+                (
+                    ln
+                    for ln in lines[i + 1 :]
+                    if ln.strip() and not ln.lstrip().startswith("#")
+                ),
+                "",
+            )
+            self.assertFalse(
+                nxt and len(nxt) - len(nxt.lstrip()) > indent,
+                f"the checkout `path:` scalar continues onto the next line "
+                f"({nxt.strip()!r}); the reader is line-at-a-time and would "
+                "validate only the first line of the folded value.",
+            )
+            # POSITIVE grammar, not a blacklist of the spellings seen so far. A
+            # blacklist of `|>!!&*` prefixes accepts `path: "."`, which YAML
+            # decodes to the workspace root while the reader — which only
+            # strips quotes and normalizes the UNDECODED text — sees a harmless
+            # name. Anything outside this grammar is a spelling the reader
+            # cannot be trusted on, whatever it decodes to.
+            self.assertRegex(
+                value,
+                r"^[A-Za-z0-9_][A-Za-z0-9._/-]*$",
+                f"a checkout `path:` is not a plain unquoted scalar ({value!r}). "
+                "The reader in TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot."
+                "test_every_checkout_in_the_review_job_declares_a_path does not "
+                "decode YAML — it cannot see through quoting or an escape, so "
+                "teach it this spelling, then widen this grammar.",
+            )
+            # Shape is not resolution: `null`, `Null`, `NULL` and `~` all match
+            # the grammar above yet resolve to an empty value — the
+            # workspace-root checkout again — and the reader normalizes the
+            # literal string "null" and finds nothing wrong with it.
+            self.assertNotIn(
+                value,
+                {"null", "Null", "NULL", "~", "Yes", "No", "On", "Off"},
+                f"a checkout `path:` is the YAML scalar {value!r}, which "
+                "resolves to an empty or boolean value rather than the "
+                "directory name it looks like",
+            )
+
+    # The four steps this suite EXECUTES. Each is extracted with `scalar_block`
+    # and handed to bash, so each must be a LITERAL block.
+    EXECUTED_STEPS = (
+        ("prepare", "Download Stage-1 artifact"),
+        ("prepare", "Close out an oversized request"),
+        ("prepare", "Corroborate the claimed PR against the trusted API"),
+        ("review", "Fetch the merge base"),
+    )
+
+    def test_every_executed_step_uses_a_literal_block_scalar(self):
+        """The `scalar_block` readers that run the extracted shell.
+
+        `|` keeps newlines; `>` FOLDS them. Extracting a folded scalar as if it
+        were literal yields shell the runner would never execute — a `for` and
+        the comments above it join into one line — so the executable tests
+        would pass against code that is not what runs.
+        """
+        text = STAGE2.read_text()
+        for job, marker in self.EXECUTED_STEPS:
+            block = job_block(text, job)
+            self.assertIn(marker, block, f"premise changed: {marker!r} is not in {job}")
+            step = block.split(marker, 1)[1].split("- name:", 1)[0]
+            # The step's OWN `run:`, found the same way the readers find it —
+            # stepping over every neighbouring block scalar rather than taking
+            # the first textual `run:`, which an `env:` value can supply.
+            runs = block_scalars(step, "run")
+            self.assertEqual(
+                len(runs),
+                1,
+                f"{marker!r} does not have exactly one `run:` block scalar "
+                f"({len(runs)} found); the readers extract one and would run "
+                "something other than the step's command.",
+            )
+            header, body = runs[0]
+            # `|` or `|-`/`|+`, and NO explicit indentation indicator. `>` folds
+            # lines, so the extracted script would differ from what Actions
+            # runs. `|1` is subtler: YAML keeps one leading space on every body
+            # line and `textwrap.dedent` removes it, which is invisible in
+            # ordinary shell and silently re-indents a heredoc terminator.
+            self.assertRegex(
+                header.lstrip("!").replace("str", "").strip(),
+                r"^\|[-+]?$",
+                f"{marker!r} no longer runs a plain LITERAL block ({header!r}); "
+                "the reader extracts it verbatim and dedents it, which is only "
+                "faithful for `|`, `|-` and `|+` — teach the reader this "
+                "spelling, then widen this test.",
+            )
+            # SPACES ONLY in the indentation. A tab after the common space
+            # prefix is scalar CONTENT to YAML, and `textwrap.dedent` — which
+            # strips the longest common whitespace prefix, tabs included —
+            # removes it. Invisible in ordinary shell, and enough to move a
+            # heredoc terminator so the real script stops terminating it.
+            tabbed = [ln for ln in body if "\t" in ln[: len(ln) - len(ln.lstrip())]]
+            self.assertEqual(
+                tabbed,
+                [],
+                f"{marker!r} indents its shell with tabs ({tabbed[:1]}); the "
+                "reader dedents, which would strip content YAML preserves.",
+            )
+
+    def test_the_suite_ci_branch_filter_is_a_single_line_flow_list(self):
+        """The branch reader in TestTheSuiteActuallyRunsInCI."""
+        inline = next(
+            (
+                uncommented(mm.group(1))
+                for ln in strip_comments(SUITE_CI.read_text()).splitlines()
+                if (mm := _key_re("branches").match(ln))
+            ),
+            None,
+        )
+        self.assertIsNotNone(inline, "premise changed: no `branches:` key")
+        # THE WHOLE LIST, matched as one grammar, before any splitting. A
+        # reader that splits first and validates the fragments accepts
+        # `['main[ab]x']` — which matches `mainax`, never `main` — as the three
+        # acceptable pieces `main`, `ab`, `x`, and the single quoted name
+        # `'release,main'` as two. Brackets and commas inside a quoted item
+        # must not be able to disappear.
+        #
+        # LITERAL NAMES ONLY, no glob and no exclusion: the reader asks "is
+        # `main` listed", which is a sound reading of the filter only when
+        # GitHub's ordered pattern matching cannot disagree with membership.
+        name = r"[A-Za-z0-9_][A-Za-z0-9._/-]*"
+        self.assertRegex(
+            inline,
+            rf"^\[[ \t]*{name}(?:[ \t]*,[ \t]*{name})*[ \t]*\]$",
+            f"the push branch filter ({inline!r}) is not a one-line flow list "
+            "of unquoted literal branch names. The reader in "
+            "TestTheSuiteActuallyRunsInCI.test_push_to_main_triggers_it_for_"
+            "the_same_paths does a membership test where GitHub does ordered "
+            "pattern matching, and cannot see quoting — teach it, then widen "
+            "this grammar.",
+        )
 
 
 if __name__ == "__main__":
