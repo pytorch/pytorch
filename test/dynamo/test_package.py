@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
 import functools
 import gc
 import importlib
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import torch
@@ -1299,6 +1301,7 @@ def add(x, y):
         # not put the memoized module back: its graph is specialized on the
         # live one, which is what __import__ hands IMPORT_NAME, and the alias
         # roots its guards, so a change to the live module has to fail them.
+        # The sibling below pins the memo written back and the change unseen.
         ctx = DiskDynamoStore()
         name = "torch_test_package_import_alias_installed"
         alias = f"__import_{name}"
@@ -1401,18 +1404,6 @@ def add(x, y):
             mid.VALUE = 11
             self.assertEqual(fn2(*args), compiled_fn2(*args))
             self.assertEqual(cnt.frame_count, 2)
-
-            # The alias binds the live module, so an attribute the installed
-            # one lacks is read where the graph read it, and compiles.
-            new.EXTRA = 3
-
-            def fn3(x):
-                import torch_test_package_import_alias_three_way as shim
-
-                return x - shim.EXTRA
-
-            self.assertEqual(fn3(*args), torch.compile(fn3, backend="eager")(*args))
-            self.assertIs(fn.__globals__[alias], new)
         finally:
             sys.modules.pop(name, None)
             _import_module.cache_clear()
@@ -1496,6 +1487,7 @@ def add(x, y):
             self.assertEqual(fn(*args), compiled_fn(*args))
             self.assertIs(fn.__globals__[alias], packaged)
         finally:
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
@@ -1584,15 +1576,61 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
-    def test_import_alias_nn_hook_guards_read_the_module_left_in_the_slot(self):
-        # nn_modules_globals_vt builds its value from the memo, the defining
-        # module whose dicts _call_impl reads through its own __globals__, and
-        # roots it at the alias. On the skip arm the alias holds a writer's
-        # same-named shim, so the hook-dict guards read the shim: with no hook
-        # registered they agree with eager, and with a forward hook on the
-        # defining module the CLOSURE_MATCH on the handle's id subscripts the
-        # shim's empty dict as the guard is built and raises, with no eager
-        # fallback. Pinned as the state #197135, higher in this stack, changes.
+    def test_import_alias_of_an_empty_slot_reads_an_attribute_the_cached_module_lacks(
+        self,
+    ):
+        # The loud form of the parent's staleness, from an empty slot: the
+        # trace reads an attribute off the live module, and the guard on it is
+        # built by reading that attribute through the alias. The parent bound
+        # the cached module there, which lacks the attribute, so Guard.create
+        # raised AttributeError, _compile_inner wrapped it, and the compile died
+        # with no eager fallback. The alias now binds the live entry, and the
+        # read compiles and agrees with eager.
+        name = "torch_test_package_import_alias_stale_attr"
+        alias = f"__import_{name}"
+        old = types.ModuleType(name)
+        old.VALUE = 2
+        new = types.ModuleType(name)
+        new.VALUE = 7
+        new.EXTRA = 3
+
+        def fn(x):
+            import torch_test_package_import_alias_stale_attr as shim
+
+            return x + shim.VALUE
+
+        def fn3(x):
+            import torch_test_package_import_alias_stale_attr as shim
+
+            return x - shim.EXTRA
+
+        args = (torch.randn(3, 2),)
+        try:
+            sys.modules[name] = old
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertIs(fn.__globals__[alias], old)
+            del fn.__globals__[alias]
+            torch._dynamo.reset()
+
+            sys.modules[name] = new
+            self.assertEqual(fn3(*args), torch.compile(fn3, backend="eager")(*args))
+            self.assertIs(fn.__globals__[alias], new)
+        finally:
+            sys.modules.pop(name, None)
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_nn_hook_guards_read_the_live_entry_the_alias_binds(self):
+        # nn_modules_globals_vt's value is the defining module, whose dicts
+        # _call_impl reads through its own __globals__, rooted at the alias,
+        # which binds the live entry: a shim under the name, so the hook-dict
+        # guards read the shim. With no hook registered they agree with eager;
+        # with a forward hook on the defining module the CLOSURE_MATCH on the
+        # handle's id subscripts the shim's empty dict as the guard is built
+        # and raises, with no eager fallback. Pinned as the state the second
+        # commit above this one changes; the memo is primed by the first
+        # compile, and cleared in finally so the shim cannot be left in it.
         name = "torch.nn.modules.module"
         alias = "__import_torch_dot_nn_dot_modules_dot_module"
         real = sys.modules[name]
@@ -1607,7 +1645,6 @@ def add(x, y):
             return mod(x)
 
         args = (torch.randn(3, 2),)
-        # Compiled once first, so the memo holds the defining module.
         torch.compile(fn, backend="eager", fullgraph=True)(*args)
         torch._dynamo.reset()
         shim = types.ModuleType(name)
@@ -1621,19 +1658,29 @@ def add(x, y):
         handle = None
         try:
             sys.modules[name] = shim
-            fn.__globals__[alias] = shim
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(fn(*args), compiled_fn(*args))
             self.assertIs(fn.__globals__[alias], shim)
             torch._dynamo.reset()
             handle = real.register_module_forward_hook(lambda m, i, o: o * 2)
-            with self.assertRaises(InternalTorchDynamoError):
+            # The dict key is the handle's id, a process-global counter.
+            with (
+                self.assertLogs("torch._guards", level="ERROR") as logs,
+                self.assertRaisesRegex(InternalTorchDynamoError, r"KeyError: \d+"),
+            ):
                 torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            guard = (
+                rf"Error while creating guard:\nName: \"G\['{alias}'\]"
+                rf"\._global_forward_hooks\[{handle.id}\]\"\n\s+Source: global"
+                r"\n\s+Create Function: CLOSURE_MATCH"
+            )
+            self.assertRegex("\n".join(logs.output), guard)
             self.assertIs(fn.__globals__[alias], shim)
         finally:
             if handle is not None:
                 handle.remove()
             sys.modules[name] = real
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
@@ -1704,11 +1751,15 @@ def add(x, y):
 
             return x + taken.VALUE
 
+        scope = fn.__globals__["__name__"]
         cases = (
-            ("not a module", "already bound to a str"),
+            ("not a module", f"already bound to a str in the globals of {scope}"),
             (types.ModuleType("other.name"), "bound to a module named other.name"),
             (nameless, "already bound to a module in the globals"),
         )
+        # The first hint names the module whose globals hold the slot -- the
+        # root frame's, which an inlined callee's own module is not.
+        hint = f"Remove or rename the global {alias} in module {scope}."
         args = (torch.randn(3, 2),)
         try:
             sys.modules[name] = module
@@ -1718,8 +1769,9 @@ def add(x, y):
                     fn.__globals__[alias] = bound
                     with self.assertRaisesRegex(
                         Unsupported, f"alias {alias} for {name}.*{re.escape(expected)}"
-                    ):
+                    ) as cm:
                         torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                    self.assertIn(hint, str(cm.exception))
                     self.assertIs(fn.__globals__[alias], bound)
         finally:
             sys.modules.pop(name, None)
@@ -1767,50 +1819,67 @@ def add(x, y):
             torch._dynamo.reset()
 
     @torch._dynamo.config.patch(record_runtime_overhead=True)
-    def test_import_alias_taken_at_codegen_skips_the_frame(self):
+    def test_import_alias_taken_at_codegen_is_a_hard_error(self):
         # import_source is also called after tracing, from codegen: with
-        # record_runtime_overhead on, make_call_generated_code resolves
-        # torch.autograd.profiler for the pregraph marker. An Unsupported
-        # raised there has no instruction to break the graph at, so under
-        # fullgraph it surfaces as-is and otherwise the frame is skipped to
-        # eager once the backend has already run -- the same outcome as any
-        # unimplemented() raised during reconstruction. The slot stays as it
-        # was either way.
+        # record_runtime_overhead on (its default, patched so this keeps
+        # driving that site if the default moves), make_call_generated_code
+        # resolves torch.autograd.profiler for the pregraph marker. compile_subgraph
+        # has no instruction left to break at, so an Unsupported raised there
+        # would be no graph break: under the default stance the frame would be
+        # skipped to eager, the backend having already run, with nothing said
+        # at default log levels. So a collision found by any caller but
+        # IMPORT_NAME stays the hard error it was, naming alias, module and
+        # offender. The function runs over a throwaway globals dict, so the
+        # real alias is planted without touching this module's globals.
         alias = "__import_torch_dot_autograd_dot_profiler"
-        missing = object()
+        scope = {"__builtins__": builtins, "__name__": "throwaway"}
+        scope[alias] = "not a module"
 
-        def fn(x):
+        def template(x):
             return x + 1
 
-        ran = []
-
-        def backend(gm, example_inputs):
-            def compiled(*args):
-                ran.append(gm)
-                return gm(*args)
-
-            return compiled
-
+        fn = types.FunctionType(template.__code__, scope, "fn")
+        cnt = CompileCounter()
         args = (torch.randn(3, 2),)
-        saved = fn.__globals__.get(alias, missing)
         try:
+            refused = f"alias {alias} for torch.autograd.profiler is already bound to a str in the globals of throwaway"
+            with self.assertRaisesRegex(AssertionError, refused):
+                torch.compile(fn, backend=cnt)(*args)
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(scope[alias], "not a module")
+        finally:
+            _import_module.cache_clear()
             torch._dynamo.reset()
+
+    def test_import_alias_taken_in_a_torch_package_slot_is_a_hard_error(self):
+        # The torch_package arm is reached through get_globals_source_and_value,
+        # for an inlined call into a packaged module: the alias is minted from
+        # the mangled name in the outer frame's globals, and nothing but
+        # import_source binds one (a mangled name is not importable, so
+        # install() cannot). That caller does not pass graph_break_ok, so a
+        # collision there is the hard error, with the three facts in it.
+        name = "torch_test_package_import_alias_packaged_taken"
+        path = os.path.join(self.path(), "alias.pt")
+        src = "SCALE = 2\n\ndef helper(x):\n    return x * SCALE\n"
+        with torch.package.PackageExporter(path) as exp:
+            exp.save_source_string(name, src)
+        packaged = torch.package.PackageImporter(path).import_module(name)
+        mangled = packaged.__name__
+        alias = mangled.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            return packaged.helper(x) + 1
+
+        try:
             fn.__globals__[alias] = "not a module"
-            refused = f"alias {alias} for torch.autograd.profiler.*bound to a str"
-            with self.assertRaisesRegex(Unsupported, refused):
-                torch.compile(fn, backend=backend, fullgraph=True)(*args)
-            self.assertEqual(ran, [])
-            torch._dynamo.reset()
-            compiled_fn = torch.compile(fn, backend=backend)
-            self.assertEqual(fn(*args), compiled_fn(*args))
-            self.assertEqual(fn(*args), compiled_fn(*args))
-            self.assertEqual(ran, [])
+            refused = f"alias {re.escape(alias)} for {re.escape(mangled)} is already bound to a str"
+            with self.assertRaisesRegex(AssertionError, refused):
+                torch.compile(fn, backend="eager")(*args)
             self.assertEqual(fn.__globals__[alias], "not a module")
         finally:
-            if saved is missing:
-                fn.__globals__.pop(alias, None)
-            else:
-                fn.__globals__[alias] = saved
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
     def test_import_alias_the_trace_refused_is_not_recorded_for_install(self):
@@ -1914,6 +1983,7 @@ def add(x, y):
                 self.assertNotIn(alias, fn.__globals__)
         finally:
             sys.modules.pop(name, None)
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
@@ -1927,12 +1997,12 @@ def add(x, y):
         # refused rather than matched against None, and a module named for the
         # key is accepted and, the value being the live entry, replaced by it.
         # No traced bytecode reaches that arm, so a comptime callback calls
-        # import_source on the live translator mid-trace, with the frame's real
-        # globals and output behind it, and snapshots the record there: the
-        # translator is not read once the compile has returned. The two arms
-        # run on two translators, as in production: a refusal raises
-        # Unsupported out to skip or restart the whole frame, so one translator
-        # never reaches the name twice.
+        # import_source on the live translator mid-trace, as IMPORT_NAME does
+        # (graph_break_ok), with the frame's real globals and output behind it,
+        # and snapshots the record there: the translator is not read once the
+        # compile has returned. The two arms run on two translators, as in
+        # production: a refusal raises Unsupported out to skip or restart the
+        # whole frame, so one translator never reaches the name twice.
         key = "torch_test_package_import_alias_non_module_value"
         alias = f"__import_{key}"
         value = types.SimpleNamespace(VALUE=1)
@@ -1943,7 +2013,7 @@ def add(x, y):
         def resolve(ctx):
             tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
             try:
-                source = tx.import_source(key)
+                source = tx.import_source(key, True)
             finally:
                 seen.append(dict(tx.output.import_sources))
             seen.append(source)
@@ -1976,6 +2046,55 @@ def add(x, y):
             self.assertEqual(recorded[alias], key)
         finally:
             sys.modules.pop(key, None)
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    @torch._dynamo.config.patch(record_runtime_overhead=True)
+    def test_import_alias_of_a_name_removed_from_sys_modules_keeps_its_module(self):
+        # Codegen resolves names the traced bytecode never imported -- here
+        # torch.autograd.profiler, for the runtime-overhead record in every
+        # compiled frame's prologue -- so nothing has put a removed entry back
+        # by the time import_source runs. The alias keeps the module the program
+        # holds, which the memo took while the name was live, instead of
+        # re-importing inside the trace (a second copy of the module) or, for
+        # None, the blocked-module sentinel, raising. The spy pins the mechanism
+        # itself: whatever else the compile imports, it never asks for this
+        # name. The alias is deleted before each compile so the binding checked
+        # is that compile's write, which is also what pins that a compile ran.
+        name = "torch.autograd.profiler"
+        alias = "__import_torch_dot_autograd_dot_profiler"
+        profiler = sys.modules[name]
+
+        def fn(x):
+            return x + 1
+
+        args = (torch.randn(3, 2),)
+        real_import = importlib.import_module
+        spy = mock.patch.object(importlib, "import_module", wraps=real_import)
+        try:
+            compiled_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], profiler)
+            for blocked in (False, True):
+                with self.subTest(blocked=blocked):
+                    torch._dynamo.reset()
+                    del fn.__globals__[alias]
+                    with spy as import_module:
+                        if blocked:
+                            sys.modules[name] = None
+                        else:
+                            del sys.modules[name]
+                        self.assertEqual(fn(*args), compiled_fn(*args))
+                        asked = [call.args[0] for call in import_module.call_args_list]
+                        self.assertNotIn(name, asked)
+                        if blocked:
+                            self.assertIsNone(sys.modules[name])
+                        else:
+                            self.assertNotIn(name, sys.modules)
+                    self.assertIs(fn.__globals__[alias], profiler)
+        finally:
+            sys.modules[name] = profiler
             _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
