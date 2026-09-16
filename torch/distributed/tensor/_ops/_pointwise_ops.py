@@ -178,7 +178,15 @@ _BINARY_ADDITIVE_RULES: list[list[Placement]] = [
 ]
 
 for op in binary_additive_ops:
-    _register_single_dim_pointwise(op, _BINARY_ADDITIVE_RULES)
+    rules: list[list[Placement]] = _BINARY_ADDITIVE_RULES
+    if op in (aten.add_.Tensor, aten.sub_.Tensor):
+        # Python scalar operands expose only one tensor argument. Offsets
+        # preserve averages without changing the scalar's native arithmetic.
+        rules = [*rules, [Partial("avg"), Partial("avg")]]
+    _register_single_dim_pointwise(op, rules)
+
+for op in (aten.add_.Scalar, aten.sub_.Scalar):
+    _register_single_dim_pointwise(op, [[Partial("avg"), Partial("avg")]])
 
 # mul: partials propagate through either arg. div: only through numerator.
 binary_mul_ops = [
