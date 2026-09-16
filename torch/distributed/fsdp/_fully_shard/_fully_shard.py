@@ -556,6 +556,10 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        A backend can set ``AllGather.layout`` to customize input packing and
+        per-parameter output views. Without a layout, FSDP uses the default
+        rank-major copy-in and copy-out.
+
         Args:
             comm (AllGather): Custom all-gather communication.
         """
@@ -567,6 +571,8 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            if comm.layout is not None:
+                comm.layout._bind_owner(fsdp_param_group)
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
