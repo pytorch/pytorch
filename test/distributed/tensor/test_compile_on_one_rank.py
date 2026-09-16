@@ -1696,6 +1696,40 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         self.assertEqual(out0, ref0)
         self.assertEqual(out1, ref1)
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_user_defined_triton_kernel_reused_in_process_across_devices(self):
+        # Same cross-device reuse as the test above, for a user-defined triton.jit
+        # kernel. That one passes only because an inductor-generated kernel gets the
+        # static launcher, which keeps its handles per device. USER_AUTOTUNE is refused
+        # by check_can_launch unless static_launch_user_defined_triton_kernels is set,
+        # and that defaults off, so these kernels fall back to TritonCompileResult --
+        # which binds one CUfunction at _init_handles() time and reuses it for every
+        # later launch.
+        #
+        # Before the index was dropped here, the baked DeviceProperties(index=N) gave
+        # each device its own cache key and hence its own autotuner, so the single
+        # baked function was never reached. Dropping it is what makes one artifact
+        # serve both devices.
+        from torch._inductor.utils import clear_caches, fresh_cache
+
+        fn = self._make_coor_user_defined_triton_fn()
+        inp0 = torch.randn(128, device="cuda:0")
+        inp1 = torch.randn(128, device="cuda:1")
+        torch._dynamo.reset()
+        clear_caches()
+        with fresh_cache():
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            with torch.cuda.device(0):
+                out0 = compiled(inp0)
+            # The same in-process autotuner (loaded on cuda:0) now launches on cuda:1.
+            with torch.cuda.device(1):
+                out1 = compiled(inp1)
+        self.assertEqual(out0.device, torch.device("cuda:0"))
+        self.assertEqual(out1.device, torch.device("cuda:1"))
+        self.assertEqual(out0, inp0 + 1)
+        self.assertEqual(out1, inp1 + 1)
+
 
 instantiate_parametrized_tests(TestCompileOnOneRankDeviceAsParameter)
 
