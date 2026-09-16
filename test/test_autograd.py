@@ -4084,6 +4084,21 @@ class TestAutograd(TestCase):
         self._test_sparse_gather((), (), 0)
 
     @skipIfTorchDynamo("grad_dtype not supported in compile")
+    @parametrize("declared", ["unset", torch.float32, torch.float64, None])
+    @parametrize("requires_grad", [False, True])
+    def test_has_grad_dtype_override(self, declared, requires_grad):
+        tensor = torch.ones(2, dtype=torch.float32, requires_grad=requires_grad)
+        self.assertIs(tensor._has_grad_dtype_override, False)
+        if declared != "unset":
+            tensor.grad_dtype = declared
+        self.assertIs(tensor._has_grad_dtype_override, declared != "unset")
+        self.assertEqual(
+            tensor.grad_dtype, torch.float32 if declared == "unset" else declared
+        )
+        with self.assertRaises(AttributeError):
+            tensor._has_grad_dtype_override = False
+
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
     def test_grad_dtype(self):
         leaf = torch.tensor([1.0, 2.0], requires_grad=True)
         # Default to tensor's dtype
