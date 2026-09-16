@@ -5339,6 +5339,75 @@ from user code:
         self.assertIn("AOTCompiledFunction", repr(abandoned))
         self.assertEqual(abandoned, abandoned)
 
+    def test_aot_compile_module_absent_global_fails_guard(self):
+        # A guarded global the loading process does not have has to fail the
+        # guard. Falling back to the serialized scope would make the guard a
+        # no-op checked against capture-time state, which is the silent failure
+        # mode -- the loud one is recoverable on the serving machine. A module
+        # load takes no f_globals=: eval_frame's _load_aot_compiled_module takes
+        # only the bytes, though deserialize still takes guard_globals=. The
+        # hint names the instance's forward whenever the scope model.forward
+        # resolves to is the dict the guards hold, as it is for a load that
+        # passed no guard_globals=, resolved forward, and is not rebound after
+        # the load -- the rebound sibling's included, since it rebinds BEFORE
+        # loading -- so the substring asserted below fits that sibling too;
+        # what pins this non-rebound load is the recovery arm at the end --
+        # defining the name in globals() serves the call here, where the same
+        # binding in test_no_match_message_hint_covers_a_rebound_forward still
+        # raises.
+        x = torch.randn(3, 3)
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(
+            HermeticModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        g = globals()
+        saved = g.pop("AOT_HERMETIC_WEIGHT")
+        try:
+            # No filter on the reload: the load installs the artifact's own
+            # guards and nothing is captured here, so the loading process's
+            # filter has no say in what a loaded artifact checks.
+            reloaded = torch.compile(HermeticModule(), fullgraph=True, backend="eager")
+            reloaded._load_aot_compiled_module(data)
+            with self.assertRaises(RuntimeError) as ctx:
+                reloaded(x)
+            message = str(ctx.exception)
+            self.assertIn("No AOT compiled graph matched", message)
+            self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
+            self.assertIn(
+                "the globals of the function this HermeticModule instance's forward "
+                "resolves to",
+                message,
+            )
+            # The advice is not something the report decides for a missing
+            # global: it closes the report for any guard failure, this one
+            # included, and asserting it pins that the hint stays an addition to
+            # it rather than a replacement. A missing global is still the
+            # mismatch the advice is for -- the report cannot know whether a new
+            # ModelInput would read the absent name; one captured for a branch
+            # that does not is served with the name still absent.
+            self.assertIn("Add a ModelInput", message)
+            # Taking the advice restores dispatch but not the value: the
+            # guards read the live scope, so the new binding passes the kept
+            # TENSOR_MATCH, which checks metadata and not values. The bytecode's
+            # globals are built once, at load, and substitute a live value only
+            # for a name the scope has then, so the value serialized with the
+            # artifact was never overwritten -- which is what asserting
+            # `x @ saved` here pins. That is the load-time snapshot as the code
+            # stands here, a limitation and not the intended end state: a later
+            # commit of this stack makes every call re-read the live value and
+            # flips this assertion to `x @ (saved * 2)`.
+            g["AOT_HERMETIC_WEIGHT"] = saved * 2
+            self.assertEqual(reloaded(x), x @ saved)
+        finally:
+            g["AOT_HERMETIC_WEIGHT"] = saved
+
     def test_aot_compile_module_import_alias_guard_loads_across_processes(self):
         # The real deployment shape: the artifact is captured by a process that
         # never runs here, so the __import_* aliases its guards are rooted at
