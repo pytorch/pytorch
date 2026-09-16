@@ -2596,6 +2596,12 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Same gfx950 CI runner failure family as test_mempool_large_alloc_barrier:
+    # the first device-side atomic on the peer's signal pad in
+    # one_shot_all_reduce never completes and the test hangs until the per-test
+    # timeout (SR-IOV virtual functions); passes on gfx950 outside those runners
+    # and on the mi300 runners with the same image.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_mempool_tensor_factory(self):
         self._init_process()
@@ -2666,6 +2672,11 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Same gfx950 CI runner failure family as test_mempool_large_alloc_barrier:
+    # the worker dies with hipErrorLaunchFailure on the first peer signal-pad
+    # access (SR-IOV virtual functions); passes on gfx950 outside those runners
+    # and on the mi300 runners with the same image.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_mempool_recycled_alloc_signal_pad(self):
         # Regression test for the signal-pad pollution bug: the symmetric
@@ -2693,6 +2704,12 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # On the gfx950 CI distributed runners (SR-IOV virtual functions) the
+    # rendezvous succeeds but barrier_kernel's first atomic on the peer's signal
+    # pad memory-faults; passes on gfx950 outside those runners and on the mi300
+    # runners with the same image. Skipped on that arch until the runner P2P
+    # path is understood.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_mempool_large_alloc_barrier(self):
         # alloc() only zeros the signal pad, not the whole (much larger) data
@@ -2735,7 +2752,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
             "MemPool should return the same storage block for same-size re-allocation",
         )
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
