@@ -3256,6 +3256,8 @@ partial_fn = functools.partial(fn, scale=2)
             ("index", 10**400, OverflowError),
         ),
     )
+    # Unspecialized, 10**400 hits sym_float: RuntimeError, not OverflowError.
+    @torch._dynamo.config.patch(specialize_int=True)
     def test_math_ceil_floor_invalid_conversion(self, name, protocol, value, error):
         class FloatLike:
             def __float__(self):
