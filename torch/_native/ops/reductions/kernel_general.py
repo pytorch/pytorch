@@ -5,7 +5,7 @@
 
 import math
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, cast, Literal
 
 from cutlass import Float32, Float64, Int32, Int64
 
@@ -417,7 +417,7 @@ def _reduce(
         num_o=num_o,
         red_pairs=red_pairs,
         kept_pairs=kept_pairs,
-        in_base=x.storage_offset(),
+        in_base=cast(int, x.storage_offset()),
         nouts=nouts,
         block=block,
     )
