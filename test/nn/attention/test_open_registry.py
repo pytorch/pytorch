@@ -1,5 +1,6 @@
 # Owner(s): ["module: sdpa"]
 
+import os
 from unittest import mock
 
 import torch
@@ -139,6 +140,45 @@ class TestFlashAttentionRegistry(TestCase):
             attention.activate_flash_attention_impl("CUDNN")
             attention.restore_flash_attention_impl()
             self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+
+    def test_cudnn_env_var_enables(self):
+        """TORCH_CUDNN_SDPA_USE_PYTHON turns the Python implementation on
+        without a source change."""
+        installed = []
+
+        def _register():
+            installed.append(1)
+
+            class _H:
+                def remove(self):
+                    installed.clear()
+
+            return _H()
+
+        self.addCleanup(_cudnn.disable)
+        with mock.patch.object(_cudnn, "_PROVIDER_REGISTER_FN", _register):
+            with mock.patch.dict(os.environ, {_cudnn.ENV_VAR: "1"}):
+                _cudnn._enable_from_env()
+            self.assertTrue(torch.backends.cuda.cudnn_sdp_python_enabled())
+            self.assertEqual(1, len(installed))
+
+    def test_cudnn_env_var_unset_is_a_no_op(self):
+        for value in ("", "0", "no"):
+            with mock.patch.dict(os.environ, {_cudnn.ENV_VAR: value}):
+                _cudnn._enable_from_env()
+            self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
+
+    def test_cudnn_env_var_failure_does_not_raise(self):
+        """A stale value must not break `import torch`: the variable is
+        process-wide and usually set by a job launcher."""
+
+        def _boom():
+            raise RuntimeError("provider is broken")
+
+        with mock.patch.object(_cudnn, "_PROVIDER_REGISTER_FN", _boom):
+            with mock.patch.dict(os.environ, {_cudnn.ENV_VAR: "1"}):
+                _cudnn._enable_from_env()  # must not raise
+        self.assertFalse(torch.backends.cuda.cudnn_sdp_python_enabled())
 
 
 if __name__ == "__main__":

@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import logging
+import os
 
 from . import _registry
 from ._registry import FlashAttentionHandle as _ProviderHandle
@@ -36,6 +38,10 @@ __all__ = [
 
 
 _CUDNN_MODULE_PATH = "cudnn.torch"
+
+ENV_VAR = "TORCH_CUDNN_SDPA_USE_PYTHON"
+
+logger = logging.getLogger(__name__)
 
 # The provider's handle while its kernels are installed; None when they are not.
 _ACTIVE_HANDLE: _ProviderHandle | None = None
@@ -143,6 +149,32 @@ def register_cudnn_attention(module_path: str = _CUDNN_MODULE_PATH):
     """
     enable(module_path)
     return _CuDNNRegistryHandle()
+
+
+def _enable_from_env() -> None:
+    """Honor ``TORCH_CUDNN_SDPA_USE_PYTHON`` at ``torch.nn.attention`` import.
+
+    Lets an existing script run on the cuDNN Python implementation without a
+    source change, which is what makes A/B comparison and soak testing
+    practical.
+
+    Never raises. The variable is process-wide and typically set by a job
+    launcher, so a stale value, a missing package, or an unfriendly import
+    order must not break ``import torch``; it warns and leaves the built-in C++
+    implementation in place. Enabling does import the provider during
+    ``import torch`` -- that cost is the point of having asked for it.
+    """
+    if os.environ.get(ENV_VAR, "") not in ("1", "true", "True"):
+        return
+    try:
+        enable()
+    except Exception:
+        logger.warning(
+            "%s is set but the cuDNN Python implementation could not be enabled; "
+            "the built-in implementation stays active.",
+            ENV_VAR,
+            exc_info=True,
+        )
 
 
 _registry.register_flash_attention_impl(

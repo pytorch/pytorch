@@ -712,6 +712,9 @@ def enable_cudnn_sdp_python(enabled: bool):
     enabling this does not disturb FA3/FA4.
 
     Enabling imports the provider package; it is not imported otherwise.
+
+    Setting ``TORCH_CUDNN_SDPA_USE_PYTHON=1`` enables this at import, so an
+    existing script can be switched over without a source change.
     """
     from torch.nn.attention import _cudnn
 
