@@ -956,7 +956,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   // The Metal kernels bind gamma/beta at the input dtype, so mixed-dtype
   // affine params (e.g. fp32 gamma/beta with an fp16 input, the
   // keep-LayerNorm-in-fp32 recipe) must be cast, not reinterpreted.
-  const auto bias_contig = bias.defined() ? std::make_optional(bias.to(input.scalar_type()).contiguous()) : std::nullopt;
+  const auto bias_contig =
+      bias.defined() ? std::make_optional(bias.to(input.scalar_type()).contiguous()) : std::nullopt;
   const auto gamma = weight.defined() ? std::make_optional(weight.to(input.scalar_type()).contiguous()) : std::nullopt;
   auto mean = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
   auto rstd = at::empty(batch_shape, input.options(), MemoryFormat::Contiguous);
