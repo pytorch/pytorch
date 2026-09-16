@@ -19,6 +19,7 @@ set(C10_XPU_SRCS
     XPUCachingAllocator.cpp
     XPUFunctions.cpp
     XPUStream.cpp
+    driver_api.cpp
     impl/XPUGuardImpl.cpp
 )
 set(C10_XPU_HEADERS
@@ -30,6 +31,7 @@ set(C10_XPU_HEADERS
     XPUFunctions.h
     XPUMacros.h
     XPUStream.h
+    driver_api.h
     impl/XPUGuardImpl.h
 )
 if(NOT BUILD_LIBTORCHLESS)
