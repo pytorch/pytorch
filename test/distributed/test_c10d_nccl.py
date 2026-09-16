@@ -7496,7 +7496,6 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 time.sleep(600)
 
 
-@skip_but_pass_in_sandcastle
 class NCCLTraceTestDumpDuringShutdown(NCCLTraceTestDumpOnTimeoutBase):
     # Give rank 1 time to observe rank 0's enqueue marker and enter shutdown
     # before rank 0's unmatched collective times out.
