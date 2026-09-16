@@ -2617,20 +2617,17 @@ class TestFullyShardInference(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    @unittest.skipIf(device_type.type != "cuda", "CUDA only")
     def test_inference(self):
-        model = nn.Linear(8, 4, bias=False, device="cuda")
+        model = nn.Linear(8, 4, bias=False, device=device_type)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
         with torch.inference_mode():
-            model(torch.ones((2, 8), device="cuda"))
+            model(torch.ones((2, 8), device=device_type))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:
         return 1
-
-    test_inference = TestFullyShardInference.test_inference
 
     def test_train_parity_single_worldsize1(self):
         """
