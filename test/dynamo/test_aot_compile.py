@@ -2542,8 +2542,9 @@ from user code:
         # codegen's business, and the evaluation count itself is pinned
         # codegen-independently by the stub tests' `checks`. hits=2 does rest on
         # one probe per evaluation, though: codegen that probed the key twice per
-        # check() would move the raise into dispatch pass 2 and fail the two
-        # assertions below on a probe count rather than on report logic.
+        # check() would move the raise into dispatch pass 2, where the entry line
+        # and this count read the same; only the last two assertions tell that
+        # apart (measured with a wrapper that calls check() twice).
         self.assertGreaterEqual(key.compares, 3)
         # Only a raise from dispatch is chained onto the report, so a report raise
         # has to carry what it was raised from in the line itself.
@@ -2551,6 +2552,10 @@ from user code:
         self.assertIn(raised, message)
         self.assertNotIn("Every guard tree raised", message)
         self.assertIn("Add a ModelInput", message)
+        # Nothing raised in dispatch, so nothing is chained and no artifact is
+        # named for fixing: the two readings a dispatch raise would change.
+        self.assertIsNone(ctx.exception.__cause__)
+        self.assertNotIn("fix or drop that artifact", message)
 
     def test_no_match_message_when_a_raise_did_not_cross_the_pybind_boundary(self):
         # Not every raise arrives as a SystemError with the real exception
@@ -2705,19 +2710,7 @@ from user code:
         # fixed or dropped, [1] names a global the load can define, and [1]'s
         # rejection is what a new ModelInput would answer. All three lines stand
         # on their own entries, in the order the report emits them.
-        model = torch.compile(
-            ModeBranchGlobalModule(),
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        x = torch.randn(3, 3)
-        model._aot_compile(
-            [
-                ModelInput(args=(x, 0), kwargs={}, contexts=[]),
-                ModelInput(args=(x, 1), kwargs={}, contexts=[]),
-            ]
-        )
+        model, x = self._aot_compile_mode_branches()
 
         class Raises(NeverReChecked):
             def check(self, f_locals):
@@ -2753,6 +2746,7 @@ from user code:
         # advice comes from the withheld branch instead, and it still has to
         # coexist with a missing global named by a third entry. [0] raised, [1]
         # names the global, [2] opted out and was withheld by [0]'s raise.
+        self._hide_leaked_dynamo_globals()
         model = torch.compile(
             ModeBranchGlobalModule(),
             fullgraph=True,
@@ -4658,9 +4652,9 @@ from user code:
         # raise on record rather than the first.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])] * 3
-        )
+        x = torch.randn(3, 3)
+        inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(3)]
+        model._aot_compile(inputs)
 
         class Raises:
             def __init__(self, message):
@@ -4672,7 +4666,6 @@ from user code:
         results = model.forward.compiled_results
         results[0]._artifacts.guard_manager = Raises("the first tree is unhappy")
         results[1]._artifacts.guard_manager = Raises("the second tree is unhappy")
-        x = torch.randn(3, 3)
         with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
             served = model(x)
         self.assertEqual(served, x * 2)
@@ -4869,9 +4862,9 @@ from user code:
         # nested inside the raise assertion it would never look at the records.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])] * 2
-        )
+        x = torch.randn(3, 3)
+        inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(2)]
+        model._aot_compile(inputs)
 
         class Raises:
             def check(self, f_locals):
@@ -4885,7 +4878,6 @@ from user code:
         results[0]._artifacts.guard_manager = Raises()
         real = results[1]._artifacts.guard_manager
         results[1]._artifacts.guard_manager = Interrupts()
-        x = torch.randn(3, 3)
         logger = "torch._dynamo.aot_compile"
         with self.assertNoLogs(logger, level="WARNING"):
             with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
