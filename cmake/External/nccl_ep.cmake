@@ -4,9 +4,7 @@ if(NOT __NCCL_EP_INCLUDED)
   if(USE_SYSTEM_NCCL_EP)
     find_package(NCCLEP REQUIRED)
 
-    get_filename_component(NCCL_EP_JIT_HOME "${NCCL_EP_JIT_INCLUDE_DIR}" DIRECTORY)
-    list(GET NCCL_INCLUDE_DIRS 0 __nccl_ep_nccl_include)
-    get_filename_component(NCCL_EP_JIT_NCCL_HOME "${__nccl_ep_nccl_include}" DIRECTORY)
+    list(GET NCCL_INCLUDE_DIRS 0 NCCL_EP_NCCL_INCLUDE_DIR)
 
     add_library(__caffe2_nccl_ep INTERFACE)
     target_link_libraries(__caffe2_nccl_ep INTERFACE ${NCCL_EP_LIBRARIES})

@@ -3,9 +3,10 @@
 // The EP code lives in this optional extension -- which NEEDED-links libnccl_ep
 // -- rather than in libtorch_cuda / libtorch_python's init.cpp. It is imported
 // lazily by torch/distributed/_token_switch.py, so the normal Python
-// extension-import machinery loads libnccl_ep (and raises ImportError if the
-// optional nccl4py wheel that provides it is absent). libtorch_cuda therefore
-// never references ncclEp* and torch imports with or without nccl4py.
+// extension-import machinery loads libnccl_ep. System NCCL EP builds use an
+// external provider; legacy dynamic builds obtain it from nccl4py.
+// libtorch_cuda therefore never references ncclEp* and torch imports without
+// loading NCCL EP.
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
 #include <torch/csrc/utils/pybind.h>
 
@@ -19,12 +20,9 @@ PYBIND11_MODULE(_nccl_ep, m) {
   using namespace c10d::nccl_ep;
 
 #ifdef NCCL_EP_JIT_HOME
-  // Point nccl-ep's runtime JIT at the headers selected at build time. An
-  // in-tree build uses one root, while a system build may use separate roots.
-  // overwrite=0 so an explicit user setting wins.
   setenv("NCCL_EP_HOME", NCCL_EP_JIT_HOME, /*overwrite=*/0);
-#ifdef NCCL_EP_JIT_NCCL_HOME
-  setenv("NCCL_HOME", NCCL_EP_JIT_NCCL_HOME, /*overwrite=*/0);
+#ifdef NCCL_EP_NCCL_JIT_HOME
+  setenv("NCCL_HOME", NCCL_EP_NCCL_JIT_HOME, /*overwrite=*/0);
 #else
   setenv("NCCL_HOME", NCCL_EP_JIT_HOME, /*overwrite=*/0);
 #endif
