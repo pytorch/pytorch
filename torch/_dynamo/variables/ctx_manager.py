@@ -1101,9 +1101,6 @@ class AutocastModeVariable(ContextWrappingVariable):
             arguments.setdefault(
                 "device_type", torch._C._get_privateuse1_backend_name()
             )
-            arguments.setdefault("dtype", None)
-            arguments.setdefault("enabled", True)
-            arguments.setdefault("cache_enabled", None)
             target_values = []
             for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
                 arg = arguments[key]

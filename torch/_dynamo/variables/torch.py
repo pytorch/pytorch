@@ -211,7 +211,15 @@ def _is_privateuse1_autocast(value: Any) -> bool:
         value, torch.amp.autocast_mode.autocast
     ):
         return False
-    return value is _get_privateuse1_autocast()
+    if value is not _get_privateuse1_autocast():
+        return False
+    # Keep wrappers whose autocast semantics are not exposed by the standard
+    # argument names on the generic user-defined class path.
+    try:
+        parameters = inspect.signature(value).parameters
+    except (TypeError, ValueError):
+        return False
+    return all(name in parameters for name in ("dtype", "enabled", "cache_enabled"))
 
 
 def _install_privateuse1_autocast_guards() -> None:

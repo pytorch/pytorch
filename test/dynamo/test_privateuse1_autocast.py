@@ -7,10 +7,6 @@ from unittest import mock
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import EagerAndRecordGraphs
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
 
 
 BACKEND = torch._C._get_privateuse1_backend_name()
@@ -79,13 +75,18 @@ class TestPrivateUse1Autocast(TestCase):
         self.assert_enter_autocast_args(backend, (BACKEND, torch.float16, True, True))
 
     def test_omitted_defaults_remain_deferred(self):
-        class MinimalAutocast(torch.amp.autocast_mode.autocast):
-            def __init__(self):
-                super().__init__(BACKEND)
+        class DeferredDefaultsAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
 
         device_module = self.device_module
         with mock.patch.object(
-            device_module.amp, "autocast", MinimalAutocast, create=True
+            device_module.amp, "autocast", DeferredDefaultsAutocast, create=True
         ):
             backend = EagerAndRecordGraphs()
 
@@ -135,44 +136,6 @@ class TestPrivateUse1Autocast(TestCase):
 
         self.assert_enter_autocast_args(backend, (BACKEND, torch.bfloat16, False, None))
 
-    @parametrize(
-        "kwargs,expected",
-        [
-            (
-                {
-                    "dtype": torch.bfloat16,
-                    "enabled": True,
-                    "cache_enabled": False,
-                },
-                (BACKEND, torch.bfloat16, True, False),
-            ),
-            (
-                {"dtype": torch.bfloat16, "enabled": False},
-                (BACKEND, torch.bfloat16, False, None),
-            ),
-        ],
-    )
-    def test_variadic_keyword_arguments(self, kwargs, expected):
-        class KwargsAutocast(torch.amp.autocast_mode.autocast):
-            def __init__(self, **wrapper_kwargs):
-                super().__init__(BACKEND, **wrapper_kwargs)
-
-        device_module = self.device_module
-        with mock.patch.object(
-            device_module.amp, "autocast", KwargsAutocast, create=True
-        ):
-            backend = EagerAndRecordGraphs()
-
-            @torch.compile(backend=backend, fullgraph=True)
-            def fn(x):
-                with device_module.amp.autocast(**kwargs):
-                    return x + 1
-
-            x = torch.randn(4)
-            self.assertEqual(fn(x), x + 1)
-
-        self.assert_enter_autocast_args(backend, expected)
-
     def test_explicit_device_type_is_preserved(self):
         class DeviceTypeAutocast(torch.amp.autocast_mode.autocast):
             pass
@@ -195,12 +158,22 @@ class TestPrivateUse1Autocast(TestCase):
 
     def test_registered_entrypoint_rebind_recompiles(self):
         class RegisteredAutocast(torch.amp.autocast_mode.autocast):
-            def __init__(self):
-                super().__init__(BACKEND)
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
 
         class ReplacementAutocast(torch.amp.autocast_mode.autocast):
-            def __init__(self):
-                super().__init__(BACKEND)
+            def __init__(self, dtype=None, enabled=True, cache_enabled=None):
+                super().__init__(
+                    BACKEND,
+                    dtype=dtype,
+                    enabled=enabled,
+                    cache_enabled=cache_enabled,
+                )
 
         autocast = RegisteredAutocast
 
@@ -222,8 +195,70 @@ class TestPrivateUse1Autocast(TestCase):
             self.assertEqual(optimized_fn(x), x + 1)
         self.assertEqual(len(backend.graphs), 2)
 
+    def test_nonstandard_wrapper_signatures_keep_generic_route(self):
+        class HiddenDefaultsAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self):
+                super().__init__(BACKEND, dtype=torch.bfloat16, enabled=False)
 
-instantiate_parametrized_tests(TestPrivateUse1Autocast)
+        class RenamedArgumentsAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self, precision, active, cache):
+                super().__init__(
+                    BACKEND,
+                    dtype=precision,
+                    enabled=active,
+                    cache_enabled=cache,
+                )
+
+        class VariadicArgumentsAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self, *wrapper_args):
+                super().__init__(BACKEND, *wrapper_args)
+
+        class VariadicKeywordAutocast(torch.amp.autocast_mode.autocast):
+            def __init__(self, **wrapper_kwargs):
+                wrapper_kwargs["enabled"] = not wrapper_kwargs.get("enabled", True)
+                super().__init__(BACKEND, **wrapper_kwargs)
+
+        cases = [
+            (HiddenDefaultsAutocast, (), {}),
+            (
+                RenamedArgumentsAutocast,
+                (torch.bfloat16, False, None),
+                {},
+            ),
+            (
+                VariadicArgumentsAutocast,
+                (torch.bfloat16, False, None),
+                {},
+            ),
+            (
+                VariadicKeywordAutocast,
+                (),
+                {
+                    "dtype": torch.bfloat16,
+                    "enabled": True,
+                    "cache_enabled": False,
+                },
+            ),
+        ]
+        device_module = self.device_module
+        x = torch.randn(4)
+        for wrapper, args, kwargs in cases:
+            with self.subTest(wrapper=wrapper.__name__, kwargs=kwargs):
+                with mock.patch.object(
+                    device_module.amp, "autocast", wrapper, create=True
+                ):
+
+                    def fn(x):
+                        with device_module.amp.autocast(*args, **kwargs):
+                            return (
+                                x + 1,
+                                torch.is_autocast_enabled(BACKEND),
+                                torch.get_autocast_dtype(BACKEND),
+                            )
+
+                    expected = fn(x)
+                    actual = torch.compile(backend="eager", fullgraph=True)(fn)(x)
+                    self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
