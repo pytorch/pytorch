@@ -211,6 +211,7 @@ import hashlib
 import io
 import logging
 import pickle
+import types
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
@@ -1589,6 +1590,61 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
             }
         )
     return frames
+
+
+def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
+    """Indices of the frames a standalone driver can actually dispatch.
+
+    The entry is reachable, and a continuation is reachable only once some
+    ALREADY reachable frame's bytecode names it. Asking merely whether a frame
+    carries a resume name is not the same question: a continuation whose parent
+    is itself unreachable is just as dead, and counting it as covered
+    under-reports how much of the artifact will run eager.
+    """
+    from torch._dynamo.package import SerializedCode
+
+    def named_globals(frame: dict[str, Any]) -> set[str]:
+        out: set[str] = set()
+        stack = [
+            SerializedCode.to_code_object(variant["dynamo_code"])
+            for variant in frame["variants"]
+        ]
+        seen: set[int] = set()
+        while stack:
+            code = stack.pop()
+            if id(code) in seen:
+                continue
+            seen.add(id(code))
+            out.update(code.co_names)
+            stack.extend(c for c in code.co_consts if isinstance(c, types.CodeType))
+        return out
+
+    reachable = {i for i, frame in enumerate(frames) if frame["is_entry"]}
+    while True:
+        named: set[str] = set()
+        for i in reachable:
+            named |= named_globals(frames[i])
+        grew = {
+            i
+            for i, frame in enumerate(frames)
+            if i not in reachable and any(n in named for n in frame["resume_names"])
+        }
+        if not grew:
+            return reachable
+        reachable |= grew
+
+
+def _serving_mode(frames: list[dict[str, Any]]) -> str:
+    """``"standalone"`` when a source artifact covers every captured frame.
+
+    Anything it cannot reach would run eager, silently giving up the compiled
+    variant, so those captures are served by installing instead.
+    """
+    reachable = _reachable_frames(frames)
+    unreachable = [
+        i for i, frame in enumerate(frames) if frame["variants"] and i not in reachable
+    ]
+    return "installed" if unreachable else "standalone"
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
