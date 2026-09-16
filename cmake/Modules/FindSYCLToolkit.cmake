@@ -184,7 +184,6 @@ elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
     PATH_SUFFIXES include
     )
 endif()
-message(FATAL_ERROR ${LevelZero_INCLUDE_DIR} ", "  $ENV{LEVEL_ZERO_V1_SDK_PATH})
 
 if(NOT LevelZero_INCLUDE_DIR)
   set(SYCL_FOUND False)
