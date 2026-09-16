@@ -1858,7 +1858,9 @@ test_distributed_4gpu() {
   total_kept=$(awk '{s+=$1} END {print s+0}' "$count_file")
   rm -f "$count_file"
   unset PYTORCH_MULTIGPU_SELECTION_COUNT_FILE
-  if [[ "$total_kept" -eq 0 ]]; then
+  # Only meaningful when the run itself succeeded; on failure rc is the real
+  # signal and a 0 count just means collection never finished.
+  if [[ "$rc" -eq 0 && "$total_kept" -eq 0 ]]; then
     echo "::error::distributed_4gpu shard selected 0 tests; min-gpus filter may have regressed"
     exit 1
   fi
