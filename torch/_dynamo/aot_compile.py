@@ -1515,7 +1515,10 @@ class AOTCompiledModel:
     per compiled result quoting the guards that refused it, or, for a result
     whose guards accept the call on the report's own evaluation after refusing
     it in both dispatch passes, a ``<guards rejected this call twice and then
-    accepted it here: ...>`` explanation in place of any guards; one
+    accepted it here: ...>`` explanation in place of any guards, or, for a
+    result whose refusal quotes nothing -- an accessor that answered false with
+    no parts, or a guard that raised with a blank message -- ``<guard check
+    failed without naming a guard>``; one
     ``For [i, j]:`` line per distinct missing-global hint naming the entries
     whose guards failed on a global the process does not define; and the advice
     to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
@@ -1610,9 +1613,18 @@ class AOTCompiledModel:
                 )
                 continue
             parts = reason.verbose_code_parts
+            # Collapse every separator splitlines() reads the report back on.
+            # Done here, not in get_verbose_code_part: the recompile logs consume
+            # the same parts and are out of this report's scope.
+            joined = " ".join("; ".join(parts).splitlines())
+            if not joined.strip():
+                # A failing accessor can answer false with no parts to quote, and
+                # a guard that raised quotes str(exc), which can be blank.
+                lines.append(f"  [{i}] <guard check failed without naming a guard>")
+                continue
             if any(map(_names_a_missing_global, parts)):
                 hinted.setdefault(result._missing_global_hint(), []).append(i)
-            lines.append(f"  [{i}] {'; '.join(parts)}")
+            lines.append(f"  [{i}] {joined}")
         for hint, at in hinted.items():
             lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
         lines.append(
