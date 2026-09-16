@@ -65,16 +65,15 @@ def _synchronize_for_devices(devices: list[str] | None) -> None:
         raise ValueError("devices must not be empty")
     if devices is not None and _is_cpu_only_devices(devices):
         return
-    if not torch.accelerator.is_available():
-        return
-    acc = torch.accelerator.current_accelerator()
-    if acc is None:
-        return
     if _is_cuda_sync_sentinel(devices):
+        if not torch.accelerator.is_available():
+            return
+        acc = torch.accelerator.current_accelerator()
+        if acc is None:
+            return
         torch.accelerator.synchronize()
         return
-    targets: list[torch.device] = []
-    mismatched: list[str] = []
+    parsed: list[tuple[str, torch.device]] = []
     for spec in devices or []:
         if spec == "cpu":
             continue
@@ -82,6 +81,21 @@ def _synchronize_for_devices(devices: list[str] | None) -> None:
             dev = torch.device(spec)
         except (RuntimeError, ValueError) as exc:
             raise ValueError(f"Invalid device entry in devices: {spec!r}") from exc
+        parsed.append((spec, dev))
+    if not parsed:
+        raise ValueError(f"No accelerator entries in devices {devices!r}")
+    if not torch.accelerator.is_available():
+        raise ValueError(
+            f"Accelerator is not available but devices {devices!r} includes accelerator entries"
+        )
+    acc = torch.accelerator.current_accelerator()
+    if acc is None:
+        raise ValueError(
+            f"No current accelerator but devices {devices!r} includes accelerator entries"
+        )
+    targets: list[torch.device] = []
+    mismatched: list[str] = []
+    for spec, dev in parsed:
         if dev.type != acc.type:
             mismatched.append(spec)
             continue
