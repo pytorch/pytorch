@@ -18,7 +18,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
-    get_devtype,
     MLP,
     patch_reduce_scatter,
     patch_register_post_backward_hook_backward,
@@ -29,9 +28,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-
-
-device_type = torch.device(get_devtype())
 
 
 class TestFullyShardFrozen(FSDPTest):
@@ -51,7 +47,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     @property
     def world_size(self) -> int:
-        return min(4, torch.get_device_module(device_type).device_count())
+        return min(4, torch.get_device_module(self.device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
     def test_train_mixed_requires_grad_per_group(self, device):
@@ -62,6 +58,9 @@ class TestFullyShardFrozen(FSDPTest):
         via the custom autograd function backward (i.e. that they are not
         delayed until the end of backward).
         """
+        # A bare device type (without index) resolves to each rank's current
+        # device, while the injected `device` is the primary device on every rank.
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True, 2],
@@ -69,10 +68,12 @@ class TestFullyShardFrozen(FSDPTest):
                 "freeze_after_init": [False, True],
             },
             self._test_train_mixed_requires_grad_per_group,
+            device_type,
         )
 
     def _test_train_mixed_requires_grad_per_group(
         self,
+        device_type: str,
         reshard_after_forward: bool | int,
         use_activation_checkpointing: bool,
         freeze_after_init: bool,
@@ -160,16 +161,19 @@ class TestFullyShardFrozen(FSDPTest):
         parameters across different FSDP communication groups, including
         possibly unfreezing parameters.
         """
+        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True, 2],
                 "unfreeze_params": [False, True],
             },
             self._test_train_mixed_requires_grad_across_groups,
+            device_type,
         )
 
     def _test_train_mixed_requires_grad_across_groups(
         self,
+        device_type: str,
         reshard_after_forward: bool | int,
         unfreeze_params: bool,
     ):
@@ -240,10 +244,12 @@ class TestFullyShardFrozen(FSDPTest):
         self.run_subtests(
             {"reshard_after_forward": [True, False, 2]},
             self._test_multi_forward_mixed_requires_grad,
+            torch.device(device).type,
         )
 
     def _test_multi_forward_mixed_requires_grad(
         self,
+        device_type: str,
         reshard_after_forward: bool | int,
     ):
         class MultiForwardModule(nn.Module):
