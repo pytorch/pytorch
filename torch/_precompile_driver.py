@@ -37,6 +37,16 @@ if TYPE_CHECKING:
     # ahead of the driver. Bound here with placeholder values (not bare annotations) so
     # static tools treat them as real names in the bodies below; this block is not emitted.
     MODULE_POSITIONS: list[int] = []
+    # Multi-graph artifact state. _FRAMES is one record per Dynamo frame (its
+    # code, its variants' guard state and transformed bytecode, the globals it
+    # reads), _BACKENDS the compiled subgraphs, _ENTRY_BINDING the entry's
+    # default arguments; the two versions lock the marshalled bytecode and the
+    # pickled guard state to the interpreter and torch build that produced them.
+    _FRAMES: str = ""
+    _BACKENDS: str = ""
+    _ENTRY_BINDING: str = ""
+    _DYNAMO_PYTHON_VERSION: tuple[int, int] = (0, 0)
+    TORCH_VERSION: str = ""
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -53,6 +63,9 @@ if TYPE_CHECKING:
     USER_INPUT_DTYPES: list[str | None] = []
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
+    # Device types the captured graph dispatches on. The drivers neutralize
+    # ambient autocast on these; see _autocast_off.
+    GRAPH_DEVICES: tuple[str, ...] = ()
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -132,6 +145,31 @@ def _check_structure(pb, names):
             )
 
 
+def _autocast_off(devices):
+    """Neutralize ambient autocast on the devices the captured graph uses.
+
+    Whatever the capture ran under is already baked into the artifact -- ATen
+    casts for make_fx, generated kernels for inductor -- but the graph still
+    re-dispatches (an inductor artifact calls extern_kernels, which hit the
+    autocast key), so a serving process with autocast on would cast a second
+    time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
+    than from the runtime tensors: a graph can reach a device none of its
+    inputs live on, and one built from factory ops has no input device at all.
+
+    Only a device whose autocast is on is entered: autocast.__exit__ clears the
+    process-wide cast cache whenever its nesting count returns to zero, so
+    entering unconditionally would wipe that cache for every autocast model in
+    the process on each call.
+    """
+    import contextlib as _contextlib
+
+    with _contextlib.ExitStack() as stack:
+        for _dev in devices:
+            if _torch.is_autocast_enabled(_dev):
+                stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
+        return stack.pop_all()
+
+
 def _eager_forward(*args):
     """Run the captured ATen graph eagerly. Pass the same args the traced fn took --
     the module(s) in the same positions plus the runtime inputs. The module(s) must
@@ -201,7 +239,7 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    with _torch.no_grad():
+    with _autocast_off(GRAPH_DEVICES), _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -312,7 +350,11 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        out = list(call([*pb, *user_flat]))
+        # The generated code re-dispatches through extern_kernels for anything
+        # inductor did not fuse, so ambient autocast reaches it even though the
+        # casts the capture ran under are already baked into the kernels.
+        with _autocast_off(GRAPH_DEVICES):
+            out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
         # mismatch, or a size mismatch on an unbacked dim the static check above cannot
@@ -366,3 +408,204 @@ def _inductor_forward(*args):
             else:
                 p.grad.add_(g)
     return _pytree.tree_unflatten(out, _pytree.treespec_loads(OUT_SPEC))
+
+
+def _build_multigraph_forward():
+    """Reconstruct a multi-graph artifact and return the runnable ``forward``.
+
+    A capture with graph breaks or several specializations is not one graph, so
+    unlike the single-graph drivers this one has to DISPATCH. Dynamo produced,
+    per frame, one transformed bytecode plus one guard tree per variant; the
+    artifact carries those verbatim (_FRAMES) and this rebuilds them into a
+    dispatcher per frame.
+
+    Deliberately standalone: nothing is installed onto the running program's
+    code objects and no frame evaluator is involved. A frame's dispatcher
+    evaluates each variant's guards against the arguments it was handed and
+    calls the first that matches, so an artifact serves only what it captured
+    and mutates nothing. A continuation is reached the way Dynamo emits it --
+    the entry bytecode does LOAD_GLOBAL on the resume name -- so binding the
+    resume dispatcher under that name in this module's namespace is all the
+    wiring the graph-break path needs.
+
+    Because there is no compiler behind a source artifact, an uncovered call
+    RAISES rather than falling back. That is the point: the artifact serves the
+    calls it captured, and anything else is a coverage gap the caller has to
+    hear about.
+    """
+    import base64
+    import importlib
+    import inspect
+    import pickle
+    import sys as _sys
+    import types
+
+    import torch
+    from torch._dynamo.aot_compile import bind_locals
+    from torch._dynamo.output_graph import get_builtins_dict
+    from torch._dynamo.package import (
+        load_guard_manager,
+        load_guards_state,
+        SerializedCode,
+    )
+
+    # The documented contract (Note [precompile programming model]) is that the
+    # version/build locks surface as a clean PrecompileError, so an
+    # ``except torch.compiler.precompile.PrecompileError`` handler catches them.
+    from torch._precompile import PrecompileError as _PrecompileError
+
+    if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
+        # marshal only REJECTS a foreign blob across the 3.10 -> 3.11 layout
+        # change; between 3.11 and 3.14 it loads and then segfaults when the
+        # code object runs, so the version has to be checked explicitly.
+        raise _PrecompileError(
+            f"precompile: this artifact was produced on Python "
+            f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]} and cannot "
+            f"load on {_sys.version_info[0]}.{_sys.version_info[1]}: it inlines "
+            f"marshalled bytecode, which is Python-version-locked. Regenerate the "
+            f"artifact under the serving Python."
+        )
+    if TORCH_VERSION != torch.__version__:
+        # _FRAMES carries pickled Dynamo guard state, which no other torch build
+        # promises to unpickle; the import check below cannot see a build whose
+        # modules all still import.
+        raise _PrecompileError(
+            f"precompile: this artifact was produced by torch {TORCH_VERSION} and "
+            f"cannot load on torch {torch.__version__}: it inlines pickled Dynamo "
+            f"guard state, which is torch-build-locked. Regenerate the artifact "
+            f"under the serving torch."
+        )
+
+    def _import(module_name):
+        try:
+            return importlib.import_module(module_name)
+        except ImportError as _e:
+            # The torch-build / environment lock, surfaced per the documented
+            # contract rather than as a raw ModuleNotFoundError.
+            raise _PrecompileError(
+                f"precompile: this artifact references module {module_name!r}, "
+                f"which is not importable here ({_e}). It was produced against a "
+                f"different torch build or environment; regenerate the artifact "
+                f"in this one."
+            ) from _e
+
+    frames = pickle.loads(base64.b64decode(_FRAMES))
+    backends = pickle.loads(base64.b64decode(_BACKENDS))
+    entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
+
+    # One namespace, this module's own dict, holds every name the transformed
+    # bytecode can reach: the globals of the module the frames were compiled in
+    # (all of them -- a continuation is installed into the globals of the frame
+    # that names it, so a standalone artifact's frames share the entry's
+    # module), Dynamo's import aliases, the compiled subgraphs and the resume
+    # dispatchers bound below. Seeding READS the user's module as of load time;
+    # the artifact never binds a name there.
+    ns = globals()
+    for _frame in frames:
+        for _k, _v in vars(_import(_frame["python_module"])).items():
+            ns.setdefault(_k, _v)
+        for _alias, _module_name in _frame["import_sources"].items():
+            ns[_alias] = _import(_module_name)
+    for _backend_id, _artifact in backends.items():
+        ns[_backend_id] = torch._dynamo.disable(_artifact.after_deserialization())
+
+    def _make_dispatcher(frame):
+        target = SerializedCode.to_code_object(frame["code"])
+        is_entry = frame["is_entry"]
+        if is_entry and target.co_freevars:
+            # Capture refuses a closure entry, so this is a malformed artifact
+            # rather than something to rebuild over empty cells.
+            raise _PrecompileError(
+                f"precompile: artifact entry {target.co_name!r} closes over "
+                f"{list(target.co_freevars)!r}, which a self-contained artifact "
+                f"cannot rebuild. Regenerate it from a module-level function."
+            )
+        # A code object carries no defaults, so the entry gets them back from
+        # the artifact; a defaulted parameter the call omits is otherwise absent
+        # from f_locals and every guard on it misses.
+        defaults = entry_binding.get("defaults") if is_entry else None
+        kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
+
+        def _function(code, closure):
+            f = types.FunctionType(code, ns, target.co_name, defaults, closure)
+            if kwdefaults:
+                f.__kwdefaults__ = dict(kwdefaults)
+            return f
+
+        variants = []
+        for guarded in frame["variants"]:
+            guards_state = load_guards_state(guarded["guards_state"])
+            # Dynamo guards builtins through a dict it minted into the TRACING
+            # process's globals under this key; a process that only loads never
+            # traced, so the key is re-minted here (as CompilePackage.install
+            # does) or every guard rooted at it misses.
+            key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+            if key:
+                ns[key] = get_builtins_dict(ns)
+            manager = load_guard_manager(guards_state, target, ns)
+            body = SerializedCode.to_code_object(guarded["dynamo_code"])
+            variants.append((manager, body))
+
+        # Calls are bound to f_locals the way Python binds them (keyword-only,
+        # *args and **kwargs included); the transformed bytecode keeps the
+        # frame's parameter layout, so the original code object describes it.
+        cells = tuple(types.CellType() for _ in target.co_freevars)
+        signature = inspect.signature(_function(target, cells or None))
+
+        def _dispatch_with(bound, closure, args, kwargs):
+            # Guards are written against the frame's locals: the free variables
+            # (a cell unbound at the graph break is absent, as it is from a real
+            # frame's f_locals), then the bound arguments.
+            f_locals = {}
+            for name, cell in zip(target.co_freevars, closure or ()):
+                try:
+                    f_locals[name] = cell.cell_contents
+                except ValueError:
+                    pass
+            f_locals.update(bind_locals(signature, *args, **kwargs))
+            for manager, variant in bound:
+                if manager.check(f_locals):
+                    return variant(*args, **kwargs)
+            raise _PrecompileError(
+                f"precompile: no captured variant of {target.co_name!r} matches this "
+                f"call. The artifact serves only what capture exercised; add an "
+                f"example covering it and recapture. Captured "
+                f"{len(variants)} variant(s)."
+            )
+
+        def _bind(closure):
+            return [(manager, _function(body, closure)) for manager, body in variants]
+
+        if target.co_freevars:
+            # Dynamo binds a continuation that closes over locals as a FACTORY
+            # taking the closure tuple, and the frame ahead of it passes one.
+            def factory(closure):
+                bound = _bind(closure)
+
+                def dispatch(*args, **kwargs):
+                    return _dispatch_with(bound, closure, args, kwargs)
+
+                return dispatch
+
+            return factory
+
+        bound = _bind(None)
+
+        def dispatch(*args, **kwargs):
+            return _dispatch_with(bound, None, args, kwargs)
+
+        return dispatch
+
+    entry = None
+    for _frame in frames:
+        dispatcher = _make_dispatcher(_frame)
+        # A continuation is reached by LOAD_GLOBAL from the frame ahead of it,
+        # under the name capture minted; bound here, nothing outside this
+        # artifact resolves it.
+        for _name in _frame["resume_names"]:
+            ns[_name] = dispatcher
+        if _frame["is_entry"]:
+            entry = dispatcher
+    if entry is None:
+        raise _PrecompileError("precompile: artifact has no entry frame")
+    return entry
