@@ -805,11 +805,6 @@ class TestFlopCounterDevice(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
 
-instantiate_device_type_tests(
-    TestFlopCounterDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
-
-
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
 )
@@ -1457,9 +1452,6 @@ class TestFlopCounterCUDA(TestCase):
             )
 
 
-instantiate_device_type_tests(TestFlopCounterCUDA, globals(), only_for="cuda")
-
-
 class TestFlexAttentionEstimation(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1637,11 +1629,16 @@ class TestFlexAttentionEstimationDevice(TestCase):
 
 
 instantiate_device_type_tests(
+    TestFlopCounterDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(TestFlopCounterCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(
     TestFlexAttentionEstimationDevice,
     globals(),
     only_for=("cuda", "xpu"),
     allow_xpu=True,
 )
+
 
 if __name__ == "__main__":
     run_tests()
