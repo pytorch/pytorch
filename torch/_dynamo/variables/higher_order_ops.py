@@ -5216,6 +5216,14 @@ class AutogradFunctionApplyVariable(VariableTracker):
             self.trace_forward_graph(tx, ctx, fwd_tracer, args, kwargs)
         )
 
+        # Direct InputBuffer accumulation is an eager engine optimization.
+        # Expose no buffers so Dynamo captures the fallback; AOTAutograd then
+        # handles accumulation in the compiled backward.
+        input_grad_buffers = ConstantVariable.create((None,) * len(args))
+        tx.output.side_effects.store_instance_dict_attr(
+            ctx, "_input_grad_buffers", input_grad_buffers
+        )
+
         bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
             self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
         )

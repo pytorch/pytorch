@@ -103,10 +103,13 @@ class FunctionCtx:
             and stream.
 
         This property is available only while a Python custom ``backward`` is
-        executing during an eager, first-order :meth:`~torch.Tensor.backward`,
-        :func:`torch.autograd.backward`, or :func:`torch.autograd.grad` call. It is
-        unavailable with ``create_graph=True``, anomaly detection, a post-hook on
-        the producing autograd node, or stale capture stream overrides.
+        executing during a first-order :meth:`~torch.Tensor.backward`,
+        :func:`torch.autograd.backward`, or :func:`torch.autograd.grad` call. When
+        the custom backward is captured by :func:`torch.compile`, every entry is
+        ``None`` and AOTAutograd accumulates the gradients returned by the fallback
+        path. The property is unavailable with ``create_graph=True``, anomaly
+        detection, a post-hook on the producing autograd node, or stale capture
+        stream overrides.
 
         .. note::
             For a leaf input, a non-``None`` entry exposes its execution-local
