@@ -2494,7 +2494,10 @@ class InstructionTranslatorBase(
         # alias roots its guards. When neither is live the writer's module
         # stays -- the memo would be no less stale -- and the guards read a
         # module the graph was not built from, as they do for an empty slot
-        # whenever the memo is not the live entry.
+        # whenever the memo is not the live entry -- and there, on the
+        # get_globals_source_and_value path, an inlined STORE_GLOBAL replays
+        # through the alias onto the memo while the trace read the live module,
+        # the one whose __dict__ is the frame's globals.
         write_value = not conflict or live
         # Recorded only once the check has passed: the package entry outlives a
         # graph break here, and install() binds every recorded alias.
