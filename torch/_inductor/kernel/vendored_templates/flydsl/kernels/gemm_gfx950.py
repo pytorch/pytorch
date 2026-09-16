@@ -130,10 +130,6 @@ def make_gemm_gfx950_param(
         raise ValueError("group_m must be non-negative")
 
     if is_mxfp:
-        if use_half_tile_interleaved:
-            raise ValueError("MXFP does not support half-tile interleaved")
-        if has_bias:
-            raise ValueError("MXFP does not support bias")
         if mma_k < 128:
             mma_k = 128
         if block_k % mma_k != 0:
@@ -206,11 +202,13 @@ def make_gemm_gfx950_param(
     scale_row_bytes = 0
     block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
     if is_mxfp:
-        cshuffle_x_threads = block_n // cshuffle_vec_size
+        shuffle_m = block_m // 2 if use_half_tile_interleaved else block_m
+        shuffle_n = block_n // 2 if use_half_tile_interleaved else block_n
+        cshuffle_x_threads = shuffle_n // cshuffle_vec_size
         if (
             cshuffle_x_threads == 0
             or block_threads % cshuffle_x_threads != 0
-            or block_m % (block_threads // cshuffle_x_threads) != 0
+            or shuffle_m % (block_threads // cshuffle_x_threads) != 0
         ):
             raise ValueError(
                 "C-shuffle thread mapping does not cover the output tile: "
@@ -219,8 +217,10 @@ def make_gemm_gfx950_param(
             )
         scale_row_bytes = block_k // MXFP_SCALE_BLOCK_K
         scale_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
-        scale_a_bytes = mxfp_scale_stage_bytes(block_m, block_k, block_threads)
-        scale_b_bytes = mxfp_scale_stage_bytes(block_n, block_k, block_threads)
+        scale_rows_a = block_m // 2 if use_half_tile_interleaved else block_m
+        scale_rows_b = block_n // 2 if use_half_tile_interleaved else block_n
+        scale_a_bytes = mxfp_scale_stage_bytes(scale_rows_a, block_k, block_threads)
+        scale_b_bytes = mxfp_scale_stage_bytes(scale_rows_b, block_k, block_threads)
         scale_a_iters = scale_a_bytes // scale_bytes_per_pass
         scale_b_iters = scale_b_bytes // scale_bytes_per_pass
 
@@ -251,9 +251,17 @@ def make_gemm_gfx950_param(
     ldg_wait_count = ldg_a_iters + ldg_b_iters + scale_a_iters + scale_b_iters
     if (stages - 2) * ldg_wait_count >= 63:
         raise ValueError("staged pipeline wait count exceeds supported range")
+    # MXFP HTI stores one half-tile at a time and stages both half-tiles'
+    # E8M0 scales with AB. C-shuffle starts after the last MMA, so scales
+    # share the AB/C union.
+    scale_lds_factor = 2 if is_mxfp and use_half_tile_interleaved else 1
+    output_bytes = block_m * block_n * out_dbytes
+    if is_mxfp and use_half_tile_interleaved:
+        output_bytes //= 4
     smem_bytes = max(
-        stages * (a_stage_bytes + b_stage_bytes + scale_a_bytes + scale_b_bytes),
-        block_m * block_n * out_dbytes,
+        stages * (a_stage_bytes + b_stage_bytes)
+        + scale_lds_factor * stages * (scale_a_bytes + scale_b_bytes),
+        output_bytes,
     )
     smem_capacity = {
         "gfx942": 65536,
@@ -279,6 +287,11 @@ def make_gemm_gfx950_param(
             raise ValueError(
                 "half-tile B load schedule must exactly cover the LDS tile"
             )
+        if (
+            2 * (half_ldg_b_iters + scale_b_iters) + (half_ldg_a_iters + scale_a_iters)
+            >= 63
+        ):
+            raise ValueError("half-tile pipeline wait count exceeds supported range")
     mma_m_repeat = block_m // m_waves // mma_m
     mma_n_repeat = block_n // n_waves // mma_n
     if is_mxfp:
@@ -1326,6 +1339,10 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
             return None
         if not result.b_is_transposed and n % GFX950_DMA_BYTES != 0:
             return None
+        if result.use_half_tile_interleaved:
+            k_tiles = (k + result.block_k - 1) // result.block_k
+            if k_tiles < 2:
+                return None
         return result
     output_vec_size = GFX950_DMA_BYTES // result.out_data_bytes
     if n % output_vec_size != 0 or k % result.mma_k != 0:

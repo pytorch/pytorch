@@ -33,11 +33,9 @@ def _inductor_tensor_arg(tensor):
 
 def _make_param():
     has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
-{% if not IS_MXFP %}
     if USE_HALF_TILE_INTERLEAVED:
         k_tiles = (GEMM_K + TILE_K - 1) // TILE_K
         has_k_tail = has_k_tail or k_tiles % 2 != 0
-{% endif %}
     return make_gemm_param_and_validate(
         GEMM_M,
         GEMM_N,
@@ -54,16 +52,18 @@ def _make_param():
             "m_waves": M_WAVES,
             "n_waves": N_WAVES,
             "group_m": GROUP_M,
-            "use_half_tile_interleaved": {% if IS_MXFP %}False{% else %}USE_HALF_TILE_INTERLEAVED{% endif %},
+            "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
             "a_is_transposed": A_IS_TRANSPOSED,
             "b_is_transposed": B_IS_TRANSPOSED,
-            "has_bias": False,
+            "has_bias": {% if IS_MXFP and HAS_BIAS %}True{% else %}False{% endif %},
             "has_k_tail": has_k_tail,
         },
     )
 
 
-{% if IS_MXFP %}
+{% if IS_MXFP and HAS_BIAS %}
+{{def_kernel("mat1", "mat2", "scale_a", "scale_b", "bias")}}
+{% elif IS_MXFP %}
 {{def_kernel("mat1", "mat2", "scale_a", "scale_b")}}
 {% else %}
 {{def_kernel("mat1", "mat2")}}
@@ -93,7 +93,14 @@ def _make_param():
                 _param = param
 
     configure_flydsl_cache_dir()
-    tensor_args = (output, mat1, mat2{% if IS_MXFP %}, scale_a, scale_b{% endif %})
+    tensor_args = (
+        output,
+        mat1,
+        mat2{% if IS_MXFP %},
+        scale_a,
+        scale_b,
+        {% if HAS_BIAS %}bias{% else %}output{% endif %}{% endif %}
+    )
     compile_args = tuple(_inductor_tensor_arg(arg) for arg in tensor_args) + (
         param,
         stream,
@@ -147,7 +154,7 @@ def {{kernel_name}}_precompile(
                     device="cpu",
                 )
 
-            input_names = ("mat1", "mat2"{% if IS_MXFP %}, "scale_a", "scale_b"{% endif %})
+            input_names = ("mat1", "mat2"{% if IS_MXFP %}, "scale_a", "scale_b"{% if HAS_BIAS %}, "bias"{% endif %}{% endif %})
             args = tuple(_fake_proxy(name) for name in input_names) + (
                 _fake_proxy("output"),
             )

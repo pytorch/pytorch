@@ -1249,6 +1249,13 @@ def _mxfp_param_kwargs(
 
     tile_k = int(gemm_config["TILE_K"])
     stages = int(gemm_config["STAGES"])
+    use_half_tile_interleaved = bool(
+        gemm_config.get("USE_HALF_TILE_INTERLEAVED", False)
+    )
+    has_k_tail = infer_has_k_tail(k, tile_k, stages)
+    if use_half_tile_interleaved:
+        k_tiles = (k + tile_k - 1) // tile_k
+        has_k_tail = has_k_tail or (k_tiles % 2 != 0)
     return {
         "dtype_id": GEMM_DTYPE_MXFP4 if mxfp_format == "mxfp4" else GEMM_DTYPE_MXFP8,
         "out_dtype_id": (
@@ -1261,15 +1268,17 @@ def _mxfp_param_kwargs(
         "m_waves": int(gemm_config["M_WAVES"]),
         "n_waves": int(gemm_config["N_WAVES"]),
         "group_m": int(gemm_config["GROUP_M"]),
-        "use_half_tile_interleaved": False,
+        "use_half_tile_interleaved": use_half_tile_interleaved,
         "a_is_transposed": a_is_transposed,
         "b_is_transposed": b_is_transposed,
         "has_bias": False,
-        "has_k_tail": infer_has_k_tail(k, tile_k, stages),
+        "has_k_tail": has_k_tail,
     }
 
 
-def _run_mxfp_tile(mxfp_format, shape, tile, out_dtype, inputs, operand_layout=()):
+def _run_mxfp_tile(
+    mxfp_format, shape, tile, out_dtype, inputs, operand_layout=(), bias=None
+):
     import flydsl.compiler as flyc
 
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
@@ -1282,19 +1291,22 @@ def _run_mxfp_tile(mxfp_format, shape, tile, out_dtype, inputs, operand_layout=(
     m, n, k = shape
     a_is_transposed, b_is_transposed = operand_layout or (False, True)
     out = torch.zeros(m, n, device=inputs[0].device, dtype=out_dtype)
-    tensors = (out, *(tensor.view(torch.uint8) for tensor in inputs))
+    bias_tensor = out if bias is None else bias
+    tensors = (out, *(tensor.view(torch.uint8) for tensor in inputs), bias_tensor)
+    kwargs = _mxfp_param_kwargs(
+        mxfp_format,
+        asdict(FlyDSLGemmConfig(*tile)),
+        k=k,
+        out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
+        a_is_transposed=a_is_transposed,
+        b_is_transposed=b_is_transposed,
+    )
+    kwargs["has_bias"] = bias is not None
     param = make_gemm_param_and_validate(
         m,
         n,
         k,
-        _mxfp_param_kwargs(
-            mxfp_format,
-            asdict(FlyDSLGemmConfig(*tile)),
-            k=k,
-            out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
-            a_is_transposed=a_is_transposed,
-            b_is_transposed=b_is_transposed,
-        ),
+        kwargs,
     )
     assert param is not None
     compile_args = tuple(
@@ -1333,6 +1345,11 @@ class TestFlyDSLMXFPMetadata(TestCase):
             ("mxfp4", {"use_fast_accum": True}, None),
             ("mxfp4", {"contraction_dim": [1]}, None),
             ("mxfp8", {"bias": object()}, None),
+            (
+                "mxfp8",
+                {"bias": _fake_node((96,), (1,), torch.float32)},
+                "mxfp8",
+            ),
             ("mxfp8", {"scale_a": []}, None),
             (
                 "mxfp8",
@@ -1444,6 +1461,29 @@ class TestFlyDSLMXFPMetadata(TestCase):
                 b_is_transposed=True,
             )
 
+    @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
+    def test_mxfp_hti_and_bias_param(self):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            GEMM_DTYPE_MXFP8,
+            make_gemm_gfx950_param,
+        )
+
+        param = make_gemm_gfx950_param(
+            dtype_id=GEMM_DTYPE_MXFP8,
+            tile_m=128,
+            tile_n=128,
+            tile_k=128,
+            stages=2,
+            m_waves=2,
+            n_waves=2,
+            use_half_tile_interleaved=True,
+            has_bias=True,
+            a_is_transposed=False,
+            b_is_transposed=True,
+        )
+        self.assertTrue(param.use_half_tile_interleaved)
+        self.assertTrue(param.has_bias)
+
     @parametrize(
         "mxfp_format,expected_tile_ks",
         (("mxfp4", (256, 512, 1024)), ("mxfp8", (128, 256, 512))),
@@ -1524,6 +1564,7 @@ class TestFlyDSLMXFPMetadata(TestCase):
             self.assertEqual(config_["GEMM_K"], k)
             self.assertEqual(config_["A_IS_TRANSPOSED"], a_is_transposed)
             self.assertEqual(config_["B_IS_TRANSPOSED"], b_is_transposed)
+            self.assertIs(config_["HAS_BIAS"], False)
 
 
 class TestFlyDSLMXFPDevice(TestCase):
@@ -1572,6 +1613,18 @@ class TestFlyDSLMXFPDevice(TestCase):
             ("mxfp8", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0), torch.bfloat16),
             ("mxfp8", (256, 256, 1024), (128, 128, 128, 4, 2, 2, 4), torch.bfloat16),
             ("mxfp8", (256, 256, 512), (256, 256, 128, 2, 2, 2, 0), torch.float16),
+            (
+                "mxfp8",
+                (128, 128, 512),
+                (128, 128, 128, 2, 2, 2, 0, True),
+                torch.bfloat16,
+            ),
+            (
+                "mxfp8",
+                (128, 128, 384),
+                (128, 128, 128, 2, 2, 2, 0, True),
+                torch.bfloat16,
+            ),
             ("mxfp4", (32, 32, 256), (16, 16, 128, 2, 1, 1, 0), torch.bfloat16),
             ("mxfp4", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0), torch.bfloat16),
             ("mxfp4", (256, 256, 1024), (64, 64, 128, 4, 2, 2, 4), torch.bfloat16),
@@ -1598,6 +1651,26 @@ class TestFlyDSLMXFPDevice(TestCase):
             mxfp_format, shape, tile, out_dtype, inputs, operand_layout
         )
         self._assert_close(actual, reference, out_dtype)
+
+    def test_mxfp8_bias_and_hti_match_reference(self, device):
+        self._skip_unless_supported(device)
+        shape = (128, 128, 512)
+        inputs, reference = _mxfp_case("mxfp8", shape, device)
+        bias = torch.randn(shape[1], device=device, dtype=torch.float32)
+        for tile in (
+            (128, 128, 128, 2, 2, 2, 0),
+            (128, 128, 128, 2, 2, 2, 0, True),
+        ):
+            with self.subTest(tile=tile):
+                actual = _run_mxfp_tile(
+                    "mxfp8",
+                    shape,
+                    tile,
+                    torch.bfloat16,
+                    inputs,
+                    bias=bias,
+                )
+                self._assert_close(actual, reference + bias, torch.bfloat16)
 
     def test_unsupported_signature_falls_back(self, device):
         self._skip_unless_supported(device)

@@ -401,6 +401,7 @@ def get_flydsl_mm_template_kwargs(
             "GEMM_K": k_static,
             "A_IS_TRANSPOSED": a_is_transposed,
             "B_IS_TRANSPOSED": b_is_transposed,
+            "HAS_BIAS": False,
         }
         for gemm_config in get_gemm_configs()
         if is_gemm_config_valid_for_shape(
@@ -1193,6 +1194,31 @@ def get_scaling_options(
     )  # verify that shapes are supported by at least one existing pairing
 
 
+def _flydsl_mxfp_bias_supported(
+    bias: Any, mat_b: Any, out_dtype: torch.dtype | None
+) -> bool:
+    if bias is None:
+        return True
+    get_size = getattr(bias, "get_size", None)
+    get_dtype = getattr(bias, "get_dtype", None)
+    if get_size is None or get_dtype is None:
+        return False
+    size = get_size()
+    if len(size) != 1:
+        return False
+    if get_dtype() not in (torch.float32, torch.bfloat16, torch.float16):
+        return False
+    if out_dtype is not None and get_dtype() not in (torch.float32, out_dtype):
+        return False
+    n = mat_b.get_size()[-1]
+    if isinstance(size[0], int) and isinstance(n, int):
+        return size[0] == n
+    try:
+        return bool(V.graph.sizevars.statically_known_equals(size[0], n))
+    except Exception:
+        return False
+
+
 def _get_rocm_mxfp_v2_format(
     mat_a: Any,
     mat_b: Any,
@@ -1217,7 +1243,7 @@ def _get_rocm_mxfp_v2_format(
         and swizzle_b == [SwizzleType.NO_SWIZZLE.value]
         and scale_a[0].get_dtype() == torch.float8_e8m0fnu
         and scale_b[0].get_dtype() == torch.float8_e8m0fnu
-        and bias is None
+        and _flydsl_mxfp_bias_supported(bias, mat_b, out_dtype)
         and out_dtype in (torch.bfloat16, torch.float16)
         and not contraction_dim
         and use_fast_accum is False
@@ -1239,6 +1265,7 @@ def get_flydsl_mxfp_template_kwargs(
     mat_b: Any,
     scale_a: Any,
     scale_b: Any,
+    bias: Any = None,
 ) -> list[dict[str, Any]]:
     """Return shape-compatible configs for one gfx950 MXFP operand format."""
     from ..heuristics.template.flydsl import (
@@ -1369,6 +1396,7 @@ def get_flydsl_mxfp_template_kwargs(
             "GEMM_K": k,
             "A_IS_TRANSPOSED": a_is_transposed,
             "B_IS_TRANSPOSED": b_is_transposed,
+            "HAS_BIAS": bias is not None,
         }
         for gemm_config in get_gemm_configs(mxfp_format)
         if is_gemm_config_valid_for_shape(
@@ -1438,6 +1466,9 @@ def tuned_scaled_mm_v2(
         )
         mxfp_scale_a, mxfp_scale_b = realize_inputs(scale_a[0], scale_b[0])
         mxfp_input_nodes = [mxfp_a, mxfp_b, mxfp_scale_a, mxfp_scale_b]
+        mxfp_bias = realize_inputs(bias) if bias is not None else None
+        if mxfp_bias is not None:
+            mxfp_input_nodes.append(mxfp_bias)
         mxfp_kernel_inputs = MMKernelInputs(
             mxfp_input_nodes,
             mat1_idx=0,
@@ -1446,7 +1477,7 @@ def tuned_scaled_mm_v2(
         )
         mxfp_nodes = mxfp_kernel_inputs.nodes()
         mxfp_choices: list[ChoiceCaller] = []
-        if use_aten_gemm_kernels():
+        if use_aten_gemm_kernels() and mxfp_bias is None:
             mxfp_choices.append(
                 aten__scaled_mm_v2_mxfp.bind(
                     mxfp_nodes,
@@ -1461,6 +1492,7 @@ def tuned_scaled_mm_v2(
             mxfp_b,
             mxfp_scale_a,
             mxfp_scale_b,
+            mxfp_bias,
         ):
             flydsl_mm_template.maybe_append_choice(
                 mxfp_choices,

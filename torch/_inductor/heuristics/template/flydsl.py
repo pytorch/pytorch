@@ -319,9 +319,9 @@ def _project_mxfp_gemm_configs(
             M_WAVES=gemm_config.M_WAVES,
             N_WAVES=gemm_config.N_WAVES,
             GROUP_M=gemm_config.GROUP_M,
+            USE_HALF_TILE_INTERLEAVED=gemm_config.USE_HALF_TILE_INTERLEAVED,
         )
         for gemm_config in gemm_configs
-        if not gemm_config.USE_HALF_TILE_INTERLEAVED
     ]
 
 
@@ -340,8 +340,19 @@ def _get_mxfp_candidates(
             "M_WAVES": [1, 2, 4],
             "N_WAVES": [1, 2, 4],
             "GROUP_M": [0, 4],
+            "USE_HALF_TILE_INTERLEAVED": [False, True],
         }
         candidates = _expand_config_space(FlyDSLGemmConfig, selections)
+        candidates = [
+            candidate
+            for candidate in candidates
+            if not candidate.USE_HALF_TILE_INTERLEAVED
+            or (
+                candidate.STAGES == 2
+                and candidate.M_WAVES == 2
+                and candidate.N_WAVES >= 2
+            )
+        ]
     else:
         candidates = [_BASELINE_CONFIG[mxfp_format]]
         candidates.extend(
