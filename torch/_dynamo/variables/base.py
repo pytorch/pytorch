@@ -38,12 +38,10 @@ from torch._C._dynamo import (
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import (
-    ObservedAttributeError,
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
-    Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
@@ -62,7 +60,6 @@ if TYPE_CHECKING:
     from ..codegen import PyCodegen
     from ..side_effects import SideEffects
     from ..symbolic_convert import InstructionTranslatorBase
-    from .constant import ConstantVariable
     from .functions import UserFunctionVariable
 
 
@@ -2222,50 +2219,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self, tx: InstructionTranslatorBase
     ) -> list[VariableTracker]:
         raise NotImplementedError
-
-    def _hasattr_check_side_effects(
-        self, tx: InstructionTranslatorBase, name: str
-    ) -> ConstantVariable | None:
-        """If *name* has a pending mutation, return the hasattr result; else None."""
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
-            value = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-            return variables.ConstantVariable.create(
-                not isinstance(value, variables.DeletedVariable)
-            )
-        return None
-
-    def call_obj_hasattr(
-        self, tx: InstructionTranslatorBase, name: str
-    ) -> ConstantVariable:
-        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
-
-        Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
-        call tp_getattro, suppress AttributeError via PyErr_Clear, return
-        True/False.
-        https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
-        """
-        result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            return result
-
-        try:
-            self.tp_getattro_impl(tx, name)
-            return variables.ConstantVariable.create(True)
-        except ObservedAttributeError:
-            tx.exn_vt_stack.clear_current_exception()
-            return variables.ConstantVariable.create(False)
-        except (NotImplementedError, Unsupported):
-            pass
-
-        unimplemented(
-            gb_type="Unsupported hasattr call",
-            context=f"call_obj_hasattr {self} {name}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[
-                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """

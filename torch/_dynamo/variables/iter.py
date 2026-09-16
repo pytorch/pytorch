@@ -324,13 +324,6 @@ class IteratorVariable(VariableTracker):
             hints=[*graph_break_hints.DYNAMO_BUG],
         )
 
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if name == "__iter__" or name == "__next__":
-            return variables.ConstantVariable.create(True)
-        return super().call_obj_hasattr(tx, name)
-
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Iterators are their own iterator."""
         return self
