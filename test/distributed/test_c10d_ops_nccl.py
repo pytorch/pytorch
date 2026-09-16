@@ -182,7 +182,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
-    @skipIfXpu(msg="c10d::allreduce_ has no SparseXPU dispatch")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="c10d::allreduce_ has no SparseXPU dispatch"
+    )
     def test_sparse_allreduce_ops(self):
         pg = self.pg
 

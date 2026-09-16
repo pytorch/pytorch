@@ -1883,7 +1883,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_shrink()
     @requires_world_size(2)
-    @skipIfXpu(msg="ProcessGroupXCCL.Options has no comm config")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="ProcessGroupXCCL.Options has no comm config"
+    )
     def test_shrink_group_nccl_config(self):
         """Verify that passing NCCL config via pg_options influences the shrunk group's backend options."""
         device, pg = self._setup_shrink_test("config")
@@ -4322,7 +4324,7 @@ class WorkHookTest(MultiProcessTestCase):
         self.assertEqual(work, seq)
 
 
-@skipIfXpu(
+@skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
     msg="XCCL has no TORCH_XCCL_PROPAGATE_ERROR / HEARTBEAT_TIMEOUT_SEC / ASYNC_ERROR_HANDLING"
 )
 class NcclErrorHandlingTest(MultiProcessTestCase):
@@ -5007,7 +5009,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 18), "Need NCCL 2.17+ for configuring NCCL communicators"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(msg="ProcessGroupXCCL.Options has no comm config")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="ProcessGroupXCCL.Options has no comm config"
+    )
     def test_pass_nccl_options_config(self):
         pg_opts = c10d.ProcessGroupNCCL.Options()
         pg_opts.config.max_ctas = 4
@@ -5061,7 +5065,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 30), "Need NCCL 2.30+ for testing max_p2p_peers in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(msg="ProcessGroupXCCL.Options has no comm config")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="ProcessGroupXCCL.Options has no comm config"
+    )
     def test_pass_nccl_options_config_max_p2p_peers(self):
         nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
         if not hasattr(nccl_cfg, "max_p2p_peers"):
@@ -5080,7 +5086,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(msg="ProcessGroupXCCL.Options has no comm config")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="ProcessGroupXCCL.Options has no comm config"
+    )
     def test_pass_nccl_options_config_comm_name(self):
         nccl_cfg = c10d.ProcessGroupNCCL.NCCLConfig()
         if not hasattr(nccl_cfg, "comm_name"):
@@ -5107,7 +5115,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 27, 3), "Need NCCL 2.27.3+ for testing comm_name in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(msg="ProcessGroupXCCL.Options has no comm config")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="ProcessGroupXCCL.Options has no comm config"
+    )
     def test_comm_name_defaults_to_group_desc_and_name(self):
         # When the user does not set config.comm_name, ProcessGroupNCCL populates
         # it with "<group_desc>:<group_name>" so the NCCL profiler / Inspector can
@@ -5142,7 +5152,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         (2, 31, 2), "Need NCCL 2.31.2+ for testing host_cft_mode in ncclConfig_t"
     )
     @skip_if_lt_x_gpu(2)
-    @skipIfXpu(msg="ProcessGroupXCCL.Options has no comm config")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="ProcessGroupXCCL.Options has no comm config"
+    )
     def test_pass_nccl_options_config_host_cft_mode(self):
         pg_opts = c10d.ProcessGroupNCCL.Options()
         # The binding is gated on the same NCCL version as the decorator above.
@@ -5990,7 +6002,9 @@ class SparseCollective(MultiProcessTestCase):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(1)
-    @skipIfXpu(msg="c10d::allreduce_ has no SparseXPU dispatch")
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+        msg="c10d::allreduce_ has no SparseXPU dispatch"
+    )
     def test_ddp_set_sparse_metadata(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
@@ -7756,7 +7770,9 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
 
 
 @skip_but_pass_in_sandcastle
-@skipIfXpu(msg="XCCL has no TORCH_XCCL_HEARTBEAT_TIMEOUT_SEC")
+@skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+    msg="XCCL has no TORCH_XCCL_HEARTBEAT_TIMEOUT_SEC"
+)
 class NcclErrorDumpTest(NCCLTraceTestBase):
     def _wait_process(self, rank, timeout):
         try:
@@ -7815,7 +7831,9 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
 
 
 # tests that needs to be run with a larger world size
-@skipIfXpu(msg="ProcessGroupXCCL has no comm_split_count")
+@skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/5385
+    msg="ProcessGroupXCCL has no comm_split_count"
+)
 class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, opts, device_id=None):
         # create nccl processgroup with opts
