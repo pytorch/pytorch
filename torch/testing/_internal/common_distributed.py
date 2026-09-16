@@ -338,7 +338,7 @@ def requires_world_size(n: int):
 
     def decorator(func):
         func._required_world_size = n
-        available = torch.cuda.device_count()
+        available = torch.accelerator.device_count()
         return unittest.skipUnless(
             available >= n, f"requires {n} GPUs, found {available}"
         )(func)
