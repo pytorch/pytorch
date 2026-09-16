@@ -35,7 +35,7 @@ import torch._C
 import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import get_fake_value
+from torch._dynamo.utils import constants_identical, get_fake_value
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -1045,10 +1045,12 @@ def are_same_graph_modules(
                     (arg_b.start, arg_b.stop, arg_b.step),
                 ):
                     return False
-            elif arg_a != arg_b:
+            elif not constants_identical(arg_a, arg_b):
                 # This is a catch-all for everything else. `slice` was a
                 # surprise but can there be other data structures that can
-                # contain fx.Nodes in them?
+                # contain fx.Nodes in them? Float constants are compared
+                # bitwise: two graphs differing only by 0.0 vs -0.0 must not
+                # be deduplicated, and identical nan constants should be.
                 return False
         return True
 
@@ -4119,6 +4121,14 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def _guard_dict_keys(vt: VariableTracker) -> None:
+    """DICT_KEYS_MATCH is shallow; nested option dicts need it too."""
+    if isinstance(vt, ConstDictVariable):
+        vt.install_dict_keys_match_guard()
+        for value in vt.items.values():
+            _guard_dict_keys(value)
+
+
 class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
     _HOP_NAME = "torch.ops.higher_order.flex_gemm"
     _ALLOW_FALLBACK_TO_EAGER = False
@@ -4157,6 +4167,10 @@ class FlexGemmHigherOrderVariable(WrapHigherOrderVariable):
 
         _check_supported_callable_arg(tx, args[1], "body_fn")
         operands = args[2].unpack_var_sequence(tx)
+        # as_python_constant guards the present values only; an option added
+        # later (fast_math, backend, a config knob) must recompile.
+        _guard_dict_keys(args[3])
+        _guard_dict_keys(args[4])
         fn_kwargs = args[3].as_python_constant()
         kernel_options = args[4].as_python_constant()
         if self._HOP_NAME is None:
