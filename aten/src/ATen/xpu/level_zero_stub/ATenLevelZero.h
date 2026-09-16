@@ -1,10 +1,6 @@
 #pragma once
 
-#include <c10/macros/Export.h>
-
-#ifndef _WIN32
-#include <level_zero/ze_api.h>
-#endif
+#include <c10/xpu/driver_api.h>
 
 namespace at::xpu {
 
@@ -33,21 +29,11 @@ namespace at::xpu {
 // ATen/xpu/detail/LazyLevelZero.cpp accordingly (e.g., via one of the stub
 // macros).
 
-#define AT_FORALL_ZE(_)        \
-  _(zeModuleCreate)            \
-  _(zeKernelCreate)            \
-  _(zeKernelGetProperties)     \
-  _(zeMemGetAllocProperties)   \
-  _(zeModuleBuildLogGetString) \
-  _(zeModuleBuildLogDestroy)
-
 extern "C" typedef struct LevelZero {
 // Intel level zero is not defaultly available on Windows.
-#ifndef _WIN32
 #define CREATE_MEMBER(name) decltype(&name) name;
-  AT_FORALL_ZE(CREATE_MEMBER)
+  C10_LIBXPU_DRIVER_API_REQUIRED(CREATE_MEMBER)
 #undef CREATE_MEMBER
-#endif // _WIN32
 } LevelZero;
 
 } // namespace at::xpu
