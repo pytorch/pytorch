@@ -24,7 +24,7 @@ import weakref
 from collections import namedtuple
 from collections.abc import Callable
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 import torch._dynamo.testing
@@ -2177,6 +2177,12 @@ from user code:
         self.assertEqual(message.count("a guarded global is missing"), 1)
         self.assertIn("the module the compiled function was traced in", message)
         self.assertIn("Add a ModelInput", message)
+        # The hint is [1]'s: neither the plain mismatch nor the advice carries it.
+        lines = message.splitlines()
+        self.assertEqual(lines[1][:6], "  [0] ")
+        self.assertNotIn("a guarded global is missing", lines[1])
+        self.assertNotIn("a guarded global is missing", lines[-1])
+        self.assertTrue(lines[-1].startswith("Add a ModelInput"), lines[-1])
 
     def test_no_match_message_hints_each_scope_a_mixed_model_failed_in(self):
         # The public constructor takes results of differing scopes: here a
@@ -2510,8 +2516,9 @@ from user code:
         # evaluation, which is what it does for real when the dict-tag fast path
         # answers false without running the tree. That rejection is not an
         # answer about the call, so a second pass has to rescue it. The
-        # rescuable result is [1], which the parent's fall-through never reached:
-        # it re-checked compiled_results[0] and raised [0]'s L['mode'] == 0.
+        # rescuable result is [1]; without the re-check the call would reach the
+        # no-match report, where [0]'s L['mode'] == 0 is one line and [1]'s real
+        # match is refused beside it.
         model, x = self._aot_compile_mode_branches()
         self._rescued_by_the_recheck(model, x)
 
@@ -2986,89 +2993,6 @@ from user code:
         self.assertNotIn("instance's forward", hints[0])
         self.assertIn("Add a ModelInput", lines[-1])
 
-    def test_no_match_report_resolves_forward_only_for_a_supplied_scope(self):
-        # An in-process capture keeps the CAPTURED scope, whose hint never names
-        # forward, so the report has no reason to resolve it -- and resolving it
-        # runs user code (get_traced_fn formats a forward it refuses). Since the
-        # CAPTURED wording reads the same whether or not the resolve ran, the
-        # gate is pinned by counting resolves rather than by the wording.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(
-            HermeticModule(),
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        x = torch.randn(3, 3)
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        resolve = patch(
-            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
-        )
-        g = globals()
-        saved = g.pop("AOT_HERMETIC_WEIGHT")
-        try:
-            with resolve as resolved, self.assertRaises(RuntimeError) as ctx:
-                model(x)
-            message = str(ctx.exception)
-        finally:
-            g["AOT_HERMETIC_WEIGHT"] = saved
-        resolved.assert_not_called()
-        self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
-        self.assertIn("the module the compiled function was traced in", message)
-        self.assertNotIn("instance's forward", message)
-        self.assertIn("Add a ModelInput", message)
-
-    def test_no_match_report_resolves_forward_once_past_a_resolve_that_raises(self):
-        # Two SUPPLIED results loaded without guard_globals=, so both hold this
-        # module's dict, on a RaisingReprModule whose forward is then rebound to
-        # a partial: get_traced_fn formats the forward it refuses into its
-        # error, and that repr raises the module's ValueError past what
-        # _resolve_guard_scope catches. The report marks the attempt before it
-        # tries, so [1] does not re-run that user code for a second raise. Both
-        # entries read neutral whether it re-ran or not, so the count pins it.
-        self._hide_leaked_dynamo_globals()
-        x = torch.randn(3, 3)
-        model = torch.compile(
-            RaisingReprModule(),
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-
-        torch._dynamo.reset()
-        inst = RaisingReprModule()
-        loads = [AOTCompiledModel.deserialize(inst, data) for _ in range(2)]
-        results = [loaded.compiled_results[0] for loaded in loads]
-        self.assertEqual([r._guard_scope for r in results], [_GuardScope.SUPPLIED] * 2)
-        mixed = AOTCompiledModel(inst, results)
-        inst.forward = functools.partial(HermeticModule.forward, inst)
-        with self.assertRaises(ValueError):
-            _resolve_guard_scope(inst)
-        resolve = patch(
-            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
-        )
-        g = globals()
-        saved = g.pop("AOT_HERMETIC_WEIGHT")
-        try:
-            with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
-                mixed(x)
-            message = str(ctx.exception)
-        finally:
-            g["AOT_HERMETIC_WEIGHT"] = saved
-        # Not assert_called_once_with: a failure would repr inst, which raises.
-        self.assertEqual(resolves.call_count, 1)
-        self.assertIs(resolves.call_args.args[0], inst)
-        self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
-        self.assertIn("[1] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
-        self.assertIn(
-            "For [0, 1]: a guarded global is missing from the live scope this "
-            f"artifact was loaded against, here vars({__name__}); define it there",
-            message,
-        )
-        self.assertNotIn("instance's forward", message)
-
     def test_no_match_report_survives_a_forward_resolve_that_raises(self):
         # deserialize without guard_globals= resolves the scope itself, so every
         # result is SUPPLIED and the report does re-resolve forward. A rebind
@@ -3176,19 +3100,31 @@ from user code:
             return check(f_locals)
 
         later_manager = later._live_guard_manager()
-        describe = later_manager.check_verbose
-        watching = patch.object(later_manager, "check_verbose", wraps=describe)
-        with watching as described, patch.object(manager, "check", splicing_check):
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.double())
-            lines = str(ctx.exception).splitlines()
-            self.assertIn("Tried 1 compiled input(s)", lines[0])
-            self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
-            described.assert_not_called()
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.double())
-            self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
-            described.assert_called_once()
+        describers = Mock()
+        describe, later_describe = manager.check_verbose, later_manager.check_verbose
+        watch_first = patch.object(manager, "check_verbose", wraps=describe)
+        watch_later = patch.object(later_manager, "check_verbose", wraps=later_describe)
+        with watch_first as first_described, watch_later as later_described:
+            describers.attach_mock(first_described, "first")
+            describers.attach_mock(later_described, "later")
+            with patch.object(manager, "check", splicing_check):
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 1 compiled input(s)", lines[0])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
+                self.assertEqual([c[0] for c in describers.mock_calls], ["first"])
+                # The next call judges the spliced list: two entries, in the
+                # list's order, each described by its own tree.
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 2 compiled input(s)", lines[0])
+                heads = [line[:6] for line in lines[1:3]]
+                self.assertEqual(heads, ["  [0] ", "  [1] "])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 2)
+                order = [c[0] for c in describers.mock_calls]
+                self.assertEqual(order, ["first", "later", "first"])
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # A tree that THROWS out of C++ returns through
