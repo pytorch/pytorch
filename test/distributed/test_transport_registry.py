@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import asyncio
 import gc
 import threading
 import weakref
@@ -10,17 +11,24 @@ from unittest.mock import patch
 import torch
 from torch.distributed._transport import (
     _registry,
+    _work,
     available_transports,
     new_transport,
     register_transport,
     Transport,
+    wait_all,
     Work,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class _TestTransport(Transport):
@@ -169,6 +177,7 @@ class TestTransportRegistry(TestCase):
             )
 
 
+@instantiate_parametrized_tests
 class TestTransportWork(TestCase):
     def blocked_transport(self):
         started = threading.Event()
@@ -220,6 +229,22 @@ class TestTransportWork(TestCase):
             self.assertIsInstance(work.exception(), ValueError)
             with self.assertRaisesRegex(ValueError, "transfer failed"):
                 work.get_future().wait()
+
+    def test_work_normalizes_legacy_future_timeout(self):
+        class LegacyTimeoutError(Exception):
+            pass
+
+        transport, started, release, _ = self.blocked_transport()
+        work = transport.write(None, None, async_op=True)
+        self.assertTrue(started.wait(5))
+        with (
+            patch.object(_work, "FutureTimeoutError", LegacyTimeoutError),
+            patch.object(work._future, "result", side_effect=LegacyTimeoutError),
+            self.assertRaisesRegex(TimeoutError, "transport wait timed out"),
+        ):
+            work.wait(timedelta(milliseconds=1))
+        release.set()
+        self.assertTrue(work.wait())
 
     def test_work_error_status(self):
         with _TestTransport(operation=lambda local, remote: -1) as transport:
@@ -300,6 +325,94 @@ class TestTransportWork(TestCase):
         release.set()
         self.assertEqual(done.wait(), 1)
         self.assertTrue(second.wait())
+
+    @parametrize("operation", ["read_async", "write_async"])
+    def test_asyncio_transfer_yields(self, operation):
+        transport, started, release, calls = self.blocked_transport()
+
+        async def run():
+            task = asyncio.create_task(getattr(transport, operation)(1, None))
+            self.assertTrue(await asyncio.to_thread(started.wait, 5))
+            self.assertFalse(task.done())
+            release.set()
+            self.assertIsNone(await task)
+
+        asyncio.run(run())
+        self.assertEqual(calls, [1])
+
+    @parametrize("failure", ["transfer", "dispatch"])
+    def test_asyncio_errors_drain_batch(self, failure):
+        transport, started, release, _ = self.blocked_transport()
+
+        def fail(local, remote):
+            raise ValueError("transfer failed")
+
+        broken = _TestTransport(operation=fail)
+        self.addCleanup(broken.close)
+
+        def submit():
+            if failure == "transfer":
+                yield broken.write(None, None, async_op=True)
+            yield transport.write(None, None, async_op=True)
+            if failure == "dispatch":
+                raise ValueError("dispatch failed")
+
+        async def run():
+            task = asyncio.create_task(wait_all(submit()))
+            self.assertTrue(await asyncio.to_thread(started.wait, 5))
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
+            release.set()
+            with self.assertRaisesRegex(ValueError, f"{failure} failed"):
+                await task
+
+        asyncio.run(run())
+
+    def test_asyncio_cancellation_drains_and_preserves_other_waiters(self):
+        transport, started, release, _ = self.blocked_transport()
+        work = transport.write(None, None, async_op=True)
+
+        async def run():
+            cancelled = asyncio.create_task(wait_all([work]))
+            other = asyncio.create_task(wait_all([work]))
+            self.assertTrue(await asyncio.to_thread(started.wait, 5))
+            await asyncio.sleep(0)
+            for _ in range(2):
+                cancelled.cancel()
+                await asyncio.sleep(0)
+                self.assertFalse(cancelled.done())
+                self.assertFalse(work.is_completed())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await cancelled
+            self.assertIsNone(await other)
+            self.assertTrue(work.is_success())
+
+        asyncio.run(run())
+
+    def test_asyncio_timeout_drains(self):
+        transport, started, release, _ = self.blocked_transport()
+
+        async def run():
+            task = asyncio.create_task(
+                asyncio.wait_for(transport.read_async(None, None), timeout=0.001)
+            )
+            self.assertTrue(await asyncio.to_thread(started.wait, 5))
+            await asyncio.sleep(0.02)
+            self.assertFalse(task.done())
+            release.set()
+            with self.assertRaises(asyncio.TimeoutError):
+                await task
+
+        asyncio.run(run())
+
+    def test_asyncio_completed_work_and_empty_batch(self):
+        with _TestTransport() as transport:
+            work = transport.write(None, None, async_op=True)
+            work.wait()
+            asyncio.run(wait_all([work]))
+            asyncio.run(wait_all([work]))
+            asyncio.run(wait_all([]))
 
 
 class TestTransportWorkDevice(TestCase):

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import (
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FutureTimeoutError,
+)
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
 
@@ -10,8 +15,53 @@ from torch.distributed import Work
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from concurrent.futures import Future
+    from collections.abc import Callable, Iterable
+
+
+def _asyncio_future(work: Work) -> asyncio.Future[None]:
+    completion: Future[None] = Future()
+
+    def complete(future: torch.futures.Future[Any]) -> None:
+        try:
+            future.wait()
+        except BaseException as error:
+            completion.set_exception(error)
+        else:
+            completion.set_result(None)
+
+    work.get_future().add_done_callback(complete)
+    return asyncio.wrap_future(completion)
+
+
+async def wait_all(works: Iterable[Work]) -> None:
+    """Await every Work without blocking asyncio or cancelling transfers.
+
+    Drain all submitted operations before propagating cancellation or errors.
+    ``asyncio.wait_for`` therefore reports its timeout only after draining.
+    A generator may submit operations; if it raises, earlier work is drained.
+    """
+    pending = []
+    dispatch_error: BaseException | None = None
+    try:
+        for work in works:
+            pending.append(_asyncio_future(work))
+    except BaseException as error:
+        dispatch_error = error
+    completion = asyncio.gather(*pending, return_exceptions=True)
+    cancelled = False
+    while True:
+        try:
+            results = await asyncio.shield(completion)
+            break
+        except asyncio.CancelledError:
+            cancelled = True
+    if cancelled:
+        raise asyncio.CancelledError
+    if dispatch_error is not None:
+        raise dispatch_error
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
 
 
 class _FutureWork(Work):
@@ -23,7 +73,10 @@ class _FutureWork(Work):
         future.add_done_callback(self._finish)
 
     def _result(self, timeout: float | None = None) -> None:
-        status = self._future.result(timeout)
+        try:
+            status = self._future.result(timeout)
+        except FutureTimeoutError as error:
+            raise TimeoutError(str(error) or "transport wait timed out") from error
         if status != 0:
             raise RuntimeError(f"transport operation failed with status {status}")
 

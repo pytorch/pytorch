@@ -218,13 +218,18 @@ class TestMooncakeTransportDevice(TestCase):
         if not is_cpu and not os.environ.get("MOONCAKE_TEST_RDMA"):
             self.skipTest("set MOONCAKE_TEST_RDMA=1 to test GPU RDMA")
         env = {"MC_FORCE_TCP": "1"} if is_cpu else {}
+        rdma_device = os.environ.get("MOONCAKE_TEST_DEVICE_NAME", "")
         with (
             patch.dict(os.environ, env),
             _mooncake.MooncakeTransport(
-                host="127.0.0.1", protocol="tcp" if is_cpu else "rdma"
+                host="127.0.0.1",
+                protocol="tcp" if is_cpu else "rdma",
+                device_name="" if is_cpu else rdma_device,
             ) as first,
             _mooncake.MooncakeTransport(
-                host="127.0.0.1", protocol="tcp" if is_cpu else "rdma"
+                host="127.0.0.1",
+                protocol="tcp" if is_cpu else "rdma",
+                device_name="" if is_cpu else rdma_device,
             ) as second,
         ):
             first.connect(second.bind())
