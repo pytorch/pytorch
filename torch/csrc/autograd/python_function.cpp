@@ -1396,8 +1396,9 @@ PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
   check_legacy_fn_attr_access(node, "input_grad_buffers");
   TORCH_CHECK(
       node->post_hooks().empty(),
-      "input_grad_buffers does not support hooks registered on the producing "
-      "autograd node");
+      "input_grad_buffers does not support post-hooks on the producing "
+      "autograd node because directly accumulated gradients are returned as "
+      "None and cannot be observed or replaced by those hooks");
 
   variable_list buffers;
   {
@@ -1413,19 +1414,19 @@ PyObject* THPFunction_input_grad_buffers(PyObject* self, void* unused) {
 
   size_t variable_idx = 0;
   for (const auto i : c10::irange(py_fn->is_variable_input.size())) {
-    PyObject* item = nullptr;
+    THPObjectPtr item;
     if (!py_fn->is_variable_input[i] || !buffers[variable_idx].defined()) {
       item = Py_NewRef(Py_None);
     } else {
       item = THPVariable_Wrap(buffers[variable_idx]);
-      if (!item) {
-        return nullptr;
-      }
+    }
+    if (!item) {
+      return nullptr;
     }
     if (py_fn->is_variable_input[i]) {
       ++variable_idx;
     }
-    PyTuple_SET_ITEM(result.get(), i, item);
+    PyTuple_SET_ITEM(result.get(), i, item.release());
   }
   TORCH_INTERNAL_ASSERT(variable_idx == buffers.size());
   return result.release();

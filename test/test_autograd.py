@@ -18486,6 +18486,67 @@ class TestInputGradBuffers(TestCase):
         self.assertEqual(x.grad, weight + 3)
         self.assertEqual(weight.grad, x)
 
+    @parametrize("api", ("grad", "backward_inputs"))
+    @parametrize("intermediate", (False, True))
+    def test_requested_inputs(self, device, api, intermediate):
+        observed_buffers = []
+
+        class Multiply(Function):
+            @staticmethod
+            def forward(ctx, x, weight):
+                ctx.save_for_backward(x, weight)
+                return x * weight
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, weight = ctx.saved_tensors
+                input_buffer, weight_buffer = ctx.input_grad_buffers
+                observed_buffers.append((input_buffer is not None, weight_buffer))
+                grad_weight = grad_output * x
+                if input_buffer is not None:
+                    input_buffer.addcmul_(grad_output, weight)
+                    return None, grad_weight
+                return grad_output * weight, grad_weight
+
+        leaf = torch.randn(4, device=device, requires_grad=True)
+        x = leaf * 2 if intermediate else leaf
+        weight = torch.randn(4, device=device, requires_grad=True)
+        fused = Multiply.apply(x, weight)
+        first = x * 3
+        outputs = (fused, first)
+        grad_outputs = (torch.ones_like(x),) * 2
+
+        if api == "grad":
+            (grad_x,) = torch.autograd.grad(outputs, (x,), grad_outputs)
+            self.assertEqual(grad_x, weight + 3)
+            self.assertIsNone(leaf.grad)
+        else:
+            torch.autograd.backward(outputs, grad_outputs, inputs=(x,))
+            self.assertEqual(x.grad, weight + 3)
+            if intermediate:
+                self.assertIsNone(leaf.grad)
+
+        self.assertEqual(observed_buffers, [(True, None)])
+        self.assertIsNone(weight.grad)
+
+    def test_autograd_grad_target_hook_sees_accumulated_gradient(self, device):
+        hook_grads = []
+
+        def tensor_hook(grad):
+            hook_grads.append(grad.clone())
+
+        x = torch.randn(4, device=device, requires_grad=True)
+        x.register_hook(tensor_hook)
+        direct = _InputGradBufferProducer.apply(x, 2, True, None)
+        first = _InputGradBufferProducer.apply(x, 3, False, None)
+        grad_outputs = (torch.ones_like(x),) * 2
+        (grad_x,) = torch.autograd.grad((direct, first), (x,), grad_outputs)
+
+        expected = torch.full_like(x, 5)
+        self.assertEqual(grad_x, expected)
+        self.assertEqual(hook_grads, [expected])
+        self.assertIsNone(x.grad)
+
     def test_retained_buffer_may_become_stale(self, device):
         retained_buffers = []
         reexposed_buffers = []
@@ -18619,7 +18680,7 @@ class TestInputGradBuffers(TestCase):
         # The exposure state must be restored when backward raises.
         torch.ones((), requires_grad=True).backward()
 
-    @parametrize("mode", ("grad", "create_graph", "anomaly", "post_hook"))
+    @parametrize("mode", ("create_graph", "grad_create_graph", "anomaly", "post_hook"))
     def test_unsupported_execution_modes_error(self, device, mode):
         class Producer(Function):
             @staticmethod
@@ -18637,12 +18698,12 @@ class TestInputGradBuffers(TestCase):
             out.grad_fn.register_hook(lambda grad_inputs, grad_outputs: None)
 
         with self.assertRaisesRegex(RuntimeError, "input_grad_buffers"):
-            if mode == "grad":
-                torch.autograd.grad(out.sum(), x)
-            elif mode == "create_graph":
+            if mode == "create_graph":
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     out.sum().backward(create_graph=True)
+            elif mode == "grad_create_graph":
+                torch.autograd.grad(out.sum(), x, create_graph=True)
             elif mode == "anomaly":
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")

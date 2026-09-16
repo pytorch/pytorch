@@ -43,7 +43,8 @@ class FunctionCtx:
     def input_grad_buffers(self) -> tuple[torch.Tensor | None, ...]:
         r"""Return existing buffers for accumulating gradients of this Function's inputs.
 
-        The tuple is aligned with the inputs passed to :meth:`~Function.forward`.
+        Each entry corresponds to an argument passed to
+        :meth:`~Function.forward`, in the same order.
         Each entry is ``None`` or the autograd engine's current ``InputBuffer`` for
         that input. A non-``None`` buffer contains gradient contributions already
         produced during the current backward. A custom backward may accumulate its
@@ -51,10 +52,10 @@ class FunctionCtx:
         fusing gradient computation with accumulation and avoiding a separate
         gradient tensor.
 
-        A buffer is exposed only after another producer has contributed to that
-        input, so availability follows backward execution order and is independent
-        for each input. An entry may also be ``None`` when its buffer cannot be
-        safely exposed.
+        Availability follows backward execution order and is independent for each
+        input. An entry is ``None`` when no earlier producer has contributed to
+        that input, or when the existing buffer is aliased or cannot safely be
+        updated in place.
 
         For example, ``x`` has another forward use while ``weight`` does not. The
         custom backward conditionally fuses accumulation only for ``grad_x``::
@@ -73,7 +74,7 @@ class FunctionCtx:
             >>>         if x_buffer is not None:
             >>>             # Computes grad_x and adds it to the existing buffer.
             >>>             matmul_backward_input_acc(
-            >>>                 grad_output, weight, out=x_buffer
+            >>>                 grad_output, weight, acc_into=x_buffer
             >>>             )
             >>>             grad_x = None
             >>>         else:
@@ -94,32 +95,32 @@ class FunctionCtx:
             A later producer may replace the engine's buffer, making a retained
             tensor stale.
 
-            After receiving a non-``None`` buffer, the custom backward must not
-            call ``backward`` or ``grad`` before returning. Reentrant engine
-            execution can run another producer while the buffer is still exposed.
+            After receiving a non-``None`` buffer, calling ``backward`` or
+            ``grad`` before the custom backward returns raises an error.
 
-            All producers that use or subsequently update an exposed buffer must
-            execute on the same device, autograd engine thread, and stream. PyTorch
-            diagnoses engine-visible violations. A custom function that launches
-            work on another thread or stream is responsible for synchronizing it
-            before returning.
+            All engine-scheduled producers that use or subsequently update an
+            exposed buffer must execute on the same device, autograd engine thread,
+            and stream.
 
         This property is available only while a Python custom ``backward`` is
-        executing during an eager, first-order :meth:`~torch.Tensor.backward` call
-        without an ``inputs`` argument. It is unavailable with
-        :func:`torch.autograd.grad`, ``create_graph=True``, anomaly detection, a
-        post-hook on the producing autograd node, or stale capture stream overrides.
+        executing during an eager, first-order :meth:`~torch.Tensor.backward`,
+        :func:`torch.autograd.backward`, or :func:`torch.autograd.grad` call. It is
+        unavailable with ``create_graph=True``, anomaly detection, a post-hook on
+        the producing autograd node, or stale capture stream overrides.
 
         .. note::
-            This property never exposes a leaf's ``.grad``. For a leaf input, the
-            completed buffer still passes through ``AccumulateGrad`` and its hooks
-            before becoming ``.grad``.
+            For a leaf input, a non-``None`` entry exposes its execution-local
+            ``InputBuffer``, not its existing ``.grad``. All contributions are
+            first combined in that buffer. During ``backward``, ``AccumulateGrad``
+            then runs once with the completed buffer to update ``.grad`` and run
+            its usual hooks. :func:`torch.autograd.grad` instead returns the
+            completed buffer without updating ``.grad``.
 
-            A custom backward that instead accumulates directly into a leaf
-            ``.grad`` and returns ``None`` does not use this interface. It is
-            responsible for managing ``.grad`` state, including initialization and
-            lifetime, synchronization with all other producers, and any
-            ``AccumulateGrad`` hook behavior bypassed by the direct write.
+            During ``backward``, a custom backward that instead accumulates
+            directly into a leaf ``.grad`` and returns ``None`` does not use this
+            interface. It is responsible for managing ``.grad`` state, including
+            initialization and lifetime, synchronization with all other producers,
+            and any ``AccumulateGrad`` hook behavior bypassed by the direct write.
         """
         return self._input_grad_buffers
 

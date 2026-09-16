@@ -434,12 +434,8 @@ variable_list get_current_input_grad_buffers(Node* node) {
       !graph_task->future_completed_.load(),
       "input_grad_buffers cannot be accessed during backward post-processing");
   TORCH_CHECK(
-      graph_task->exec_info_.empty(),
-      "input_grad_buffers is only supported by backward() without the inputs "
-      "argument");
-  TORCH_CHECK(
       !graph_task->thread_locals_.get_grad_mode(),
-      "input_grad_buffers does not support backward(create_graph=True)");
+      "input_grad_buffers does not support create_graph=True");
   TORCH_CHECK(
       !AnomalyMode::is_enabled(),
       "input_grad_buffers does not support anomaly detection");
