@@ -67,20 +67,13 @@ class GemmABLoadContext:
     """Workgroup-wide state shared by direct-to-LDS operand loads.
 
     ``wave_offset`` and ``tid`` select each lane's LDS destination;
-    ``inner_bound`` and ``has_k_tail`` describe the runtime K boundary;
-    ``block_threads``, ``async_load_bytes``, ``in_data_bytes``,
-    ``ldg_x_threads``, and ``block_k`` define the byte load schedule.
+    ``inner_bound`` and ``param.has_k_tail`` describe the runtime K boundary.
     """
 
     wave_offset: Any
     tid: Any
     inner_bound: Any
-    block_threads: Any
-    async_load_bytes: Any
-    in_data_bytes: Any
-    ldg_x_threads: Any
-    block_k: Any
-    has_k_tail: Any
+    param: GemmGfx950Param
     uni_copy_atom: Any
     buffer_copy_atom: Any
     a_s2r_copy_atom: Any
@@ -574,12 +567,7 @@ def make_gemm_ab_load_context(elem_dtype, tiled_mma, tid, k, param: GemmGfx950Pa
         wave_offset=get_wave_lds_offset(tid, param.async_load_bytes),
         tid=tid,
         inner_bound=k,
-        block_threads=param.block_threads,
-        async_load_bytes=param.async_load_bytes,
-        in_data_bytes=param.in_data_bytes,
-        ldg_x_threads=param.ldg_x_threads,
-        block_k=param.block_k,
-        has_k_tail=param.has_k_tail,
+        param=param,
         uni_copy_atom=uni_copy_atom,
         buffer_copy_atom=buffer_copy_atom,
         a_s2r_copy_atom=a_s2r_copy_atom,
@@ -596,12 +584,13 @@ def async_load_operand(
     k_tile,
 ):
     context = operand.context
+    param = context.param
     tid = context.tid
-    block_threads = context.block_threads
-    async_load_bytes = context.async_load_bytes
-    async_load_vec_size = async_load_bytes // context.in_data_bytes
-    ldg_x_threads = context.ldg_x_threads
-    block_k = context.block_k
+    block_threads = param.block_threads
+    async_load_bytes = param.async_load_bytes
+    async_load_vec_size = async_load_bytes // param.in_data_bytes
+    ldg_x_threads = param.ldg_x_threads
+    block_k = param.block_k
     inner_bound = context.inner_bound
     lds_ptr = make_wave_lds_ptr(lds_base, context.wave_offset)
     for i in range_constexpr(operand.load_iters):
@@ -626,7 +615,7 @@ def async_load_operand(
                 operand.lds_layout,
                 block_k,
             )
-        if const_expr(context.has_k_tail):
+        if const_expr(param.has_k_tail):
             safe_global_k_idx = (global_k_idx < inner_bound).select(global_k_idx, 0)
         else:
             safe_global_k_idx = global_k_idx
@@ -637,11 +626,11 @@ def async_load_operand(
         if const_expr(operand.is_k_major):
             global_offset = (
                 safe_global_k_idx * operand.leading_stride + safe_global_outer_idx
-            ) * context.in_data_bytes
+            ) * param.in_data_bytes
         else:
             global_offset = (
                 safe_global_outer_idx * operand.leading_stride + safe_global_k_idx
-            ) * context.in_data_bytes
+            ) * param.in_data_bytes
         buffer_load_lds_inline(operand.rsrc, lds_ptr, global_offset, async_load_bytes)
         if i < operand.load_iters - 1:
             lds_ptr = lds_ptr + block_threads * async_load_bytes
