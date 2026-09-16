@@ -2390,6 +2390,28 @@ from user code:
         raised = "  [0] <guard check raised RuntimeError: page break rec sep line>"
         self.assertIn(raised, lines)
 
+    def test_aot_compile_module_wrong_arity_raises_type_error(self):
+        # A call the signature cannot bind is a caller error, not a guard miss:
+        # it surfaces as the TypeError the plain module would raise, not as a
+        # no-match report telling the user to add a ModelInput. Nothing catches
+        # the bind's TypeError on the way out, and it has to arrive alone: a fold
+        # into the no-match report would quote inspect's text as one entry's
+        # reason, so neither the type nor the message tells the two apart -- only
+        # the absence of the report does.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        x = torch.randn(3, 3)
+        with self.assertRaises(TypeError) as ctx:
+            model(x, x)
+        self.assertIn("too many positional arguments", str(ctx.exception))
+        self.assertNotIn("No AOT compiled graph matched", str(ctx.exception))
+        with self.assertRaises(TypeError) as ctx:
+            model()
+        self.assertIn("missing a required argument: 'x'", str(ctx.exception))
+        self.assertNotIn("No AOT compiled graph matched", str(ctx.exception))
+
     def test_no_match_message_survives_a_raising_guard(self):
         # __call__ has already established that nothing matched; re-evaluating
         # the guards to say WHY must not replace that answer with a secondary
@@ -4358,6 +4380,46 @@ from user code:
         with self.assertRaisesRegex(TypeError, "takes 3 positional arguments but 4"):
             AOTCompiledModel(ScaleModule(), [], set())
 
+    def test_aot_compile_module_binds_a_call_once_per_result(self):
+        # Results whose signatures differ cannot share a binding, so each binds
+        # on its own -- and still only once: the two dispatch passes and the
+        # report all ask about the same call, so a rebind per pass would leave
+        # the rest of this file green and pay for itself on every no-match.
+        # test_module_dispatch_binds_a_call_once_for_results_sharing_a_signature
+        # pins the shared case; this is the per-result count it cannot see.
+        mod = ScaleModule()
+        x = torch.randn(3, 3)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        doubled = model.forward.compiled_results
+
+        def triple(self, y):
+            return y * 3
+
+        mod.forward = types.MethodType(triple, mod)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
+        combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+        binds = []
+        bind = AOTCompiledFunction.prepare_f_locals
+
+        def counted(result, *args, **kwargs):
+            binds.append(result)
+            return bind(result, *args, **kwargs)
+
+        with patch.object(AOTCompiledFunction, "prepare_f_locals", counted):
+            with self.assertRaises(RuntimeError) as ctx:
+                combined(x.half())
+        # Both passes and the report ran on both results, each from its own one
+        # binding: one bind per result, in index order, and the same objects.
+        results = combined.compiled_results
+        self.assertEqual(len(binds), len(results))
+        for i, (bind_of, result) in enumerate(zip(binds, results)):
+            self.assertIs(bind_of, result, f"bind {i} is not of result [{i}]")
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
+
     def test_aot_compile_module_warns_once_per_model_not_per_process(self):
         # The dedup set is a field on the model, which is the whole reason it is
         # not torch._logging.warning_once: that cache is process-global, so the
@@ -4469,6 +4531,82 @@ from user code:
         self.assertIn("RuntimeError: the second artifact is unhappy", logs.output[0])
         with self.assertNoLogs(logger, level="WARNING"):
             model(x)
+
+    def test_aot_compile_module_interrupt_out_of_a_later_tree_propagates(self):
+        # accepts() catches Exception, so an interrupt out of a later tree leaves
+        # __call__ as itself -- neither read as a non-match nor wrapped in a
+        # report -- and the earlier raise on record goes with it, as on any exit
+        # that neither serves a graph nor builds a report. The second call pins
+        # where the dedup is judged: it warns about [0] again, so the aborted
+        # call consumed nothing. Deciding the (index, type) pair at the raise
+        # rather than at the serve leaves that call silent, and fails only here.
+        # assertNoLogs stays outermost: its __exit__ checks nothing while an
+        # exception is passing through it, and this call always raises, so
+        # nested inside the raise assertion it would never look at the records.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(2)]
+        model._aot_compile(inputs)
+
+        class Raises:
+            def check(self, f_locals):
+                raise RuntimeError("zero is unhappy")
+
+        class Interrupts:
+            def check(self, f_locals):
+                raise KeyboardInterrupt("ctrl-c inside the tree")
+
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = Raises()
+        real = results[1]._artifacts.guard_manager
+        results[1]._artifacts.guard_manager = Interrupts()
+        logger = "torch._dynamo.aot_compile"
+        with self.assertNoLogs(logger, level="WARNING"):
+            with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+                model(x)
+        results[1]._artifacts.guard_manager = real
+        with self.assertLogs(logger, level="WARNING") as logs:
+            self.assertEqual(model(x), x * 2)
+        self.assertEqual(len(logs.output), 1)
+        warned = logs.output[0]
+        self.assertIn("[0]'s guard check raised RuntimeError: zero is unhappy", warned)
+        self.assertIn("dispatch served [1]", warned)
+
+    def test_aot_compile_module_later_result_that_cannot_bind_raises_type_error(self):
+        # prepare_f_locals is outside accepts()' try for every result, not only
+        # the first: a later result whose signature cannot take the call surfaces
+        # as bind_locals' TypeError, as a plain module call would, with an earlier
+        # result's raise on record and, as on the interrupt above, nothing to log
+        # it (same nesting, for the same reason). Both premises are pinned first:
+        # the results cannot share a binding, so [1] binds inside the second
+        # accepts(), and [0]'s tree does raise.
+        self._hide_leaked_dynamo_globals()
+        mod = ScaleModule()
+        x = torch.randn(3, 3)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        doubled = model.forward.compiled_results
+
+        def needs_z(self, y, z):
+            return y * z
+
+        mod.forward = types.MethodType(needs_z, mod)
+        model = torch.compile(mod, fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x, x), kwargs={}, contexts=[])])
+        combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
+
+        class Raises:
+            def check(self, f_locals):
+                raise RuntimeError("zero is unhappy")
+
+        combined.compiled_results[0]._artifacts.guard_manager = Raises()
+        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
+        with self.assertRaisesRegex(RuntimeError, "zero is unhappy"):
+            combined.compiled_results[0].guard_check(mod, x)
+        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+            with self.assertRaisesRegex(TypeError, "missing a required argument: 'z'"):
+                combined(x)
 
     def test_aot_compile_module_ordinary_dispatch_warns_about_nothing(self):
         # The swallowed-raise warning is about a raise, so an ordinary dispatch
