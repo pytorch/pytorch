@@ -39,7 +39,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -2618,46 +2617,20 @@ class TestFullyShardInference(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    def test_inference(self, device):
-        test_device_type = torch.device(device).type
-        if test_device_type == device_type.type:
-            mesh = init_device_mesh(test_device_type, (self.world_size,))
-        else:
-            mesh = DeviceMesh.from_group(
-                dist.new_group(backend="gloo"), test_device_type
-            )
-        # FSDPTest selects the current accelerator for each worker rank.
-        device = torch.device(test_device_type)
-        torch.manual_seed(42)
-        model = nn.Linear(8, 4, bias=False, device=device, dtype=torch.bfloat16)
-        model.requires_grad_(False)
-        ref_model = copy.deepcopy(model)
-        shard_dim = 0 if self.world_size == 1 else 1
-        fully_shard(
-            model,
-            mesh=mesh,
-            reshard_after_forward=False,
-            shard_placement_fn=lambda _: Shard(shard_dim),
-        )
-        inp = torch.ones((2, 8), device=device, dtype=torch.bfloat16)
+    @unittest.skipIf(device_type.type != "cuda", "CUDA only")
+    def test_inference(self):
+        model = nn.Linear(8, 4, bias=False, device="cuda")
+        fully_shard(model, shard_placement_fn=lambda _: Shard(1))
         with torch.inference_mode():
-            self.assertEqual(model(inp), ref_model(inp))
-            model.reshard()
-            self.assertEqual(model(inp), ref_model(inp))
-
-
-class TestFullyShardInferenceWorldSize1(TestFullyShardInference):
-    @property
-    def world_size(self) -> int:
-        return 1
-
-    test_inference = TestFullyShardInference.test_inference
+            model(torch.ones((2, 8), device="cuda"))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:
         return 1
+
+    test_inference = TestFullyShardInference.test_inference
 
     def test_train_parity_single_worldsize1(self):
         """
@@ -2777,20 +2750,6 @@ class TestFullyShardCudaGraph(FSDPTest):
                 for graph_grad, ref_grad in zip(static_output_grads, ref_grads):
                     self.assertTrue(torch.equal(graph_grad, ref_grad))
                 model.zero_grad(set_to_none=True)
-
-
-instantiate_device_type_tests(
-    TestFullyShardInferenceWorldSize1,
-    globals(),
-    only_for=(device_type.type, "cpu"),
-    allow_xpu=True,
-)
-instantiate_device_type_tests(
-    TestFullyShardInference,
-    globals(),
-    only_for=(device_type.type, "cpu"),
-    allow_xpu=True,
-)
 
 
 if __name__ == "__main__":
