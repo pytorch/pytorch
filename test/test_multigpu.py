@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     instantiate_device_type_tests,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
@@ -38,9 +39,20 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_MULTIACCELERATOR,
+    TEST_XPU,
     TestCase,
 )
 
+
+def xpu_supports_sleep() -> bool:
+    try:
+        torch.xpu._sleep(10)
+        return True
+    except NotImplementedError:
+        return False
+
+
+TEST_XPU_SLEEP = TEST_XPU and xpu_supports_sleep()
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (
     torch.cuda.get_allocator_backend() == "cudaMallocAsync"
@@ -166,6 +178,7 @@ class TestMultiGPUDevice(TestCase):
         # Similarly, both copy() ops are synchronized on s0.
         self.assertEqual(y, x)
 
+    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_copy_streams(self, devices):
         device_type = torch.device(devices[0]).type
@@ -357,6 +370,7 @@ class TestMultiGPUDevice(TestCase):
             )
             self.assertNotEqual(device_module.current_stream(), default_stream)
 
+    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_streams_multi_gpu_query(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -510,6 +524,8 @@ class TestMultiGPUDevice(TestCase):
             p2c.get()
             c2p.put(sync_func(device_module, FIFTY_MIL_CYCLES))
 
+    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5402")
     @deviceCountAtLeast(2)
     def test_stream_event_nogil(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -551,6 +567,7 @@ class TestMultiGPUDevice(TestCase):
             self.assertGreater(parent_time + child_time, total_time * 1.3)
 
     # This test is flaky for ROCm, see issue #62602
+    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_events_wait(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -579,6 +596,7 @@ class TestMultiGPUDevice(TestCase):
         self.assertTrue(s0.query())
         self.assertTrue(s1.query())
 
+    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
     @deviceCountAtLeast(2)
     def test_events_multi_gpu_query(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -622,6 +640,8 @@ class TestMultiGPUDevice(TestCase):
             self.assertTrue(e0.query())
             self.assertTrue(e1.query())
 
+    @skipXPUIf(not TEST_XPU_SLEEP, "torch.xpu._sleep is not supported on older driver")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5403")
     @deviceCountAtLeast(2)
     def test_caching_pinned_memory_multi_gpu(self, devices):
         device_module = torch.get_device_module(devices[0])
@@ -671,6 +691,7 @@ class TestMultiGPUDevice(TestCase):
         self.assertEqual(offset, 100)
 
     # Verifies that mem_get_info works, including when called for a different device
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4775")
     def test_mem_get_info(self, device):
         device_module = torch.get_device_module(device)
 
@@ -1886,7 +1907,9 @@ class TestCudaCommCUDA(TestCase):
             self.assertTrue(torch.equal(x, cat))
 
 
-instantiate_device_type_tests(TestMultiGPUDevice, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestMultiGPUDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
