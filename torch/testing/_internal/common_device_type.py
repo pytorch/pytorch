@@ -383,7 +383,7 @@ def _check_capabilities(test_case, required_capabilities) -> None:
     }
 
     if missing:
-        raise unittest.SkipTest(
+        raise AssertionError(
             f"Device '{type(test_case).device_type}' has not declared capabilities: "
             f"{', '.join(sorted(missing))}. "
             f"Add them to {type(test_case).__name__}._capabilities()."
@@ -1334,10 +1334,11 @@ def get_desired_device_type_test_bases(
 def requires_capabilities(*caps: str):
     """Declare that a test method requires device capabilities.
 
-    If a required capability is missing from the device's ``_capabilities()``
-    map or is declared but unsupported, the test is skipped by raising
-    ``unittest.SkipTest``. The same capability preflight also runs during device
-    test ``setUp``.
+    If a required capability is missing from ``type(self).get_capabilities()``,
+    raise ``AssertionError``, even if another required capability is unsupported.
+    A declared but unsupported capability skips the test with ``unittest.SkipTest``.
+    If all required capabilities are supported, the test executes. The same
+    capability preflight also runs during device test ``setUp``.
     """
     caps_set = frozenset(caps)
 
