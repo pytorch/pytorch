@@ -1598,11 +1598,12 @@ class TestFlexAttentionEstimation(TestCase):
         self.assertEqual(sparse_flops, dense_flops // 2)
 
 
-class TestFlexAttentionEstimationCudaOnly(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestFlexAttentionEstimationDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
+    # estimate_roofline_runtime_ms queries real device tflops/DRAM bandwidth.
     @xfailIfNoAcceleratorTriton
-    def test_flex_attention_roofline_estimate(self, device):
+    def test_flex_attention_roofline_estimate(self):
         """estimate_roofline_runtime_ms works for flex_attention with mixed-dtype output."""
         from torch._inductor.fx_passes.overlap_scheduling import (
             estimate_roofline_runtime_ms,
@@ -1636,7 +1637,10 @@ class TestFlexAttentionEstimationCudaOnly(TestCase):
 
 
 instantiate_device_type_tests(
-    TestFlexAttentionEstimationCudaOnly, globals(), only_for="cuda"
+    TestFlexAttentionEstimationDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 if __name__ == "__main__":
