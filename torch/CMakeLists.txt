@@ -329,6 +329,9 @@ if(USE_NUMPY)
   target_link_libraries(torch_python PRIVATE Python::NumPy)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
+if(USE_NCCL_EP AND USE_SYSTEM_NCCL AND NOT USE_SYSTEM_NCCL_EP)
+  set_property(SOURCE "${TORCH_SRC_DIR}/csrc/Module.cpp" APPEND PROPERTY COMPILE_DEFINITIONS NCCL_EP_REQUIRES_NCCL4PY)
+endif()
 
 if(BUILD_LAZY_TS_BACKEND)
   target_compile_definitions(torch_python PRIVATE BUILD_LAZY_TS_BACKEND)
@@ -488,10 +491,10 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
   #    headers baked from the submodule build dir; no nccl4py).
-  #  - USE_SYSTEM_NCCL_EP=ON: __caffe2_nccl_ep is a system libnccl_ep.so;
-  #    its EP and NCCL JIT header roots are baked in as defaults.
+  #  - USE_SYSTEM_NCCL_EP=ON: __caffe2_nccl_ep is a system libnccl_ep.so,
+  #    resolved from its system prefix together with its JIT headers.
   #  - USE_SYSTEM_NCCL=ON and USE_SYSTEM_NCCL_EP=OFF: libnccl_ep.so is built
-  #    from the NCCL submodule and resolved with its JIT headers from nccl4py.
+  #    from source and resolved with its JIT headers from nccl4py.
   if(USE_NCCL_EP)
     Python_add_library(_nccl_ep MODULE WITH_SOABI
       "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_ep.cu"
@@ -505,11 +508,18 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     set_target_properties(_nccl_ep PROPERTIES
       LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch")
     if(USE_SYSTEM_NCCL_EP)
+      get_filename_component(_nccl_ep_library_dir "${NCCL_EP_LIBRARIES}" DIRECTORY)
+      get_filename_component(_nccl_ep_jit_home "${NCCL_EP_JIT_INCLUDE_DIR}" DIRECTORY)
+      get_filename_component(_nccl_ep_nccl_jit_home "${NCCL_EP_NCCL_INCLUDE_DIR}" DIRECTORY)
       target_compile_definitions(_nccl_ep PRIVATE
-        "NCCL_EP_JIT_HOME=\"${NCCL_EP_JIT_HOME}\""
-        "NCCL_EP_JIT_NCCL_HOME=\"${NCCL_EP_JIT_NCCL_HOME}\"")
+        "NCCL_EP_JIT_HOME=\"${_nccl_ep_jit_home}\""
+        "NCCL_EP_NCCL_JIT_HOME=\"${_nccl_ep_nccl_jit_home}\"")
       set_target_properties(_nccl_ep PROPERTIES
-        INSTALL_RPATH "${_rpath_portable_origin}/lib")
+        INSTALL_RPATH "${_rpath_portable_origin}/lib;${_nccl_ep_library_dir}"
+        INSTALL_RPATH_USE_LINK_PATH TRUE)
+      unset(_nccl_ep_library_dir)
+      unset(_nccl_ep_jit_home)
+      unset(_nccl_ep_nccl_jit_home)
     elseif(USE_SYSTEM_NCCL)
       # Dynamic: resolve nccl4py's libnccl_ep.so (site-packages/nccl/ep/lib, one
       # dir up from torch/ via $ORIGIN/..) at import.
