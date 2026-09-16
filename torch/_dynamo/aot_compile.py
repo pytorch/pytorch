@@ -49,12 +49,11 @@ _EXTERNAL_DATA_HINT = (
 )
 
 # What a raise can cost the tree it came out of, said once: the no-match report
-# and the warning the serving paths log both name it. Phrased for one tree or
-# several, since the report's caveat names every tree it rests on. Hedged,
-# because only a throw skips the reset on check_nopybind_template's exits: a
-# tree that returns with an error set (the SystemError _unwrapped_raise reads
-# through) reset on its way out, and neither the last-resort veto nor this
-# clause tells the two apart.
+# and the warning the serving paths log both name it. Hedged, because only a
+# throw skips the reset on check_nopybind_template's exits: a tree that returns
+# with an error set (the SystemError _unwrapped_raise reads through) reset on
+# its way out, and neither the last-resort veto nor this clause tells the two
+# apart.
 _STALE_AFTER_THROW = (
     "a C++ throw out of a tree can leave that tree's relational guard state "
     "stale, so its next check can reject a call it fits or accept one it does not"
@@ -114,37 +113,28 @@ def _names_a_missing_global(text: str) -> bool:
 
 
 def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
-    """What a guard tree meant to raise, as ``(type name, exception)``.
-
-    Every place that names such a raise reads it from here, so a report line and
-    the warning the serving paths log cannot describe one throw differently."""
-    # A tree that returns to pybind with an exception still set arrives here as
-    # a SystemError whose own str() is the bound method's repr and says nothing
-    # about what raised, so report what _PyErr_FormatFromCause chained behind
-    # it. __cause__ and not __context__: that call sets both, but __context__ is
-    # also set implicitly for ANY exception raised while another was being
-    # handled, so reading it would quote the exception the CALLER was handling
-    # for a SystemError that arrived some other way.
+    """What a guard tree meant to raise, as ``(type name, exception)``; the one
+    reading the report line and the warning share, so they cannot drift."""
+    # A tree returning to pybind with an exception still set arrives as a
+    # SystemError whose str() is the bound method's repr, so report what
+    # _PyErr_FormatFromCause chained behind it. __cause__, not __context__: that
+    # call sets both, but PEP 3134 sets __context__ for ANY exception raised while
+    # another was handled, so it would quote what the CALLER was handling.
     cause = e.__cause__ if isinstance(e, SystemError) else None
     reason: BaseException = e if cause is None else cause
     return type(reason).__name__, reason
 
 
-def _raise_text(e: Exception) -> str:
+def _raised_line(index: int, e: Exception) -> str:
     kind, reason = _unwrapped_raise(e)
     # Keyed on that chain, not on where the raise came from: the clause explains
-    # why the text quotes a chained exception instead of the one the tree
-    # raised, so a raise with nothing chained -- a TORCH_CHECK inside the tree,
-    # which pybind translates at this same boundary into a plain RuntimeError --
-    # gets the text without it.
+    # why the line quotes a chained exception rather than the tree's own, so a
+    # raise with nothing chained (a TORCH_CHECK, which pybind translates at the
+    # same boundary into a plain RuntimeError) gets the line without it.
     boundary = "" if reason is e else " (through the guard tree's pybind boundary)"
-    # str(reason) is arbitrary user text, and the report is one line per input
-    # read back with splitlines(), so collapse every separator it breaks on.
-    return " ".join(f"{kind}: {reason}{boundary}".splitlines())
-
-
-def _raised_line(index: int, e: Exception) -> str:
-    return f"  [{index}] <guard check raised {_raise_text(e)}>"
+    line = f"  [{index}] <guard check raised {kind}: {reason}{boundary}>"
+    # str(reason) is user text and the report is read back with splitlines().
+    return " ".join(line.splitlines())
 
 
 class _GuardScope(enum.Enum):
@@ -945,10 +935,10 @@ class AOTCompiledFunction:
                 # A rebind to a Dynamo wrapper is resolved THROUGH it
                 # (_resolve_guard_scope), so the sentence sends the reader through too.
                 f"the globals of the function {forward} resolves to, seen through "
-                "the wrappers torch.compile and torch._dynamo.disable return and "
-                "through any functools.wraps'd torch._dynamo.external_utils "
-                "function to the function they wrap, since that is the one the "
-                f"load resolved{named}"
+                "the wrappers torch.compile, torch._dynamo.disable, run and "
+                "optimize return and through any functools.wraps'd "
+                "torch._dynamo.external_utils function to the function they wrap, "
+                f"since that is the one the load resolved{named}"
                 if forward is not None
                 else f"the live scope this artifact was loaded against{named}"
             )
@@ -999,7 +989,17 @@ class AOTCompiledFunction:
         the call. A global the graph itself rebinds is re-read from the scope on
         the next call too: the replayed ``STORE_GLOBAL`` lands in the bytecode's
         globals, not in the scope, so the stored value is one no guard certified
-        and the scope's is what the check before the call just passed.
+        and the scope's is what the check before the call just passed. That is a
+        deliberate trade-off: a forward that accumulates into a guarded global
+        (``global W; W = W * 2``) serves the scope's value on every call, where
+        eager, whose store lands in the dict its guards read, counts up. Leaving
+        a stored name out of the re-read instead would serve the stored value
+        after a rebind of the scope the guards accepted -- the check certifying
+        one value while the graph reads another, which is the stale read this
+        re-read removes -- and writing the store back into the scope is a
+        behaviour neither load path has. Under the default filter, which keeps
+        no global guard, nothing is re-read and such a store accumulates in the
+        bytecode's globals, unchecked.
 
         Only a load handed a live scope arms this. An artifact compiled in this
         process has none, so its globals stay at the values the capture copied
@@ -1360,29 +1360,33 @@ def _resolve_guard_scope(
             "that module's forward, rooting the guards in its defining namespace; "
             "bind a plain function or bound method as model.forward instead"
         )
-    # mod.forward = torch.compile(mod.forward) (or torch._dynamo.disable, run,
-    # optimize) binds the functools.wraps'd wrapper those return; innermost_fn
-    # follows the _torchdynamo_orig_callable chain they set and stops at a
-    # wrapper Dynamo did not mint. A compile that wrapped its target in
-    # external_utils.wrap_inline (config.wrap_top_frame, or a forward defined
-    # under torch/) ends that chain on wrap_inline's inner, a wraps'd function
-    # that carries neither attribute and only forwards to what it wraps, so a
-    # function that OWNS external_utils' dict is followed to its __wrapped__,
-    # one hop per stacked compile. The predicate is the dict's identity, not
-    # __module__ (functools.wraps copies it), and not "defined under
-    # torch._dynamo": decorators' wraps'd wrappers (nonstrict_trace,
-    # leaf_function) are the root frame a capture traces, so they stay put.
-    # _static_getattr is object.__getattribute__: it sees class attributes and
-    # descriptors but skips the type's getattro, and a bound method's
-    # __globals__ is method_getattro's delegation to __func__, so a bound
-    # method is never hopped. An external_utils function with no __wrapped__
-    # (wrap_dunder_call_ctx_manager's inner skips functools.wraps) stops the
-    # loop and fails the namespace test below like any other.
+    # innermost_fn follows the _torchdynamo_orig_callable chain the wrappers
+    # torch.compile, torch._dynamo.disable, run and optimize return carry. A
+    # compile that wrapped its target in external_utils.wrap_inline
+    # (config.wrap_top_frame, or a forward defined under torch/) ends that chain
+    # on wrap_inline's inner, which only forwards to what it wraps, so a function
+    # OWNING external_utils' dict is followed to its __wrapped__, one hop per
+    # stacked compile. Keyed on the dict's identity, not __module__ (functools.wraps
+    # copies it): torch._dynamo.decorators' wraps'd wrappers are the root frame a
+    # capture traces, so they stay put. A bound method owns no __globals__ for
+    # _static_getattr (object.__getattribute__) to read, so one is never hopped.
     resolved = innermost_fn(forward)
     while _static_getattr(resolved, "__globals__") is vars(external_utils):
         wrapped = _static_getattr(resolved, "__wrapped__")
         if wrapped is None:
-            break
+            # wrap_dunder_call_ctx_manager's inner skips functools.wraps on purpose,
+            # as does wrap_inline_with_error_on_graph_break's wrapper, which only
+            # compile_wrapper._torchdynamo_inline holds: no public API binds it.
+            hopped = resolved is not forward
+            via = "resolves through a Dynamo wrapper to" if hopped else "is"
+            return None, (
+                f"{described} {via} a torch._dynamo.external_utils function with "
+                "no __wrapped__ to see through to the forward it wraps -- the "
+                "wrapper torch._dynamo.error_on_graph_break, patch_dynamo_config, "
+                "disable_nested_graph_breaks and override_cudagraphs return skips "
+                "functools.wraps; bind the forward that decorator wrapped as "
+                "model.forward instead"
+            )
         resolved = wrapped
     # torch.compile(mod).forward wraps the module's DISPATCH, not the forward
     # the capture traced: the module itself under config.wrap_top_frame or a
@@ -1436,11 +1440,21 @@ def _resolve_guard_scope(
     if namespace is not None and namespace.partition(".")[0] == "torch":
         hopped = resolved is not forward
         via = "resolves through a Dynamo wrapper to" if hopped else "resolves to"
+        what = traced_fn.__qualname__
+        wrapped = _static_getattr(traced_fn, "__wrapped__")
+        if wrapped is not None:
+            # functools.wraps copied the wrappee's __qualname__ onto the wrapper
+            # (a class-body @torch.compiler.wrap_numpy forward binds external_utils'
+            # wrap), which would read "X resolves to X". co_qualname is 3.11+.
+            code = traced_fn.__code__
+            what = (
+                f"{getattr(code, 'co_qualname', code.co_name)}, a functools.wraps'd "
+                f"wrapper over {getattr(wrapped, '__qualname__', what)}"
+            )
         return None, (
-            f"{described} {via} {traced_fn.__qualname__}, whose globals are "
-            f"{namespace}'s namespace, a torch module a load neither roots guards "
-            "in nor seeds; bind the module's own forward, defined outside torch, "
-            "as model.forward instead"
+            f"{described} {via} {what}, whose globals are {namespace}'s namespace, "
+            "a torch module a load neither roots guards in nor seeds; bind the "
+            "module's own forward, defined outside torch, as model.forward instead"
         )
     return scope, None
 
@@ -1704,27 +1718,30 @@ class AOTCompiledModel:
     match is served over: the matching graph runs, and the raise is logged once
     per ``(input index, exception type)`` per model on the
     ``torch._dynamo.aot_compile`` logger, starting over when ``compiled_results``
-    changes. A ``KeyboardInterrupt`` or
-    ``SystemExit`` out of a guard tree is never read as an answer and
-    propagates.
+    changes. A ``KeyboardInterrupt`` or ``SystemExit`` out of a guard tree is
+    never read as an answer and propagates.
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
     per compiled result quoting the guards that refused it, or, for a result
     whose guards accept the call on the report's own evaluation after not
     accepting it in dispatch, a ``<guards did not accept this call in dispatch
-    and accepted it here: ...>`` explanation in place of any guards; one
+    and accepted it here: ...>`` explanation in place of any guards, or, for a
+    result whose refusal quotes nothing -- an accessor that answered false with
+    no parts, or a guard that raised with a blank message -- ``<guard check
+    failed without naming a guard>``; one
     ``For [i, j]:`` line per distinct missing-global hint naming the entries
     whose guards failed on a global the process does not define; and -- when
     some checked tree reached an answer, or the artifact holds no input at all
     -- the advice to add a ``ModelInput`` or check which guards
     ``guard_filter_fn`` kept. When every rejection that advice rests on followed
-    a raise from its own tree, it names and quotes those raises and says to fix
-    them first; when no checked tree ever answered and some tree raised, a line
-    saying every guard tree raised replaces it, unless an opted-out result's
-    line has already said the raise withheld it. When some checked input's
-    guard tree raised, that exception is the ``__cause__`` of the
-    ``RuntimeError`` rather than the exception the caller sees, so a caller
+    a raise from its own tree, it says so and says to fix the raise first; when
+    no checked tree ever answered and two or more trees raised, a line saying
+    every guard tree raised replaces it, unless an opted-out result's line has
+    already said the raise withheld it; a single raiser's own line already says
+    as much. When some checked input's guard tree raised, that exception is the
+    ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
+    sees, so a caller
     catching the tree's own type (``SystemError`` for a leaf that returned with
     an error set, ``RuntimeError`` for a ``TORCH_CHECK``) catches the report
     instead.
@@ -1741,13 +1758,12 @@ class AOTCompiledModel:
     _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
         dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
-    # The results warn_swallowed below last logged about and the (index, exception
-    # type) pairs it logged, so a hot loop over a broken artifact logs once per
-    # defect rather than once per call. Per model, not torch._logging.warning_once,
-    # whose cache is process-global. Kept beside the results because a changed
-    # compiled_results can put another artifact at a warned-about index; judged
-    # where the warning is logged rather than with the binding verdict, which a
-    # one-result model never re-decides. One field, as above.
+    # The results warn_swallowed last logged about and the (index, exception type)
+    # pairs it logged, so a hot loop over a broken artifact logs once per defect.
+    # Per model, not torch._logging.warning_once, whose cache is process-global.
+    # Kept beside the results because a changed compiled_results can put another
+    # artifact at a warned-about index; judged where the warning is logged, since
+    # a one-result model never re-decides the binding verdict. One field, as above.
     _warned: tuple[
         tuple[weakref.ref[AOTCompiledFunction], ...], set[tuple[int, str]]
     ] = dataclasses.field(
@@ -1772,28 +1788,24 @@ class AOTCompiledModel:
         # check() ignores _guard_check_enabled, which only the last resort and
         # the report read, so scan every result.
         raised: dict[int, Exception] = {}
-        # `unanswered` holds the indices whose LAST evaluation reached no answer,
-        # the only ones with no guard to quote; `answered` those that ever reached
-        # one, which a ModelInput could have covered; `trusted` those that did so
-        # with no raise of their own on record (see warn_swallowed).
+        # Indices whose LAST evaluation reached no answer: no guard to quote.
         unanswered: set[int] = set()
+        # Indices that ever reached an answer, which a ModelInput could have covered.
         answered: set[int] = set()
+        # Answered with no raise of their own on record (see warn_swallowed).
         trusted: set[int] = set()
-        # Per-result bindings, filled on first use and kept for the re-check and
-        # the report.
+        # Per-result bindings, filled on first use, kept for the re-check and report.
         bound: dict[int, dict[str, object]] = {}
         # Whether results that bind alike reuse the first one's binding (a bind
-        # costs more than a check()), decided once a second result is reached
-        # so a call the first result serves pays nothing for it. The reuse rests
-        # on check() only reading the f_locals it is handed, so one dict can
-        # serve every tree.
+        # costs more than a check()), decided once a second result is reached so
+        # a call the first result serves pays nothing for it; the reuse rests on
+        # check() only reading the f_locals it is handed.
         shared: bool | None = None
 
         def accepts(i: int, result: AOTCompiledFunction) -> bool:
             nonlocal shared
-            # prepare_f_locals stays outside the try, so a call the signature
-            # cannot bind still surfaces as bind_locals' TypeError, as a plain
-            # module call would, rather than as a tree that did not match.
+            # prepare_f_locals stays outside the try, so a call the signature cannot
+            # bind surfaces as bind_locals' TypeError, not as a tree that did not match.
             f_locals = bound.get(i)
             if f_locals is None:
                 if bound and shared is None:
@@ -1822,12 +1834,11 @@ class AOTCompiledModel:
 
         def warn_swallowed(served: int) -> None:
             # A raise is not a rejection, so it says nothing about the result
-            # that did answer -- but nothing else records it here: on this path
-            # no report is built. Also where the result that answered IS the one
-            # that raised: its accept is the only answer about this call, and
-            # vetoing it would not contain the stale relational state below --
-            # a scan raise whose call another result serves leaves it stale for
-            # the NEXT call, which has no raise on record at all.
+            # that did answer -- but no report is built on this path, so nothing
+            # else records it. Also where the result that answered IS the one that
+            # raised: its accept is the only answer about this call, and vetoing
+            # it would not contain the stale relational state below, which a scan
+            # raise leaves for the NEXT call, with no raise on record at all.
             over, warned = self._warned
             if not _same_results(over, results):
                 warned = set()
@@ -1844,9 +1855,8 @@ class AOTCompiledModel:
                     )
                 else:
                     # The last resort serves an opted-out result whatever its
-                    # guards say, so a stale rejection costs it nothing and the
-                    # report calls it an opt-out, not a defect; what the raise
-                    # costs it is the match the scan can never find.
+                    # guards say, so a stale rejection costs it nothing; what the
+                    # raise costs it is the match the scan can never find.
                     advice = (
                         f"Input [{i}] opted out of guard checks, but a tree that "
                         "raises never matches in the scan, so its graph is "
@@ -1889,12 +1899,11 @@ class AOTCompiledModel:
                     warn_swallowed(i)
                 return result._serve(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
-        # only after both passes failed to find a real match and only if no tree
-        # whose guards someone did ask about raised -- whether or not a later pass
-        # then answered: a rejection following a throw can be about the relational
-        # guard state the throw left stale (see warn_swallowed) rather than about
-        # this call. A raise from the opted-out result itself is not such a case:
-        # nobody wanted its answer.
+        # only after both passes failed to find a real match and no tree whose
+        # guards someone did ask about raised -- even if a later pass answered: a
+        # rejection after a throw can be about the relational guard state the
+        # throw left stale (see warn_swallowed), not about this call. A raise from
+        # the opted-out result itself withholds nothing: nobody wanted its answer.
         if not any(results[i]._guard_check_enabled for i in raised):
             for i, result in enumerate(results):
                 if not result._guard_check_enabled:
@@ -1922,8 +1931,7 @@ class AOTCompiledModel:
         trusted: set[int],
         bound: dict[int, dict[str, object]],
     ) -> str:
-        """A report naming every compiled input and what its guard check said,
-        raised, or -- for a withheld opt-out -- was never asked.
+        """A report naming every compiled input and what its guard check said or raised.
 
         ``results`` and ``bound`` are the results the dispatch above judged and
         the f_locals it judged them on, one per result, so the report explains
@@ -1951,12 +1959,11 @@ class AOTCompiledModel:
         withheld = False
         for i, result in enumerate(results):
             if not result._guard_check_enabled:
-                # Nobody asked about this result's guards, so quoting them would
-                # name the wrong thing -- a raise out of them included -- and it
-                # is no mismatch a ModelInput could cover: what kept it from
-                # serving this call is the raise above. Decided before the raise
-                # below so an opted-out tree that raised is reported once, as the
-                # opt-out it is.
+                # Nobody asked about this result's guards, so quoting them -- a
+                # raise out of them included -- would name the wrong thing, and no
+                # ModelInput covers what kept it from serving: the raise above.
+                # Decided before the raise below, so an opted-out tree that raised
+                # is reported once, as the opt-out it is.
                 lines.append(
                     f"  [{i}] <opted out of guard checks; withheld because "
                     f"[{raiser}]'s guard check raised>"
@@ -1964,10 +1971,9 @@ class AOTCompiledModel:
                 withheld = True
                 continue
             if i in unanswered:
-                # No rejection to quote, so report the raise rather than
-                # evaluating the same tree a third time, whose answer would be
-                # about that evaluation and not the one dispatch acted on. An
-                # entry that raised and THEN answered is not here: its own
+                # No rejection to quote, so report the raise rather than evaluate
+                # the tree a third time, whose answer would not be the one dispatch
+                # acted on. An entry that raised and THEN answered is not here: its
                 # rejection is quoted below, and its raise survives only where it
                 # is the one the chain carries -- the FIRST index that raised.
                 lines.append(_raised_line(i, raised[i]))
@@ -1982,14 +1988,20 @@ class AOTCompiledModel:
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards did not accept this call in dispatch and "
-                    "accepted it here: a guard that does not answer consistently>"
+                    "accepted it here: a guard that does not answer consistently, or "
+                    "guarded state that changed between those evaluations>"
                 )
                 continue
-            if not reason.verbose_code_parts:
-                # A failing accessor can answer false with no parts to quote.
+            parts = reason.verbose_code_parts
+            # Collapse every separator splitlines() reads the report back on.
+            # Done here, not in get_verbose_code_part: the recompile logs consume
+            # the same parts and are out of this report's scope.
+            joined = " ".join("; ".join(parts).splitlines())
+            if not joined.strip():
+                # A failing accessor can answer false with no parts to quote, and
+                # a guard that raised quotes str(exc), which can be blank.
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
-            parts = reason.verbose_code_parts
             if any(map(_names_a_missing_global, parts)):
                 forward: str | None = None
                 if result._guard_scope is _GuardScope.SUPPLIED and not tried_forward:
@@ -2007,8 +2019,6 @@ class AOTCompiledModel:
                     forward = f"this {type(self.model).__name__} instance's forward"
                 hint = result._missing_global_hint(forward=forward)
                 hinted.setdefault(hint, []).append(i)
-            # Collapse every separator splitlines() reads the report back on.
-            joined = " ".join("; ".join(parts).splitlines())
             lines.append(f"  [{i}] {joined}")
         for hint, at in hinted.items():
             lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
@@ -2018,9 +2028,8 @@ class AOTCompiledModel:
                 "the opted-out input(s) above; fix or drop that artifact."
             )
         elif raiser is not None:
-            # Same advice for the same artifact, for a report with no opt-out to
-            # withhold: a tree that raised has to be fixed whether or not its
-            # raise also cost the caller a graph.
+            # Same advice with no opt-out to withhold: a tree that raised has to
+            # be fixed whether or not its raise also cost the caller a graph.
             lines.append(
                 f"[{raiser}]'s guard check raised while checking this call; fix "
                 "or drop that artifact."
@@ -2036,35 +2045,18 @@ class AOTCompiledModel:
             )
             if coverable and not trusted_rejection:
                 # Keyed on what dispatch recorded, not on the entry lines: the
-                # re-check may have printed a raise or an accept instead. Named
-                # and quoted here because nothing else on the report carries
-                # such a raise: the entry line quotes the rejection, the raiser
-                # line names the FIRST enabled raiser, which need not be one of
-                # these, and the chain carries the first raise of all. Bracketed
-                # as on the entry line and joined with a semicolon: the quoted
-                # text is arbitrary user text that may hold commas, and
-                # _raise_text has a parenthetical of its own. `- trusted` is
-                # what makes raised[i] safe to read without the gate above: an
-                # answered entry outside `trusted` raised before it rejected.
-                # Under that gate every trusted entry is opted out, so the
-                # enabled filter alone already drops them; it is there for the
-                # opted-out entries that raised and then rejected, whose guards
-                # nobody asked about and whose withheld line blames the raiser.
-                untrusted = [
-                    f"[{i}] <{_raise_text(raised[i])}>"
-                    for i in sorted(answered - trusted)
-                    if results[i]._guard_check_enabled
-                ]
-                plural = "s" if len(untrusted) > 1 else ""
+                # re-check may have printed a raise or an accept instead.
                 advice += (
-                    f" Fix the raise{plural} out of {'; '.join(untrusted)} first: "
-                    "every rejection this advice rests on followed a raise from "
-                    f"its own tree, and {_STALE_AFTER_THROW}."
+                    " Fix the raise first: every rejection this advice rests on "
+                    f"followed a raise from its own tree, and {_STALE_AFTER_THROW}."
                 )
             lines.append(advice)
-        if raised and not withheld and not coverable:
-            # Not beside a withheld line, which has already said what happened,
-            # and not for the empty artifact, which has no raise to describe.
+        if len(raised) > 1 and not withheld and not coverable:
+            # `not coverable`: no checked tree answered, so every entry line above
+            # is a raise and the advice above is off. Not beside a withheld line,
+            # which has already said what the raise cost, and only where the
+            # raiser line above names one raiser of several: for a single entry
+            # it already says all of this.
             lines.append(
                 "Every guard tree raised while checking this call; the reasons "
                 "above are those raises, not guards this call failed."
@@ -2125,8 +2117,10 @@ class AOTCompiledModel:
         There is no live scope only when ``model.forward`` does not resolve to a
         Python function of its own: ``get_traced_fn`` cannot resolve it, or it is
         an ``nn.Module``, as given or reached through a Dynamo wrapper (the
-        module's dispatch under ``config.wrap_top_frame``), or it resolves to a
-        function torch itself defines, whose globals are a torch module's
+        module's dispatch under ``config.wrap_top_frame``), or it is a
+        ``torch._dynamo.external_utils`` function with no ``__wrapped__`` to see
+        through (``torch._dynamo.error_on_graph_break``'s wrapper), or it resolves
+        to a function torch itself defines, whose globals are a torch module's
         namespace (the module's dispatch otherwise, ``torch.compile(mod).forward``,
         included), or the target a Dynamo wrapper is seen through to does not
         resolve itself; guards then resolve against the scope rebuilt from the
@@ -2134,10 +2128,11 @@ class AOTCompiledModel:
         global but those aliases and that key warns to say so, naming the cause.
 
         The function ``model.forward`` resolves to is the one bound as ``forward``
-        seen through Dynamo's own wrappers -- the ones ``torch.compile`` and both
-        ``torch._dynamo.disable`` forms return, and the ``functools.wraps``'d
-        ``torch._dynamo.external_utils`` functions those wrap their target in --
-        but not through a wrapper the caller applied: a ``functools.wraps``'d
+        seen through Dynamo's own wrappers -- the ones ``torch.compile``,
+        ``torch._dynamo.disable``, ``run`` and ``optimize`` return, and any
+        ``functools.wraps``'d ``torch._dynamo.external_utils`` function, of which
+        ``torch.compiler.wrap_numpy`` is the one a caller applies -- but not
+        through any other wrapper the caller applied: a ``functools.wraps``'d
         decorator over it, in the class body or rebound on the instance, resolves
         to the decorator's own function, so the scope is the decorator's module.
         That is the scope a capture of the decorated forward records as well --
@@ -2146,13 +2141,12 @@ class AOTCompiledModel:
         live, and one captured from the undecorated forward fails its global
         guards there, with ``KeyError on G['NAME']`` and a hint naming that
         module; load an artifact onto the forward it was captured from.
-        ``torch.compiler.wrap_numpy`` is the one caller-applied decorator that is
-        itself such an ``external_utils`` function. Rebound on the instance it is
-        seen through, so the scope is the forward's own module -- what an
-        artifact captured from the undecorated forward, the only artifact that
-        shape can load, recorded; applied in the class body it resolves to
-        ``wrap`` in ``external_utils``' own namespace, which is refused as any
-        torch namespace is.
+        ``wrap_numpy`` rebound on the instance is seen through, so the scope is
+        the forward's own module -- what an artifact captured from the
+        undecorated forward, the only artifact that shape can load, recorded;
+        applied in the class body it binds a method, which is not seen through
+        and resolves to ``wrap`` in ``external_utils``' own namespace, refused as
+        any torch namespace is.
 
         ``guard_globals``, when supplied, is that scope instead of anything
         resolved from ``model.forward``, so a caller who wants neither the live
