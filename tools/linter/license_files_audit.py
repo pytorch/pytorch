@@ -22,15 +22,14 @@ from packaging.licenses import canonicalize_license_expression
 
 
 LICENSE_GLOBS = (
-    "LICENSE",
-    "third_party/**/LICENSE*",
-    "third_party/**/COPYING*",
+    ":(icase)LICENSE",
+    ":(icase)third_party/**/LICENSE*",
+    ":(icase)third_party/**/COPYING*",
 )
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "license_audit_manifest.toml"
-SPDX_OMIT_FROM_PROJECT_LICENSE = frozenset({"LicenseRef-NvidiaProprietary"})
 _SKIP_REASON = (
-    "third_party/ has no discoverable license files (submodules not checked out)"
+    "checkout has too few declared license files (submodules not checked out)"
 )
 # Missing-path enforcement runs only when most declared license-files exist on disk
 # (full / quick-checks checkout). Sparse CPU/CUDA CI omits many submodules.
@@ -96,20 +95,21 @@ def discover_license_files(repo_root: Path) -> set[str]:
 
 
 def _parenthesize_compound_expression(expression: str) -> str:
-    if any(op in expression for op in (" OR ", " AND ", " WITH ")):
+    if " OR " in expression:
         return f"({expression})"
     return expression
 
 
 def expected_project_license_expression(spdx: dict[str, str]) -> str:
-    expressions = sorted(
-        {
-            expression
-            for expression in spdx.values()
-            if expression not in SPDX_OMIT_FROM_PROJECT_LICENSE
-        }
+    expressions: set[str] = set()
+    for expression in spdx.values():
+        if " OR " in expression:
+            expressions.add(expression)
+        else:
+            expressions.update(expression.split(" AND "))
+    return " AND ".join(
+        _parenthesize_compound_expression(e) for e in sorted(expressions)
     )
-    return " AND ".join(_parenthesize_compound_expression(e) for e in expressions)
 
 
 def _checkout_looks_populated(repo_root: Path, included: set[str]) -> bool:
@@ -139,12 +139,12 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
     if not isinstance(included, list) or not all(isinstance(p, str) for p in included):
         return (["[project].license-files must be a list of strings."], None)
 
-    discovered = discover_license_files(repo_root)
-    if not any(p.startswith("third_party/") for p in discovered):
+    inc = set(included)
+    if not _checkout_looks_populated(repo_root, inc):
         return ([], _SKIP_REASON)
 
+    discovered = discover_license_files(repo_root)
     err: list[str] = []
-    inc = set(included)
     if bad := inc & excluded:
         err.append(
             "license-files must not list paths that are in manifest excluded list: "
@@ -168,24 +168,11 @@ def audit_repo_license_files(repo_root: Path) -> tuple[list[str], str | None]:
                 + ", ".join(not_discoverable)
             )
 
-        # excluded - discovered, scoped to submodules that are checked out:
-        # only flag an excluded entry as stale when another file from the same
-        # third_party/<dep>/ is visible in discovered, meaning the submodule
-        # is populated but the specific file is no longer tracked.
-        populated_deps = {
-            "/".join(p.split("/")[:2])
-            for p in discovered
-            if p.startswith("third_party/")
-        }
-        if stale_excluded := sorted(
-            p
-            for p in excluded
-            if "/".join(p.split("/")[:2]) in populated_deps and p not in discovered
-        ):
+        if stale_excluded := sorted(excluded - discovered):
             err.append(
-                f"{_MANIFEST_PATH.name} excluded list has stale path(s) whose "
-                "submodule is populated but the file is no longer tracked "
-                "(removed from submodule?): " + ", ".join(stale_excluded)
+                f"{_MANIFEST_PATH.name} excluded list has path(s) not returned by "
+                "git ls-files --recurse-submodules (removed from submodule or "
+                "glob mismatch?): " + ", ".join(stale_excluded)
             )
 
         if missing := sorted(p for p in inc if not (repo_root / p).is_file()):
