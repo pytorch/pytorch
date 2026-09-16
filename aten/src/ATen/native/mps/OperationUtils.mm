@@ -1090,7 +1090,7 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     auto cplState = getPipelineStateForFunc(kernel_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
 
       getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor}, mpsStream);
@@ -1192,7 +1192,7 @@ void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
   @autoreleasepool {
     auto cplState = getPipelineStateForFunc(kernel_name);
     MPSStream* mpsStream = getCurrentMPSStream();
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       auto computeEncoder = mpsStream->commandEncoder();
       getMPSProfiler().beginProfileKernel(cplState, kernel_name, /*isGraph=*/false, mpsStream);
       [computeEncoder setComputePipelineState:cplState];
@@ -1633,7 +1633,17 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
                        iter.ndim(),
                        types);
       }
-      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      if (iter.is_contiguous()) {
+        mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      } else {
+        // Strided kernels take a 3D dispatch: the first three (coalesced) dims map straight onto the grid, so the
+        // kernel reads their coordinates from thread_position_in_grid rather than dividing for them. Only dims past
+        // the third pay for a div/mod, and TensorIterator has already coalesced whatever it could.
+        const auto ndim = iter.ndim();
+        const auto dim0 = static_cast<NSUInteger>(iter.shape()[0]);
+        const auto dim1 = ndim > 1 ? static_cast<NSUInteger>(iter.shape()[1]) : 1;
+        mtl_dispatch3DJob(computeEncoder, binaryPSO, dim0, dim1, static_cast<NSUInteger>(iter.numel()) / (dim0 * dim1));
+      }
       getMPSProfiler().endProfileKernel(binaryPSO, mpsStream);
     }
   });

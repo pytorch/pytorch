@@ -3522,7 +3522,7 @@ kernel void svd_jacobi(
     const uint32_t ld = params.transposed ? params.v_ld : params.u_ld;
     // U_b is column-major (elem i of col c at out[c*ld + i]); the transposed
     // run emits V_b row-major (out[i*ld + c]), so index columns accordingly.
-    const uint32_t col_off = params.transposed ? 1u: ld;
+    const uint32_t col_off = params.transposed ? 1u : ld;
     const uint32_t elem_step = params.transposed ? ld : 1u;
     // Relative rank cutoff: sigma_j at or below the Jacobi noise floor
     // (~m*eps*sigma_max) is numerically zero, so its column is arbitrary and
