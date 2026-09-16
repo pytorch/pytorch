@@ -277,14 +277,29 @@ class NIXLTransport(Transport):
                 )
                 self._transfers[key] = handle
             try:
-                state = agent.transfer(handle)
                 deadline = time.monotonic() + self._timeout
+                error: BaseException | None = None
+                timed_out = False
+                state = "PROC"
+                try:
+                    state = agent.transfer(handle)
+                except BaseException as dispatch_error:
+                    error = dispatch_error
                 while state == "PROC":
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError(f"NIXL {operation.lower()} timed out")
-                    state = agent.check_xfer_state(handle)
+                    timed_out |= time.monotonic() >= deadline
+                    try:
+                        state = agent.check_xfer_state(handle)
+                    except BaseException as check_error:
+                        # A failed query does not establish that DMA has stopped.
+                        if error is None:
+                            error = check_error
+                        time.sleep(0)
+                if error is not None:
+                    raise error
                 if state != "DONE":
                     raise RuntimeError(f"NIXL {operation.lower()} failed")
+                if timed_out:
+                    raise TimeoutError(f"NIXL {operation.lower()} timed out")
             except BaseException:
                 self._transfers.pop(key, None)
                 try:
