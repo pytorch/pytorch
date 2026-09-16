@@ -3991,8 +3991,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
 instantiate_parametrized_tests(OptimizedModuleTest)
 
-instantiate_parametrized_tests(OptimizedModuleTest)
-
 instantiate_device_type_tests(
     NNModuleTestsDevice, globals(), except_for="cpu", allow_xpu=True
 )
