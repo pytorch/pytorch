@@ -7,6 +7,7 @@ contract and the dtype/index-width compile parameters against stock aten.
 """
 
 import unittest
+from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -30,6 +31,9 @@ class TestRadixKernelBuilder(TestCase):
         self.assertEqual(
             [t["name"] for t in b["tensor_args"]], ["mX", "mValues", "mIndices"]
         )
+        self.assertEqual(b["tensor_args"][0]["dynamic_sizes"], [0])
+        self.assertIsNone(b["fn"].scalar_tail_iters)
+        self.assertIsNone(b["fn"].fixed_vec_iters)
 
     @skipIfNoCuteDSL
     def test_build_prefixes_unique_across_grid(self):
@@ -41,6 +45,38 @@ class TestRadixKernelBuilder(TestCase):
                 b = build({"dtype": dtype, "N": 4096, "K": 64, "deterministic": det})
                 prefixes.add(b["prefix"])
         self.assertEqual(len(prefixes), 4)
+
+    @skipIfNoCuteDSL
+    def test_launch_bounds_compile_without_cuda_device(self):
+        import cutlass.cute as cute
+        import cutlass.cutlass_dsl.cutlass as cutlass_dsl
+        from cutlass import Float32, Int64
+
+        from torch._native.ops.topk.cutedsl_kernels import (
+            _make_fake_tensor,
+            _RadixSelectTopK,
+        )
+
+        batch = cute.sym_int()
+        k = 1024
+        with mock.patch.object(
+            cutlass_dsl.cuda_helpers,
+            "get_device_attribute",
+            side_effect=AssertionError("unexpected CUDA device query"),
+        ):
+            cute.compile(
+                _RadixSelectTopK(
+                    k,
+                    deterministic=True,
+                    index_dtype=Int64,
+                    scalar_tail_iters=4,
+                    min_blocks_per_mp=2,
+                ),
+                _make_fake_tensor(Float32, (batch, 32768), 4),
+                _make_fake_tensor(Float32, (batch, k), 4),
+                _make_fake_tensor(Int64, (batch, k), 4),
+                cute.runtime.make_fake_stream(),
+            )
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -66,7 +102,7 @@ class TestRadixKernelParams(TestCase):
         i_f = _make_fake_tensor(index_dtype, (batch, k), math.gcd(4, k))
         compiled = cute.compile(
             _RadixSelectTopK(
-                N, k, deterministic=True, in_dtype=in_dtype, index_dtype=index_dtype
+                k, deterministic=True, in_dtype=in_dtype, index_dtype=index_dtype
             ),
             x_f,
             v_f,
