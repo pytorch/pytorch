@@ -9,8 +9,6 @@ Examples:
     python compile_benchmark.py --model flux --mode full --backend eager
     python compile_benchmark.py --model tiny_stable_diffusion --mode all \
         --check-outputs --output results.csv
-
-The ``auroflow`` spelling remains as an alias for compatibility.
 """
 
 from __future__ import annotations
@@ -339,7 +337,6 @@ def _recipes() -> dict[str, Recipe]:
             artifacts=(),
         ),
     }
-    recipes["auroflow"] = recipes["auraflow"]
     return recipes
 
 
