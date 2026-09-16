@@ -19,8 +19,8 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     TraceableFlyDSLLauncher,
 )
 from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
-from torch.export.graph_signature import OutputKind
 from torch._library.utils import get_layout_constraint_tag
+from torch.export.graph_signature import OutputKind
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -69,6 +69,7 @@ class _EagerLauncher:
 
 class FlyDSLCaptureTest(TestCase):
     def setUp(self):
+        super().setUp()
         flydsl_launcher_side_table.reset_table()
         torch._dynamo.reset()
 
@@ -478,8 +479,7 @@ class FlyDSLCaptureTest(TestCase):
         )
         self.assertTrue(
             any(
-                output.kind is OutputKind.USER_INPUT_MUTATION
-                and output.target == "out"
+                output.kind is OutputKind.USER_INPUT_MUTATION and output.target == "out"
                 for output in exported.graph_signature.output_specs
             )
         )
