@@ -1300,9 +1300,6 @@ bool ConcretePyInterpreterVTable::fake_try_op_impl(
     }
     py::object result;
     {
-      c10::impl::ExcludeDispatchKeyGuard guard(
-          c10::DispatchKeySet(c10::DispatchKey::Python) |
-          c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
       auto tls = c10::impl::tls_local_dispatch_key_set();
       tls.excluded_ = tls.excluded_.remove(c10::DispatchKey::Fake);
       c10::impl::ForceDispatchKeyGuard fake_guard(tls);
@@ -1341,9 +1338,6 @@ bool ConcretePyInterpreterVTable::fake_try_fast_op_impls(
       op,
       stack,
       [&](const py::object& args, const py::dict& kwargs) {
-        c10::impl::ExcludeDispatchKeyGuard guard(
-            c10::DispatchKeySet(c10::DispatchKey::Python) |
-            c10::DispatchKeySet(c10::DispatchKey::PythonTLSSnapshot));
         return fast_impl(active.py_fake_mode, *args, **kwargs);
       },
       make_fake_device_stamp(common_device, active.mode, /*skip_fake=*/false),
