@@ -20,10 +20,10 @@ from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     find_free_port,
     IS_WINDOWS,
     munge_exc,
-    skipIfCppFakeTensor,
     skipIfTorchDynamo,
     skipIfWindows,
 )
@@ -351,7 +351,6 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
 
     @make_logging_test()
-    @skipIfCppFakeTensor("C++ FakeTensor has a different repr")
     def test_dynamo_error(self, records):
         try:
             fn_opt = torch.compile(dynamo_error_fn, backend="inductor")
@@ -359,9 +358,7 @@ class LoggingTests(LoggingTestCase):
         except Exception:
             pass
         record = self.getRecord(records, "WON'T CONVERT")
-        self.assertExpectedInline(
-            munge_exc(record.getMessage()),
-            """\
+        expected = """\
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
@@ -375,7 +372,13 @@ torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",
+    output = output.add(torch.ones(10, 10))"""
+        expected = expectedIfCppFakeTensor(
+            expected.replace("FakeTensor(...", "tensor(..."), expected
+        )
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            expected,
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
