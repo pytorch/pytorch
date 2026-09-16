@@ -421,10 +421,7 @@ class TestCppWrapperCpuSelection(TestCase):
         ).run(code)
 
         aoti_module = torch._inductor.aoti_load_package(package_path)
-        expected_error = (
-            "Expect the tensor to be 16 bytes aligned. "
-            "Fail due to storage_offset=1 itemsize=4"
-        )
+        expected_error = "Expect the tensor to be 16 bytes aligned. Got data_ptr="
         with self.assertRaisesRegex(RuntimeError, expected_error):
             aoti_module(*sample)
 

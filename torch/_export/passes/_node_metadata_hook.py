@@ -38,7 +38,10 @@ def _node_metadata_hook(
     if node.op != "call_function" or not callable(node.target):
         raise AssertionError(f"node: {node}, target: {node.target}")
 
-    if (
+    if node.target is torch._C._dynamo.guards.assert_alignment:
+        # Runtime alignment assertions require real pointers.
+        node.meta["val"] = True
+    elif (
         isinstance(node.target, torch._ops.OpOverload)
         and len(node.target._schema.returns) == 0
     ):

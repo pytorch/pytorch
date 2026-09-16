@@ -2482,7 +2482,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.aot_mode and V.graph.is_const_graph:
             return
         stmt = f'assert_alignment({name}, {alignment}, "{op_name}");'
-        self._codegen_runtime_assert(code, stmt)
+        if config.alignment_asserts_inputs and op_name == "input":
+            code.writeline(stmt)
+        else:
+            self._codegen_runtime_assert(code, stmt)
 
     def codegen_device(self, device):
         device_str = device_to_aten(device.type)[5:].lower()  # remove "at::k"
