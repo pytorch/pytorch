@@ -265,6 +265,13 @@ alignment_asserts = (
     == "1"
 )
 
+# Strict mode for input alignment: assert alignment of graph inputs which
+# were codegenned under the assumption that they are aligned, instead of the
+# runtime silently realigning misaligned inputs with a clone.
+alignment_asserts_inputs = (
+    os.environ.get("TORCHINDUCTOR_ALIGNMENT_ASSERTS_INPUTS") == "1"
+)
+
 # enable loop reordering based on input orders
 pick_loop_orders = True
 

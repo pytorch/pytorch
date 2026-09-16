@@ -480,22 +480,14 @@ inline void assert_alignment(
     return;
   }
 
-  int64_t storage_offset = 0;
-  AOTI_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_get_storage_offset(tensor, &storage_offset));
-
-  int32_t dtype = 0;
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(tensor, &dtype));
-  const size_t itemsize = aoti_torch_dtype_element_size(dtype);
-
-  if (storage_offset * itemsize % alignment != 0) {
+  const auto ptr = reinterpret_cast<uintptr_t>(get_data_ptr_wrapper(tensor));
+  if (ptr % alignment != 0) {
     std::stringstream msg;
     if (op_name) {
       msg << "\nError in op: " << op_name;
     }
     msg << "\nExpect the tensor to be " << alignment
-        << " bytes aligned. Fail due to storage_offset=" << storage_offset
-        << " itemsize=" << itemsize;
+        << " bytes aligned. Got data_ptr=" << ptr;
     AOTI_RUNTIME_CHECK(false, std::move(msg).str());
   }
 }
