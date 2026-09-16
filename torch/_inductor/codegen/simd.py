@@ -3653,7 +3653,13 @@ class SIMDScheduling(BaseScheduling):
         return None
 
     def generate_node_schedule(
-        self, nodes, numel, rnumel, *, required_post_reduction_index=None
+        self,
+        nodes,
+        numel,
+        rnumel,
+        *,
+        required_post_reduction_index=None,
+        group_extent_subs=None,
     ):
         """Build a schedule, optionally requiring a main-body suffix after a reduction."""
         if required_post_reduction_index is not None and not (
@@ -3672,12 +3678,18 @@ class SIMDScheduling(BaseScheduling):
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
+            if group_extent_subs:
+                node_numel = sympy_subs(node_numel, group_extent_subs)
+                node_rnumel = sympy_subs(node_rnumel, group_extent_subs)
             return (node_numel == numel and node_rnumel == rnumel) or (
                 node_numel == numel * rnumel and node_rnumel == 1
             )
 
         def fits_outside_reduction(n):
             _, (node_numel, node_rnumel) = n.group
+            if group_extent_subs:
+                node_numel = sympy_subs(node_numel, group_extent_subs)
+                node_rnumel = sympy_subs(node_rnumel, group_extent_subs)
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
         def expect_improved_memory_usage(n):
@@ -4637,6 +4649,24 @@ class SIMDScheduling(BaseScheduling):
         rnumel = plan.parent_rnumel
         sub_parent_epilogue_nodes = stage.epilogue_nodes
         parent_nodes = list(plan.parent_nodes)
+        group_extent_subs = {}
+        if has_translated_projection:
+            # The scheduler specializes the canonical parent width, while the
+            # final SchedulerNode groups may still spell it with the backed
+            # symbolic dimension.  Normalize only this committed translated
+            # plan; ordinary dynamic reductions retain their existing group
+            # matching behavior.
+            for parent_node in parent_nodes:
+                if not parent_node.is_reduction():
+                    continue
+                _, (node_numel, node_rnumel) = parent_node.group
+                if (
+                    V.graph.sizevars.statically_known_equals(node_numel, numel)
+                    and V.graph.sizevars.statically_known_equals(node_rnumel, rnumel)
+                    and node_rnumel != rnumel
+                ):
+                    group_extent_subs[node_rnumel] = rnumel
+                    break
         required_replay_relations = tuple(
             relation
             for relation in stage.access_relations
@@ -4651,6 +4681,7 @@ class SIMDScheduling(BaseScheduling):
             numel,
             rnumel,
             required_post_reduction_index=plan.required_post_reduction_index,
+            group_extent_subs=group_extent_subs or None,
         )
         schedule_log.debug(
             "Schedule:\n %s\nSub-parent epilogue:\n %s",
