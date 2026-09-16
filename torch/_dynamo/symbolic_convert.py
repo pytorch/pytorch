@@ -2384,6 +2384,9 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
+        # import_source leaves a writer's same-named module in the alias slot
+        # when the memo is not the live entry; the value stays the memo, the
+        # module whose __globals__ _call_impl reads the hook dicts through.
         fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
