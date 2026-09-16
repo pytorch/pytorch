@@ -35,7 +35,7 @@ inline bool has_torch_function(PyObject* obj) {
 bool has_torch_function(c10::ArrayRef<PyObject*> args);
 
 struct DisableTorchDispatch {
-  // Fake is excluded so no_dispatch() suspends the cpp FakeTensorMode too:
+  // no_dispatch() must suspend C++ Fake just as it suspends Python dispatch:
   // real-tensor reads under no_dispatch() (e.g. t.item() in from_real_tensor)
   // must not re-enter the Fake fallback. No-op when Fake is not in TLS.
   DisableTorchDispatch()
