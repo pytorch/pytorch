@@ -618,6 +618,12 @@ class StorageWeakRefWrapper:
     def remove_extra_reference(self) -> None:
         self.extra_ref_check = None
 
+    def data_ptr_changed(self) -> bool:
+        if torch._C._storage_Use_Count(self.ref.cdata) == 0:
+            return False
+        stor = torch.UntypedStorage._new_with_weak_ptr(self.ref.cdata)
+        return stor.data_ptr() != self._data_ptr
+
     def expired(self) -> bool:
         if self.extra_ref_check is not None and not self.extra_ref_check():
             return False
@@ -630,7 +636,14 @@ class StorageWeakRefWrapper:
             stor_count -= 2
         if stor_count < 0:
             raise AssertionError(f"expected stor_count >= 0, got {stor_count}")
-        return stor_count == 0
+        if stor_count == 0:
+            return True
+
+        # Storage metadata mutations such as resize_() can preserve the
+        # StorageImpl while replacing its allocation. This wrapper represents
+        # the allocation that existed when it was created, so it is no longer
+        # live once the storage points at a different address.
+        return self.data_ptr_changed()
 
     def __repr__(self) -> str:
         if self.ref is None or self.ref.expired():
@@ -2435,6 +2448,7 @@ class CUDAGraphTreeManager:
 
         self.id_to_mode: dict[FunctionID, CompilationMode] = {}
         self.id_to_compile_id: dict[FunctionID, CompileId | None] = {}
+        self.storage_reallocated_function_ids: OrderedSet[FunctionID] = OrderedSet()
         self.has_live_user_visible_output_cloning = False
 
         # Note: [Backward Generation Handling]
@@ -2525,11 +2539,31 @@ class CUDAGraphTreeManager:
             > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         )
 
+    def _check_for_reallocated_output_storage(self) -> None:
+        if self.current_node is None:
+            return
+
+        for node in self.current_node._path_from_root:
+            function_id = node.wrapped_function.id
+            if function_id in self.storage_reallocated_function_ids:
+                continue
+            if any(
+                output is not None and output.data_ptr_changed()
+                for output in node.outputs_weakrefs
+            ):
+                self.storage_reallocated_function_ids.add(function_id)
+                log_cudagraph_skip_and_bump_counter(
+                    "skipping cudagraphs because an output storage was "
+                    "reallocated outside the compiled graph"
+                )
+
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
         # we don't want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
+        self._check_for_reallocated_output_storage()
+
         if self.in_recording:
             self.try_end_curr_recording(function_id)
 
@@ -2557,9 +2591,11 @@ class CUDAGraphTreeManager:
         # Early exit if the function mutates inputs which are neither parameters/buffers nor
         # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
         # and `try_end_curr_warmup` which may change self.current_node.
-        if self.non_cudagraph_managed_mutation_hint[node_id][
-            function_id
-        ] or self.exceed_rerecord_limit(node_id, function_id):
+        if (
+            self.non_cudagraph_managed_mutation_hint[node_id][function_id]
+            or self.exceed_rerecord_limit(node_id, function_id)
+            or function_id in self.storage_reallocated_function_ids
+        ):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses

@@ -26,6 +26,7 @@ from torch._inductor.cudagraph_trees import (
     AliasesPriorGraphOutput,
     cudagraphify_impl as tree_cudagraphify_impl,
     ExecutionState,
+    StorageWeakRefWrapper,
 )
 from torch._inductor.cudagraph_utils import PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -150,6 +151,17 @@ class TestCase(InductorTestCase):
 
 
 class CUDAGraphAPIOnlyTests(TestCase):
+    def test_storage_weakref_expires_after_reallocation(self):
+        tensor = torch.empty(1)
+        storage_ref = StorageWeakRefWrapper(tensor)
+        old_data_ptr = tensor.untyped_storage().data_ptr()
+
+        tensor.resize_(1024 * 1024)
+
+        self.assertNotEqual(tensor.untyped_storage().data_ptr(), old_data_ptr)
+        self.assertTrue(storage_ref.data_ptr_changed())
+        self.assertTrue(storage_ref.expired())
+
     def test_mark_warmup_incomplete_without_cudagraphs(self):
         cudagraph_trees = torch._inductor.cudagraph_trees
         containers = cudagraph_trees.get_obj(
@@ -832,6 +844,29 @@ if HAS_CUDA_AND_TRITON:
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
             self.assertIsNone(self.get_manager())
+
+        def test_resize_intermediate_storage_across_graph_break(self):
+            def resize_tensor(x):
+                value = x[0].clone()
+                x.resize_(5)
+                x.zero_()
+                x[0] = value
+                return x
+
+            def fn(x, weight):
+                y = torch.mv(weight, x)
+                y = resize_tensor(y)
+                return y.square()
+
+            x = torch.randn(32, device="cuda")
+            weight = torch.randn(1, 32, device="cuda")
+            compiled_fn = torch.compile(fn, mode="reduce-overhead")
+            for _ in range(3):
+                expected = fn(x, weight)
+                actual = compiled_fn(x, weight)
+                self.assertEqual(actual, expected)
+                x = torch.randn_like(x)
+                weight = torch.randn_like(weight)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
