@@ -3690,6 +3690,7 @@ def get_backend_num_stages() -> int:
     options = get_backend_options()
     return options.get("num_stages", 2 if torch.version.hip else 3)
 
+
 @functools.cache
 def get_device_tflops(dtype: torch.dtype) -> float:
     """

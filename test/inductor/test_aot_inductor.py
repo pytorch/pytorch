@@ -90,7 +90,6 @@ from torch.testing._internal.common_utils import (
     NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
-    recover_orig_fp32_precision,
     runOnRocm,
     set_cwd,
     skipIfRocmArch,
@@ -10269,8 +10268,7 @@ torch._inductor.aoti_load_package("{model_path}")
                 cfg["BLOCK_M"] * cfg["BLOCK_N"] * cfg["BLOCK_Q"], 64 * 256
             )
 
-    @recover_orig_fp32_precision
-    def test_bmm_shared_a_offered_when_eligible_with_mixed_tf32_apis(self):
+    def test_bmm_shared_a_offered_when_eligible_when_legacy_tf32_getters_fail(self):
         _skip_unless_bmm_shared_a_runnable(self)
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA TF32 matmul settings")
@@ -10278,9 +10276,22 @@ torch._inductor.aoti_load_package("{model_path}")
             torch.randn(1, 64, 64, device=self.device, dtype=torch.float16),
             torch.randn(128, 64, 32, device=self.device, dtype=torch.float16),
         )
-        torch.set_float32_matmul_precision("highest")
-        torch.backends.cuda.matmul.fp32_precision = "tf32"
-        offered = _record_bmm_shared_a_choices(example_inputs)
+
+        def raise_mixed_api_error(*args, **kwargs):
+            raise RuntimeError("mix of the legacy and new APIs")
+
+        with (
+            patch.object(
+                torch._C,
+                "_get_cublas_allow_tf32",
+                side_effect=raise_mixed_api_error,
+            ),
+            patch(
+                "torch.get_float32_matmul_precision",
+                side_effect=raise_mixed_api_error,
+            ),
+        ):
+            offered = _record_bmm_shared_a_choices(example_inputs)
         self.assertTrue(offered, "bmm_shared_a was not offered to the autotuner")
 
     def test_bmm_shared_a_not_offered_when_disabled(self):
