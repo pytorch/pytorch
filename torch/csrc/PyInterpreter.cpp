@@ -995,3 +995,33 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
 c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
 }
+
+py::object getFakeModePyObj(const std::shared_ptr<c10::FakeTensorMode>& mode) {
+  if (mode == nullptr) {
+    return py::none();
+  }
+  // fake_mode_pyobj_ weakly references the Python CppFakeTensorMode: the
+  // Python object owns this C++ mode, so a strong reference would cycle.
+  if (mode->fake_mode_pyobj_ != nullptr) {
+    PyObject* obj = nullptr;
+    if (PyWeakref_GetRef(
+            mode->fake_mode_pyobj_->ptr(getPyInterpreter()), &obj) > 0) {
+      return py::reinterpret_steal<py::object>(obj);
+    }
+  }
+  auto converter = py::reinterpret_borrow<py::object>(
+      mode->fake_tensor_converter_->ptr(getPyInterpreter()));
+  py::object shape_env = mode->shape_env_ == nullptr
+      ? py::none()
+      : py::reinterpret_borrow<py::object>(
+            mode->shape_env_->ptr(getPyInterpreter()));
+  py::object cls = py::module::import("torch._subclasses.fake_tensor")
+                       .attr("CppFakeTensorMode");
+  py::object wrapper =
+      cls.attr("_from_cpp_mode")(py::cast(mode), converter, shape_env);
+  PyObject* weakref = PyWeakref_NewRef(wrapper.ptr(), nullptr);
+  TORCH_CHECK(weakref != nullptr, "failed to weakref CppFakeTensorMode");
+  mode->fake_mode_pyobj_ =
+      std::make_shared<c10::SafePyObject>(weakref, getPyInterpreter());
+  return wrapper;
+}
