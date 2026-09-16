@@ -38,7 +38,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import constants_identical, get_fake_value
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
-from torch._dynamo.variables.functions import UserFunctionVariable
+from torch._dynamo.variables.functions import UserFunctionVariable, UserMethodVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
 from torch._dynamo.variables.script_object import CustomClassObjectVariable
 from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
@@ -1990,7 +1990,8 @@ def speculate_subgraph_with_auto_output_flattening(
             )
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2190,7 +2191,8 @@ def speculate_subgraph(
 
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
-        if isinstance(f, UserFunctionVariable):
+        # functions and methods both reach this path
+        if isinstance(f, (UserFunctionVariable, UserMethodVariable)):
             f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
@@ -2362,12 +2364,16 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
     ) -> VariableTracker:
         if self.source is None:
             raise AssertionError("source must not be None")
+        call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            self.value.__call__.__func__,
+            torch._dynamo.variables.UserFunctionVariable(
+                self.value.__call__.__func__,
+                source=AttrSource(call_source, "__func__"),
+            ),
             torch._dynamo.variables.UserDefinedObjectVariable(
                 self.value, source=self.source
             ),
-            source=AttrSource(self.source, "__call__"),
+            source=call_source,
         ).call_function(tx, args, kwargs)
 
 
@@ -4468,6 +4474,25 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
                 context_fn = ctx.guard_as_python_constant()
+            elif isinstance(ctx, torch._dynamo.variables.UserMethodVariable):
+                # Binding the method needs its receiver as a real object. When
+                # the receiver was built inside the region that is impossible,
+                # so graph break with the reason rather than the generic one.
+                try:
+                    context_fn = ctx.guard_as_python_constant()
+                except Unsupported as e:
+                    unimplemented(
+                        gb_type="checkpoint context_fn bound to a non-constant receiver",
+                        context=f"context_fn={ctx}",
+                        explanation="checkpoint needs context_fn as a Python callable, "
+                        "but the receiver of this bound method cannot be resolved to "
+                        "a constant object at trace time.",
+                        hints=[
+                            "Bind context_fn to an object created outside the compiled "
+                            "region, or pass a function or functools.partial instead.",
+                        ],
+                        from_exc=e,
+                    )
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
@@ -4525,6 +4550,8 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
 
         if isinstance(func_var, torch._dynamo.variables.UserFunctionVariable):
             func = func_var.fn
+        elif isinstance(func_var, torch._dynamo.variables.UserMethodVariable):
+            func = func_var.guard_as_python_constant()
         elif isinstance(
             func_var, torch._dynamo.variables.functions.FunctoolsPartialVariable
         ):
@@ -5553,7 +5580,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
-                        autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                        torch._dynamo.variables.UserFunctionVariable(
+                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                        ),
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
@@ -5983,7 +6012,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                fn.__func__,
+                torch._dynamo.variables.UserFunctionVariable(
+                    fn.__func__,
+                    source=source and AttrSource(source, "__func__"),
+                ),
                 cls_vt,
                 source=source,
             )
