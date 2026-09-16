@@ -2244,6 +2244,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         SeqIter = VariableTracker.build(tx, polyfills.builtins.sequence_iterator)
         return SeqIter.call_function(tx, [self], {})
 
+    def tp_new_impl(self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs: dict[str, VariableTracker]) -> VariableTracker:
+        func = self.generic_getattr(tx, "__new__")
+        return func.call_function(tx, args, kwargs)
+
     @staticmethod
     @functools.cache
     def _supported_random_functions() -> set[Any]:

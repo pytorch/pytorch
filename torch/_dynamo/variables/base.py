@@ -2376,14 +2376,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         implements `object.__new__(cls)`, the ultimate fallback every type's
         `__new__` chain bottoms out at.
         """
-        if len(args) != 1:
+        klass = self.as_python_constant()
+        if klass is not object:
             unimplemented(
                 gb_type="missing tp_new",
-                context=f"tp_new_impl not implemented for {self.python_type_name()}",
+                context=f"tp_new_impl not implemented for {klass.__name__}",
                 explanation=f"Dynamo does not know how to trace __new__ on `{self.debug_repr()}`.",
-                hints=[*graph_break_hints.DYNAMO_BUG],
+                hints=[*graph_break_hints.SUPPORTABLE],
             )
-        no_keywords(tx, "object", kwargs)
+        if len(args) != 1 or len(kwargs) != 0:
+            raise_type_error(tx, "object.__new__() takes exactly one argument (the type to instantiate)")
+
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], args[1:], tx=tx
         )
