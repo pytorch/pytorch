@@ -2678,6 +2678,10 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             translated_relations = [
                 relation for relation in relations if relation.translation is not None
             ]
+            if translated_relations and len(translated_relations) != len(relations):
+                raise AssertionError(
+                    f"mixed translated and non-translated relations for {name}"
+                )
             contract_relations = (
                 translated_relations if translated_relations else relations
             )
@@ -2697,6 +2701,14 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                     raise AssertionError(f"mixed source roles for {name}")
                 if None in parent_lanes and len(parent_lanes) != 1:
                     raise AssertionError(f"mixed direct and lane relations for {name}")
+            else:
+                if len(source_sets) != 1:
+                    raise AssertionError(
+                        f"mixed translated source accesses for {name}"
+                    )
+                # Live-source status remains per relation.  In particular, a
+                # forwarded internal output and a graph-output view can share
+                # the same source name without sharing this role.
             allowed_lanes = (
                 None
                 if translated_relations or None in parent_lanes
@@ -3488,6 +3500,16 @@ class SIMDScheduling(BaseScheduling):
         if plan is None:
             return None
         if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
+            return None
+        if any(
+            relation.translation is not None
+            for stage in plan.sub_parent_stages
+            for relation in stage.access_relations
+        ) and self._translated_projection_geometry(plan) is None:
+            # The scheduler proof establishes semantic legality, but the first
+            # Triton slice supports only a narrower physical projection.  Keep
+            # this decline before a staged identity is committed; codegen still
+            # revalidates the committed plan and treats a mismatch as an ICE.
             return None
         return plan
 

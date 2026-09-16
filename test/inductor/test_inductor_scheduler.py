@@ -951,6 +951,75 @@ class TestScheduler(TestCase):
             )
         )
 
+    def test_translated_capability_gate_declines_unsupported_geometry(self):
+        row, feature = sympy.symbols(
+            "capability_row capability_feature", integer=True, nonnegative=True
+        )
+        source = MemoryDep(
+            "buf0",
+            192 * row + feature,
+            (row, feature),
+            (4, 192),
+        )
+
+        def make_plan(child_width, factor, translation):
+            consumer = MemoryDep(
+                "buf0",
+                192 * row + feature + translation,
+                (row, feature),
+                (4, child_width),
+            )
+            proof = SubParentAccessRelation.prove_translation(
+                source, consumer, sizevars=SizeVarAllocator()
+            )
+            self.assertIsNotNone(proof)
+            relation = SubParentAccessRelation(
+                (source,),
+                consumer,
+                None,
+                False,
+                translation=proof.translation,
+            )
+            stage = SubParentEpilogueStage(
+                factor=factor,
+                access_relations=(relation,),
+                output_groups=(
+                    SubParentOutputGroup(output_lanes=1, nodes=(Mock(),)),
+                ),
+            )
+            return StagedReductionPlan(
+                parent_nodes=(),
+                parent_numel=sympy.Integer(4),
+                parent_rnumel=sympy.Integer(192),
+                nested_stage=None,
+                sub_parent_stages=(stage,),
+            )
+
+        supported_plan = make_plan(64, 3, 0)
+        unsupported_plan = make_plan(96, 2, 0)
+        scheduling = object.__new__(SIMDScheduling)
+        scheduling.supports_sub_parent_epilogue = True
+        graph = Mock(sizevars=SizeVarAllocator())
+
+        with (
+            V.set_graph_handler(graph),
+            patch.object(
+                SIMDScheduling, "_sub_parent_tiling_is_2d", return_value=True
+            ),
+            patch.object(
+                NestedReduction,
+                "sub_parent_epilogue_plan",
+                side_effect=(supported_plan, unsupported_plan),
+            ),
+            inductor_config.patch({"triton.nested_reduction": True}),
+        ):
+            self.assertIs(
+                scheduling._sub_parent_epilogue_plan([], 4, 192), supported_plan
+            )
+            self.assertIsNone(
+                scheduling._sub_parent_epilogue_plan([], 4, 192)
+            )
+
     def test_sub_parent_resolver_uses_planned_lane_set(self):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
         source = MemoryDep("buf0", d0, (d0,), (sympy.Integer(16),))
