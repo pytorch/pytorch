@@ -963,6 +963,12 @@ class AOTCompiledFunction:
         same two dicts, left to diverge as they already did rather than widened
         here.
 
+        An artifact that opted out of the check re-reads the same names with
+        nothing certifying them and serves whatever it finds, a value a kept
+        guard would have rejected included, or, for a name the scope no longer
+        binds, the last value read: the opt-out is unsafe by construction, and
+        holding those names at their load-time values instead would be no more
+        checked, only stale.
         The re-read is not atomic with the guard check before it, so a rebind
         landing between the two is served unchecked -- the same window an eager
         compiled frame has between guard evaluation and LOAD_GLOBAL. The write
@@ -1637,7 +1643,10 @@ class AOTCompiledModel:
             # than result(), which would re-run the ~1us guard eval on this
             # hot dispatch path. _serve costs one Python frame instead
             # (measured 0.164us), and is what hands the graph the globals
-            # that check just accepted.
+            # that check just accepted. Gating that frame out per site is
+            # not worth it: _serve is the only caller of the raw fn, and a
+            # site that got the gate wrong would serve a stale global with
+            # every guard passing.
             return first._serve(self.model, *args, **kwargs)
         bound = [f_locals]
         shared = len(results) > 1 and self._binds_alike(results)
@@ -1646,7 +1655,7 @@ class AOTCompiledModel:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
             bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
-                return result.fn(self.model, *args, **kwargs)
+                return result._serve(self.model, *args, **kwargs)
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
         # disarms that root, so a second check() runs the tree it skipped. With
@@ -1656,12 +1665,12 @@ class AOTCompiledModel:
         # 1us per result, accepted.
         for result, f_locals in zip(results, bound):
             if result._live_guard_manager().check(f_locals):
-                return result.fn(self.model, *args, **kwargs)
+                return result._serve(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
         # only after both passes above have failed to find a real match.
         for result in results:
             if not result._guard_check_enabled:
-                return result.fn(self.model, *args, **kwargs)
+                return result._serve(self.model, *args, **kwargs)
         raise RuntimeError(self._no_match_report(results, bound))
 
     def _no_match_report(
@@ -1756,15 +1765,13 @@ class AOTCompiledModel:
         compiled bytecode reads the globals serialized with the artifact except
         for the names a kept guard's own source IS -- not a global reached only
         through a sub-path of it, and never the recorded ``__builtins_dict___N``
-        key -- which are re-taken from that live dict before a call the first
-        compiled result's guards accept (the fallback passes of dispatch still
-        serve the values merged at load). So a value the graph reads live is one
-        a passing guard certifies, every other global is the one it was traced
-        with, and a guarded global the live dict lacks fails the guard rather
-        than falling back to the serialized value. Rebinding a guarded global
-        after the load is therefore what the graph computes with once those
-        guards accept it, and the certification is only as strong as the guard's
-        type: a kept ``TENSOR_MATCH`` accepts a same-metadata
+        key -- which are re-taken from that live dict on every call. So a value
+        the graph reads live is one a passing guard certifies, every other global
+        is the one it was traced with, and a guarded global the live dict lacks
+        fails the guard rather than falling back to the serialized value.
+        Rebinding a guarded global after the load is therefore what the graph
+        computes with once the guards accept it, and the certification is only as
+        strong as the guard's type: a kept ``TENSOR_MATCH`` accepts a same-metadata
         swap, checking metadata and not values, and a root ``TYPE_MATCH`` on a
         container checks its type, not the members the graph reads through it.
         Loading also MUTATES that dict: a recorded ``__import_*`` alias a kept guard
