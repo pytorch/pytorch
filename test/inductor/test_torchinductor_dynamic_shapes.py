@@ -62,6 +62,12 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
+    # of the model, so the parent stops emitting triton_per_ and the
+    # persistent-vs-looped contrast the test asserts no longer exists.
+    "test_regional_codegen_only_config_cpp_wrapper_dynamic_shapes": TestFailure(
+        ("cuda", "xpu"), is_skip=True
+    ),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),

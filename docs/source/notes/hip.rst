@@ -118,6 +118,8 @@ To debug memory errors, set
 hipBLAS workspaces
 ------------------
 
+Unlike CUDA, ROCm continues to cache workspaces by default.
+
 For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
 handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to
 avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
