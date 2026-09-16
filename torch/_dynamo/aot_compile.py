@@ -613,9 +613,10 @@ class AOTCompiledFunction:
     # Whether a kept guard is rooted at a user global; False until a load
     # decides it. Arms the live-value pick, and deserialize's fallback warning.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
-    # Whether the load-time merge of the guarded names into the bytecode's
-    # globals runs, which only a caller that supplied a guard scope but no
-    # f_globals -- the module load path -- needs.
+    # Whether a supplied guard scope with global guards, on top of arming the
+    # per-call re-read, also has its guarded names merged into the bytecode's
+    # globals at load; only the module load path, which supplies a scope but no
+    # f_globals for the bytecode to read, sets it.
     _bytecode_reads_guard_scope: bool = False
     # The globals a kept guard's own source IS (not one reached only through a
     # sub-path of it), armed only for a supplied live scope. _serve re-takes
@@ -951,7 +952,17 @@ class AOTCompiledFunction:
         the call. A global the graph itself rebinds is re-read from the scope on
         the next call too: the replayed ``STORE_GLOBAL`` lands in the bytecode's
         globals, not in the scope, so the stored value is one no guard certified
-        and the scope's is what the check before the call just passed.
+        and the scope's is what the check before the call just passed. That is a
+        deliberate trade-off: a forward that accumulates into a guarded global
+        (``global W; W = W * 2``) serves the scope's value on every call, where
+        eager, whose store lands in the dict its guards read, counts up. Leaving
+        a stored name out of the re-read instead would serve the stored value
+        after a rebind of the scope the guards accepted -- the check certifying
+        one value while the graph reads another, which is the stale read this
+        re-read removes -- and writing the store back into the scope is a
+        behaviour neither load path has. Under the default filter, which keeps
+        no global guard, nothing is re-read and such a store accumulates in the
+        bytecode's globals, unchecked.
 
         Only a load handed a live scope arms this. An artifact compiled in this
         process has none, so its globals stay at the values the capture copied
@@ -1589,7 +1600,10 @@ class AOTCompiledModel:
     per compiled result quoting the guards that refused it, or, for a result
     whose guards accept the call on the report's own evaluation after refusing
     it in both dispatch passes, a ``<guards rejected this call twice and then
-    accepted it here: ...>`` explanation in place of any guards; one
+    accepted it here: ...>`` explanation in place of any guards, or, for a
+    result whose refusal quotes nothing -- an accessor that answered false with
+    no parts, or a guard that raised with a blank message -- ``<guard check
+    failed without naming a guard>``; one
     ``For [i, j]:`` line per distinct missing-global hint naming the entries
     whose guards failed on a global the process does not define; and the advice
     to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
@@ -1687,14 +1701,20 @@ class AOTCompiledModel:
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards rejected this call twice and then accepted "
-                    "it here: a guard that does not answer consistently>"
+                    "it here: a guard that does not answer consistently, or "
+                    "guarded state that changed between those evaluations>"
                 )
                 continue
-            if not reason.verbose_code_parts:
-                # A failing accessor can answer false with no parts to quote.
+            parts = reason.verbose_code_parts
+            # Collapse every separator splitlines() reads the report back on.
+            # Done here, not in get_verbose_code_part: the recompile logs consume
+            # the same parts and are out of this report's scope.
+            joined = " ".join("; ".join(parts).splitlines())
+            if not joined.strip():
+                # A failing accessor can answer false with no parts to quote, and
+                # a guard that raised quotes str(exc), which can be blank.
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
-            parts = reason.verbose_code_parts
             if any(map(_names_a_missing_global, parts)):
                 forward: str | None = None
                 if result._guard_scope is _GuardScope.SUPPLIED and not tried_forward:
@@ -1712,8 +1732,6 @@ class AOTCompiledModel:
                     forward = f"this {type(self.model).__name__} instance's forward"
                 hint = result._missing_global_hint(forward=forward)
                 hinted.setdefault(hint, []).append(i)
-            # Collapse every separator splitlines() reads the report back on.
-            joined = " ".join("; ".join(parts).splitlines())
             lines.append(f"  [{i}] {joined}")
         for hint, at in hinted.items():
             lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
