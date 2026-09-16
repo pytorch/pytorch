@@ -468,9 +468,14 @@ class PersistentCache(CacheBase):
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
         precision = torch.backends.cuda.matmul.fp32_precision
-        # bfx9 has no legacy equivalent, and the legacy getter may reject it.
         if precision != "bfx9":
-            precision = torch.get_float32_matmul_precision()
+            try:
+                precision = torch.get_float32_matmul_precision()
+            except RuntimeError as e:
+                # Keep the backend-specific precision when the process has mixed
+                # legacy and new matmul precision state.
+                if "mix of the legacy and new APIs" not in str(e):
+                    raise
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}
