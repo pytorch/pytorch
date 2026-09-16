@@ -27,7 +27,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
+        # 3.12 builds a single abi3 wheel covering 3.12+, so 3.13/3.14/3.15 need
+        # no job of their own. Free-threaded builds cannot use the limited API,
+        # so 3.14t and 3.15t stay version-specific.
+        py_vers: [ "3.10", "3.11", "3.12", "3.14t", "3.15t" ]
     timeout-minutes: 40
     env:
       PY_VERS: ${{ matrix.py_vers }}
@@ -80,17 +83,8 @@ jobs:
           3.12)
             PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
             ;;
-          3.13)
-            PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
-            ;;
-          3.14)
-            PYTHON_EXECUTABLE=/opt/python/cp314-cp314/bin/python
-            ;;
           3.14t)
             PYTHON_EXECUTABLE=/opt/python/cp314-cp314t/bin/python
-            ;;
-          3.15)
-            PYTHON_EXECUTABLE=/opt/python/cp315-cp315/bin/python
             ;;
           3.15t)
             PYTHON_EXECUTABLE=/opt/python/cp315-cp315t/bin/python
@@ -100,6 +94,14 @@ jobs:
             exit 1
             ;;
           esac
+
+          # Tag the 3.12 build abi3 so one wheel serves 3.12+, as
+          # triton-lang/triton's own wheels.yml does. triton's setup.py reads
+          # this and overrides bdist_wheel's tag to cp312-abi3. It has no
+          # free-threaded guard, so it must stay off for 3.14t/3.15t.
+          if [[ "${PY_VERS}" == "3.12" ]]; then
+            export TRITON_STABLE_ABI=ON
+          fi
 
           # Put the selected interpreter's bin dir on PATH so the pip-installed
           # cmake (and python/pip) are found by triton's setup.py. In the original
