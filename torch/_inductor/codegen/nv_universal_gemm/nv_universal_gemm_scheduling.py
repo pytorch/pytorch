@@ -456,6 +456,9 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         if reduction_plan is not None and not self._supports_scalar_reduce():
             log.debug("NVGEMM local reductions require scalar reduction support")
             return NVGemmVerticalFusionDecision.DEFER
+        if epilogue_program.has_composite_generated_reduction_plan:
+            log.debug("NVGEMM direct EFC supports one generated reduction")
+            return NVGemmVerticalFusionDecision.DEFER
         if reduction_plan is not None and not all(
             variant.supports_reduction(reduction_plan) for variant in variants
         ):

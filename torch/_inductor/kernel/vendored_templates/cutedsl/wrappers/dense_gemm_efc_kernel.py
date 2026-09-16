@@ -14,12 +14,14 @@ from cutlass.operators.fusion.library import ActivationOp
 
 try:
     from cutlass.operators.providers.cutedsl.evt import efc as common_efc
+except ModuleNotFoundError:
+    from cutlass.operators.providers.cutedsl.evt import common_efc
+
+try:
     from cutlass.operators.providers.cutedsl.evt.efc.dense_gemm.sm100 import (
         DenseGemmEFC,
     )
 except ImportError:
-    from cutlass.operators.providers.cutedsl.evt import common_efc
-
     DenseGemmEFC = None
 
 from cutlass.operators.providers.cutedsl.evt.converter import (

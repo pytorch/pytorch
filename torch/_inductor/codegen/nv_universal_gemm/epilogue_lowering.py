@@ -193,6 +193,29 @@ class NVGemmEpilogueProgram:
             geometries[output_name] = match.geometry
         return geometries
 
+    @property
+    def has_composite_generated_reduction_plan(self) -> bool:
+        plan = self.reduction_plan
+        analysis = self.capture.analysis
+        if (
+            plan is None
+            or not plan.tensor_epilogue_returns_local_reduce
+            or plan.reduction_output is None
+            or analysis is None
+        ):
+            return False
+        try:
+            n = V.graph.sizevars.optimization_hint(self.capture.gemm.get_size()[1])
+        except (GuardOnDataDependentSymNode, TypeError, ValueError):
+            return False
+        match = analysis.synthetic_reduction_program(
+            plan.reduction_output,
+            self.capture.gemm.get_name(),
+            self.capture.gemm.get_dtype(),
+            n,
+        )
+        return match is not None and len(match.region.reductions) > 1
+
     def oriented_reduction_geometries(
         self, swap_ab: bool
     ) -> dict[str, GemmReductionGeometry]:

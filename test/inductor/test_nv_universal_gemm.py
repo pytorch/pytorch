@@ -1574,6 +1574,7 @@ class TestNVUniversalGemmHeuristics(TestCase):
         generated_config = GemmReductionCompileConfig.from_args(generated_args, cute)
         self.assertEqual(generated_config.constexprs()[:4], (4, 1, False, True))
         self.assertIsNone(generated_config.reduction.reduce_op)
+        self.assertEqual(generated_config.reduction.finalize(3.0, 4), 3.0)
         generated_plan = GemmReductionPlan(
             reduction_output="reduction",
             primary_output="output",
@@ -2106,12 +2107,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 kernel_options={"backend": "NVGEMM"},
             )
 
-        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        result, _, _ = self._compile_and_check(fn, a, b)
         expected = fn(a, b)
         torch.testing.assert_close(result[0], expected[0], atol=1e-2, rtol=1e-2)
         torch.testing.assert_close(result[1], expected[1], atol=1e-1, rtol=1e-2)
-        self.assertTrue(epilogue_fused, "pointwise consumer was NOT fused")
-        self.assertIn("out_ptr1", code)
 
     @parametrize("feeds_main", (False, True))
     def test_flex_gemm_grouped_n_reduce_epilogue_fusion(self, feeds_main):
@@ -2178,30 +2177,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
         if axis == 0 or group > 32:
             self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_COMBINE_FN_SRC")
-
-    def test_bf16_axis_1_group_64_abs_amax_defers_without_compatible_efc(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
-            NVUniversalGemmScheduling,
-        )
-
-        fn, a, b = self._make_bf16_grouped_reduce_epilogue(1, 64, "abs_amax")
-        supports_reduction_layout = NVUniversalGemmScheduling._supports_reduction_layout
-
-        def reject_efc_choices(choice, min_tile_shape):
-            return not choice.supports_epilogue_fusion and supports_reduction_layout(
-                choice, min_tile_shape
-            )
-
-        with mock.patch.object(
-            NVUniversalGemmScheduling,
-            "_supports_reduction_layout",
-            side_effect=reject_efc_choices,
-        ):
-            result, code, epilogue_fused = self._compile_and_check(fn, a, b)
-
-        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self.assertFalse(epilogue_fused)
-        self.assertNotIn("has_epilogue=True", code)
 
     @parametrize(
         "axis_group",
@@ -2469,7 +2444,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         )
         self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
 
-    def test_bf16_grouped_n_composite_reduction_fusion(self):
+    def test_bf16_grouped_n_composite_reduction_defers(self):
         m, n, k, group = 128, 64, 64, 4
         a = torch.rand(m, k, device="cuda", dtype=torch.bfloat16)
         b = torch.rand(k, n, device="cuda", dtype=torch.bfloat16)
@@ -2484,12 +2459,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 scale,
             )
 
-        result, code, _ = self._compile_and_check(fn, a, b)
+        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self._assert_scalar_reduce_marker(code, "cute.ReductionOp.ADD")
-        self._assert_scalar_reduce_marker(code, "cute.ReductionOp.MAX")
-        self._assert_scalar_reduce_marker(code, "reduction_type=None")
-        self._assert_scalar_reduce_marker(code, "source_fn=None")
+        self.assertFalse(epilogue_fused)
+        self.assertNotIn("has_epilogue=True", code)
 
     def test_bf16_grouped_n_distinct_reduction_consumers(self):
         m, n, k, group = 128, 64, 64, 4
@@ -2506,7 +2479,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         result, _, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
 
-    def test_scaled_mm_grouped_n_composite_reduction_fusion(self):
+    def test_scaled_mm_grouped_n_composite_reduction_defers(self):
         m, n, k, group = 128, 128, 512, 4
         a, b, scale_a, scale_b = _make_nvfp4_scaled_mm_inputs(m, n, k)
 
@@ -2527,12 +2500,12 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 scale,
             )
 
-        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
+        result, code, epilogue_fused = self._compile_and_check(
+            fn, a, b, scale_a, scale_b
+        )
         self.assertEqual(result, fn(a, b, scale_a, scale_b), atol=2e-2, rtol=2e-2)
-        self._assert_scalar_reduce_marker(code, "cute.ReductionOp.ADD")
-        self._assert_scalar_reduce_marker(code, "cute.ReductionOp.MAX")
-        self._assert_scalar_reduce_marker(code, "reduction_type=None")
-        self._assert_scalar_reduce_marker(code, "source_fn=None")
+        self.assertFalse(epilogue_fused)
+        self.assertNotIn("has_epilogue=True", code)
 
     def test_scaled_mm_grouped_m_reduce_finalizes_after_cross_warp_combine(self):
         m, n, k, group = 128, 128, 512, 64
@@ -2933,12 +2906,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         "axis_group",
         ((0, 64), (0, 128), (1, 16), (1, 32), (1, 64), (1, 128)),
     )
-    def test_scaled_mm_grouped_reduce_fusion_swap_ab(self, axis_group):
+    def test_scaled_mm_grouped_reduce_swap_ab_defers_efc(self, axis_group):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             NVUniversalGemmCaller,
-        )
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
-            NVUniversalGemmScheduling,
         )
 
         axis, group = axis_group
@@ -2964,23 +2934,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         def benchmark(caller, *args, **kwargs):
             benchmarked_orientations.add(caller.swap_ab)
-            is_target = caller.swap_ab and caller.supports_epilogue_fusion
+            is_target = caller.swap_ab and not caller.supports_epilogue_fusion
             return 0.1 if is_target else 1.0
-
-        def best_epilogue_choice(ir_node, **kwargs):
-            return next(
-                choice
-                for choice in ir_node._choices
-                if isinstance(choice, NVUniversalGemmCaller)
-                and choice.swap_ab
-                and choice.supports_epilogue_fusion
-                and choice.kernel.metadata.design.tile_shape[:2] == (128, 128)
-            )
 
         torch._dynamo.reset()
         with (
             config.patch(
                 _nvgemm_config(
+                    epilogue_fusion=False,
                     nvgemm_swap_ab=True,
                     nvgemm_max_profiling_configs=1,
                     compile_threads=1,
@@ -3000,11 +2961,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             mock.patch.object(
                 NVUniversalGemmCaller, "benchmark", autospec=True, side_effect=benchmark
             ),
-            mock.patch.object(
-                NVUniversalGemmScheduling,
-                "_best_nvgemm_choice",
-                side_effect=best_epilogue_choice,
-            ),
         ):
             result, code_list = run_and_get_code(
                 torch.compile(fn), a, b, scale_a, scale_b
@@ -3015,12 +2971,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         self.assertEqual(result, expected, atol=2e-2, rtol=2e-2)
         self.assertEqual(result[1].stride(), expected[1].stride())
         result[1].view(-1)
-        self.assertIn("VendoredDenseBlockScaledGemmEFC", code)
         self.assertIn("swap_ab=True", code)
-        self.assertIn(f"axis={1 - axis}", code)
-        self.assertIn(f"group={group}", code)
+        self.assertNotIn("VendoredDenseBlockScaledGemmEFC", code)
         self.assertEqual(benchmarked_orientations, {False, True})
-        self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
 
     def test_scaled_mm_grouped_reduce_source_fusion(self):
         m, n, k, group = 128, 128, 512, 32

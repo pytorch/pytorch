@@ -183,7 +183,7 @@ class GemmReductionCompileConfig:
                 0.0,
                 materialize(args.combine_fn),
                 None,
-                materialize(args.finalizer_fn),
+                materialize(args.finalizer_fn) or _identity_finalize,
             )
         else:
             if args.reduction_type is None or args.source_fn is None:
