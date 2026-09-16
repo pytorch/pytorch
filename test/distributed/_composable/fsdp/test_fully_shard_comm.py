@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -350,18 +350,83 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
             {
                 "num_linears": [1, 2, 3, 5],
                 "dtype": [torch.float32, torch.bfloat16],
+                "use_dim0_views_for_copy": [False, True],
             },
             self._test_nonzero_dim_copy,
         )
 
     @skip_if_lt_x_gpu(2)
     def test_nonzero_dim_copy_inference(self):
-        self._test_nonzero_dim_copy(3, torch.float32, inference_mode=True)
+        self.run_subtests(
+            {"use_dim0_views_for_copy": [False, True]},
+            functools.partial(
+                self._test_nonzero_dim_copy, 3, torch.float32, inference_mode=True
+            ),
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_use_dim0_views_for_copy(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.Linear(4, 4), nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
+        )
+        fsdp_modules = (model, model[1], model[1][0])
+        for module in reversed(fsdp_modules):
+            fully_shard(
+                module,
+                shard_placement_fn=lambda param: Shard(param.ndim - 1),
+                reshard_after_forward=True,
+            )
+
+        def check_options(expected_options):
+            expected_by_param = {}
+            for module, expected in zip(fsdp_modules, expected_options):
+                param_groups = module._get_fsdp_state()._fsdp_param_groups
+                self.assertTrue(param_groups)
+                for param_group in param_groups:
+                    self.assertEqual(param_group.use_dim0_views_for_copy, expected)
+                    expected_by_param[id(param_group.fsdp_params[0])] = expected
+
+            with (
+                patch(
+                    "torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather_copy_out",
+                    wraps=foreach_all_gather_copy_out,
+                ) as all_gather_copy_out,
+                patch(
+                    "torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce",
+                    wraps=foreach_reduce,
+                ) as reduce,
+            ):
+                inp = torch.randn((2, 4), device=device_type, requires_grad=True)
+                model(inp).sum().backward()
+                model.zero_grad()
+
+            for collective, params_arg in ((all_gather_copy_out, 1), (reduce, 0)):
+                seen_params = set()
+                for call in collective.call_args_list:
+                    param_id = id(call.args[params_arg][0])
+                    self.assertEqual(
+                        call.kwargs["use_dim0_views_for_copy"],
+                        expected_by_param[param_id],
+                    )
+                    seen_params.add(param_id)
+                self.assertEqual(seen_params, set(expected_by_param))
+
+        check_options((False, False, False))
+        model.set_use_dim0_views_for_copy(True, recurse=False)
+        check_options((True, False, False))
+        model.set_use_dim0_views_for_copy(True)
+        check_options((True, True, True))
+        model[1].set_use_dim0_views_for_copy(False, recurse=False)
+        check_options((True, False, True))
+        model.set_use_dim0_views_for_copy(False)
+        check_options((False, False, False))
 
     def _test_nonzero_dim_copy(
         self,
         num_linears: int,
         dtype: torch.dtype,
+        use_dim0_views_for_copy: bool = False,
         inference_mode: bool = False,
     ):
         device = torch.device(device_type.type, self.rank)
@@ -404,6 +469,8 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
             reshard_after_forward=True,
             mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
         )
+        if use_dim0_views_for_copy:
+            model.set_use_dim0_views_for_copy(True)
         torch.manual_seed(42 + self.rank)
         if inference_mode:
             with torch.inference_mode():

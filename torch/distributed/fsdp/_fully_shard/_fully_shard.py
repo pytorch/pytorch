@@ -677,6 +677,34 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
+    def set_use_dim0_views_for_copy(
+        self, enable: bool, *, recurse: bool = True
+    ) -> None:
+        """
+        Enables dimension-0 views for copies of nonzero-dimension shards
+        (experimental). Disabled by default.
+
+        When enabled, all-gather copy-out and reduce-scatter copy-in use
+        contiguous views sharded along their first dimension to avoid separate
+        reorders. Parameter shapes and sharding placements are unchanged.
+        This can improve copying for tensors with small leading dimensions,
+        such as ``[2, F, D]`` with ``Shard(1)``. Large leading dimensions create
+        many views and may increase CPU overhead. Unsupported layouts retain
+        the default copy path.
+
+        Args:
+            enable (bool): Whether to use dimension-0 views for copying.
+            recurse (bool): Whether to set for all FSDP submodules or just
+                the passed-in module. Defaults to ``True``.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.use_dim0_views_for_copy = enable
+
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
     ) -> None:

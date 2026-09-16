@@ -432,6 +432,8 @@ def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
+    *,
+    use_dim0_views_for_copy: bool = False,
 ) -> None:
     (
         all_gather_output,
@@ -462,7 +464,7 @@ def foreach_all_gather_copy_out(
         )
         fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs, needs_reorder = _get_all_gather_copy_out_views(
-            fsdp_param
+            fsdp_param, use_dim0_views_for_copy=use_dim0_views_for_copy
         )
         if needs_reorder:
             shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
@@ -495,6 +497,8 @@ def foreach_all_gather_copy_out(
 
 def _get_all_gather_copy_out_views(
     fsdp_param: FSDPParam,
+    *,
+    use_dim0_views_for_copy: bool = False,
 ) -> tuple[list[torch.Tensor], bool]:
     """Return copy destinations and whether they need a follow-up reorder."""
     outputs = fsdp_param.all_gather_outputs
@@ -504,7 +508,8 @@ def _get_all_gather_copy_out_views(
 
     num_leading_elements = math.prod(fsdp_param.padded_sharded_param_size[:shard_dim])
     if (
-        fsdp_param.sharded_state == ShardedState.SHARDED
+        use_dim0_views_for_copy
+        and fsdp_param.sharded_state == ShardedState.SHARDED
         and num_leading_elements > 0
         and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
     ):
@@ -528,7 +533,7 @@ def _foreach_all_gather_reorder(
         shard_dim = fsdp_param.fsdp_placement.dim
 
         with torch.autograd._unsafe_preserve_version_counter(
-            tuple(fsdp_param.all_gather_outputs)
+            tuple(t for t in fsdp_param.all_gather_outputs if not t.is_inference())
         ):
             for param_all_gather_output, target_all_gather_output in zip(
                 param_all_gather_outputs, fsdp_param.all_gather_outputs
@@ -568,6 +573,8 @@ def foreach_reduce(
     partial_reduce_output: torch.Tensor | None,  # only used for HSDP
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
+    *,
+    use_dim0_views_for_copy: bool = False,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -610,7 +617,10 @@ def foreach_reduce(
     current_stream = device_handle.current_stream()
 
     copy_in_grads, padded_unsharded_sizes = _get_reduce_scatter_copy_in(
-        fsdp_params, unsharded_grads, world_size
+        fsdp_params,
+        unsharded_grads,
+        world_size,
+        use_dim0_views_for_copy=use_dim0_views_for_copy,
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
@@ -800,6 +810,8 @@ def _get_reduce_scatter_copy_in(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
+    *,
+    use_dim0_views_for_copy: bool = False,
 ) -> tuple[list[torch.Tensor], list[torch.Size]]:
     """Prepare copy inputs while keeping one padded size per original parameter."""
     copy_in_grads: list[torch.Tensor] = []
@@ -811,7 +823,7 @@ def _get_reduce_scatter_copy_in(
                 raise AssertionError(
                     f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
                 )
-            if unsharded_grad.is_contiguous():
+            if use_dim0_views_for_copy and unsharded_grad.is_contiguous():
                 copy_in_grads.extend(unsharded_grad.flatten(0, shard_dim - 1).unbind(0))
                 # Even nonzero-dim shards need no padding.
                 padded_unsharded_sizes.append(unsharded_grad.size())
