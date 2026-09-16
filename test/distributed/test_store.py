@@ -463,35 +463,49 @@ class TCPStoreTest(TestCase, StoreTestBase):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
 
-        os.environ["MASTER_ADDR"] = addr
-        os.environ["MASTER_PORT"] = str(port)
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["MASTER_ADDR"] = addr
+            os.environ["MASTER_PORT"] = str(port)
 
-        # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
-        # initialize even when using the same socket address.
+            # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
+            # initialize even when using the same socket address.
 
-        os.environ["USE_LIBUV"] = "1" if self._use_libuv else "0"
-        dist.init_process_group(
-            backend="gloo",
-            init_method="env://",
-            rank=0,
-            world_size=1,
-        )
+            os.environ["USE_LIBUV"] = "1" if self._use_libuv else "0"
+            dist.init_process_group(
+                backend="gloo",
+                init_method="env://",
+                rank=0,
+                world_size=1,
+            )
 
-        backend_opts = rpc.TensorPipeRpcBackendOptions(
-            init_method=f"tcp://{addr}:{port}", _transports=tp_transports()
-        )
-        rpc.init_rpc(
-            name="worker0",
-            rank=0,
-            world_size=1,
-            rpc_backend_options=backend_opts,
-        )
+            backend_opts = rpc.TensorPipeRpcBackendOptions(
+                init_method=f"tcp://{addr}:{port}", _transports=tp_transports()
+            )
+            rpc.init_rpc(
+                name="worker0",
+                rank=0,
+                world_size=1,
+                rpc_backend_options=backend_opts,
+            )
 
-        del os.environ["USE_LIBUV"]
-        if "USE_LIBUV" in os.environ:
-            raise AssertionError("Expected USE_LIBUV to not be in os.environ")
-        rpc.shutdown()
-        dist.destroy_process_group()
+            del os.environ["USE_LIBUV"]
+            if "USE_LIBUV" in os.environ:
+                raise AssertionError("Expected USE_LIBUV to not be in os.environ")
+            rpc.shutdown()
+            dist.destroy_process_group()
+        finally:
+            # A failure can land inside init_rpc, so do not wait on a possibly
+            # half-initialized agent, and tear the group down even if this raises.
+            try:
+                if rpc.api._is_current_rpc_agent_set():
+                    rpc.shutdown(graceful=False)
+            finally:
+                if dist.is_initialized():
+                    dist.destroy_process_group()
+                for var in ("USE_LIBUV", "MASTER_ADDR", "MASTER_PORT"):
+                    os.environ.pop(var, None)
 
     @skip_if_win32()
     def test_take_over_listen_socket(self):
