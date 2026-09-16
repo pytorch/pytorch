@@ -43,7 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
@@ -337,6 +337,100 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+
+
+class TestFullyShardNonzeroDimCopy(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_nonzero_dim_copy(self):
+        self.run_subtests(
+            {
+                "num_linears": [1, 2, 3, 5],
+                "dtype": [torch.float32, torch.bfloat16],
+            },
+            self._test_nonzero_dim_copy,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_nonzero_dim_copy_inference(self):
+        self._test_nonzero_dim_copy(3, torch.float32, inference_mode=True)
+
+    def _test_nonzero_dim_copy(
+        self,
+        num_linears: int,
+        dtype: torch.dtype,
+        inference_mode: bool = False,
+    ):
+        device = torch.device(device_type.type, self.rank)
+        dim, features = 5, 3 * self.world_size
+        shapes = [
+            (num_linears, features, dim),
+            (2, num_linears, features, dim),
+            (self.world_size + 1, dim),
+        ]
+        # Frozen mixed dtypes make the all-gather buffer use byte offsets.
+        dtypes = (
+            [torch.bfloat16, torch.float32, torch.bfloat16]
+            if inference_mode
+            else [dtype] * len(shapes)
+        )
+
+        class StackedLinears(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weights = nn.ParameterList(
+                    nn.Parameter(
+                        torch.randn(shape, device=device, dtype=param_dtype) / 16,
+                        requires_grad=not inference_mode,
+                    )
+                    for shape, param_dtype in zip(shapes, dtypes)
+                )
+
+            def forward(self, inp):
+                return [
+                    F.linear(inp.to(weight.dtype), weight.flatten(0, -2))
+                    for weight in self.weights
+                ]
+
+        torch.manual_seed(42)
+        model = StackedLinears()
+        ref_model = copy.deepcopy(model)
+        fully_shard(
+            model,
+            shard_placement_fn=lambda param: Shard(param.ndim - 2),
+            reshard_after_forward=True,
+            mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
+        )
+        torch.manual_seed(42 + self.rank)
+        if inference_mode:
+            with torch.inference_mode():
+                for _ in range(2):
+                    inp = torch.randn((2, dim), device=device)
+                    self.assertEqual(model(inp), ref_model(inp))
+            return
+
+        optim = torch.optim.SGD(model.parameters(), lr=1e-3)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
+        for _ in range(2):
+            inp = torch.randn((2, dim), device=device, dtype=dtype, requires_grad=True)
+            ref_inp = inp.detach().clone().requires_grad_()
+            outputs, ref_outputs = model(inp), ref_model(ref_inp)
+            self.assertEqual(outputs, ref_outputs)
+            sum(output.square().sum() for output in outputs).backward()
+            sum(output.square().sum() for output in ref_outputs).backward()
+            self.assertEqual(inp.grad, ref_inp.grad)
+            for ref_param in ref_model.parameters():
+                ref_grad = ref_param.grad.float() / self.world_size
+                dist.all_reduce(ref_grad)
+                ref_param.grad.copy_(ref_grad)
+            optim.step()
+            ref_optim.step()
+            check_sharded_parity(self, ref_model, model)
+            optim.zero_grad()
+            ref_optim.zero_grad()
 
 
 class TestFullyShardCommunication(FSDPTest):
