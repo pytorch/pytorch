@@ -205,6 +205,7 @@ it.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import io
 import logging
@@ -225,6 +226,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
+    import os
     from collections.abc import Callable, Mapping
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
@@ -278,7 +280,19 @@ class PrecompileError(RuntimeError):
     effectful op, a non-tensor output the inductor backend cannot lower, or a runtime
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
+
+    ``result`` carries what the call that raised returned, when it ran before the
+    refusal -- for ``precompile(...)`` the list of example results; ``None`` otherwise.
     """
+
+    # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
+    # resolve it there.
+    __module__ = "torch.compiler"
+
+    #: What the call that raised this returned, when it ran before the refusal:
+    #: an accumulating capture's step has already executed by the time its
+    #: artifact gate refuses, so the result rides on the error. ``None`` otherwise.
+    result: object = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -352,6 +366,44 @@ class Capture:
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         raise NotImplementedError
+
+
+class _MakeFxCapture(Capture):
+    r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
+
+    A make_fx trace records the ATen ops of ONE execution of ``fn``, so this
+    captures exactly one call and refuses a second -- there is no notion of
+    guards or recompiled variants here, and thus nothing a further call could
+    add. Pass ``tracer=DynamoTracer()`` to capture several calls with the graph
+    breaks and recompilations between them.
+    """
+
+    def __init__(
+        self,
+        fn: Callable[..., object],
+        artifact_path: str | os.PathLike[str],
+        cache_path: str | os.PathLike[str],
+        *,
+        backend: str,
+        decompositions: dict | None,
+        training: bool,
+    ) -> None:
+        if isinstance(fn, functools.partial):
+            raise PrecompileError(
+                "precompile cannot capture a partial. Pass the underlying function "
+                "and give its bound arguments as call arguments."
+            )
+        self._module = PrecompiledModule(
+            fn, backend=backend, tracer="make_fx", decompositions=decompositions
+        )
+        self._artifact_path = artifact_path
+        self._cache_path = cache_path
+        self._training = training
+        self._traced = False
+        self._rendered: tuple[str, bytes] | None = None
+
+    def __enter__(self) -> Self:
+        return self
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
