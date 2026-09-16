@@ -74,6 +74,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_SANDCASTLE,
+    isRocmArchAnyOf,
+    MI200_ARCH,
+    MI350_ARCH,
     parametrize,
     retry_on_connect_failures,
     run_tests,
@@ -82,6 +85,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfXpu,
     TEST_ACCELERATOR,
+    skipIfRocmArch,
     TEST_CUDA,
     TEST_MULTIACCELERATOR,
     TEST_WITH_DEV_DBG_ASAN,
@@ -3423,6 +3427,12 @@ class DistributedDataParallelTest(
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
                         tol = 3.0e-3 if has_half else 1.0e-5
+                        if has_half and TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH):
+                            # MIOpen picks fp16 implicit-GEMM group conv solvers on
+                            # gfx90a that lose intermediate precision, and the DDP vs
+                            # full-batch accumulation order difference amplifies it.
+                            # https://github.com/ROCm/rocm-libraries/issues/11938
+                            tol = 8.0e-3
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print(
@@ -4863,6 +4873,14 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 torch.distributed.all_gather_single(output, t)
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/115859")
+    # On the gfx950 CI distributed runners (SR-IOV virtual functions) the
+    # symmetric-memory rendezvous succeeds but the first device-side atomic on
+    # the peer's signal pad in one_shot_all_reduce never completes and the test
+    # hangs; passes on gfx950 outside those runners and on the mi300 runners
+    # with the same image. Skipped on that arch until the runner P2P path is
+    # understood.
+    @
+    (MI350_ARCH)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(2)
     @parametrize(
