@@ -63,28 +63,25 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
 
-if TEST_WITH_ROCM:
-    DEVICE_COUNT = min(4, max(2, torch.cuda.device_count()))
-else:
-    DEVICE_COUNT = 4
-
+# CPU defaults; machines without an accelerator and MPS fall back to them.
+DEVICE_TYPE = "cpu"
+DISTRIBUTED_BACKEND = "gloo"
+DEVICE_COUNT = 1
 if torch.accelerator.is_available():
     acc = torch.accelerator.current_accelerator()
-    DEVICE_TYPE = acc.type
-    # Use the backend registered for this accelerator type. If no backend is
-    # registered, the accelerator's companion plugin is missing or broken.
-    DISTRIBUTED_BACKEND = get_default_backend_for_device(acc)
-    DEVICE_COUNT = torch.accelerator.device_count()
-else:
-    DEVICE_TYPE = "cpu"
-    DISTRIBUTED_BACKEND = "gloo"
-    DEVICE_COUNT = 1
+    # gloo does not support MPS tensors; for backward compatibility.
+    if acc.type != "mps":
+        DEVICE_TYPE = acc.type
+        # The accelerator's backend must be registered in
+        # Backend.default_device_backend_map before this module is imported.
+        DISTRIBUTED_BACKEND = get_default_backend_for_device(acc)
+        DEVICE_COUNT = torch.accelerator.device_count()
+    del acc  # avoid exposing a module-level temporary
 
 
 class FSDPInitMode(Enum):
@@ -1401,9 +1398,10 @@ class FSDPTestMixin:
         )
         if ref_init_fn is None:
             if TEST_HPU:
-                ref_model = DDP(
-                    model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE
-                )
+                # _get_device_index cannot resolve bare "hpu" to an index;
+                # re-add ":0" for backward compatibility.
+                hpu = f"{DEVICE_TYPE}:0"
+                ref_model = DDP(model, device_ids=[hpu], output_device=hpu)
             elif DEVICE_TYPE == "cpu":
                 ref_model = DDP(model)
             else:
