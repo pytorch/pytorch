@@ -33,7 +33,8 @@ def _find_pkg_dir(name: str) -> str | None:
 
 
 def _prepare_nccl4py() -> None:
-    # Dynamic (USE_SYSTEM_NCCL=ON / wheel) build only: the extension NEEDED-links
+    # Legacy dynamic (USE_SYSTEM_NCCL=ON, USE_SYSTEM_NCCL_EP=OFF) build only:
+    # the extension NEEDED-links
     # libnccl_ep.so, which the nccl4py wheel provides at runtime. Point nccl-ep's
     # JIT at nccl4py's EP headers (NCCL_EP_HOME) and the nvidia.nccl wheel's NCCL
     # headers (NCCL_HOME), and make libnccl_ep resolvable, before importing the
@@ -74,18 +75,20 @@ def _prepare_nccl4py() -> None:
 
 def _import_nccl_ep() -> Any:
     # The EP bindings live in the optional torch._nccl_ep extension (USE_NCCL_EP).
-    # A USE_SYSTEM_NCCL=OFF build links libnccl_ep statically and bakes its JIT
-    # header paths, so the extension imports directly -- self-contained, no
-    # nccl4py. A USE_SYSTEM_NCCL=ON build NEEDED-links libnccl_ep from the nccl4py
-    # wheel, so the first import fails until nccl4py is set up; fall back to that
-    # and retry.
+    # Static and USE_SYSTEM_NCCL_EP builds import directly; system EP uses an
+    # external provider. The legacy dynamic build obtains its provider and headers
+    # from nccl4py, so fall back to setting it up.
     try:
         # pyrefly: ignore [missing-import]  # built only with USE_NCCL_EP
         import torch._nccl_ep as _ep
 
         return _ep
-    except ImportError:
-        pass
+    except ImportError as e:
+        if not torch._C._nccl_ep_requires_nccl4py:
+            raise ImportError(
+                "torch._nccl_ep is unavailable; this PyTorch was not built with "
+                "USE_NCCL_EP, or its NCCL EP runtime provider could not be loaded."
+            ) from e
 
     _prepare_nccl4py()
     try:
@@ -94,8 +97,8 @@ def _import_nccl_ep() -> Any:
     except ImportError as e:
         raise ImportError(
             "torch._nccl_ep is unavailable; this PyTorch was not built with "
-            "USE_NCCL_EP (or, for a USE_SYSTEM_NCCL=ON build, the nccl4py wheel "
-            "is missing)."
+            "USE_NCCL_EP (or, for a USE_SYSTEM_NCCL=ON and "
+            "USE_SYSTEM_NCCL_EP=OFF build, the nccl4py wheel is missing)."
         ) from e
 
     return _ep
