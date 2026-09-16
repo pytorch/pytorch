@@ -847,24 +847,27 @@ class AOTCompiledFunction:
 
     def _missing_global_hint(self) -> str:
         """Advice for a guard that failed on a global its scope does not define,
-        worded for the scope the guards were actually resolved against."""
+        worded for the scope the guards were actually resolved against. Returns a
+        bare sentence; a caller that continues a line of its own adds the
+        separator."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
+            rebuilt = (
+                "a guarded global is missing from the scope rebuilt from the artifact"
+            )
             if self._forward_not_resolved_reason is not None:
                 # A module load takes no f_globals=, which is the function load's
                 # parameter; _load_aot_compiled_module takes only the bytes.
                 return (
-                    " -- a guarded global is missing from the scope rebuilt from "
-                    "the artifact. That scope was rebuilt because "
+                    f"{rebuilt}. That scope was rebuilt because "
                     f"{self._forward_not_resolved_reason}, or pass "
                     "AOTCompiledModel.deserialize a guard_globals= scope that "
                     "carries the name."
                 )
             return (
-                " -- a guarded global is missing from the scope rebuilt from the "
-                "artifact; load with an f_globals= that is a complete live scope "
-                "carrying the name -- normally vars(mod) for the module mod that "
-                "defined the function, which is usually not the module doing the "
-                "loading -- so the guard can resolve it."
+                f"{rebuilt}; load with an f_globals= that is a complete live "
+                "scope carrying the name -- normally vars(mod) for the module "
+                "mod that defined the function, which is usually not the module "
+                "doing the loading -- so the guard can resolve it."
             )
         if self._guard_scope is _GuardScope.SUPPLIED:
             # SUPPLIED implies a scope; named by its module when it is one,
@@ -873,16 +876,16 @@ class AOTCompiledFunction:
             namespace = _module_namespace_name(self._guard_globals or {})
             where = "" if namespace is None else f", here vars({namespace})"
             return (
-                " -- a guarded global is missing from the live scope this "
-                f"artifact was loaded against{where}; define it there so the "
-                "guard can resolve it."
+                "a guarded global is missing from the live scope this artifact "
+                f"was loaded against{where}; define it there so the guard can "
+                "resolve it."
             )
         # CAPTURED: the guards hold the globals they were traced against BY
         # REFERENCE, so a name deleted after capture can be defined there again
         # to make the guard resolve -- the same advice as SUPPLIED, worded for
         # the dict this path actually used.
         return (
-            " -- a guarded global is missing from the globals of the module the "
+            "a guarded global is missing from the globals of the module the "
             "compiled function was traced in, which its guards still resolve "
             "against; define it there so the guard can resolve it."
         )
@@ -899,7 +902,7 @@ class AOTCompiledFunction:
                 # ends in a newline, so the hint has to be appended to the
                 # stripped message: otherwise its inline continuation lands on a
                 # line of its own, starting with a stray space.
-                msg = msg.rstrip() + self._missing_global_hint()
+                msg = msg.rstrip() + " -- " + self._missing_global_hint()
             raise RuntimeError(msg)
         return self.fn(*args, **kwargs)
 
@@ -1513,9 +1516,10 @@ class AOTCompiledModel:
     explanation in place of any guards, or, for a result whose refusal quotes
     nothing -- an accessor that answered false with no parts, or a guard that
     raised with a blank message -- ``<guard check failed without naming a
-    guard>``; the missing-global hint appended to each entry whose guards
-    failed on a global the process does not define; and the advice to add a
-    ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
+    guard>``; one ``For [i, j]:`` line per distinct missing-global hint naming
+    the entries whose guards failed on a global the process does not define;
+    and the advice to add a ``ModelInput`` or check which guards
+    ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
@@ -1593,6 +1597,12 @@ class AOTCompiledModel:
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
         ]
+        # Hint text -> the entries it is for, in first-seen order: entries whose
+        # advice reads alike share a line, whatever scope each resolves against,
+        # and one whose advice differs keeps its own rather than being read
+        # another entry's. Two unnamed supplied dicts word alike and so share a
+        # line; the sentence names no dict either way.
+        hinted: dict[str, list[int]] = {}
         for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
             if reason.result:
@@ -1612,10 +1622,12 @@ class AOTCompiledModel:
                 # a guard that raised quotes str(exc), which can be blank.
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
-            line = f"  [{i}] {joined}"
             if any(map(_names_a_missing_global, parts)):
-                line += result._missing_global_hint()
-            lines.append(line)
+                hint = result._missing_global_hint()
+                hinted.setdefault(hint, []).append(i)
+            lines.append(f"  [{i}] {joined}")
+        for hint, at in hinted.items():
+            lines.append(f"For [{', '.join(map(str, at))}]: {hint}")
         lines.append(
             "Add a ModelInput covering this call, or check whether "
             "guard_filter_fn kept a guard this call cannot satisfy -- both "
