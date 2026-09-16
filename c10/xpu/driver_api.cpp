@@ -99,6 +99,13 @@ ZE_STUB(
     ze_device_handle_t*)
 ZE_STUB(zeModuleBuildLogGetString, ze_module_build_log_handle_t, size_t*, char*)
 ZE_STUB(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
+ZE_STUB(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
+ZE_STUB(zeDeviceGetProperties, ze_device_handle_t, ze_device_properties_t*)
+ZE_STUB(
+    zeDeviceGetMemoryProperties,
+    ze_device_handle_t,
+    uint32_t*,
+    ze_device_memory_properties_t*)
 
 #undef ZE_STUB
 #undef _STUB_ARGS
