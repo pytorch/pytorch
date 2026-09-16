@@ -2624,10 +2624,12 @@ def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Noncontiguous type promoting tensors
+    # Float8 does not support mixed-dtype promotion.
+    b_dtype = dtype if dtype in float8_types() else highest_precision_float(device)
+    c_dtype = dtype if dtype in float8_types() else torch.float16
     a = make_arg((3, 4, 2))
-    b = make_arg((3, 2, 2), noncontiguous=True, dtype=highest_precision_float(device))
-    c = make_arg((3, 3, 2), dtype=torch.float16).permute(1, 0, 2)
+    b = make_arg((3, 2, 2), noncontiguous=True, dtype=b_dtype)
+    c = make_arg((3, 3, 2), dtype=c_dtype).permute(1, 0, 2)
 
     yield SampleInput((a, b, c), kwargs={'dim': 1})
 
@@ -15776,7 +15778,6 @@ op_db: list[OpInfo] = [
         supports_sparse_bsc=True,
         dtypes=all_types_and(torch.half, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
-        dtypesIfMPS=all_types_and(torch.half, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_nn_activation_relu,
         supports_out=False,
         supports_fwgrad_bwgrad=True,
@@ -17203,6 +17204,7 @@ op_db: list[OpInfo] = [
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
         dtypes=float8_types(),
+        dtypesIfMPS=empty_types(),
         # Deliberately e4m3fn even on gfx942 (native fnuz); see _scaled_mm_v2.
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
@@ -19443,6 +19445,7 @@ op_db: list[OpInfo] = [
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.float8_e4m3fn),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
@@ -20552,7 +20555,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo('cat',
            ref=_cat_np,
            aliases=('concat', 'concatenate'),
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32, torch.float8_e4m3fn),
            sample_inputs_func=sample_inputs_cat_concat,
            reference_inputs_func=reference_inputs_cat,
            error_inputs_func=error_inputs_cat,
@@ -20564,6 +20567,10 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            check_batched_forward_grad=False,
            assert_autodiffed=True,
            skips=(
+               # SchemaCheckMode checks input mutations with allclose, which does not support float8.
+               DecorateInfo(unittest.skip("allclose does not support float8"),
+                            'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.float8_e4m3fn,)),
                # RuntimeError: Arguments for call not valid.
                #               Expected a value of type 'List[Tensor]' for argument
                #               'tensors' but instead found type 'Tensor (inferred)'.
@@ -26535,7 +26542,7 @@ python_ref_db = [
             # TypeError: Trying to convert Float8_* to the MPS backend but it does not have support for that dtype.
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
-                dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
+                dtypes=(torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
@@ -26543,7 +26550,7 @@ python_ref_db = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
-                dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
+                dtypes=(torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz,)
             ),
         ),
     ),

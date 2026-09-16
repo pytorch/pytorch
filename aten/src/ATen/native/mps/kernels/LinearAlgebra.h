@@ -61,12 +61,12 @@ struct SvdParams {
   uint32_t m; // staged rows = max(orig m,n) >= n
   uint32_t n; // staged cols = k = min(orig m,n)
   uint32_t max_sweeps;
-  bool compute_uv;
   float tol;
   uint32_t u_ld;
   uint32_t u_bstride;
   uint32_t v_ld;
   uint32_t v_bstride;
+  bool compute_uv;
   bool transposed; // SVD ran on A^H (left/right vectors swap targets)
   bool stage_v; // V accumulator in threadgroup mem (Vtg) vs device mem (Vacc)
 };
@@ -74,9 +74,9 @@ struct SvdParams {
 struct EighParams {
   uint32_t n;
   uint32_t max_sweeps;
+  float tol;
   bool compute_v;
   bool upper; // UPLO: true read upper triangle, false read lower
-  float tol;
 };
 
 // for LU streaming-panel kernels
