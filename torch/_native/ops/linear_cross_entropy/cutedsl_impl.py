@@ -203,6 +203,12 @@ def _kernel_eligible(
         and label_smoothing == 0.0
         and input.dim() == 2
         and linear_weight.dim() == 2
+        # The class count crosses the FFI as int32 and the kernel's column
+        # arithmetic is int32, so a larger one would truncate rather than
+        # decline. Unreachable today -- a (C, F) weight that big fits in no
+        # memory, and cuBLAS takes GEMM dimensions as int -- so this states the
+        # precondition rather than rejecting anything.
+        and linear_weight.shape[0] <= 2**31 - 1
     )
 
 
@@ -356,12 +362,19 @@ def _batch_chunked_kernel(
     # kernel orders its writes against its reads, which is what makes that safe.
     g_alias = logits_buf.view(dtype).narrow(1, 0, num_classes)
     row_max_buf = torch.empty((chunk_rows, 1), dtype=logits_dtype, device=device)
-    # The fused kernel's two (Bc,) statistics outputs.
     # One slot per row of the call: the kernel writes each row's loss
     # contribution and the reduction happens once, after the loop, instead of
     # four launches per chunk on (Bc,) data.
     term_buf = torch.empty(num_batches, dtype=acc_dtype, device=device)
     weight_t = linear_weight.t()
+    # `addmm` takes `self` only in `out_dtype` or in `mat1`'s dtype, which is
+    # narrower than what the op accepts: with fp16 inputs the buffer is fp16, so
+    # an fp32 bias matches neither. Cast just that combination -- where `addmm`
+    # takes the bias in `mat1`'s dtype it gives the same bits as a pre-cast one,
+    # so casting there would be a round trip for nothing.
+    bias_arg = linear_bias
+    if linear_bias is not None and linear_bias.dtype not in (logits_dtype, dtype):
+        bias_arg = linear_bias.to(logits_dtype)
 
     for start in range(0, num_batches, chunk_rows):
         rows = min(chunk_rows, num_batches - start)
@@ -370,11 +383,13 @@ def _batch_chunked_kernel(
         scale_chunk = row_scale.narrow(0, start, rows)
         logits = logits_buf.narrow(0, 0, rows)
 
-        if linear_bias is None:
+        # `bias_arg`, not `linear_bias`: it is None exactly when that is, and
+        # branching on it is what narrows its type for the `addmm` below.
+        if bias_arg is None:
             torch.mm(input_chunk, weight_t, out_dtype=logits_dtype, out=logits)
         else:
             torch.addmm(
-                linear_bias, input_chunk, weight_t, out_dtype=logits_dtype, out=logits
+                bias_arg, input_chunk, weight_t, out_dtype=logits_dtype, out=logits
             )
 
         g = g_alias.narrow(0, 0, rows) if compute_grads else None
@@ -398,7 +413,9 @@ def _batch_chunked_kernel(
             target_logit = logits.gather(1, target_chunk.unsqueeze(1)).squeeze(1)
             logits.exp_()
             row_sum = logits.sum(dim=1, dtype=acc_dtype)
-            # Shift-invariant: log(sum exp(z - m)) - (z_T - m) == lse - z_T.
+            # Shifted by the row max on both sides: the unshifted difference
+            # is the same number in exact arithmetic, but in fp32 a large row
+            # offset rounds both terms to it and the difference collapses.
             loss.add_((scale_chunk * (row_sum.log() - target_logit)).sum())
             continue
 

@@ -29,10 +29,12 @@ def _reference(logits, row_scale, target, out_dtype):
     g = e * (row_scale / row_sum).unsqueeze(1)
     rows = torch.arange(logits.shape[0], device=logits.device)
     g[rows, target] -= row_scale
+    # Both statistics carry the row max, matching the kernel: their difference
+    # is the loss, and unshifted terms lose it to rounding at a large offset.
     return (
         g.to(out_dtype),
-        row_max.squeeze(1) + row_sum.log(),
-        logits[rows, target],
+        row_sum.log(),
+        logits[rows, target] - row_max.squeeze(1),
     )
 
 
@@ -79,7 +81,7 @@ class TestFusedGradLogitsKernel(TestCase):
 
     def _check(self, logits, row_scale, target, dtype, row_stride=None):
         g, term = self._run(logits, row_scale, target, dtype, row_stride=row_stride)
-        want_g, want_lse, want_target_logit = _reference(
+        want_g, want_log_row_sum, want_shifted = _reference(
             logits, row_scale, target, dtype
         )
         if dtype is torch.float32:
@@ -92,7 +94,7 @@ class TestFusedGradLogitsKernel(TestCase):
         # anything the kernel emitted, so an error inside it cannot be hidden
         # by a cancelling error in the same kernel.
         self.assertEqual(
-            term, row_scale * (want_lse - want_target_logit), atol=1e-4, rtol=1e-5
+            term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
         )
 
     @parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -146,7 +148,7 @@ class TestFusedGradLogitsKernel(TestCase):
         _, term = _outputs(num_rows, V, dtype)
         g = logits.view(dtype).narrow(1, 0, V)
         self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target)
-        want_g, want_lse, want_target_logit = _reference(
+        want_g, want_log_row_sum, want_shifted = _reference(
             source, row_scale, target, dtype
         )
         self.assertEqual(g, want_g)
@@ -154,7 +156,7 @@ class TestFusedGradLogitsKernel(TestCase):
         # which the loss term would expose: it is the only place that logit
         # reaches an output.
         self.assertEqual(
-            term, row_scale * (want_lse - want_target_logit), atol=1e-4, rtol=1e-5
+            term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
         )
 
     def test_monotonic_rows_rescale_every_element(self):
@@ -179,9 +181,16 @@ class TestFusedGradLogitsKernel(TestCase):
         logits = logits + 10000.0
         g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isfinite(g).all())
-        want_lse, want_t = _reference(logits, row_scale, target, torch.float32)[1:]
+        want_log_row_sum, want_shifted = _reference(
+            logits, row_scale, target, torch.float32
+        )[1:]
         self.assertTrue(torch.isfinite(term).all())
-        self.assertEqual(term, row_scale * (want_lse - want_t), atol=1e-4, rtol=1e-5)
+        self.assertEqual(
+            term,
+            row_scale * (want_log_row_sum - want_shifted),
+            atol=1e-4,
+            rtol=1e-5,
+        )
 
     def test_uniform_row_sums_to_the_class_count(self):
         num_rows, V = 4, 2048
@@ -225,10 +234,17 @@ class TestFusedGradLogitsKernel(TestCase):
         # warp, so this is exactly the first-touch case.
         logits[:, 0] = float("-inf")
         g, term = self._run(logits, row_scale, target, torch.float32)
-        want_g, want_lse, want_t = _reference(logits, row_scale, target, torch.float32)
+        want_g, want_log_row_sum, want_shifted = _reference(
+            logits, row_scale, target, torch.float32
+        )
         self.assertTrue(torch.isfinite(g).all())
         self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
-        self.assertEqual(term, row_scale * (want_lse - want_t), atol=1e-4, rtol=1e-5)
+        self.assertEqual(
+            term,
+            row_scale * (want_log_row_sum - want_shifted),
+            atol=1e-4,
+            rtol=1e-5,
+        )
 
     def test_every_class_masked_is_nan_like_eager(self):
         """A fully masked row has no valid class: eager's shifted softmax is
@@ -254,7 +270,9 @@ class TestFusedGradLogitsKernel(TestCase):
         self.assertTrue(torch.isnan(term[2]))
         self.assertTrue(torch.isfinite(g[0]).all())
 
-    @parametrize("bad_target", [-1, 1 << 20])
+    # `1 << 32` is the one that needs int64 to catch: its low 32 bits are zero,
+    # so a check made after narrowing to int32 reads it as class 0 and passes.
+    @parametrize("bad_target", [-1, 1 << 20, 1 << 32, (1 << 32) + 1])
     def test_out_of_range_target_poisons_its_row(self, bad_target):
         """Out of range is a caller error. Eager reports it through an index
         assert; this kernel indexes nothing through the dispatcher, so it
@@ -301,9 +319,16 @@ class TestFusedGradLogitsKernel(TestCase):
         logits, row_scale, target = _inputs(24, 4097)
         g, term = _outputs(24, 4097, torch.bfloat16)
         self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target, **meta)
-        want_g, want_lse, want_t = _reference(logits, row_scale, target, torch.bfloat16)
+        want_g, want_log_row_sum, want_shifted = _reference(
+            logits, row_scale, target, torch.bfloat16
+        )
         self.assertEqual(g, want_g)
-        self.assertEqual(term, row_scale * (want_lse - want_t), atol=1e-4, rtol=1e-5)
+        self.assertEqual(
+            term,
+            row_scale * (want_log_row_sum - want_shifted),
+            atol=1e-4,
+            rtol=1e-5,
+        )
 
     @parametrize(
         "meta, message",
