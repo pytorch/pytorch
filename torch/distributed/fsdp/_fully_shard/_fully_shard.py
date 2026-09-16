@@ -136,11 +136,11 @@ def fully_shard(
     includes the parameters in ``module.parameters()`` except those already
     assigned to a group from an earlier call on a submodule. This means that
     :meth:`fully_shard` should be called bottom-up on your model. Each group's
-    parameters are all-gathered in one collective. Its gradients are normally
-    reduce-scattered in one collective.
-    Partitioning the model into multiple groups ("layer by layer") allows for
-    peak memory savings and communication/computation overlap. Users generally
-    should *not* call :meth:`fully_shard` only on the topmost root module.
+    parameters are all-gathered in one collective, and its gradients are
+    reduce-scattered in one collective. Partitioning the model into multiple
+    groups ("layer by layer") allows for peak memory savings and communication/computation
+    overlap. Users generally should *not* call :meth:`fully_shard` only on the
+    topmost root module.
 
     When called with a list (``fully_shard([a, b, ...])``), the model's
     forward may run only a subset of the grouped modules, with the rest
