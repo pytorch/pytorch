@@ -7,17 +7,19 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    FSDPTestContinuous,
-    get_devtype,
-    get_full_params,
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_full_params
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 
-
-device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -48,16 +50,19 @@ class Model(Module):
 
 
 class TestMultiForward(FSDPTestContinuous):
-    def _dist_train(self, wrap_fsdp):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _dist_train(self, device, wrap_fsdp):
+        device_type = torch.device(device).type
         # keep everything deterministic for input data
         torch.manual_seed(0)
-        model = Model(wrap_fsdp).to(device_type.type)
+        model = Model(wrap_fsdp).to(device_type)
         if wrap_fsdp:
-            model = FSDP(model, device_id=device_type.type)
+            model = FSDP(model, device_id=device_type)
         else:
-            model = DistributedDataParallel(model, device_ids=[device_type.type])
+            model = DistributedDataParallel(model, device_ids=[device_type])
         optim = SGD(model.parameters(), lr=0.1)
-        in_data = torch.rand(64, 4).to(device_type.type)
+        in_data = torch.rand(64, 4).to(device_type)
         in_data.requires_grad = True
         for _ in range(3):
             out = model(in_data)
@@ -68,18 +73,21 @@ class TestMultiForward(FSDPTestContinuous):
             return get_full_params(model)
         return list(model.parameters())
 
+    @requires_capabilities(Capability.distributed.backend, Capability.distributed.fsdp)
     @skip_if_lt_x_gpu(2)
-    def test_multi_forward(self):
+    def test_multi_forward(self, device):
         # DDP
-        ddp_state = self._dist_train(wrap_fsdp=False)
+        ddp_state = self._dist_train(device, wrap_fsdp=False)
         # FSDP
-        fsdp_state = self._dist_train(wrap_fsdp=True)
+        fsdp_state = self._dist_train(device, wrap_fsdp=True)
         self.assertEqual(ddp_state, fsdp_state)
 
 
-devices = ("cpu", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestMultiForward, globals(), only_for=devices, allow_xpu=True
+    TestMultiForward,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
 )
 if __name__ == "__main__":
     run_tests()
