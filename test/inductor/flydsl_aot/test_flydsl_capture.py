@@ -9,6 +9,7 @@ from unittest import mock
 
 import torch
 from torch._higher_order_ops.flydsl_kernel_wrap import (
+    _register_flydsl_call_spec,
     flydsl_kernel_wrapper_functional,
     flydsl_kernel_wrapper_mutation,
     flydsl_launcher_side_table,
@@ -18,6 +19,7 @@ from torch._higher_order_ops.flydsl_kernel_wrap import (
     TraceableFlyDSLLauncher,
 )
 from torch._inductor.codegen.flydsl.flydsl_utils import runtime_available
+from torch.export.graph_signature import OutputKind
 from torch._library.utils import get_layout_constraint_tag
 from torch.testing._internal.common_utils import TestCase
 
@@ -38,6 +40,9 @@ if HAS_FLYDSL:
 
 else:
     _launcher = None
+
+
+requires_flydsl = unittest.skipUnless(HAS_FLYDSL, "FlyDSL is not available")
 
 
 class _EagerLauncher:
@@ -62,12 +67,12 @@ class _EagerLauncher:
         self.launch(out, workspace, inp)
 
 
-@unittest.skipUnless(HAS_FLYDSL, "FlyDSL is not available")
 class FlyDSLCaptureTest(TestCase):
     def setUp(self):
         flydsl_launcher_side_table.reset_table()
         torch._dynamo.reset()
 
+    @requires_flydsl
     def test_export_captures_explicit_launcher(self):
         captured_launcher = torch.library.wrap_flydsl(
             _launcher,
@@ -93,6 +98,7 @@ class FlyDSLCaptureTest(TestCase):
         with self.assertRaisesRegex(TypeError, "mutates_args"):
             torch.library.wrap_flydsl(_launcher)
 
+    @requires_flydsl
     def test_repeated_wrap_reuses_registration(self):
         first = torch.library.wrap_flydsl(_launcher, mutates_args={"out"})
         second = torch.library.wrap_flydsl(_launcher, mutates_args={"out"})
@@ -104,6 +110,16 @@ class FlyDSLCaptureTest(TestCase):
         self.assertEqual(first.launcher_idx, second.launcher_idx)
         self.assertNotEqual(first.launcher_idx, different_mutations.launcher_idx)
 
+    @requires_flydsl
+    def test_wrap_accepts_single_mutated_argument_name(self):
+        captured = torch.library.wrap_flydsl(_launcher, mutates_args="out")
+
+        registration = flydsl_launcher_side_table.get_registration(
+            captured.launcher_idx
+        )
+        self.assertEqual((0,), registration.mutated_arg_indices)
+
+    @requires_flydsl
     def test_capture_rejects_unknown_mutated_argument(self):
         with self.assertRaisesRegex(ValueError, "not launcher parameters"):
             torch.library.wrap_flydsl(
@@ -111,6 +127,7 @@ class FlyDSLCaptureTest(TestCase):
                 mutates_args={"missing"},
             )
 
+    @requires_flydsl
     def test_wrap_rejects_non_jit_function(self):
         with self.assertRaisesRegex(RuntimeError, "annotated with flydsl.compiler.jit"):
             torch.library.wrap_flydsl(lambda: None, mutates_args=())
@@ -127,6 +144,7 @@ class FlyDSLCaptureTest(TestCase):
 
         available.assert_called_once_with()
 
+    @requires_flydsl
     def test_wrap_rejects_explicit_stream(self):
         @flyc.jit
         def launcher(out: fx.Tensor, stream: Stream):
@@ -147,6 +165,7 @@ class FlyDSLCaptureTest(TestCase):
         self.assertEqual(("out", "inp"), positional)
         self.assertEqual({"rows": 8}, keyword)
 
+    @requires_flydsl
     def test_split_launcher_arguments_rejects_variadic_parameters(self):
         @flyc.jit
         def launcher(out: fx.Tensor, *inputs: fx.Tensor):
@@ -155,6 +174,7 @@ class FlyDSLCaptureTest(TestCase):
         with self.assertRaisesRegex(TypeError, "variadic parameters cannot be wrapped"):
             torch.library.wrap_flydsl(launcher, mutates_args={"out"})
 
+    @requires_flydsl
     def test_export_captures_dynamic_dimension(self):
         captured_launcher = torch.library.wrap_flydsl(
             _launcher,
@@ -184,6 +204,7 @@ class FlyDSLCaptureTest(TestCase):
         self.assertIsInstance(rows, torch.fx.Node)
         self.assertIsInstance(rows.meta["val"], torch.SymInt)
 
+    @requires_flydsl
     def test_export_keeps_compile_time_arguments_out_of_fx(self):
         callback = lambda value: value  # noqa: E731
 
@@ -221,6 +242,7 @@ class FlyDSLCaptureTest(TestCase):
         self.assertIs(fx.Float32, restored[3])
         self.assertEqual(256, restored[4])
 
+    @requires_flydsl
     def test_constexpr_call_specs_use_flydsl_value_identity(self):
         @flyc.jit
         def launcher(out: fx.Tensor, config: fx.Constexpr[tuple]):
@@ -258,6 +280,11 @@ class FlyDSLCaptureTest(TestCase):
             nodes[1].kwargs["call_spec_idx"],
         )
 
+    def test_constexpr_call_specs_require_value_signature(self):
+        with self.assertRaisesRegex(AssertionError, "value-signature callback"):
+            _register_flydsl_call_spec({0: (True,)}, (0,), None)
+
+    @requires_flydsl
     def test_wrap_rejects_preconstructed_runtime_jit_arguments(self):
         captured = torch.library.wrap_flydsl(_launcher, mutates_args={"out"})
         out = torch.empty(4)
@@ -267,6 +294,7 @@ class FlyDSLCaptureTest(TestCase):
             with self.assertRaisesRegex(TypeError, "graphable PyTorch values"):
                 captured(out, inp, value)
 
+    @requires_flydsl
     def test_wrap_rejects_non_tensor_mutation(self):
         @flyc.jit
         def launcher(value: fx.Int32):
@@ -275,6 +303,7 @@ class FlyDSLCaptureTest(TestCase):
         with self.assertRaisesRegex(TypeError, "flydsl.expr.Tensor annotation"):
             torch.library.wrap_flydsl(launcher, mutates_args={"value"})
 
+    @requires_flydsl
     def test_wrap_rejects_unannotated_mutation(self):
         @flyc.jit
         def launcher(value):
@@ -305,6 +334,7 @@ class FlyDSLCaptureTest(TestCase):
                 (0, 1),
             )
 
+    @requires_flydsl
     def test_export_registers_and_deduplicates_compile_time_call_specs(self):
         @flyc.jit
         def launcher(
@@ -352,6 +382,7 @@ class FlyDSLCaptureTest(TestCase):
             nodes[1].kwargs["call_spec_idx"],
         )
 
+    @requires_flydsl
     def test_export_captures_bound_jit_method_without_self_operand(self):
         class LauncherOwner:
             @flyc.jit
@@ -412,6 +443,86 @@ class FlyDSLCaptureTest(TestCase):
 
         self.assertEqual(1, len(overloaded))
         self.assertIs(tensor, overloaded[0])
+
+    @requires_flydsl
+    def test_run_decompositions_functionalizes_mutation(self):
+        captured = torch.library.wrap_flydsl(_launcher, mutates_args="out")
+
+        class Model(torch.nn.Module):
+            def forward(self, out, inp):
+                captured(out, inp, inp.numel())
+                return out
+
+        exported = torch.export.export(
+            Model(),
+            (torch.empty(8), torch.randn(8)),
+        ).run_decompositions()
+
+        self.assertEqual(
+            1,
+            len(
+                exported.graph_module.graph.find_nodes(
+                    op="call_function",
+                    target=flydsl_kernel_wrapper_functional,
+                )
+            ),
+        )
+        self.assertEqual(
+            0,
+            len(
+                exported.graph_module.graph.find_nodes(
+                    op="call_function",
+                    target=flydsl_kernel_wrapper_mutation,
+                )
+            ),
+        )
+        self.assertTrue(
+            any(
+                output.kind is OutputKind.USER_INPUT_MUTATION
+                and output.target == "out"
+                for output in exported.graph_signature.output_specs
+            )
+        )
+
+    @requires_flydsl
+    def test_run_decompositions_rejects_aliased_arguments(self):
+        captured = torch.library.wrap_flydsl(_launcher, mutates_args="out")
+
+        class Model(torch.nn.Module):
+            def forward(self, inp):
+                captured(inp, inp, inp.numel())
+                return inp
+
+        exported = torch.export.export(Model(), (torch.randn(8),))
+        with self.assertRaisesRegex(RuntimeError, "aliased launcher arguments"):
+            exported.run_decompositions()
+
+    def test_aot_eager_functionalizes_mutation(self):
+        registration = TraceableFlyDSLLauncher(_EagerLauncher(), (0, 1))
+        call_spec_idx = flydsl_launcher_side_table.add_call_spec({})
+        torch._dynamo.allow_in_graph(flydsl_kernel_wrapper_mutation)
+
+        def fn(out, workspace, inp):
+            flydsl_kernel_wrapper_mutation(
+                registration.launcher_idx,
+                call_spec_idx,
+                (out, workspace, inp),
+                (0, 1),
+            )
+            return out + workspace
+
+        out = torch.zeros(4)
+        workspace = torch.zeros(4)
+        inp = torch.arange(4, dtype=torch.float32)
+        actual = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+            out,
+            workspace,
+            inp,
+        )
+
+        torch.testing.assert_close(actual, inp + 7)
+        torch.testing.assert_close(out, inp)
+        torch.testing.assert_close(workspace, torch.full_like(workspace, 7))
 
     def test_functional_wrapper_clones_only_requested_outputs(self):
         registration = TraceableFlyDSLLauncher(
@@ -474,6 +585,7 @@ class FlyDSLCaptureTest(TestCase):
                 (0,),
             )
 
+    @requires_flydsl
     def test_flydsl_op_is_opaque_to_symbolic_trace(self):
         captured_launcher = torch.library.wrap_flydsl(
             _launcher,
@@ -503,6 +615,7 @@ class FlyDSLCaptureTest(TestCase):
         )
         self.assertEqual(1, len(nodes))
 
+    @requires_flydsl
     def test_flydsl_op_preserves_exact_strides_by_default(self):
         captured_launcher = torch.library.wrap_flydsl(
             _launcher,
@@ -541,6 +654,7 @@ class FlyDSLCaptureTest(TestCase):
         self.assertIsInstance(input_node, torch.fx.Node)
         self.assertEqual(example.stride(), input_node.meta["val"].stride())
 
+    @requires_flydsl
     def test_flydsl_op_decomposes_for_export(self):
         captured_launcher = torch.library.wrap_flydsl(
             _launcher,
@@ -608,6 +722,7 @@ class FlyDSLCaptureTest(TestCase):
         )
         self.assertEqual(1, len(flydsl_nodes))
 
+    @requires_flydsl
     def test_flydsl_op_decomposes_for_torch_compile_by_default(self):
         from torch._dynamo.testing import AotEagerAndRecordGraphs
 
@@ -662,6 +777,7 @@ class FlyDSLCaptureTest(TestCase):
             ),
         )
 
+    @requires_flydsl
     def test_flydsl_op_preserved_in_joint_export(self):
         from torch.export.experimental import _export_forward_backward
 
@@ -729,6 +845,7 @@ class FlyDSLCaptureTest(TestCase):
             ),
         )
 
+    @requires_flydsl
     def test_flydsl_op_preserves_mutation_when_decomposed(self):
         captured_launcher = torch.library.wrap_flydsl(
             _launcher,
@@ -758,6 +875,7 @@ class FlyDSLCaptureTest(TestCase):
         self.assertEqual(1, len(nodes))
         self.assertEqual((0,), nodes[0].kwargs["mutated_arg_indices"])
 
+    @requires_flydsl
     def test_flydsl_op_decomposes_multiple_launchers_and_aten(self):
         captured_launcher = torch.library.wrap_flydsl(
             _launcher,

@@ -55,11 +55,14 @@ else:
     _launcher = None
 
 
-@unittest.skipUnless(HAS_FLYDSL, "FlyDSL is not available")
+requires_flydsl = unittest.skipUnless(HAS_FLYDSL, "FlyDSL is not available")
+
+
 class FlyDSLInductorTest(TestCase):
     def setUp(self):
         flydsl_launcher_side_table.reset_table()
 
+    @requires_flydsl
     def test_lowering_preserves_arguments_and_mutations(self):
         captured = torch.library.wrap_flydsl(
             _launcher,
@@ -135,6 +138,7 @@ class FlyDSLInductorTest(TestCase):
                         require_shape_env=False,
                     ).validate()
 
+    @requires_flydsl
     def test_aot_kernel_rejects_cpp_only_packaging(self):
         captured = torch.library.wrap_flydsl(
             _launcher,
@@ -160,6 +164,7 @@ class FlyDSLInductorTest(TestCase):
 
         compile_launcher_mock.assert_not_called()
 
+    @requires_flydsl
     def test_post_grad_decomposes_functional_wrapper(self):
         captured = torch.library.wrap_flydsl(
             _launcher,
@@ -287,6 +292,7 @@ class FlyDSLInductorTest(TestCase):
 
         return make_fx(f, tracing_mode="fake")(torch.randn(8))
 
+    @requires_flydsl
     def test_reinplace_removes_clone_for_fresh_output(self):
         graph_module = self._functional_graph(keep_original=False)
 
@@ -309,6 +315,7 @@ class FlyDSLInductorTest(TestCase):
             ),
         )
 
+    @requires_flydsl
     def test_reinplace_keeps_clone_for_live_original(self):
         graph_module = self._functional_graph(keep_original=True)
 
@@ -321,6 +328,7 @@ class FlyDSLInductorTest(TestCase):
         )
         self.assertEqual((0,), functional.kwargs["tensors_to_clone"])
 
+    @requires_flydsl
     def test_inductor_compiler_exports_flydsl_object(self):
         captured = torch.library.wrap_flydsl(
             _launcher,
@@ -360,6 +368,7 @@ class FlyDSLInductorTest(TestCase):
         self.assertEqual("_mlir_flydsl_launcher_test", artifact.symbol)
         self.assertEqual("flydsl_launcher_test__load", artifact.module_load_symbol)
 
+    @requires_flydsl
     def test_inductor_compiler_exports_bound_flydsl_object(self):
         class Owner:
             @flyc.jit
@@ -416,6 +425,7 @@ class FlyDSLInductorTest(TestCase):
         )
         self.assertEqual("_mlir_flydsl_bound_launcher_test", artifact.symbol)
 
+    @requires_flydsl
     def test_aot_kernel_registers_runtime_libraries_separately(self):
         captured = torch.library.wrap_flydsl(
             _launcher,
@@ -473,6 +483,7 @@ class FlyDSLInductorTest(TestCase):
             self.assertIn("hipGetDevice", generated_header)
             self.assertIn("cannot be shared across GPU devices", generated_header)
 
+    @requires_flydsl
     def test_aot_kernel_restores_call_spec_and_bound_self(self):
         class Owner:
             @flyc.jit
