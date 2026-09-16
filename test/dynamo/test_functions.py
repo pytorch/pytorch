@@ -3252,6 +3252,8 @@ partial_fn = functools.partial(fn, scale=2)
         "protocol,value,error",
         (
             ("float", 1, TypeError),
+            ("float", float("inf"), OverflowError),
+            ("float", float("nan"), ValueError),
             ("index", 1.5, TypeError),
             ("index", 10**400, OverflowError),
         ),

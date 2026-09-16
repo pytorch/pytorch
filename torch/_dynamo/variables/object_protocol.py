@@ -868,7 +868,7 @@ def pylong_as_double(tx: "InstructionTranslatorBase", obj: VariableTracker) -> f
         # Read the int payload without dispatching subclass overrides.
         return int.__float__(obj.as_python_constant())
     except OverflowError as exc:
-        raise_observed_exception(OverflowError, tx, args=[str(exc)])
+        raise_observed_exception(OverflowError, tx, args=list(exc.args))
 
 
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
