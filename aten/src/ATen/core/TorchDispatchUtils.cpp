@@ -4,6 +4,8 @@
 namespace at::impl {
 
 bool tensor_has_dispatch(const at::Tensor& t) {
+  // Autograd fallback must recognize C++ fake tensors as having custom
+  // dispatch behavior.
   DispatchKeySet key_set(
       {DispatchKey::Python,
        DispatchKey::PythonTLSSnapshot,
