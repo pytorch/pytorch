@@ -302,7 +302,7 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        autowrap_modules: tuple[ModuleType] = (math,),
+        autowrap_modules: tuple[ModuleType, ...] = (math,),
         autowrap_functions: tuple[Callable[..., Any], ...] = (),
         param_shapes_constant: bool = False,
     ) -> None:
@@ -315,7 +315,7 @@ class Tracer(TracerBase):
 
         Args:
 
-            autowrap_modules (Tuple[ModuleType]): defaults to `(math, )`,
+            autowrap_modules (Tuple[ModuleType, ...]): defaults to `(math, )`,
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap(). Backward-compatibility for
                 this parameter is guaranteed.
@@ -359,6 +359,17 @@ class Tracer(TracerBase):
         self.num_calls: dict[str, int] = {}
         # Mapping of node name to module scope
         self.node_name_to_scope: dict[str, tuple[str, type]] = {}
+
+    @classmethod
+    def _graph_module_deserialization_tracer(cls, root: torch.nn.Module) -> "Tracer":
+        """Construct a tracer for replaying a serialized GraphModule.
+
+        GraphModule deserialization retraces generated forward code while treating
+        every submodule as a leaf. Tracers with required constructor arguments or
+        tracing-only behavior can override this hook. The reconstructed graph still
+        records the original tracer class.
+        """
+        return cls()
 
     _qualname_counter: dict[str, int] = collections.defaultdict(int)
 
