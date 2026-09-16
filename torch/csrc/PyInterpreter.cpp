@@ -1159,7 +1159,7 @@ struct ActiveFakeMode {
 ActiveFakeMode get_active_fake_mode() {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  py::object py_fake_mode = getFakeModePyObj(mode);
+  py::object py_fake_mode = getCppFakeTensorModePyObj(mode);
   TORCH_CHECK(!py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
   return {std::move(mode), std::move(py_fake_mode)};
 }
@@ -1488,7 +1488,8 @@ c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
 }
 
-py::object getFakeModePyObj(const std::shared_ptr<c10::FakeTensorMode>& mode) {
+py::object getCppFakeTensorModePyObj(
+    const std::shared_ptr<c10::FakeTensorMode>& mode) {
   if (mode == nullptr) {
     return py::none();
   }
