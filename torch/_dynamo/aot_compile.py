@@ -921,8 +921,13 @@ class AOTCompiledFunction:
             namespace = _module_namespace_name(self._guard_globals or {})
             named = "" if namespace is None else f", here vars({namespace})"
             where = (
-                f"the globals of the function {forward} resolves to, since that "
-                f"is the one the load resolved{named}"
+                # A rebind to a Dynamo wrapper is resolved THROUGH it
+                # (_resolve_guard_scope), so the sentence sends the reader through too.
+                f"the globals of the function {forward} resolves to, seen through "
+                "the wrappers torch.compile, torch._dynamo.disable, run and "
+                "optimize return and through any functools.wraps'd "
+                "torch._dynamo.external_utils function to the function they wrap, "
+                f"since that is the one the load resolved{named}"
                 if forward is not None
                 else f"the live scope this artifact was loaded against{named}"
             )
@@ -1358,7 +1363,19 @@ def _resolve_guard_scope(
     while _static_getattr(resolved, "__globals__") is vars(external_utils):
         wrapped = _static_getattr(resolved, "__wrapped__")
         if wrapped is None:
-            break
+            # wrap_dunder_call_ctx_manager's inner skips functools.wraps on purpose,
+            # as does wrap_inline_with_error_on_graph_break's wrapper, which only
+            # compile_wrapper._torchdynamo_inline holds: no public API binds it.
+            hopped = resolved is not forward
+            via = "resolves through a Dynamo wrapper to" if hopped else "is"
+            return None, (
+                f"{described} {via} a torch._dynamo.external_utils function with "
+                "no __wrapped__ to see through to the forward it wraps -- the "
+                "wrapper torch._dynamo.error_on_graph_break, patch_dynamo_config, "
+                "disable_nested_graph_breaks and override_cudagraphs return skips "
+                "functools.wraps; bind the forward that decorator wrapped as "
+                "model.forward instead"
+            )
         resolved = wrapped
     # torch.compile(mod).forward wraps the module's DISPATCH, not the forward
     # the capture traced: the module itself under config.wrap_top_frame or a
@@ -1383,10 +1400,21 @@ def _resolve_guard_scope(
         traced_fn = convert_frame.get_traced_fn(resolved)[0]
         scope = traced_fn.__globals__
     except (RuntimeError, AttributeError):
+        if resolved is forward:
+            return None, (
+                f"get_traced_fn cannot resolve {described} to a Python function; "
+                "make model.forward a plain function or bound method so its own "
+                "globals are used instead"
+            )
+        # torch.compile over a functools.partial or a tensor method wraps it in
+        # wrap_inline (no source file, not a function), so the unwrap lands on
+        # it; the cannot-resolve advice above would describe the
+        # compile_wrapper, a plain function that resolves fine.
         return None, (
-            f"get_traced_fn cannot resolve {described} to a Python function; "
-            "make model.forward a plain function or bound method so its own "
-            "globals are used instead"
+            f"{described} resolves through a Dynamo wrapper to an instance of "
+            f"{type(resolved).__name__}, which get_traced_fn cannot resolve to "
+            "a Python function; bind a plain function or bound method as "
+            "model.forward instead"
         )
     # A forward that resolves to a function torch itself defines -- the
     # nn.Module.forward a module never overrode, _LazyGraphModule._lazy_forward
@@ -1402,6 +1430,16 @@ def _resolve_guard_scope(
         hopped = resolved is not forward
         via = "resolves through a Dynamo wrapper to" if hopped else "resolves to"
         what = traced_fn.__qualname__
+        wrapped = _static_getattr(traced_fn, "__wrapped__")
+        if wrapped is not None:
+            # functools.wraps copied the wrappee's __qualname__ onto the wrapper
+            # (a class-body @torch.compiler.wrap_numpy forward binds external_utils'
+            # wrap), which would read "X resolves to X". co_qualname is 3.11+.
+            code = traced_fn.__code__
+            what = (
+                f"{getattr(code, 'co_qualname', code.co_name)}, a functools.wraps'd "
+                f"wrapper over {getattr(wrapped, '__qualname__', what)}"
+            )
         return None, (
             f"{described} {via} {what}, whose globals are {namespace}'s namespace, "
             "a torch module a load neither roots guards in nor seeds; bind the "
