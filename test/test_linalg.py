@@ -408,7 +408,21 @@ class _TestLinalgMixin:
                 self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
 
 
-class TestLinalgDevice(_TestLinalgMixin, TestCase):
+class TestLinalg(TestCase):
+    """Device-independent and CPU-only regression tests, run once rather than per device."""
+
+    def setUp(self):
+        super().setUp()
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
+        if torch.cuda.is_available():
+            torch.backends.cuda.matmul.allow_tf32 = False
+
+    def tearDown(self):
+        _restore_fp32_precision(self._prev_fp32_state)
+        super().tearDown()
+
     def test_parse_cuda_scaled_gemm_options_preserves_input_dtype_order(self):
         tokens = ["nt", "16", "32", "64", "ld", "64", "16", "16", "a", "Float8", "e5m2", "b", "Float8", "e4m3fn", "c", "BFloat16", "as", "Float", "bs", "Float", "ast", "0", "bst", "0", "dscale", "0", "fast", "0", "bias", "None"]
         dtype_dict = {
@@ -425,17 +439,123 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         self.assertEqual(options.dtypeA, torch.float8_e4m3fn)
         self.assertEqual(options.dtypeB, torch.float8_e5m2)
 
-    def setUp(self):
-        super().setUp()
-        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
-        # backend-specific fp32_precision, so snapshot and restore all of it.
-        self._prev_fp32_state = _snapshot_fp32_precision()
-        if torch.cuda.is_available():
-            torch.backends.cuda.matmul.allow_tf32 = False
+    def test_vector_norm_decom_unbacked_checks(self):
+        from torch._refs.linalg import _check_vector_norm_args
 
-    def tearDown(self):
-        _restore_fp32_precision(self._prev_fp32_state)
-        super().tearDown()
+        class Mod(torch.nn.Module):
+            def __init__(self, ord, dim):
+                super().__init__()
+                self.ord = ord
+                self.dim = dim
+
+            def forward(self, a):
+                x = a.item()
+                tensor_unbacked_size = torch.ones(x, x + 1, x + 2)
+                _check_vector_norm_args(tensor_unbacked_size, self.ord, self.dim)
+                return tensor_unbacked_size
+
+        def test(
+            ord: float | int,
+            dim: DimsType | None,
+            expect_numel_runtime_check: bool,
+            expect_index_0_check: bool = False,
+        ) -> None:
+            m = Mod(ord, dim)
+            exported_program: torch.export.ExportedProgram = torch.export.export(
+                m, args=tuple(torch.tensor([1]))
+            )
+            self.assertEqual(
+                "Runtime assertion failed for expression Ne(u0*(u0 + 1)*(u0 + 2), 0)"
+                in exported_program.graph_module.code,
+                expect_numel_runtime_check,
+            )
+            self.assertEqual(
+                "Runtime assertion failed for expression Ne(u0, 0) | Ne(u0*(u0 + 1)*(u0 + 2), 0)"
+                in exported_program.graph_module.code,
+                expect_index_0_check,
+            )
+
+        # dim is int
+        test(-1, 1, True)
+
+        # dim is None
+        test(-1, None, True)
+
+        # len(dim) == 0
+        test(-1, [], True)
+
+        # shape[d] == 0
+        test(-1, [0], False, True)
+
+        # u0 + 1 == 0 is False we do not see a runtime assert in the generated graph.
+        test(-1, [1], False, False)
+
+        test(-1, [0, 1], False, True)
+        test(-1, [0, 0], False, True)
+
+    def test_permute_matmul(self):
+        a = torch.ones([2, 5, 24, 24])
+        b = torch.ones([3, 2, 5, 24, 24])
+        c = a.permute(0, 1, 3, 2).matmul(b)
+        self.assertEqual([c.min(), c.max(), c.sum()], [24, 24, 414720])
+
+    def test_lower_precision_accumulation_with_ref_path(self):
+        # fix https://github.com/pytorch/pytorch/issues/95125
+        # and https://github.com/pytorch/pytorch/issues/83863
+        # for bf16 accumulation in gemm ref path
+        def check_correctness(fn, dtype, *args):
+            expected = fn(*args).to(dtype=dtype)
+            with torch.backends.mkldnn.flags(enabled=False):
+                def test():
+                    lower_args = (arg.to(dtype=dtype) for arg in args)
+                    tmp_result = fn(*lower_args)
+                    return tmp_result
+                c = test()
+                if not (torch.all(c == expected)):
+                    raise AssertionError(
+                        f"Incorrect result with\nexpected: {expected}\ngot: {c}\n"
+                    )
+        # test matmul
+        for dtype in [torch.bfloat16, torch.half]:
+            for transa in [True, False]:
+                for transb in [True, False]:
+                    a = torch.ones(300, 300)
+                    b = torch.ones(300, 300)
+                    if transa:
+                        a = a.transpose(0, 1).contiguous().transpose(0, 1)
+                    if transb:
+                        b = b.transpose(0, 1).contiguous().transpose(0, 1)
+                    check_correctness(torch.matmul, dtype, a, b)
+        # test bmm
+        a = torch.ones(1, 1, 300)
+        b = torch.ones(1, 300, 1)
+        check_correctness(torch.bmm, torch.bfloat16, a, b)
+        check_correctness(torch.bmm, torch.half, a, b)
+        # test baddbmm
+        a = torch.ones(1, 1, 300)
+        b = torch.ones(1, 300, 1)
+        c = torch.ones(1, 1, 1)
+        check_correctness(torch.baddbmm, torch.bfloat16, c, a, b)
+        check_correctness(torch.baddbmm, torch.half, c, a, b)
+        # test mv/addmv
+        for dtype in [torch.bfloat16, torch.half]:
+            for trans in [True, False]:
+                c = torch.ones(300) * -300
+                a = torch.ones(300, 300)
+                if trans:
+                    a = a.transpose(0, 1).contiguous().transpose(0, 1)
+                b = torch.ones(300)
+                check_correctness(torch.mv, dtype, a, b)
+                check_correctness(torch.addmv, dtype, c, a, b)
+        # test dot
+        a = torch.ones(300)
+        b = torch.ones(300)
+        check_correctness(torch.dot, torch.bfloat16, a, b)
+        check_correctness(torch.dot, torch.half, a, b)
+
+
+class TestLinalgDevice(_TestLinalgMixin, TestCase):
+    """Device-generic linalg tests, instantiated once per supported device."""
 
     def _get_other_device(self, dtype=None):
         """Return a device different from self.device_type for error-path testing."""
@@ -1699,61 +1819,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
                             dim,
                             keepdim,
                             norm_dtype)
-
-
-    def test_vector_norm_decom_unbacked_checks(self):
-        from torch._refs.linalg import _check_vector_norm_args
-
-        class Mod(torch.nn.Module):
-            def __init__(self, ord, dim):
-                super().__init__()
-                self.ord = ord
-                self.dim = dim
-
-            def forward(self, a):
-                x = a.item()
-                tensor_unbacked_size = torch.ones(x, x + 1, x + 2)
-                _check_vector_norm_args(tensor_unbacked_size, self.ord, self.dim)
-                return tensor_unbacked_size
-
-        def test(
-            ord: float | int,
-            dim: DimsType | None,
-            expect_numel_runtime_check: bool,
-            expect_index_0_check: bool = False,
-        ) -> None:
-            m = Mod(ord, dim)
-            exported_program: torch.export.ExportedProgram = torch.export.export(
-                m, args=tuple(torch.tensor([1]))
-            )
-            self.assertEqual(
-                "Runtime assertion failed for expression Ne(u0*(u0 + 1)*(u0 + 2), 0)"
-                in exported_program.graph_module.code,
-                expect_numel_runtime_check,
-            )
-            self.assertEqual(
-                "Runtime assertion failed for expression Ne(u0, 0) | Ne(u0*(u0 + 1)*(u0 + 2), 0)"
-                in exported_program.graph_module.code,
-                expect_index_0_check,
-            )
-
-        # dim is int
-        test(-1, 1, True)
-
-        # dim is None
-        test(-1, None, True)
-
-        # len(dim) == 0
-        test(-1, [], True)
-
-        # shape[d] == 0
-        test(-1, [0], False, True)
-
-        # u0 + 1 == 0 is False we do not see a runtime assert in the generated graph.
-        test(-1, [1], False, False)
-
-        test(-1, [0, 1], False, True)
-        test(-1, [0, 0], False, True)
 
     def test_vector_norm_dim_tuple_arg(self, device):
         test_cases = [
@@ -8693,66 +8758,6 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         bad[0] = -(n + 1)
         with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
             torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
-
-    def test_permute_matmul(self):
-        a = torch.ones([2, 5, 24, 24])
-        b = torch.ones([3, 2, 5, 24, 24])
-        c = a.permute(0, 1, 3, 2).matmul(b)
-        self.assertEqual([c.min(), c.max(), c.sum()], [24, 24, 414720])
-
-    def test_lower_precision_accumulation_with_ref_path(self):
-        # fix https://github.com/pytorch/pytorch/issues/95125
-        # and https://github.com/pytorch/pytorch/issues/83863
-        # for bf16 accumulation in gemm ref path
-        def check_correctness(fn, dtype, *args):
-            expected = fn(*args).to(dtype=dtype)
-            with torch.backends.mkldnn.flags(enabled=False):
-                def test():
-                    lower_args = (arg.to(dtype=dtype) for arg in args)
-                    tmp_result = fn(*lower_args)
-                    return tmp_result
-                c = test()
-                if not (torch.all(c == expected)):
-                    raise AssertionError(
-                        f"Incorrect result with\nexpected: {expected}\ngot: {c}\n"
-                    )
-        # test matmul
-        for dtype in [torch.bfloat16, torch.half]:
-            for transa in [True, False]:
-                for transb in [True, False]:
-                    a = torch.ones(300, 300)
-                    b = torch.ones(300, 300)
-                    if transa:
-                        a = a.transpose(0, 1).contiguous().transpose(0, 1)
-                    if transb:
-                        b = b.transpose(0, 1).contiguous().transpose(0, 1)
-                    check_correctness(torch.matmul, dtype, a, b)
-        # test bmm
-        a = torch.ones(1, 1, 300)
-        b = torch.ones(1, 300, 1)
-        check_correctness(torch.bmm, torch.bfloat16, a, b)
-        check_correctness(torch.bmm, torch.half, a, b)
-        # test baddbmm
-        a = torch.ones(1, 1, 300)
-        b = torch.ones(1, 300, 1)
-        c = torch.ones(1, 1, 1)
-        check_correctness(torch.baddbmm, torch.bfloat16, c, a, b)
-        check_correctness(torch.baddbmm, torch.half, c, a, b)
-        # test mv/addmv
-        for dtype in [torch.bfloat16, torch.half]:
-            for trans in [True, False]:
-                c = torch.ones(300) * -300
-                a = torch.ones(300, 300)
-                if trans:
-                    a = a.transpose(0, 1).contiguous().transpose(0, 1)
-                b = torch.ones(300)
-                check_correctness(torch.mv, dtype, a, b)
-                check_correctness(torch.addmv, dtype, c, a, b)
-        # test dot
-        a = torch.ones(300)
-        b = torch.ones(300)
-        check_correctness(torch.dot, torch.bfloat16, a, b)
-        check_correctness(torch.dot, torch.half, a, b)
 
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @parametrize("transpose_a", [True, False])
