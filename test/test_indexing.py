@@ -10,6 +10,7 @@ import numpy as np
 
 import torch
 from torch import tensor
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -50,6 +51,14 @@ from torch.testing._internal.common_utils import (
 
 
 class TestIndexing(TestCase):
+    @onlyCPU
+    def test_scalar_unbacked_symint_index(self, device):
+        shape_env = ShapeEnv()
+        index = shape_env.create_unbacked_symint()
+        scalar = torch.tensor(1, device=device)
+        with self.assertRaisesRegex(IndexError, "invalid index of a 0-dim tensor"):
+            scalar[index]
+
     def test_index(self, device):
         def consec(size, start=1):
             sequence = torch.ones(torch.tensor(size).prod(0)).cumsum(0)
