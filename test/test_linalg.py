@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import \
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision, DeterministicGuard)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIf,
+     expectedFailureXPU, skipCUDAIf,
      skipCUDAIfNoCusolver, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type, largeMPSBufferTest)
@@ -6049,6 +6049,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
+    @expectedFailureXPU # https://github.com/intel/torch-xpu-ops/issues/3951
     @skipIfTorchDynamo("Runtime error with torch._C._linalg.linalg_lu_factor")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -6815,6 +6816,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @expectedFailureXPU # https://github.com/intel/torch-xpu-ops/issues/5332
     @parametrize("k", [64, 256])
     @parametrize("n", [32, 48, 64, 128])
     def test__dyn_quant_pack_4bit_weight(self, device, k, n):
@@ -6842,6 +6844,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @expectedFailureXPU # https://github.com/intel/torch-xpu-ops/issues/5332
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
@@ -6914,6 +6917,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @expectedFailureXPU # https://github.com/intel/torch-xpu-ops/issues/5332
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
