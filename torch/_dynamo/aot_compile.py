@@ -1733,18 +1733,21 @@ class AOTCompiledModel:
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, one ``For [i, j]:``
-    line per distinct missing-global hint naming the entries whose guards failed
-    on a global the process does not define, and -- when some checked tree
-    reached an answer, or the artifact holds no input at all -- the advice to
-    add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When
-    every rejection that advice rests on followed a raise from its own tree, it
-    names and quotes those raises and says to fix them first; when no checked
-    tree ever answered, a line saying every guard tree raised replaces it,
-    unless an opted-out result's line has already said the raise withheld it.
-    When some checked input's guard tree raised, that exception is the
-    ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
-    sees, so a caller catching the tree's own type
+    per compiled result quoting the guards that refused it, or, for a result
+    whose guards accept the call on the report's own evaluation after not
+    accepting it in dispatch, a ``<guards did not accept this call in dispatch
+    and accepted it here: ...>`` explanation in place of any guards; one
+    ``For [i, j]:`` line per distinct missing-global hint naming the entries
+    whose guards failed on a global the process does not define; and -- when
+    some checked tree reached an answer, or the artifact holds no input at all
+    -- the advice to add a ``ModelInput`` or check which guards
+    ``guard_filter_fn`` kept. When every rejection that advice rests on followed
+    a raise from its own tree, it names and quotes those raises and says to fix
+    them first; when no checked tree ever answered, a line saying every guard
+    tree raised replaces it, unless an opted-out result's line has already said
+    the raise withheld it. When some checked input's guard tree raised, that
+    exception is the ``__cause__`` of the ``RuntimeError`` rather than the
+    exception the caller sees, so a caller catching the tree's own type
     (``SystemError`` for a leaf that returned with an error set,
     ``RuntimeError`` for a ``TORCH_CHECK``) catches the report instead.
     """
