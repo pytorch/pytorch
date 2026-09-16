@@ -1330,6 +1330,43 @@ inline bool is_pinned(const torch::stable::Tensor& self) {
   return torch::stable::detail::to<bool>(stack[0]);
 }
 
+/// Stable version of the from_file op.
+///
+/// Creates a CPU tensor backed by a memory-map of the file at filename.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param filename Path of the file to read.
+/// @param shared Optional flag to write tensor changes back to the file.
+/// @param size Optional number of elements to read from the file.
+/// @param dtype Optional scalar type for the tensor elements.
+/// @param layout Optional memory layout (e.g., strided, sparse).
+/// @param device Optional device, which must be CPU for this op.
+/// @param pin_memory Optional flag to use pinned memory.
+/// @return A new tensor holding the file contents.
+inline torch::stable::Tensor from_file(
+    const std::string& filename,
+    std::optional<bool> shared = std::nullopt,
+    std::optional<int64_t> size = 0,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 7;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(filename),
+      torch::stable::detail::from(shared),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::from_file", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

@@ -788,6 +788,22 @@ def my_is_pinned(self) -> bool:
     return torch.ops.libtorch_agn_2_10.my_is_pinned.default(self)
 
 
+def my_from_file(filename, shared=None, size=0, dtype=None) -> Tensor:
+    """
+    Creates a CPU tensor backed by the contents of a file.
+
+    Args:
+        filename: str - path of the file to read
+        shared: bool or None - whether the mapping is shared with the file
+        size: int or None - number of elements to read from the file
+        dtype: ScalarType or None - data type of the tensor elements
+
+    Returns: Tensor - a tensor holding the file contents
+    """
+    op = torch.ops.libtorch_agn_2_10.my_from_file.default
+    return op(filename, shared, size, dtype)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #

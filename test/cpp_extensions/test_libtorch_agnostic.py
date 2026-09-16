@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     skipIfWindows,
+    TemporaryFileName,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -383,6 +384,30 @@ class TestLibtorchAgnostic(TestCase):
 
         pinned = torch.randn(2, 3, device="cpu", pin_memory=True)
         self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 10)
+    def test_my_from_file(self, device):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        my_from_file = libtorch_agnostic.ops.my_from_file
+        expected = torch.arange(24, dtype=torch.float32)
+        with TemporaryFileName() as path:
+            expected.numpy().tofile(path)
+
+            result = my_from_file(path, shared=False, size=24, dtype=torch.float32)
+            self.assertEqual(result, expected)
+
+            result = my_from_file(path, size=8, dtype=torch.uint8)
+            self.assertEqual(result, torch.from_file(path, size=8, dtype=torch.uint8))
+
+            shared = my_from_file(path, shared=True, size=24, dtype=torch.float32)
+            shared.fill_(3.0)
+            on_disk = torch.from_file(path, size=24, dtype=torch.float32)
+            self.assertEqual(on_disk, torch.full((24,), 3.0))
+
+            with self.assertRaises(RuntimeError):
+                my_from_file(path + ".missing", size=1, dtype=torch.uint8)
 
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
