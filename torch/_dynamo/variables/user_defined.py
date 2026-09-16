@@ -1148,13 +1148,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
     # __new__ in its own __dict__ provides -- not necessarily an immediate
     # base. This finds that ancestor so callers can delegate to its own
     # tp_new_impl instead of re-deriving per-type arg-handling rules here.
-    _new_slot_owners_with_choke_points: tuple[type, ...] = (
+    _new_slot_owners_with_choke_points: set[type] = {
         dict,
         tuple,
         set,
         frozenset,
         list,
-    )
+    }
 
     @staticmethod
     def new_slot_owner(cls: type) -> type:
@@ -1192,13 +1192,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        if self.value is collections.OrderedDict:
-            # Exact OrderedDict: represent as a bare OrderedDictVariable,
-            # mirroring dict.__new__(dict) -> ConstDictVariable. OrderedDict
-            # does not declare its own __new__ (it inherits dict.__new__),
-            # so this must be special-cased ahead of the MRO walk below --
-            # there is no dedicated OrderedDictBuiltinVariable to delegate to.
-            return OrderedDictVariable({}, mutation_type=ValueMutationNew())
         owner = self.new_slot_owner(self.value)
         if owner in self._new_slot_owners_with_choke_points:
             # Delegate to the VariableTracker that already implements this
@@ -1287,10 +1280,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and name == "__enter__"
         ):
             return args[0].enter(tx)
-        elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
-            self.value.__new__
-        ):
-            return self.tp_new_impl(tx, args, kwargs)
         elif name == "__setattr__" and self.ban_mutation:
             unimplemented(
                 gb_type="Class attribute mutation when the __dict__ was already materialized",
@@ -2244,7 +2233,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         SeqIter = VariableTracker.build(tx, polyfills.builtins.sequence_iterator)
         return SeqIter.call_function(tx, [self], {})
 
-    def tp_new_impl(self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs: dict[str, VariableTracker]) -> VariableTracker:
+    def tp_new_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         func = self.generic_getattr(tx, "__new__")
         return func.call_function(tx, args, kwargs)
 

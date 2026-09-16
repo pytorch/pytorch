@@ -46,7 +46,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import format_source_range, istype, no_keywords
+from ..utils import format_source_range, istype
 
 
 _RICHCOMPARE_OPS = frozenset(
@@ -2385,7 +2385,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         if len(args) != 1 or len(kwargs) != 0:
-            raise_type_error(tx, "object.__new__() takes exactly one argument (the type to instantiate)")
+            raise_type_error(
+                tx,
+                "object.__new__() takes exactly one argument (the type to instantiate)",
+            )
 
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], args[1:], tx=tx
