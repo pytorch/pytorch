@@ -262,9 +262,7 @@ def _import_module(name: str) -> types.ModuleType:
     """
     The process's first resolution of the name, kept for its lifetime: nothing
     invalidates the memo, so after a sys.modules handover it is an older object
-    than the live entry. import_source binds it into an empty alias slot
-    regardless, and replaces another writer's same-named binding with it only
-    when it is that entry.
+    than the live entry.
     """
     return importlib.import_module(name)
 
@@ -2445,10 +2443,10 @@ class InstructionTranslatorBase(
         conflict = alias in f_globals and f_globals[alias] is not value
         if conflict:
             bound = f_globals[alias]
-            # __name__ is read out of the instance dict through
-            # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
-            # class-level __getattribute__ (importlib.util._LazyModule imports on
-            # any attribute read) runs inside the trace on the way to a verdict.
+            # Both names out of the instance dicts: a PEP 562 module __getattr__
+            # and a class-level __getattribute__ (importlib.util._LazyModule
+            # imports on any attribute read) are user code that must not run
+            # inside a trace.
             bound_name = (
                 object.__getattribute__(bound, "__dict__").get("__name__")
                 if isinstance(bound, types.ModuleType)
@@ -2468,13 +2466,6 @@ class InstructionTranslatorBase(
             accepted = (module_name, value_name) if value_name else (module_name,)
             if bound_name not in accepted:
                 # Named by type, never repr'd: __repr__ is user code too.
-                # IMPORT_NAME has no break_graph_if_unsupported, so this
-                # Unsupported reaches step(): the frame is skipped outright
-                # unless a checkpoint (an empty stack after two or more ops)
-                # precedes the import, and compiled up to that checkpoint
-                # otherwise. Either outcome is cached on the code object and
-                # nothing guards this global, so fixing it afterwards does not
-                # retrace the frame until torch._dynamo.reset().
                 offender = type(bound).__name__
                 if bound_name is not None:
                     offender = f"{offender} named {bound_name}"
@@ -2489,31 +2480,18 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-        # An empty slot, or one already holding value, takes value.
-        # A writer's same-named module in the slot was the live entry when the
-        # writer ran, and the memo can predate or postdate a handover of the
-        # name since. The memo replaces it only when it is the live entry now:
-        # the graph is specialized on what IMPORT_NAME pushed, the live entry,
-        # and this alias roots its guards.
-        # When neither is live the writer's module stays; the memo would be no
-        # less stale. The guards then read a module the graph was not built
-        # from.
-        # An empty slot has that same blindness whenever the memo is not the
-        # live entry. There the alias has a write side too: on the
-        # get_globals_source_and_value path an inlined STORE_GLOBAL replays
-        # through the alias onto the memo, while the trace read the live
-        # module, the one whose __dict__ is the frame's globals.
-        write_value = not conflict or live
         # Recorded only once the check has passed: the package entry outlives a
         # graph break here, and install() binds every recorded alias.
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        # The write is into a live namespace and nothing unwinds it -- there is
-        # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
-        # trace that graph-breaks or restarts, as does the write install makes
-        # to this name.
-        if write_value:
+        # A writer's same-named module stays in the slot unless value is the
+        # live entry, which is what IMPORT_NAME pushed and the graph is built
+        # from; when neither is live it stays too, the memo being no less
+        # stale. The guards this alias roots, and the bytecode reconstructed
+        # through it (codegen.py, reconstruct_type, call_apply), then read the
+        # module left in the slot rather than the one the graph was built from.
+        if not conflict or live:
             f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)

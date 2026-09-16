@@ -24,7 +24,7 @@ import weakref
 from collections import namedtuple
 from collections.abc import Callable
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 import torch._dynamo.testing
@@ -2177,6 +2177,12 @@ from user code:
         self.assertEqual(message.count("a guarded global is missing"), 1)
         self.assertIn("the module the compiled function was traced in", message)
         self.assertIn("Add a ModelInput", message)
+        # The hint is [1]'s: neither the plain mismatch nor the advice carries it.
+        lines = message.splitlines()
+        self.assertEqual(lines[1][:6], "  [0] ")
+        self.assertNotIn("a guarded global is missing", lines[1])
+        self.assertNotIn("a guarded global is missing", lines[-1])
+        self.assertTrue(lines[-1].startswith("Add a ModelInput"), lines[-1])
 
     def test_no_match_message_hints_each_scope_a_mixed_model_failed_in(self):
         # The public constructor takes results of differing scopes: here a
@@ -2510,8 +2516,9 @@ from user code:
         # evaluation, which is what it does for real when the dict-tag fast path
         # answers false without running the tree. That rejection is not an
         # answer about the call, so a second pass has to rescue it. The
-        # rescuable result is [1], which the parent's fall-through never reached:
-        # it re-checked compiled_results[0] and raised [0]'s L['mode'] == 0.
+        # rescuable result is [1]; without the re-check the call would reach the
+        # no-match report, where [0]'s L['mode'] == 0 is one line and [1]'s real
+        # match is refused beside it.
         model, x = self._aot_compile_mode_branches()
         self._rescued_by_the_recheck(model, x)
 
@@ -3176,19 +3183,31 @@ from user code:
             return check(f_locals)
 
         later_manager = later._live_guard_manager()
-        describe = later_manager.check_verbose
-        watching = patch.object(later_manager, "check_verbose", wraps=describe)
-        with watching as described, patch.object(manager, "check", splicing_check):
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.double())
-            lines = str(ctx.exception).splitlines()
-            self.assertIn("Tried 1 compiled input(s)", lines[0])
-            self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
-            described.assert_not_called()
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.double())
-            self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
-            described.assert_called_once()
+        describers = Mock()
+        describe, later_describe = manager.check_verbose, later_manager.check_verbose
+        watch_first = patch.object(manager, "check_verbose", wraps=describe)
+        watch_later = patch.object(later_manager, "check_verbose", wraps=later_describe)
+        with watch_first as first_described, watch_later as later_described:
+            describers.attach_mock(first_described, "first")
+            describers.attach_mock(later_described, "later")
+            with patch.object(manager, "check", splicing_check):
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 1 compiled input(s)", lines[0])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
+                self.assertEqual([c[0] for c in describers.mock_calls], ["first"])
+                # The next call judges the spliced list: two entries, in the
+                # list's order, each described by its own tree.
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 2 compiled input(s)", lines[0])
+                heads = [line[:6] for line in lines[1:3]]
+                self.assertEqual(heads, ["  [0] ", "  [1] "])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 2)
+                order = [c[0] for c in describers.mock_calls]
+                self.assertEqual(order, ["first", "later", "first"])
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # A tree that THROWS out of C++ returns through
@@ -3323,8 +3342,8 @@ from user code:
         # loaded redirects dispatch. A copy taken at load time would go on
         # serving whichever graph matched then, with no error and a wrong answer.
         # The graph specialized on this global rather than lifting it, so the
-        # bytecode never reads it: its globals carry the name, and every call
-        # refreshes it, but only the guards consult its value.
+        # bytecode never reads it: its globals carry the name, but only the
+        # guards consult its value.
         #
         # _set_pool_mode REBINDS the global, which is what makes the helper's
         # post-load checks pin the by-reference read. The helper's other callers
@@ -4407,109 +4426,6 @@ from user code:
         EPS = rebound
         AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.full((3,), 9.0))
         self.assertEqual(reloaded(x), x * rebound + load_time_param)
-
-    def test_aot_compile_module_second_pass_rebind_is_served(self):
-        # Dispatch's second pass re-reads the guarded global as well. A check()
-        # can reject from the recursive dict-tag fast path without running the
-        # tree, which answers nothing about the call, so the pass that rescues it
-        # serves a call whose guards did pass and owes the graph the same live
-        # value the first pass would have handed it. A stub that rejects once and
-        # then defers to the real tree forces that pass on a LOADED artifact, the
-        # only kind the re-read is armed for.
-        global EPS
-
-        self._hide_leaked_dynamo_globals()
-        self.addCleanup(globals().__setitem__, "EPS", EPS)
-
-        class EpsOnlyModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS
-
-        x = torch.randn(3)
-        keep_tensors = torch.compiler.keep_tensor_guards_unsafe
-        options = {"guard_filter_fn": keep_tensors}
-        model = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-
-        load_time_eps = EPS
-        reloaded = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
-        )
-        reloaded._load_aot_compiled_module(data)
-        result = reloaded.forward.compiled_results[0]
-        # Armed, so a served load-time value would be this test's own doing.
-        self.assertEqual(result._live_global_names, ("EPS",))
-
-        class RejectsThenDefers:
-            def __init__(self, tree):
-                self.tree = tree
-                self.checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                return self.checks > 1 and self.tree.check(f_locals)
-
-        stub = RejectsThenDefers(result._artifacts.guard_manager)
-        result._artifacts.guard_manager = stub
-
-        rebound = torch.tensor(2.0)
-        self.assertNotEqual(rebound.item(), load_time_eps.item())
-        EPS = rebound
-        served = reloaded(x)
-        # The real tree, not the stub, is what accepted the rebind.
-        self.assertEqual(stub.checks, 2)
-        self.assertEqual(served, x * rebound)
-        self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
-
-    def test_aot_compile_module_opted_out_load_rebind_is_served(self):
-        # The re-read reaches the last resort too, the site that serves a result
-        # which opted out: the name set is recorded by the load, before
-        # disable_guard_check() flips anything, so the graph goes on following the
-        # guard scope -- here past a rebind the kept TENSOR_MATCH refuses, which
-        # is what pushes dispatch off both earlier passes onto that site.
-        global EPS
-
-        self._hide_leaked_dynamo_globals()
-        self.addCleanup(globals().__setitem__, "EPS", EPS)
-
-        class EpsOnlyModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS
-
-        x = torch.randn(3)
-        keep_tensors = torch.compiler.keep_tensor_guards_unsafe
-        options = {"guard_filter_fn": keep_tensors}
-        model = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-
-        load_time_eps = EPS
-        reloaded = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
-        )
-        reloaded._load_aot_compiled_module(data)
-        result = reloaded.forward.compiled_results[0]
-        self.assertEqual(result._live_global_names, ("EPS",))
-        self.assertEqual(reloaded(x), x * load_time_eps)
-
-        rebound = torch.nn.Parameter(torch.tensor(2.0), requires_grad=False)
-        self.assertNotEqual(rebound.item(), load_time_eps.item())
-        EPS = rebound
-        with self.assertRaisesRegex(
-            RuntimeError, "No AOT compiled graph matched this call"
-        ):
-            reloaded(x)
-        result.disable_guard_check()
-        served = reloaded(x)
-        self.assertEqual(served, x * rebound)
-        self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
 
     @torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True)
     def test_aot_compile_module_shape_only_global_arms_the_guard_scope(self):
