@@ -2722,6 +2722,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.current_stream,
             torch.cuda.current_stream,
+            torch.mtia.current_stream,
             torch.xpu.current_stream,
         )
         def handle_current_stream(
@@ -2772,6 +2773,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         _synchronize_fn_to_device_type = {
             torch.cuda.synchronize: "cuda",
+            torch.mtia.synchronize: "mtia",
             torch.xpu.synchronize: "xpu",
             torch.mps.synchronize: "mps",
             torch.cpu.synchronize: "cpu",
@@ -2780,6 +2782,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(
             torch.accelerator.synchronize,
             torch.cuda.synchronize,
+            torch.mtia.synchronize,
             torch.xpu.synchronize,
             torch.mps.synchronize,
             torch.cpu.synchronize,
