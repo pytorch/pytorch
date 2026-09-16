@@ -9,7 +9,6 @@ import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from typing import Any
-from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -948,8 +947,9 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             ac=False,
         )
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_partial_group_releases_deferred_all_gather_after_backward(self):
+        """Root backward releases state retained by a partial forward."""
         dim, vocab_size = 32, 128
         model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
         fully_shard([model.norm, model.head])
@@ -960,6 +960,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         chunk = hidden.detach().requires_grad_()
         model.head(chunk).sum().backward()
         comm_ctx = model.head._get_fsdp_state()._comm_ctx
+        # The standalone head forward leaves this deferred state for the root
+        # backward boundary to release.
         self.assertIsNotNone(comm_ctx.all_gather_state)
 
         hidden.backward(chunk.grad)
@@ -1326,13 +1328,9 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         model.body.armed = False
 
         comm_ctx = model._get_fsdp_state()._comm_ctx
-        with patch.object(
-            comm_ctx,
-            "release_all_gather_state",
-            wraps=comm_ctx.release_all_gather_state,
-        ) as release_all_gather_state:
-            model.reset_iter_state()
-        release_all_gather_state.assert_called_once_with()
+        self.assertIsNotNone(comm_ctx.all_gather_state)
+        model.reset_iter_state()
+        self.assertIsNone(comm_ctx.all_gather_state)
 
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()

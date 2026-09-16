@@ -470,6 +470,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         *,
         use_static_metadata: bool = True,
         null_boundary_grads: bool = False,
+        reuse_recv_buffers: bool = False,
     ) -> None:
         self.init_pg()
 
@@ -557,9 +558,19 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
                 cast(list[PipelineStage], stages),  # type: ignore[arg-type]
                 n_microbatches=n_microbatches,
                 loss_fn=_loss_fn,
+                reuse_recv_buffers=reuse_recv_buffers,
             )
 
         self._execute_schedule_step(schedule, stages, pp_input, pp_target)
+
+        if reuse_recv_buffers:
+            for stage in stages:
+                for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool):
+                    self.assertFalse(pool._owners)
+                    for slot in pool._buffers:
+                        for buffer in slot:
+                            if buffer is not None:
+                                self.assertFalse(buffer.requires_grad)
 
         for stage_index in stage_indices:
             self._assert_stage_grad_parity(
@@ -757,6 +768,15 @@ class TestDTensorPPModes(DTensorPPIntegrationBase):
             ScheduleInterleaved1F1B,
             apply_tp_replicate,
             [Replicate()],
+        )
+
+    @_requires_multi_gpu
+    def test_static_mode_interleaved1f1b_replicate_with_recv_buffer_reuse(self):
+        self._run_training_correctness(
+            ScheduleInterleaved1F1B,
+            apply_tp_replicate,
+            [Replicate()],
+            reuse_recv_buffers=True,
         )
 
     @_requires_multi_gpu
