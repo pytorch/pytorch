@@ -33,7 +33,7 @@ def supported_alignment(tensor: torch.Tensor, maximum: int) -> int:
     """Return the largest power-of-two alignment up to `maximum` supported by `tensor`."""
     # const_data_ptr avoids materializing COW storage.
     with torch._C.DisableTorchFunctionSubclass():
-        ptr = tensor.const_data_ptr()
+        ptr = tensor.const_data_ptr()  # type: ignore[attr-defined]
     alignment = maximum
     while alignment > tensor.element_size() and ptr % alignment:
         alignment //= 2
