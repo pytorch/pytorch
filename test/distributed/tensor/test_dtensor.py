@@ -1423,7 +1423,7 @@ class TestDTensorMeshDevice(DTensorTestBase):
 
     @unittest.expectedFailure
     @with_comms
-    def test_dtensor_cond(self, device):
+    def test_dtensor_cond(self):
         mesh = self.build_device_mesh()
 
         def make_dtensor(*shape, dtype, device):
@@ -1433,7 +1433,7 @@ class TestDTensorMeshDevice(DTensorTestBase):
                 placements=None,
             )
 
-        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=device)
+        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=self.device_type)
 
         # Fails with AssertionError: P1972527564
         torch.cond(
