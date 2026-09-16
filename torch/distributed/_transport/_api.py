@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import Any, cast, Protocol, runtime_checkable, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
 
-from ._work import _WorkQueue, Work
+from ._work import _WorkQueue, wait_all, Work
 
 
 if TYPE_CHECKING:
@@ -55,6 +55,10 @@ class Transport(ABC):
     ``wait`` blocks until completion and propagates transfer errors.
     ``is_completed`` includes failed operations; ``get_future`` resolves to
     an empty list on success.
+
+    ``read_async`` and ``write_async`` are asyncio coroutines. They drain the
+    transfer before propagating cancellation, allowing callers to release
+    exposed buffers when the coroutine exits. Use ``wait_all`` for batches.
 
     Built-in backends serialize asynchronous operations on a worker thread.
     Local buffers are retained until completion and must not be modified or
@@ -105,7 +109,10 @@ class Transport(ABC):
 
     @abstractmethod
     def register_memory(self, tensor: torch.Tensor) -> Memory:
-        """Register a contiguous tensor for transport operations."""
+        """Register a contiguous tensor, including after bind/connect or transfers.
+
+        Exchange its remote-buffer descriptor with the peer before remote access.
+        """
 
     @abstractmethod
     def write(
@@ -126,6 +133,20 @@ class Transport(ABC):
         async_op: bool = False,
     ) -> int | Work:
         """Read into a local view; return Work for async_op=True, otherwise zero."""
+
+    async def write_async(
+        self, local_buffer: MemoryView, remote_buffer: RemoteBuffer
+    ) -> None:
+        """Write a local view, yielding to asyncio until the transfer finishes."""
+        work = cast(Work, self.write(local_buffer, remote_buffer, async_op=True))
+        await wait_all((work,))
+
+    async def read_async(
+        self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer
+    ) -> None:
+        """Read into a local view, yielding to asyncio until the transfer finishes."""
+        work = cast(Work, self.read(local_buffer, remote_buffer, async_op=True))
+        await wait_all((work,))
 
     @abstractmethod
     def close(self) -> None:
