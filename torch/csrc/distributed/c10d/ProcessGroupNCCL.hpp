@@ -587,16 +587,31 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Run desync debug. This function is called by watchdog at time of timeout.
     void run();
 
-    // Log work start to store.
+    // Buffer a work start for the next flush().
     void logWorkStart(WorkNCCL& work);
 
-    // Log work end to store.
+    // Buffer a work end for the next flush().
     void logWorkEnd(WorkNCCL& work);
+
+    // Push the buffered start/end updates to the store.
+    //
+    // Call this with workMetaListMutex_ RELEASED. traceUpdate() is a blocking
+    // TCPStore round-trip and workEnqueue() -- i.e. every collective launch on
+    // the trainer thread -- contends on that same mutex, so a store write held
+    // under it stalls the launch path.
+    void flush();
 
    private:
     // Whether desync debug is enabled.
     // If false, all functions are no-op.
     bool enabled_{false};
+
+    // Last work seq (with its op name) buffered since the last flush().
+    // traceUpdate() overwrites a single fixed key per rank, so only the final
+    // write of a watchdog pass is ever observable; buffering collapses one
+    // store round-trip per work into one per pass.
+    std::optional<std::pair<uint64_t, std::string>> pendingStart_;
+    std::optional<std::pair<uint64_t, std::string>> pendingEnd_;
 
     // From ProcessGroupNCCL
     int rank_;
