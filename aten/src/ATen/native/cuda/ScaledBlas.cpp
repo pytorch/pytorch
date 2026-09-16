@@ -294,7 +294,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 }
 
 bool
-_tunable_scaled_gemm_rocm(
+_tunable_scaled_gemm(
           cublasCommonArgs& args,
           const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a, const Tensor& scale_b,
@@ -302,9 +302,11 @@ _tunable_scaled_gemm_rocm(
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
           const at::ScalarType out_dtype,
-          Tensor& out) {
-#ifdef USE_ROCM
+          Tensor& out,
+          const std::optional<Tensor>& alpha) {
   bool dispatched = false;
+#ifdef USE_ROCM
+  (void)alpha;
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
       if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
         if (mat2.scalar_type() == ScalarType::Float8_e4m3fnuz) {      \
@@ -362,6 +364,24 @@ _tunable_scaled_gemm_rocm(
           dispatched = scaledgemm(&params) == at::cuda::tunable::OK;                              \
         }                                                             \
       }
+#else
+      // CUDA cuBLASLt dispatches on runtime dtypes in ScaledGemmParams, whose
+      // signature also keys the tuning cache by dtype. AT/BT are placeholders.
+#define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                         \
+      static at::cuda::tunable::ScaledGemmTunableOp<                 \
+          at::Float8_e4m3fn, at::Float8_e4m3fn, scalar_t,            \
+          BLASOP_A, BLASOP_B> scaledgemm{};                          \
+      dispatched = scaledgemm(&params) == at::cuda::tunable::OK;
+#endif
+#ifdef USE_ROCM
+#define TUNABLE_SCALED_GEMM_TYPES \
+  kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES)
+#define TUNABLE_SET_ALPHA(params, alpha_val)
+#else
+#define TUNABLE_SCALED_GEMM_TYPES \
+  kHalf, kBFloat16, kFloat, AT_EXPAND(AT_FLOAT8_TYPES)
+#define TUNABLE_SET_ALPHA(params, alpha_val) (params).alpha = (alpha_val)
+#endif
   AT_DISPATCH_V2(out_dtype, "_tunable_scaled_gemm", AT_WRAP([&] {
     bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
     bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
@@ -389,7 +409,6 @@ _tunable_scaled_gemm_rocm(
     params.k = args.k;
     params.a = args.mata->data_ptr();
     params.a_scale_ptr = args.scale_mata_ptr;
-    params.a_scale_dtype = args.scale_mata_dtype.value();
     params.lda = args.lda;
     params.a_dtype = args.mata->scalar_type();
     params.a_scale_dtype = args.scale_mata_dtype.value();
@@ -397,7 +416,6 @@ _tunable_scaled_gemm_rocm(
     params.a_swizzle_type = args.swizzle_mata_type;
     params.b = args.matb->data_ptr();
     params.b_scale_ptr = args.scale_matb_ptr;
-    params.b_scale_dtype = args.scale_matb_dtype.value();
     params.ldb = args.ldb;
     params.b_dtype = args.matb->scalar_type();
     params.b_scale_dtype = args.scale_matb_dtype.value();
@@ -410,6 +428,7 @@ _tunable_scaled_gemm_rocm(
     params.ldc = args.result_ld;
     params.c_dtype = out_dtype;
     params.use_fast_accum = use_fast_accum;
+    TUNABLE_SET_ALPHA(params, alpha);
     // `dispatched` stays false if the selected kernel reports a non-OK status,
     // or if no branch of TUNABLE_DISPATCH matches this dtype pair; either way
     // the caller re-dispatches at::cuda::blas::scaled_gemm.
@@ -429,12 +448,11 @@ _tunable_scaled_gemm_rocm(
       TORCH_CHECK(false, "unreachable");
     }
   }),
-  kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES));
+  TUNABLE_SCALED_GEMM_TYPES);
+#undef TUNABLE_SET_ALPHA
+#undef TUNABLE_SCALED_GEMM_TYPES
 #undef TUNABLE_DISPATCH
   return dispatched;
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_gemm_rocm only callable on ROCM devices");
-#endif
 }
 
 struct ScaledGemmEpilogue {
@@ -483,21 +501,20 @@ _scaled_gemm(
           (effective_accumulator->stride(0) == args.result_ld &&
            effective_accumulator->scalar_type() == out_dtype_),
       "scaled_addmm: input and output must have the same dtype and leading dimension");
-// ROCM enables the TunableOp path only
-// but can fallback to at::cuda::blas::scaled_gemm
-#ifdef USE_ROCM
   auto tuning_ctx = at::cuda::tunable::getTuningContext();
-  bool tunable_op_enabled = tuning_ctx->IsTunableOpEnabled();
-#else
-  bool tunable_op_enabled = false;
-#endif
+  // TunableOp's ScaledGemmParams cannot represent the addmm accumulator/alpha/beta
+  // yet, so bypass it for epilogues (ROCm blocks the accumulator upstream, CUDA-only).
+  const bool tunable_supports_epilogue = !effective_accumulator &&
+      epilogue.alpha == 1.0f && epilogue.beta == 0.0f;
+  bool tunable_op_enabled =
+      tuning_ctx->IsTunableOpEnabled() && tunable_supports_epilogue;
   if (tunable_op_enabled) {
-      // Only available on ROCM. Returns false when the tunable dispatch did
+      // Returns false when the tunable dispatch did
       // not run the GEMM -- the selected kernel reported a non-OK status, or
       // no TUNABLE_DISPATCH branch matched this dtype pair. Both cases fall
       // through to the non-tunable scaled_gemm below. Matches the addmm
       // fallback in launchGemmAndBiasCublasLt.
-      if (_tunable_scaled_gemm_rocm(
+      if (_tunable_scaled_gemm(
               args,
               mat1, mat2,
               scale_a, scale_b,
@@ -505,7 +522,8 @@ _scaled_gemm(
               bias,
               use_fast_accum,
               out_dtype_,
-              out)) {
+              out,
+              device_alpha)) {
         return out;
       }
   }
