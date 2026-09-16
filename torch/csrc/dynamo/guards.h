@@ -50,6 +50,14 @@ struct LocalState {
     }
   }
 
+  at::DispatchKeySet apply_for_tensor(at::DispatchKeySet ks) const {
+    auto result = apply(ks);
+    if (override_dispatch_key_set.empty()) {
+      result = result - c10::DispatchKeySet(c10::DispatchKey::Fake);
+    }
+    return result;
+  }
+
   LocalState()
       : dispatch_modifier(c10::impl::tls_local_dispatch_key_set()),
         override_dispatch_key_set(c10::BackendComponent::InvalidBit),
