@@ -1743,13 +1743,14 @@ class AOTCompiledModel:
     -- the advice to add a ``ModelInput`` or check which guards
     ``guard_filter_fn`` kept. When every rejection that advice rests on followed
     a raise from its own tree, it names and quotes those raises and says to fix
-    them first; when no checked tree ever answered, a line saying every guard
-    tree raised replaces it, unless an opted-out result's line has already said
-    the raise withheld it. When some checked input's guard tree raised, that
-    exception is the ``__cause__`` of the ``RuntimeError`` rather than the
-    exception the caller sees, so a caller catching the tree's own type
-    (``SystemError`` for a leaf that returned with an error set,
-    ``RuntimeError`` for a ``TORCH_CHECK``) catches the report instead.
+    them first; when no checked tree ever answered and some tree raised, a line
+    saying every guard tree raised replaces it, unless an opted-out result's
+    line has already said the raise withheld it. When some checked input's
+    guard tree raised, that exception is the ``__cause__`` of the
+    ``RuntimeError`` rather than the exception the caller sees, so a caller
+    catching the tree's own type (``SystemError`` for a leaf that returned with
+    an error set, ``RuntimeError`` for a ``TORCH_CHECK``) catches the report
+    instead.
     """
 
     model: torch.nn.Module
@@ -2065,7 +2066,13 @@ class AOTCompiledModel:
                 # these, and the chain carries the first raise of all. Bracketed
                 # as on the entry line and joined with a semicolon: the quoted
                 # text is arbitrary user text that may hold commas, and
-                # _raise_text has a parenthetical of its own.
+                # _raise_text has a parenthetical of its own. `- trusted` is
+                # what makes raised[i] safe to read without the gate above: an
+                # answered entry outside `trusted` raised before it rejected.
+                # Under that gate every trusted entry is opted out, so the
+                # enabled filter alone already drops them; it is there for the
+                # opted-out entries that raised and then rejected, whose guards
+                # nobody asked about and whose withheld line blames the raiser.
                 untrusted = [
                     f"[{i}] <{_raise_text(raised[i])}>"
                     for i in sorted(answered - trusted)
