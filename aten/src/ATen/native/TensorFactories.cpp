@@ -104,6 +104,18 @@
 
 namespace at::native {
 namespace {
+void check_random_floating_dtype(
+    const char* function_name,
+    std::optional<ScalarType> dtype) {
+  if (!dtype.has_value()) {
+    return;
+  }
+  TORCH_CHECK(
+      at::isFloatingType(dtype.value()) || at::isComplexType(dtype.value()),
+      function_name,
+      " only returns floating point tensors. Did you mean torch.randint?");
+}
+
 void window_function_checks(
     const char* function_name,
     const TensorOptions& options,
@@ -1047,6 +1059,7 @@ Tensor rand(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
+  check_random_floating_dtype("torch.rand", dtype);
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
@@ -1076,6 +1089,7 @@ Tensor rand_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
+  check_random_floating_dtype("torch.rand_like", dtype);
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
@@ -1350,6 +1364,7 @@ Tensor randn(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
+  check_random_floating_dtype("torch.randn", dtype);
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
@@ -1407,6 +1422,7 @@ Tensor randn_like(
     std::optional<Device> device,
     std::optional<bool> pin_memory,
     std::optional<c10::MemoryFormat> optional_memory_format) {
+  check_random_floating_dtype("torch.randn_like", dtype);
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(

@@ -3690,6 +3690,17 @@ class TestRandomTensorCreation(TestCase):
             torch.rand(size, size, out=res2)
             self.assertEqual(res1, res2)
 
+    @onlyCPU
+    def test_rand_integral_dtype_error(self, device):
+        err = "only returns floating point tensors"
+        for func in (torch.rand, torch.randn):
+            with self.assertRaisesRegex(RuntimeError, err):
+                func(3, dtype=torch.int32)
+            with self.assertRaisesRegex(RuntimeError, err):
+                func(3, dtype=torch.long)
+            with self.assertRaisesRegex(RuntimeError, err):
+                func(3, dtype=torch.bool)
+
     def test_randperm(self, device):
         if device == 'cpu' or device == 'meta':
             rng_device = None
