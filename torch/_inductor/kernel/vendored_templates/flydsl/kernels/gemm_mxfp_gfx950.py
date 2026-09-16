@@ -129,10 +129,7 @@ def async_load_mxfp8_scales(
         if const_expr(has_k_tail):
             sk = (sk < k_bound // MXFP_SCALE_BLOCK_K).select(sk, 0)
         buffer_load_lds_inline(
-            rsrc,
-            lds_ptr,
-            safe_row * stride + sk,
-            GFX950_SCALE_DMA_BYTES,
+            rsrc, lds_ptr, safe_row * stride + sk, GFX950_SCALE_DMA_BYTES
         )
         if i < load_iters - 1:
             lds_ptr = lds_ptr + block_threads * GFX950_SCALE_DMA_BYTES

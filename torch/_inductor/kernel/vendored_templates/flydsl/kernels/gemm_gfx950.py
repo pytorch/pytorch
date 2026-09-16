@@ -599,6 +599,7 @@ def async_load_operand(
     ldg_x_threads = param.ldg_x_threads
     block_k = param.block_k
     k = context.k
+    fence_loads = param.dtype_id == GEMM_DTYPE_MXFP8 and param.use_half_tile_interleaved
     lds_ptr = make_wave_lds_ptr(lds_base, context.wave_offset)
     for i in range_constexpr(operand.load_iters):
         global_tid = block_threads * i + tid
@@ -638,7 +639,12 @@ def async_load_operand(
             global_offset = (
                 safe_global_outer_idx * operand.leading_stride + safe_global_k_idx
             ) * param.in_data_bytes
+        # Preserve HTI's load/MFMA schedule across the inline-asm boundary.
+        if const_expr(fence_loads):
+            rocdl.sched_barrier(0)
         buffer_load_lds_inline(operand.rsrc, lds_ptr, global_offset, async_load_bytes)
+        if const_expr(fence_loads):
+            rocdl.sched_barrier(0)
         if i < operand.load_iters - 1:
             lds_ptr = lds_ptr + block_threads * async_load_bytes
 

@@ -1684,7 +1684,8 @@ class TestFlyDSLMXFPDevice(TestCase):
         ),
     )
     @parametrize("out_dtype", (torch.bfloat16, torch.float16))
-    def test_mxfp8_hti_scale_stage_reuse(self, device, tile_k, k, out_dtype):
+    @parametrize("operand_layout", ((False, True), (False, False), (True, True), (True, False)))
+    def test_mxfp8_hti_scale_stage_reuse(self, device, tile_k, k, out_dtype, operand_layout):
         self._skip_unless_supported(device)
         torch.manual_seed(0)
         m = n = 256
@@ -1700,13 +1701,17 @@ class TestFlyDSLMXFPDevice(TestCase):
             operands.append(values)
             scales.append(scale)
             references.append(reference)
-        inputs = (operands[0], operands[1].t(), *scales)
+        a_is_transposed, b_is_transposed = operand_layout
+        a, b = operands
+        a = _with_outer_contiguous_storage(a) if a_is_transposed else a
+        b = b if b_is_transposed else _with_outer_contiguous_storage(b)
+        inputs = (a, b.t(), *scales)
         reference = (references[0] @ references[1].t()).to(out_dtype)
         for use_hti in (False, True):
             with self.subTest(use_hti=use_hti):
                 actual = _run_mxfp_tile(
                     "mxfp8", (m, n, k), (128, 128, tile_k, 2, 2, 2, 0, use_hti),
-                    out_dtype, inputs,
+                    out_dtype, inputs, operand_layout,
                 )
                 self.assertEqual(actual, reference, atol=3e-2, rtol=3e-2)
 
