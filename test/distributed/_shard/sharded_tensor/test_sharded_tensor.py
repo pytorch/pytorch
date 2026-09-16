@@ -165,7 +165,7 @@ class TestCreateTensorFromParams(TestCase):
             pin_memory=False,
             memory_format=torch.contiguous_format,
         )
-        local_device = torch.device(0)
+        local_device = torch.device(f"{DEVICE_TYPE}:0")
         local_tensor = _create_tensor_from_params(
             5, 10, local_device=local_device, tensor_properties=tensor_properties
         )
@@ -335,7 +335,7 @@ class TestShardTensor(ShardedTensorTestBase):
                 f"rank:3/{DEVICE_TYPE}:3",
             ],
         )
-        tensor = torch.rand(12, 12).to(self.rank)
+        tensor = torch.rand(12, 12).to(f"{DEVICE_TYPE}:{self.rank}")
 
         with self.assertRaisesRegex(ValueError, "does not match with src_rank"):
             _shard_tensor(tensor, spec, src_rank=self.rank)
@@ -633,7 +633,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             full_tensor = torch.zeros(
                 h,
                 w,
-                device=torch.device(dst),
+                device=torch.device(f"{DEVICE_TYPE}:{dst}"),
             )
         st.gather(dst, full_tensor)
 
@@ -667,7 +667,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             full_tensor = torch.zeros(
                 h,
                 w,
-                device=torch.device(dst),
+                device=torch.device(f"{DEVICE_TYPE}:{dst}"),
             )
         st.gather(dst, full_tensor)
 

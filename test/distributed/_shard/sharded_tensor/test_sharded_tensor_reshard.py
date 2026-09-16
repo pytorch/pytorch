@@ -36,7 +36,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestReshard(ShardedTensorTestBase):
     def _run_sharded_tensor_reshard(self, sharding_spec, reshard_spec, input_size):
         torch.manual_seed(0)
-        local_tensor = torch.rand(*input_size).to(self.rank)
+        local_tensor = torch.rand(*input_size).to(f"{DEVICE_TYPE}:{self.rank}")
         st = _shard_tensor(local_tensor, sharding_spec)
         st_compare = _shard_tensor(local_tensor, reshard_spec)
         st.reshard(reshard_spec)

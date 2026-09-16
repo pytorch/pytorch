@@ -69,7 +69,9 @@ class TestShardingPlan(ShardedTensorTestBase):
             output_plan={"": rowwise_sharding_spec},
         )
 
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).to(self.rank)
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).to(
+            f"{DEVICE_TYPE}:{self.rank}"
+        )
 
         with self.assertRaisesRegex(
             TypeError, "Only `ShardingSpec` and `Sharder` are supported to shard"
@@ -113,7 +115,7 @@ class TestShardingPlan(ShardedTensorTestBase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_planner(self):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
-            self.rank
+            f"{DEVICE_TYPE}:{self.rank}"
         )
         planner = ChunkAllShardingPlanner(device_count=TEST_GPU_NUM)
         sharding_plan = planner.build_plan(megatron_lm)
