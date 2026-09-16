@@ -21,6 +21,10 @@ set -uo pipefail
 
 FINDINGS="${PR_REVIEW_FINDINGS_FILE:-/tmp/pr-review-findings.json}"
 DIFF="${PR_REVIEW_DIFF_FILE:-/tmp/pr-diff.txt}"
+# Named in an anchor-miss report so the model can Read the changed-file list
+# itself. The validator never opens it; it only points at it, and only after
+# checking it is there.
+FILES="${PR_REVIEW_FILES_FILE:-/tmp/pr-files.txt}"
 SCRIPTS="${PR_REVIEW_SCRIPTS_DIR:-}"
 
 if [[ -z "$SCRIPTS" ]]; then
@@ -35,4 +39,5 @@ fi
 # otherwise be imported and get to define what "valid" means.
 PYTHONPATH="$SCRIPTS" python3 "$SCRIPTS/validate_findings.py" \
   --findings-file "$FINDINGS" \
-  --diff-file "$DIFF"
+  --diff-file "$DIFF" \
+  --files-file "$FILES"
