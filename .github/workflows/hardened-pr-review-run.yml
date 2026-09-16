@@ -352,7 +352,8 @@ jobs:
           # shape the prompt: the hooks are the write boundary and
           # validate_findings.py decides what a finding may say, so two runs
           # differing only there behaved differently under one hash. The set is
-          # pinned by TestThePromptHashCoversTheTrustedSurface.
+          # pinned by TestTheReviewJobsTrustedSurfaceIsPinned's
+          # prompt-hash tests, which also EXECUTE this step.
           HASH=$(cat .github/workflows/hardened-pr-review-run.yml \
                      scripts/pr_review/extract_verdict.py \
                      scripts/pr_review/emit_row.py \

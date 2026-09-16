@@ -332,6 +332,13 @@ def uncommented(raw: str) -> str:
     QUOTE-AWARE, because `#` inside a quoted scalar is content: truncating
     `"a # b"` to `"a` both corrupts the value and leaves the quotes unbalanced,
     and doing it to a gate expression red a workflow YAML had not changed.
+
+    THE LIMIT: any quote character opens that state, wherever it sits. That is
+    right for a scalar that STARTS quoted and for the shell lines this also
+    reads (a `#` inside `echo "PR #${N}"` is content), and wrong for a PLAIN
+    scalar containing an apostrophe — `O'Brien # note` keeps its comment here
+    where YAML would drop it. No value in these files is spelled that way; a
+    reader that needs it must be taught, not assumed.
     """
     quote, i = "", 0
     while i < len(raw):
@@ -367,6 +374,27 @@ def plain_scalar(raw: str) -> str:
         )
         return inner
     return v
+
+
+def norm_expr(value: str) -> str:
+    """Collapse the whitespace INSIDE every `${{ … }}`, leaving the rest alone.
+
+    Actions resolves `${{github.sha}}` and `${{  github.sha  }}` identically, so
+    an equality against one spelling is a false RED on a reformat — and a
+    contract test that reds on a cosmetic edit earns itself a deletion. Only the
+    expression interior is touched: the surrounding scalar still has to match.
+
+    WHITESPACE RUNS ONLY. `${{ github . sha }}` also evaluates the same and is
+    NOT canonicalized here, because removing spaces around a `.` would corrupt
+    a string literal that contains one. Such a spelling reds, with the value in
+    the message; widen this deliberately rather than by accident.
+    """
+    return re.sub(
+        r"\$\{\{(.*?)\}\}",
+        lambda m: "${{ " + " ".join(m.group(1).split()) + " }}",
+        value,
+        flags=re.S,
+    )
 
 
 # Any mapping key, and the same with a block-scalar header as its value.
@@ -453,6 +481,339 @@ def scalar_block(text: str, key: str) -> str:
     return "\n".join(blocks[0][1])
 
 
+# One mapping entry: an unquoted-or-quoted key, a colon, and the rest. The
+# grammar in `refuse_unmodelled_spellings` already refuses a space before the
+# colon and a quoted KEY, so this is deliberately not more permissive than the
+# file it reads.
+_MAP_ENTRY = re.compile(r"""^[ \t]*["']?([\w.-]+)["']?[ \t]*:(?:[ \t]+(.*))?$""")
+
+
+def mapping_items(lines: list[str]) -> dict:
+    """A mapping's OWN key/value pairs, decoded — never a nested block's.
+
+    A line-at-a-time scan for `key:` ANYWHERE under a mapping reads the BODY of
+    a block scalar as if it were the mapping. `ssh-known-hosts: |` with a
+    `ref: <the pull request's head>` line indented beneath it declares no `ref`
+    INPUT at all — actions/checkout receives a known-hosts string and falls back
+    to its default ref — while a scan matching `ref:` at any depth recorded the
+    expected value and passed. The same shape hides a `cancel-in-progress:` line
+    inside a `group: |` scalar. So only lines at the mapping's OWN indent count,
+    which a block scalar's body can never reach: YAML requires that body to be
+    more indented than the key introducing it.
+
+    Values come back through `plain_scalar` then `norm_expr`, so quoting and
+    expression respacing are not differences. An entry this reader cannot parse,
+    or a duplicate key, ASSERTS rather than being skipped.
+    """
+    body = [ln for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+    if not body:
+        return {}
+    own = min(len(ln) - len(ln.lstrip()) for ln in body)
+    out: dict[str, str] = {}
+    for i, ln in enumerate(body):
+        if len(ln) - len(ln.lstrip()) != own:
+            continue
+        m = _MAP_ENTRY.match(ln)
+        assert m, f"unreadable mapping entry {ln!r}"
+        assert m.group(1) not in out, f"duplicate key {m.group(1)!r} in one mapping"
+        # AN INLINE VALUE MUST BE THE WHOLE VALUE. Skipping deeper lines is
+        # right for a nested mapping (`with:`, `hooks:`) and WRONG for a scalar
+        # that continues: YAML folds `path: pr` with a more-indented `/../trusted`
+        # beneath it into the single value `pr /../trusted`, which normalizes to
+        # the workspace-root sibling — while a first-line reader records `pr`
+        # and the exact-mapping comparison above it still matches. A block
+        # header (`ref: >-`) takes the lines below as its value the same way.
+        # Both are refused rather than guessed at.
+        nxt = body[i + 1] if i + 1 < len(body) else ""
+        deeper = bool(nxt) and len(nxt) - len(nxt.lstrip()) > own
+        assert not (m.group(2) and deeper), (
+            f"the entry {ln.strip()!r} has an inline value AND a more-indented "
+            f"line under it ({nxt.strip()!r}). YAML folds those into one value "
+            "and this reader sees only the first; write the value on one line, "
+            "or teach this reader the spelling."
+        )
+        out[m.group(1)] = norm_expr(plain_scalar(m.group(2) or ""))
+    return out
+
+
+def env_values(text: str, name: str) -> list:
+    """Every value bound to `name` in `text`, DECODED.
+
+    Five readers spelled this `^\\s*NAME:\\s*(\\S+)\\s*$`, which reds on a
+    trailing comment — the `$` anchor — and keeps the quotes when the value is
+    quoted. Both are legal and behaviour-preserving, and the failure message
+    each produced then asserted something false: "REVIEW_MODEL is not a
+    workflow-level env" about a file that declares one. A contract test that
+    reds on a comment, and lies about why, is one an author deletes.
+    """
+    return [
+        norm_expr(plain_scalar(m.group(1)))
+        for ln in text.splitlines()
+        if (m := _key_re(name).match(ln))
+    ]
+
+
+def step_uses(step: str) -> str:
+    """The ACTION a step runs, as a value — `""` when it runs a script.
+
+    Selecting steps by a substring anywhere in their text is not selecting them
+    by what they run: `actions/checkout@…` in a step's NAME, or in an inline
+    comment, makes an unrelated step read as a checkout, and a legal
+    `uses: 'aws-actions/configure-aws-credentials@…'` — quoted, or with a
+    second space after the colon — is invisible to a literal split. So the
+    value is read off the step's OWN keys, whose column is derived rather than
+    assumed, and a step declaring two of them asserts.
+    """
+    lines = step.splitlines()
+    rest = [ln for ln in lines[1:] if ln.strip()]
+    own = min((len(ln) - len(ln.lstrip()) for ln in rest), default=0)
+    mine = lines[:1] + [ln for ln in rest if len(ln) - len(ln.lstrip()) == own]
+    seen = [
+        plain_scalar(m.group(1))
+        for ln in mine
+        if (m := _key_re("uses").match(ln)) and uncommented(m.group(1))
+    ]
+    assert len(seen) <= 1, f"a step declares {seen} for `uses:`"
+    return seen[0] if seen else ""
+
+
+def steps_using(text: str, action: str) -> list:
+    """Every step in `text` whose `uses:` names `action@<something>`."""
+    return [
+        s
+        for s in re.split(r"(?m)^      -(?: |$)", strip_comments(text))[1:]
+        if step_uses(s).startswith(action + "@")
+    ]
+
+
+def review_checkouts() -> dict:
+    """The review job's checkout steps, keyed by the `path:` they land on.
+
+    The value is the step's WHOLE `with:` mapping, decoded, because these
+    inputs are what decide whose code ends up where.
+    """
+    review = job_block(STAGE2.read_text(), "review")
+    out = {}
+    for step in steps_using(review, "actions/checkout"):
+        inputs = mapping_items(with_block(step))
+        assert "path" in inputs, (
+            f"a review-job checkout declares no path: {step[:60]!r}"
+        )
+        assert inputs["path"] not in out, f"two checkouts land on {inputs['path']!r}"
+        out[inputs["path"]] = inputs
+    return out
+
+
+def github_outputs(text: str) -> list:
+    """Parse a `$GITHUB_OUTPUT` file the way the runner does.
+
+    Two forms are legal — `name=value`, and a heredoc `name<<DELIM` … `DELIM`
+    for a multi-line value — and for a repeated key the LAST write is what a
+    later step reads. Asserting on `written.split()` modelled neither:
+    `} | tr '\\n' ' ' >> "$GITHUB_OUTPUT"` collapses three assignments into ONE
+    whose value happens to contain the other two, and
+    `printf 'eligible<<END\\nfalse\\nEND\\n'` overrides a `key=value` line a
+    startswith-filter was still reading as the final value.
+
+    Anything this reader does not recognise ASSERTS rather than being skipped:
+    a shape it cannot parse is a shape it cannot vouch for.
+    """
+    out, lines, i = [], text.splitlines(), 0
+    while i < len(lines):
+        ln = lines[i]
+        i += 1
+        if not ln:
+            continue
+        if (m := re.fullmatch(r"([^=<]+)<<(\S+)", ln)) is not None:
+            key, delim, body = m.group(1), m.group(2), []
+            while i < len(lines) and lines[i] != delim:
+                body.append(lines[i])
+                i += 1
+            assert i < len(lines), f"unterminated $GITHUB_OUTPUT heredoc {key!r}"
+            i += 1
+            out.append((key, "\n".join(body)))
+            continue
+        assert "=" in ln, f"unreadable $GITHUB_OUTPUT line {ln!r}"
+        k, _, v = ln.partition("=")
+        out.append((k, v))
+    return out
+
+
+def sole_outputs(case: unittest.TestCase, written: str) -> dict:
+    """`github_outputs` as a mapping, refusing a key written more than once."""
+    pairs = github_outputs(written)
+    keys = [k for k, _ in pairs]
+    dupes = sorted({k for k in keys if keys.count(k) > 1})
+    case.assertEqual(
+        dupes,
+        [],
+        f"$GITHUB_OUTPUT carries {dupes} more than once ({pairs}); the LAST "
+        "write is the value every later step reads, and it need not be the "
+        "one this test checked.",
+    )
+    return dict(pairs)
+
+
+def run_step(text: str, marker: str, td: str, env: dict, stubs: dict) -> tuple:
+    """Extract the `run:` body of the step NAMED `marker` and EXECUTE it.
+
+    Text assertions establish that a guard is written down. Only running it
+    establishes that it decides anything: `[[ … ]] || true || { … exit 1; }`
+    keeps every literal a reader looks for — the comparison, a standalone `exit
+    1` line inside the branch — while the branch is unreachable and the step
+    exits 0. Measured, on the artifact-authentication guard.
+
+    THE STEP IS LOCATED BY ITS `- name:` LINE, not by the first occurrence of
+    the text. `str.index` matches a comment that merely mentions the step, and
+    an earlier step carrying such a comment donates ITS body to the run. The
+    entry is bounded at the next sequence marker at step indent whatever key
+    introduces it, because `- id: …` opens a sibling step just as `- name:`
+    does and a body-hunting extractor would walk into it.
+
+    `stubs` maps a command name to a bash script placed first on PATH. The
+    environment is REPLACED rather than extended, so a variable the step reads
+    but the caller did not set is an error here rather than a value silently
+    inherited from whoever ran the suite. It is NOT a model of a runner's
+    environment — callers must pass what the step's own `env:` declares.
+
+    Returns `(CompletedProcess, Path to the step's $GITHUB_OUTPUT)`.
+    """
+    hits = list(re.finditer(rf"(?m)^      - name: {re.escape(marker)}[ \t]*$", text))
+    assert len(hits) == 1, f"{marker!r} names {len(hits)} steps, expected 1"
+    rest = text[hits[0].start() :]
+    nxt = re.search(r"(?m)^      - ", rest[1:])
+    body = textwrap.dedent(
+        scalar_block(rest if nxt is None else rest[: nxt.start() + 1], "run")
+    )
+    bin_dir = Path(td) / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name, script in stubs.items():
+        (bin_dir / name).write_text(script)
+        (bin_dir / name).chmod(0o755)
+    out = Path(td) / "step_output"
+    out.write_text("")
+    return (
+        subprocess.run(
+            ["bash", "-c", body],
+            capture_output=True,
+            text=True,
+            cwd=td,
+            env={
+                "PATH": f"{bin_dir}:/usr/bin:/bin",
+                "GITHUB_OUTPUT": str(out),
+                **env,
+            },
+        ),
+        out,
+    )
+
+
+# Three DISTINCT stub shas, so an assertion can tell which field a value came
+# from. With head and base stubbed to the same digits, reading `.head.sha`
+# where the step means `.base.sha` produced an identical recording and an
+# identical `compare` call, and nothing could see the difference.
+STUB_API_HEAD = "a" * 40
+STUB_API_BASE = "b" * 40
+
+
+# `gh api <endpoint> [--jq FILTER]`, reading the endpoint and the filter out of
+# argv IN ANY ORDER, serving the real response SHAPE, and applying the filter
+# with real `jq`. A stub that dispatched on `$2` and returned the already-
+# extracted value could not tell `--jq '.merge_base_commit.sha'` from no filter
+# at all: deleting the flag left this harness green while the step on a runner
+# received the whole comparison document and rejected every request. It also
+# broke on the legal `gh api --jq F <endpoint>`, where `$2` is `--jq`.
+_GH_STUB = """#!/bin/bash
+endpoint=""; filter=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    api) ;;
+    --jq|-q) filter="$2"; shift ;;
+    -*) ;;
+    *) [ -z "$endpoint" ] && endpoint="$1" ;;
+  esac
+  shift
+done
+printf '%s\\t%s\\n' "$endpoint" "$filter" >> "$GH_ARGV"
+case "$endpoint" in
+  */compare/*) body=$COMPARE_JSON ;;
+  */pulls/*)   body=$PR_JSON ;;
+  *) echo "gh stub: unmodelled endpoint $endpoint" >&2; exit 1 ;;
+esac
+if [ -n "$filter" ]; then printf '%s' "$body" | jq -r "$filter"
+else printf '%s' "$body"; fi
+"""
+
+
+def run_corroboration(
+    merge_base: str,
+    td: str,
+    *,
+    api_head: str = STUB_API_HEAD,
+    api_head_repo: str = "o/r",
+    api_head_ref: str = "b",
+    event_head_repo: str = "o/r",
+    event_head_branch: str = "b",
+):
+    """Execute `prepare`'s corroboration step against a stubbed `gh`.
+
+    THE IDENTITIES ARE PARAMETERS, and that is the point. Stubbing the API to
+    agree with the event on every field meant no call this harness could make
+    ever reached the provenance branch — so deleting that branch outright left
+    every test using it green. The defaults agree; the rejection tests disagree
+    deliberately, and `api_head` drives the freshness branch.
+
+    The stub RECORDS the endpoint and the `--jq` filter of every call, because
+    which endpoint a step asks for, and what it selects out of the answer, are
+    as load-bearing as the value it then stores.
+
+    Returns `(CompletedProcess, $GITHUB_OUTPUT path, recorded-calls path)`.
+    """
+    pr_json = json.dumps(
+        {
+            "head": {
+                "sha": api_head,
+                "repo": {"full_name": api_head_repo},
+                "ref": api_head_ref,
+            },
+            "base": {"sha": STUB_API_BASE},
+            "draft": False,
+            "labels": [{"name": "in progress"}],
+            "changed_files": 3,
+        }
+    )
+    # `merge_base` is what `.merge_base_commit.sha` must YIELD, so the literal
+    # "null" is served as a JSON null — what the endpoint really returns when
+    # the field is absent — rather than as the four-character string.
+    sha = None if merge_base == "null" else merge_base
+    argv = Path(td) / "gh_calls"
+    argv.write_text("")
+    proc, out = run_step(
+        STAGE2.read_text(),
+        "Corroborate the claimed PR against the trusted API",
+        td,
+        {
+            "GH_ARGV": str(argv),
+            "COMPARE_JSON": json.dumps({"merge_base_commit": {"sha": sha}}),
+            "PR_JSON": pr_json,
+            # Declared by the step's own `env:`; `set -u` would otherwise make
+            # a legal rewrite that passes it through explicitly fail here only.
+            "GH_TOKEN": "stub-token",
+            "PR_NUMBER": "1",
+            "HEAD_SHA": STUB_API_HEAD,
+            "TRIGGER_EVENT": "labeled",
+            "REPO": "o/r",
+            "EVENT_HEAD_REPO": event_head_repo,
+            "EVENT_HEAD_BRANCH": event_head_branch,
+            "REVIEW_LABEL": "in progress",
+            "DONE_LABEL": "ready for review",
+            "MAX_CHANGED_FILES": "100",
+        },
+        {"gh": _GH_STUB},
+    )
+    return proc, out, argv
+
+
 def _scopes(mapping: str) -> str:
     """`scope: level` pairs, decoded and normalized, as `a: x, b: y`.
 
@@ -529,20 +890,63 @@ def indented_blocks(text: str, key: str) -> list[list[str]]:
 
 
 def indented_block(text: str, key: str) -> list[str]:
-    """Values of a block scalar or list introduced by `key:`, as raw lines."""
+    """Values of a block scalar or list introduced by `key:`, as raw lines.
+
+    THE OUTERMOST `key:`, matched as a KEY. `startswith(key)` accepted any line
+    beginning with those characters wherever it sat — including a line inside
+    another key's block scalar, which is how an `env:` literal containing a
+    decoy `permissions:` mapping could stand in for the job's real one while the
+    real one was widened. A block scalar's body is necessarily more indented
+    than the key introducing it, so taking the shallowest match is what makes
+    the real key win; a second key at that same column is a genuine duplicate
+    and asserts.
+
+    A COMMENT DOES NOT END THE BLOCK, whatever column it sits in — the same
+    correction `with_block` already carries. Ending on one dropped every entry
+    written after an ordinary explanatory comment. Comments INSIDE the block are
+    still returned, because a caller checks for them.
+    """
     lines = text.splitlines()
-    for i, ln in enumerate(lines):
-        if ln.strip().startswith(key):
-            indent = len(ln) - len(ln.lstrip())
-            out = []
-            for nxt in lines[i + 1 :]:
-                if not nxt.strip():
-                    continue
-                if len(nxt) - len(nxt.lstrip()) <= indent:
-                    break
+    if key.startswith("- "):
+        # A STEP MARKER (`- name: Run the pr_review suite`), not a mapping key.
+        # Matched WHOLE rather than as a prefix, so `- name: Run the pr_review
+        # suite (disabled)` is a different step to this reader as it is to
+        # Actions.
+        marker = key.rstrip(":")
+
+        def introduces(ln: str) -> bool:
+            return uncommented(ln.strip()) == marker
+
+    else:
+        name = key.rstrip(":")
+
+        def introduces(ln: str) -> bool:
+            m = _key_re(name).match(ln)
+            if not m:
+                return False
+            v = uncommented(m.group(1))
+            # `run: |` and `group: >-` introduce a block as a bare `key:` does.
+            return not v or bool(BLOCK_HEADER.fullmatch(v))
+
+    hits = [i for i, ln in enumerate(lines) if introduces(ln)]
+    assert hits, f"{key!r} not found"
+    shallowest = min(len(lines[i]) - len(lines[i].lstrip()) for i in hits)
+    at_top = [i for i in hits if len(lines[i]) - len(lines[i].lstrip()) == shallowest]
+    assert len(at_top) == 1, f"{key!r} is declared {len(at_top)} times at one level"
+    i = at_top[0]
+    out = []
+    for nxt in lines[i + 1 :]:
+        if not nxt.strip():
+            continue
+        outdented = len(nxt) - len(nxt.lstrip()) <= shallowest
+        if nxt.lstrip().startswith("#"):
+            if not outdented:
                 out.append(nxt)
-            return out
-    raise AssertionError(f"{key!r} not found")
+            continue
+        if outdented:
+            break
+        out.append(nxt)
+    return out
 
 
 def refuse_unmodelled_spellings(case: unittest.TestCase, text: str, what: str) -> None:
@@ -684,8 +1088,16 @@ class TestPreparePermissions(unittest.TestCase):
             strip_comments(prepare),
             "premise changed: prepare no longer reads the PR API",
         )
-        perms = indented_block(prepare, "permissions:")
-        self.assertIn("pull-requests: read", "\n".join(perms))
+        # THE VALUE, not the text. `pull-requests: write # pull-requests: read`
+        # satisfies a containment check while `prepare` holds write on every
+        # pull request in the repository. Read as a mapping ENTRY, so a nested
+        # block cannot supply it either.
+        scopes = mapping_items(indented_block(prepare, "permissions:"))
+        self.assertEqual(
+            scopes.get("pull-requests"),
+            "read",
+            f"prepare's permissions are {scopes}; pull-requests must be read",
+        )
 
     def test_review_job_holds_no_pr_scope(self):
         """The converse: the job that reads untrusted code must NOT gain it."""
@@ -716,9 +1128,9 @@ class TestEgressAllowlistCoversItsOwnWrites(unittest.TestCase):
             )
 
     def test_every_s3_bucket_written_is_allowlisted(self):
-        bucket = re.search(r"^\s*S3_BUCKET:\s*(\S+)", self.text, re.M)
-        self.assertIsNotNone(bucket, "S3_BUCKET env not found")
-        name = bucket.group(1)
+        buckets = env_values(self.text, "S3_BUCKET")
+        self.assertEqual(len(buckets), 1, f"S3_BUCKET is bound {len(buckets)} times")
+        name = buckets[0]
         writes = re.findall(r"s3://\$\{S3_BUCKET\}/", strip_comments(self.review))
         self.assertTrue(writes, "premise changed: review job no longer writes to S3")
         self.assertIn(
@@ -1066,41 +1478,43 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         nothing else re-checks.
         """
         prepare = strip_comments(job_block(self.text, "prepare"))
-        self.assertIn(
-            '[[ "$HEAD_SHA" == "$EVENT_HEAD_SHA" ]]',
-            prepare,
-            "the captured head_sha is no longer compared against "
-            "workflow_run.head_sha; the artifact is believed rather than "
-            "authenticated.",
-        )
-        self.assertIn(
-            '[ "$API_HEAD_REPO" != "$EVENT_HEAD_REPO" ] '
-            '|| [ "$API_HEAD_REF" != "$EVENT_HEAD_BRANCH" ]',
-            prepare,
-            "the API's head repo/branch are no longer compared against the "
-            "event's; a run could be pointed at a different pull request.",
-        )
-        # AND EACH COMPARISON MUST REJECT. Both branches read as provenance
-        # checks with their `exit 1` removed, and the step then exports
-        # `fresh=true` on a mismatch — the comparison is present and decides
-        # nothing.
-        # BOUNDED BY THE BRANCH, not by a character count: with `exit 1`
-        # deleted, the very next check's own `exit 1` sat inside a fixed
-        # window and satisfied this. Each branch runs to its closing `}`/`fi`.
-        for marker, close, what in (
-            ("::error::captured head_sha", "\n          }", "the artifact head_sha"),
-            ("but the run came from", "\n          fi", "the API/event"),
+        # THE WHOLE LINE, not the comparison as a substring. Bash evaluates an
+        # AND/OR list left to right, so `|| true || {` and a trailing
+        # `&& false` each leave the comparison byte-identical where a
+        # containment check looks for it while the rejection becomes
+        # unreachable. Compared through `uncommented`, so an explanatory
+        # trailing comment — which changes nothing bash does — is not a red.
+        for expected, what in (
+            (
+                '[[ "$HEAD_SHA" == "$EVENT_HEAD_SHA" ]] || {',
+                "the captured head_sha against workflow_run.head_sha",
+            ),
+            (
+                'if [ "$API_HEAD_REPO" != "$EVENT_HEAD_REPO" ] '
+                '|| [ "$API_HEAD_REF" != "$EVENT_HEAD_BRANCH" ]; then',
+                "the API's head repo/branch against the event's",
+            ),
         ):
-            i = prepare.index(marker)
-            j = prepare.index(close, i)
-            # A STATEMENT, not the substring: `echo "exit 1"` satisfied a
-            # containment check while the branch fell through.
-            self.assertIn(
-                "exit 1",
-                [ln.strip() for ln in prepare[i:j].splitlines()],
-                f"{what} mismatch branch logs but does not exit; the run "
-                "continues with the value it has just called wrong.",
+            key = expected.split("]")[0]
+            seen = [uncommented(ln.strip()) for ln in prepare.splitlines() if key in ln]
+            self.assertEqual(
+                seen,
+                [expected],
+                f"the comparison of {what} is {seen}, not [{expected!r}]. "
+                "Anything added to that line can make the rejection "
+                "unreachable while the comparison stays exactly where a "
+                "substring check looks for it.",
             )
+        # THAT EACH COMPARISON REJECTS IS ESTABLISHED BY RUNNING IT, in
+        # TestTheProvenanceGuardsRejectWhenTheyDisagree below. Three textual
+        # pins have now failed at it in turn — a substring `exit 1`, then a
+        # standalone `exit 1` STATEMENT, then the same statement bounded by the
+        # branch's closing `}`/`fi` rather than by a character count. All three
+        # were defeated by `[[ … ]] || true || { … exit 1; }`, which keeps
+        # every literal a reader looks for inside a branch bash never reaches.
+        # The two assertions above stay because they name WHICH values must be
+        # compared, which an executed step cannot say; what the step DOES with
+        # the answer is measured, not read.
 
     def test_the_write_boundary_hook_is_declared(self):
         """`Write` is granted BARE, and this hook is what confines it.
@@ -1117,9 +1531,22 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         # and a substring search could not tell `"PreToolUse"` from
         # `"PreToolUseDISABLED"`, which keeps every string it looks for in the
         # file while wiring the hook to an event that never fires. Measured.
-        settings = json.loads(
-            textwrap.dedent("\n".join(indented_block(self.review, "settings:")))
+        raw = textwrap.dedent("\n".join(indented_block(self.review, "settings:")))
+        # AND THE TWO DECODERS MUST AGREE. Actions substitutes `${{ … }}` in
+        # this blob BEFORE anything parses it as JSON, so a JSON escape defeats
+        # a test that decodes first: `${{ github.workspace }}` reconstructs
+        # the expected command for `json.loads` while Actions sees no expression
+        # opener at all and the hook command stays a literal that resolves to
+        # nothing. No escape in this blob is legitimate — every value is a path
+        # or a matcher — so any backslash is refused rather than interpreted.
+        self.assertNotIn(
+            "\\",
+            raw,
+            "the review's settings carry a backslash escape. Actions expands "
+            "`${{ … }}` in this text before it is JSON, so an escaped `$` is "
+            "an expression to `json.loads` and a literal to the runner.",
         )
+        settings = json.loads(raw)
         # THE WHOLE SETTINGS OBJECT, not just its hooks. `disableAllHooks:
         # true` beside them turns every entry below into decoration while each
         # assertion on those entries still passes.
@@ -1129,42 +1556,73 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             f"the review's settings declare {sorted(settings)}; only `hooks` "
             "is modelled here, and a sibling key can switch them all off.",
         )
-        hooks = settings["hooks"]
-        for event, matcher, script in (
-            ("PreToolUse", "Write|Edit|MultiEdit|NotebookEdit", "restrict-write.sh"),
-            ("PostToolUse", "Write", "validate-post-write.sh"),
-            ("Stop", None, "validate-on-stop.sh"),
-        ):
-            self.assertIn(
-                event,
-                hooks,
-                f"the review declares no {event} hook; {script} never runs",
-            )
-            # THE MATCHER AND THE COMMAND ON THE SAME ENTRY. Checked as two
-            # independent lists, `{"matcher": "Write|…", "command": "true"}`
-            # beside `{"matcher": "Edit", "command": ".../restrict-write.sh"}`
-            # satisfied both while the bare `Write` grant ran unhooked.
-            entries = [e for e in hooks[event] if e.get("matcher") == matcher]
-            self.assertTrue(
-                entries,
-                f"the {event} hook has no entry matching {matcher!r} "
-                f"(matchers are {[e.get('matcher') for e in hooks[event]]})",
-            )
-            commands = [h["command"] for e in entries for h in e["hooks"]]
-            # EXACT, not `endswith`. `: ${{ … }}/trusted/…/restrict-write.sh`
-            # runs bash's no-op builtin and still ends with the same text, so
-            # the hook never executes and the bare `Write` is unconfined — with
-            # every assertion here green. Measured.
-            expected = (
-                "${{ github.workspace }}/trusted/.claude/hooks/pr_review/" + script
-            )
-            self.assertIn(
-                expected,
-                commands,
-                f"the {event} command is {commands}, not [{expected!r}]; "
-                "anything prefixed onto it runs instead of the hook, and the "
-                "bare `Write` grant is then unconfined.",
-            )
+        # THE WHOLE HOOKS OBJECT, as a VALUE. Every earlier version of this
+        # test asked whether the expected command was PRESENT, which permits
+        # one beside it: a second command on the same entry, or a second entry
+        # under a matcher nobody modelled, pointing at
+        # `${{ github.workspace }}/pr/…` runs pull-request code on every write
+        # the model attempts — with the trusted guard still running and every
+        # assertion here green. Measured. Presence cannot express "and nothing
+        # else", so the comparison is an equality against the exact set.
+        #
+        # It subsumes what the per-event loop checked and keeps its reasons:
+        # the MATCHER AND THE COMMAND must be on the SAME entry (as two
+        # independent lists, `{"matcher": "Write|…", "command": "true"}` beside
+        # `{"matcher": "Edit", "command": ".../restrict-write.sh"}` satisfied
+        # both while the bare `Write` grant ran unhooked); the command is EXACT
+        # rather than a suffix, because `: ${{ … }}/…/restrict-write.sh` runs
+        # bash's no-op builtin and still ends with the same text; and each hook
+        # object's KEYS are exact, because a sibling key — `"async": true`
+        # being the one that matters, where the CLI supports it — leaves the
+        # event, the matcher and the command untouched while the hook stops
+        # being able to BLOCK the write it is the only boundary on.
+        #
+        # Commands go through `norm_expr` first, so respacing
+        # `${{github.workspace}}` — which Actions resolves identically — is not
+        # a difference. Everything else is compared verbatim.
+        trusted = "${{ github.workspace }}/trusted/.claude/hooks/pr_review/"
+        hooks = json.loads(norm_expr(json.dumps(settings["hooks"])))
+        self.assertEqual(
+            hooks,
+            {
+                "PreToolUse": [
+                    {
+                        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": trusted + "restrict-write.sh",
+                            }
+                        ],
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "Write",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": trusted + "validate-post-write.sh",
+                            }
+                        ],
+                    }
+                ],
+                "Stop": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": trusted + "validate-on-stop.sh",
+                            }
+                        ]
+                    }
+                ],
+            },
+            "the review's hooks are not exactly the three trusted guards; "
+            "anything extra here runs on the model's writes, and a command "
+            "under `pr/` is pull-request code executing inside the trusted "
+            "step.",
+        )
 
     def test_the_prompt_hash_covers_the_trusted_surface(self):
         """A telemetry hash that omits half of what it identifies.
@@ -1192,66 +1650,77 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
                 "validate-post-write.sh",
             )
         }
-        missing = sorted(required - hashed)
+        # THE EXACT SET, both ways. A file MISSING means a change there moves
+        # the review's behaviour without moving the hash that identifies it; an
+        # EXTRA one means the hash moves for a change this contract does not
+        # model, and neither is visible from a containment check.
         self.assertEqual(
-            missing,
-            [],
-            f"the prompt hash omits {missing}; a change there moves the "
-            "review's behaviour without moving the hash that identifies it.",
+            hashed,
+            required,
+            f"the prompt hash covers {sorted(hashed)}, not {sorted(required)}",
         )
-        # AND THE BYTES MUST REACH `sha256sum`. Naming a file is not hashing
-        # it: `cat a b >/dev/null; cat c | sha256sum` mentions all three and
-        # hashes one, so the two discarded inputs could change with the hash
-        # unmoved. One `cat` feeding one pipe, no redirection.
-        self.assertEqual(
-            step.count("| sha256sum"), 1, "the hash is not one `cat | sha256sum`"
-        )
-        self.assertEqual(
-            step.count("cat "),
-            1,
-            "the hash step runs more than one `cat`; a second one can consume "
-            "the files this test looked for and send them somewhere else.",
-        )
-        # The `HASH=$( … )` command itself. `echo "hash=$HASH" >> $GITHUB_OUTPUT`
-        # below it is the legitimate `>` in this step.
-        assignment = step.split("HASH=", 1)[1].split("\n          echo", 1)[0]
-        self.assertNotIn(
-            ">",
-            assignment,
-            "the hash command redirects. Every named file must reach the "
-            "single `sha256sum`, or a change to a discarded input leaves the "
-            "hash that identifies the run unmoved.",
-        )
-        # AND THE COMPUTED VALUE IS WHAT IS EXPORTED. `echo "hash=disabled"`
-        # records one identifier for every version of the trusted surface,
-        # while every assertion about the `cat` above stays green.
-        self.assertIn(
-            'echo "hash=$HASH" >> "$GITHUB_OUTPUT"',
-            step,
-            "the step does not export the hash it just computed",
-        )
-        # AND ASSIGNED ONCE. `HASH=disabled` inserted just before the export
-        # satisfies every assertion above while the exported value is a
-        # constant.
-        self.assertEqual(
-            step.count("HASH="),
-            1,
-            f"the hash step assigns HASH {step.count('HASH=')} times; the "
-            "last one wins and it need not be the computed digest.",
-        )
-        # Each required file named EXACTLY ONCE, so the set above cannot be
-        # satisfied by a mention in a second, discarded command.
-        for path in sorted(required):
-            self.assertEqual(
-                step.count(path),
-                1,
-                f"{path} appears {step.count(path)} times in the hash step; "
-                "exactly one of them would be the one that is hashed.",
-            )
         for path in sorted(required):
             self.assertTrue(
                 (REPO / path).is_file(), f"the hash names a missing file: {path}"
             )
+
+    def test_the_exported_hash_is_the_digest_of_every_file_it_names(self):
+        """RUN the step: naming a file is not hashing it, and four text pins
+        in a row failed to tell the difference.
+
+        `cat a b >/dev/null; cat c | sha256sum` mentions three files and hashes
+        one. `HASH=disabled` before the export, a second
+        `echo "hash=disabled" >> "$GITHUB_OUTPUT"` after it, and an indirect
+        `"${!var}"` write each leave a constant in the output while every
+        occurrence a reader counts stays put. Executing the step settles all of
+        them at once: the value that reaches $GITHUB_OUTPUT is compared against
+        the digest this test computes itself, and each named file is perturbed
+        in turn to prove its bytes actually reach that digest.
+        """
+        step = "\n".join(indented_block(self.review_prepare(), "run:"))
+        # Order matters to the digest and is the workflow's to choose, so it is
+        # read from the step rather than pinned. WHICH files are named is
+        # pinned, exactly, by the test above.
+        named = re.findall(r"([\w./-]+\.(?:py|sh|md|yml))", step)
+        self.assertEqual(len(named), len(set(named)), f"a file is named twice: {named}")
+
+        def run(bodies: dict) -> tuple:
+            with tempfile.TemporaryDirectory() as td:
+                for rel, data in bodies.items():
+                    dst = Path(td) / rel
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    dst.write_bytes(data)
+                proc, out = run_step(
+                    self.text, "Hash the trusted prompt surface", td, {}, {}
+                )
+                return proc, out.read_text()
+
+        def digest(bodies: dict) -> str:
+            return hashlib.sha256(b"".join(bodies[rel] for rel in named)).hexdigest()
+
+        def check(bodies: dict, why: str) -> None:
+            # SUCCESS AND THE RECOMPUTED VALUE, on every case. Asserting only
+            # that a perturbed run's output DIFFERS passes when the step
+            # crashes and writes nothing, which is the opposite of the property
+            # — the hash would then not identify anything at all.
+            proc, written = run(bodies)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertEqual(
+                sole_outputs(self, written),
+                {"hash": digest(bodies)[:16]},
+                f"{why}: the step exported {written!r}, not the digest of the "
+                f"files it names ({digest(bodies)[:16]}) as its one output",
+            )
+
+        bodies = {rel: f"content of {rel}\n".encode() for rel in named}
+        check(bodies, "unperturbed")
+        for rel in named:
+            with self.subTest(perturbed=rel):
+                # The digest is recomputed from the perturbed fixture, so this
+                # asserts the hash MOVED TO THE RIGHT VALUE rather than merely
+                # moved — and a file dropped from the `cat` leaves it unmoved
+                # while the expected value changes.
+                check(dict(bodies, **{rel: bodies[rel] + b"x"}), f"perturbed {rel}")
 
     def review_prepare(self) -> str:
         """The `Hash the trusted prompt surface` step, in `prepare`."""
@@ -1271,15 +1740,25 @@ class TestCredentialDuration(unittest.TestCase):
     """
 
     def test_every_role_assumption_requests_the_minimum(self):
-        text = strip_comments(STAGE2.read_text())
-        steps = text.split("uses: aws-actions/configure-aws-credentials")
-        self.assertGreaterEqual(len(steps) - 1, 3, "expected three role assumptions")
-        for i, step in enumerate(steps[1:], 1):
-            head = step.split("- name:")[0]
-            self.assertIn(
-                "role-duration-seconds: 900",
-                head,
-                f"assumption #{i} omits the 15-minute bound",
+        # EVERY STEP THAT ASSUMES A ROLE, found by its `uses:` VALUE. Splitting
+        # the file on the literal `uses: aws-actions/configure-aws-credentials`
+        # missed a fourth assumption written `uses: 'aws-actions/…'` — legal,
+        # and invisible to a substring — while the three it did find still read
+        # 900. It also red on quoting any of the three.
+        steps = steps_using(STAGE2.read_text(), "aws-actions/configure-aws-credentials")
+        self.assertEqual(len(steps), 3, f"role assumptions: {len(steps)}, expected 3")
+        for i, step in enumerate(steps, 1):
+            # THE VALUE, AND THE ACTION'S INPUT. `role-duration-seconds: 3600 #
+            # role-duration-seconds: 900` satisfies a containment check while
+            # widening a stolen credential from fifteen minutes to the role's
+            # one-hour ceiling — and the same key MOVED into the step's `env:`
+            # satisfies one too, while the action receives no bound at all.
+            # `with_block` is what makes it the input rather than the text.
+            seen = mapping_items(with_block(step)).get("role-duration-seconds")
+            self.assertEqual(
+                seen,
+                "900",
+                f"assumption #{i} requests {seen!r} seconds, not '900'",
             )
 
 
@@ -1536,6 +2015,29 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
             "A job Actions skips concludes `skipped`, which no required check "
             "reads as a failure, so every contract in this file stops blocking "
             "a merge.",
+        )
+
+    def test_the_suite_ci_checks_out_the_code_under_test(self):
+        """Every contract in this file is advisory if the job runs main's copy.
+
+        This class is thorough about the job not being skippable, not tolerating
+        its own failure, not dodging the command and not being narrowed by
+        `paths:` — and said nothing about WHICH tree it checks out. Adding
+        `ref: ${{ github.event.pull_request.base.sha }}` to that checkout is
+        one line, and after it the suite validates the base branch's workflows
+        on every pull request: green for exactly the change class it exists to
+        catch. The default ref is the right one, so the input is refused rather
+        than pinned to a value.
+        """
+        checkouts = steps_using(SUITE_CI.read_text(), "actions/checkout")
+        self.assertEqual(len(checkouts), 1, f"suite CI checkouts: {len(checkouts)}")
+        inputs = mapping_items(with_block(checkouts[0]))
+        self.assertEqual(
+            inputs,
+            {"fetch-depth": "1", "persist-credentials": "false"},
+            f"the suite CI checkout declares {inputs}; anything that redirects "
+            "it — `ref:`, `repository:`, `path:` — points this suite at a tree "
+            "other than the one the pull request changes.",
         )
 
     def test_the_suite_step_runs_the_discovery_command_and_cannot_dodge_it(self):
@@ -2173,12 +2675,10 @@ class TestTheFindingsPathIsPinned(unittest.TestCase):
         # binding pass vacuously, after which the hooks fall back to their own
         # /tmp default and silently disagree with the prompt.
         for var in ("FINDINGS_FILE", "PR_REVIEW_FINDINGS_FILE"):
-            values = re.findall(rf"^\s+{var}: (.+)$", self.review, re.M)
+            values = env_values(self.review, var)
             self.assertTrue(values, f"{var} is no longer set in the review job")
             for value in values:
-                self.assertEqual(
-                    value.strip(), self.EXPECTED, f"{var} drifted to {value!r}"
-                )
+                self.assertEqual(value, self.EXPECTED, f"{var} drifted to {value!r}")
 
     def test_the_hooks_default_agrees_with_the_workflow(self):
         # The hook falls back to its own literal when the env var is unset, and
@@ -2278,11 +2778,10 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
         text = strip_comments(STAGE2.read_text())
         for name, expected in self.PINNED_ENV_VALUES.items():
             with self.subTest(variable=name):
-                seen = [
-                    uncommented(m.group(1))
-                    for ln in text.splitlines()
-                    if (m := _key_re(name).match(ln.strip()))
-                ]
+                # ...AND THROUGH `norm_expr`, like every other expression
+                # compared in this file: `${{github.workspace}}` resolves
+                # identically and is not a drift.
+                seen = env_values(text, name)
                 self.assertEqual(
                     seen,
                     [expected],
@@ -2322,9 +2821,12 @@ class TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot(unittest.TestCase):
     """
 
     def test_every_checkout_in_the_review_job_declares_a_path(self):
+        # BY WHAT THE STEP RUNS. `"actions/checkout@" in s` also selects a
+        # step whose NAME or inline comment merely mentions the action — a red
+        # on a rename that changes nothing — and MISSES a step whose `uses:` was
+        # swapped for another action while the mention stayed.
         review = job_block(STAGE2.read_text(), "review")
-        steps = review.split("- name:")
-        checkouts = [s for s in steps if "actions/checkout@" in s]
+        checkouts = steps_using(review, "actions/checkout")
         self.assertEqual(len(checkouts), 2, "premise changed: not two checkouts")
         for step in checkouts:
             # SINGLE LINE, and the value may be empty. `\s+` after `path:`
@@ -2429,6 +2931,185 @@ class TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot(unittest.TestCase):
         )
 
 
+class TestEachReviewCheckoutFetchesTheCommitItNames(unittest.TestCase):
+    """`path:` says where a checkout LANDS; `ref:` says WHOSE CODE it holds.
+
+    Every other control that tells the two checkouts apart keys off `path:` —
+    the symlink scrub's PR_DIR, the model's Read grants, PR_REVIEW_SCRIPTS_DIR,
+    the hook commands. All of them stay green if `trusted/` is filled from the
+    pull request's head instead of the trusted commit, and the job then runs
+    PR-authored hooks, the sanitizer and the row emitter inside the step that
+    holds the review job's AWS session. The whole trusted/untrusted split rests
+    on that one `ref: ${{ github.sha }}`, and nothing read it: changing it alone
+    left the suite green. Measured.
+
+    Read as VALUES and compared as an exact mapping per checkout, so a second
+    `ref:`, an inline comment, or an `allow-unsafe-pr-checkout:` added to the
+    trusted side cannot satisfy it.
+    """
+
+    # The WHOLE `with:` mapping of each checkout, not a chosen subset, because
+    # an input nobody modelled changes the same things these do: `repository:`
+    # picks another repo, `token:` another identity, `sparse-checkout:` another
+    # subset of the tree, `submodules: recursive` fetches code the diff does not
+    # show. Adding an input here is a deliberate edit to this literal, which is
+    # the point — an unmodelled one is refused rather than reasoned about.
+    EXPECTED = {
+        "trusted": {
+            "ref": "${{ github.sha }}",
+            "fetch-depth": "1",
+            "path": "trusted",
+            "persist-credentials": "false",
+        },
+        "pr": {
+            "ref": "${{ needs.prepare.outputs.head_sha }}",
+            "fetch-depth": "1",
+            "path": "pr",
+            "persist-credentials": "false",
+            "submodules": "false",
+            "lfs": "false",
+            # What lets actions/checkout fetch fork code in a `workflow_run`
+            # job. Its ABSENCE from the trusted checkout above is as
+            # load-bearing as its presence here.
+            "allow-unsafe-pr-checkout": "true",
+        },
+    }
+
+    def test_each_checkout_declares_exactly_the_inputs_its_role_requires(self):
+        # The splitter assumes steps at six spaces, as every other step reader
+        # in this file does. A reindented step sequence yields NO steps and
+        # reds on the count below rather than passing vacuously.
+        self.assertEqual(
+            review_checkouts(),
+            self.EXPECTED,
+            "a review-job checkout no longer fetches what its role requires. "
+            "`trusted/` must hold this repo's commit and `pr/` the "
+            "authenticated PR head; swapping them, or adding an input that "
+            "redirects either, runs pull-request code as the trusted half of "
+            "the job.",
+        )
+
+
+class TestEveryStageTwoJobChecksOutWhatItsRoleAllows(unittest.TestCase):
+    """The review job's two checkouts were pinned. Stage 2 has FOUR.
+
+    `prepare` and `publish` each check this repository out at the workspace
+    root and then run `scripts/pr_review/emit_row.py` from it — `prepare` with
+    GITHUB_TOKEN and the publisher AWS session, `publish` with those plus
+    `issues: write` and `pull-requests: write`. Pointing either `ref:` at the
+    pull request's head is one token, and runs pull-request-authored Python
+    with all of it. It is the same mutation the review job's trusted checkout
+    is already pinned against, one job over, where nothing looked.
+
+    Every checkout in the file is enumerated, so a fifth one cannot be added
+    unnoticed either.
+    """
+
+    # (job, path) -> the `ref:` that checkout must fetch. `None` for `path:`
+    # means the checkout lands on the workspace root, which is legitimate in
+    # the two jobs that never fetch pull-request code and forbidden in `review`
+    # (see TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot).
+    EXPECTED = {
+        ("prepare", None): "${{ github.sha }}",
+        ("review", "trusted"): "${{ github.sha }}",
+        ("review", "pr"): "${{ needs.prepare.outputs.head_sha }}",
+        ("publish", None): "${{ github.sha }}",
+    }
+
+    def test_no_job_checks_out_pull_request_code_it_is_not_allowed_to(self):
+        text = STAGE2.read_text()
+        seen = {}
+        for job in ("prepare", "review", "publish"):
+            for step in steps_using(job_block(text, job), "actions/checkout"):
+                inputs = mapping_items(with_block(step))
+                key = (job, inputs.get("path"))
+                self.assertNotIn(key, seen, f"two checkouts in {job} on {key[1]!r}")
+                seen[key] = inputs.get("ref")
+        self.assertEqual(
+            seen,
+            self.EXPECTED,
+            "a Stage 2 checkout no longer fetches the commit its job is "
+            "allowed to run. Only `review` may fetch the pull request, and "
+            "only into `pr/`, which nothing executes.",
+        )
+
+    def test_the_verdict_is_sanitized_by_the_trusted_copy_of_the_script(self):
+        """`trusted/` here is a control, not a path that reads like one.
+
+        `PR_REVIEW_SCRIPTS_DIR` and `PR_DIR` are pinned precisely because their
+        values select which checkout a trusted program reads. This literal is
+        the third such selector and nothing read it: `python3
+        pr/scripts/pr_review/extract_verdict.py` runs the pull request's own
+        sanitizer, with the review job's AWS session, over the output `publish`
+        then treats as sanitized. One token, and it reads like a typo next to
+        the unprefixed `scripts/pr_review/emit_row.py` two jobs away.
+        """
+        review = strip_comments(job_block(STAGE2.read_text(), "review"))
+        runs = re.findall(r"python3 (\S*scripts/pr_review/\S+\.py)", review)
+        self.assertTrue(
+            runs, "premise changed: the review job runs no pr_review script"
+        )
+        self.assertEqual(
+            sorted(set(runs)),
+            ["trusted/scripts/pr_review/extract_verdict.py"],
+            f"the review job runs {sorted(set(runs))}; every program it "
+            "executes must come from the trusted checkout.",
+        )
+
+    def test_neither_stage_declares_a_workflow_level_collapse_group(self):
+        """The defect TestStage1CollapseGroupIsJobLevel exists for, on the
+        OTHER file, where it is worse.
+
+        GitHub claims a workflow-level group before evaluating a job's `if:`,
+        so a run the workflow is going to skip still joins it. Stage 2 receives
+        a `workflow_run` completion for EVERY Stage 1 run, including the ones
+        `prepare` refuses — so one group at column 0 lets a refused run cancel
+        a review already in flight. Stage 1 is pinned against this; Stage 2 was
+        not, and the reasoning transfers word for word.
+        """
+        for path in (STAGE1, STAGE2):
+            with self.subTest(workflow=path.name):
+                self.assertIsNone(
+                    re.search(r"(?m)^[\"']?concurrency[\"']?[ \t]*:", path.read_text()),
+                    f"{path.name} declares a workflow-level concurrency group; "
+                    "a run its jobs would refuse still joins it, and cancels "
+                    "whatever is already there.",
+                )
+
+    def test_each_job_holds_exactly_the_permissions_it_was_reviewed_with(self):
+        """One key was pinned on one job; the rest of the surface was open.
+
+        `pull-requests` had to be `read` on `prepare`, and `review` had to hold
+        no PR scope. Nothing bounded the other scopes on any job, so `contents:
+        write` and `issues: write` could be added to `prepare` — the job that
+        holds GITHUB_TOKEN and the publisher session — with the suite green.
+        """
+        text = STAGE2.read_text()
+        self.assertEqual(
+            {
+                job: mapping_items(indented_block(job_block(text, job), "permissions:"))
+                for job in ("prepare", "review", "publish")
+            },
+            {
+                "prepare": {
+                    "actions": "read",
+                    "contents": "read",
+                    "pull-requests": "read",
+                    "id-token": "write",
+                },
+                "review": {"contents": "read", "id-token": "write"},
+                "publish": {
+                    "issues": "write",
+                    "pull-requests": "write",
+                    "contents": "read",
+                    "id-token": "write",
+                },
+            },
+            "a Stage 2 job's token scopes are not the ones this design was "
+            "reviewed with. Widening one is a deliberate edit to this literal.",
+        )
+
+
 class TestForkCheckoutPreconditionsHold(unittest.TestCase):
     """`allow-unsafe-pr-checkout: true` is only safe while four things stay true.
 
@@ -2448,27 +3129,68 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
         self.code = strip_comments(self.review)
 
     def test_opt_in_is_present_and_on_the_untrusted_checkout(self):
-        """Without it, fork PRs fail at checkout and no review ever runs."""
-        self.assertIn("allow-unsafe-pr-checkout: true", self.code)
-        untrusted = self.code.split("path: pr", 1)
-        self.assertEqual(len(untrusted), 2, "premise changed: no `path: pr` checkout")
-        self.assertIn(
-            "allow-unsafe-pr-checkout: true",
-            untrusted[1].split("- name:", 1)[0],
-            "the opt-in is not on the checkout that fetches PR code",
+        """Without it, fork PRs fail at checkout and no review ever runs.
+
+        Read through `review_checkouts()` rather than by splitting the job text
+        on the literal `path: pr`: that split reds on `path: "pr"`, a quoting
+        change YAML reads identically, and it takes whatever follows the match
+        rather than the step's own `with:` mapping.
+        """
+        seen = review_checkouts()["pr"].get("allow-unsafe-pr-checkout")
+        self.assertEqual(
+            seen,
+            "true",
+            f"the checkout that fetches PR code declares "
+            f"allow-unsafe-pr-checkout {seen!r}, not 'true'; fork pull "
+            "requests fail at checkout and no review ever runs.",
         )
 
     def test_review_job_uses_no_secrets(self):
         """A secret here would be readable by a process running fork code."""
-        # BOTH ACCESS FORMS. `secrets['CI_TOKEN']` is the same context read as
-        # `secrets.CI_TOKEN`, and a dot-only pattern matched neither it nor
-        # `secrets["X"]` — so a secret could be handed to the job that runs
-        # fork code with this test green. Any mention of the context at all is
-        # refused here: the review job needs none.
-        found = sorted(
-            set(re.findall(r"secrets\s*[.\[]\s*[\"']?([A-Za-z_]\w*)", self.code))
+        # THE WHOLE CONTEXT, not one spelling of one key. Enumerating spellings
+        # lost twice: a dot-only pattern saw neither `secrets['X']` nor
+        # `secrets["X"]`, and a `secrets`-only pattern could not see
+        # `${{ github['token'] }}` — the same GITHUB_TOKEN under a different
+        # context — which handed a live token to the process running fork code
+        # with this test green. Expression syntax keeps supplying more:
+        # `github[format('to{0}','ken')]` builds the key at runtime, and
+        # `toJSON(github)` / `toJSON(secrets)` serialise the whole thing.
+        #
+        # So the rule is by NEED, not by spelling: this job needs no GitHub
+        # credential, so `secrets` in any form, ANY index into `github`, and any
+        # `toJSON` are refused outright. Dotted `github.` reads stay legal
+        # because the job genuinely uses `github.workspace` and
+        # `github.repository` — except `.token`, which is the credential.
+        #
+        # CASE-INSENSITIVE, because Actions expression names are:
+        # `${{ github.TOKEN }}` and `${{ tojson(secrets) }}` resolve exactly as
+        # the lower-case spellings do.
+        #
+        # SCANNED WITH THE NEWLINES COLLAPSED as well as line by line, because a
+        # folded scalar can put `${{ github.` on one content line and `token }}`
+        # on the next: Actions joins them, and neither line on its own carries
+        # the whole access.
+        #
+        # This is about GitHub credentials only. The job DOES hold an AWS
+        # session — it assumes REVIEW_ROLE deliberately, and that role's narrow
+        # scope is what TestReviewRoleSeparationIsPinned exists for.
+        pattern = r"\bsecrets\b|github\s*\[|github\s*\.\s*token|\btoJSON\b"
+        offenders = [
+            ln.strip() for ln in self.code.splitlines() if re.search(pattern, ln, re.I)
+        ]
+        folded = re.search(pattern, " ".join(self.code.split()), re.I)
+        self.assertEqual(
+            offenders,
+            [],
+            f"the review job names a GitHub credential, or a context that "
+            f"carries one ({offenders}); the process running pull-request code "
+            "can read anything this job is handed.",
         )
-        self.assertEqual(found, [], f"review job now references secrets: {found}")
+        self.assertIsNone(
+            folded,
+            f"the review job names a GitHub credential across a line break "
+            f"({folded.group(0) if folded else ''!r})",
+        )
 
     def test_review_job_caches_nothing(self):
         """Cache writes land in the default-branch scope — poisonable from a fork."""
@@ -2481,9 +3203,23 @@ class TestForkCheckoutPreconditionsHold(unittest.TestCase):
         self.assertEqual(runners, ["ubuntu-latest"], f"runner changed: {runners}")
 
     def test_untrusted_checkout_does_not_persist_credentials(self):
-        """Otherwise the token lands in pr/.git/config, which the model may read."""
-        after = self.code.split("path: pr", 1)[1].split("- name:", 1)[0]
-        self.assertIn("persist-credentials: false", after)
+        """Otherwise the token lands in pr/.git/config, which the model may read.
+
+        THE VALUE, not the substring. `strip_comments` drops whole-line
+        comments only, so `persist-credentials: true # persist-credentials:
+        false` satisfied a containment check while the checkout wrote the job's
+        token into `pr/.git/config` — a file inside the model's Read grant.
+        Same treatment `egress-policy` and `disable-sudo` got, and read through
+        the same checkout reader as the opt-in above.
+        """
+        seen = review_checkouts()["pr"].get("persist-credentials")
+        self.assertEqual(
+            seen,
+            "false",
+            f"the untrusted checkout's persist-credentials is {seen!r}, not "
+            "'false'; the job's token lands in pr/.git/config, which the "
+            "model is allowed to read.",
+        )
 
 
 class TestReviewRoleSeparationIsPinned(unittest.TestCase):
@@ -2524,7 +3260,7 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
         # the workflow-level one, so a job-level `env: REVIEW_ROLE: <other>`
         # inside `review` — which is the binding that would actually apply —
         # was invisible to every assertion below.
-        roles = re.findall(r"^\s*REVIEW_ROLE:\s*(\S+)", strip_comments(self.text), re.M)
+        roles = env_values(strip_comments(self.text), "REVIEW_ROLE")
         self.assertEqual(
             len(roles),
             1,
@@ -2532,8 +3268,8 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
             "innermost wins and the tests below read only one.",
         )
         self.review_role = roles[0]
-        env = re.search(r"^\s*environment:\s*(\S+)\s*$", self.review, re.M)
-        self.review_env = env.group(1) if env else None
+        envs = env_values(self.review, "environment")
+        self.review_env = envs[0] if len(envs) == 1 else None
 
     def test_review_role_is_the_untrusted_role(self):
         self.assertEqual(
@@ -2572,7 +3308,27 @@ class TestReviewRoleSeparationIsPinned(unittest.TestCase):
         self.assertNotIn(self.SHARED_ROLE, self.review)
 
     def test_review_job_assumes_review_role_indirectly(self):
-        self.assertIn("role-to-assume: ${{ env.REVIEW_ROLE }}", self.review)
+        # THE VALUE, AND THE ACTION'S INPUT. `role-to-assume: ${{
+        # env.PUBLISHER_ROLE }} # role-to-assume: ${{ env.REVIEW_ROLE }}`
+        # satisfies a containment check while the job that runs pull-request
+        # code assumes the publisher role — the silent widening this class's
+        # docstring calls the dangerous one. So does the expected value written
+        # under the step's `env:` beside a different real input, which is why
+        # this reads the `with:` mapping rather than scanning the job.
+        #
+        # WHAT THE REFERENCE RESOLVES TO is `setUp`'s business: it requires
+        # `REVIEW_ROLE` to be defined exactly once in the whole file, so a
+        # step-level `env: REVIEW_ROLE: ${{ env.PUBLISHER_ROLE }}` beneath this
+        # very input cannot redirect it.
+        steps = steps_using(self.review, "aws-actions/configure-aws-credentials")
+        self.assertEqual(len(steps), 1, f"review job role assumptions: {len(steps)}")
+        seen = mapping_items(with_block(steps[0])).get("role-to-assume")
+        self.assertEqual(
+            seen,
+            "${{ env.REVIEW_ROLE }}",
+            f"the review job assumes {seen!r}, not the untrusted role; that is "
+            "PutObject on pr_review_verdicts/ for the job running PR code.",
+        )
 
 
 class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
@@ -2637,7 +3393,17 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
             re.search(r"^\s+concurrency:", block, re.M),
             "capture lost its concurrency group",
         )
-        self.assertIn("cancel-in-progress: true", block)
+        # THE VALUE, AND AS AN ENTRY OF `concurrency:`. `cancel-in-progress:
+        # false # cancel-in-progress: true` satisfies a containment check while
+        # bursts stop collapsing — and so does the same text indented inside a
+        # `group: |` block scalar, where Actions reads it as part of the group
+        # NAME and cancellation quietly defaults to false.
+        conc = mapping_items(indented_block(block, "concurrency:"))
+        self.assertEqual(
+            conc.get("cancel-in-progress"),
+            "true",
+            f"capture's concurrency is {conc}; cancel-in-progress must be true",
+        )
 
     def test_the_capture_group_is_keyed_by_event(self):
         """A constant under one trigger, and the reason to keep it is the run
@@ -2673,15 +3439,23 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
         # line — `group: …-${{ github.event.pull_request.number }}  # -${{
         # github.event_name }}` — kept this green while the real group lost its
         # event separation. Measured.
-        value = uncommented(group.group(1))
-        self.assertIn(
-            "${{ github.event_name }}",
+        # THE WHOLE VALUE, not a required substring. Containment says what the
+        # group must MENTION, and the group's job is decided by what it VARIES
+        # over: `${{ github.run_id }}-${{ github.event_name }}` names the event
+        # and still gives every run a group of its own, so nothing collapses
+        # and the burst this key exists for costs a runner each. One literal,
+        # edited deliberately.
+        value = norm_expr(uncommented(group.group(1)))
+        self.assertEqual(
             value,
-            f"the capture group is {value!r}, which does not distinguish the "
-            "event; a PR-ref `pull_request` copy of this workflow would share "
-            "it and silently cancel the real review.",
+            "hardened-pr-review-${{ github.repository }}"
+            "-${{ github.event.pull_request.number }}-${{ github.event_name }}",
+            f"the capture group is {value!r}. It must vary over the pull "
+            "request and the event and nothing else: drop the event and a "
+            "PR-ref `pull_request` copy of this workflow shares the group and "
+            "silently cancels the real review; add the run and nothing "
+            "collapses at all.",
         )
-        self.assertNotIn("github.event.action", value)
 
 
 class TestStage1RunsNoPullRequestContent(unittest.TestCase):
@@ -3431,8 +4205,15 @@ class TestStage1RunsNoPullRequestContent(unittest.TestCase):
         it would be phrased.
 
         Scope, stated: this covers `${{ }}` interpolations. The job `if:` is
-        a boolean gate whose result is a decision rather than a value, and it
-        is pinned separately by TestTheLabelGateIsWhatSelectsAPr.
+        a boolean gate whose result is a decision rather than a value. Earlier
+        text here credited a class named TestTheLabelGateIsWhatSelectsAPr for
+        pinning it; NO SUCH CLASS EXISTS in this file, and a citation of a
+        fence nobody built is worse than no citation. What the gate actually
+        has is `test_the_job_if_literals_match_the_declared_label`, which
+        compares the two label literals in it against the declared env value —
+        and nothing that establishes how those literals are WIRED. Stage 2's
+        gate is parsed and evaluated as a formula by
+        TestStage2CannotBeTriggeredByALookalikeWorkflow; Stage 1's is not.
         """
         allowed = {
             "github.repository": "owner/repo of the base repository",
@@ -3908,12 +4689,16 @@ class TestTheReviewModelIsNamedOnceAtTheTop(unittest.TestCase):
 
     def test_the_model_is_a_workflow_level_env_next_to_the_role(self):
         header = self.stripped.split("jobs:", 1)[0]
-        m = re.search(r"(?m)^\s{2}REVIEW_MODEL:\s*(\S+)\s*$", header)
-        self.assertIsNotNone(m, "REVIEW_MODEL is not a workflow-level env in Stage 2")
+        models = env_values(header, "REVIEW_MODEL")
+        self.assertEqual(
+            len(models),
+            1,
+            f"REVIEW_MODEL is a workflow-level env {len(models)} times in Stage 2",
+        )
         self.assertRegex(
-            m.group(1),
+            models[0],
             r"^global\.anthropic\.claude-[\w.-]+$",
-            f"REVIEW_MODEL is {m.group(1)!r}, which is not a Bedrock global "
+            f"REVIEW_MODEL is {models[0]!r}, which is not a Bedrock global "
             "inference-profile id; the review step would fail to resolve it.",
         )
 
@@ -4033,8 +4818,8 @@ class TestSymlinkScrubIsNulSafe(unittest.TestCase):
         review = job_block(STAGE2.read_text(), "review")
         untrusted = [
             s
-            for s in review.split("- name:")
-            if "actions/checkout@" in s and "allow-unsafe-pr-checkout" in s
+            for s in steps_using(review, "actions/checkout")
+            if "allow-unsafe-pr-checkout" in s
         ]
         self.assertEqual(
             len(untrusted), 1, "premise changed: not exactly one PR-code checkout"
@@ -4928,19 +5713,27 @@ class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
         self.assertIn("MAX_CHANGED_FILES", review)
         # It is a workflow-level env, so both jobs resolve the same value.
         header = self.stripped.split("jobs:", 1)[0]
-        self.assertTrue(
-            re.search(r"^\s*MAX_CHANGED_FILES:\s*\d+\s*$", header, re.M),
-            "MAX_CHANGED_FILES is not a workflow-level env; the two gates could drift",
+        caps = env_values(header, "MAX_CHANGED_FILES")
+        self.assertEqual(
+            len(caps), 1, f"MAX_CHANGED_FILES is a workflow-level env {len(caps)} times"
+        )
+        self.assertRegex(
+            caps[0],
+            r"^\d+$",
+            f"the workflow-level MAX_CHANGED_FILES is {caps[0]!r}, not a count",
         )
 
     def test_both_downstream_jobs_stand_down_when_prepare_says_too_large(self):
         """`publish` too: it is `always()`, so skipping `review` is not enough."""
         for job in ("review", "publish"):
+            # `job_if`, not `block.split("runs-on:")[0]`. YAML mappings are
+            # unordered, so moving an unchanged `runs-on:` above `if:` emptied
+            # that region and red the test — the identical defect already found
+            # and fixed one class away, not carried here.
             block = strip_comments(job_block(self.text, job))
-            cond = block.split("runs-on:", 1)[0]
             self.assertIn(
                 "needs.prepare.outputs.too_large != 'true'",
-                " ".join(cond.split()),
+                " ".join(job_if(block).split()),
                 f"{job} would still run on the oversized path",
             )
 
@@ -5043,66 +5836,65 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
             self.prepare, r'"merge_base_sha=\$MERGE_BASE"\s*>>\s*"\$GITHUB_OUTPUT"'
         )
 
-    def _run_corroboration(self, merge_base: str, td: str):
-        """Execute the corroboration step against a stubbed `gh`."""
-        i = self.text.index("Corroborate the claimed PR against the trusted API")
-        rest = self.text[i:]
-        nxt = rest.find("\n      - name:", 1)
-        body = textwrap.dedent(scalar_block(rest if nxt == -1 else rest[:nxt], "run"))
-        sha = "a" * 40
-        pr_json = json.dumps(
-            {
-                "head": {"sha": sha, "repo": {"full_name": "o/r"}, "ref": "b"},
-                "base": {"sha": "b" * 40},
-                "draft": False,
-                "labels": [{"name": "in progress"}],
-                "changed_files": 3,
-            }
-        )
-        bin_dir = Path(td) / "bin"
-        bin_dir.mkdir()
-        (bin_dir / "gh").write_text(
-            "#!/bin/bash\n"
-            f"case \"$2\" in\n  *compare*) printf '%s' {json.dumps(merge_base)} ;;\n"
-            f"  *) printf '%s' {json.dumps(pr_json)} ;;\nesac\n"
-        )
-        (bin_dir / "gh").chmod(0o755)
-        out = Path(td) / "gh_out"
-        out.write_text("")
-        return subprocess.run(
-            ["bash", "-c", body],
-            capture_output=True,
-            text=True,
-            cwd=td,
-            env={
-                "PATH": f"{bin_dir}:/usr/bin:/bin",
-                "GITHUB_OUTPUT": str(out),
-                "PR_NUMBER": "1",
-                "HEAD_SHA": sha,
-                "TRIGGER_EVENT": "labeled",
-                "REPO": "o/r",
-                "EVENT_HEAD_REPO": "o/r",
-                "EVENT_HEAD_BRANCH": "b",
-                "REVIEW_LABEL": "in progress",
-                "DONE_LABEL": "ready for review",
-                "MAX_CHANGED_FILES": "100",
-            },
-        ), out
+    def _run_corroboration(self, merge_base: str, td: str, **identities):
+        return run_corroboration(merge_base, td, **identities)
 
     def test_a_malformed_merge_base_aborts_the_run(self):
         """Executed, not matched: a `#`-commented-out guard passes a text test."""
         for bad in ("", "null", "not-a-sha", "a" * 39):
             with tempfile.TemporaryDirectory() as td:
-                proc, out = self._run_corroboration(bad, td)
+                proc, _out, _argv = self._run_corroboration(bad, td)
             self.assertNotEqual(proc.returncode, 0, f"merge base {bad!r} was accepted")
             self.assertIn("no usable merge base", proc.stdout + proc.stderr)
 
     def test_a_well_formed_merge_base_is_exported(self):
         with tempfile.TemporaryDirectory() as td:
-            proc, out = self._run_corroboration("c" * 40, td)
+            proc, out, _argv = self._run_corroboration("c" * 40, td)
             written = out.read_text()
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn(f"merge_base_sha={'c' * 40}", written)
+        self.assertEqual(
+            sole_outputs(self, written).get("merge_base_sha"),
+            "c" * 40,
+            f"the step wrote {written!r} for merge_base_sha",
+        )
+
+    def test_the_recorded_base_is_the_base_and_not_the_head(self):
+        """`base_sha` selects what the review is shown a diff AGAINST.
+
+        Nothing checked which field it came from. Extracting `.head.sha` where
+        the step means `.base.sha` records the head as the base AND asks
+        `compare` for `head...head`, whose merge base is the head itself — so
+        the review sees an empty diff and reports no findings on a real change.
+        Both halves are pinned, against distinct stub values.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            proc, out, argv = self._run_corroboration("c" * 40, td)
+            written, calls = out.read_text(), argv.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            sole_outputs(self, written).get("base_sha"),
+            STUB_API_BASE,
+            f"the step recorded {written!r} as its base sha; it must be the "
+            "API's `.base.sha` and nothing else.",
+        )
+        # THE CALLS, as (endpoint, --jq filter). Both halves matter: the
+        # endpoint decides WHICH history the fork point is computed on, and the
+        # filter decides whether `$MERGE_BASE` is a sha or the whole comparison
+        # document. Recorded as two fields so a legal reordering of `gh`'s own
+        # arguments is not a difference.
+        self.assertEqual(
+            [tuple(ln.split("\t")) for ln in calls.splitlines()],
+            [
+                ("repos/o/r/pulls/1", ""),
+                (
+                    f"repos/o/r/compare/{STUB_API_BASE}...{STUB_API_HEAD}?per_page=1",
+                    ".merge_base_commit.sha",
+                ),
+            ],
+            f"the step called {calls!r}; it must corroborate the claimed PR "
+            "and then resolve the fork point of the corroborated base and "
+            "head, selecting the merge-base commit out of the answer.",
+        )
 
     def test_the_merge_base_reaches_the_review_job_as_an_output(self):
         self.assertRegex(
@@ -5138,34 +5930,195 @@ class TestThePrCheckoutIsNotAFullClone(unittest.TestCase):
         by appending `# no merge base between` to a `|| true`. The fix is to
         execute the extracted shell rather than to match its text.
         """
-        block = self._step("Fetch the merge base", hay=self.review)
-        body = textwrap.dedent(scalar_block(block, "run"))
         with tempfile.TemporaryDirectory() as td:
-            bin_dir = Path(td) / "bin"
-            bin_dir.mkdir()
             # `git fetch` succeeds, `git cat-file -e` fails: the object did not
             # arrive. The step must exit non-zero.
-            (bin_dir / "git").write_text(
-                '#!/bin/bash\ncase "$1" in\n'
-                "  fetch) exit 0 ;;\n"
-                "  cat-file) exit 1 ;;\n"
-                "  *) exit 0 ;;\nesac\n"
-            )
-            (bin_dir / "git").chmod(0o755)
-            proc = subprocess.run(
-                ["bash", "-c", body],
-                capture_output=True,
-                text=True,
-                cwd=td,
-                env={
-                    "PATH": f"{bin_dir}:/usr/bin:/bin",
-                    "MERGE_BASE_SHA": "0" * 40,
+            proc, _out = run_step(
+                self.text,
+                "Fetch the merge base",
+                td,
+                {"MERGE_BASE_SHA": "0" * 40},
+                {
+                    "git": '#!/bin/bash\ncase "$1" in\n'
+                    "  fetch) exit 0 ;;\n"
+                    "  cat-file) exit 1 ;;\n"
+                    "  *) exit 0 ;;\nesac\n"
                 },
             )
         self.assertNotEqual(
             proc.returncode, 0, "a merge base that never arrived was accepted"
         )
         self.assertIn("did not arrive", proc.stdout + proc.stderr)
+
+
+class TestTheProvenanceGuardsRejectWhenTheyDisagree(unittest.TestCase):
+    """Executed, not read: the two guards that authenticate the request.
+
+    Stage 2 runs on `workflow_run`, so everything it is told about the pull
+    request arrives either in an artifact Stage 1 uploaded or from the API. Two
+    guards in `prepare` make that trustworthy — the artifact's `head_sha` must
+    equal the event's, and the API's head repo and branch must equal the
+    event's. With either one passing on a mismatch, a run can be pointed at a
+    commit or a pull request of someone else's choosing while every other
+    assertion in this file is satisfied.
+
+    Both are one line of shell, and no text pin has held: the comparison, the
+    branch and a standalone `exit 1` inside it all survive `|| true` while the
+    step exits 0. So each is RUN, with inputs that disagree, and the assertion
+    is on the exit status. Each test also has a POSITIVE control, because a
+    guard that rejects everything would satisfy a rejection test while
+    reviewing nothing.
+
+    BOTH FIELDS DISAGREEING is its own case, not the union of the two
+    single-field ones. An inner test rewritten to `if [ repo = ] || [ ref = ];
+    then exit 1; fi` rejects each single mismatch — one field still agrees —
+    and accepts the run where both differ, which is the interesting one.
+
+    WHAT THIS HARNESS DOES NOT EXERCISE, stated so the next reader does not
+    infer coverage from the class name: the artifact size cap, the four shape
+    regexes in `coords`, the draft/label eligibility gate, and the changed-file
+    size gate. Their branches are reached with fixture values that satisfy
+    them. The merge-base validator is covered separately by
+    `TestThePrCheckoutIsNotAFullClone`.
+    """
+
+    ARTIFACT = {
+        "pr_number": "7",
+        "head_sha": STUB_API_HEAD,
+        "base_sha": STUB_API_BASE,
+        "is_fork": "false",
+        "trigger_event": "labeled",
+    }
+
+    def _run_coords(self, td: str, *, artifact=None, event_head_sha=STUB_API_HEAD):
+        """Execute `prepare`'s artifact validation step on a real JSON file."""
+        req = Path(td) / "request"
+        req.mkdir(exist_ok=True)
+        (req / "pr-review-request.json").write_text(
+            json.dumps({**self.ARTIFACT, **(artifact or {})})
+        )
+        return run_step(
+            STAGE2.read_text(),
+            "Validate and authenticate the request",
+            td,
+            {"EVENT_HEAD_SHA": event_head_sha},
+            {},
+        )
+
+    def test_a_matching_artifact_is_accepted_and_its_coordinates_exported(self):
+        """The positive control for the head_sha guard."""
+        with tempfile.TemporaryDirectory() as td:
+            proc, out = self._run_coords(td)
+            written = out.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        # THE WHOLE OUTPUT, parsed the way the runner parses it. These are the
+        # coordinates every later step reads; a fourth entry would be an
+        # unmodelled output, and a repeated key would mean the value this test
+        # checked is not the one that survives. Compared as a MAPPING, because
+        # the order of three independent assignments is not a contract.
+        self.assertEqual(
+            sole_outputs(self, written),
+            {
+                "pr_number": "7",
+                "head_sha": STUB_API_HEAD,
+                "trigger_event": "labeled",
+            },
+            f"the authenticated coordinates are {written!r}",
+        )
+
+    def test_an_artifact_naming_another_commit_is_refused(self):
+        """A forged artifact could otherwise name any commit in the repo."""
+        with tempfile.TemporaryDirectory() as td:
+            proc, out = self._run_coords(td, event_head_sha="d" * 40)
+            written = out.read_text()
+        self.assertNotEqual(
+            proc.returncode,
+            0,
+            "the artifact's head_sha disagreed with workflow_run.head_sha and "
+            "the step accepted it; the run reviews a commit of the artifact "
+            "author's choosing.",
+        )
+        self.assertIn("captured head_sha", proc.stdout + proc.stderr)
+        self.assertNotIn(
+            "head_sha=",
+            written,
+            "the step exported coordinates it had just failed to authenticate",
+        )
+
+    def test_a_run_from_another_pull_request_is_refused(self):
+        """The API's head repo and branch must be the event's, both of them."""
+        for label, kwargs in (
+            ("head repo", {"event_head_repo": "attacker/r"}),
+            ("head branch", {"event_head_branch": "other"}),
+            (
+                "both",
+                {"event_head_repo": "attacker/r", "event_head_branch": "other"},
+            ),
+        ):
+            with self.subTest(field=label), tempfile.TemporaryDirectory() as td:
+                proc, out, _argv = run_corroboration("c" * 40, td, **kwargs)
+                written = out.read_text()
+            self.assertNotEqual(
+                proc.returncode,
+                0,
+                f"the API and the event disagreed on {label} and the step "
+                "accepted it; a run can be pointed at a different pull "
+                "request.",
+            )
+            self.assertIn("but the run came from", proc.stdout + proc.stderr)
+            self.assertEqual(
+                written,
+                "",
+                f"the step recorded {written!r} for a pull request it had "
+                "just failed to corroborate",
+            )
+
+    def test_an_agreeing_pull_request_is_accepted(self):
+        """The positive control: an agreeing run must reach a REVIEWABLE state.
+
+        `eligible` alone is not that. Appending `fresh=false` after the
+        `fresh=true` write leaves every rejection test above passing while no
+        review ever runs, so both outputs the downstream `if:`s read are
+        pinned, and a fork — the population this pipeline exists for — is
+        covered beside a same-repo pull request.
+        """
+        for label, kwargs, is_fork in (
+            ("same repo", {}, "false"),
+            (
+                "fork",
+                {"api_head_repo": "forker/r", "event_head_repo": "forker/r"},
+                "true",
+            ),
+        ):
+            with self.subTest(head=label), tempfile.TemporaryDirectory() as td:
+                proc, out, _argv = run_corroboration("c" * 40, td, **kwargs)
+                written = out.read_text()
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            got = sole_outputs(self, written)
+            self.assertEqual(
+                (got.get("eligible"), got.get("fresh"), got.get("is_fork")),
+                ("true", "true", is_fork),
+                f"an agreeing {label} pull request recorded {written!r}; the "
+                "review job runs only when eligible AND fresh are true.",
+            )
+
+    def test_a_pull_request_that_moved_on_is_skipped_rather_than_reviewed(self):
+        """The freshness branch, which the agreeing controls never reach.
+
+        Reviewing a superseded commit spends a model call on code nobody will
+        merge, and — because the row carries the OLD head — records a verdict
+        against a commit the API no longer calls current.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            proc, out, _argv = run_corroboration("c" * 40, td, api_head="e" * 40)
+            written = out.read_text()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        got = sole_outputs(self, written)
+        self.assertEqual(
+            (got.get("eligible"), got.get("fresh")),
+            ("true", "false"),
+            f"the PR had moved to a new head and the step recorded {written!r}",
+        )
 
 
 class TestTheReadersPremisesStillHold(unittest.TestCase):
@@ -5192,7 +6145,7 @@ class TestTheReadersPremisesStillHold(unittest.TestCase):
     def test_both_review_checkout_paths_are_plain_scalars(self):
         """The reader in TestBothReviewCheckoutsStayOutOfTheWorkspaceRoot."""
         review = job_block(STAGE2.read_text(), "review")
-        steps = [s for s in review.split("- name:") if "actions/checkout@" in s]
+        steps = steps_using(review, "actions/checkout")
         self.assertEqual(len(steps), 2, "premise changed: not two checkouts")
         for step in steps:
             lines = with_block(step)
