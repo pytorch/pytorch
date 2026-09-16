@@ -29,8 +29,8 @@ def _reference(logits, row_scale, target, out_dtype):
     g = e * (row_scale / row_sum).unsqueeze(1)
     rows = torch.arange(logits.shape[0], device=logits.device)
     g[rows, target] -= row_scale
-    # Both statistics carry the row max, matching the kernel: the loss is their
-    # difference, and unshifted terms lose it to rounding at a large offset.
+    # Both statistics carry the row max, matching the kernel: their difference
+    # is the loss, and unshifted terms lose it to rounding at a large offset.
     return (
         g.to(out_dtype),
         row_sum.log(),
@@ -45,9 +45,8 @@ def _outputs(num_rows, V, dtype, device="cuda", row_stride=None):
         # A wider row stride than V: the kernel indexes through the tensor's
         # own strides, so this must work as well as the packed case.
         g = torch.empty(num_rows, row_stride, device=device, dtype=dtype)[:, :V]
-    log_row_sum = torch.empty(num_rows, device=device, dtype=torch.float32)
-    shifted_target = torch.empty(num_rows, device=device, dtype=torch.float32)
-    return g, log_row_sum, shifted_target
+    term = torch.empty(num_rows, device=device, dtype=torch.float32)
+    return g, term
 
 
 def _inputs(num_rows, V, device="cuda", logits_dtype=torch.float32):
@@ -76,18 +75,12 @@ class TestFusedGradLogitsKernel(TestCase):
         self.kernel = fused_grad_logits_kernel
 
     def _run(self, logits, row_scale, target, dtype, row_stride=None):
-        g, log_row_sum, shifted_target = _outputs(
-            *logits.shape, dtype, row_stride=row_stride
-        )
-        self.kernel.fused_grad_logits_into(
-            g, log_row_sum, shifted_target, logits, row_scale, target
-        )
-        return g, log_row_sum, shifted_target
+        g, term = _outputs(*logits.shape, dtype, row_stride=row_stride)
+        self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target)
+        return g, term
 
     def _check(self, logits, row_scale, target, dtype, row_stride=None):
-        g, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, dtype, row_stride=row_stride
-        )
+        g, term = self._run(logits, row_scale, target, dtype, row_stride=row_stride)
         want_g, want_log_row_sum, want_shifted = _reference(
             logits, row_scale, target, dtype
         )
@@ -97,9 +90,12 @@ class TestFusedGradLogitsKernel(TestCase):
             self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
         else:
             self.assertEqual(g, want_g)
-        self.assertEqual(log_row_sum, want_log_row_sum, atol=1e-4, rtol=1e-5)
-        # A copy, not a computation.
-        self.assertEqual(shifted_target, want_shifted)
+        # The loss term, referenced to TORCH's statistics rather than to
+        # anything the kernel emitted, so an error inside it cannot be hidden
+        # by a cancelling error in the same kernel.
+        self.assertEqual(
+            term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
+        )
 
     @parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize(
@@ -149,18 +145,19 @@ class TestFusedGradLogitsKernel(TestCase):
         compiled mode."""
         logits, row_scale, target = _inputs(num_rows, V)
         source = logits.clone()
-        g, log_row_sum, shifted_target = _outputs(num_rows, V, dtype)
+        _, term = _outputs(num_rows, V, dtype)
         g = logits.view(dtype).narrow(1, 0, V)
-        self.kernel.fused_grad_logits_into(
-            g, log_row_sum, shifted_target, logits, row_scale, target
-        )
+        self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target)
         want_g, want_log_row_sum, want_shifted = _reference(
             source, row_scale, target, dtype
         )
         self.assertEqual(g, want_g)
-        self.assertEqual(log_row_sum, want_log_row_sum, atol=1e-4, rtol=1e-5)
-        # Read before any write could occupy its bytes.
-        self.assertEqual(shifted_target, want_shifted)
+        # The target logit is read before any write could occupy its bytes,
+        # which the loss term would expose: it is the only place that logit
+        # reaches an output.
+        self.assertEqual(
+            term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
+        )
 
     def test_monotonic_rows_rescale_every_element(self):
         """Worst case for the online statistics: each thread walks its columns
@@ -182,34 +179,39 @@ class TestFusedGradLogitsKernel(TestCase):
         num_rows, V = 8, 1024
         logits, row_scale, target = _inputs(num_rows, V)
         logits = logits + 10000.0
-        g, log_row_sum, _ = self._run(logits, row_scale, target, torch.float32)
+        g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isfinite(g).all())
+        want_log_row_sum, want_shifted = _reference(
+            logits, row_scale, target, torch.float32
+        )[1:]
+        self.assertTrue(torch.isfinite(term).all())
         self.assertEqual(
-            log_row_sum, _reference(logits, row_scale, target, torch.float32)[1]
+            term,
+            row_scale * (want_log_row_sum - want_shifted),
+            atol=1e-4,
+            rtol=1e-5,
         )
 
     def test_uniform_row_sums_to_the_class_count(self):
         num_rows, V = 4, 2048
         logits = torch.full((num_rows, V), 3.5, device="cuda", dtype=torch.float32)
         _, row_scale, target = _inputs(num_rows, V)
-        _, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, torch.float32
-        )
-        want = torch.full_like(log_row_sum, torch.tensor(float(V)).log().item())
-        self.assertEqual(log_row_sum, want, atol=1e-4, rtol=1e-6)
-        # Every logit is the row max, so the shifted target logit is 0.
-        self.assertEqual(shifted_target, torch.zeros_like(shifted_target))
+        _, term = self._run(logits, row_scale, target, torch.float32)
+        # Uniform logits: lse = z + log(V) and the target logit is z, so the
+        # row's whole loss term is scale * log(V) whatever z is.
+        want = row_scale * torch.tensor(float(V), device=term.device).log()
+        self.assertEqual(term, want, atol=1e-4, rtol=1e-6)
 
     def test_target_column_is_the_shifted_probability(self):
         """The one-hot subtract is what replaces eager's index_add_, so the
         target column is checked explicitly rather than only in aggregate."""
         num_rows, V = 16, 512
         logits, row_scale, target = _inputs(num_rows, V)
-        g, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, torch.float32
-        )
+        g, term = self._run(logits, row_scale, target, torch.float32)
         rows = torch.arange(num_rows, device=g.device)
-        p_target = (shifted_target - log_row_sum).exp()
+        # term = scale * (lse - z_target), so lse comes back out of it.
+        lse = term / row_scale + logits[rows, target]
+        p_target = (logits[rows, target] - lse).exp()
         self.assertEqual(
             g[rows, target], (p_target - 1.0) * row_scale, atol=1e-6, rtol=1e-5
         )
@@ -231,16 +233,18 @@ class TestFusedGradLogitsKernel(TestCase):
         # Column 0 is thread 0's first column, and the block is wider than one
         # warp, so this is exactly the first-touch case.
         logits[:, 0] = float("-inf")
-        g, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, torch.float32
-        )
+        g, term = self._run(logits, row_scale, target, torch.float32)
         want_g, want_log_row_sum, want_shifted = _reference(
             logits, row_scale, target, torch.float32
         )
         self.assertTrue(torch.isfinite(g).all())
         self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
-        self.assertEqual(log_row_sum, want_log_row_sum, atol=1e-4, rtol=1e-5)
-        self.assertEqual(shifted_target, want_shifted)
+        self.assertEqual(
+            term,
+            row_scale * (want_log_row_sum - want_shifted),
+            atol=1e-4,
+            rtol=1e-5,
+        )
 
     def test_every_class_masked_is_nan_like_eager(self):
         """A fully masked row has no valid class: eager's shifted softmax is
@@ -249,13 +253,9 @@ class TestFusedGradLogitsKernel(TestCase):
         num_rows, V = 4, 512
         logits, row_scale, target = _inputs(num_rows, V)
         logits[1] = float("-inf")
-        g, log_row_sum, shifted_target = self._run(
-            logits, row_scale, target, torch.float32
-        )
+        g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isnan(g[1]).all())
-        # The loss the caller builds from the two statistics, whether the NaN
-        # arrives in `log_row_sum` or as `-inf - -inf`.
-        self.assertTrue(torch.isnan(log_row_sum[1] - shifted_target[1]))
+        self.assertTrue(torch.isnan(term[1]))
         self.assertTrue(torch.isfinite(g[0]).all())
 
     def test_nan_logit_poisons_its_row(self):
@@ -265,9 +265,9 @@ class TestFusedGradLogitsKernel(TestCase):
         num_rows, V = 4, 512
         logits, row_scale, target = _inputs(num_rows, V)
         logits[2, 7] = float("nan")
-        g, log_row_sum, _ = self._run(logits, row_scale, target, torch.float32)
+        g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isnan(g[2]).all())
-        self.assertTrue(torch.isnan(log_row_sum[2]))
+        self.assertTrue(torch.isnan(term[2]))
         self.assertTrue(torch.isfinite(g[0]).all())
 
     # `1 << 32` is the one that needs int64 to catch: its low 32 bits are zero,
@@ -281,13 +281,13 @@ class TestFusedGradLogitsKernel(TestCase):
         num_rows, V = 6, 256
         logits, row_scale, target = _inputs(num_rows, V)
         target[3] = bad_target
-        g, _, shifted_target = self._run(logits, row_scale, target, torch.float32)
+        g, term = self._run(logits, row_scale, target, torch.float32)
         self.assertTrue(torch.isnan(g[3]).all())
-        self.assertTrue(torch.isnan(shifted_target[3]))
+        self.assertTrue(torch.isnan(term[3]))
         # Only the offending row: the rest of the chunk is still usable.
         self.assertTrue(torch.isfinite(g[:3]).all())
         self.assertTrue(torch.isfinite(g[4:]).all())
-        self.assertTrue(torch.isfinite(shifted_target[[0, 1, 2, 4, 5]]).all())
+        self.assertTrue(torch.isfinite(term[[0, 1, 2, 4, 5]]).all())
 
     def test_zero_row_scale_gives_a_zero_gradient(self):
         """An ignored row carries scale 0, and its whole gradient row -- target
@@ -295,7 +295,7 @@ class TestFusedGradLogitsKernel(TestCase):
         num_rows, V = 6, 300
         logits, row_scale, target = _inputs(num_rows, V)
         row_scale = torch.zeros_like(row_scale)
-        g, _, _ = self._run(logits, row_scale, target, torch.bfloat16)
+        g, _ = self._run(logits, row_scale, target, torch.bfloat16)
         self.assertEqual(g, torch.zeros_like(g))
 
     def test_wider_row_stride(self):
@@ -317,15 +317,18 @@ class TestFusedGradLogitsKernel(TestCase):
         every legal combination has to compute the same thing -- including the
         write ordering, whose safety argument holds for any staging depth."""
         logits, row_scale, target = _inputs(24, 4097)
-        g, log_row_sum, shifted_target = _outputs(24, 4097, torch.bfloat16)
-        self.kernel.fused_grad_logits_into(
-            g, log_row_sum, shifted_target, logits, row_scale, target, **meta
-        )
-        want_g, want_log_row_sum, _ = _reference(
+        g, term = _outputs(24, 4097, torch.bfloat16)
+        self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target, **meta)
+        want_g, want_log_row_sum, want_shifted = _reference(
             logits, row_scale, target, torch.bfloat16
         )
         self.assertEqual(g, want_g)
-        self.assertEqual(log_row_sum, want_log_row_sum, atol=1e-4, rtol=1e-5)
+        self.assertEqual(
+            term,
+            row_scale * (want_log_row_sum - want_shifted),
+            atol=1e-4,
+            rtol=1e-5,
+        )
 
     @parametrize(
         "meta, message",
@@ -341,10 +344,10 @@ class TestFusedGradLogitsKernel(TestCase):
         something that silently drops per-warp partials (above 32 warps) or
         never runs (a zero-tile stage)."""
         logits, row_scale, target = _inputs(4, 64)
-        g, log_row_sum, shifted_target = _outputs(4, 64, torch.bfloat16)
+        g, term = _outputs(4, 64, torch.bfloat16)
         with self.assertRaisesRegex(ValueError, message):
             self.kernel.fused_grad_logits_into(
-                g, log_row_sum, shifted_target, logits, row_scale, target, **meta
+                g, term, logits, row_scale, target, **meta
             )
 
     def test_logits_are_not_modified(self):

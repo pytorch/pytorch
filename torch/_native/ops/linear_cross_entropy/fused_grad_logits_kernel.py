@@ -9,19 +9,19 @@ Contract, per row ``n`` of the chunk, with ``m_n = max_v z[n, v]`` and
 ``l_n = sum_v exp(z[n, v] - m_n)``::
 
     g[n, v] = exp(z[n, v] - m_n) * (s_n / l_n) - s_n * [v == T_hat_n]
-    log_row_sum[n] = log(l_n)
-    shifted_target_logit[n] = z[n, T_hat_n] - m_n
+    term[n] = s_n * (log(l_n) - (z[n, T_hat_n] - m_n))
 
 ``g`` is what makes both parameter gradients plain GEMMs (see
-``grad_logits_kernel``); the other two are the ``(Bc,)`` statistics the loss
-needs, from which the caller forms
-``s_n * (log_row_sum_n - shifted_target_logit_n)``.
+``grad_logits_kernel``); the per-row loss contribution is formed here rather
+than left to the caller, who would pay a subtract, a multiply and a reduction
+per chunk on ``(Bc,)`` data for it.
 
-Both carry the row max, and that is the point: ``m_n + log(l_n)`` and
-``z[n, T_hat_n]`` have the same difference algebraically, but a row offset far
-from zero rounds both to ``m_n`` in fp32 and the difference collapses. Logits
-of 2**24 -- reachable from bf16 inputs of 4096 -- make a loss of log(2) come
-out as 0. Shifted, each term is O(1) and the offset never enters.
+Both halves of that difference carry the row max, and that is the point:
+``(m_n + log(l_n)) - z[n, T_hat_n]`` is the same number algebraically, but a
+row offset far from zero rounds both terms to ``m_n`` in fp32 and the
+difference collapses. Logits of 2**24 -- reachable from bf16 inputs of 4096 --
+make a loss of log(2) come out as 0. Shifted, each half is O(1) and the offset
+never enters.
 
 The logits stay raw: nothing here mutates them, so the eager loop's in-place
 shift and ``exp_`` disappear along with their traffic, and the buffer can be
@@ -120,8 +120,7 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         mS: cute.Tensor,
         mTarget: cute.Tensor,
         mG: cute.Tensor,
-        mLogRowSum: cute.Tensor,
-        mShiftedTargetLogit: cute.Tensor,
+        mTerm: cute.Tensor,
         V: Int32,
     ):
         tidx, _, _ = cute.arch.thread_idx()
@@ -192,20 +191,24 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         )
 
         s = mS[row]
-        target_logit = Float32(mZ[row, target_read])
         if out_of_range:
             # Out-of-range target (see above): poison the row rather than
-            # return plausible numbers. `factor` carries it to every element of
-            # the gradient row and the target logit carries it to the loss, so
-            # the failure cannot be read as a result.
+            # return plausible numbers. Through `factor` this reaches every
+            # element of the gradient row as well as the loss term, so the
+            # failure cannot be read as a result.
             s = Float32(Float32.nan)
-            target_logit = Float32(Float32.nan)
         factor = s / row_sum
         if tidx == 0:
-            # Shifted, both of them -- see the module docstring for why the
-            # unshifted pair cannot be subtracted in fp32.
-            mLogRowSum[row] = cute.math.log(row_sum, fastmath=True)
-            mShiftedTargetLogit[row] = target_logit - row_max
+            # The loss needs only this combination of the row's two
+            # statistics, so it is formed here: emitting them separately cost
+            # the caller a subtract, a multiply and a reduction per chunk on
+            # (Bc,) data, which is launch-bound at every size. Both halves stay
+            # shifted by the row max -- see the module docstring for why the
+            # unshifted difference cannot be taken in fp32.
+            mTerm[row] = s * (
+                cute.math.log(row_sum, fastmath=True)
+                - (Float32(mZ[row, target_read]) - row_max)
+            )
 
         # This read of the target logit has to be ordered against the writes
         # below, which may occupy its bytes.
@@ -242,13 +245,12 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
         mS: cute.Tensor,
         mTarget: cute.Tensor,
         mG: cute.Tensor,
-        mLogRowSum: cute.Tensor,
-        mShiftedTargetLogit: cute.Tensor,
+        mTerm: cute.Tensor,
         stream: cuda.CUstream,
         V: Int32,
         num_rows: Int32,
     ):
-        _kernel(mZ, mS, mTarget, mG, mLogRowSum, mShiftedTargetLogit, V).launch(
+        _kernel(mZ, mS, mTarget, mG, mTerm, V).launch(
             grid=[num_rows, 1, 1],
             block=[threads_per_block, 1, 1],
             stream=stream,
@@ -299,7 +301,6 @@ def _compile_fused_grad_logits(
             stride=(cute.sym_int64(), 1),
         ),
         f32_1d(),
-        f32_1d(),
         cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
         Int32(0),
         Int32(0),
@@ -309,14 +310,13 @@ def _compile_fused_grad_logits(
 
 def fused_grad_logits_into(
     g: torch.Tensor,
-    log_row_sum: torch.Tensor,
-    shifted_target_logit: torch.Tensor,
+    term: torch.Tensor,
     logits: torch.Tensor,
     row_scale: torch.Tensor,
     target: torch.Tensor,
     **meta: int,
 ) -> None:
-    """Writes ``g`` and the row statistics from the raw ``logits``.
+    """Writes ``g`` and the per-row loss term from the raw ``logits``.
 
     ``logits`` is (Bc, V) with unit inner stride, fp32 or a low-precision
     buffer dtype. When ``g`` is a separate buffer the logits are left untouched;
@@ -329,8 +329,10 @@ def fused_grad_logits_into(
     either way (see the module docstring), so the caller chooses the layout and
     nothing else changes.
 
-    ``log_row_sum``, ``shifted_target_logit`` and ``row_scale`` are fp32 (Bc,),
-    ``target`` is int64 (Bc,), all contiguous.
+    ``term``, ``row_scale`` are fp32 (Bc,) and ``target`` is int64 (Bc,), all
+    contiguous. ``term`` is the row's loss contribution,
+    ``row_scale * (log(l) - (z_target - m))`` -- the only combination of the
+    row statistics the loss needs, so neither is emitted separately.
 
     ``meta`` carries the kernel's shape knobs, so a tuner -- or a caller who has
     measured its own shapes -- can choose them without editing this file:
@@ -358,6 +360,4 @@ def fused_grad_logits_into(
         raise ValueError(f"tiles_per_stage must be at least 1, got {tiles}")
     num_rows, V = logits.shape
     compiled = _compile_fused_grad_logits(logits.dtype, g.dtype, threads, tiles)
-    compiled(
-        logits, row_scale, target, g, log_row_sum, shifted_target_logit, V, num_rows
-    )
+    compiled(logits, row_scale, target, g, term, V, num_rows)
