@@ -2252,6 +2252,11 @@ def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
             ),
         )
 
+    dim_c = dim_w - 1
+    torch._check(
+        input.size(dim_c) == grad_output.size(dim_c),
+        lambda: f"grad_output channel unexpected. Expected: {input.size(dim_c)}, Got: {grad_output.size(dim_c)}",
+    )
     torch._check(
         output_w == grad_output.size(dim_w),
         lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
@@ -2388,6 +2393,10 @@ def meta_pad2d_backward(grad_output, self, padding):
     output_w = input_w + pad_l + pad_r
 
     torch._check(
+        self_shape[dim_plane] == grad_output.size(dim_plane),
+        lambda: f"grad_output channel unexpected. Expected: {self_shape[dim_plane]}, Got: {grad_output.size(dim_plane)}",
+    )
+    torch._check(
         output_w == grad_output.size(dim_w),
         lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
     )
@@ -2515,6 +2524,11 @@ def meta_pad3d_backward(grad_output, input, padding):
     output_h = input_h + pad_t + pad_b
     output_w = input_w + pad_l + pad_r
 
+    dim_c = dim_d - 1
+    torch._check(
+        input.size(dim_c) == grad_output.size(dim_c),
+        lambda: f"grad_output channel unexpected. Expected: {input.size(dim_c)}, Got: {grad_output.size(dim_c)}",
+    )
     torch._check(
         output_w == grad_output.size(dim_w),
         lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
