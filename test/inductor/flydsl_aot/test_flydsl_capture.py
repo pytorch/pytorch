@@ -68,6 +68,7 @@ class _EagerLauncher:
 
 class FlyDSLCaptureTest(TestCase):
     def setUp(self):
+        super().setUp()
         flydsl_launcher_side_table.reset_table()
         torch._dynamo.reset()
 
@@ -477,8 +478,7 @@ class FlyDSLCaptureTest(TestCase):
         )
         self.assertTrue(
             any(
-                output.kind is OutputKind.USER_INPUT_MUTATION
-                and output.target == "out"
+                output.kind is OutputKind.USER_INPUT_MUTATION and output.target == "out"
                 for output in exported.graph_signature.output_specs
             )
         )
