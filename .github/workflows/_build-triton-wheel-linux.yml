@@ -115,7 +115,9 @@ jobs:
           fi
 
           yum install -y zlib-devel zip
-          "${PYTHON_EXECUTABLE}" -m pip install -U setuptools==78.1.0 pybind11==3.0.1 auditwheel wheel
+          # nanobind: triton's setup.py imports it at module scope since
+          # ec2b08420d. pybind11 stays for the xpu pin, which predates that.
+          "${PYTHON_EXECUTABLE}" -m pip install -U setuptools==78.1.0 pybind11==3.0.1 nanobind==2.10.2 auditwheel wheel
           "${PYTHON_EXECUTABLE}" -m pip install -U cmake --force-reinstall
 
           if [[ ("${{ inputs.device }}" == "cuda" || "${{ inputs.device }}" == "rocm" || "${{ inputs.device }}" == "aarch64" ) ]]; then
