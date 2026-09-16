@@ -3979,6 +3979,30 @@ from user code:
         self.assertNotIn("guard check raised", lines[2])
         self.assertIn("Add a ModelInput", lines[3])
 
+    def test_no_match_message_reads_a_systemerror_cause_not_the_handled_exception(self):
+        # _PyErr_FormatFromCause sets __cause__ and __context__ alike, so only a
+        # SystemError whose two differ tells the reads apart: raised inside an
+        # `except ValueError:` block, its __context__ is what the CALLER was handling.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+
+        class Raises:
+            def check(self, f_locals):
+                raise SystemError("stub tree is unhappy")
+
+        model.forward.compiled_results[0]._artifacts.guard_manager = Raises()
+        try:
+            raise ValueError("the caller was handling this")
+        except ValueError:
+            with self.assertRaises(RuntimeError) as ctx:
+                model(x)
+        message = str(ctx.exception)
+        raised = "  [0] <guard check raised SystemError: stub tree is unhappy>"
+        self.assertIn(raised, message.splitlines())
+        self.assertNotIn("the caller was handling this", message)
+
     def test_no_match_report_reads_the_dispatch_record_after_a_raise(self):
         # [0] raised in the scan and rejected on the second pass, so the accept
         # line is reached with ONE rejection on record; [1] raised in both passes
@@ -4078,6 +4102,22 @@ from user code:
         raw = "[1]'s guard check raised RuntimeError: checked\x0ctree\x1eis unhappy"
         self.assertIn(raw, warned)
         self.assertEqual(warned.count("dispatch served [0]"), 2)
+
+    def test_aot_compile_module_interrupt_out_of_a_guard_tree_propagates(self):
+        # accepts() catches Exception, not BaseException: a Ctrl-C inside a tree is
+        # no answer about this call. Widened, the call ends in a report quoting it.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+
+        class Interrupts:
+            def check(self, f_locals):
+                raise KeyboardInterrupt("ctrl-c inside the tree")
+
+        model.forward.compiled_results[0]._artifacts.guard_manager = Interrupts()
+        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+            model(x)
 
     def test_aot_compile_module_raising_tree_does_not_reach_an_opted_out_result(self):
         # A tree that raised rejected nothing, so an opted-out result answering
@@ -4618,6 +4658,29 @@ from user code:
         self.assertIn("opted out of guard checks, but", logs.output[0])
         self.assertIn("reachable only through the last resort", logs.output[0])
         self.assertNotIn("Fix or drop input", logs.output[0])
+
+    def test_aot_compile_module_warns_once_per_exception_type_at_one_index(self):
+        # The dedup key is (index, exception type), not the index: two defects at
+        # one index told apart by type alone warn twice; a repeat of one is silent.
+        self._hide_leaked_dynamo_globals()
+        x = torch.randn(3, 3)
+
+        class Raises:
+            error = ValueError
+
+            def check(self, f_locals):
+                raise self.error("guard tree is unhappy")
+
+        model = self._model_whose_tree_raises("guard tree is unhappy")
+        model.forward.compiled_results[0]._artifacts.guard_manager = Raises()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            self.assertEqual(model(x), x * 2)
+            Raises.error = TypeError
+            self.assertEqual(model(x), x * 2)
+            self.assertEqual(model(x), x * 2)
+        self.assertEqual(len(logs.output), 2, logs.output)
+        self.assertIn("[0]'s guard check raised ValueError: guard tree", logs.output[0])
+        self.assertIn("[0]'s guard check raised TypeError: guard tree", logs.output[1])
 
     def test_aot_compiled_model_keeps_its_warning_dedup_out_of_the_constructor(self):
         # A factory, not a default: a class-level set would share one dedup
