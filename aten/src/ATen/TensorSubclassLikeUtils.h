@@ -45,6 +45,7 @@ constexpr auto kTensorSubclassLike =
          DispatchKey::Sparse,
          DispatchKey::SparseCsr,
          DispatchKey::Python,
+         // C++ fake tensors must be treated like subclasses for dispatch.
          DispatchKey::Fake}) |
     DispatchKeySet(BackendComponent::MetaBit);
 
