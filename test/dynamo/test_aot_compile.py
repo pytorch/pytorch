@@ -24,7 +24,7 @@ import weakref
 from collections import namedtuple
 from collections.abc import Callable
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 import torch._dynamo.testing
@@ -2043,6 +2043,68 @@ from user code:
         )
         self.assertEqual(reloaded(x), ReturnsBuiltinModule()(x))
 
+    def test_aot_compile_module_no_match_error(self):
+        # Two inputs, so the message has to account for both rather than
+        # reporting only the first one's guard failure. Vary dtype rather than
+        # shape: aot_compile_module does not forward `dynamic`, so a second
+        # shape goes automatic-dynamic and would subsume the unmatched input.
+        # No graph runs on this path, so eager keeps the report identical.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float32),),
+                    kwargs={},
+                    contexts=[],
+                ),
+                ModelInput(
+                    args=(torch.randn(3, 3, dtype=torch.float64),),
+                    kwargs={},
+                    contexts=[],
+                ),
+            ]
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3, dtype=torch.float16))
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        self.assertIn("Tried 2 compiled input(s)", message)
+        # One line per input, not a multi-line GuardDebugInfo repr per input: the
+        # two entries are the two lines after the header, each says something
+        # after its index, and the advice that follows is not indented, so it
+        # is not a continuation of the second.
+        lines = message.splitlines()
+        self.assertEqual([line[:6] for line in lines[1:3]], ["  [0] ", "  [1] "])
+        for line in lines[1:3]:
+            self.assertTrue(line[6:].strip(), f"entry says nothing: {line!r}")
+        self.assertFalse(lines[3].startswith(" "), lines[3])
+        self.assertIn("Add a ModelInput", message)
+
+    def test_no_match_message_keeps_the_advice_for_every_entry(self):
+        # One entry names a missing global and the other is a plain mismatch, and
+        # neither advice covers the other's entry: defining AOT_BRANCH_SCALE
+        # cannot make mode=2 satisfy [1]'s L['mode'] == 1, and a new ModelInput
+        # for mode=2 would not resolve the global [1] failed on. Reporting only
+        # one of them asserts something untrue about the whole call.
+        model, x = self._aot_compile_mode_branches()
+        g = globals()
+        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", g["AOT_BRANCH_SCALE"])
+        del g["AOT_BRANCH_SCALE"]
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, 2)
+        message = str(ctx.exception)
+        self.assertIn("[0] L['mode'] == 0", message)
+        self.assertIn("[1] KeyError on G['AOT_BRANCH_SCALE']", message)
+        self.assertIn("a guarded global is missing", message)
+        self.assertIn("the module the compiled function was traced in", message)
+        self.assertIn("Add a ModelInput", message)
+        # The hint is [1]'s: neither the plain mismatch nor the advice carries it.
+        lines = message.splitlines()
+        self.assertEqual(lines[1][:6], "  [0] ")
+        self.assertNotIn("a guarded global is missing", lines[1])
+        self.assertNotIn("a guarded global is missing", lines[-1])
+        self.assertTrue(lines[-1].startswith("Add a ModelInput"), lines[-1])
+
     def _install_global_probe(self, name, misses):
         # Re-keys this module's global `name` under a CountedKey. Both cleanups
         # are registered before the dict is touched, so an interrupt anywhere
@@ -2095,8 +2157,19 @@ from user code:
         counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
         with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
+            self.assertEqual(binds, [results[0]])
+            binds.clear()
+            with self.assertRaises(RuntimeError) as ctx:
+                model(torch.ones(3, 3, dtype=torch.float16))
+        message = str(ctx.exception)
         served.assert_called_once()
+        # One bind for the call nothing matched as well, counted apart from the
+        # matched call's, and one entry per result off that bind, whatever else
+        # the report carries.
         self.assertEqual(binds, [results[0]])
+        lines = message.splitlines()
+        self.assertEqual(sum(line.startswith("  [") for line in lines), len(xs))
+        self.assertIn("Add a ModelInput", message)
 
     def test_module_dispatch_decides_a_shared_binding_past_the_first_result(self):
         # Whether results bind alike is asked only once the first result has
@@ -2114,7 +2187,7 @@ from user code:
         single = AOTCompiledModel(mod, results[:1])
         with patched as verdict:
             self.assertEqual(single(xs[0]), xs[0] * 2)
-            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
                 single(xs[1])
             verdict.assert_not_called()
 
@@ -2164,7 +2237,7 @@ from user code:
         self.assertTrue(combined._binds_alike(tuple(combined.compiled_results)))
         combined.compiled_results[1] = doubles
         self.assertEqual(combined(x.double(), 1), x.double() * 3)
-        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+        with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
             combined(x.double())
         self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
 
@@ -2200,7 +2273,7 @@ from user code:
             return check(f_locals)
 
         with patch.object(manager, "check", appending_check):
-            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
                 combined(x.double())
         self.assertIs(combined.compiled_results[1], later)
         self.assertEqual(combined(x.double()), x.double() * 2)
@@ -2279,7 +2352,7 @@ from user code:
             return binds_alike(model, results)
 
         with patch.object(AOTCompiledModel, "_binds_alike", racing):
-            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
                 combined(x.double())
             # Only racing starts the decider: a dispatch that stopped consulting
             # _binds_alike would still raise above and leave the race untested.
@@ -2324,15 +2397,16 @@ from user code:
         # evaluation, which is what it does for real when the dict-tag fast path
         # answers false without running the tree. That rejection is not an
         # answer about the call, so a second pass has to rescue it. The
-        # rescuable result is [1], which the parent's fall-through never reached:
-        # it re-checked compiled_results[0] and raised [0]'s L['mode'] == 0.
+        # rescuable result is [1]; without the re-check the call would reach the
+        # no-match report, where [0]'s L['mode'] == 0 is one line and [1]'s real
+        # match is refused beside it.
         model, x = self._aot_compile_mode_branches()
         self._rescued_by_the_recheck(model, x)
 
     def test_module_dispatch_rechecks_an_opted_out_result_whose_tree_accepts(self):
         # The same false rejection of [1], with both results opted out. A
         # re-check that skipped opted-out results would leave the call to the
-        # fall-through, which serves the FIRST opted-out result: [0], whose
+        # opt-out stage, which serves the FIRST opted-out result: [0], whose
         # L['mode'] == 0 guard genuinely fails this call.
         model, x = self._aot_compile_mode_branches()
         for result in model.forward.compiled_results:
@@ -2341,10 +2415,10 @@ from user code:
 
     def test_module_dispatch_serves_an_opted_out_result_from_any_position(self):
         # With [0] still checked and [1] opted out, a call neither guards is
-        # served by [1]; the fall-through this stage precedes re-enters
-        # compiled_results[0] alone and raised its guard error. x * 3 is
-        # deliberately not eager's answer for mode=2 (x * 2): serving a graph
-        # compiled for a different call is what the opt-out exists to do.
+        # served by [1] rather than raising the no-match report, the stage after
+        # this one. x * 3 is deliberately not eager's answer for mode=2 (x * 2):
+        # serving a graph compiled for a different call is what the opt-out
+        # exists to do.
         mod = ModeBranchGlobalModule()
         model = torch.compile(mod, fullgraph=True, backend="eager")
         x = torch.randn(3, 3)
@@ -2359,35 +2433,32 @@ from user code:
         # [0]'s real match still outranks [1]'s opt-out, so this stage cannot
         # be hoisted into the scan.
         self.assertEqual(model(x, 0), x * 2)
-        # With both opted out and nothing matching, index order decides, as it
-        # did at the fall-through.
+        # With both opted out and nothing matching, index order decides.
         model.forward.compiled_results[0].disable_guard_check()
         self.assertEqual(model(x, 2), x * 2)
 
     def test_module_dispatch_rechecks_before_honouring_an_opt_out(self):
         # [0] opted out, [1] checked and falsely rejected once: the re-check
-        # finds [1]'s real match before the fall-through can hand the call to [0].
+        # finds [1]'s real match before the opt-out stage can hand the call to [0].
         model, x = self._aot_compile_mode_branches()
         model.forward.compiled_results[0].disable_guard_check()
         self._rescued_by_the_recheck(model, x)
 
     @parametrize("leading_opt_outs", [0, 1, 2])
-    def test_module_dispatch_no_match_falls_through_to_the_first_result(
+    def test_module_dispatch_no_match_raises_unless_a_result_opted_out(
         self, leading_opt_outs
     ):
-        # Nothing mocked: a call neither result guards is handed to
-        # compiled_results[0], which raises unless it opted out, in which case
-        # its graph runs; opting [1] out as well changes nothing. The graphs
-        # differ (x * 2 and x * 3), so the number says which result answered.
-        # The fourth row, [1] opted out alone, raises here like the first and
-        # is pinned by the commit that changes it.
+        # Nothing mocked: a call neither result guards raises the no-match
+        # report, and is handed to no result; with [0] opted out its graph runs
+        # instead, and opting [1] out as well changes nothing. The graphs differ
+        # (x * 2 and x * 3), so the number says which result answered.
         model, x = self._aot_compile_mode_branches()
         for result in model.forward.compiled_results[:leading_opt_outs]:
             result.disable_guard_check()
         if leading_opt_outs:
             self.assertEqual(model(x, 2), x * 2)
         else:
-            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
                 model(x, 2)
 
     def test_aot_compile_module_disable_guard_check(self):
@@ -2557,6 +2628,54 @@ from user code:
         self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
             self.assertEqual(loaded(x), x * 3)
+
+    def test_no_match_report_names_the_results_the_dispatch_judged(self):
+        # compiled_results is public, and the report indexes the binding the
+        # dispatch built, one per result the call began with. [0]'s check()
+        # splices a result in AHEAD of it mid-call: a report that re-read the
+        # list by index would ask for a binding the dispatch never made, and an
+        # IndexError would take its place; one that re-read it and zipped would
+        # describe the spliced result against [0]'s binding under the same
+        # header, so the spliced result's describer is watched as well. It is
+        # the next call's to judge.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        first = aot_compile_forward(mod, make_scaling_forward(2), x)
+        later = aot_compile_forward(mod, make_scaling_forward(3), x)
+        combined = AOTCompiledModel(mod, [first])
+        manager = first._live_guard_manager()
+        check = manager.check
+
+        def splicing_check(f_locals):
+            # Idempotent: the re-check pass runs this check a second time.
+            combined.compiled_results[:] = [later, first]
+            return check(f_locals)
+
+        later_manager = later._live_guard_manager()
+        describers = Mock()
+        describe, later_describe = manager.check_verbose, later_manager.check_verbose
+        watch_first = patch.object(manager, "check_verbose", wraps=describe)
+        watch_later = patch.object(later_manager, "check_verbose", wraps=later_describe)
+        with watch_first as first_described, watch_later as later_described:
+            describers.attach_mock(first_described, "first")
+            describers.attach_mock(later_described, "later")
+            with patch.object(manager, "check", splicing_check):
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 1 compiled input(s)", lines[0])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
+                self.assertEqual([c[0] for c in describers.mock_calls], ["first"])
+                # The next call judges the spliced list: two entries, in the
+                # list's order, each described by its own tree.
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 2 compiled input(s)", lines[0])
+                heads = [line[:6] for line in lines[1:3]]
+                self.assertEqual(heads, ["  [0] ", "  [1] "])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 2)
+                order = [c[0] for c in describers.mock_calls]
+                self.assertEqual(order, ["first", "later", "first"])
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # A tree that THROWS out of C++ returns through
