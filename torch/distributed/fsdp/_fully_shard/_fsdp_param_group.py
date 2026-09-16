@@ -464,8 +464,10 @@ class FSDPParamGroup:
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
 
-                with torch.autograd._unsafe_preserve_version_counter(
-                    (tensor,) if not tensor.is_inference() else ()
+                with (
+                    torch.autograd._unsafe_preserve_version_counter(tensor)
+                    if not tensor.is_inference()
+                    else contextlib.nullcontext()
                 ):
                     tensor.copy_(all_gather_input)
 
