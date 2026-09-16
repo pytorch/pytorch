@@ -621,3 +621,96 @@ def _is_risky_drop(
             or _defined_where_read(value, entry.orig_guard.user_stack)
         )
     return True
+
+
+# Guards that pin an input's SHAPE or VALUE, and are never policy-dropped even
+# when they held identically across every captured variant. Dropping a guard is
+# licensed by "it discriminated nothing", but with a single example nothing CAN
+# discriminate, and what silently disappears is the check that the runtime tensor
+# looks like the captured one at all -- so an out-of-domain shape reaches a kernel
+# specialized for a different one, which crashes on inductor and can quietly
+# miscompute on eager. Shape is the axis a caller is most likely to vary and least
+# likely to expect to be unchecked, so it is always serialized.
+_SHAPE_BEARING_GUARD_TYPES = frozenset(
+    {
+        "TENSOR_MATCH",
+        "SEQUENCE_LENGTH",
+        # Value-equality guards belong here for the same reason and are the
+        # half that bites hardest: they pin a Python value the graph
+        # specialized on -- an int or bool argument, `module.training`, an
+        # `.item()` result, `mask=None`. Dropped, the artifact serves the
+        # captured branch for every other value, with correct-looking numerics
+        # and nothing in the header to say so. Shapes at least crash inside a
+        # kernel; these do not.
+        "CONSTANT_MATCH",
+        "EQUALS_MATCH",
+        "DUPLICATE_INPUT",
+        # And the one that pins whether an attribute is THERE. hasattr is a
+        # branch like any other, so dropping it serves the captured side to a
+        # caller on the other one -- the same silent wrong answer as a dropped
+        # CONSTANT_MATCH. Reachable on the DEFAULT gates, because a
+        # single-variant capture makes every slot look invariant and the drop
+        # is not classed risky.
+        "HASATTR",
+        # And the guard that pins an input's KIND. Dropped, a graph traced for
+        # one class is served to another and returns the first one's answer,
+        # silently -- there is no shape to crash on. Upstream depends on this
+        # specifically: an AsyncCollectiveTensor's tensor-class guards are
+        # deliberately removed so an ACT-traced graph can be reused for the
+        # resolved tensor, and the observation sites reinstall exactly this
+        # guard to keep that sound. FAKE_SCRIPT_TYPE_MATCH is the same pin for
+        # a reference-type opaque object (type(unwrapped) is T).
+        "TYPE_MATCH",
+        "FAKE_SCRIPT_TYPE_MATCH",
+        # And the default-device pin: the graph specialized on
+        # utils_device.CURRENT_DEVICE, so a capture under the default None
+        # served under torch.set_default_device("cuda") returns CPU tensors
+        # with no refusal.
+        "DEFAULT_DEVICE",
+        # And every guard that pins a Python fact about a value or a container's
+        # contents: whether a key is in a dict or a set, which keys a dict has,
+        # whether an attribute is absent from an instance __dict__, how long a
+        # tuple iterator is, where a range/count iterator stands, whether a
+        # value is None or a given bool. Each one is a branch the graph
+        # specialized on, so a drop serves the captured branch to the other
+        # side, silently -- and a module-owned dict (self.opts = {}) is
+        # environment-rooted, which is exactly where the policy used to drop it.
+        "BOOL_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "DICT_CONTAINS",
+        "DICT_KEYS_MATCH",
+        "DICT_NOT_CONTAINS",
+        "MAPPING_KEYS_CHECK",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
+        "NOT_PRESENT_IN_GENERIC_DICT",
+        "RANGE_ITERATOR_MATCH",
+        "SET_CONTAINS",
+        "SET_NOT_CONTAINS",
+        "TUPLE_ITERATOR_LEN",
+    }
+)
+
+
+# Guards whose C++ leaf compares something no fingerprint here models: subclass
+# metadata, a DTensor placement, an opaque object's guard values, a raw
+# DispatchKeySet, or process-wide state carried entirely in the leaf. Calling
+# two of these equal is how the report ends up asserting a precondition that
+# does not hold, so they are never compared -- they are reported separately as
+# undetermined, which is the honest answer and cannot mislead.
+_UNMODELLED_GUARD_TYPES = frozenset(
+    {
+        "DISPATCH_KEY_SET_MATCH",
+        "DTENSOR_SPEC_MATCH",
+        # Its builder is a no-op like GRAD_MODE's, but GlobalStateGuard does not
+        # snapshot FSDP training state and the state is per param group, so
+        # nothing here can model or vouch for it.
+        "FSDP_TRAINING_STATE",
+        "GLOBAL_STATE",
+        "OPAQUE_OBJ_GUARD_FN_MATCH",
+        "SHAPE_ENV",
+        "TENSOR_SUBCLASS_METADATA_MATCH",
+        "TORCH_FUNCTION_STATE",
+    }
+)
