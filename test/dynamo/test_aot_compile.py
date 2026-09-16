@@ -603,7 +603,7 @@ class CountedKey:
 
 AOT_BRANCH_SCALE = 3.0
 
-_ACCEPTED_IN_THE_REPORT = "  [1] <guards rejected this call twice and then accepted it here: a guard that does not answer consistently, or guarded state that changed between those evaluations>"
+_ACCEPTED_IN_THE_REPORT = "<guards rejected this call twice and then accepted it here: a guard that does not answer consistently, or guarded state that changed between those evaluations>"
 
 
 class ModeBranchGlobalModule(torch.nn.Module):
@@ -2113,6 +2113,35 @@ from user code:
         self.assertFalse(lines[3].startswith(" "), lines[3])
         self.assertIn("Add a ModelInput", message)
 
+    def test_no_match_report_joins_every_verbose_part_of_an_entry(self):
+        # A symbolic-shape refusal is the ordinary multi-part entry: the SHAPE_ENV
+        # guard is one lambda over every relation the tree holds, and a failure
+        # quotes all of its exprs, satisfied ones included, so the line has to
+        # carry each of them joined with "; " for the reader to find the one
+        # this call broke.
+        class TwoDynamicModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x[: y.size(0)] + y
+
+        x, y = torch.randn(4, 3), torch.randn(2, 3)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+        model = torch.compile(TwoDynamicModule(), fullgraph=True, backend="eager")
+        model._aot_compile([ModelInput(args=(x, y), kwargs={}, contexts=[])])
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(2, 3), torch.randn(4, 3))
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(len(lines), 3, lines)
+        self.assertTrue(lines[1].startswith("  [0] "), lines[1])
+        # The relation this call broke and the two bounds it satisfies, on the
+        # one entry line.
+        self.assertIn("L['y'].size()[0] <= L['x'].size()[0]", lines[1])
+        self.assertIn("2 <= L['y'].size()[0]", lines[1])
+        self.assertIn("2 <= L['x'].size()[0]", lines[1])
+        # At least the two separators the join adds; a part's own free text (the
+        # 0/1-specialization note) carries a "; " of its own, so not exactly two.
+        self.assertGreaterEqual(lines[1].count("; "), 2, lines[1])
+
     def test_no_match_report_keeps_an_entry_on_one_line_past_odd_separators(self):
         # A verbose code part embeds the guard's own source line, which the read
         # producing it ends only at \n, so every other separator splitlines()
@@ -2744,24 +2773,29 @@ from user code:
     def test_no_match_message_when_a_guard_answers_inconsistently(self):
         # Both dispatch passes ran [1]'s whole tree and both rejected the call,
         # so an accept while the report asks why contradicts them rather than
-        # correcting them: neither the guards it just passed nor "add a
-        # ModelInput" says anything true about that entry.
+        # correcting them. The guards the tree just passed cannot be quoted as
+        # the reason the call was refused, so GuardDebugInfo.result decides what
+        # the entry says.
         model, x = self._aot_compile_mode_branches()
         probe, _ = self._install_global_probe("AOT_BRANCH_SCALE", misses=2)
         with self.assertRaises(RuntimeError) as ctx:
             model(x, 1)
         message = str(ctx.exception)
         # Two rejections in dispatch, then the report's accept: one lookup per
-        # evaluation, since one accessor is rooted at the global and the dict-tag
-        # fast path that would skip it is off -- the probe's pop/insert bumped
-        # this module dict's version past the one the last accept recorded.
+        # evaluation, since one DictGetItemGuardAccessor is rooted at the global.
+        # That accessor skips the lookup on a check() whose manager's dict tag
+        # matches (matches_dict_tag in guards.cpp, under any config); the probe's
+        # pop/insert bumped this module dict's version past the tag the manager
+        # holds, so no evaluation skips it.
         self.assertEqual(probe.compares, 3)
-        self.assertIn(_ACCEPTED_IN_THE_REPORT, message)
+        self.assertIn(f"  [1] {_ACCEPTED_IN_THE_REPORT}", message)
         # One entry line per result: the explanation is all [1] contributes, so
         # no blank "  [1] " line follows it from an accept's empty verbose parts.
         entries = [line for line in message.splitlines() if line.startswith("  [")]
         self.assertEqual(len(entries), 2)
-        # [0] is a real mismatch, so its advice still applies to the call.
+        # The footer is the report's, not [0]'s: a ModelInput captured for this
+        # call gets a tree that matches it on the first evaluation, so it is a
+        # mitigation for [1]'s entry as well as for [0]'s real mismatch.
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("Add a ModelInput", message)
 
@@ -2794,7 +2828,7 @@ from user code:
         # Both passes ran the tree against the wrong value and refused; the
         # accept is the report's alone, and the call is refused all the same.
         self.assertEqual(check.call_count, 2)
-        self.assertIn(_ACCEPTED_IN_THE_REPORT, message)
+        self.assertIn(f"  [1] {_ACCEPTED_IN_THE_REPORT}", message)
         entries = [line for line in message.splitlines() if line.startswith("  [")]
         self.assertEqual(len(entries), 2)
         self.assertIn("[0] L['mode'] == 0", message)
@@ -2909,6 +2943,36 @@ from user code:
         state = torch._C._get_torch_function_state()
         with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
             model(nested)
+        self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_module_restores_torch_function_after_the_report_throws(self):
+        # The test above throws out of the scan's check() and never reaches the
+        # report, whose check_verbose is the module path's only direct call of it
+        # and has the same non-RAII exit. Here check() refuses cleanly and the
+        # tree throws only when the report describes it: TENSOR_MATCH's verbose
+        # failure branch calls is_parameter, which runs the Parameter metaclass's
+        # __instancecheck__, patched to raise. The throw propagates in place of
+        # the report; only the state it leaves is pinned.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+        (result,) = model.forward.compiled_results
+        manager, meta = result._live_guard_manager(), type(torch.nn.Parameter)
+
+        def raising_instancecheck(*args):
+            raise RuntimeError("__instancecheck__ raised")
+
+        state = torch._C._get_torch_function_state()
+        with (
+            patch.object(manager, "check", return_value=False) as check,
+            patch.object(meta, "__instancecheck__", raising_instancecheck),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "__instancecheck__ raised"):
+                model(torch.randn(3, 3, dtype=torch.float64))
+        # Both passes refused, so the throw is the report's check_verbose.
+        self.assertEqual(check.call_count, 2)
         self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
