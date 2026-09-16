@@ -217,8 +217,10 @@ TensorCheck::TensorCheck(
     : pytype(pt),
       dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
-      device_index_(v.device().index()),
-      device_index_is_current_(device_index_is_current),
+      device_index_(
+          device_index_is_current
+              ? std::nullopt
+              : std::optional<c10::DeviceIndex>(v.device().index())),
       requires_grad_(v.requires_grad()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
@@ -240,20 +242,22 @@ TensorCheck::TensorCheck(
       dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(dtype),
       device_index_(device_index),
-      device_index_is_current_(false),
       requires_grad_(requires_grad),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
       dim_(static_cast<int64_t>(sizes_.size())) {}
 
 bool TensorCheck::deviceIndexMatches(const c10::Device& device) const {
-  if (!device_index_is_current_) {
-    return device_index_ == device.index();
+  // An unset index means the guard accepts the current accelerator rather than
+  // a recorded one -- still a real check, just not a rank-specific one. Neither
+  // form admits a tensor on some other device.
+  //
+  // Deliberately not value_or(current_device_index()): that evaluates its
+  // argument eagerly, querying the current device on every recorded-index check
+  // too. This runs per guarded tensor, so keep the common path call-free.
+  if (device_index_.has_value()) {
+    return *device_index_ == device.index();
   }
-  // compile_on_one_rank: the index recorded when this guard was built is that
-  // of whichever rank happened to compile, so comparing against it would reject
-  // every other rank. CooR guarantees the tensor is on the current accelerator,
-  // so check that instead -- still a real check, just not a rank-specific one.
   return device.index() == current_device_index();
 }
 
@@ -338,11 +342,11 @@ std::string TensorCheck::check_verbose(
     return std::move(fail_reason).str();
   } else if (!deviceIndexMatches(v.device())) {
     fail_reason << "Tensor device index mismatch. Expected device index to be ";
-    if (device_index_is_current_) {
+    if (device_index_.has_value()) {
+      fail_reason << static_cast<int>(*device_index_);
+    } else {
       fail_reason << "the current device ("
                   << static_cast<int>(current_device_index()) << ")";
-    } else {
-      fail_reason << static_cast<int>(device_index_);
     }
     fail_reason << ", actual " << static_cast<int>(v.device().index());
     return std::move(fail_reason).str();
@@ -8454,7 +8458,7 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("user_stack"),
           py::arg("pytype"),
           py::arg("dispatch_keys"),
-          py::arg("device_index_is_current"))
+          py::arg("device_index_is_current") = false)
 
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
