@@ -128,6 +128,7 @@ import sysconfig
 import types
 from typing import TYPE_CHECKING
 
+import torch
 from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
 
@@ -623,6 +624,13 @@ def _is_risky_drop(
     return True
 
 
+# Guards whose check IS object identity, directly or through a derived guard,
+# which is the same test default_guard_filter_fn drops on.
+_IDENTITY_GUARD_TYPES = frozenset(
+    CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+)
+
+
 # Guards that pin an input's SHAPE or VALUE, and are never policy-dropped even
 # when they held identically across every captured variant. Dropping a guard is
 # licensed by "it discriminated nothing", but with a single example nothing CAN
@@ -712,5 +720,59 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "SHAPE_ENV",
         "TENSOR_SUBCLASS_METADATA_MATCH",
         "TORCH_FUNCTION_STATE",
+    }
+)
+
+
+# Guard types whose GuardBuilder method is `pass`: the guard is a marker, and
+# the check it names is made by GLOBAL_STATE's leaf. Nothing about them is
+# serialized or dropped, so they never appear in a dropped-guard report --
+# listing GRAD_MODE as "a precondition nothing checks" would be false, since
+# GlobalStateGuard checks it on every call. Their facts ARE compared, from the
+# same process state GlobalStateGuard snapshots (see _value_fingerprint).
+_NOOP_GUARD_TYPES = frozenset({"DETERMINISTIC_ALGORITHMS", "GRAD_MODE"})
+
+
+def _is_noop_guard_type(guard_type: str) -> bool:
+    # EMPTY_NN_MODULE_HOOKS_DICT is a no-op by config: under
+    # skip_nnmodule_hook_guards, the default, GuardBuilder emits nothing for it.
+    return guard_type in _NOOP_GUARD_TYPES or (
+        guard_type == "EMPTY_NN_MODULE_HOOKS_DICT"
+        and torch._dynamo.config.skip_nnmodule_hook_guards
+    )
+
+
+# The ONLY guard types the invariance policy may drop, and only when proven
+# invariant across every captured variant: identity guards (which the default
+# filter drops anyway, as unserializable) and process-wide compiler state. The
+# four sets form a total, disjoint classification of GuardBuilder's
+# guard-producing methods, pinned by
+# test_precompile_package.test_guard_policy_classification_is_total: a guard type in
+# none of them -- i.e. any type added to GuardBuilder after this list -- is
+# KEPT unconditionally until someone classifies it here, so a new value-pinning
+# guard can never become silently droppable by default.
+_INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
+    {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "BUILTIN_MATCH",
+        "CLASS_MATCH",
+        "CLOSURE_MATCH",
+        # COW_TENSOR_MATCH pins a folded torch._C._is_cow_tensor branch, so by
+        # value it reads like the shape-bearing membership guards -- but it
+        # cannot be rebuilt from the pickle: the tensor comes back fake and its
+        # builder rejects that, so the default filter keeps it and then the
+        # policy's re-serialization, or a load, fails on it rather than losing
+        # it silently. It lives here rather than in the shape-bearing set
+        # because keeping it never yields a loadable artifact.
+        "COW_TENSOR_MATCH",
+        "DICT_VERSION",
+        "DUAL_LEVEL",
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        "FUNCTION_MATCH",
+        "FUNCTORCH_STACK_MATCH",
+        "ID_MATCH",
+        "MODULE_MATCH",
+        "NN_MODULE",
+        "WEAKREF_ALIVE",
     }
 )
