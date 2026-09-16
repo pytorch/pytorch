@@ -6,17 +6,18 @@ frame, each ``torch_dynamo_resume_in_*`` continuation created by a graph break,
 and every recompiled variant of each -- is captured into one serializable
 artifact on top of CompilePackage.
 
-Everything here is internal; the session that drives it and the
-``torch.compiler.precompile.capture(..., tracer=DynamoTracer())`` entry point build on
-these in later commits. This is distinct from
+Everything here is internal; the capture session and the
+``torch.compiler.precompile.capture`` / ``accumulate`` / ``load`` entry points
+that build on it follow in later commits. This is distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture.
 
 Capture is by execution, and the caller drives it: the session hands back a
 callable, the caller invokes it with real inputs inside their own loop, and
 every frame Dynamo produces is recorded. Runtime guards stay intact during
-capture; ``guard_filter_fn`` applies only to the serialized copy, and every
-dropped guard is reported in ``PrecompileSummary.dropped_guards``.
+capture, so later calls trigger the same recompilations as ordinary
+``torch.compile``; ``guard_filter_fn`` applies only to the serialized copy, and
+every dropped guard is reported in ``PrecompileSummary.dropped_guards``.
 
     with torch.compiler.precompile.capture(
         step, artifact_path="m.py", cache_path="m.cache", backend="inductor"
@@ -29,41 +30,35 @@ dropped guard is reported in ``PrecompileSummary.dropped_guards``.
     with compiled, torch.no_grad():
         compiled(model, x1)
 
-The caller's calls ARE the capture: each ``cap(...)`` runs the callable for
-real, returns its result, and records every frame, break continuation and
-guarded variant it exercises. ``precompile.accumulate`` is the same model, rewriting the artifact on every
+``precompile.accumulate`` is the same model, rewriting the artifact on every
 call instead of once at block exit.
 
-Calls run with the grad mode the caller sets -- capture does not force
-``no_grad()`` or ``enable_grad()``. ``training=True`` lowers the backward
-eagerly so the artifact carries one and a served output can be backpropagated.
-No loss is needed for that: the joint trace synthesizes tangents from the
-forward outputs' own metadata.
-
-Live capture retains every runtime guard, so later examples trigger the same
-recompilations as ordinary ``torch.compile``. ``guard_filter_fn`` applies only
-to the serialized copy. If serialization drops a configuration-dependent guard,
-the artifact is refused by default rather than written with variants whose
-dispatch would be ambiguous after load. ``invariants`` writes a readable report
+If serialization drops a configuration-dependent guard, the artifact is refused
+by default rather than written with variants whose dispatch would be ambiguous
+after load. ``invariants`` writes a readable report
 that separates, per frame, the guards holding in EVERY variant from the ones
 that differed: the first are preconditions the artifact is only valid under,
 the second are what tell its graphs apart. Guards from different frames are not
 comparable -- an entry frame guards its arguments, a resume frame guards
 whatever crossed the break -- so the intersection is per frame.
 
-Capture is by execution: a resume function only exists once the frame ahead of
-it has actually run, so every variant must be exercised. Whatever you do not
-run is not in the artifact, and ``summary().complete`` means complete only for
-the observed capture, not for every possible input to the callable. A captured
-call that raises marks the session incomplete even if caller code catches it.
+Because capture is by execution, a resume function only exists once the frame
+ahead of it has actually run, so every variant must be exercised. Whatever you
+do not run is not in the artifact, and ``summary().complete`` means complete
+only for the observed capture, not for every possible input to the callable. A
+captured call that raises marks the session incomplete even if caller code
+catches it.
 
 Know these before relying on an artifact in production:
 
-* An inference artifact is the default: the caller runs the calls under
-  ``torch.no_grad()``. For a training artifact pass ``training=True``, which
-  traces with grad on and lowers the backward eagerly -- without it, AOTAutograd
-  defers the backward to the first ``.backward()`` call, so a grad-enabled
-  capture that never makes one records no backends and cannot be written.
+* Calls run with the grad mode the caller sets; capture forces neither
+  ``no_grad()`` nor ``enable_grad()``. For an inference artifact run the calls
+  under ``torch.no_grad()``. For a training artifact pass ``training=True``,
+  which lowers the backward eagerly so the artifact carries one and a served
+  output can be backpropagated -- without it, AOTAutograd defers the backward
+  to the first ``.backward()`` call, so a grad-enabled capture that never makes
+  one records no backends and cannot be written. No loss is needed: the joint
+  trace synthesizes tangents from the forward outputs' own metadata.
 * A non-tensor argument, and any value that crosses a graph break, is guarded
   by equality, so an int/bool/str argument or a break coming from ``.item()``
   yields an artifact that only serves calls reproducing those exact values.
@@ -72,14 +67,15 @@ Know these before relying on an artifact in production:
   ``dynamic=True`` helps with shapes but not with pinned values.
 * Identity guards cannot be serialized, so precompiling gives up on noticing
   that a guarded object was rebound. ``summary().dropped_guards`` is the
-  authoritative list. ``risky_dropped_guards`` includes every drop observed to
-  distinguish captured variants plus a lint for configuration-like sources; it
-  is still not a proof for unobserved deployments. See ``_is_risky_drop``. The
-  public ``torch.compiler.precompile`` facade rejects the RISKY subset by
-  default. Refusing every drop is opt-in: every model drops the identity guards
-  precompile cannot serialize, so ``require_no_dropped_guards=True`` refuses
-  essentially every real artifact. Some models trip the lint on
-  library internals: measured on stock models, torchvision resnet18 and
+  authoritative list. ``summary().risky_dropped_guards`` includes every drop
+  observed to distinguish captured variants plus a lint for configuration-like
+  sources; it is still not a proof for unobserved deployments. See
+  ``_is_risky_drop``. The public ``torch.compiler.precompile`` facade rejects
+  the RISKY subset by default. Refusing every drop is opt-in: every model drops
+  the identity guards precompile cannot serialize, so
+  ``require_no_dropped_guards=True`` refuses essentially every real artifact.
+  Some models trip the lint on library internals. Measured on stock models
+  when this was written, torchvision resnet18 and
   mobilenet_v3 report none, timm's ViT reports one (a re-exported
   ``torch._assert``) and transformers' Qwen2 reports 33 built from a two-layer
   config, 55 for the pretrained 24-layer, of which only the
@@ -102,18 +98,6 @@ Know these before relying on an artifact in production:
 
 This wraps CompilePackage, which is the low-level component and is not meant to
 be used directly.
-
-The public surface is ``torch.compiler.precompile.capture(...)``, a caller-driven
-capture used as a context manager: the caller's own calls inside the block drive
-the capture, and the ``(python_code, cache)`` artifact is written to the given files
-when the block exits (its default ``tracer=DynamoTracer()`` records many calls;
-``tracer=MakeFxTracer()`` produces a self-contained Python source artifact from one
-call); ``torch.compiler.precompile.accumulate(...)``, the counterpart that rewrites
-the files after every call; and ``torch.compiler.precompile.load``.
-The helpers in this module, including the capture session, implement that surface
-and remain internal. All of it is distinct from ``torch._dynamo.config.caching_precompile``,
-which caches ``torch.compile`` artifacts transparently without an explicit
-capture block.
 """
 
 from __future__ import annotations
@@ -121,7 +105,6 @@ from __future__ import annotations
 import functools
 import hashlib
 import importlib.machinery
-import logging
 import os
 import re
 import site
@@ -132,32 +115,19 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch._guards import ChainedSource, Source
-from torch.compiler._precompile_types import (
-    FrameInvariants,
-    GuardFact as _GuardFact,
-    PrecompileSummary,
-)
+from torch.utils._config_module import ConfigModule
 
 from .guards import CheckFunctionManager
-from .source import AttrSource, DictGetItemSource, GlobalSource
+from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
     import traceback
     from collections.abc import Callable, Mapping, Sequence
 
+    from torch.compiler._precompile_types import GuardFact as _GuardFact
+
     from .types import GuardFilterEntry
-
-
-log = logging.getLogger(__name__)
-
-# Not a public surface -- see the module docstring. This exists so `from ...
-# import *` in a debugging session pulls the entry points rather than every
-# private helper, and so linters do not flag them as unused.
-__all__ = [
-    "FrameInvariants",
-    "PrecompileSummary",
-]
 
 
 def _compose_with_default(
@@ -175,13 +145,13 @@ def _compose_with_default(
     """
 
     def composed(entries: Sequence[GuardFilterEntry]) -> Sequence[bool]:
-        base = default_guard_filter_fn(entries)
         chosen = user(entries)
         if len(chosen) != len(entries):
             raise ValueError(
                 f"guard_filter_fn returned {len(chosen)} decisions for "
                 f"{len(entries)} guards; it must return one per entry."
             )
+        base = default_guard_filter_fn(entries)
         return [bool(a) and bool(b) for a, b in zip(base, chosen)]
 
     return composed
@@ -191,23 +161,31 @@ def default_guard_filter_fn(
     guard_entries: Sequence[GuardFilterEntry],
 ) -> Sequence[bool]:
     """
-    Drop the guard types that cannot be serialized, and keep everything else.
+    Drop every guard whose type, or whose derived type, is one the serializer
+    refuses, and keep everything else.
 
-    Read this before trusting an artifact. The unserializable set is exactly the
-    IDENTITY guards -- ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH,
-    NN_MODULE, CLASS_MATCH, DICT_VERSION, WEAKREF_ALIVE -- so precompiling
-    inherently gives up on noticing that a guarded object was REBOUND to a
-    different object of the same shape. Most such guards are on modules and
-    builtins and are stable in practice, but one on a global holding a function
-    is not: rebind it between capture and load and the artifact serves the graph
-    traced against the old one, with no error.
+    Read this before trusting an artifact. The refused set is the IDENTITY
+    guards -- ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH, NN_MODULE,
+    CLASS_MATCH, DICT_VERSION, WEAKREF_ALIVE -- so precompiling inherently gives
+    up on noticing that a guarded object was REBOUND to a different object of
+    the same shape. Most such guards are on modules and builtins and are stable
+    in practice, but one on a global holding a function is not: rebind it
+    between capture and load and the artifact serves the graph traced against
+    the old one, with no error.
 
-    Keeping these makes serialization raise for essentially every function, so
-    every drop is recorded with its source name in
+    This is not exactly ``CheckFunctionManager.serialize_guards``'s test. It is
+    stricter in one direction: the serializer accepts a TYPE_MATCH or
+    BUILTIN_MATCH whatever its derived types, so the BUILTIN_MATCH whose
+    derived ID_MATCH this drops would have serialized. It is looser in the
+    other: a TYPE_MATCH on a local-scope class passes here and the serializer
+    still refuses it, because the type cannot be pickled.
+
+    Keeping the identity guards makes serialization raise for essentially every
+    function, so every drop is recorded with its source name in
     ``PrecompileSummary.dropped_guards``. A caller is not refused for having
     them, because requiring none would refuse essentially every model. The rail
-    that is on is the risky-drop
-    lint, and a lint is not a proof. See ``risky_dropped_guards``.
+    that is on is the risky-drop lint, and a lint is not a proof. See
+    ``_is_risky_drop``.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
@@ -225,26 +203,23 @@ def _owning_module(value: object) -> str | None:
 
 
 def _source_root(source: Source) -> Source:
-    while isinstance(source, ChainedSource):
-        source = source.base
-    return source
+    return source.get_base() if isinstance(source, ChainedSource) else source
 
 
 # Locals Dynamo synthesizes when a resume function is itself nested, passed
-# positionally into the continuation. They name generated code, not a slot any
-# config chooses, so an identity guard lost on one cannot diverge.
+# positionally into the continuation (resume_execution.py builds the list).
+# They name generated code, not a slot any config chooses, so an identity guard
+# lost on one cannot diverge.
 _DYNAMO_SYNTHESIZED = ("__nested_resume_fns", "__nested_frame_values")
 
 
-def _is_dynamo_synthesized(source_name: str) -> bool:
-    return any(
-        source_name == n or source_name.startswith(n + "[") for n in _DYNAMO_SYNTHESIZED
-    )
+def _is_dynamo_synthesized(source: Source) -> bool:
+    root = _source_root(source)
+    return isinstance(root, LocalSource) and root.local_name in _DYNAMO_SYNTHESIZED
 
 
-# A pip target nested inside the stdlib dir that sysconfig does not name in
-# this layout -- Debian's /usr/lib/python3.X/dist-packages -- still ends in one
-# of these.
+# Belt and braces for an install directory none of the roots name: whichever
+# layout put it there, a pip target still ends in one of these.
 _INSTALL_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
 
 
@@ -269,6 +244,9 @@ def _stdlib_roots() -> tuple[str, ...]:
         roots.append(frozen_dir)
     paths = sysconfig.get_paths()
     roots += [p for p in (paths.get("stdlib"), paths.get("platstdlib")) if p]
+    if sys.platform == "win32":
+        # The stdlib's C extensions live beside Lib, not under it.
+        roots.append(os.path.join(sys.base_prefix, "DLLs"))
     return tuple(sorted({_norm(p) for p in roots}))
 
 
@@ -289,11 +267,10 @@ def _install_roots() -> tuple[str, ...]:
         get = getattr(site, name, None)
         try:
             got = get() if get is not None else None
+            found = [got] if isinstance(got, str) else list(got or ())
         except Exception:
             continue  # -S, or a site.py that defines it but cannot answer
-        if got is None:
-            continue
-        roots += [got] if isinstance(got, str) else list(got)
+        roots += [p for p in found if isinstance(p, str)]
     return tuple(sorted({_norm(p) for p in roots}))
 
 
@@ -308,7 +285,7 @@ def _torch_roots() -> tuple[str, ...]:
     """
     own_file = globals().get("__file__")
     if not own_file:
-        return ()  # frozen torch: nothing to anchor to, fall back to the name
+        return ()  # frozen torch: no directory to anchor to
     own = _norm(os.path.dirname(os.path.dirname(own_file)))
     roots = {own}
     search = getattr(sys.modules.get("torch"), "__path__", None) or ()
@@ -319,6 +296,7 @@ def _torch_roots() -> tuple[str, ...]:
 
 
 def _within(path: str, roots: tuple[str, ...]) -> bool:
+    """Prefix test over ``_norm``-ed paths; the caller normalizes both sides."""
     return any(path == r or path.startswith(r + os.sep) for r in roots)
 
 
@@ -359,9 +337,11 @@ def _located(module: types.ModuleType, name: str, stdlib: bool) -> bool | None:
     if origin == "built-in" or loader is importlib.machinery.BuiltinImporter:
         # Statically linked, and BuiltinImporter precedes PathFinder on
         # sys.meta_path, so no file on sys.path is reachable under this name.
-        return name.partition(".")[0] in sys.builtin_module_names
+        # The inittab is keyed on the full dotted name.
+        return name in sys.builtin_module_names
     if origin == "frozen" or loader is importlib.machinery.FrozenImporter:
-        return True  # frozen also precedes the path finder
+        # frozen also precedes the path finder
+        return importlib.machinery.FrozenImporter.find_spec(name) is not None
     return None  # namespace package, exec'd in memory, REPL __main__
 
 
@@ -383,8 +363,12 @@ def _is_library_module(module_name: str | None) -> bool:
     stdlib root and not under an install root (purelib nests inside stdlib in
     conda and inside platstdlib in a venv, so the exclusion is what does the
     work), or with no file at all because it is built in or frozen, which the
-    path finder cannot shadow. A name that is not imported, a namespace
-    package, and a module with no location evidence are all untrusted.
+    path finder cannot shadow. That is required of the TOP-LEVEL name: not
+    imported, a namespace package, or without location evidence, it is
+    untrusted. An imported inner name only has to not be located ELSEWHERE:
+    the package it was found in is already located, and real submodules carry
+    no evidence of their own (torch.ops has a relative ``__file__``,
+    pyexpat.errors none at all).
     """
     if module_name is None:
         return False
@@ -404,8 +388,8 @@ def _is_library_module(module_name: str | None) -> bool:
     for i in range(2, len(parts) + 1):
         name = ".".join(parts[:i])
         module = sys.modules.get(name)
-        # An unimported inner name has nothing to check, and the package it
-        # would have to be found in has already been located.
+        # Unimported or unlocatable, an inner name has nothing to check, and
+        # the package it would have to be found in has already been located.
         if module is not None and _located(module, name, stdlib) is False:
             return False
     return True
@@ -417,17 +401,27 @@ def _defined_where_read(
     """
     Whether the def lives in the file of the frame that read it.
 
-    A def bound to its own name in its OWN module takes an edit there to
-    repoint. ``from impl_a import op`` takes only a conditional import in the
-    reader, which is not an edit at all and which no checksum covers.
+    The caller has already matched the value's ``__name__`` to the global it
+    was read from; this adds the WHERE. A def bound to its own name in its OWN
+    module takes an edit there to repoint. ``from impl_a import op`` takes only
+    a conditional import in the reader, which is not an edit at all and which
+    no checksum covers.
     """
-    home = sys.modules.get(getattr(value, "__module__", None) or "")
+    home = sys.modules.get(_owning_module(value) or "")
     file = getattr(home, "__file__", None)
-    return bool(user_stack) and file is not None and file == user_stack[-1].filename
+    if not user_stack or not isinstance(file, str):
+        return False
+    return _norm(file) == _norm(user_stack[-1].filename)
 
 
 def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
-    """The module behind an ``__import_a_dot_b`` alias, mirroring import_source."""
+    """
+    The module behind an ``__import_a_dot_b`` alias, mirroring import_source.
+
+    The OutputGraph's import_sources table is authoritative, but a guard entry
+    does not carry it; unmangling collides only for a module literally named
+    ``a_dot_b``.
+    """
     prefix = "__import_"
     if not global_name.startswith(prefix):
         return None
@@ -456,12 +450,21 @@ def _module_namespaces(
     ``if flag: import impl_b as impl`` picks what ``impl.op`` resolves to per
     machine, and so does the same alias spelled ``from . import impl_b as
     impl`` in a package __init__. Inheriting the parent's trust without
-    checking the name is what let ``mypkg.impl.op`` through before.
+    checking the name is what let that shape through before.
+
+    Library ownership is trusted under ANY binding, ``import torch.nn.functional
+    as F`` included; the price, taken deliberately because flagging ``F`` would
+    flag every model, is that an alias config picks between two torch modules
+    is waived too (see ``_is_risky_drop``'s KNOWN GAP). A config module is the
+    one namespace whose bindings config chooses by definition, so it is never
+    trusted whoever owns it. Keys are source names, and the consumer looks a
+    read's ``source.base.name`` up exactly, never by prefix.
     """
     modules = {
         e.orig_guard.originating_source.name: (e.orig_guard.originating_source, e.value)
         for e in entries
         if isinstance(e.value, types.ModuleType)
+        and not isinstance(e.value, ConfigModule)
         and isinstance(_source_root(e.orig_guard.originating_source), GlobalSource)
     }
     # Dynamo guards the attributes it reads off an import alias but never the
@@ -478,29 +481,29 @@ def _module_namespaces(
     trusted: dict[str, bool] = {}
 
     def is_trusted(name: str) -> bool:
-        if name not in trusted:
-            trusted[name] = False  # also breaks cycles while recursing
-            found = modules.get(name)
-            if found is not None:
-                source, module = found
-                # Mirrors InstructionTranslator.import_source's alias.
-                dynamo_alias = "__import_" + module.__name__.replace(".", "_dot_")
-                if _is_library_module(module.__name__):
-                    trusted[name] = True
-                elif isinstance(source, GlobalSource):
-                    trusted[name] = source.global_name in (
-                        module.__name__,
-                        dynamo_alias,
-                    )
-                elif isinstance(source, AttrSource):
-                    outer = modules.get(source.base.name)
-                    trusted[name] = (
-                        outer is not None
-                        and is_trusted(source.base.name)
-                        and module.__name__
-                        in (source.member, f"{outer[1].__name__}.{source.member}")
-                    )
-        return trusted[name]
+        if name in trusted:
+            return trusted[name]
+        found = modules.get(name)
+        ok = False
+        if found is not None:
+            source, module = found
+            if _is_library_module(module.__name__):
+                ok = True
+            elif isinstance(source, GlobalSource):
+                ok = (
+                    source.global_name == module.__name__
+                    or _dynamo_alias_module(source.global_name) is module
+                )
+            elif isinstance(source, AttrSource):
+                outer = modules.get(source.base.name)
+                ok = (
+                    outer is not None
+                    and is_trusted(source.base.name)
+                    and module.__name__
+                    in (source.member, f"{outer[1].__name__}.{source.member}")
+                )
+        trusted[name] = ok
+        return ok
 
     return {name: module for name, (_, module) in modules.items() if is_trusted(name)}
 
@@ -561,14 +564,15 @@ def _is_risky_drop(
 
     Trusting a namespace is not trusting everything read off it. ``F.gelu`` is
     waived because torch owns torch.nn.functional and there is only one of it;
-    ``own_helpers.call`` is waived because own_helpers owns the def, subject to
-    the gap below. ``mypkg.op`` re-exported from ``mypkg.impl_b``,
-    ``dispatch.op`` and ``mypkg.impl.op`` are not waived: the import that chose
-    the implementation lives in a file the inlined-source checksum never sees,
-    so capture and serve can disagree with every other rail passing. Waiving
-    those is how this predicate failed open in an earlier round;
-    ``_RISKY_DROP_CORPUS`` in test_precompile_package.py is the regression net that keeps
-    them, and every other shape found so far, flagged.
+    ``own_helpers.call`` is waived because own_helpers owns a def of that same
+    name, subject to the gap below. ``mypkg.op`` re-exported from
+    ``mypkg.impl_b``, ``dispatch.op``, ``own_helpers.act`` bound to some other
+    def, and ``mypkg.impl.op`` where ``mypkg/__init__`` did ``from . import
+    impl_b as impl`` are not waived: the import or assignment that chose the
+    implementation lives in a file the inlined-source checksum never sees, so
+    capture and serve can disagree with every other rail passing.
+    ``test_risky_drop_decision_table`` in test_precompile_package.py pins these
+    shapes and every other one found so far.
 
     KNOWN GAP, and it is a wrong-answer one. EVERY waiver above judges the
     object capture happened to bind, not the statement that bound it, so any
@@ -593,7 +597,9 @@ def _is_risky_drop(
       waived even though the model itself reads ``F.gelu`` unconditionally.
       ``functools.wraps(F.gelu)(user_fn)`` reaches the same waiver by a
       different route, since it copies ``__name__`` and ``__module__`` off the
-      torch function it wraps.
+      torch function it wraps. So does an alias config picks between two torch
+      modules: ``F`` bound to torch.nn.functional or torch._refs.nn.functional
+      is trusted either way, and ``F.gelu`` names a different function.
 
     An ``allow_in_graph`` function passes too, and Dynamo traces it opaquely so
     the inlined-source checksum never covers it either. Nothing at capture time
@@ -604,20 +610,23 @@ def _is_risky_drop(
     """
     source = entry.orig_guard.originating_source
     value = entry.value
-    # entry.name, not source.name: guard names arrive with local scope stripped
-    # ("L['x'].y" -> "x.y"), and these are always locals of a resume frame.
-    if _is_dynamo_synthesized(entry.name):
+    if _is_dynamo_synthesized(source):
         return False
     if source.name in namespaces:
         return False
     if _reads_a_builtin(source, value):
         return False
-    if isinstance(source, ChainedSource):
+    if not entry.has_value:
+        return True  # nothing to judge ownership by
+    if isinstance(source, AttrSource):
         namespace = namespaces.get(source.base.name)
         if namespace is not None:
             return not (
                 _is_library_module(namespace.__name__)
-                or _owning_module(value) == namespace.__name__
+                or (
+                    _owning_module(value) == namespace.__name__
+                    and getattr(value, "__name__", None) == source.member
+                )
             )
     if (
         isinstance(source, GlobalSource)
@@ -630,8 +639,24 @@ def _is_risky_drop(
     return True
 
 
-# CONSTANT_MATCH covers bool/None/int, EQUALS_MATCH everything else comparable.
-_VALUE_EQUALITY_GUARD_TYPES = frozenset({"CONSTANT_MATCH", "EQUALS_MATCH"})
+# The guards that pin a Python value by equality. CONSTANT_MATCH is the front
+# door: it delegates a bool to BOOL_MATCH, None to NONE_MATCH, a code object to
+# ID_MATCH and everything else -- ints included -- to EQUALS_MATCH, and it is
+# the only guard method that derives into another one of these, so a slot's
+# top-level guard type is enough here. CONSTANT_SUBCLASS_MATCH pins the base
+# value of an int/float/str subclass argument; the two iterator guards pin an
+# iterator argument's exact position. Length and key-set guards
+# (SEQUENCE_LENGTH, TUPLE_ITERATOR_LEN, MAPPING_KEYS_CHECK) pin a container's
+# structure rather than a value and are deliberately not counted.
+_VALUE_EQUALITY_GUARD_TYPES = frozenset(
+    {
+        "CONSTANT_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "EQUALS_MATCH",
+        "RANGE_ITERATOR_MATCH",
+    }
+)
 
 
 def _pins_a_value(guard_type: str, name: str) -> bool:
@@ -669,31 +694,35 @@ def _pins_a_value(guard_type: str, name: str) -> bool:
 # invariant neither holds.
 _OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
 _SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
-_DYNAMO_INDICES = re.compile(r"_dynamo_\w*indices")
-# Dynamo appends a per-process counter to the globals it installs, so the same
-# guard reads __builtins_dict___6 in one compilation and ___8 in the next.
-# Leaving that in makes identical guards look like they differ.
-_DYNAMO_COUNTER = re.compile(
-    r"(__builtins_dict__|__compiled_fn|__resume_at)_*\d+(_\d+)?"
-)
+# Dynamo appends a per-process counter to the builtins dict it installs, so the
+# same guard reads __builtins_dict___6 in one compilation and ___8 in the next.
+# Of the globals Dynamo mints, only the three families in
+# aot_compile._MINTED_GLOBAL_PREFIXES can root a serializable guard: this one and
+# the two install_global_by_id shapes the pattern below covers. __compiled_fn_*
+# and __resume_at_* are codegen-only LOAD_GLOBAL targets, never guard subjects.
+_DYNAMO_COUNTER = re.compile(re.escape(_BUILTINS_DICT_PREFIX) + r"_\d+")
 # OutputGraph.install_global_by_id names a global "<prefix>_<id(value)>_c<n>",
 # so a guard reading one carries BOTH an address and a compile counter inside
 # an identifier, where neither pattern above can see it. Real models reach this
 # -- transformers' Qwen2 installs three -- and the report then differs run to
-# run, which is exactly what the "commit and diff" contract rules out.
+# run, which is exactly what the "commit and diff" contract rules out. The
+# prefix can be empty (torch itself is installed as "_<id>_c<n>"), so the digit
+# width is the anchor: it is what keeps a user identifier such as w_1_c2 intact.
 _DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
 
 
 def _normalize(text: str) -> str:
-    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)  # see _saved_hooks_fingerprint
+    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
     text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
-    return _DYNAMO_COUNTER.sub(r"\1_<n>", text)
+    return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
 
 
 def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
-    # Keep the _dynamo_*_indices parts: they carry TENSOR_MATCH's dimension
-    # marking, so mark_static on one variant and not the next shows up only here.
     return tuple(_normalize(part) for part in (code_list or ()))
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
 # Guards whose check IS object identity, directly or through a derived guard,
@@ -703,7 +732,18 @@ _IDENTITY_GUARD_TYPES = frozenset(
 )
 
 
-_STABLE_CONST_TYPES = (str, int, float, complex, bytes, bool, type(None))
+# Ellipsis and NotImplemented repr by name, so they are as stable as a literal.
+_STABLE_CONST_TYPES = (
+    str,
+    int,
+    float,
+    complex,
+    bytes,
+    bool,
+    type(None),
+    type(Ellipsis),
+    type(NotImplemented),
+)
 
 
 def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
@@ -715,7 +755,9 @@ def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
     filtered recursively rather than dropped whole: two lambdas differing only
     in a tuple or frozenset constant -- ``x * (1, 2)`` against ``x * (1, 3)`` --
     are genuinely different variants, and dropping the container is what let
-    them collide.
+    them collide. A const of any other type keeps its SLOT as a type marker:
+    ``x[..., 0]`` and ``x[0, ...]`` fold to one const tuple at the same index,
+    so with the slot dropped they would collide the same way.
     """
     out: list[object] = []
     for c in consts:
@@ -732,6 +774,8 @@ def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
         elif isinstance(c, frozenset):
             # Sorted by repr so the digest does not inherit set iteration order.
             out.append(tuple(sorted(_stable_consts(tuple(c)), key=repr)))
+        else:
+            out.append(f"<{type(c).__name__}>")
     return tuple(out)
 
 
@@ -767,24 +811,22 @@ def _object_identity(value: object) -> str:
     """
     A stable stand-in for the id ``_normalize`` stripped.
 
-    A name rather than an address, so the file still diffs clean across runs.
-    Two objects of one type still collapse -- two Linear instances are
-    indistinguishable here -- but the case that matters must separate: one slot
-    holding a different callable in different variants. A qualname alone does
-    NOT achieve that, because the shape this exists for is an ACT2FN-style
-    table, whose entries are all ``<lambda>`` in one module. Two of those then
-    render identically, the CLOSURE_MATCH that split the compilations lands in
-    the intersection, and the report calls the one thing that varies an
-    invariant of both. So a callable is also named by where it is DEFINED and by
-    a digest of its body, both source-derived and so still stable across
-    processes; the file is reduced to its basename so the report does not carry
-    a checkout path.
+    A qualname alone does not separate the case this exists for: an ACT2FN-style
+    table whose entries are all ``<lambda>`` in one module, where two variants
+    holding different entries would render identically and the CLOSURE_MATCH
+    that split them would be reported as an invariant of both. So a callable is
+    also named by where it is DEFINED (basename, so no checkout path) and by a
+    digest of its body, both source-derived and so stable across processes.
 
-    The discriminating part goes FIRST. Truncation is what bounds this string,
-    and a qualname alone can exceed the limit on real models -- a transformers
-    lambda nested in a long module path -- so a digest appended at the end is
-    cut off exactly on the names that need it most, re-colliding what it was
-    added to separate.
+    The discriminating part goes FIRST: truncation bounds this string, and a
+    transformers lambda nested in a long module path exceeds the limit on the
+    qualname alone, so a digest appended at the end would be cut off exactly on
+    the names that need it most.
+
+    Only the code object is named, not the data bound to it. Two closures from
+    one factory (``make(2)`` and ``make(3)``), two functions differing only in
+    ``__defaults__``, bound methods of two instances, and every
+    ``functools.partial`` render the same, as do two instances of one class.
     """
     if isinstance(value, types.ModuleType):
         return f"is module {value.__name__}"
@@ -793,64 +835,51 @@ def _object_identity(value: object) -> str:
         code = getattr(value, "__code__", None)
         where = ""
         if isinstance(code, types.CodeType):
-            site = os.path.basename(code.co_filename or "?")
-            where = f"@{site}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+            filename = os.path.basename(code.co_filename or "?")
+            where = f"@{filename}:{code.co_firstlineno}#{_code_fingerprint(code)} "
         return _normalize(f"is {where}{_owning_module(value) or '?'}.{name}")[:160]
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
-# Guards that pin an input's SHAPE or VALUE, and are never policy-dropped even
-# when they held identically across every captured variant. Dropping a guard is
-# licensed by "it discriminated nothing", but with a single example nothing CAN
-# discriminate, and what silently disappears is the check that the runtime tensor
-# looks like the captured one at all -- so an out-of-domain shape reaches a kernel
-# specialized for a different one, which crashes on inductor and can quietly
-# miscompute on eager. Shape is the axis a caller is most likely to vary and least
-# likely to expect to be unchecked, so it is always serialized.
+# Guards that pin an input's SHAPE, VALUE or KIND, never policy-dropped even
+# when they held identically across every captured variant. A drop is licensed
+# by "it discriminated nothing", but with a single example nothing CAN
+# discriminate, and what would disappear is the check that the runtime input
+# looks like the captured one at all. A dropped shape guard crashes inside a
+# kernel on inductor and can quietly miscompute on eager; a dropped value guard
+# serves the captured branch to every other value with correct-looking numerics.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
         "TENSOR_MATCH",
         "SEQUENCE_LENGTH",
-        # Value-equality guards belong here for the same reason and are the
-        # half that bites hardest: they pin a Python value the graph
-        # specialized on -- an int or bool argument, `module.training`, an
-        # `.item()` result, `mask=None`. Dropped, the artifact serves the
-        # captured branch for every other value, with correct-looking numerics
-        # and nothing in the header to say so. Shapes at least crash inside a
-        # kernel; these do not.
+        # Python values the graph specialized on: an int or bool argument,
+        # module.training, an .item() result, mask=None.
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
+        # Pins that two inputs alias, so a graph traced under `x is y` is never
+        # served two distinct tensors.
         "DUPLICATE_INPUT",
-        # And the one that pins whether an attribute is THERE. hasattr is a
-        # branch like any other, so dropping it serves the captured side to a
-        # caller on the other one -- the same silent wrong answer as a dropped
-        # CONSTANT_MATCH. Reachable on the DEFAULT gates, because a
+        # hasattr is a branch like any other. Reachable on the DEFAULT gates: a
         # single-variant capture makes every slot look invariant and the drop
         # is not classed risky.
         "HASATTR",
-        # And the guard that pins an input's KIND. Dropped, a graph traced for
-        # one class is served to another and returns the first one's answer,
-        # silently -- there is no shape to crash on. Upstream depends on this
-        # specifically: an AsyncCollectiveTensor's tensor-class guards are
-        # deliberately removed so an ACT-traced graph can be reused for the
-        # resolved tensor, and the observation sites reinstall exactly this
-        # guard to keep that sound. FAKE_SCRIPT_TYPE_MATCH is the same pin for
-        # a reference-type opaque object (type(unwrapped) is T).
+        # An input's KIND: a graph traced for one class and served to another
+        # returns the first one's answer, with no shape to crash on. Upstream
+        # leans on this guard specifically: VariableBuilder.wrap_tensor relaxes
+        # an AsyncCollectiveTensor's class guards (UnwrapCollectiveTensorSource)
+        # so an ACT-traced graph serves the resolved tensor, and
+        # BuiltinVariable.call_isinstance reinstalls TYPE_MATCH where the class
+        # is observed. FAKE_SCRIPT_TYPE_MATCH is the same pin for a
+        # reference-type opaque object.
         "TYPE_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
-        # And the default-device pin: the graph specialized on
-        # utils_device.CURRENT_DEVICE, so a capture under the default None
-        # served under torch.set_default_device("cuda") returns CPU tensors
-        # with no refusal.
+        # The graph specialized on utils_device.CURRENT_DEVICE: captured under
+        # the default None and served under set_default_device("cuda"), it
+        # returns CPU tensors with no refusal.
         "DEFAULT_DEVICE",
-        # And every guard that pins a Python fact about a value or a container's
-        # contents: whether a key is in a dict or a set, which keys a dict has,
-        # whether an attribute is absent from an instance __dict__, how long a
-        # tuple iterator is, where a range/count iterator stands, whether a
-        # value is None or a given bool. Each one is a branch the graph
-        # specialized on, so a drop serves the captured branch to the other
-        # side, silently -- and a module-owned dict (self.opts = {}) is
-        # environment-rooted, which is exactly where the policy used to drop it.
+        # Membership, key-set, length and iterator-position facts, each a branch
+        # the graph specialized on. A module-owned dict (self.opts = {}) is
+        # environment-rooted, which is exactly where a policy would drop it.
         "BOOL_MATCH",
         "CONSTANT_SUBCLASS_MATCH",
         "COUNT_ITERATOR_MATCH",
@@ -865,16 +894,27 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "SET_CONTAINS",
         "SET_NOT_CONTAINS",
         "TUPLE_ITERATOR_LEN",
+        # A SEQUENCE_LENGTH on a module's hook dicts when
+        # skip_nnmodule_hook_guards is off, and nothing under the default: so
+        # either there is nothing to drop, or what there is pins a value.
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        # Pins a folded torch._C._is_cow_tensor branch. Kept, a capture that
+        # folded one fails at serialization with the builder's own error (the
+        # tensor comes back fake and COW_TENSOR_MATCH rejects that); dropped, it
+        # would serve the folded branch to the other kind of tensor silently.
+        "COW_TENSOR_MATCH",
     }
 )
 
 
-# Guards whose C++ leaf compares something no fingerprint here models: subclass
-# metadata, a DTensor placement, an opaque object's guard values, a raw
-# DispatchKeySet, or process-wide state carried entirely in the leaf. Calling
-# two of these equal is how the report ends up asserting a precondition that
-# does not hold, so they are never compared -- they are reported separately as
-# undetermined, which is the honest answer and cannot mislead.
+# Guards whose C++ leaf compares something no fingerprint in this module reads:
+# subclass metadata, a DTensor placement, an opaque object's guard values, a raw
+# DispatchKeySet, the symbolic shape environment, or process-wide state the leaf
+# snapshots for itself (GlobalStateGuard's state, the torch-function mode
+# stack). Calling two of these equal is how the report ends up asserting a
+# precondition that does not hold, so they are never compared and are reported
+# as undetermined. They are never dropped either: a policy may drop only what
+# its droppable set names, and these are in no such set.
 _UNMODELLED_GUARD_TYPES = frozenset(
     {
         "DISPATCH_KEY_SET_MATCH",
@@ -902,8 +942,10 @@ _NOOP_GUARD_TYPES = frozenset({"DETERMINISTIC_ALGORITHMS", "GRAD_MODE"})
 
 
 def _is_noop_guard_type(guard_type: str) -> bool:
-    # EMPTY_NN_MODULE_HOOKS_DICT is a no-op by config: under
-    # skip_nnmodule_hook_guards, the default, GuardBuilder emits nothing for it.
+    # EMPTY_NN_MODULE_HOOKS_DICT is classified shape-bearing for the config
+    # where it emits a check; under skip_nnmodule_hook_guards, the default,
+    # GuardBuilder emits nothing for it, so a report must not call it a
+    # precondition.
     return guard_type in _NOOP_GUARD_TYPES or (
         guard_type == "EMPTY_NN_MODULE_HOOKS_DICT"
         and torch._dynamo.config.skip_nnmodule_hook_guards
@@ -911,63 +953,53 @@ def _is_noop_guard_type(guard_type: str) -> bool:
 
 
 # The ONLY guard types the invariance policy may drop, and only when proven
-# invariant across every captured variant: identity guards (which the default
-# filter drops anyway, as unserializable) and process-wide compiler state. The
-# four sets form a total, disjoint classification of GuardBuilder's
-# guard-producing methods, pinned by
-# test_precompile_package.test_guard_policy_classification_is_total: a guard type in
-# none of them -- i.e. any type added to GuardBuilder after this list -- is
-# KEPT unconditionally until someone classifies it here, so a new value-pinning
-# guard can never become silently droppable by default.
-_INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
+# invariant across every captured variant: the identity guards the default
+# filter drops anyway as unserializable, and process-wide compiler state. The
+# four sets are a total, disjoint classification of GuardBuilder's guard
+# methods, pinned by test_guard_policy_classification_is_total: a guard type in
+# none of them -- any type added to GuardBuilder after this list -- is KEPT
+# unconditionally until someone classifies it, so a new value-pinning guard can
+# never become silently droppable. Guards installed outside GuardBuilder (the
+# root manager's DuplicateInputs and StorageOverlap exprs, the dimension-marking
+# lambda) never reach the guard filter and are outside the policy as well.
+_INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset(
     {
         "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        # An identity match on a builtin, which the default filter keeps.
         "BUILTIN_MATCH",
-        "CLASS_MATCH",
-        "CLOSURE_MATCH",
-        # COW_TENSOR_MATCH pins a folded torch._C._is_cow_tensor branch, so by
-        # value it reads like the shape-bearing membership guards -- but it
-        # cannot be rebuilt from the pickle: the tensor comes back fake and its
-        # builder rejects that, so the default filter keeps it and then the
-        # policy's re-serialization, or a load, fails on it rather than losing
-        # it silently. It lives here rather than in the shape-bearing set
-        # because keeping it never yields a loadable artifact.
-        "COW_TENSOR_MATCH",
-        "DICT_VERSION",
         "DUAL_LEVEL",
-        "EMPTY_NN_MODULE_HOOKS_DICT",
-        "FUNCTION_MATCH",
         "FUNCTORCH_STACK_MATCH",
-        "ID_MATCH",
-        "MODULE_MATCH",
-        "NN_MODULE",
-        "WEAKREF_ALIVE",
     }
 )
 
 
 def _saved_hooks_fingerprint() -> str:
-    """Name the installed saved-tensors hooks by content, never by address."""
+    """
+    Name the installed saved-tensors hooks the way the guard compares them.
+
+    The guard stores ``tuple(map(id, hooks))`` when both hooks are fx
+    GraphModules and ``None`` otherwise, so plain-Python hooks, and no hooks at
+    all, are one value to it and must be one value here, or the report shows a
+    'varies' line for a guard that passes either way. Inlineable hooks are
+    named by their rendered graph rather than by address, since an id cannot
+    go in a committed, diffable file. KNOWN TRADEOFF: two distinct GraphModules
+    with identical code read as one hook set here while the guard tells them
+    apart, so a policy may drop that guard on the strength of this fingerprint.
+    """
     try:
-        from torch._functorch._aot_autograd.utils import top_saved_tensors_hooks
+        from torch._functorch._aot_autograd.utils import (
+            saved_tensors_hooks_are_inlineable,
+            top_saved_tensors_hooks,
+        )
 
         hooks = top_saved_tensors_hooks()
+        if not saved_tensors_hooks_are_inlineable(hooks):
+            return "hooks=None"
+        return "hooks=(" + ", ".join(_hash_text(hook.code) for hook in hooks) + ")"
     except Exception:
-        return ""
-    if not hooks:
-        return "hooks=None"
-    names = []
-    for hook in hooks:
-        code = getattr(hook, "code", None)  # fx GraphModule renders its graph
-        if isinstance(code, str):
-            names.append(_hash_text(code))
-        else:
-            names.append(_object_identity(hook))
-    return "hooks=(" + ", ".join(names) + ")"
-
-
-def _hash_text(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()[:12]
+        # Distinct from the "" that means "the rendered code already names the
+        # check": a failed read must not merge two variants.
+        return "hooks=<unreadable>"
 
 
 def _value_fingerprint(entry: GuardFilterEntry) -> str:
@@ -981,10 +1013,10 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     -- python type and the full dispatch key set included, since a Parameter
     against a Tensor, a conjugated view against a plain one, or an
     inference-mode tensor against a no_grad one, splits a compilation exactly
-    as dtype does. KNOWN GAP: that leaf checks
-    nothing for a dim the compile made dynamic, so under ``dynamic=True`` the
-    concrete shape here is narrower than the guard and a shape-generic
-    TENSOR_MATCH is reported as varying rather than invariant.
+    as dtype does. KNOWN GAP: that leaf checks nothing for a dim the compile
+    made dynamic, so under ``dynamic=True`` the concrete shape here is narrower
+    than the guard and a shape-generic TENSOR_MATCH is reported as varying
+    rather than invariant.
 
     An identity guard needs one too, because ``_normalize`` strips the id its
     code renders: without a name for the object, two variants holding different
@@ -995,7 +1027,10 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     it, so fingerprinting it again SPLITS identical guards: TYPE_MATCH on an
     unspecialized int checks only that the int is an int, and stamping 1 on one
     variant and 2 on the next demotes a real invariant into two identical
-    'varies' lines.
+    'varies' lines. So every branch dispatches on the guard type, never on the
+    value's: the NOT_NONE_MATCH Dynamo installs on an optimizer's .grad, or a
+    TYPE_MATCH on a tensor attribute, holds a tensor whose shape and dtype it
+    never checks.
     """
     if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
         # Its code renders tuple(map(id, hooks)), which _normalize has to erase
@@ -1017,22 +1052,25 @@ def _value_fingerprint(entry: GuardFilterEntry) -> str:
     if not entry.has_value:
         return ""
     value = entry.value
-    if isinstance(value, torch.Tensor):
+    if entry.guard_type == "TENSOR_MATCH" and isinstance(value, torch.Tensor):
         # Render exactly what TensorCheck stores (notably the TLS-adjusted
         # dispatch key set, not the tensor's own) rather than reconstructing it.
+        # The fact's source already names the tensor, so no name goes in.
         from .guards import convert_to_concrete_values, get_tensor_guard_code_part
 
         try:
             return get_tensor_guard_code_part(
                 value,
-                "",
+                "<value>",
                 convert_to_concrete_values(value.size()),
                 convert_to_concrete_values(value.stride()),
                 type(value),
                 torch._C._dispatch_keys(value),
             )
         except Exception:
-            return f"type={type(value).__name__}, dtype={value.dtype}, <unrenderable>"
+            # A subclass whose __torch_function__ refuses attribute reads got
+            # here; type() is the one read that cannot raise.
+            return f"type={type(value).__name__}, <unrenderable>"
     if entry.guard_type in _IDENTITY_GUARD_TYPES or any(
         d in _IDENTITY_GUARD_TYPES for d in entry.derived_guard_types
     ):
@@ -1059,17 +1097,25 @@ def _wont_generalize(
     guards the same source generically -- the ordinary shape once two examples
     are captured -- serves the new value fine, and warning about it tells the
     caller to enumerate values that already work.
+
+    Cancellation is per frame, like every comparison in this module: a bare
+    name means nothing across frames, and ``___stack0`` names whatever crossed
+    the break in EVERY resume frame -- a tensor in one, an ``.item()`` int in
+    the next -- so a generic mention elsewhere must not erase a real pin here.
+    ``GuardFact.source`` and a kept slot's name share one spelling, the
+    ``GuardFilterEntry.name`` with local scope stripped (``L['x']`` -> ``x``).
     """
     pinned = {n for t, n in kept if _pins_a_value(t, n)}
     if not pinned:
         return ()
     for variants in guard_sets.values():
+        pins: set[str] = set()
+        generic: set[str] = set()
         for facts in variants:
-            mentioned = {f.source for f in facts}
-            pins_here = {
-                f.source for f in facts if _pins_a_value(f.guard_type, f.source)
-            }
-            # This variant reached the source without pinning it, so it is the
+            here = {f.source for f in facts if _pins_a_value(f.guard_type, f.source)}
+            pins |= here
+            # A variant that reached the source without pinning it is the
             # graph that serves other values.
-            pinned -= mentioned - pins_here
+            generic |= {f.source for f in facts} - here
+        pinned -= pins & generic
     return tuple(sorted(pinned))
