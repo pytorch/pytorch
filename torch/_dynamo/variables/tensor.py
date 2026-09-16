@@ -1796,12 +1796,8 @@ class TensorVariable(VariableTracker):
                     {},
                 ),
             )
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                "only integer tensors of a single element can be converted to an index"
-            ],
+        raise_type_error(
+            tx, "only integer tensors of a single element can be converted to an index"
         )
 
     def nb_int_impl(
