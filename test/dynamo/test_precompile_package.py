@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import copy
+import functools
 import pickle
 
 import torch._inductor.test_case
@@ -91,6 +92,130 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(PrecompileContext.take_artifact("k").key, "k")
         self.assertIsNone(PrecompileContext.take_artifact("k"))
         self.assertIsNone(PrecompileContext.serialize_artifact_by_key("k"))
+
+
+class _SessionStep(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        y = self.lin(x)
+        if y.shape[0] > 2:
+            y = y * 2
+        return torch.relu(y)
+
+
+def _session_breaks(x):
+    y = x * 2
+    torch._dynamo.graph_break()
+    return y + 3
+
+
+def _session_raises(x, boom):
+    if boom:
+        raise ValueError("boom")
+    return x + 1
+
+
+class TestPrecompileSession(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _session(self, fn, **kwargs):
+        from torch._dynamo.precompile_package import precompile_capture
+
+        kwargs.setdefault("backend", "eager")
+        kwargs.setdefault("dynamic", False)
+        return precompile_capture(fn, **kwargs)
+
+    def test_each_call_folds_into_the_entry_as_a_guarded_variant(self):
+        model = _SessionStep()
+        session = self._session(model)
+        with session as cap:
+            for rows in (2, 3, 4):
+                x = torch.randn(rows, 4)
+                self.assertEqual(cap(x), model(x))
+        entry = session._package.cache_entry()
+        self.assertEqual(entry.fn_name, "_SessionStep.forward")
+        self.assertEqual(len(entry.codes), 1)
+        self.assertEqual(len(entry.codes[0].guarded_codes), 3)
+        self.assertFalse(entry.codes[0].bypassed)
+
+    def test_a_graph_break_records_the_resume_frame(self):
+        session = self._session(_session_breaks)
+        with session as cap:
+            self.assertEqual(cap(torch.ones(3)), torch.ones(3) * 2 + 3)
+        entry = session._package.cache_entry()
+        self.assertEqual(len(entry.codes), 2)
+        self.assertTrue(any(c.install_to_global for c in entry.codes))
+        self.assertEqual(len(entry.backend_ids), 2)
+
+    def test_recompile_limit_caps_the_variants_but_not_the_calls(self):
+        model = _SessionStep()
+        session = self._session(model, recompile_limit=2)
+        with session as cap:
+            for rows in (2, 3, 4, 5):
+                x = torch.randn(rows, 4)
+                self.assertEqual(cap(x), model(x))
+        entry = session._package.cache_entry()
+        self.assertLessEqual(len(entry.codes[0].guarded_codes), 2)
+
+    def test_session_is_one_shot_and_refuses_reentry(self):
+        from torch._dynamo.exc import PackageError
+
+        session = self._session(_session_breaks)
+        with session as cap:
+            with self.assertRaisesRegex(PackageError, "already active"):
+                session.__enter__()
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            cap(torch.ones(3))
+        with self.assertRaisesRegex(RuntimeError, "cannot be re-entered"):
+            session.__enter__()
+
+    def test_an_error_inside_the_block_is_recorded_once_and_propagates(self):
+        session = self._session(_session_raises)
+        with session as cap:
+            self.assertEqual(cap(torch.ones(2), False), torch.ones(2) + 1)
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "boom"):
+                    cap(torch.ones(2), True)
+        self.assertEqual(session._capture_errors, ["ValueError: boom"])
+
+    def test_eager_backends_survive_exit_for_the_render(self):
+        session = self._session(_session_breaks)
+        with session as cap:
+            cap(torch.ones(3))
+        entry = session._package.cache_entry()
+        self.assertEqual(set(session._package.cached_backends), set(entry.backend_ids))
+        for backend in session._package.cached_backends.values():
+            self.assertTrue(callable(backend))
+
+    def test_inductor_artifacts_are_taken_from_the_precompile_context(self):
+        from torch._dynamo.precompile_context import PrecompileContext
+
+        session = self._session(_session_breaks, backend="inductor")
+        with session as cap:
+            cap(torch.ones(3))
+        entry = session._package.cache_entry()
+        self.assertEqual(set(session._backend_artifacts), set(entry.backend_ids))
+        for backend_id in entry.backend_ids:
+            self.assertIsNone(PrecompileContext.serialize_artifact_by_key(backend_id))
+        self.assertEqual(session._package.cached_backends, {})
+
+    def test_entry_fn_of_resolves_modules_and_refuses_the_rest(self):
+        from torch._dynamo.precompile_package import _entry_fn_of
+
+        model = _SessionStep()
+        self.assertIs(_entry_fn_of(model).__func__, _SessionStep.forward)
+        self.assertIs(_entry_fn_of(model).__self__, model)
+        self.assertIs(_entry_fn_of(_session_breaks), _session_breaks)
+        with self.assertRaisesRegex(TypeError, "has no __code__"):
+            _entry_fn_of(functools.partial(_session_breaks))
+        with self.assertRaisesRegex(TypeError, "expected a callable"):
+            _entry_fn_of(3)
 
 
 if __name__ == "__main__":
