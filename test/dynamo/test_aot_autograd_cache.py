@@ -4312,7 +4312,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
         dtype_set = {"float32", "bfloat16", "float16", "int8", "uint8"}
         result = pickler._stabilize_tensor_subclass_metadata(dtype_set)
-        expected_elements = tuple(sorted(pickle.dumps(x) for x in dtype_set))
+        expected_elements = tuple(sorted(dtype_set, key=pickle.dumps))
         self.assertEqual(
             result,
             _CanonicalSetMetadata(container_type=set, elements=expected_elements),
@@ -4339,7 +4339,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             "allowed_ops": {"add", "mul", "sub"},
         }
         result = pickler._stabilize_tensor_subclass_metadata(metadata)
-        expected_ops = tuple(sorted(pickle.dumps(x) for x in metadata["allowed_ops"]))
+        expected_ops = tuple(sorted(metadata["allowed_ops"], key=pickle.dumps))
         self.assertEqual(
             result["allowed_ops"],
             _CanonicalSetMetadata(container_type=set, elements=expected_ops),
@@ -4355,9 +4355,20 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         result = pickler._stabilize_tensor_subclass_metadata(nested)
         self.assertIsInstance(result, _CanonicalSetMetadata)
         self.assertEqual(result.container_type, set)
-        self.assertEqual(result.elements, tuple(sorted(result.elements)))
+        expected = tuple(
+            sorted(
+                (
+                    _CanonicalSetMetadata(
+                        container_type=frozenset,
+                        elements=tuple(sorted(inner, key=pickle.dumps)),
+                    )
+                    for inner in nested
+                ),
+                key=pickle.dumps,
+            )
+        )
+        self.assertEqual(result.elements, expected)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4091")
     @requires_gpu_and_triton
     def test_prepare_for_pickle_clears_benchmark_failure_reasons(self):
         """prepare_for_pickle clears benchmark_failure_reasons which can hold

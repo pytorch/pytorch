@@ -819,8 +819,8 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 container_type=type(obj),
                 elements=tuple(
                     sorted(
-                        pickle.dumps(self._stabilize_tensor_subclass_metadata(x))
-                        for x in obj
+                        (self._stabilize_tensor_subclass_metadata(x) for x in obj),
+                        key=pickle.dumps,
                     )
                 ),
             )
