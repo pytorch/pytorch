@@ -5978,7 +5978,7 @@ class TestLinalg(TestCase):
             t = torch.randn(*shape, device=device, dtype=dtype)
             u, _ = torch.linalg.qr(t)
             v, _ = torch.linalg.qr(t.mT)
-            s = torch.rand(*shape[:-2], min(shape[-1], shape[-2]), device=device, dtype=dtype).add_(0.5)
+            s = torch.rand(*shape[:-2], min(shape[-1], shape[-2]), device=device, dtype=dtype).real.add_(0.5)
             return (u * s.unsqueeze(-2)) @ v.mH
 
         if pivot:
