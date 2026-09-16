@@ -892,9 +892,9 @@ class AOTCompiledFunction:
         """Advice for a guard that failed on a global its scope does not define,
         worded for the scope the guards were actually resolved against. Returns a
         bare sentence; a caller that continues a line of its own adds the
-        separator. ``forward`` names the instance attribute a module load resolved
-        the scope from, passed only when the guards hold the dict it resolves to,
-        and honoured only in the SUPPLIED branch."""
+        separator. ``forward`` names the model's instance attribute, passed only
+        when the guards hold the very dict it resolves to -- resolved by the load
+        or supplied by the caller -- and honoured only in the SUPPLIED branch."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
             rebuilt = (
                 "a guarded global is missing from the scope rebuilt from the artifact"
@@ -916,13 +916,13 @@ class AOTCompiledFunction:
             )
         if self._guard_scope is _GuardScope.SUPPLIED:
             # SUPPLIED implies a scope; a module's namespace is named by its
-            # module, since a module load resolved it from model.forward and the
-            # caller passed no dict to be sent back to.
+            # module, since a module load that resolved it from model.forward had
+            # no caller's dict to send the reader back to.
             namespace = _module_namespace_name(self._guard_globals or {})
             named = "" if namespace is None else f", here vars({namespace})"
             where = (
-                f"the globals of the function {forward} resolves to, since that "
-                f"is the one the load resolved{named}"
+                f"the globals of the function {forward} resolves to, which is "
+                f"the dict the guards hold{named}"
                 if forward is not None
                 else f"the live scope this artifact was loaded against{named}"
             )
@@ -1635,7 +1635,8 @@ class AOTCompiledModel:
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, or, for a result
+    per compiled result quoting the verbose parts of the guard that refused it,
+    or, for a result
     whose guards accept the call on the report's own evaluation after not
     accepting it in dispatch, a ``<guards did not accept this call in dispatch
     and accepted it here: ...>`` explanation in place of any guards, or, for a
@@ -1786,9 +1787,10 @@ class AOTCompiledModel:
                     warn_swallowed(i)
                 # The guard manager already passed; go through _serve rather
                 # than result(), which would re-run the ~1us guard eval on this
-                # hot dispatch path. _serve costs one Python frame instead
-                # (measured 0.164us), and is what hands the graph the globals
-                # that check just accepted. Gating that frame out per site is
+                # hot dispatch path. _serve costs one Python frame plus a scope
+                # probe and a dict write per certified global instead (about 0.4us
+                # with one name, under the ~0.85us guard eval), and is what hands
+                # the graph the globals that check just accepted. Gating that frame out per site is
                 # not worth it: _serve is the only caller of the raw fn, and a
                 # site that got the gate wrong would serve a stale global with
                 # every guard passing.
@@ -1837,16 +1839,18 @@ class AOTCompiledModel:
     ) -> str:
         """A report naming every compiled input and what its guard check said or raised.
 
-        ``results`` and ``bound`` are the results the dispatch above judged and
-        the f_locals it judged them on, one per result, so the report explains
-        the same call rather than a fresh one."""
+        ``results`` and ``bound`` are the results ``AOTCompiledModel.__call__``
+        judged and the f_locals it judged them on, one per result, so the report
+        explains the same call rather than a fresh one."""
         lines = [
             "No AOT compiled graph matched this call. Tried "
             f"{len(results)} compiled input(s):"
         ]
-        # Hint text -> the entries it is for, in first-seen order: entries that
-        # share a scope share a sentence, and one whose scope differs keeps its
-        # own rather than being read the first entry's advice.
+        # Hint text -> the entries it is for, in first-seen order: entries whose
+        # advice reads alike share a line, whatever scope each resolves against,
+        # and one whose advice differs keeps its own rather than being read
+        # another entry's. Two unnamed supplied dicts word alike and so share a
+        # line; the sentence names no dict either way.
         hinted: dict[str, list[int]] = {}
         resolved: dict[str, Any] | None = None
         tried_forward = False
@@ -1913,12 +1917,21 @@ class AOTCompiledModel:
                     # forward it refuses into its error, and that repr can raise past
                     # what _resolve_guard_scope catches. The report must still arrive.
                     try:
-                        resolved, _ = _resolve_guard_scope(self.model)
-                    except Exception:
-                        pass
+                        resolved, unresolved = _resolve_guard_scope(self.model)
+                    except Exception as exc:
+                        # The type only: str(exc) can run the same repr again.
+                        unresolved = f"resolving it raised {type(exc).__name__}"
+                    if resolved is None:
+                        log.debug(
+                            "the no-match report's hint names no %s.forward: %s",
+                            type(self.model).__name__,
+                            unresolved,
+                        )
                 if resolved is not None and resolved is result._guard_globals:
-                    # Named as the instance attribute: the load resolved the scope from
-                    # model.forward, and a rebound instance reads another function's dict.
+                    # Named as the instance attribute: the guards hold the dict it
+                    # resolves to, whether the load resolved that dict from it or the
+                    # caller passed the same one, and a rebound instance reads another
+                    # function's dict.
                     forward = f"this {type(self.model).__name__} instance's forward"
                 hint = result._missing_global_hint(forward=forward)
                 hinted.setdefault(hint, []).append(i)
