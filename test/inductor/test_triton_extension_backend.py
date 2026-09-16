@@ -59,15 +59,16 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_FBCODE,
     IS_MACOS,
+    xfailIfS390X,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON, TRITON_HAS_CPU
 from torch.utils._triton import has_triton_package
 
 
 try:
-    from .test_extension_backend import BaseExtensionBackendTests
+    from .test_extension_backend import BaseExtensionBackendTests, TestCase
 except ImportError:
-    from test_extension_backend import BaseExtensionBackendTests
+    from test_extension_backend import BaseExtensionBackendTests, TestCase
 
 if has_triton_package():
     import triton
@@ -149,6 +150,27 @@ class TritonExtensionBackendTestBase(BaseExtensionBackendTests):
         FileCheck().check("import triton").check("@triton.jit").check(
             "tl_math.sin"
         ).check("device_str='privateuseone'").run(code)
+
+
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
+@xfailIfS390X
+class TritonHeuristicsTestBase(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if config.cpp_wrapper:
+            raise unittest.SkipTest(
+                "Not possible to fix until CppWrapperCpu supports triton for CPU"
+            )
+        common.init_backend_registration()
+        for registry in (
+            common.device_codegens,
+            common.custom_backend_passes,
+            common.custom_backend_codegen_configs,
+        ):
+            backend_patch = unittest.mock.patch.dict(registry)
+            backend_patch.start()
+            cls.addClassCleanup(backend_patch.stop)
 
     def _register_custom_backend_with_heuristics(self, device):
         path_to_ext_heuristics = str(
@@ -273,7 +295,7 @@ class TritonExtensionBackendGenericTests(TritonExtensionBackendTestBase):
 
 
 @unittest.skipUnless(TRITON_HAS_CPU, "Requires Triton CPU backend.")
-class TritonExtensionBackendCPUTests(TritonExtensionBackendTestBase):
+class TritonExtensionBackendCPUTests(TritonHeuristicsTestBase):
     hw_classification = HardwareClassification.CPU
 
     def test_codegen_with_custom_heuristics_module(self, device):
@@ -285,7 +307,7 @@ class TritonExtensionBackendCPUTests(TritonExtensionBackendTestBase):
 
 @unittest.skipUnless(has_triton_package(), "Requires Triton package.")
 @unittest.skipIf(TRITON_HAS_CPU, "Triton CPU backend takes precedence.")
-class TritonExtensionBackendAcceleratorTests(TritonExtensionBackendTestBase):
+class TritonExtensionBackendAcceleratorTests(TritonHeuristicsTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
