@@ -24,6 +24,7 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
+from ._recv_buffers import _RecvInfo
 from ._utils import (
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
@@ -36,7 +37,7 @@ from .microbatch import (
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
-from .stage import _PipelineStageBase, _RecvInfo, PipelineStage
+from .stage import _PipelineStageBase, PipelineStage
 
 
 __all__ = [
@@ -404,7 +405,9 @@ class _PipelineSchedule(ABC):
                 result = stage._warmup_backward_result(received_result=result)
             if result is None:
                 raise RuntimeError("P2P warm-up voting failed")
-            supports_static, permits_dynamic = (bool(value.item()) for value in result)
+            supports_static_value, permits_dynamic_value = result.tolist()
+            supports_static = bool(supports_static_value)
+            permits_dynamic = bool(permits_dynamic_value)
             if not supports_static and not permits_dynamic:
                 raise PipeliningMetadataError(
                     "pass_pipeline_metadata requires complete static metadata "
@@ -3906,6 +3909,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
 _PipelineResourceGranularity = Literal["microbatch", "stage_microbatch"]
 
 
+# Identity equality keeps this frozen plan hashable despite MappingProxyType.
 @dataclass(frozen=True, eq=False)
 class _PipelineResourceLiveness:
     """Deterministic resource-slot assignments for one pipeline rank."""
@@ -4069,8 +4073,8 @@ def _analyze_pipeline_resource_liveness(
             f"{sorted(missing_input_backwards)}"
         )
     for key in expected:
-        if releases[key] <= starts[key]:
-            raise ValueError(f"Resource lifetime {key} ends at or before its forward")
+        if releases[key] < starts[key]:
+            raise ValueError(f"Resource lifetime {key} ends before its forward")
 
     if granularity == "microbatch":
         intervals = [
@@ -4089,10 +4093,10 @@ def _analyze_pipeline_resource_liveness(
         microbatch_slots, num_slots = _assign_pipeline_resource_slots(intervals)
         assignments = {
             (stage_index, microbatch_index): microbatch_slots[microbatch_index]
-            for stage_index, microbatch_index in expected
+            for stage_index, microbatch_index in sorted(expected)
         }
     else:
-        keys = sorted(expected, key=lambda item: (starts[item], releases[item], item))
+        keys = sorted(expected)
         intervals = [(starts[key], releases[key]) for key in keys]
         slots, num_slots = _assign_pipeline_resource_slots(intervals)
         assignments = dict(zip(keys, slots, strict=True))
