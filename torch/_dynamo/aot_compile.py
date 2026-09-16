@@ -1700,13 +1700,17 @@ class AOTCompiledModel:
     accepting it in dispatch, a ``<guards did not accept this call in dispatch
     and accepted it here: ...>`` explanation in place of any guards; one
     ``For [i, j]:`` line per distinct missing-global hint naming the entries
-    whose guards failed on a global the process does not define; and the advice
-    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When
-    some checked input's guard tree raised, that exception is the ``__cause__``
-    of the ``RuntimeError`` rather than the exception the caller sees, so a
-    caller catching the tree's own type (``SystemError`` for a leaf that
-    returned with an error set, ``RuntimeError`` for a ``TORCH_CHECK``) catches
-    the report instead.
+    whose guards failed on a global the process does not define; and -- when
+    some checked tree reached an answer, or the artifact holds no input at all
+    -- the advice to add a ``ModelInput`` or check which guards
+    ``guard_filter_fn`` kept. When no checked tree ever answered and some tree
+    raised, a line saying every guard tree raised replaces it, unless an
+    opted-out result's line has already said the raise withheld it. When some
+    checked input's guard tree raised, that exception is the ``__cause__`` of
+    the ``RuntimeError`` rather than the exception the caller sees, so a caller
+    catching the tree's own type (``SystemError`` for a leaf that returned with
+    an error set, ``RuntimeError`` for a ``TORCH_CHECK``) catches the report
+    instead.
     """
 
     model: torch.nn.Module
@@ -1752,8 +1756,10 @@ class AOTCompiledModel:
         # the report read, so scan every result.
         raised: dict[int, Exception] = {}
         # `unanswered` holds the indices whose LAST evaluation reached no answer,
-        # the only ones with no guard to quote.
+        # the only ones with no guard to quote; `answered` those that ever reached
+        # one, which a ModelInput could have covered.
         unanswered: set[int] = set()
+        answered: set[int] = set()
         # Per-result bindings, filled on first use and kept for the re-check and
         # the report.
         bound: dict[int, dict[str, object]] = {}
@@ -1785,8 +1791,12 @@ class AOTCompiledModel:
                 raised[i] = e
                 unanswered.add(i)
                 return False
+            if answer:
+                return True
+            # Recorded on a rejection only: an accept serves and builds no report.
             unanswered.discard(i)
-            return answer
+            answered.add(i)
+            return False
 
         def warn_swallowed(served: int) -> None:
             # A raise is not a rejection, so it says nothing about the result
@@ -1871,7 +1881,7 @@ class AOTCompiledModel:
                     if raised:
                         warn_swallowed(i)
                     return result._serve(self.model, *args, **kwargs)
-        report = self._no_match_report(results, raised, unanswered, bound)
+        report = self._no_match_report(results, raised, unanswered, answered, bound)
         if raised:
             # `raised` is in recording order, so this chains the first index that
             # raised, not always the raiser the advice names: they differ when an
@@ -1886,6 +1896,7 @@ class AOTCompiledModel:
         results: tuple[AOTCompiledFunction, ...],
         raised: dict[int, Exception],
         unanswered: set[int],
+        answered: set[int],
         bound: dict[int, dict[str, object]],
     ) -> str:
         """A report naming every compiled input and what its guard check said,
@@ -1910,6 +1921,9 @@ class AOTCompiledModel:
             (i for i in raised if results[i]._guard_check_enabled),
             None,
         )
+        # An entry that answered in either dispatch pass rejected this call, so a
+        # ModelInput could have covered it even where its line below is a raise.
+        coverable = any(results[i]._guard_check_enabled for i in answered)
         withheld = False
         for i, result in enumerate(results):
             if not result._guard_check_enabled:
@@ -1987,12 +2001,22 @@ class AOTCompiledModel:
                 f"[{raiser}]'s guard check raised while checking this call; fix "
                 "or drop that artifact."
             )
-        lines.append(
-            "Add a ModelInput covering this call, or check whether "
-            "guard_filter_fn kept a guard this call cannot satisfy -- both "
-            "belong to the process that compiles the artifacts, which need not "
-            "be the one that loaded them."
-        )
+        # An artifact holding no inputs at all -- which deserialize() accepts --
+        # has no entry to answer, and adding an input is exactly the advice for it.
+        if coverable or not results:
+            lines.append(
+                "Add a ModelInput covering this call, or check whether "
+                "guard_filter_fn kept a guard this call cannot satisfy -- both "
+                "belong to the process that compiles the artifacts, which need "
+                "not be the one that loaded them."
+            )
+        if raised and not withheld and not coverable:
+            # Not beside a withheld line, which has already said what happened,
+            # and not for the empty artifact, which has no raise to describe.
+            lines.append(
+                "Every guard tree raised while checking this call; the reasons "
+                "above are those raises, not guards this call failed."
+            )
         return "\n".join(lines)
 
     def serialize(self) -> bytes:
