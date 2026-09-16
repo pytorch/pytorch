@@ -211,6 +211,7 @@ import hashlib
 import io
 import logging
 import pickle
+import threading
 import types
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
@@ -226,6 +227,11 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 log = logging.getLogger(__name__)
+
+# Installing records backend keys into the process-global PrecompileContext
+# and unload takes them back. Serialize the snapshot/record and the take-back
+# so two handles on one artifact cannot each record, or take, the other's keys.
+_RECORD_LOCK = threading.Lock()
 
 
 if TYPE_CHECKING:
