@@ -399,23 +399,6 @@ def _reject_unsupported_marks(user_flat: list[object]) -> None:
             )
 
 
-def _unbacked_guard_error(e: BaseException) -> PrecompileError:
-    """The shared capture-time error for a guard on a mark_unbacked dim (both tracers).
-
-    A mark_unbacked dim is captured as an unbacked symint (no hint), so a computation that
-    needs to guard on / specialize its size (a shape-dependent branch, a reshape that pins
-    it) cannot be captured. Unbacked dims cannot be guarded, so rather than bake a
-    silently-wrong artifact, fail here.
-    """
-    return PrecompileError(
-        "precompile: fn needs to guard on a dim marked with mark_unbacked "
-        "(it branches on or specializes that size), which is not allowed for "
-        "an unbacked dynamic dim. Do not mark that dim (capture it static), "
-        "or restructure fn to avoid the size-dependent operation. Underlying: "
-        f"{(str(e).splitlines() or [''])[0]}"
-    )
-
-
 def _read_unbacked_marks(user_flat: list[object]) -> list[dict[int, _MarkSpec]]:
     """Read ``torch._dynamo.decorators.mark_unbacked`` marks off the user-input tensors.
 
