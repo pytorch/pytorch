@@ -145,16 +145,19 @@ def _autocast_off(devices):
     time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
     than from the runtime tensors: a graph can reach a device none of its
     inputs live on, and one built from factory ops has no input device at all.
+
+    Only a device whose autocast is on is entered: autocast.__exit__ clears the
+    process-wide cast cache whenever its nesting count returns to zero, so
+    entering unconditionally would wipe that cache for every autocast model in
+    the process on each call.
     """
     import contextlib as _contextlib
 
-    import torch as _t
-
-    stack = _contextlib.ExitStack()
-    for _dev in devices:
-        if _t.amp.is_autocast_available(_dev):
-            stack.enter_context(_t.amp.autocast(_dev, enabled=False))
-    return stack
+    with _contextlib.ExitStack() as stack:
+        for _dev in devices:
+            if _torch.is_autocast_enabled(_dev):
+                stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
+        return stack.pop_all()
 
 
 def _eager_forward(*args):
