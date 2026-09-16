@@ -52,6 +52,19 @@ static_weight_shapes = True
 # Tells partitioner that parameters are free to save for backward.
 treat_parameters_as_free_to_save = True
 
+# Recomputing a read of a module buffer in the backward is only equivalent to
+# saving it if nothing mutates the buffer in between. Buffers hold mutable state
+# (running statistics, counters), and the mutation may live in another compiled
+# region or in eager code -- neither is visible in the graph being partitioned,
+# so it cannot be detected there. When True, never recompute through a buffer
+# input. Parameters are excluded: the optimizer updates them between iterations,
+# not between a forward and its own backward, and recomputing activations from
+# weights is the main win activation checkpointing buys.
+#
+# Off by default: it is conservative, so it also pins reads of buffers that are
+# never actually mutated, and that cost has not been characterized broadly.
+ban_recompute_through_buffers = False
+
 # Applies CSE to the graph before partitioning
 cse = True
 
