@@ -584,7 +584,21 @@ void ldl_factor_kernel(
        {
          // DEBUG
          if (hermitian) {
-  ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+           // ldl_factor_blas3_kernel factors a single matrix -- its grid is
+           // 1x1x1 -- so drive the batch from here, the way the looped MAGMA
+           // paths do, until the kernel grows a batched grid of its own.
+           const auto batch_size = batchCount(LD);
+           if (batch_size == 1) {
+             ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, hermitian);
+           } else {
+             auto LD_3d = LD.view({-1, LD.size(-2), LD.size(-1)});
+             auto pivots_2d = pivots.view({-1, pivots.size(-1)});
+             auto info_1d = info.view({-1});
+             for (const auto i : c10::irange(batch_size)) {
+               ::at::native::ldl_factor_blas3_kernel(
+                   LD_3d[i], pivots_2d[i], info_1d[i], hermitian);
+             }
+           }
          } else {
          ldl_factor_cusolver(
           LD, pivots, info, upper, hermitian);
