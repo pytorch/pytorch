@@ -16,10 +16,22 @@ name: In Progress PR Review Run
 
 on:
   workflow_run:
-    # Matched by NAME, which a pull request can claim: `workflows:` does not
-    # pin a path, so a second workflow added in a PR and named the same thing
-    # would trigger this one with an artifact of its choosing. The
-    # `github.event.workflow.path` condition on `prepare` is what pins it.
+    # Matched by NAME, and a pull request can claim a name: a PR may add a
+    # second workflow called "Hardened PR Review" and complete it, firing this
+    # one with an artifact of its choosing. TWO conditions on `prepare` answer
+    # that, and the first is the strong one:
+    #
+    #   `workflow_run.event == 'pull_request_target'` - a PR-authored workflow
+    #   cannot produce that event. Since 2025-12-08 GitHub reads a
+    #   `pull_request_target` workflow from the repository's DEFAULT BRANCH,
+    #   whatever the pull request's base branch is, so claiming that event
+    #   takes write access to the default branch - not merely opening a pull
+    #   request, and not write access to some other branch either.
+    #
+    #   `github.event.workflow.path == ...` - which of the trusted workflows
+    #   it was. Kept as the second fence, and note it is NOT case-sensitive:
+    #   GitHub's `==` ignores case, so it separates honest files, not a
+    #   deliberate lookalike. That is why it is no longer the only control.
     workflows: ["Hardened PR Review"]
     types: [completed]
 
@@ -33,12 +45,21 @@ env:
   # Carries S3 PutObject for the telemetry prefix. Only ever assumed by jobs
   # that do not execute pull-request content.
   PUBLISHER_ROLE: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+  # The Bedrock model the review runs on. Here rather than buried in
+  # `claude_args:` so changing it is one line at the top of the file, next to
+  # the role it is paid for with. Matches .github/workflows/claude-code.yml.
+  # The `model` column of the telemetry row is NOT set from this: it is read
+  # back out of the run's own usage file, so the row records what answered.
+  REVIEW_MODEL: global.anthropic.claude-opus-5
   AWS_REGION: us-east-1
   S3_BUCKET: ossci-raw-job-status
   S3_PREFIX: pr_review_verdicts
-  # The PR-lifecycle label that gates automated review. Stage 1 has its own copy
-  # of this string, but that one is attacker-authored and decides nothing; THIS
-  # is the trusted definition, used both to gate the run and to label the row.
+  # The PR-lifecycle label that gates automated review. Stage 1 has its own
+  # copy of this string; since Stage 1 moved to `pull_request_target` that copy
+  # is ALSO trusted — it is read from the default branch, not from the pull
+  # request. THIS one remains the definition that decides, for a different
+  # reason: `prepare` re-reads the PR's labels from the API and must compare
+  # against a value the artifact cannot influence, whoever authored it.
   REVIEW_LABEL: "in progress"
   DONE_LABEL: "ready for review"
   # Skip PRs too large to review usefully or affordably. Recorded as
@@ -51,7 +72,7 @@ jobs:
     if: |
       github.repository == 'pytorch/pytorch' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.event == 'pull_request_target' &&
       github.event.workflow.path == '.github/workflows/hardened-pr-review.yml'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -109,9 +130,21 @@ jobs:
           # as .github/workflows/claude-issue-triage-run.yml.
           #
           # This bounds the TRANSIENT case only. Exhausting the retries still
-          # exits before the `started` row, and Stage 1 is author-controlled so
-          # it can decline to upload at all - see emit_row.py on why a missing
-          # row must be rendered explicitly rather than read as clean.
+          # exits before the `started` row, so a missing row must be rendered
+          # explicitly rather than read as clean - see emit_row.py.
+          #
+          # The older reason given here, "Stage 1 is author-controlled so it
+          # can decline to upload at all", is no longer true: Stage 1 runs
+          # from the default branch under `pull_request_target`, so nobody
+          # opening a pull request chooses whether it uploads.
+          #
+          # That does NOT make a missing artifact a visible failure, and an
+          # earlier draft of this comment said it did. A Stage 1 that fails
+          # never reaches here at all - `prepare` requires
+          # `workflow_run.conclusion == 'success'`. What reaches here is a
+          # SUCCESSFUL Stage 1 whose artifact is nonetheless unavailable:
+          # expired, deleted, or not yet visible to the downloader. Missing
+          # telemetry is still not a verdict about the pull request.
           for attempt in 1 2 3 4 5; do
             # gh extracts with O_EXCL, so clear a partial tree from a prior
             # attempt or the retry fails deterministically with "file exists".
@@ -132,15 +165,30 @@ jobs:
         id: coords
         env:
           # GitHub-populated, therefore trusted. The artifact is not.
+          #
+          # STILL THE PULL REQUEST'S HEAD under `pull_request_target`, which is
+          # not obvious: that trigger runs the workflow from the default
+          # branch, so
+          # one might expect the run to be stamped with the base commit. It is
+          # not. Checked against live data rather than assumed - pytorch/pytorch
+          # run 28074906673 (`docathon-sync-label.yml`, `pull_request_target`,
+          # fork PR #187894) reports head_sha 50387cfd9953a498422f677bae3159be
+          # f24ca826, head_repository aperson30/pytorch and head_branch
+          # fix/mps-while-loop-kernel-naming, all three the PULL REQUEST's. The
+          # same holds for the two `head_*` fields the next step compares.
           EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
           FILE=request/pr-review-request.json
 
-          # The artifact comes from a workflow the PR author controls, so cap
-          # it before parsing. This bounds PARSING cost only - the download
-          # above has already written the file - and an author inflating it
-          # only denies service to their own PR.
+          # Cap the artifact before parsing. The PR author no longer controls
+          # the workflow that writes it — Stage 1 runs from the default branch
+          # — so this is no longer a defence against its author. It is a
+          # defence against WHICH Stage 1 wrote it: `workflow_run` subscribes
+          # by workflow NAME, and the two conditions on this job's `if:` are
+          # what establish provenance. This cap is what keeps a run that got
+          # past them from being expensive. Bounds PARSING only; the download
+          # above has already written the file.
           SIZE=$(stat -c%s "$FILE")
           [ "$SIZE" -le 65536 ] || { echo "::error::request artifact is ${SIZE}B, over the 64KiB cap"; exit 1; }
 
@@ -612,6 +660,12 @@ jobs:
           # place instead of duplicated across three shell scripts.
           PR_REVIEW_FINDINGS_FILE: ${{ runner.temp }}/pr-review-findings.json
           PR_REVIEW_DIFF_FILE: /tmp/pr-diff.txt
+          # Written by the diff step above, granted to the model's Read tool,
+          # and named by the validator when a finding misses its anchor — so
+          # the changed-file list is fetched by the model rather than pushed
+          # into its system message. All three spellings must agree; pinned by
+          # TestTheChangedFileListIsAPointerNotAPayload.
+          PR_REVIEW_FILES_FILE: /tmp/pr-files.txt
           PR_REVIEW_SCRIPTS_DIR: ${{ github.workspace }}/trusted/scripts/pr_review
           PR_REVIEW_HOOK_LOG: ${{ runner.temp }}/pr-review-hooks.log
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
@@ -685,7 +739,7 @@ jobs:
           # is the one that must survive - it is where the verdict is written.
           # `pr/` needs none: it sits under the action's cwd.
           claude_args: |
-            --model global.anthropic.claude-sonnet-4-6
+            --model ${{ env.REVIEW_MODEL }}
             --allowedTools "Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(/${{ runner.temp }}/pr-review-findings.json),Write"
             --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Task"
             --setting-sources user

