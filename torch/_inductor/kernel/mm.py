@@ -298,12 +298,8 @@ def _get_flydsl_2d_layout_metadata(
     if out_stride[1] != 1:
         return None
 
-    mat1_leading_stride = (
-        mat1_stride[1] if mat1_is_transposed else mat1_stride[0]
-    )
-    mat2_leading_stride = (
-        mat2_stride[1] if mat2_is_transposed else mat2_stride[0]
-    )
+    mat1_leading_stride = mat1_stride[1] if mat1_is_transposed else mat1_stride[0]
+    mat2_leading_stride = mat2_stride[1] if mat2_is_transposed else mat2_stride[0]
     sizevars = V.graph.sizevars
     aligned_byte_expressions = (
         mat1.get_layout().offset * operand_itemsize,
@@ -373,9 +369,7 @@ def get_flydsl_mm_template_kwargs(
         return []
 
     itemsize = dtype.itemsize
-    metadata = _get_flydsl_2d_layout_metadata(
-        layout, mat1, mat2, itemsize, itemsize
-    )
+    metadata = _get_flydsl_2d_layout_metadata(layout, mat1, mat2, itemsize, itemsize)
     if metadata is None:
         return []
 

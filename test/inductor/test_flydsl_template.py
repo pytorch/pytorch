@@ -338,8 +338,8 @@ class TestFlyDSLTemplate(TestCase):
 
         self.assertIsNotNone(metadata)
         names = (*input_names, "output")
-        self.assertEqual(metadata["precompile_shapes"], dict.fromkeys(names, [1]))
-        self.assertEqual(metadata["precompile_strides"], dict.fromkeys(names, [1]))
+        self.assertEqual(metadata["precompile_shapes"], {name: [1] for name in names})
+        self.assertEqual(metadata["precompile_strides"], {name: [1] for name in names})
         self.assertEqual(metadata["precompile_dtypes"], dict.fromkeys(names, "float32"))
 
     @parametrize(
@@ -767,8 +767,8 @@ class TestFlyDSLTemplate(TestCase):
             asdict(config) for config in flydsl_heuristics.get_default_gemm_configs()
         ]
         configs_by_hti = {}
-        for config in configs:
-            configs_by_hti.setdefault(config["USE_HALF_TILE_INTERLEAVED"], config)
+        for config_ in configs:
+            configs_by_hti.setdefault(config_["USE_HALF_TILE_INTERLEAVED"], config_)
         for use_hti in (False, True):
             self.assertIn(
                 use_hti,
@@ -940,8 +940,8 @@ class TestFlyDSLTemplate(TestCase):
             for config in flydsl_heuristics.get_default_grouped_gemm_configs()
         ]
         configs_by_hti = {}
-        for config in configs:
-            configs_by_hti.setdefault(config["USE_HALF_TILE_INTERLEAVED"], config)
+        for config_ in configs:
+            configs_by_hti.setdefault(config_["USE_HALF_TILE_INTERLEAVED"], config_)
         for use_hti in (False, True):
             self.assertIn(
                 use_hti,
@@ -1232,7 +1232,6 @@ def _candidate_args(
 
 def _run_mxfp_tile(mxfp_format, shape, tile, out_dtype, inputs, operand_layout=()):
     import flydsl.compiler as flyc
-
     from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
         gemm_mxfp_gfx950,
         make_mxfp_param_and_validate,
@@ -1252,7 +1251,8 @@ def _run_mxfp_tile(mxfp_format, shape, tile, out_dtype, inputs, operand_layout=(
         a_is_transposed=a_is_transposed,
         b_is_transposed=b_is_transposed,
     )
-    assert param is not None
+    if param is None:
+        raise AssertionError
     compile_args = tuple(
         flyc.from_torch_tensor(tensor).mark_layout_dynamic() for tensor in tensors
     ) + (param, 0)

@@ -21,17 +21,18 @@ from flydsl.expr import const_expr, range_constexpr, rocdl
 
 from .gemm_gfx950 import (
     __barrier,
+    async_load_operand,
     AsyncLoadContext,
     AsyncLoadOperand,
     BlockSwizzle,
-    GFX950_DMA_BYTES,
-    GFX950_WAVE_SIZE,
-    async_load_operand,
     get_leading_stride,
     get_wave_lds_offset,
+    GFX950_DMA_BYTES,
+    GFX950_WAVE_SIZE,
     make_lds_layout,
     make_tile_schedule,
 )
+
 
 def _permlane_swap(width, old, src):
     """v_permlane{16,32}_swap_b32 -> (new_old, new_src) as i32 IR values.
@@ -288,8 +289,7 @@ def make_mxfp_param_and_validate(
     k_tiles = (k + block_k - 1) // block_k
     derived_fields = asdict(derived)
     derived_fields["use_cshuffle"] = (
-        derived.use_cshuffle
-        and n % (GFX950_DMA_BYTES // MXFP_OUT_BYTES) == 0
+        derived.use_cshuffle and n % (GFX950_DMA_BYTES // MXFP_OUT_BYTES) == 0
     )
     return MXFPGemmParams(
         mxfp_format_id=MXFP_FORMAT_FP4 if mxfp_format == "mxfp4" else MXFP_FORMAT_FP8,
@@ -312,9 +312,7 @@ def make_mxfp_param_and_validate(
 
 def make_mxfp_gemm_kernel_name(param: MXFPGemmParams) -> str:
     mxfp_format = "mxfp4" if param.mxfp_format_id == MXFP_FORMAT_FP4 else "mxfp8"
-    out_dtype = (
-        "bfloat16" if param.out_dtype_id == MXFP_OUT_DTYPE_BF16 else "float16"
-    )
+    out_dtype = "bfloat16" if param.out_dtype_id == MXFP_OUT_DTYPE_BF16 else "float16"
     return (
         f"{mxfp_format}_scaled_mm_gfx950"
         f"_{out_dtype}"
@@ -357,6 +355,7 @@ def make_mxfp_tiled_mma(param: MXFPGemmParams, operand_elem):
     )
     return mma_atom, fx.make_tiled_mma(mma_atom, wave_layout, mma_permutation)
 
+
 @flyc.kernel
 def gemm_mxfp_gfx950_kernel(
     out: fx.Tensor,
@@ -398,9 +397,7 @@ def gemm_mxfp_gfx950_kernel(
 
     tid = fx.thread_idx.x
 
-    block_swizzle = BlockSwizzle(
-        NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=group_m
-    )
+    block_swizzle = BlockSwizzle(NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=group_m)
     bid_m, bid_n = block_swizzle.swizzle(tiles_m, tiles_n, fx.block_idx.x)
     block_m_offset = bid_m * fx.Int32(block_m)
     block_n_offset = bid_n * fx.Int32(block_n)
@@ -450,9 +447,7 @@ def gemm_mxfp_gfx950_kernel(
             src = fx.recast_iter(
                 fx.PointerType.get(elem_type.ir_type, src.memspace, alignment), src
             )
-        flat = fx.Tensor(
-            fx.make_view(src, fx.make_layout(elems, 1))
-        )
+        flat = fx.Tensor(fx.make_view(src, fx.make_layout(elems, 1)))
         return fx.rocdl.make_buffer_tensor(flat, max_size=True)
 
     # A and B arrive as uint8 views, so their flat extents are byte counts.
@@ -479,9 +474,7 @@ def gemm_mxfp_gfx950_kernel(
 
     if const_expr(is_mxfp4):
         universal_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), fx.Uint8)
-        buffer_s2r_atom = fx.make_copy_atom(
-            fx.rocdl.BufferCopy128b(), fx.Uint8
-        )
+        buffer_s2r_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.Uint8)
         transposed_s2r_atom = fx.make_copy_atom(
             fx.rocdl.cdna4.LDSReadTrans8_64b(), fx.Uint8
         )
@@ -523,42 +516,24 @@ def gemm_mxfp_gfx950_kernel(
                 fx.make_layout(MXFP_MFMA_K // elements_per_byte, 1),
             ),
         )
-        a_s2r_atom = (
-            transposed_s2r_atom if a_is_transposed else universal_s2r_atom
-        )
-        b_s2r_atom = (
-            transposed_s2r_atom if not b_is_transposed else universal_s2r_atom
-        )
+        a_s2r_atom = transposed_s2r_atom if a_is_transposed else universal_s2r_atom
+        b_s2r_atom = transposed_s2r_atom if not b_is_transposed else universal_s2r_atom
         thr_copy_A = a_tiled_copy.get_slice(tid)
         thr_copy_B = b_tiled_copy.get_slice(tid)
     else:
-        universal_s2r_atom = fx.make_copy_atom(
-            fx.UniversalCopy128b(), operand_elem
-        )
-        buffer_s2r_atom = fx.make_copy_atom(
-            fx.rocdl.BufferCopy128b(), operand_elem
-        )
+        universal_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), operand_elem)
+        buffer_s2r_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), operand_elem)
         transposed_s2r_atom = fx.make_copy_atom(
             fx.rocdl.cdna4.LDSReadTrans8_64b(), operand_elem
         )
-        a_s2r_atom = (
-            transposed_s2r_atom if a_is_transposed else universal_s2r_atom
-        )
-        b_s2r_atom = (
-            transposed_s2r_atom if not b_is_transposed else universal_s2r_atom
-        )
-        a_tiled_copy_atom = (
-            transposed_s2r_atom if a_is_transposed else buffer_s2r_atom
-        )
+        a_s2r_atom = transposed_s2r_atom if a_is_transposed else universal_s2r_atom
+        b_s2r_atom = transposed_s2r_atom if not b_is_transposed else universal_s2r_atom
+        a_tiled_copy_atom = transposed_s2r_atom if a_is_transposed else buffer_s2r_atom
         b_tiled_copy_atom = (
             transposed_s2r_atom if not b_is_transposed else buffer_s2r_atom
         )
-        thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(
-            tid
-        )
-        thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(
-            tid
-        )
+        thr_copy_A = fx.make_tiled_copy_A(a_tiled_copy_atom, tiled_mma).get_slice(tid)
+        thr_copy_B = fx.make_tiled_copy_B(b_tiled_copy_atom, tiled_mma).get_slice(tid)
     a_lds_layout_bytes = make_lds_layout(
         block_m,
         block_k_bytes,
@@ -622,9 +597,7 @@ def gemm_mxfp_gfx950_kernel(
         c_lds_layout = fx.make_layout((block_m, block_n), (block_n, 1))
         sC = fx.make_view(smem_c, c_lds_layout)
         cshuffle_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), out_elem)
-        cshuffle_r2g_atom = fx.make_copy_atom(
-            fx.rocdl.BufferCopy128b(), out_elem
-        )
+        cshuffle_r2g_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), out_elem)
         cshuffle_vec_size = GFX950_DMA_BYTES // MXFP_OUT_BYTES
         cshuffle_x_threads = block_n // cshuffle_vec_size
         cshuffle_thr_layout = fx.make_layout(
@@ -651,9 +624,7 @@ def gemm_mxfp_gfx950_kernel(
         for i in range_constexpr(fx.size(pred_C.shape).unpack()):
             row = fx.get_scalar(thr_cRow[i])
             col = fx.get_scalar(thr_cCol[i])
-            pred_C[i] = (block_m_offset + row < m) & (
-                block_n_offset + col < n
-            )
+            pred_C[i] = (block_m_offset + row < m) & (block_n_offset + col < n)
     else:
         r2g_atom = fx.make_copy_atom(fx.rocdl.BufferCopy16b(), out_elem)
         thr_copy_C = fx.make_tiled_copy_C(r2g_atom, tiled_mma).get_slice(tid)
@@ -662,9 +633,7 @@ def gemm_mxfp_gfx950_kernel(
         for i in range_constexpr(fx.size(pred_C_mma.shape).unpack()):
             row = fx.get_scalar(thr_mma_cRow[i])
             col = fx.get_scalar(thr_mma_cCol[i])
-            pred_C_mma[i] = (block_m_offset + row < m) & (
-                block_n_offset + col < n
-            )
+            pred_C_mma[i] = (block_m_offset + row < m) & (block_n_offset + col < n)
         pred_C = thr_copy_C.retile(pred_C_mma)
 
     lane = fx.Int32(tid) % fx.Int32(GFX950_WAVE_SIZE)
@@ -775,7 +744,6 @@ def gemm_mxfp_gfx950_kernel(
                 global_outer_offset=block_n_offset,
                 k_tile=k_tile,
             )
-
 
     def scaled_mma(d_frag, a_frag, b_frag, scale_a, scale_b):
         if const_expr(not is_mxfp4):
@@ -923,12 +891,8 @@ def gemm_mxfp_gfx950_kernel(
 
     if const_expr(param.lds_scale):
         # Base byte offset for this lane's first scale value.
-        sc_lane_base_a = (
-            a_row_base * fx.Int32(param.scale_row_bytes) + lane_grp
-        )
-        sc_lane_base_b = (
-            b_row_base * fx.Int32(param.scale_row_bytes) + lane_grp
-        )
+        sc_lane_base_a = a_row_base * fx.Int32(param.scale_row_bytes) + lane_grp
+        sc_lane_base_b = b_row_base * fx.Int32(param.scale_row_bytes) + lane_grp
 
     def lds_scale_read(base_bytes, dyn_base, repeat_stride, n_repeat):
         """Read one E8M0 byte for each repeat and MFMA K slice."""
@@ -942,9 +906,7 @@ def gemm_mxfp_gfx950_kernel(
                 reg = fx.make_rmem_tensor(1, fx.Uint8)
                 fx.copy(
                     sc_lds_atom,
-                    fx.make_view(
-                        fx.add_offset(base_bytes, off), fx.make_layout(1, 1)
-                    ),
+                    fx.make_view(fx.add_offset(base_bytes, off), fx.make_layout(1, 1)),
                     reg,
                 )
                 words.append(fx.get_scalar(reg[0]).to(fx.Int32))
@@ -964,9 +926,7 @@ def gemm_mxfp_gfx950_kernel(
 
         for kh in range_constexpr(param.k_halves):
             if const_expr(has_k_tail):
-                global_k = (
-                    k_tile * fx.Int32(block_k) + fx.Int32(kh * MXFP_MFMA_K)
-                )
+                global_k = k_tile * fx.Int32(block_k) + fx.Int32(kh * MXFP_MFMA_K)
                 if global_k < k:
                     consume_k_half(kh)
             else:
@@ -1058,7 +1018,6 @@ def gemm_mxfp_gfx950_kernel(
         fx.copy(r2g_atom, frag_C_retile, thr_gC, pred=pred_C)
 
 
-
 @flyc.jit
 def gemm_mxfp_gfx950(
     out: fx.Tensor,
@@ -1069,9 +1028,7 @@ def gemm_mxfp_gfx950(
     param: MXFPGemmParams,
     stream: fx.Stream = fx.Stream(None),
 ):
-    elements_per_byte = (
-        2 if const_expr(param.mxfp_format_id == MXFP_FORMAT_FP4) else 1
-    )
+    elements_per_byte = 2 if const_expr(param.mxfp_format_id == MXFP_FORMAT_FP4) else 1
     m = fx.Int32(fx.get_scalar(a.shape[0]))
     n = fx.Int32(fx.get_scalar(b.shape[1]))
     k = fx.Int32(fx.get_scalar(a.shape[1])) * fx.Int32(elements_per_byte)
