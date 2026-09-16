@@ -60,6 +60,20 @@ PRUNE_FUNCTIONS = {
 # above is stable, so that is what the XPU trees assert on.
 PRUNE_PATTERN = re.compile(r"ze[A-Z]\w*|urUSM\w*")
 
+# A memcpy eligible device to device copy dispatches to the copy engine on
+# client GPUs but to a copy kernel on PVC, so on XPU the two nodes under
+# `aten::copy_` name a different runtime API and a different SYCL kernel
+# depending on which architecture the test runs on. Neither name is unique to
+# copies, so the pair is collapsed only where it appears under a copy.
+XPU_D2D_COPY = "[xpu d2d copy]"
+XPU_D2D_COPY_TREES = (
+    ["urEnqueueUSMMemcpy", "Memcpy D2D (Device -> Device)"],
+    [
+        "urEnqueueKernelLaunchWithArgsExp",
+        "at::native::xpu::VectorizedElementwiseKernel<...>",
+    ],
+)
+
 # ROCTracer is currently not producing events that profiler can extract. We
 # should bring it up to parity with CUPTI Kineto / profiler integration, but in
 # the mean time there is still utility in running tests but not checking that
@@ -138,7 +152,13 @@ class ProfilerTree:
                     prune_level = PRUNE_ALL
                 if prune_level is None:
                     out.append((depth, name))
-                    flatten(node.children, depth + 1, out)
+                    children = flatten(node.children, depth + 1)
+                    if (
+                        name.strip() == "aten::copy_"
+                        and [n.strip() for _, n in children] in XPU_D2D_COPY_TREES
+                    ):
+                        children = [(depth + 1, XPU_D2D_COPY)]
+                    out.extend(children)
                 elif prune_level == IGNORE:
                     flatten(node.children, depth, out)
                 elif prune_level == KEEP_NAME_AND_ELLIPSES:
@@ -1167,8 +1187,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                       aten::to
                       [memory]
                       aten::copy_
-                        urEnqueueUSMMemcpy
-                          Memcpy D2D (Device -> Device)
+                        [xpu d2d copy]
                     aten::mul
                       [memory]
                       aten::mul
@@ -1196,8 +1215,7 @@ class TestProfilerTreeDevice(_TestProfilerTreeBase):
                     aten::empty_strided
                       [memory]
                     aten::copy_
-                      urEnqueueUSMMemcpy
-                        Memcpy D2D (Device -> Device)
+                      [xpu d2d copy]
                   aten::_foreach_add_
                     urEnqueueUSMMemcpy
                       Memcpy H2D (Host (Driver Allocated) -> Device)
