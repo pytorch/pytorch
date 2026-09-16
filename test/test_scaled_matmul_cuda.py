@@ -39,7 +39,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyCUDA,
     onlyOn,
     e4m3_type,
     e5m2_type,
@@ -60,6 +59,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
+    HardwareClassification,
     TestCase,
 )
 from torch.testing._internal.common_quantized import (
@@ -733,6 +733,7 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     return kwargs[format]
 
 class TestFP8MatmulDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -2646,7 +2647,8 @@ class TestFP8MatmulDevice(TestCase):
 
 
 class TestFP8Matmul(TestCase):
-    @skipXPU
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pack_uint4(self):
         """
         Verify that given a tensor with high precision values [val0, val1],
@@ -2662,8 +2664,9 @@ class TestFP8Matmul(TestCase):
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
 
 
-@onlyCUDA
 class TestFP8MatmulCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
         """Check the identity, storage, version, and value contract."""
         data_ptr = input.data_ptr()
@@ -3437,7 +3440,9 @@ class TestFP8MatmulCUDA(TestCase):
                     self.assertNotEqual(carveout_66, carveout_0)
 
 
-instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFP8Matmul, globals())
+instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFP8MatmulCUDA, globals(), only_for=('cuda'))
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
