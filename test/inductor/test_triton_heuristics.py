@@ -702,7 +702,7 @@ class TestTritonHeuristics(TestCase):
                     "device": TestTritonHeuristics._fake_cuda_device_properties()
                 },
                 heuristic_type=HeuristicType.REDUCTION,
-                filename="/tmp/kernel.py",
+                filename=os.path.join(tempfile.gettempdir(), "kernel.py"),
                 inductor_meta={},
                 caching_autotuner_cls=CaptureAutotuner,
             )(FakeJitFunction())
@@ -745,7 +745,7 @@ class TestTritonHeuristics(TestCase):
         ) as create:
             configs, autotune_cache, autotune_cache_info = check_autotune_cache(
                 [cfg],
-                "/tmp/kernel.py",
+                os.path.join(tempfile.gettempdir(), "kernel.py"),
                 {},
                 dynamic_scale_rblock_eligible=False,
             )
