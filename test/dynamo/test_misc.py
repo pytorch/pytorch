@@ -17907,6 +17907,15 @@ fn
 
         self.assertEqual(fn(), b"")
 
+    def test_builtin_bytearray_from_bytes(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            equal = bytearray(b"abc") == bytearray(b"abc")
+            unequal = bytearray(b"abc") == bytearray(b"cba")
+            return equal, unequal, x + 1
+
+        self.assertEqual(fn(torch.ones(2)), (True, False, torch.ones(2) + 1))
+
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}
 

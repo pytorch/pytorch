@@ -2043,6 +2043,25 @@ class BuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "bytes", kwargs)
         return variables.ConstantVariable.create(b"")
 
+    def call_bytearray(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        # Only the bytes-like copy form, e.g. bytearray(b"abc"). The int,
+        # iterable-of-ints and str+encoding forms are left to graph break.
+        if kwargs or len(args) != 1 or not args[0].is_python_constant():
+            return None
+        arg = args[0].as_python_constant()
+        if not isinstance(arg, (bytes, bytearray)):
+            return None
+        # A bytearray is mutable, so it is modeled the same way as any other
+        # bytearray instance (UserDefinedObjectVariable), not as a constant.
+        return UserDefinedObjectVariable(
+            bytearray(arg), mutation_type=ValueMutationNew()
+        )
+
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
             unimplemented(
