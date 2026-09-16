@@ -1314,6 +1314,9 @@ def tuned_scaled_mm_v2(
     ):
         return fallback()
 
+    if mat_a.get_device().type == "mps":
+        return fallback()
+
     def _is_dynamic(sz) -> bool:
         return PythonWrapperCodegen.statically_known_int_or_none(sz) is None
 

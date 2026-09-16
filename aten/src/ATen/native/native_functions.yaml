@@ -7122,7 +7122,6 @@
   dispatch:
     CPU: _scaled_mm_cpu
     CUDA: _scaled_mm_cuda
-    MPS: _scaled_mm_mps
     XPU: _scaled_mm_xpu
   tags: needs_exact_strides
 
@@ -7131,7 +7130,6 @@
   dispatch:
     CPU: _scaled_mm_out_cpu
     CUDA: _scaled_mm_out_cuda
-    MPS: _scaled_mm_out_mps
     XPU: _scaled_mm_out_xpu
   tags: needs_exact_strides
 
@@ -7146,6 +7144,7 @@
   dispatch:
     CPU: _scaled_mm_cpu_v2_out
     CUDA: _scaled_mm_cuda_v2_out
+    MPS: _scaled_mm_mps_v2_out
     XPU: _scaled_mm_xpu_v2_out
   tags: needs_exact_strides
 

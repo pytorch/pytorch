@@ -15,7 +15,6 @@ struct ScaledMMArgs {
   device const float* scale_a;
   device const float* scale_b;
   device const uchar* bias;
-  device const float* scale_result;
   threadgroup half* a_tile;
   threadgroup half* b_tile;
 };
@@ -61,11 +60,6 @@ inline void scaled_mm_store(
         ? float(reinterpret_cast<device const bfloat*>(args.bias)[col])
         : float(reinterpret_cast<device const half*>(args.bias)[col]);
   }
-  if IF_CONSTEXPR (c10::metal::is_float8_v<T>) {
-    if (p.has_scale_result) {
-      value *= args.scale_result[0];
-    }
-  }
   args.out[row * p.out_row_stride + col * p.out_col_stride] = T(value);
 }
 
@@ -78,8 +72,7 @@ kernel void scaled_mm(
     device const float* scale_a [[buffer(3)]],
     device const float* scale_b [[buffer(4)]],
     device const uchar* bias [[buffer(5)]],
-    device const float* scale_result [[buffer(6)]],
-    constant ScaledMMParams<>& p [[buffer(7)]],
+    constant ScaledMMParams<>& p [[buffer(6)]],
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]],
     uint sg [[simdgroup_index_in_threadgroup]]) {
@@ -99,8 +92,7 @@ kernel void scaled_mm(
   threadgroup half a_tile[tile * tile];
   threadgroup half b_tile[tile * tile];
   threadgroup float c_tile[tile * tile];
-  const ScaledMMArgs<T> args{
-      a, b, out, scale_a, scale_b, bias, scale_result, a_tile, b_tile};
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
   const uint sg_row = sg / sg_grid * block;
   const uint sg_col = sg % sg_grid * block;
   simdgroup_float8x8 accum[frags][frags];
@@ -154,7 +146,7 @@ kernel void scaled_mm(
   }
 }
 
-#define REGISTER_SCALED_MM(T)                                       \
+#define REGISTER_SCALED_MM_WITH_OUT_T(T)                            \
   template [[host_name("scaled_mm_" #T)]] kernel void scaled_mm<T>( \
       device const float8_e4m3fn*,                                  \
       device const float8_e4m3fn*,                                  \
@@ -162,16 +154,15 @@ kernel void scaled_mm(
       device const float*,                                          \
       device const float*,                                          \
       device const uchar*,                                          \
-      device const float*,                                          \
       constant ScaledMMParams<>&,                                   \
       uint2,                                                        \
       uint,                                                         \
       uint);
 
-REGISTER_SCALED_MM(float);
-REGISTER_SCALED_MM(half);
-REGISTER_SCALED_MM(bfloat);
-REGISTER_SCALED_MM(float8_e4m3fn);
+REGISTER_SCALED_MM_WITH_OUT_T(float);
+REGISTER_SCALED_MM_WITH_OUT_T(half);
+REGISTER_SCALED_MM_WITH_OUT_T(bfloat);
+REGISTER_SCALED_MM_WITH_OUT_T(float8_e4m3fn);
 
 #if C10_METAL_HAS_MPP
 
@@ -184,15 +175,13 @@ kernel void scaled_mm_mpp(
     device const float* scale_a [[buffer(3)]],
     device const float* scale_b [[buffer(4)]],
     device const uchar* bias [[buffer(5)]],
-    device const float* scale_result [[buffer(6)]],
-    constant ScaledMMParams<>& p [[buffer(7)]],
+    constant ScaledMMParams<>& p [[buffer(6)]],
     uint2 group [[threadgroup_position_in_grid]],
     uint tid [[thread_index_in_threadgroup]]) {
   constexpr auto tile = scaled_mm_tile;
   threadgroup half a_tile[tile * tile];
   threadgroup half b_tile[tile * tile];
-  const ScaledMMArgs<T> args{
-      a, b, out, scale_a, scale_b, bias, scale_result, a_tile, b_tile};
+  const ScaledMMArgs<T> args{a, b, out, scale_a, scale_b, bias, a_tile, b_tile};
   using tile_t =
       tensor<threadgroup half, extents<int, tile, tile>, tensor_inline>;
   tile_t aa(a_tile, extents<int, tile, tile>());
@@ -234,7 +223,7 @@ kernel void scaled_mm_mpp(
   }
 }
 
-#define REGISTER_SCALED_MM_MPP(T)                                           \
+#define REGISTER_SCALED_MM_MPP_WITH_OUT_T(T)                                \
   template [[host_name("scaled_mm_mpp_" #T)]] kernel void scaled_mm_mpp<T>( \
       device const float8_e4m3fn*,                                          \
       device const float8_e4m3fn*,                                          \
@@ -242,14 +231,13 @@ kernel void scaled_mm_mpp(
       device const float*,                                                  \
       device const float*,                                                  \
       device const uchar*,                                                  \
-      device const float*,                                                  \
       constant ScaledMMParams<>&,                                           \
       uint2,                                                                \
       uint);
 
-REGISTER_SCALED_MM_MPP(float);
-REGISTER_SCALED_MM_MPP(half);
-REGISTER_SCALED_MM_MPP(bfloat);
-REGISTER_SCALED_MM_MPP(float8_e4m3fn);
+REGISTER_SCALED_MM_MPP_WITH_OUT_T(float);
+REGISTER_SCALED_MM_MPP_WITH_OUT_T(half);
+REGISTER_SCALED_MM_MPP_WITH_OUT_T(bfloat);
+REGISTER_SCALED_MM_MPP_WITH_OUT_T(float8_e4m3fn);
 
 #endif // C10_METAL_HAS_MPP

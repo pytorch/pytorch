@@ -46,7 +46,6 @@ from torch.testing._internal.common_device_type import (
     E5M2_MAX_POS,
     skipXPU,
     skipCUDAIf,
-    skipMPS,
 )
 
 from torch.testing._internal.common_xpu import Xe2_Or_Later
@@ -224,8 +223,7 @@ def scaled_mm_wrap(
     bias=None,
     wrap_v2=wrap,
 ):
-    # MPS only implements _scaled_mm; route it to v1 until _scaled_mm_v2 lands there.
-    if not wrap_v2 or a.device.type == "mps":
+    if not wrap_v2:
         return torch._scaled_mm(
             a,
             b,
@@ -1961,6 +1959,8 @@ class TestFP8Matmul(TestCase):
         # the CUTLASS fallback depending on CUDA version / arch.
         if torch.version.hip and output_dtype is not torch.bfloat16:
             raise unittest.SkipTest("hipblaslt rowwise _scaled_mm only supports BFloat16")
+        if "mps" in device and not wrap_v2:
+            raise unittest.SkipTest("MPS only implements _scaled_mm_v2")
 
         M, K, N = 256, 512, 768
         torch.manual_seed(42)
@@ -3312,7 +3312,6 @@ class TestFP8Matmul(TestCase):
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @skipIfRocm
-    @skipMPS  # no _scaled_mm_v2 kernel on MPS
     def test_scaled_mm_v2_fullgraph(self, device) -> None:
         m, n, k = 15, 32, 16
         a = torch.randn(m, k, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
