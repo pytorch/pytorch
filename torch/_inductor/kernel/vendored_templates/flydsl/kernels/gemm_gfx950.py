@@ -15,6 +15,7 @@ from flydsl.runtime.device import get_rocm_arch
 GFX950_DMA_BYTES = 16
 GFX950_WAVE_SIZE = 64
 GFX950_MAX_BLOCK_THREADS = 1024
+# 32-bit buffer_load_lds: four 1-byte E8M0 scales (128 K) per thread.
 GFX950_SCALE_DMA_BYTES = 4
 MXFP_SCALE_BLOCK_K = 32
 MXFP_MAX_MMA_REPEAT = 8
@@ -88,7 +89,7 @@ class AsyncLoadOperand:
     is_k_major: Any
 
 
-def mxfp8_scale_stage_bytes(rows, block_k, block_threads):
+def mxfp_scale_stage_bytes(rows, block_k, block_threads):
     # A complete 32-bit DMA per thread, padding the last workgroup-sized
     # chunk. Extra lanes duplicate valid rows rather than reading OOB.
     workgroup_bytes = block_threads * GFX950_SCALE_DMA_BYTES
@@ -218,8 +219,8 @@ def make_gemm_gfx950_param(
             )
         scale_row_bytes = block_k // MXFP_SCALE_BLOCK_K
         scale_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
-        scale_a_bytes = mxfp8_scale_stage_bytes(block_m, block_k, block_threads)
-        scale_b_bytes = mxfp8_scale_stage_bytes(block_n, block_k, block_threads)
+        scale_a_bytes = mxfp_scale_stage_bytes(block_m, block_k, block_threads)
+        scale_b_bytes = mxfp_scale_stage_bytes(block_n, block_k, block_threads)
         scale_a_iters = scale_a_bytes // scale_bytes_per_pass
         scale_b_iters = scale_b_bytes // scale_bytes_per_pass
 

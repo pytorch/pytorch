@@ -21,7 +21,7 @@ from .gemm_gfx950 import (
     make_gemm_gfx950_kernel_name,
     make_lds_layout,
     make_wave_lds_ptr,
-    mxfp8_scale_stage_bytes,
+    mxfp_scale_stage_bytes,
     MXFP_SCALE_BLOCK_K,
 )
 
@@ -111,7 +111,7 @@ def async_load_mxfp8_scales(
     """Stage four E8M0 bytes/lane with the same waitcnt protocol as A/B."""
     scale_k = block_k // MXFP_SCALE_BLOCK_K
     words_per_row = scale_k // 4
-    stage_bytes = mxfp8_scale_stage_bytes(rows, block_k, block_threads)
+    stage_bytes = mxfp_scale_stage_bytes(rows, block_k, block_threads)
     load_iters = stage_bytes // (block_threads * GFX950_SCALE_DMA_BYTES)
     rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(scale))
     lds_ptr = make_wave_lds_ptr(
