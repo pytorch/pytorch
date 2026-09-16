@@ -91,6 +91,7 @@ from torch._inductor.cudagraph_utils import (
     WrappedFunction,
 )
 from torch._library.opaque_object import is_custom_class_obj
+from torch._prims_common import compute_required_storage_length
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -934,6 +935,15 @@ class AliasesNewOutput(OutputAliasInfo):
         self.index = index
 
 
+def _can_copy_input_storage(inp: torch.Tensor) -> bool:
+    # Copying the logical view must preserve every storage-relative read.
+    storage_size = int(compute_required_storage_length(inp.size(), inp.stride(), 0))
+    return bool(
+        inp.storage_offset() == 0
+        and inp.untyped_storage().nbytes() == storage_size * inp.element_size()
+    )
+
+
 class CUDAGraphNode:
     """
     A single recording of a function into a CUDA Graph. Recordings of CUDA Graphs share a single memory pool
@@ -1025,9 +1035,18 @@ class CUDAGraphNode:
             for idx, t in enumerate(inputs)
             if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
         )
-        copy_cudagraph_managed_idxs_set = (
-            OrderedSet(copy_cudagraph_managed_idxs) & all_cudagraph_managed_idxs
-        ) - static_input_idxs
+        copy_cudagraph_managed_idxs_set = OrderedSet(
+            idx
+            for idx in (
+                OrderedSet(copy_cudagraph_managed_idxs) & all_cudagraph_managed_idxs
+            )
+            - static_input_idxs
+            if _can_copy_input_storage(cast(torch.Tensor, inputs[idx]))
+        )
+        self.copied_managed_input_storage_sizes: dict[int, int] = {
+            idx: cast(torch.Tensor, inputs[idx]).untyped_storage().nbytes()
+            for idx in copy_cudagraph_managed_idxs_set
+        }
         self.cudagraph_managed_idxs: list[int] = list(
             all_cudagraph_managed_idxs - copy_cudagraph_managed_idxs_set
         )
@@ -1140,18 +1159,6 @@ class CUDAGraphNode:
             self.recorded_liveness_before_graph = curr_liveness
             self.expected_dead_indices_before_graph = different_indices
 
-        # Copied managed inputs do not feed the graph directly, but keeping their
-        # source storages live during recording prevents capture from reusing
-        # memory the replay caller may still hold.
-        preserved_copy_cudagraph_managed_inputs: list[torch.Tensor] = []
-        for idx in copy_cudagraph_managed_idxs_set:
-            inp = inputs[idx]
-            if (
-                isinstance(inp, torch.Tensor)
-                and self._is_alias_of_live_recorded_tensor(inp) is not None
-            ):
-                preserved_copy_cudagraph_managed_inputs.append(inp)
-
         recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
 
@@ -1216,7 +1223,6 @@ class CUDAGraphNode:
             self.recording_outputs: OutputType | None = self._record(
                 wrapped_function.model, recording_inputs
             )
-        preserved_copy_cudagraph_managed_inputs.clear()
         self.outputs_metadata: OutputList[dict[str, Any] | int | None] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -1305,6 +1311,15 @@ class CUDAGraphNode:
         self.check_static_inputs_are_stable(new_inputs)
 
         self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
+
+        # Copy sources can alias managed inputs; release them before checking deaths.
+        torch._check(
+            self._check_liveness(
+                self.expected_dead_indices_after_graph, self.path_weakrefs
+            ),
+            lambda: "TODO: graph recording observed an input tensor deallocate during graph "
+            " recording that did not occur during replay. Please file an issue.",
+        )
 
         self.run_graph()
 
@@ -2040,7 +2055,7 @@ class CUDAGraphNode:
 
         return recording_inputs
 
-    def can_copy_cudagraph_managed_input(self, idx: int) -> bool:
+    def can_copy_cudagraph_managed_input(self, idx: int, inp: torch.Tensor) -> bool:
         # A copied input no longer aliases other inputs inside the replayed graph.
         # If any input is mutated, a later invocation can pass the same graph-pool
         # tensor to both slots and require that aliasing to be preserved.
@@ -2048,6 +2063,7 @@ class CUDAGraphNode:
             not self.wrapped_function.mutated_input_idxs
             and idx not in self.wrapped_function.static_input_idxs
             and not self.preserved_aliased_inputs[idx]
+            and _can_copy_input_storage(inp)
         )
 
     def check_invariants(
@@ -2064,6 +2080,18 @@ class CUDAGraphNode:
             inputs,
             self.static_input_data_ptrs,
         )
+
+        for idx, storage_size in self.copied_managed_input_storage_sizes.items():
+            inp = cast(torch.Tensor, inputs[idx])
+            if (
+                inp.storage_offset() != 0
+                or inp.untyped_storage().nbytes() != storage_size
+            ):
+                status = CheckInvariantStatus.CopiedInputStorageMismatch
+                return status, lambda: (
+                    f"copied managed input {idx} requires storage offset 0 "
+                    f"and {storage_size} storage bytes"
+                )
 
         # previously managed data pointers remain stable
         # this is on the hot path so moved to C++. equivalent to:
@@ -2107,20 +2135,11 @@ class CUDAGraphNode:
             )
             return status, _logger
 
-        # the cudagraph managed tensors which died upon recording must also die upon
-        # this invocation. it is too late to check after we've replayed the graph,
-        # because we would have already written over their memory.
+        # Release managed arguments before the post-copy lifetime check in run().
         for idx in self.cudagraph_managed_idxs:
             if not self.preserved_aliased_inputs[idx]:
                 inputs[idx] = None  # type: ignore[call-overload]
 
-        torch._check(
-            self._check_liveness(
-                self.expected_dead_indices_after_graph, self.path_weakrefs
-            ),
-            lambda: "TODO: graph recording observed an input tensor deallocate during graph "
-            " recording that did not occur during replay. Please file an issue.",
-        )
         return CheckInvariantStatus.SUCCESS, lambda: f"{CheckInvariantStatus.SUCCESS}"
 
     def mismatched_cudagraph_managed_idxs(self, inputs: list[InputType]) -> list[int]:
@@ -2672,6 +2691,22 @@ class CUDAGraphTreeManager:
         ):
             return self.ids_to_funcs[function_id].model(new_inputs)
 
+        uncopyable_demoted_idxs: OrderedSet[int] = OrderedSet()
+        for idx in self._get_demoted_cudagraph_managed_idxs(function_id):
+            if _can_copy_input_storage(cast(torch.Tensor, new_inputs[idx])):
+                continue
+            uncopyable_demoted_idxs.add(idx)
+            if not self._get_cuda_graph_recorded_tensor_checker()(
+                cast(torch.Tensor, new_inputs[idx])
+            ):
+                self.skip_cudagraph[node_id][function_id] = True
+                log_cudagraph_skip_and_bump_counter(
+                    f"skipping cudagraph due to demoted input {idx} of function "
+                    f"{function_id.id} becoming an unmanaged tensor whose full "
+                    "storage cannot be preserved by copying its view"
+                )
+                return self.ids_to_funcs[function_id].model(new_inputs)
+
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
         # then warm up graph B and make more allocations, the subsequent recording of A will not
@@ -2708,7 +2743,11 @@ class CUDAGraphTreeManager:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
                 # and other
-                status, status_logger = child.check_invariants(new_inputs)
+                if any(idx in child.input_copy_idxs for idx in uncopyable_demoted_idxs):
+                    status = CheckInvariantStatus.CopiedInputStorageMismatch
+                    status_logger = functools.partial(str, status)
+                else:
+                    status, status_logger = child.check_invariants(new_inputs)
                 if status == CheckInvariantStatus.SUCCESS:
                     return self.execute_node(child, new_inputs)
 
@@ -2758,7 +2797,9 @@ class CUDAGraphTreeManager:
                 demotable_cudagraph_managed_idxs = OrderedSet(
                     idx
                     for idx in latest.mismatched_cudagraph_managed_idxs(new_inputs)
-                    if latest.can_copy_cudagraph_managed_input(idx)
+                    if latest.can_copy_cudagraph_managed_input(
+                        idx, cast(torch.Tensor, new_inputs[idx])
+                    )
                 )
             skip_cudagraph_managed_input_idxs: tuple[int, ...] = ()
             if demotable_cudagraph_managed_idxs:

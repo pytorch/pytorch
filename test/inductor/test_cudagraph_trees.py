@@ -2573,6 +2573,38 @@ if HAS_CUDA_AND_TRITON:
             run_pair(3)
             self.assertEqual(len(children), 3)
 
+        @config.patch(
+            {
+                "triton.skip_cudagraph_warmup": True,
+                "triton.cudagraph_managed_input_rerecord_limit": 1,
+            }
+        )
+        def test_demoted_input_alias_lifetime(self):
+            def producer(args):
+                x = args[0]
+                args.clear()
+                return tuple(x + i for i in range(3))
+
+            def consumer(args):
+                x, y = args
+                args.clear()
+                return [x + y]
+
+            inp = torch.ones(4, device="cuda")
+            producer_cg = self.cudagraphify_impl(producer, [inp], ())
+            consumer_cg = self.cudagraphify_impl(consumer, [inp, inp], ())
+            child = None
+            for idx in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                outputs = producer_cg([inp])
+                args = [outputs[idx], outputs[-1]]
+                del outputs
+                consumer_cg(args)
+                if idx == 1:
+                    child = self.curr_node()
+                    self.assertIn((0, 1), child.expected_dead_indices_after_graph)
+            self.assertIs(self.curr_node(), child)
+
         @torch._inductor.config.patch(
             {
                 "triton.skip_cudagraph_warmup": True,
@@ -7329,6 +7361,46 @@ if HAS_CUDA_AND_TRITON:
         ops,
     )
     from torch.testing._internal.common_methods_invocations import op_db
+
+    class TestCudagraphManagedInputStorage(TestCase):
+        @config.patch(
+            {
+                "triton.skip_cudagraph_warmup": True,
+                "triton.cudagraph_managed_input_rerecord_limit": 1,
+            }
+        )
+        def test_managed_view_storage(self, device):
+            def consumer(x):
+                return (x.as_strided((32,), (1,), 0) + 1,)
+
+            def producer(args):
+                x = args[0]
+                args.clear()
+                return x + 0, x + 1
+
+            inp = torch.arange(32, dtype=torch.float32, device=device)
+            example = inp[:4]
+            graph = make_fx(consumer)(example)
+            compiled = compile_fx_inner(graph, [example], cudagraphs=False)
+            self.assertEqual(compiled([example])[0], inp + 1)
+
+            cudagraphify = functools.partial(
+                tree_cudagraphify_impl,
+                device_index=inp.device.index,
+                is_inference=True,
+                is_backward=False,
+            )
+            producer_cg = cudagraphify(producer, [inp], ())
+            consumer_cg = cudagraphify(compiled, [example], ())
+            for idx in range(2):
+                torch.compiler.cudagraph_mark_step_begin()
+                outputs = producer_cg([inp])
+                self.assertEqual(consumer_cg([outputs[idx][:4]])[0], inp + idx + 1)
+                del outputs
+
+    instantiate_device_type_tests(
+        TestCudagraphManagedInputStorage, globals(), only_for=("cuda",)
+    )
 
     # Ops that involve indexing/scattering that we want to test with cudagraphs
     INDEXING_OPS = (
