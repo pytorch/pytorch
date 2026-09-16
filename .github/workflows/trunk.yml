@@ -70,6 +70,28 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       check_experiments: lf,amd-dpx
 
+  # Build-only Hopper coverage: nothing in CI compiles for sm90 on CUDA 12.x
+  # otherwise, so this catches 12.6-specific compile breaks against '9.0'.
+  linux-jammy-cuda12_6-py3_11-gcc11-sm90-build-only:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.6-py3.11-gcc11-sm90-build-only ') }}
+    name: linux-jammy-cuda12.6-py3.11-gcc11-sm90-build-only
+    uses: ./.github/workflows/_linux-build.yml
+    needs:
+      - get-label-type
+      - job-filter
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.r7i.4xlarge
+      build-environment: linux-jammy-cuda12.6-py3.11-gcc11-sm90-build-only
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.6-cudnn9-py3.11-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '9.0'
+      build-generates-artifacts: false
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "12.6"
+    secrets: inherit
+
   libtorch-linux-jammy-cuda13_2-py3_10-gcc11-debug-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' libtorch-linux-jammy-cuda13.2-py3.10-gcc11-debug ') }}
     name: libtorch-linux-jammy-cuda13.2-py3.10-gcc11-debug
