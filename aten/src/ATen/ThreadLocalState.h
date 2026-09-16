@@ -48,7 +48,6 @@ class TORCH_API ThreadLocalState {
   c10::impl::LocalDispatchKeySet dispatch_key_;
 
   std::shared_ptr<c10::FakeTensorMode> fake_tensor_mode_state_;
-  bool fake_in_kernel_invocation_state_;
 
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
