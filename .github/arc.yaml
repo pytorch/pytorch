@@ -109,6 +109,9 @@ runner_mapping:
   linux.rocm.gpu.mi300.4: linux.rocm.gpu.mi300.4
   linux.rocm.gpu.gfx950.1: linux.rocm.gpu.gfx950.1
   linux.rocm.gpu.gfx950.2: linux.rocm.gpu.gfx950.2
+  # Kubernetes-novolume scale set: the CI image is the workflow job pod.
+  linux.rocm.gpu.gfx950.1-no-dind: linux.rocm.gpu.gfx950.1-no-dind
+  linux.rocm.gpu.gfx950.2-no-dind: linux.rocm.gpu.gfx950.2-no-dind
   amd-dpx-linux.rocm.gpu.gfx950.1: amd-dpx-linux.rocm.gpu.gfx950.1
   amd-dpx-linux.rocm.gpu.gfx950.2: amd-dpx-linux.rocm.gpu.gfx950.2
   linux.rocm.gpu.rx7900.1: linux.rocm.gpu.rx7900.1
