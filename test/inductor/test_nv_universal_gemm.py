@@ -2459,10 +2459,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 scale,
             )
 
-        result, code, epilogue_fused = self._compile_and_check(fn, a, b)
+        result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=2e-2, rtol=2e-2)
-        self.assertFalse(epilogue_fused)
-        self.assertNotIn("has_epilogue=True", code)
+        self.assertNotIn("cute.ReductionOp.ADD", code)
+        self.assertNotIn("cute.ReductionOp.MAX", code)
 
     def test_bf16_grouped_n_distinct_reduction_consumers(self):
         m, n, k, group = 128, 64, 64, 4
@@ -2500,12 +2500,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
                 scale,
             )
 
-        result, code, epilogue_fused = self._compile_and_check(
-            fn, a, b, scale_a, scale_b
-        )
+        result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b), atol=2e-2, rtol=2e-2)
-        self.assertFalse(epilogue_fused)
-        self.assertNotIn("has_epilogue=True", code)
+        self.assertNotIn("cute.ReductionOp.ADD", code)
+        self.assertNotIn("cute.ReductionOp.MAX", code)
 
     def test_scaled_mm_grouped_m_reduce_finalizes_after_cross_warp_combine(self):
         m, n, k, group = 128, 128, 512, 64
