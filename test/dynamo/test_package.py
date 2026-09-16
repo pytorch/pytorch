@@ -1581,7 +1581,9 @@ def add(x, y):
         # is the frame's first work, so there is no checkpoint to compile up to
         # and the whole frame is skipped -- and stays skipped, the alias left
         # alone, after the global is removed: nothing guards it, so only
-        # torch._dynamo.reset() makes Dynamo trace the frame again.
+        # torch._dynamo.reset() makes Dynamo trace the frame again. Neither
+        # refusal remembers the name in _import_source_cache; the compile that
+        # binds the alias does, which is why the pop in finally stays.
         name = "torch_test_package_import_alias_taken"
         alias = f"__import_{name}"
         module = types.ModuleType(name)
@@ -1606,17 +1608,20 @@ def add(x, y):
             for bound, expected in cases:
                 with self.subTest(expected=expected):
                     torch._dynamo.reset()
+                    _import_source_cache.pop(name, None)
                     fn.__globals__[alias] = bound
                     with self.assertRaisesRegex(
                         Unsupported, f"alias {alias} for {name}.*{re.escape(expected)}"
                     ):
                         torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                    self.assertNotIn(name, _import_source_cache)
                     torch._dynamo.reset()
                     cnt = CompileCounter()
                     skipped = torch.compile(fn, backend=cnt)
                     self.assertEqual(fn(*args), skipped(*args))
                     self.assertIs(fn.__globals__[alias], bound)
                     self.assertEqual(cnt.frame_count, 0)
+                    self.assertNotIn(name, _import_source_cache)
                     del fn.__globals__[alias]
                     self.assertEqual(fn(*args), skipped(*args))
                     self.assertEqual(cnt.frame_count, 0)
@@ -1625,6 +1630,7 @@ def add(x, y):
                     self.assertEqual(fn(*args), skipped(*args))
                     self.assertEqual(cnt.frame_count, 1)
                     self.assertIs(fn.__globals__[alias], module)
+                    self.assertIs(_import_source_cache[name], module)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
@@ -1639,7 +1645,8 @@ def add(x, y):
         # in that entry, and install() binds every recorded alias
         # unconditionally -- record_only_if_new gates only the uninstall
         # bookkeeping -- over the very global the check refused to touch.
-        # Nothing is recorded for an alias the trace did not bind.
+        # Nothing is recorded for an alias the trace did not bind, in the
+        # package or in _import_source_cache, so there is nothing to pop.
         ctx = DiskDynamoStore()
         name = "torch_test_package_import_alias_refused"
         alias = f"__import_{name}"
@@ -1662,6 +1669,7 @@ def add(x, y):
             compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
             self.assertEqual(fn(*args), compiled_fn(*args))
             self.assertIs(fn.__globals__[alias], foreign)
+            self.assertNotIn(name, _import_source_cache)
             self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
             for entry in package._codes.values():
                 self.assertNotIn(alias, entry.import_sources)
@@ -1672,10 +1680,10 @@ def add(x, y):
             package, backends = ctx.load_package(fn, self.path())
             package.install(backends)
             self.assertIs(fn.__globals__[alias], foreign)
+            self.assertNotIn(name, _import_source_cache)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
-            _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
     def test_import_alias_check_does_not_run_a_module_getattribute(self):
