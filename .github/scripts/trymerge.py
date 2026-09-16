@@ -2686,7 +2686,7 @@ def get_classifications(
         # over a PR with more cleared failures than the cap would be refused
         # where it succeeds today. Defer to the author.
         elif is_ai_not_related(check, drci_classifications) and not (
-            ignore_current_checks is not None and name in ignore_current_checks
+            ignore_current_checks and (pr_num, name) in ignore_current_checks
         ):
             checks_with_classifications[name] = JobCheckState(
                 check.name,

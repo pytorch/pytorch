@@ -2930,7 +2930,7 @@ class TestAdvisorNotRelated(TestCase):
         checks = {"job": self._check("job", 7)}
         drci = {"AI_NOT_RELATED": [{"id": 7, "name": "job"}]}
         with mock.patch("trymerge.get_drci_classifications", return_value=drci):
-            classified = get_classifications(1, "pytorch", checks, [])
+            classified = get_classifications(1, "pytorch", checks, None)
         self.assertEqual(classified["job"].classification, "AI_NOT_RELATED")
 
     def test_ignore_current_wins_over_being_cleared(self) -> None:
@@ -2944,7 +2944,7 @@ class TestAdvisorNotRelated(TestCase):
         checks = {"job": self._check("job", 7)}
         drci = {"AI_NOT_RELATED": [{"id": 7, "name": "job"}]}
         with mock.patch("trymerge.get_drci_classifications", return_value=drci):
-            classified = get_classifications(1, "pytorch", checks, ["job"])
+            classified = get_classifications(1, "pytorch", checks, {(1, "job")})
         self.assertEqual(classified["job"].classification, "IGNORE_CURRENT_CHECK")
 
     def test_a_merge_i_over_the_cap_is_not_refused(self) -> None:
@@ -2963,7 +2963,9 @@ class TestAdvisorNotRelated(TestCase):
         checks = {n: self._check(n, i) for n, i in zip(names, ids)}
         drci = {"AI_NOT_RELATED": [{"id": i, "name": n} for n, i in zip(names, ids)]}
         with mock.patch("trymerge.get_drci_classifications", return_value=drci):
-            classified = get_classifications(1, "pytorch", checks, names)
+            classified = get_classifications(
+                1, "pytorch", checks, {(1, n) for n in names}
+            )
         _, failed, _ = categorize_checks(classified, names)
         self.assertEqual(failed, [])
 
@@ -2978,7 +2980,7 @@ class TestAdvisorNotRelated(TestCase):
                     "job": self._check("job", 7),
                 }
                 with mock.patch("trymerge.get_drci_classifications", return_value={}):
-                    classified = get_classifications(1, "pytorch", checks, [])
+                    classified = get_classifications(1, "pytorch", checks, None)
                 self.assertIsNone(classified["job"].classification)
 
     def test_a_stale_check_summary_never_clears_a_gate(self) -> None:
@@ -2997,7 +2999,7 @@ class TestAdvisorNotRelated(TestCase):
             "flaky job": self._check("flaky job", 9),
         }
         with mock.patch("trymerge.get_drci_classifications", return_value={}):
-            classified = get_classifications(1, "pytorch", checks, [])
+            classified = get_classifications(1, "pytorch", checks, None)
         # The AI category is dropped from the fallback; FLAKY still applies.
         self.assertIsNone(classified["job"].classification)
         self.assertEqual(classified["flaky job"].classification, "FLAKY")
