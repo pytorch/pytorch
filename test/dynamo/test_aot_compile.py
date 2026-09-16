@@ -616,7 +616,9 @@ class SelfModeBranchGlobalModule(torch.nn.Module):
     # The same branch on an attribute rather than an argument: the guard on
     # self.mode is a LOCAL_UNSPECIALIZED_NN_MODULE source, which sorts after
     # GLOBAL, so the root's G accessor is installed -- and fails -- before the
-    # self.mode guard (the L['x'] TENSOR_MATCH, a LOCAL, comes before both).
+    # self.mode guard (the L['x'] TENSOR_MATCH, a LOCAL, comes before both), and
+    # check_verbose quotes only the first failing accessor's parts, so the
+    # self.mode mismatch is invisible to a report on the missing global.
     def __init__(self, mode):
         super().__init__()
         self.mode = mode
@@ -2387,14 +2389,16 @@ from user code:
         counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
         with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
+            self.assertEqual(binds, [results[0]])
+            binds.clear()
             with self.assertRaises(RuntimeError) as ctx:
                 model(torch.ones(3, 3, dtype=torch.float16))
         message = str(ctx.exception)
         served.assert_called_once()
-        # One bind for the matched call and one for the call nothing matched, and
-        # one entry per result off that second bind, whatever else the report
-        # carries.
-        self.assertEqual(binds, [results[0], results[0]])
+        # One bind for the call nothing matched as well, counted apart from the
+        # matched call's, and one entry per result off that bind, whatever else
+        # the report carries.
+        self.assertEqual(binds, [results[0]])
         lines = message.splitlines()
         self.assertEqual(sum(line.startswith("  [") for line in lines), len(xs))
         self.assertIn("Add a ModelInput", message)
@@ -2673,15 +2677,13 @@ from user code:
         self._rescued_by_the_recheck(model, x)
 
     @parametrize("leading_opt_outs", [0, 1, 2])
-    def test_module_dispatch_no_match_falls_through_to_the_first_result(
+    def test_module_dispatch_no_match_raises_unless_a_result_opted_out(
         self, leading_opt_outs
     ):
-        # Nothing mocked: a call neither result guards is handed to
-        # compiled_results[0], which raises unless it opted out, in which case
-        # its graph runs; opting [1] out as well changes nothing. The graphs
-        # differ (x * 2 and x * 3), so the number says which result answered.
-        # The fourth row, [1] opted out alone, raises here like the first and
-        # is pinned by the commit that changes it.
+        # Nothing mocked: a call neither result guards raises the no-match
+        # report, and is handed to no result; with [0] opted out its graph runs
+        # instead, and opting [1] out as well changes nothing. The graphs differ
+        # (x * 2 and x * 3), so the number says which result answered.
         model, x = self._aot_compile_mode_branches()
         for result in model.forward.compiled_results[:leading_opt_outs]:
             result.disable_guard_check()
@@ -3049,15 +3051,14 @@ from user code:
         named = "this GlobalConfigModule instance's forward resolves to"
         neutral = "the live scope this artifact was loaded against; define it there"
         pair = by_forward.compiled_results[:1] + by_caller.compiled_results[:1]
-        resolve = patch(
-            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
-        )
+        target = "torch._dynamo.aot_compile._resolve_guard_scope"
         cases = ((pair, [named, neutral]), (pair[::-1], [neutral, named]))
         for results, wording in cases:
             mixed = AOTCompiledModel(GlobalConfigModule(), results)
+            resolve = patch(target, wraps=_resolve_guard_scope)
             with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
                 mixed(x)
-            resolves.assert_called_once()
+            resolves.assert_called_once_with(mixed.model)
             message = str(ctx.exception)
             self.assertIn("[0] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
             self.assertIn("[1] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
