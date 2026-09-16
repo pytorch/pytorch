@@ -8,6 +8,7 @@ See ``lower_quack_flex_gemm`` for the template flow.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import importlib.util
 import logging
@@ -90,6 +91,30 @@ def decompose_nvgemm_additive_gemm(graph_module: torch.fx.GraphModule) -> None:
         graph.eliminate_dead_code()
         graph.lint()
         graph_module.recompile()
+
+
+class QuackFallbackUnsupported(NotImplementedError):
+    """Request ordinary lowering before FlexGEMM mutates the graph or realizes IR.
+
+    Raised for unsupported grouped-mm compositions or fp32 without TF32;
+    a pinned ``config`` turns it into a hard error instead of a silent fallback.
+    """
+
+
+def check_quack_fp32_operand(gemm_arg: TensorBox) -> None:
+    """Reject CUDA float32 GEMMs unless the matmul policy permits TF32."""
+    precision = torch.backends.cuda.matmul.fp32_precision
+    if (
+        gemm_arg.get_dtype() is not torch.float32
+        or gemm_arg.get_device_or_error().type != "cuda"
+        or precision == "tf32"
+    ):
+        return
+    raise QuackFallbackUnsupported(
+        "FlexGEMM QUACK computes float32 GEMM operands in TF32, but "
+        f"torch.backends.cuda.matmul.fp32_precision is {precision!r}; "
+        "opt in with torch.set_float32_matmul_precision('high') or use bfloat16/float16 operands"
+    )
 
 
 def has_flex_gemm_quack() -> bool:
@@ -437,6 +462,7 @@ def lower_quack_flex_gemm(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         if not isinstance(gemm_arg, TensorBox):
             raise NotImplementedError("FlexGEMM lowering expects tensor GEMM operands")
         gemm_args.append(gemm_arg)
+    check_quack_fp32_operand(gemm_args[mat1_index])
     epilogue_arg_placeholders = (
         *mainloop_scale_nodes,
         *flex_gemm_epilogue_arg_placeholders(subgraph.graph_module, gemm_fx_node),
@@ -781,7 +807,22 @@ def flex_gemm_lowering(gemm_op, subgraph, args, gemm_kwargs, kernel_options):
         with config.patch(nvgemm_config):
             return process_subgraph_nodes(subgraph.graph_module, list(args))
     if backend == "QUACK":
-        return lower_quack_flex_gemm(
-            body_gemm_op, subgraph, args, gemm_kwargs, kernel_options
+        # Capture normalization mutates the body; grouped fallback needs the original.
+        quack_subgraph = dataclasses.replace(
+            subgraph, graph_module=copy.deepcopy(subgraph.graph_module)
         )
+        try:
+            return lower_quack_flex_gemm(
+                body_gemm_op, quack_subgraph, args, gemm_kwargs, kernel_options
+            )
+        except QuackFallbackUnsupported as error:
+            if "config" in kernel_options:
+                raise
+            fallback_reason = str(error)
+            log_flex_gemm_artifact(
+                "fallback",
+                lambda: fallback_reason,
+                lowering_name=subgraph.name,
+            )
+            return process_subgraph_nodes(subgraph.graph_module, list(args))
     return process_subgraph_nodes(subgraph.graph_module, list(args))
