@@ -613,9 +613,10 @@ class AOTCompiledFunction:
     # Whether a kept guard is rooted at a user global; False until a load
     # decides it. Arms the live-value pick, and deserialize's fallback warning.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
-    # Whether the load-time merge of the guarded names into the bytecode's
-    # globals runs, which only a caller that supplied a guard scope but no
-    # f_globals -- the module load path -- needs.
+    # Whether a supplied guard scope's certified names are picked into the
+    # bytecode's globals, at load and again by _serve before every call; only
+    # the module load path, which supplies a guard scope but no f_globals, sets
+    # it.
     _bytecode_reads_guard_scope: bool = False
     # The globals a kept guard's own source IS (not one reached only through a
     # sub-path of it), armed only for a supplied live scope. _serve re-takes
@@ -687,7 +688,7 @@ class AOTCompiledFunction:
                 # A live scope: a name it lacks must fail the guard rather than
                 # fall back to the value serialized with the artifact.
                 self._guard_scope = _GuardScope.SUPPLIED
-                if self._has_global_guards:
+                if self._bytecode_reads_guard_scope and self._has_global_guards:
                     # The narrow set, because a passing guard is the only thing
                     # that certifies a live value is the one the graph was
                     # compiled for. The builtins dict key is left out as well: a
@@ -700,19 +701,17 @@ class AOTCompiledFunction:
                     # artifact was traced with.
                     certified = _guard_source_globals(output_graph) - {builtins_key}
                     self._live_global_names = tuple(sorted(certified))
-                    if self._bytecode_reads_guard_scope:
-                        # Bound at load as well as re-taken per call in _serve:
-                        # a certified name the bytecode reads but the graph
-                        # never lifted -- a global the forward mutates or
-                        # returns -- is in external_refs and in no serialized
-                        # scope, so forward_callable's check fails unless it is
-                        # bound here.
-                        live = {
-                            name: guard_scope[name]
-                            for name in certified
-                            if name in guard_scope
-                        }
-                        extra_globals = {**(extra_globals or {}), **live}
+                    # Bound at load as well as re-taken per call in _serve: a
+                    # certified name the bytecode reads but the graph never
+                    # lifted -- a global the forward mutates or returns -- is in
+                    # external_refs and in no serialized scope, so
+                    # forward_callable's check fails unless it is bound here.
+                    live = {
+                        name: guard_scope[name]
+                        for name in certified
+                        if name in guard_scope
+                    }
+                    extra_globals = {**(extra_globals or {}), **live}
 
         self.fn = self._artifacts.runtime_env.forward_callable(
             self._artifacts.backend_id,
@@ -953,10 +952,14 @@ class AOTCompiledFunction:
         globals, not in the scope, so the stored value is one no guard certified
         and the scope's is what the check before the call just passed.
 
-        Only a load handed a live scope arms this. An artifact compiled in this
-        process has none, so its globals stay at the values the capture copied
-        while its guards read the module dict they were rooted in: the same two
-        dicts, left to diverge as they already did rather than widened here.
+        Only a load that hands the artifact a live scope the bytecode does not
+        otherwise read -- the module load path -- arms this. A function artifact
+        loaded with ``f_globals`` still reads the load-time merge of that dict
+        while its guards read it live, and an artifact compiled in this process
+        has no scope at all, so its globals stay at the values the capture
+        copied while its guards read the module dict they were rooted in: the
+        same two dicts, left to diverge as they already did rather than widened
+        here.
 
         An artifact that opted out of the check re-reads the same names with
         nothing certifying them and serves whatever it finds, a value a kept
@@ -1085,18 +1088,19 @@ class AOTCompiledFunction:
         "no scope" -- and the load WRITES into it, seeding the recorded aliases,
         builtins-dict key and unnamed-scope key a kept guard is rooted at without
         replacing a name it already binds, so pass the dict those should land in.
-        Supplying it also arms the per-call re-read ``_serve`` performs: a global a
-        kept guard's own source IS -- not one reached only through a sub-path of
-        it, which the guard does not certify, and apart from the recorded
-        ``__builtins_dict___N`` key, excluded by name -- is taken from that dict on
-        every call, one name at a time, so the graph reads only what a guard
-        certifies and never a global whose guard a filter dropped. Passing neither
-        resolves global guards against the scope rebuilt from the artifact, where a
-        rebinding in this process is invisible.
+        Passing neither resolves global guards against the scope rebuilt from the
+        artifact, where a rebinding in this process is invisible.
 
-        ``bytecode_reads_guard_scope`` additionally merges that same set into the
-        bytecode's globals at load time, for a caller whose scope the bytecode
-        does not otherwise read, i.e. the module load path.
+        ``bytecode_reads_guard_scope`` picks the guarded names out of
+        ``guard_globals`` into the bytecode's globals as well -- the live value of
+        each global a kept guard's own source IS, not one reached only through a
+        sub-path of it, which the guard does not certify, and apart from the
+        recorded ``__builtins_dict___N`` key, excluded by name -- one name at a
+        time, merged at load and re-taken by ``_serve`` before every call. Only a
+        caller that supplies a guard scope but no ``f_globals`` sets it, i.e. the
+        module load path: such a caller cannot inspect the guards itself, so it
+        gets the substitution only where a guard certifies it, and never for a
+        global whose guard a filter dropped.
         """
         f = io.BytesIO(data)
         f.seek(0)
