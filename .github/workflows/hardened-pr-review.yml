@@ -1,0 +1,85 @@
+name: Hardened PR Review
+
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened, ready_for_review]
+
+
+# The trailing label is load-bearing. This repo requires a workflow-level
+# cancelling group, but GitHub claims that group BEFORE evaluating the job
+# `if:`, so without the label a run this workflow will skip - a CLA bot
+# labelling the PR - still joins it and cancels a review already in flight.
+# The prefix is what the repo check requires; the suffix keeps runs for
+# different labels apart. The job-level group below still collapses pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.label.name }}
+  cancel-in-progress: true
+
+env:
+  # The PR-lifecycle state label that gates automated review.
+  REVIEW_LABEL: "in progress"
+
+jobs:
+  capture:
+    if: |
+      github.repository == 'pytorch/pytorch' &&
+      !github.event.pull_request.draft &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'in progress') ||
+        (github.event.action != 'labeled' &&
+         contains(github.event.pull_request.labels.*.name, 'in progress') &&
+         !contains(github.event.pull_request.labels.*.name, 'ready for review'))
+      )
+    concurrency:
+      group: hardened-pr-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Capture PR coordinates
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          TRIGGER_EVENT: ${{ github.event.action }}
+        run: |
+          set -euo pipefail
+
+          [[ "$PR_NUM"   =~ ^[0-9]+$ ]]           || { echo "::error::bad pr_number: '$PR_NUM'"; exit 1; }
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]     || { echo "::error::bad head_sha: '$HEAD_SHA'"; exit 1; }
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]     || { echo "::error::bad base_sha: '$BASE_SHA'"; exit 1; }
+          [[ "$BASE_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::bad base_ref: '$BASE_REF'"; exit 1; }
+
+          jq -n \
+            --argjson pr "$PR_NUM" \
+            --arg sha "$HEAD_SHA" \
+            --arg base_sha "$BASE_SHA" \
+            --arg base_ref "$BASE_REF" \
+            --argjson is_fork "$IS_FORK" \
+            --arg trigger_event "$TRIGGER_EVENT" \
+            --arg label "$REVIEW_LABEL" \
+            '{
+               pr_number: $pr,
+               head_sha: $sha,
+               base_sha: $base_sha,
+               base_ref: $base_ref,
+               is_fork: $is_fork,
+               trigger_event: $trigger_event,
+               trigger_label: $label
+             }' > pr-review-request.json
+
+          echo "Captured PR #${PR_NUM} @ ${HEAD_SHA} (base ${BASE_REF} @ ${BASE_SHA}, fork=${IS_FORK})"
+
+      - name: Upload capture artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hardened-pr-review-request
+          path: pr-review-request.json
+          retention-days: 1
+          if-no-files-found: error
