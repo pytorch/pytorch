@@ -1,10 +1,14 @@
 """Public ``torch.compiler.precompile`` surface.
 
-Prototype API: capture ``fn`` ahead of time and lower it to a self-contained
-Python source artifact, then reload it in a fresh process. See :func:`capture`,
-:func:`accumulate` and :func:`load`, and Note [precompile programming model] in
-``torch/_precompile.py`` for the contract. Signatures, error types and the
-artifact format may change between releases without a deprecation cycle.
+Prototype API: capture ``fn`` ahead of time from the caller's own calls and lower
+it to a self-contained Python source artifact plus an acceleration cache, then
+reload it in a fresh process. This module exports the types a capture takes and
+returns: the ``MakeFxTracer`` configuration, the ``Capture`` handle, and the
+``PrecompileSummary`` / ``FrameInvariants`` / ``GuardFact`` reports. The capture
+session's entry points (``capture``, ``accumulate``, ``load``) build on them. See
+Note [precompile programming model] in ``torch/_precompile.py`` for the contract.
+Signatures, error types and the artifact format may change between releases
+without a deprecation cycle.
 
 Distinct from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
 guard-serialization caching mode), despite the shared word.
@@ -24,21 +28,24 @@ from torch.compiler._precompile_types import (
 )
 
 
-# These types are defined in torch._precompile / a private module (for
-# import-layering reasons, and because dataclass decoration resolves annotations
-# against the defining module). Declare this module their home so introspection
-# (test_public_bindings, Sphinx) resolves them under torch.compiler.precompile,
-# where they are re-exported.
+# These types are defined in torch._precompile / torch.compiler._precompile_types
+# (import layering; and @dataclass dereferences sys.modules[cls.__module__] while
+# decorating, so a class body cannot name a module that is still being imported).
+# Declare this module their home so introspection (pickle, test_public_bindings,
+# Sphinx) resolves them under torch.compiler.precompile, where they are re-exported.
 for _t in (
+    Capture,
     MakeFxTracer,
     PrecompileSummary,
     FrameInvariants,
     GuardFact,
 ):
-    # Resolve the string annotations against the DEFINING module's globals before
-    # re-homing, so typing.get_type_hints (which resolves a class's annotations
-    # through its __module__) does not later fail to find names like Callable in
-    # this module's namespace.
+    # torch._precompile uses ``from __future__ import annotations``, and
+    # typing.get_type_hints resolves a class's string annotations through its
+    # __module__. MakeFxTracer's only annotation today (``dict | None``) would resolve
+    # from builtins anywhere; resolving against the DEFINING module before the
+    # re-homing keeps that true for any annotation added later (a ``Callable`` field
+    # would otherwise fail to resolve in this module's namespace).
     _t.__annotations__ = typing.get_type_hints(_t)
     _t.__module__ = "torch.compiler.precompile"
 del _t
