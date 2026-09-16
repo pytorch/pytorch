@@ -5,6 +5,7 @@ import gc
 import importlib
 import os
 import pickle
+import re
 import sys
 import tempfile
 import types
@@ -18,6 +19,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -26,7 +28,8 @@ from torch._dynamo.package import (
     DynamoCache,
 )
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.symbolic_convert import _import_module
+from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -66,6 +69,12 @@ class UnpicklableConfig:
 
     def __reduce__(self):
         raise RuntimeError("config cannot pickle")
+
+
+def _import_alias_getattr_boom(name):
+    # PEP 562 module __getattr__: reached only if the check reads __name__ with
+    # getattr instead of out of the module __dict__.
+    raise RuntimeError(f"module __getattr__ ran inside a trace for {name}")
 
 
 def _bound_method_guard_target(self, x):
@@ -1068,6 +1077,139 @@ def add(x, y):
         source = ImportSource("torch")
         reloaded = pickle.loads(pickle.dumps(source))
         self.assertEqual(reloaded, source)
+
+    def test_import_alias_taken_by_a_non_module_graph_breaks(self):
+        # The check catches what it was written for: the alias name
+        # holding something other than the module it names -- a non-module, or a
+        # module of another name, which is the state two module names mangling
+        # onto one alias leave it in. The condition is the user's globals, so it
+        # is a graph break, not an internal error. Without fullgraph the import
+        # is the frame's first work, so there is no checkpoint to compile up to
+        # and the whole frame is skipped -- and stays skipped, the alias left
+        # alone, after the global is removed: nothing guards it, so only
+        # torch._dynamo.reset() makes Dynamo trace the frame again.
+        name = "torch_test_package_import_alias_taken"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+        nameless = types.ModuleType("nameless")
+        del nameless.__dict__["__name__"]
+        nameless.__dict__["__getattr__"] = _import_alias_getattr_boom
+
+        def fn(x):
+            import torch_test_package_import_alias_taken as taken
+
+            return x + taken.VALUE
+
+        cases = (
+            ("not a module", "already bound to a str"),
+            (types.ModuleType("other.name"), "bound to a module named other.name"),
+            (nameless, "already bound to a module in the globals"),
+        )
+        args = (torch.randn(3, 2),)
+        try:
+            sys.modules[name] = module
+            for bound, expected in cases:
+                with self.subTest(expected=expected):
+                    torch._dynamo.reset()
+                    fn.__globals__[alias] = bound
+                    with self.assertRaisesRegex(
+                        Unsupported, f"alias {alias} for {name}.*{re.escape(expected)}"
+                    ):
+                        torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                    torch._dynamo.reset()
+                    cnt = CompileCounter()
+                    skipped = torch.compile(fn, backend=cnt)
+                    self.assertEqual(fn(*args), skipped(*args))
+                    self.assertIs(fn.__globals__[alias], bound)
+                    self.assertEqual(cnt.frame_count, 0)
+                    del fn.__globals__[alias]
+                    self.assertEqual(fn(*args), skipped(*args))
+                    self.assertEqual(cnt.frame_count, 0)
+                    self.assertNotIn(alias, fn.__globals__)
+                    torch._dynamo.reset()
+                    self.assertEqual(fn(*args), skipped(*args))
+                    self.assertEqual(cnt.frame_count, 1)
+                    self.assertIs(fn.__globals__[alias], module)
+        finally:
+            sys.modules.pop(name, None)
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_the_trace_refused_is_not_recorded_for_install(self):
+        # Two ops precede the import, so the graph break has a checkpoint: the
+        # trace restarts and the frame is compiled up to it, and the
+        # CompilePackage entry made for the frame outlives the abandoned trace
+        # and is what gets saved. A record written before the check would ship
+        # in that entry, and install() binds every recorded alias
+        # unconditionally -- record_only_if_new gates only the uninstall
+        # bookkeeping -- over the very global the check refused to touch.
+        # Nothing is recorded for an alias the trace did not bind.
+        ctx = DiskDynamoStore()
+        name = "torch_test_package_import_alias_refused"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+        foreign = "not a module"
+
+        def fn(x):
+            y = x + 1
+            y = y * 2
+            import torch_test_package_import_alias_refused as taken
+
+            return y + taken.VALUE
+
+        args = (torch.randn(3, 2),)
+        try:
+            sys.modules[name] = module
+            fn.__globals__[alias] = foreign
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], foreign)
+            self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
+            for entry in package._codes.values():
+                self.assertNotIn(alias, entry.import_sources)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+            torch._dynamo.reset()
+            package, backends = ctx.load_package(fn, self.path())
+            package.install(backends)
+            self.assertIs(fn.__globals__[alias], foreign)
+        finally:
+            sys.modules.pop(name, None)
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_is_not_bound_to_a_non_module_import(self):
+        # sys.modules accepts any object and __import__ hands it back verbatim.
+        # IMPORT_NAME rejects it before import_source binds the alias, so the
+        # traced globals never hold the non-module and a second trace after the
+        # entry is swapped for another non-module graph breaks the same way
+        # instead of tripping the alias check on two nameless objects.
+        name = "torch_test_package_import_alias_non_module"
+        alias = f"__import_{name}"
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_non_module as taken
+
+            return x + taken.VALUE
+
+        try:
+            for entry in (object(), object()):
+                torch._dynamo.reset()
+                sys.modules[name] = entry
+                with self.assertRaisesRegex(Unsupported, "Bad import result"):
+                    torch.compile(fn, backend="eager", fullgraph=True)(*args)
+                self.assertNotIn(alias, fn.__globals__)
+        finally:
+            sys.modules.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)
