@@ -2421,6 +2421,8 @@ class InstructionTranslatorBase(
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
+            # Never served from _import_source_cache, so never written to it.
+            cacheable = False
         else:
             # The live sys.modules entry, which is what IMPORT_NAME pushed and
             # so what the guards this alias roots must read, taken from
@@ -2457,6 +2459,7 @@ class InstructionTranslatorBase(
                     if spec_dict.get("_initializing"):
                         value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+            cacheable = True
 
         f_globals = self.output.global_scope
         # The alias outlives the compile that minted it, so a later writer that
@@ -2519,7 +2522,7 @@ class InstructionTranslatorBase(
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        if "torch_package" not in module_name and isinstance(value, types.ModuleType):
+        if cacheable and isinstance(value, types.ModuleType):
             _import_source_cache[module_name] = value
         # The write is into a live namespace and nothing unwinds it -- there is
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
