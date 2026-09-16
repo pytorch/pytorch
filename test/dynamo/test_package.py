@@ -1194,8 +1194,10 @@ def add(x, y):
         # installed one stays. What that leaves is the memo's own hazard, the
         # one an empty slot has whenever the memo is not the live entry: the
         # graph holds the live module's VALUE while the guards read the alias,
-        # so a change to the live module goes unseen and a change to the
-        # installed one recompiles.
+        # so a change to the live module goes unseen -- the compiled function
+        # diverges from eager, accepted here and pinned as a divergence; the
+        # next commit (#197046), which binds the live entry, turns it into a
+        # recompile -- and a change to the installed one recompiles.
         ctx = DiskDynamoStore()
         name = "torch_test_package_import_alias_three_way"
         alias = f"__import_{name}"
@@ -1239,6 +1241,7 @@ def add(x, y):
             self.assertIs(fn.__globals__[alias], mid)
             new.VALUE = 10
             self.assertEqual(compiled_fn2(*args), args[0] * 9)
+            self.assertNotEqual(fn2(*args), compiled_fn2(*args))
             self.assertEqual(cnt.frame_count, 1)
             mid.VALUE = 11
             self.assertEqual(fn2(*args), compiled_fn2(*args))

@@ -262,7 +262,9 @@ def _import_module(name: str) -> types.ModuleType:
     """
     The process's first resolution of the name, kept for its lifetime: nothing
     invalidates the memo, so after a sys.modules handover it is an older object
-    than the live entry. import_source writes it only when it is that entry.
+    than the live entry. import_source binds it into an empty alias slot
+    regardless, and replaces another writer's same-named binding with it only
+    when it is that entry.
     """
     return importlib.import_module(name)
 
@@ -2437,8 +2439,8 @@ class InstructionTranslatorBase(
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
         # this checks for (two module names still mangle to one alias).
-        rebind = alias not in f_globals or f_globals[alias] is value
-        if not rebind:
+        conflict = alias in f_globals and f_globals[alias] is not value
+        if conflict:
             bound = f_globals[alias]
             # __name__ is read out of the instance dict through
             # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
@@ -2484,15 +2486,16 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-            # The writer's module was the live entry when the writer ran, and
-            # the memo can predate or postdate a handover of the name since, so
-            # the memo replaces it only when it is the live entry now: the graph
-            # is specialized on what IMPORT_NAME pushed, the live entry, and
-            # this alias roots its guards. When neither is live the writer's
-            # module stays -- the memo would be no less stale -- and the guards
-            # read a module the graph was not built from, as they do for an
-            # empty slot whenever the memo is not the live entry.
-            rebind = live
+        # An empty slot, or one already holding value, takes value. A writer's
+        # same-named module was the live entry when the writer ran, and the
+        # memo can predate or postdate a handover of the name since, so the
+        # memo replaces it only when it is the live entry now: the graph is
+        # specialized on what IMPORT_NAME pushed, the live entry, and this
+        # alias roots its guards. When neither is live the writer's module
+        # stays -- the memo would be no less stale -- and the guards read a
+        # module the graph was not built from, as they do for an empty slot
+        # whenever the memo is not the live entry.
+        write_value = not conflict or live
         # Recorded only once the check has passed: the package entry outlives a
         # graph break here, and install() binds every recorded alias.
         if self.package is not None:
@@ -2502,7 +2505,7 @@ class InstructionTranslatorBase(
         # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
         # trace that graph-breaks or restarts, as does the write install makes
         # to this name.
-        if rebind:
+        if write_value:
             f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
