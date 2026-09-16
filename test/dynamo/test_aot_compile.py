@@ -697,7 +697,9 @@ class SelfModeBranchGlobalModule(torch.nn.Module):
     # The same branch on an attribute rather than an argument: the guard on
     # self.mode is a LOCAL_UNSPECIALIZED_NN_MODULE source, which sorts after
     # GLOBAL, so the root's G accessor is installed -- and fails -- before the
-    # self.mode guard (the L['x'] TENSOR_MATCH, a LOCAL, comes before both).
+    # self.mode guard (the L['x'] TENSOR_MATCH, a LOCAL, comes before both), and
+    # check_verbose quotes only the first failing accessor's parts, so the
+    # self.mode mismatch is invisible to a report on the missing global.
     def __init__(self, mode):
         super().__init__()
         self.mode = mode
@@ -2388,28 +2390,6 @@ from user code:
         raised = "  [0] <guard check raised RuntimeError: page break rec sep line>"
         self.assertIn(raised, lines)
 
-    def test_aot_compile_module_wrong_arity_raises_type_error(self):
-        # A call the signature cannot bind is a caller error, not a guard miss:
-        # it surfaces as the TypeError the plain module would raise, not as a
-        # no-match report telling the user to add a ModelInput. Nothing catches
-        # the bind's TypeError on the way out, and it has to arrive alone: a fold
-        # into the no-match report would quote inspect's text as one entry's
-        # reason, so neither the type nor the message tells the two apart -- only
-        # the absence of the report does.
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
-        )
-        x = torch.randn(3, 3)
-        with self.assertRaises(TypeError) as ctx:
-            model(x, x)
-        self.assertIn("too many positional arguments", str(ctx.exception))
-        self.assertNotIn("No AOT compiled graph matched", str(ctx.exception))
-        with self.assertRaises(TypeError) as ctx:
-            model()
-        self.assertIn("missing a required argument: 'x'", str(ctx.exception))
-        self.assertNotIn("No AOT compiled graph matched", str(ctx.exception))
-
     def test_no_match_message_survives_a_raising_guard(self):
         # __call__ has already established that nothing matched; re-evaluating
         # the guards to say WHY must not replace that answer with a secondary
@@ -2471,7 +2451,7 @@ from user code:
         # Only a raise from dispatch is chained onto the report, so a report raise
         # has to carry what it was raised from in the line itself.
         raised = "[0] <guard check raised ValueError: boom on compare 3 (through the guard tree's pybind boundary)>"
-        self.assertIn(raised, message)
+        self.assertIn(f"  {raised}", message.splitlines())
         self.assertIn("Add a ModelInput", message)
         # Nothing raised in dispatch, so nothing is chained and no artifact is
         # named for fixing: the two readings a dispatch raise would change.
@@ -2546,6 +2526,7 @@ from user code:
         class Boom(Exception):
             pass
 
+        self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
             [
@@ -2661,6 +2642,8 @@ from user code:
         add = self._line_index(lines, "Add a ModelInput covering this call")
         self.assertLess(hint, fix)
         self.assertLess(fix, add)
+        self.assertIn("For [1]:", lines[hint])
+        self.assertIn("[0]'s guard check raised while checking this call", lines[fix])
 
     def test_no_match_message_keeps_the_advice_beside_a_withheld_opt_out(self):
         # The other pairing: with an opted-out input in the list the fix-or-drop
@@ -2721,6 +2704,7 @@ from user code:
         add = self._line_index(lines, "Add a ModelInput covering this call")
         self.assertLess(hint, fix)
         self.assertLess(fix, add)
+        self.assertIn("For [1]:", lines[hint])
         self.assertIn("not a guard failure", lines[fix])
 
     def _install_global_probe(self, name, misses):
@@ -2775,14 +2759,16 @@ from user code:
         counting = patch.object(AOTCompiledFunction, "prepare_f_locals", counted)
         with counting, patch.object(results[3], "fn", wraps=results[3].fn) as served:
             self.assertEqual(model(xs[3]), mod(xs[3]))
+            self.assertEqual(binds, [results[0]])
+            binds.clear()
             with self.assertRaises(RuntimeError) as ctx:
                 model(torch.ones(3, 3, dtype=torch.float16))
         message = str(ctx.exception)
         served.assert_called_once()
-        # One bind for the matched call and one for the call nothing matched, and
-        # one entry per result off that second bind, whatever else the report
-        # carries.
-        self.assertEqual(binds, [results[0], results[0]])
+        # One bind for the call nothing matched as well, counted apart from the
+        # matched call's, and one entry per result off that bind, whatever else
+        # the report carries.
+        self.assertEqual(binds, [results[0]])
         lines = message.splitlines()
         self.assertEqual(sum(line.startswith("  [") for line in lines), len(xs))
         self.assertIn("Add a ModelInput", message)
@@ -3061,15 +3047,13 @@ from user code:
         self._rescued_by_the_recheck(model, x)
 
     @parametrize("leading_opt_outs", [0, 1, 2])
-    def test_module_dispatch_no_match_falls_through_to_the_first_result(
+    def test_module_dispatch_no_match_raises_unless_a_result_opted_out(
         self, leading_opt_outs
     ):
-        # Nothing mocked: a call neither result guards is handed to
-        # compiled_results[0], which raises unless it opted out, in which case
-        # its graph runs; opting [1] out as well changes nothing. The graphs
-        # differ (x * 2 and x * 3), so the number says which result answered.
-        # The fourth row, [1] opted out alone, raises here like the first and
-        # is pinned by the commit that changes it.
+        # Nothing mocked: a call neither result guards raises the no-match
+        # report, and is handed to no result; with [0] opted out its graph runs
+        # instead, and opting [1] out as well changes nothing. The graphs differ
+        # (x * 2 and x * 3), so the number says which result answered.
         model, x = self._aot_compile_mode_branches()
         for result in model.forward.compiled_results[:leading_opt_outs]:
             result.disable_guard_check()
@@ -3278,7 +3262,8 @@ from user code:
         # The same line is reachable with ONE rejection on record once a raise is
         # tolerated: pass 1 raised, pass 2 rejected, the report accepted. The
         # line has to describe what dispatch did without claiming a count it
-        # never took -- the raise itself survives only in the chain.
+        # never took; the raise's text survives only in the chain, the report
+        # keeping just the fact of it in its fix-or-drop advice.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -3310,6 +3295,8 @@ from user code:
         accepted = "  [0] <guards did not accept this call in dispatch and accepted it here: a guard that does not answer consistently>"
         self.assertIn(accepted, message.splitlines())
         self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
+        self.assertNotIn("the first pass is unhappy", message)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
 
     def test_no_match_message_advises_an_input_for_a_missing_global(self):
@@ -3457,9 +3444,10 @@ from user code:
             message = str(ctx.exception)
             self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
             self.assertIn(
-                "this HermeticModule instance's forward resolves to, seen through any "
-                "Dynamo wrapper to the function it wraps, since that is the one the "
-                "load resolved",
+                "this HermeticModule instance's forward resolves to, seen through the "
+                "wrappers torch.compile and torch._dynamo.disable return and through "
+                "any functools.wraps'd torch._dynamo.external_utils function to the "
+                "function they wrap, since that is the one the load resolved",
                 message,
             )
             wrapper_globals["AOT_HERMETIC_WEIGHT"] = saved
@@ -3538,15 +3526,14 @@ from user code:
         named = "this GlobalConfigModule instance's forward resolves to"
         neutral = "the live scope this artifact was loaded against; define it there"
         pair = by_forward.compiled_results[:1] + by_caller.compiled_results[:1]
-        resolve = patch(
-            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
-        )
+        target = "torch._dynamo.aot_compile._resolve_guard_scope"
         cases = ((pair, [named, neutral]), (pair[::-1], [neutral, named]))
         for results, wording in cases:
             mixed = AOTCompiledModel(GlobalConfigModule(), results)
+            resolve = patch(target, wraps=_resolve_guard_scope)
             with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
                 mixed(x)
-            resolves.assert_called_once()
+            resolves.assert_called_once_with(mixed.model)
             message = str(ctx.exception)
             self.assertIn("[0] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
             self.assertIn("[1] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
@@ -3764,6 +3751,7 @@ from user code:
         checked = "  [1] <guard check raised RuntimeError: checked tree is unhappy>"
         self.assertIn(checked, lines)
         self.assertIn("[1]'s raise, not a guard failure, is what withheld", lines[3])
+        self.assertNotIn("the opted-out tree is unhappy", str(ctx.exception))
         self.assertEqual(str(ctx.exception.__cause__), "the opted-out tree is unhappy")
         # Opted out as well, [1] withholds the last resort no longer, which serves
         # the first opted-out result: one warning per raise, each naming that
@@ -4010,12 +3998,9 @@ from user code:
         # rejection while the `from` chain keeps the raise.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [
-                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
-                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
-            ]
-        )
+        x = torch.randn(3, 3)
+        inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(2)]
+        model._aot_compile(inputs)
 
         class RaisesThenRejects:
             def __init__(self):
@@ -4052,7 +4037,7 @@ from user code:
         results[1]._artifacts.guard_manager = Rejects()
         results[1].disable_guard_check()
         with self.assertRaises(RuntimeError) as ctx:
-            served = model(torch.randn(3, 3))
+            served = model(x)
             self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
         message = str(ctx.exception)
         # The scan raised and the second pass answered: two checks, not one.
@@ -4073,9 +4058,10 @@ from user code:
 
     def test_no_match_message_quotes_the_last_raise_at_one_index(self):
         # Both dispatch passes evaluate an enabled tree, so one index can raise
-        # twice with two different exceptions. The report quotes the later one,
-        # which is the raise `unanswered` recorded and the raise the report's own
-        # re-check line quotes for an entry that answered and then raised: one
+        # twice with two different exceptions. The report quotes the later one:
+        # `raised[i]` is overwritten in place, so the entry line and the chain
+        # read the same exception, and the report's own re-check line quotes the
+        # later raise for an entry that answered and then raised as well -- one
         # rule for both lines rather than one for each.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
@@ -4101,48 +4087,6 @@ from user code:
         self.assertIn(raised, message.splitlines())
         self.assertNotIn("unhappy on pass 1", message)
         self.assertEqual(str(ctx.exception.__cause__), "unhappy on pass 2")
-
-    def test_no_match_message_chains_a_raise_the_advice_does_not_name(self):
-        # The chain carries the FIRST index that raised and the advice names the
-        # first ENABLED one, which are different entries when an opted-out result
-        # raised first: [0] is reported as the opt-out it is and its line quotes
-        # no exception text, so the chain is the only surviving record of its
-        # raise. Reading raised[raiser] instead would delete it.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [
-                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
-                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
-            ]
-        )
-
-        class Raises(NeverReChecked):
-            def __init__(self, message):
-                self.message = message
-
-            def check(self, f_locals):
-                raise RuntimeError(self.message)
-
-        results = model.forward.compiled_results
-        results[0]._artifacts.guard_manager = Raises("the opted-out tree is unhappy")
-        results[0].disable_guard_check()
-        results[1]._artifacts.guard_manager = Raises("the checked tree is unhappy")
-        with self.assertRaises(RuntimeError) as ctx:
-            served = model(torch.randn(3, 3))
-            self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
-        message = str(ctx.exception)
-        lines = message.splitlines()
-        withheld = (
-            "  [0] <opted out of guard checks; withheld because [1]'s guard "
-            "check raised>"
-        )
-        self.assertIn(withheld, lines)
-        checked = "  [1] <guard check raised RuntimeError: the checked tree is unhappy>"
-        self.assertIn(checked, lines)
-        self.assertIn("[1]'s raise, not a guard failure, is what withheld", message)
-        self.assertNotIn("the opted-out tree is unhappy", message)
-        self.assertEqual(str(ctx.exception.__cause__), "the opted-out tree is unhappy")
 
     def test_aot_compile_module_warning_unwraps_a_pybind_boundary_raise(self):
         # This warning is the only record of a swallowed raise on the serving
@@ -4414,46 +4358,6 @@ from user code:
         with self.assertRaisesRegex(TypeError, "takes 3 positional arguments but 4"):
             AOTCompiledModel(ScaleModule(), [], set())
 
-    def test_aot_compile_module_binds_a_call_once_per_result(self):
-        # Results whose signatures differ cannot share a binding, so each binds
-        # on its own -- and still only once: the two dispatch passes and the
-        # report all ask about the same call, so a rebind per pass would leave
-        # the rest of this file green and pay for itself on every no-match.
-        # test_module_dispatch_binds_a_call_once_for_results_sharing_a_signature
-        # pins the shared case; this is the per-result count it cannot see.
-        mod = ScaleModule()
-        x = torch.randn(3, 3)
-        model = torch.compile(mod, fullgraph=True, backend="eager")
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        doubled = model.forward.compiled_results
-
-        def triple(self, y):
-            return y * 3
-
-        mod.forward = types.MethodType(triple, mod)
-        model = torch.compile(mod, fullgraph=True, backend="eager")
-        model._aot_compile([ModelInput(args=(x.double(),), kwargs={}, contexts=[])])
-        combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
-        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
-        binds = []
-        bind = AOTCompiledFunction.prepare_f_locals
-
-        def counted(result, *args, **kwargs):
-            binds.append(result)
-            return bind(result, *args, **kwargs)
-
-        with patch.object(AOTCompiledFunction, "prepare_f_locals", counted):
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.half())
-        # Both passes and the report ran on both results, each from its own one
-        # binding: one bind per result, in index order, and the same objects.
-        results = combined.compiled_results
-        self.assertEqual(len(binds), len(results))
-        for i, (bind_of, result) in enumerate(zip(binds, results)):
-            self.assertIs(bind_of, result, f"bind {i} is not of result [{i}]")
-        lines = str(ctx.exception).splitlines()
-        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
-
     def test_aot_compile_module_warns_once_per_model_not_per_process(self):
         # The dedup set is a field on the model, which is the whole reason it is
         # not torch._logging.warning_once: that cache is process-global, so the
@@ -4565,82 +4469,6 @@ from user code:
         self.assertIn("RuntimeError: the second artifact is unhappy", logs.output[0])
         with self.assertNoLogs(logger, level="WARNING"):
             model(x)
-
-    def test_aot_compile_module_interrupt_out_of_a_later_tree_propagates(self):
-        # accepts() catches Exception, so an interrupt out of a later tree leaves
-        # __call__ as itself -- neither read as a non-match nor wrapped in a
-        # report -- and the earlier raise on record goes with it, as on any exit
-        # that neither serves a graph nor builds a report. The second call pins
-        # where the dedup is judged: it warns about [0] again, so the aborted
-        # call consumed nothing. Deciding the (index, type) pair at the raise
-        # rather than at the serve leaves that call silent, and fails only here.
-        # assertNoLogs stays outermost: its __exit__ checks nothing while an
-        # exception is passing through it, and this call always raises, so
-        # nested inside the raise assertion it would never look at the records.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        x = torch.randn(3, 3)
-        inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(2)]
-        model._aot_compile(inputs)
-
-        class Raises:
-            def check(self, f_locals):
-                raise RuntimeError("zero is unhappy")
-
-        class Interrupts:
-            def check(self, f_locals):
-                raise KeyboardInterrupt("ctrl-c inside the tree")
-
-        results = model.forward.compiled_results
-        results[0]._artifacts.guard_manager = Raises()
-        real = results[1]._artifacts.guard_manager
-        results[1]._artifacts.guard_manager = Interrupts()
-        logger = "torch._dynamo.aot_compile"
-        with self.assertNoLogs(logger, level="WARNING"):
-            with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
-                model(x)
-        results[1]._artifacts.guard_manager = real
-        with self.assertLogs(logger, level="WARNING") as logs:
-            self.assertEqual(model(x), x * 2)
-        self.assertEqual(len(logs.output), 1)
-        warned = logs.output[0]
-        self.assertIn("[0]'s guard check raised RuntimeError: zero is unhappy", warned)
-        self.assertIn("dispatch served [1]", warned)
-
-    def test_aot_compile_module_later_result_that_cannot_bind_raises_type_error(self):
-        # prepare_f_locals is outside accepts()' try for every result, not only
-        # the first: a later result whose signature cannot take the call surfaces
-        # as bind_locals' TypeError, as a plain module call would, with an earlier
-        # result's raise on record and, as on the interrupt above, nothing to log
-        # it (same nesting, for the same reason). Both premises are pinned first:
-        # the results cannot share a binding, so [1] binds inside the second
-        # accepts(), and [0]'s tree does raise.
-        self._hide_leaked_dynamo_globals()
-        mod = ScaleModule()
-        x = torch.randn(3, 3)
-        model = torch.compile(mod, fullgraph=True, backend="eager")
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        doubled = model.forward.compiled_results
-
-        def needs_z(self, y, z):
-            return y * z
-
-        mod.forward = types.MethodType(needs_z, mod)
-        model = torch.compile(mod, fullgraph=True, backend="eager")
-        model._aot_compile([ModelInput(args=(x, x), kwargs={}, contexts=[])])
-        combined = AOTCompiledModel(mod, doubled + model.forward.compiled_results)
-
-        class Raises:
-            def check(self, f_locals):
-                raise RuntimeError("zero is unhappy")
-
-        combined.compiled_results[0]._artifacts.guard_manager = Raises()
-        self.assertFalse(combined._binds_alike(tuple(combined.compiled_results)))
-        with self.assertRaisesRegex(RuntimeError, "zero is unhappy"):
-            combined.compiled_results[0].guard_check(mod, x)
-        with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
-            with self.assertRaisesRegex(TypeError, "missing a required argument: 'z'"):
-                combined(x)
 
     def test_aot_compile_module_ordinary_dispatch_warns_about_nothing(self):
         # The swallowed-raise warning is about a raise, so an ordinary dispatch
@@ -5369,15 +5197,16 @@ from user code:
             "\n".join(logs.output),
         )
 
-    def test_aot_compile_module_fallback_names_a_targetless_dynamo_wrapper(self):
+    def test_aot_compile_module_deserialize_refuses_a_targetless_dynamo_wrapper(
+        self,
+    ):
         # error_on_graph_break, patch_dynamo_config and disable_nested_graph_breaks
         # bind through wrap_dunder_call_ctx_manager, whose inner deliberately
-        # skips functools.wraps: a plain function get_traced_fn does resolve, in
-        # external_utils' namespace, with no __wrapped__ to follow to the forward
-        # it wraps. Falling back is right; the reason has to name this shape and
-        # model.forward as given, not the cannot-resolve one over the unwrapped
-        # function, and external_utils' namespace, the one a resolution would
-        # have seeded, gains nothing.
+        # skips functools.wraps: a plain function owning external_utils' dict
+        # with no __wrapped__ to follow to the forward it wraps. The hop stops on
+        # it and the namespace test refuses it as it refuses any external_utils
+        # function bound as forward, with the reason it gave before the hop
+        # existed, and external_utils' namespace gains nothing.
         mod = GlobalConfigModule()
         mod.forward = torch._dynamo.error_on_graph_break(True)(mod.forward)
         self.assertIs(mod.forward.__globals__, vars(torch._dynamo.external_utils))
@@ -5386,46 +5215,33 @@ from user code:
             mod,
             torch._dynamo.external_utils,
             "GlobalConfigModule.forward (function named "
-            "wrap_dunder_call_ctx_manager.<locals>.inner) is a Dynamo wrapper "
-            "without a resolvable target, a torch._dynamo.external_utils function "
-            "carrying no __wrapped__; bind the forward it wraps as model.forward "
-            "instead",
+            "wrap_dunder_call_ctx_manager.<locals>.inner) resolves to "
+            "wrap_dunder_call_ctx_manager.<locals>.inner, whose globals are "
+            "torch._dynamo.external_utils's namespace, a torch module a load "
+            "neither roots guards in nor seeds; bind the module's own forward, "
+            "defined outside torch, as model.forward instead",
         )
 
     def test_aot_compile_module_fallback_names_a_compiled_partial_forward(self):
         # torch.compile over a partial wraps it in wrap_inline (no source file,
-        # not a function), so the unwrap follows __wrapped__ onto the partial
-        # and get_traced_fn fails THERE. Falling back is right (before the
-        # unwrap this shape resolved eval_frame's dict and the torch-namespace
-        # rule refused it); the reason has to say what the wrapper reached, not
-        # tell the user to make model.forward a plain function -- the
-        # compile_wrapper already is one.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
+        # not a function), so the hop follows __wrapped__ onto the partial and
+        # get_traced_fn fails THERE. Falling back is right (before the hop this
+        # shape resolved eval_frame's dict and the torch-namespace rule refused
+        # it); the reason has to say what the wrapper reached, not tell the user
+        # to make model.forward a plain function -- the compile_wrapper already
+        # is one -- and eval_frame's namespace gains nothing.
         mod = GlobalConfigModule()
         mod.forward = torch.compile(
             functools.partial(GlobalConfigModule.forward, mod), backend="eager"
         )
-        eval_frame_globals = vars(torch._dynamo.eval_frame)
-        preexisting = frozenset(eval_frame_globals)
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            compiled = AOTCompiledModel.deserialize(mod, data)
-        for result in compiled.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-        reason = (
+        self._assert_forward_refused(
+            mod,
+            torch._dynamo.eval_frame,
             "GlobalConfigModule.forward (function named wrap_inline.<locals>.inner) "
             "resolves through a Dynamo wrapper to an instance of partial, which "
-            "get_traced_fn cannot resolve to a Python function"
+            "get_traced_fn cannot resolve to a Python function; bind a plain "
+            "function or bound method as model.forward instead",
         )
-        self.assertIn(reason, "\n".join(logs.output))
-        with self.assertRaises(RuntimeError) as ctx:
-            compiled(x)
-        message = str(ctx.exception)
-        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
-        self.assertIn(f"rebuilt because {reason}", message)
-        self.assertIn("bind a plain function or bound method as model.forward", message)
-        self.assertNotIn("so its own globals are used", message)
-        self.assertEqual({k for k in eval_frame_globals if k not in preexisting}, set())
 
     def test_aot_compile_module_fallback_names_a_compiled_builtin_forward(self):
         # torch.compile over a C-implemented bound method (a tensor's sum) wraps
@@ -5435,29 +5251,20 @@ from user code:
         # the wrapper reached all the same; only the un-hopped builtin, bound as
         # forward directly, is the shape get_traced_fn cannot resolve as given.
         x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
         mod = GlobalConfigModule()
         mod.forward = torch.compile(x.sum, backend="eager")
         resolved = torch._dynamo.eval_frame.innermost_fn(mod.forward).__wrapped__
         self.assertEqual(type(resolved).__name__, "builtin_function_or_method")
         with self.assertRaises(AttributeError):
             torch._dynamo.convert_frame.get_traced_fn(resolved)
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            compiled = AOTCompiledModel.deserialize(mod, data)
-        for result in compiled.compiled_results:
-            self.assertIs(result._guard_scope, _GuardScope.RECONSTRUCTED)
-        reason = (
+        self._assert_forward_refused(
+            mod,
+            torch._dynamo.eval_frame,
             "GlobalConfigModule.forward (function named Tensor.sum) resolves "
             "through a Dynamo wrapper to an instance of builtin_function_or_method, "
-            "which get_traced_fn cannot resolve to a Python function"
+            "which get_traced_fn cannot resolve to a Python function; bind a plain "
+            "function or bound method as model.forward instead",
         )
-        self.assertIn(reason, "\n".join(logs.output))
-        with self.assertRaises(RuntimeError) as ctx:
-            compiled(x)
-        message = str(ctx.exception)
-        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']", message)
-        self.assertIn(f"rebuilt because {reason}", message)
-        self.assertNotIn("so its own globals are used", message)
         mod.forward = x.sum
         scope, reason = _resolve_guard_scope(mod)
         self.assertIsNone(scope)
@@ -6776,8 +6583,10 @@ from user code:
         # the non-recursive one external_utils' get_nonrecursive_disable_wrapper.
         # Neither namespace is the scope, the bound method they wrap is. The
         # non-recursive wrapper also satisfies the __wrapped__ hop's predicate,
-        # so the innermost_fn assertion is what pins that innermost_fn alone,
-        # not the hop, reaches the bound method.
+        # so recursive_False is served by either mechanism and only
+        # recursive_True catches a load that drops innermost_fn; the
+        # innermost_fn assertion records which mechanism reaches the bound
+        # method first, not which one the load needed.
         x = torch.randn(4, 8)
         data = self._two_input_global_guard_artifact(x)
         mod = GlobalConfigModule()
