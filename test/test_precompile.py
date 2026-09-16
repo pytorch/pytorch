@@ -75,12 +75,26 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
+    def test_guard_fact_render(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
+        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
+        # No rendered code falls back to <guard_type>, a value is appended, and
+        # the dropped label pads to the width of "enforced" so lines align.
+        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
+        self.assertEqual(
+            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        )
+        # Several code parts are joined; no source drops the " on ..." suffix.
+        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
+        self.assertEqual(joined.render(), "[enforced] a ; b")
+
     def test_summary_types_pickle(self):
         # A capture summary or invariants report is the kind of value users
         # stash next to an artifact (torch.save of a diagnostics record, a
-        # multiprocessing capture farm). A previous revision pointed these
-        # classes' __module__ at torch.compiler, which does not export them,
-        # so pickle could not resolve the class and every instance raised.
+        # multiprocessing capture farm), so every instance must round-trip
+        # through pickle, which resolves the class through its __module__.
         from torch.compiler._precompile_types import (
             FrameInvariants,
             GuardFact,
@@ -89,9 +103,141 @@ class TestPrecompile(TestCase):
 
         fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
         inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
-        summary = PrecompileSummary(1, 0, 1, 1, ())
+        summary = PrecompileSummary(
+            frames=1, resume_functions=0, guarded_codes=1, backend_graphs=1
+        )
         for obj in (fact, inv, summary):
             self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
+
+    def test_summary_complete_requires_every_term(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        def summary(**kw):
+            base = dict(frames=1, resume_functions=0, guarded_codes=1, backend_graphs=1)
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+        self.assertFalse(summary(bypassed=("f",)).complete)
+        self.assertFalse(summary(truncated=("f",)).complete)
+        self.assertFalse(summary(uncovered_frames=("f",)).complete)
+
+    def test_summary_digest_and_guard_type_counts(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        plain = PrecompileSummary(
+            frames=2,
+            resume_functions=1,
+            guarded_codes=3,
+            backend_graphs=2,
+            dropped_guards=(
+                ("ID_MATCH", "G['fn']"),
+                ("ID_MATCH", "G['g']"),
+                ("HASATTR", "L['m']"),
+            ),
+            kept_guards=(("TYPE_MATCH", "L['x']"), ("TENSOR_MATCH", "L['x']")),
+            wont_generalize=("L['scale']",),
+        )
+        self.assertEqual(plain.dropped_guard_types(), {"ID_MATCH": 2, "HASATTR": 1})
+        self.assertEqual(plain.kept_guard_types(), {"TYPE_MATCH": 1, "TENSOR_MATCH": 1})
+        self.assertExpectedInline(
+            str(plain),
+            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'ID_MATCH': 2, 'HASATTR': 1}, 1 value-pinned guards""",
+        )
+        bad = PrecompileSummary(
+            frames=3,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            bypassed=("gen",),
+            truncated=("loop",),
+            uncovered_frames=("helper",),
+            risky_dropped_guards=(("ID_MATCH", "L['self'].act"),),
+            capture_errors=("boom",),
+        )
+        self.assertFalse(bad.complete)
+        self.assertExpectedInline(
+            str(bad),
+            """3 frames (0 from graph breaks), 1 guarded codes, 1 backend graphs, RISKY drops ["L['self'].act"], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR(S)""",
+        )
+
+    @parametrize("mode", ["make_fx", "dynamo", "installed"])
+    def test_parse_artifact_metadata_required_set_follows_tracer(self, mode):
+        # TRACER picks which calling-convention constants an artifact must carry
+        # (absent means make_fx), and an installed dynamo artifact swaps the
+        # per-frame blobs for the package blob.
+        from torch._precompile import _parse_artifact_metadata
+
+        src, required, not_required = {
+            "make_fx": (
+                "BACKEND = 'inductor'\n",
+                ["BUFFER_NAMES", "OUT_SPEC", "USER_INPUT_BOUNDS"],
+                ["TRACER", "_FRAMES", "_ENTRY_BINDING"],
+            ),
+            "dynamo": (
+                "TRACER = 'dynamo'\n",
+                ["FN_NAME", "FRAMES", "_FRAMES", "_BACKENDS", "_ENTRY_BINDING"],
+                ["OUT_SPEC", "SERVING_MODE", "_PACKAGE"],
+            ),
+            "installed": (
+                "TRACER = 'dynamo'\nSERVING_MODE = 'installed'\n",
+                ["_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL", "_ENTRY_BINDING"],
+                ["OUT_SPEC", "_FRAMES", "_BACKENDS"],
+            ),
+        }[mode]
+        with self.assertRaises(PrecompileError) as cm:
+            _parse_artifact_metadata(src)
+        msg = str(cm.exception)
+        self.assertIn("missing calling-convention metadata", msg)
+        for name in required:
+            self.assertIn(repr(name), msg)
+        for name in not_required:
+            self.assertNotIn(repr(name), msg)
+
+    def test_parse_artifact_metadata_literals(self):
+        from torch._precompile import _parse_artifact_metadata
+
+        fields = [
+            ("BACKEND", "eager"),
+            ("TRACER", "dynamo"),
+            ("FN_NAME", "step"),
+            ("FRAMES", [{"is_entry": True, "variants": []}]),
+            ("DROPPED_GUARDS", []),
+            ("RISKY_DROPPED_GUARDS", []),
+            ("WONT_GENERALIZE", ()),
+            ("_FRAMES", "blob"),
+            ("_BACKENDS", "blob"),
+            ("_DYNAMO_PYTHON_VERSION", "3.12"),
+            ("_ENTRY_BINDING", "step"),
+            ("TORCH_VERSION", "2.0"),
+        ]
+        src = "".join(f"{name} = {value!r}\n" for name, value in fields)
+        meta = _parse_artifact_metadata(src)
+        self.assertEqual(meta["FRAMES"], [{"is_entry": True, "variants": []}])
+        # Reported but never required: the serving mode defaults for artifacts
+        # predating it, and the guard-audit sections come back as data.
+        self.assertEqual(meta["SERVING_MODE"], "standalone")
+        self.assertNotIn("POLICY_DROPPED_GUARDS", meta)
+        audit = "POLICY_DROPPED_GUARDS = ['g']\nDROPPED_GUARD_CODE = {'g': 'code'}\n"
+        meta = _parse_artifact_metadata(src + audit)
+        self.assertEqual(meta["POLICY_DROPPED_GUARDS"], ["g"])
+        self.assertEqual(meta["DROPPED_GUARD_CODE"], {"g": "code"})
+        # The last top-level assignment wins for the set selection and the
+        # reported value alike, as it would under exec.
+        shadowed = src.replace("TRACER = 'dynamo'", "TRACER = 'other'")
+        meta = _parse_artifact_metadata(shadowed + "TRACER = 'dynamo'\n")
+        self.assertEqual(meta["TRACER"], "dynamo")
+        # A consumed name whose value is not a literal is named, including the
+        # ones that select the required set; an unconsumed one is skipped.
+        for bad in ("TRACER = object()\n", "TRACER = 'dynamo'\nSERVING_MODE = f()\n"):
+            name = bad.splitlines()[-1].split(" =")[0]
+            with self.assertRaisesRegex(PrecompileError, f"{name!r} .* is malformed"):
+                _parse_artifact_metadata(bad)
+        meta = _parse_artifact_metadata(src + "_x = f()\n")
+        self.assertEqual(meta["TRACER"], "dynamo")
 
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
