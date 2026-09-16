@@ -103,7 +103,7 @@ class C10_API Scalar {
       typename T,
       typename std::enable_if_t<std::is_same_v<T, bool>, bool>* = nullptr>
   Scalar(T vv) : tag(Tag::HAS_b) {
-    v.i = convert<int64_t, bool>(vv);
+    v.i = c10::convert<int64_t, bool>(vv);
   }
 
   template <
@@ -111,33 +111,33 @@ class C10_API Scalar {
       typename std::enable_if_t<std::is_same_v<T, c10::SymBool>, bool>* =
           nullptr>
   Scalar(T vv) : tag(Tag::HAS_sb) {
-    v.i = convert<int64_t, c10::SymBool>(vv);
+    v.i = c10::convert<int64_t, c10::SymBool>(vv);
   }
 
-#define DEFINE_ACCESSOR(type, name)                                   \
-  type to##name() const {                                             \
-    if (Tag::HAS_d == tag) {                                          \
-      return checked_convert<type, double>(v.d, #type);               \
-    } else if (Tag::HAS_z == tag) {                                   \
-      return checked_convert<type, c10::complex<double>>(v.z, #type); \
-    } else if (Tag::HAS_sd == tag) {                                  \
-      return checked_convert<type, double>(                           \
-          toSymFloat().guard_float(__FILE__, __LINE__), #type);       \
-    }                                                                 \
-    if (Tag::HAS_b == tag) {                                          \
-      return checked_convert<type, bool>(v.i, #type);                 \
-    } else if (Tag::HAS_i == tag) {                                   \
-      return checked_convert<type, int64_t>(v.i, #type);              \
-    } else if (Tag::HAS_u == tag) {                                   \
-      return checked_convert<type, uint64_t>(v.u, #type);             \
-    } else if (Tag::HAS_si == tag) {                                  \
-      return checked_convert<type, int64_t>(                          \
-          toSymInt().guard_int(__FILE__, __LINE__), #type);           \
-    } else if (Tag::HAS_sb == tag) {                                  \
-      return checked_convert<type, int64_t>(                          \
-          toSymBool().guard_bool(__FILE__, __LINE__), #type);         \
-    }                                                                 \
-    TORCH_CHECK(false)                                                \
+#define DEFINE_ACCESSOR(type, name)                                        \
+  type to##name() const {                                                  \
+    if (Tag::HAS_d == tag) {                                               \
+      return c10::checked_convert<type, double>(v.d, #type);               \
+    } else if (Tag::HAS_z == tag) {                                        \
+      return c10::checked_convert<type, c10::complex<double>>(v.z, #type); \
+    } else if (Tag::HAS_sd == tag) {                                       \
+      return c10::checked_convert<type, double>(                           \
+          toSymFloat().guard_float(__FILE__, __LINE__), #type);            \
+    }                                                                      \
+    if (Tag::HAS_b == tag) {                                               \
+      return c10::checked_convert<type, bool>(v.i, #type);                 \
+    } else if (Tag::HAS_i == tag) {                                        \
+      return c10::checked_convert<type, int64_t>(v.i, #type);              \
+    } else if (Tag::HAS_u == tag) {                                        \
+      return c10::checked_convert<type, uint64_t>(v.u, #type);             \
+    } else if (Tag::HAS_si == tag) {                                       \
+      return c10::checked_convert<type, int64_t>(                          \
+          toSymInt().guard_int(__FILE__, __LINE__), #type);                \
+    } else if (Tag::HAS_sb == tag) {                                       \
+      return c10::checked_convert<type, int64_t>(                          \
+          toSymBool().guard_bool(__FILE__, __LINE__), #type);              \
+    }                                                                      \
+    TORCH_CHECK(false)                                                     \
   }
 
   // TODO: Support ComplexHalf accessor
@@ -431,7 +431,7 @@ class C10_API Scalar {
           std::is_integral_v<T> && !std::is_same_v<T, bool>,
           bool>* = nullptr>
   Scalar(T vv, bool /*unused*/) : tag(Tag::HAS_i) {
-    v.i = convert<decltype(v.i), T>(vv);
+    v.i = c10::convert<decltype(v.i), T>(vv);
   }
 
   template <
@@ -440,14 +440,14 @@ class C10_API Scalar {
           !std::is_integral_v<T> && !c10::is_complex<T>::value,
           bool>* = nullptr>
   Scalar(T vv, bool /*unused*/) : tag(Tag::HAS_d) {
-    v.d = convert<decltype(v.d), T>(vv);
+    v.d = c10::convert<decltype(v.d), T>(vv);
   }
 
   template <
       typename T,
       typename std::enable_if_t<c10::is_complex<T>::value, bool>* = nullptr>
   Scalar(T vv, bool /*unused*/) : tag(Tag::HAS_z) {
-    v.z = convert<decltype(v.z), T>(vv);
+    v.z = c10::convert<decltype(v.z), T>(vv);
   }
 };
 
