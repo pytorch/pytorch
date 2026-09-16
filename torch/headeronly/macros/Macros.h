@@ -471,7 +471,7 @@ __host__ __device__
     (void)(printf(                                                    \
         "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(           \
             __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: " \
-                      "Assertion failed: `" #cond "`: " msg "\n",     \
+                      "Assertion failed: `%s`: " msg "\n",            \
         __func__,                                                     \
         blockIdx.x,                                                   \
         blockIdx.y,                                                   \
@@ -479,6 +479,7 @@ __host__ __device__
         threadIdx.x,                                                  \
         threadIdx.y,                                                  \
         threadIdx.z,                                                  \
+        #cond,                                                        \
         ##__VA_ARGS__));                                              \
     (void)(_wassert(                                                  \
                _CRT_WIDE(#cond),                                      \
@@ -554,11 +555,89 @@ __host__ __device__
     abort();                     \
   }
 #else
+#if defined(USE_ROCM) && defined(__HIP_DEVICE_COMPILE__)
+namespace torch::headeronly::detail {
+// Compile-time string fragment for CUDA_KERNEL_ASSERT message pieces.
+template <unsigned N>
+struct RoCmAssertLit {
+  char data[N]{};
+  constexpr RoCmAssertLit(const char (&s)[N]) {
+    for (unsigned i = 0; i < N; ++i) {
+      data[i] = s[i];
+    }
+  }
+  static constexpr unsigned size() {
+    return N;
+  }
+  constexpr unsigned percent() const {
+    unsigned count = 0;
+    for (unsigned i = 0; i < N - 1; ++i) {
+      if (data[i] == '%') {
+        ++count;
+      }
+    }
+    return count;
+  }
+};
+
+// OCKL is_last=1 treats the append as printf format; escape '%'. Size the
+// buffer as Out + NumPercent.
+template <RoCmAssertLit A, RoCmAssertLit B, RoCmAssertLit C>
+constexpr auto rocm_assert_concat() {
+  constexpr unsigned out = A.size() + B.size() + C.size() - 2;
+  constexpr unsigned pct = A.percent() + B.percent() + C.percent();
+  struct {
+    char data[out + pct];
+    unsigned length;
+  } msg{};
+  unsigned j = 0;
+  auto append = [&](const char* s, unsigned n) {
+    for (unsigned k = 0; k < n; ++k) {
+      if (s[k] == '%') {
+        msg.data[j++] = '%';
+      }
+      msg.data[j++] = s[k];
+    }
+  };
+  append(A.data, A.size() - 1);
+  append(B.data, B.size() - 1);
+  append(C.data, C.size());
+  msg.length = j;
+  return msg;
+}
+
+// __host__ __device__: hipcc's device pass still type-checks host-only call
+// sites (e.g. MemoryAccess.cuh LoadWithCast ctors). Host runtime uses #else
+// __assert_fail; this body is not emitted for host codegen.
+template <unsigned N>
+__host__ __device__ inline __attribute__((always_inline, flatten)) void
+rocm_assert_one_shot(const char (&msg)[N], unsigned length) {
+  auto d = __ockl_fprintf_stderr_begin();
+  __ockl_fprintf_append_string_n(d, msg, length, 1);
+  __builtin_trap();
+}
+} // namespace torch::headeronly::detail
+
+#define ROCM_ASSERT_LIT(s) ::torch::headeronly::detail::RoCmAssertLit(s)
+
+#define CUDA_KERNEL_ASSERT(cond)                                        \
+  if C10_UNLIKELY (!(cond)) {                                           \
+    static constexpr auto _rocm_assert_msg =                            \
+        ::torch::headeronly::detail::rocm_assert_concat<                \
+            ROCM_ASSERT_LIT(__FILE__ ":" C10_STRINGIZE(__LINE__) ": "), \
+            ROCM_ASSERT_LIT(__func__),                                  \
+            ROCM_ASSERT_LIT(": Device-side assertion `" #cond           \
+                            "' failed.\n")>();                          \
+    ::torch::headeronly::detail::rocm_assert_one_shot(                  \
+        _rocm_assert_msg.data, _rocm_assert_msg.length);                \
+  }
+#else
 #define CUDA_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#endif // defined(USE_ROCM) && defined(__HIP_DEVICE_COMPILE__)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)                              \
   if (C10_UNLIKELY(!(cond))) {                                         \
     __assert_fail(                                                     \
@@ -569,7 +648,7 @@ __host__ __device__
     printf(                                                            \
         "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(            \
             __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "  \
-            "Assertion failed: `" #cond "`: " msg "\n",                \
+            "Assertion failed: `%s`: " msg "\n",                        \
         __func__,                                                      \
         blockIdx.x,                                                    \
         blockIdx.y,                                                    \
@@ -577,6 +656,7 @@ __host__ __device__
         threadIdx.x,                                                   \
         threadIdx.y,                                                   \
         threadIdx.z,                                                   \
+        #cond,                                                         \
         ##__VA_ARGS__); \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
