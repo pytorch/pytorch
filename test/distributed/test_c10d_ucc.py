@@ -126,7 +126,7 @@ class RendezvousEnvTest(TestCase):
             os.environ["MASTER_PORT"] = str(common.find_free_port())
             os.environ["RANK"] = "0"
 
-            previous_handlers = logging.root.handlers
+            previous_handlers = list(logging.root.handlers)
 
             c10d.init_process_group(backend="ucc", init_method="env://")
 
