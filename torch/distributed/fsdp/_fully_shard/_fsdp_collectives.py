@@ -413,19 +413,16 @@ def _get_param_all_gather_inputs(
             param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
 
     # 2nd pass: use foreach copy to compute the remaining all-gather inputs
-    if not foreach_copy_inputs:
-        return param_all_gather_inputs
-    fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
-    param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
-    if param_dtype is None:
-        raise AssertionError("Expected param_dtype to not be None")
-    flat_foreach_copy_input = torch.empty(
-        (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
-    )
-    splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
-    torch._foreach_copy_(splits, foreach_copy_inputs)
-    for i, split in zip(foreach_copy_indices, splits):
-        param_all_gather_inputs[i] = [split]
+    if foreach_copy_inputs:
+        fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
+        param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
+        flat_foreach_copy_input = torch.empty(
+            (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
+        )
+        splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
+        torch._foreach_copy_(splits, foreach_copy_inputs)
+        for i, split in zip(foreach_copy_indices, splits):
+            param_all_gather_inputs[i] = [split]
 
     return param_all_gather_inputs
 
