@@ -1655,7 +1655,7 @@ def add(x, y):
 
             # fn's import statement cannot run with the entry gone, in eager or
             # in the trace, so import_source is driven on a stub translator
-            # over fn's globals, as the non-module-value test drives it.
+            # over fn's globals rather than by a compile.
             self.assertIs(_import_source_cache[name], new)
             sys.modules.pop(name)
             scope = fn.__globals__
@@ -1904,8 +1904,11 @@ def add(x, y):
         # key is accepted and, the value being the live entry, replaced by it.
         # No traced bytecode reaches that arm, so a comptime callback calls
         # import_source on the live translator mid-trace, with the frame's real
-        # globals and output behind it. A refused call stores nothing in
-        # cache_method's cache, which fills on the return path only.
+        # globals and output behind it, and snapshots the record there: the
+        # translator is not read once the compile has returned. The two arms
+        # run on two translators, as in production: a refusal raises
+        # Unsupported out to skip or restart the whole frame, so one translator
+        # never reaches the name twice.
         key = "torch_test_package_import_alias_non_module_value"
         alias = f"__import_{key}"
         value = types.SimpleNamespace(VALUE=1)
@@ -1915,8 +1918,11 @@ def add(x, y):
 
         def resolve(ctx):
             tx = InstructionTranslator.current_tx()
-            seen.append(tx)
-            seen.append(tx.import_source(key))
+            try:
+                source = tx.import_source(key)
+            finally:
+                seen.append(dict(tx.output.import_sources))
+            seen.append(source)
 
         def fn(x):
             comptime(resolve)
@@ -1929,20 +1935,19 @@ def add(x, y):
             refused = f"alias {alias} for {key}.*bound to a module in the globals"
             with self.assertRaisesRegex(Unsupported, refused):
                 torch.compile(fn, backend="eager", fullgraph=True)(*args)
-            (tx,) = seen
+            (recorded,) = seen
             self.assertIs(fn.__globals__[alias], nameless)
-            self.assertNotIn(alias, tx.output.import_sources)
-            self.assertNotIn((key,), tx._cache_method_import_source)
+            self.assertNotIn(alias, recorded)
 
             seen.clear()
             torch._dynamo.reset()
             fn.__globals__[alias] = types.ModuleType(key)
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(fn(*args), compiled_fn(*args))
-            tx, source = seen
+            recorded, source = seen
             self.assertEqual(source.global_name, alias)
             self.assertIs(fn.__globals__[alias], value)
-            self.assertEqual(tx.output.import_sources[alias], key)
+            self.assertEqual(recorded[alias], key)
             # Bound but not remembered: a later trace with the entry gone must
             # not be served a non-module from the cache.
             self.assertNotIn(key, _import_source_cache)
