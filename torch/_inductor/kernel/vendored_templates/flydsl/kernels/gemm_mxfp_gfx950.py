@@ -14,7 +14,6 @@ from .gemm_gfx950 import (
     GEMM_DTYPE_MXFP4,
     GemmABLoadContext,
     GemmGfx950Param,
-    get_leading_stride,
     get_wave_lds_offset,
     GFX950_DMA_BYTES,
     GFX950_SCALE_DMA_BYTES,
@@ -85,7 +84,7 @@ def make_mxfp_ab_load_context(elem_dtype, tiled_mma, tid, k, param: GemmGfx950Pa
     return GemmABLoadContext(
         wave_offset=get_wave_lds_offset(tid, param.async_load_bytes),
         tid=tid,
-        inner_bound=k,
+        k=k,
         param=param,
         uni_copy_atom=uni_copy_atom,
         buffer_copy_atom=buffer_copy_atom,
@@ -486,8 +485,12 @@ def gemm_mxfp_gfx950(
     m = fx.Int32(fx.get_scalar(a.shape[0]))
     n = fx.Int32(fx.get_scalar(b.shape[1]))
     k = fx.Int32(fx.get_scalar(a.shape[1])) * fx.Int32(elements_per_byte)
-    a_leading_stride = get_leading_stride(a, param.a_is_transposed)
-    b_leading_stride = get_leading_stride(b, param.b_is_transposed)
+    a_leading_stride = fx.Int32(
+        fx.get_scalar(a.stride[1] if const_expr(param.a_is_transposed) else a.stride[0])
+    )
+    b_leading_stride = fx.Int32(
+        fx.get_scalar(b.stride[1] if const_expr(param.b_is_transposed) else b.stride[0])
+    )
     num_pid_m = (m - 1) // param.block_m + 1
     num_pid_n = (n - 1) // param.block_n + 1
     kernel = gemm_mxfp_gfx950_kernel

@@ -64,15 +64,9 @@ class GemmGfx950Param:
 
 @dataclass(slots=True, kw_only=True, eq=False)
 class GemmABLoadContext:
-    """Workgroup-wide state shared by direct-to-LDS operand loads.
-
-    ``wave_offset`` and ``tid`` select each lane's LDS destination;
-    ``inner_bound`` and ``param.has_k_tail`` describe the runtime K boundary.
-    """
-
     wave_offset: Any
     tid: Any
-    inner_bound: Any
+    k: Any
     param: GemmGfx950Param
     uni_copy_atom: Any
     buffer_copy_atom: Any
@@ -84,14 +78,6 @@ class GemmABLoadContext:
 
 @dataclass(slots=True, kw_only=True, eq=False)
 class AsyncLoadOperand:
-    """One operand's resource, layout, iteration, and boundary metadata.
-
-    ``outer_tile_size`` and ``outer_bound`` describe the tiled M or N axis;
-    ``leading_stride`` is measured in source elements; ``load_iters`` is the
-    number of 16-byte loads per thread; and ``is_k_major`` selects the address
-    mapping.
-    """
-
     context: GemmABLoadContext
     rsrc: Any
     lds_layout: Any
@@ -487,11 +473,6 @@ def make_wave_lds_ptr(ptr, wave_offset):
     return fx.recast_iter(fx.Int8, ptr) + fx.Int32(wave_offset)
 
 
-def get_leading_stride(tensor, is_transposed):
-    stride = tensor.stride[1] if const_expr(is_transposed) else tensor.stride[0]
-    return fx.Int32(fx.get_scalar(stride))
-
-
 def swizzled_contiguous_idx(idx0, idx1, layout, extent):
     # The XOR swizzle is self-inverse. Map each physical contiguous position
     # written by direct-to-LDS DMA back to its logical global vector.
@@ -566,7 +547,7 @@ def make_gemm_ab_load_context(elem_dtype, tiled_mma, tid, k, param: GemmGfx950Pa
     return GemmABLoadContext(
         wave_offset=get_wave_lds_offset(tid, param.async_load_bytes),
         tid=tid,
-        inner_bound=k,
+        k=k,
         param=param,
         uni_copy_atom=uni_copy_atom,
         buffer_copy_atom=buffer_copy_atom,
@@ -591,7 +572,7 @@ def async_load_operand(
     async_load_vec_size = async_load_bytes // param.in_data_bytes
     ldg_x_threads = param.ldg_x_threads
     block_k = param.block_k
-    inner_bound = context.inner_bound
+    k = context.k
     lds_ptr = make_wave_lds_ptr(lds_base, context.wave_offset)
     for i in range_constexpr(operand.load_iters):
         global_tid = block_threads * i + tid
@@ -616,7 +597,7 @@ def async_load_operand(
                 block_k,
             )
         if const_expr(param.has_k_tail):
-            safe_global_k_idx = (global_k_idx < inner_bound).select(global_k_idx, 0)
+            safe_global_k_idx = (global_k_idx < k).select(global_k_idx, 0)
         else:
             safe_global_k_idx = global_k_idx
         global_outer_idx = global_outer_offset + outer_local_idx
@@ -1289,8 +1270,12 @@ def gemm_gfx950(
     m = fx.Int32(fx.get_scalar(a.shape[0]))
     n = fx.Int32(fx.get_scalar(b.shape[1]))
     k = fx.Int32(fx.get_scalar(a.shape[1]))
-    a_leading_stride = get_leading_stride(a, param.a_is_transposed)
-    b_leading_stride = get_leading_stride(b, param.b_is_transposed)
+    a_leading_stride = fx.Int32(
+        fx.get_scalar(a.stride[1] if const_expr(param.a_is_transposed) else a.stride[0])
+    )
+    b_leading_stride = fx.Int32(
+        fx.get_scalar(b.stride[1] if const_expr(param.b_is_transposed) else b.stride[0])
+    )
     tiled_mma = _make_gemm_gfx950_tiled_mma(param)
     num_pid_m = (m - 1) // param.block_m + 1
     num_pid_n = (n - 1) // param.block_n + 1
