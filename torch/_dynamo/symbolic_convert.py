@@ -2486,18 +2486,20 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-        # An empty slot, or one already holding value, takes value. A writer's
-        # same-named module was the live entry when the writer ran, and the
-        # memo can predate or postdate a handover of the name since, so the
-        # memo replaces it only when it is the live entry now: the graph is
-        # specialized on what IMPORT_NAME pushed, the live entry, and this
-        # alias roots its guards. When neither is live the writer's module
-        # stays -- the memo would be no less stale -- and the guards read a
-        # module the graph was not built from, as they do for an empty slot
-        # whenever the memo is not the live entry -- and there, on the
-        # get_globals_source_and_value path, an inlined STORE_GLOBAL replays
-        # through the alias onto the memo while the trace read the live module,
-        # the one whose __dict__ is the frame's globals.
+        # An empty slot, or one already holding value, takes value.
+        # A writer's same-named module in the slot was the live entry when the
+        # writer ran, and the memo can predate or postdate a handover of the
+        # name since. The memo replaces it only when it is the live entry now:
+        # the graph is specialized on what IMPORT_NAME pushed, the live entry,
+        # and this alias roots its guards.
+        # When neither is live the writer's module stays; the memo would be no
+        # less stale. The guards then read a module the graph was not built
+        # from.
+        # An empty slot has that same blindness whenever the memo is not the
+        # live entry. There the alias has a write side too: on the
+        # get_globals_source_and_value path an inlined STORE_GLOBAL replays
+        # through the alias onto the memo, while the trace read the live
+        # module, the one whose __dict__ is the frame's globals.
         write_value = not conflict or live
         # Recorded only once the check has passed: the package entry outlives a
         # graph break here, and install() binds every recorded alias.
