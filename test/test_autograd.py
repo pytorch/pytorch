@@ -17290,10 +17290,11 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
                 with unittest.mock.patch(
                     "torch.utils.checkpoint._is_cacheable_effect",
-                    side_effect=AssertionError("unexpected effect lookup"),
-                ):
+                    autospec=True,
+                ) as effect_lookup:
                     with _CachingTorchDispatchMode(policy_fn, storage):
                         torch.ones(1).sin()
+                effect_lookup.assert_not_called()
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
     def test_selective_checkpoint_preserves_registered_effect(self):
@@ -17312,11 +17313,11 @@ class TestSelectiveActivationCheckpoint(TestCase):
             effectful_identity.register_autograd(backward)
             effectful_identity.register_effect(torch.library.EffectType.ORDERED)
 
-            for policy in (
-                CheckpointPolicy.PREFER_RECOMPUTE,
-                CheckpointPolicy.MUST_RECOMPUTE,
-                CheckpointPolicy.PREFER_CPU_OFFLOAD,
-                CheckpointPolicy.MUST_CPU_OFFLOAD,
+            for policy, expected_calls in (
+                (CheckpointPolicy.PREFER_RECOMPUTE, 1),
+                (CheckpointPolicy.PREFER_CPU_OFFLOAD, 1),
+                (CheckpointPolicy.MUST_RECOMPUTE, 2),
+                (CheckpointPolicy.MUST_CPU_OFFLOAD, 2),
             ):
                 with self.subTest(policy=policy):
                     call_count = 0
@@ -17335,8 +17336,46 @@ class TestSelectiveActivationCheckpoint(TestCase):
                     )
                     out.sum().backward()
 
-                    self.assertEqual(call_count, 1)
+                    self.assertEqual(call_count, expected_calls)
                     self.assertEqual(x.grad, x.cos())
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_selective_checkpoint_preserves_effect_without_output(self):
+        call_count = 0
+        with torch.library._scoped_library("test_eager_sac_none_effect", "FRAGMENT"):
+
+            @torch.library.custom_op(
+                "test_eager_sac_none_effect::record", mutates_args=()
+            )
+            def effectful_record(x: torch.Tensor) -> None:
+                nonlocal call_count
+                call_count += 1
+
+            @effectful_record.register_fake
+            def _(x):
+                return None
+
+            effectful_record.register_effect(torch.library.EffectType.ORDERED)
+
+            def context_fn():
+                return create_selective_checkpoint_contexts(
+                    lambda _ctx, _op, *args, **kwargs: (
+                        CheckpointPolicy.PREFER_RECOMPUTE
+                    )
+                )
+
+            x = torch.randn(3, requires_grad=True)
+
+            def fn(value):
+                effectful_record(value)
+                return value.sin()
+
+            checkpoint(
+                fn, x, use_reentrant=False, context_fn=context_fn
+            ).sum().backward()
+
+            self.assertEqual(call_count, 1)
+            self.assertEqual(x.grad, x.cos())
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_raw_c10d_launch_is_not_a_cacheable_effect(self):

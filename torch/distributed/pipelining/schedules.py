@@ -402,7 +402,9 @@ class _PipelineSchedule(ABC):
                 result = stage._warmup_backward_result(received_result=result)
             if result is None:
                 raise RuntimeError("P2P warm-up voting failed")
-            supports_static, permits_dynamic = (bool(value.item()) for value in result)
+            supports_static_value, permits_dynamic_value = result.tolist()
+            supports_static = bool(supports_static_value)
+            permits_dynamic = bool(permits_dynamic_value)
             if not supports_static and not permits_dynamic:
                 raise PipeliningMetadataError(
                     "pass_pipeline_metadata requires complete static metadata "
