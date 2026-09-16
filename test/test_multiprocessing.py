@@ -186,17 +186,14 @@ def sum_tensors(inq, outq):
             )
 
 
-def queue_get_exception_device(device):
-    def queue_get_exception(inqueue, outqueue):
-        os.close(2)  # hide expected error message
-        try:
-            torch.zeros(5, 5).to(device)
-        except Exception as e:
-            outqueue.put(e)
-        else:
-            outqueue.put("no exception")
-
-    return queue_get_exception
+def queue_get_exception(device, inqueue, outqueue):
+    os.close(2)  # hide expected error message
+    try:
+        torch.zeros(5, 5).to(device)
+    except Exception as e:
+        outqueue.put(e)
+    else:
+        outqueue.put("no exception")
 
 
 # Multiply by two in a separate stream
@@ -597,7 +594,7 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
         t = torch.zeros(5, 5).to(device).cpu()
         inq = mp.Queue()
         outq = mp.Queue()
-        p = mp.Process(target=queue_get_exception_device(device), args=(inq, outq))
+        p = mp.Process(target=queue_get_exception, args=(device, inq, outq))
         p.start()
         inq.put(t)
         p.join()
@@ -629,19 +626,6 @@ if __name__ == "__main__":
         self.assertRegex(
             stderr, f"Cannot re-initialize {device_type} in forked subprocess."
         )
-
-    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
-    def test_autograd_errors(self):
-        ctx = mp.get_context("fork")
-        simple_autograd_function()
-        # Autograd only uses thread when GPUs are involved
-        if torch.accelerator.is_available():
-            with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
-                with ctx.Pool(3) as pool:
-                    pool.map(simple_autograd_function, [1, 2, 3])
-        else:
-            with ctx.Pool(3) as pool:
-                pool.map(simple_autograd_function, [1, 2, 3])
 
 
 instantiate_device_type_tests(TestMultiprocessingDevice, globals(), allow_xpu=True)
@@ -769,6 +753,19 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         simple_autograd_function()
         with ctx.Pool(3) as pool:
             pool.map(simple_autograd_function, [1, 2, 3])
+
+    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
+    def test_autograd_errors(self):
+        ctx = mp.get_context("fork")
+        simple_autograd_function()
+        # Autograd only uses thread when GPUs are involved
+        if torch.accelerator.is_available():
+            with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
+                with ctx.Pool(3) as pool:
+                    pool.map(simple_autograd_function, [1, 2, 3])
+        else:
+            with ctx.Pool(3) as pool:
+                pool.map(simple_autograd_function, [1, 2, 3])
 
     def test_empty_tensor_sharing_meta(self):
         self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
