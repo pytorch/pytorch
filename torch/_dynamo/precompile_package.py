@@ -118,7 +118,12 @@ capture block.
 
 from __future__ import annotations
 
+import functools
 import logging
+import os
+import site
+import sys
+import sysconfig
 from typing import TYPE_CHECKING
 
 from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
@@ -198,3 +203,83 @@ def default_guard_filter_fn(
         and not any(d in unsupported for d in g.derived_guard_types)
         for g in guard_entries
     ]
+
+
+# A pip target nested inside the stdlib dir that sysconfig does not name in
+# this layout -- Debian's /usr/lib/python3.X/dist-packages -- still ends in one
+# of these.
+_INSTALL_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
+
+
+def _norm(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+@functools.cache
+def _stdlib_roots() -> tuple[str, ...]:
+    """
+    Where this interpreter's own library lives. os is unquestionably stdlib, so
+    its directory is the direct evidence and the only one that stays right when
+    the stdlib is a zip; sysconfig and sys._stdlib_dir cover a build where os is
+    frozen with no __file__.
+    """
+    roots = []
+    os_file = getattr(os, "__file__", None)
+    if os_file:
+        roots.append(os.path.dirname(os_file))
+    frozen_dir = getattr(sys, "_stdlib_dir", None)  # 3.11+
+    if frozen_dir:
+        roots.append(frozen_dir)
+    paths = sysconfig.get_paths()
+    roots += [p for p in (paths.get("stdlib"), paths.get("platstdlib")) if p]
+    return tuple(sorted({_norm(p) for p in roots}))
+
+
+@functools.cache
+def _install_roots() -> tuple[str, ...]:
+    """
+    Where a third party lands. This is the load-bearing exclusion: purelib is
+    NESTED inside stdlib in a conda layout and inside platstdlib in a venv, so
+    without it every pip-installed package is under a stdlib root.
+    """
+    paths = sysconfig.get_paths()
+    roots = [p for p in (paths.get("purelib"), paths.get("platlib")) if p]
+    for name in ("getsitepackages", "getusersitepackages"):
+        # getattr, not a direct reference: the "old virtualenv site.py" this
+        # guards against does not DEFINE these, so naming them here would raise
+        # the very AttributeError the except is for -- out of a lint, aborting
+        # the capture it was asked to check.
+        get = getattr(site, name, None)
+        try:
+            got = get() if get is not None else None
+        except Exception:
+            continue  # -S, or a site.py that defines it but cannot answer
+        if got is None:
+            continue
+        roots += [got] if isinstance(got, str) else list(got)
+    return tuple(sorted({_norm(p) for p in roots}))
+
+
+@functools.cache
+def _torch_roots() -> tuple[str, ...]:
+    """
+    Every directory torch's own submodules come from. An editable build splits
+    them -- torch/__init__.py out of the source tree, _C.so and version.py out
+    of site-packages -- and torch.__path__ is exactly that set. It is only
+    trusted if the directory this file is running from is in it, so a
+    sys.modules['torch'] that is not us cannot nominate its own roots.
+    """
+    own_file = globals().get("__file__")
+    if not own_file:
+        return ()  # frozen torch: nothing to anchor to, fall back to the name
+    own = _norm(os.path.dirname(os.path.dirname(own_file)))
+    roots = {own}
+    search = getattr(sys.modules.get("torch"), "__path__", None) or ()
+    listed = {_norm(p) for p in search if isinstance(p, str)}
+    if own in listed:
+        roots |= listed
+    return tuple(sorted(roots))
+
+
+def _within(path: str, roots: tuple[str, ...]) -> bool:
+    return any(path == r or path.startswith(r + os.sep) for r in roots)
