@@ -845,11 +845,13 @@ class AOTCompiledFunction:
                 scope["__builtins__"] = builtins.__dict__
             scope[builtins_key] = get_builtins_dict(scope)
 
-    def _missing_global_hint(self) -> str:
+    def _missing_global_hint(self, *, forward: str | None = None) -> str:
         """Advice for a guard that failed on a global its scope does not define,
         worded for the scope the guards were actually resolved against. Returns a
         bare sentence; a caller that continues a line of its own adds the
-        separator."""
+        separator. ``forward`` names the model's instance attribute, passed only
+        when the guards hold the very dict it resolves to -- resolved by the load
+        or supplied by the caller -- and honoured only in the SUPPLIED branch."""
         if self._guard_scope is _GuardScope.RECONSTRUCTED:
             rebuilt = (
                 "a guarded global is missing from the scope rebuilt from the artifact"
@@ -870,15 +872,20 @@ class AOTCompiledFunction:
                 "doing the loading -- so the guard can resolve it."
             )
         if self._guard_scope is _GuardScope.SUPPLIED:
-            # SUPPLIED implies a scope; named by its module when it is one,
-            # since a module load resolved it from model.forward and the caller
-            # passed no dict to be sent back to.
+            # SUPPLIED implies a scope; a module's namespace is named by its
+            # module, since a module load that resolved it from model.forward had
+            # no caller's dict to send the reader back to.
             namespace = _module_namespace_name(self._guard_globals or {})
-            where = "" if namespace is None else f", here vars({namespace})"
+            named = "" if namespace is None else f", here vars({namespace})"
+            where = (
+                f"the globals of the function {forward} resolves to, which is "
+                f"the dict the guards hold{named}"
+                if forward is not None
+                else f"the live scope this artifact was loaded against{named}"
+            )
             return (
-                "a guarded global is missing from the live scope this artifact "
-                f"was loaded against{where}; define it there so the guard can "
-                "resolve it."
+                f"a guarded global is missing from {where}; define it there "
+                "so the guard can resolve it."
             )
         # CAPTURED: the guards hold the globals they were traced against BY
         # REFERENCE, so a name deleted after capture can be defined there again
@@ -1603,6 +1610,8 @@ class AOTCompiledModel:
         # another entry's. Two unnamed supplied dicts word alike and so share a
         # line; the sentence names no dict either way.
         hinted: dict[str, list[int]] = {}
+        resolved: dict[str, Any] | None = None
+        tried_forward = False
         for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
             if reason.result:
@@ -1623,7 +1632,30 @@ class AOTCompiledModel:
                 lines.append(f"  [{i}] <guard check failed without naming a guard>")
                 continue
             if any(map(_names_a_missing_global, parts)):
-                hint = result._missing_global_hint()
+                forward: str | None = None
+                if result._guard_scope is _GuardScope.SUPPLIED and not tried_forward:
+                    tried_forward = True
+                    # Resolving forward runs user code: get_traced_fn formats a
+                    # forward it refuses into its error, and that repr can raise past
+                    # what _resolve_guard_scope catches. The report must still arrive.
+                    try:
+                        resolved, unresolved = _resolve_guard_scope(self.model)
+                    except Exception as exc:
+                        # The type only: str(exc) can run the same repr again.
+                        unresolved = f"resolving it raised {type(exc).__name__}"
+                    if resolved is None:
+                        log.debug(
+                            "the no-match report's hint names no %s.forward: %s",
+                            type(self.model).__name__,
+                            unresolved,
+                        )
+                if resolved is not None and resolved is result._guard_globals:
+                    # Named as the instance attribute: the guards hold the dict it
+                    # resolves to, whether the load resolved that dict from it or the
+                    # caller passed the same one, and a rebound instance reads another
+                    # function's dict.
+                    forward = f"this {type(self.model).__name__} instance's forward"
+                hint = result._missing_global_hint(forward=forward)
                 hinted.setdefault(hint, []).append(i)
             lines.append(f"  [{i}] {joined}")
         for hint, at in hinted.items():
