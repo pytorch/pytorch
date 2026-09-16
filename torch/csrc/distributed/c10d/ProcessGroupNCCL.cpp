@@ -1357,6 +1357,8 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   // only participate in one group.
   // This value must be non-negative int32 and all ranks are.
   ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
+  // eagerConnectSingleDevice() initializes the child from ncclCommSplit before
+  // returning, so split does not need a separate Store connection.
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store, groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
@@ -1375,9 +1377,9 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::merge(
     const int& size) {
   auto ncclOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
   TORCH_CHECK(ncclOpts != nullptr, "opts not a ProcessGroupNCCL::Options.");
-  // Unlike split(), merge creates an uninitialized communicator whose first
-  // collective may block in Store rendezvous, so preserve its independent
-  // connection.
+  // Unlike split(), merge returns an uninitialized child. Its first collective
+  // may block in broadcastUniqueNCCLID() while holding the Store connection,
+  // so preserve an independent connection.
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), rank, size, ncclOpts);
   return c10::static_intrusive_pointer_cast<Backend>(pg);

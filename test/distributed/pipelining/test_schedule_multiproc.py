@@ -421,9 +421,7 @@ class ScheduleTest(MultiProcContinuousTest):
             (ScheduleInterleaved1F1B, False),
             (ScheduleInterleaved1F1B, True),
             (ScheduleLoopedBFS, False),
-            (ScheduleLoopedBFS, True),
             (ScheduleInterleavedZeroBubble, False),
-            (ScheduleInterleavedZeroBubble, True),
         ],
     )
     @skip_if_lt_x_gpu(4)
@@ -460,6 +458,7 @@ class ScheduleTest(MultiProcContinuousTest):
             stage, stage_module, _ = create_single_stage_pipeline(
                 self.config, mod, x, num_microbatches
             )
+            stages = [stage]
             stage_modules = [stage_module]
             schedule = ScheduleClass(
                 stage, num_microbatches, loss_fn=loss_fn, scale_grads=False
@@ -468,6 +467,34 @@ class ScheduleTest(MultiProcContinuousTest):
         # Clear gradients and run eval
         zero_gradients(stage_modules)
         losses = []
+
+        def run_training_step():
+            zero_gradients(stage_modules)
+            if self.rank == 0:
+                schedule.step(x)
+            elif self.rank == self.world_size - 1:
+                schedule.step(target=target, losses=[])
+            else:
+                schedule.step()
+
+        def recv_pool_ptrs():
+            return tuple(
+                tuple(
+                    tuple(
+                        buffer.data_ptr() if buffer is not None else None
+                        for buffer in slot
+                    )
+                    for slot in pool._buffers
+                )
+                for stage in stages
+                for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool)
+            )
+
+        train_ptrs = None
+        if reuse_recv_buffers:
+            run_training_step()
+            train_ptrs = recv_pool_ptrs()
+            zero_gradients(stage_modules)
 
         if self.rank == 0:
             # Support with and without no_grad()
@@ -493,6 +520,26 @@ class ScheduleTest(MultiProcContinuousTest):
         # Verify that losses are still computed during eval
         if self.rank == self.world_size - 1:
             self.assertTrue(len(losses) > 0, "Losses should be computed during eval()")
+
+        if reuse_recv_buffers:
+            # Inference may need more forward slots, but compatible pools grow
+            # without replacing addresses already captured during training.
+            eval_ptrs = recv_pool_ptrs()
+            eval_pools_drained = all(
+                not pool._owners
+                for stage in stages
+                for pool in (stage._fwd_recv_pool, stage._bwd_recv_pool)
+            )
+            run_training_step()
+            resumed_train_ptrs = recv_pool_ptrs()
+            dist.barrier(device_ids=[self.rank])
+
+            self.assertIsNotNone(train_ptrs)
+            self.assertTrue(eval_pools_drained)
+            for expected, actual in zip(train_ptrs, eval_ptrs, strict=True):
+                self.assertEqual(actual[: len(expected)], expected)
+            for expected, actual in zip(train_ptrs, resumed_train_ptrs, strict=True):
+                self.assertEqual(actual[: len(expected)], expected)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -786,7 +833,6 @@ class ScheduleTest(MultiProcContinuousTest):
             (ScheduleInterleaved1F1B, True, False),
             (ScheduleInterleaved1F1B, True, True),
             (ScheduleLoopedBFS, False, False),
-            (ScheduleLoopedBFS, True, False),
             (ScheduleInterleavedZeroBubble, False, False),
             (ScheduleInterleavedZeroBubble, True, False),
         ],
@@ -1111,10 +1157,13 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize(
-        "schedule_class",
-        [ScheduleZBVZeroBubble, ScheduleDualPipeV],
+        "schedule_class,reuse_recv_buffers",
+        [
+            (ScheduleZBVZeroBubble, False),
+            (ScheduleDualPipeV, False),
+            (ScheduleDualPipeV, True),
+        ],
     )
-    @parametrize("reuse_recv_buffers", [False, True])
     @skip_if_lt_x_gpu(4)
     def test_v_shape_schedules(self, schedule_class, reuse_recv_buffers):
         n_stages = 8

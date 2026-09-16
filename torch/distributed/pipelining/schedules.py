@@ -24,6 +24,7 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
+from ._recv_buffers import _RecvInfo
 from ._utils import (
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
@@ -36,7 +37,7 @@ from .microbatch import (
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
-from .stage import _PipelineStageBase, _RecvInfo, PipelineStage
+from .stage import _PipelineStageBase, PipelineStage
 
 
 __all__ = [
@@ -404,7 +405,9 @@ class _PipelineSchedule(ABC):
                 result = stage._warmup_backward_result(received_result=result)
             if result is None:
                 raise RuntimeError("P2P warm-up voting failed")
-            supports_static, permits_dynamic = (bool(value.item()) for value in result)
+            supports_static_value, permits_dynamic_value = result.tolist()
+            supports_static = bool(supports_static_value)
+            permits_dynamic = bool(permits_dynamic_value)
             if not supports_static and not permits_dynamic:
                 raise PipeliningMetadataError(
                     "pass_pipeline_metadata requires complete static metadata "
@@ -2489,10 +2492,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     subclassed and the subclass can be responsible for creating a schedule IR.
 
     ``reuse_recv_buffers`` gives receive destinations stable addresses by
-    retaining a schedule-colored pool. Inference keeps each received input
-    alive until all sends complete because the runtime has no per-send wait
-    action. Switching between training and inference may therefore resize the
-    single pool for each direction.
+    retaining a schedule-colored pool. Compatible pools only grow, so switching
+    between training and inference preserves existing addresses and retains the
+    maximum slot count needed by either mode. Inference owns received contents
+    until outstanding sends finish and retains the allocated pool for the
+    schedule's lifetime. A custom ``RECV_F`` or ``RECV_B`` handler must call the
+    corresponding stage receive method, or otherwise preserve its pool
+    acquire and descriptor-population contract, when buffer reuse is enabled.
     """
 
     def __init__(self, *args, **kwargs):
@@ -2926,7 +2932,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 return
 
             stage = stage_index_to_stage[action.stage_index]
-            if stage.has_backward and action.computation_type in (
+            if self._has_backward and action.computation_type in (
                 FULL_BACKWARD,
                 BACKWARD_WEIGHT,
             ):
@@ -3005,6 +3011,10 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
     What is different is that when microbatches are ready for multiple local
     stages, Loops BFS will prioritizes the earlier stage, running all available
     microbatches at once.
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
     """
 
     def __init__(
@@ -3016,8 +3026,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
     ):
         super().__init__(
             stages=stages,
@@ -3027,8 +3037,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3244,6 +3254,10 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
 
     1. pp_group_size = 4, n_microbatches = 10. We will have num_rounds = 2 and n_microbatches % 2 is 0.
     2. pp_group_size = 4, n_microbatches = 3. We will have num_rounds = 1 and n_microbatches % 1 is 0.
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
     """
 
     def __init__(
@@ -3257,8 +3271,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3271,8 +3285,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3357,6 +3371,10 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
     the pipeline bubble.
 
     In particular this is implementing the ZB1P schedule in the paper.
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
     """
 
     def __init__(
@@ -3370,8 +3388,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3386,8 +3404,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3558,6 +3576,10 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
     This ZB-V schedule would have the "zero bubble" property only if time forward == time backward input == time backward weights.
     In practice, this is not likely true for real models so alternatively
     a greedy scheduler could be implemented for unequal/unbalanced time.
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
     """
 
     def __init__(
@@ -3571,8 +3593,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3587,8 +3609,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3748,6 +3770,10 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
     DualPipe schedule introduced by DeepSeek in https://arxiv.org/pdf/2412.19437
 
     Based on the open sourced code from https://github.com/deepseek-ai/DualPipe
+
+    ``reuse_recv_buffers`` retains schedule-colored receive storage at stable
+    addresses and keeps the largest compatible train/eval pool for the
+    schedule's lifetime.
     """
 
     def __init__(
@@ -3761,8 +3787,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
-        reuse_recv_buffers: bool = False,
         max_active_stages: int = 3,
+        reuse_recv_buffers: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3777,8 +3803,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             scale_grads=scale_grads,
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
-            reuse_recv_buffers=reuse_recv_buffers,
             max_active_stages=max_active_stages,
+            reuse_recv_buffers=reuse_recv_buffers,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3976,6 +4002,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
 _PipelineResourceGranularity = Literal["microbatch", "stage_microbatch"]
 
 
+# Identity equality keeps this frozen plan hashable despite MappingProxyType.
 @dataclass(frozen=True, eq=False)
 class _PipelineResourceLiveness:
     """Deterministic resource-slot assignments for one pipeline rank."""
@@ -4232,8 +4259,8 @@ def _analyze_pipeline_resource_liveness(
             f"{sorted(missing_input_backwards)}"
         )
     for key in expected:
-        if releases[key] <= starts[key]:
-            raise ValueError(f"Resource lifetime {key} ends at or before its forward")
+        if releases[key] < starts[key]:
+            raise ValueError(f"Resource lifetime {key} ends before its forward")
 
     if granularity == "microbatch":
         intervals = [
@@ -4252,10 +4279,10 @@ def _analyze_pipeline_resource_liveness(
         microbatch_slots, num_slots = _assign_pipeline_resource_slots(intervals)
         assignments = {
             (stage_index, microbatch_index): microbatch_slots[microbatch_index]
-            for stage_index, microbatch_index in expected
+            for stage_index, microbatch_index in sorted(expected)
         }
     else:
-        keys = sorted(expected, key=lambda item: (starts[item], releases[item], item))
+        keys = sorted(expected)
         intervals = [(starts[key], releases[key]) for key in keys]
         slots, num_slots = _assign_pipeline_resource_slots(intervals)
         assignments = dict(zip(keys, slots, strict=True))
