@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 
 #include <c10/macros/Macros.h>
 
@@ -17,23 +19,18 @@ class SessionState {
       : producers_(producers.begin(), producers.end()), frame_(frame) {}
 
   C10_ALWAYS_INLINE void wait() {
-    auto outstanding = workOutstanding_.load();
-    while (outstanding != 0) {
-      workOutstanding_.wait(outstanding);
-      outstanding = workOutstanding_.load();
-    }
+    std::unique_lock<std::mutex> lock(mutex_);
+    cv_.wait(lock, [&] { return workOutstanding_.load() == 0; });
   }
 
   C10_ALWAYS_INLINE void addWork(uint32_t ct = 1) {
     workOutstanding_.fetch_add(ct);
   }
 
-  // NOTE: removeWork may call notify_one() after wait() has already returned,
-  // so the owner must keep the SessionState alive until every thread that can
-  // call removeWork() has returned from it.
   C10_ALWAYS_INLINE void removeWork() {
     if (workOutstanding_.fetch_sub(1) == 1) {
-      workOutstanding_.notify_one();
+      std::lock_guard<std::mutex> lock(mutex_);
+      cv_.notify_one();
     }
   }
 
@@ -58,6 +55,8 @@ class SessionState {
   };
 
   std::atomic_uint32_t workOutstanding_{0};
+  std::condition_variable cv_;
+  std::mutex mutex_;
   c10::FastMap<const Node*, AtomicRefableInt> producers_;
 
   ExecutionFrame& frame_;
