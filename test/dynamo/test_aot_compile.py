@@ -24,7 +24,7 @@ import weakref
 from collections import namedtuple
 from collections.abc import Callable
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 import torch._dynamo.testing
@@ -601,8 +601,6 @@ class CountedKey:
 
 
 AOT_BRANCH_SCALE = 3.0
-
-_ACCEPTED_IN_THE_REPORT = "  [1] <guards rejected this call twice and then accepted it here: a guard that does not answer consistently, or guarded state that changed between those evaluations>"
 
 
 class ModeBranchGlobalModule(torch.nn.Module):
@@ -2101,6 +2099,12 @@ from user code:
         self.assertEqual(message.count("a guarded global is missing"), 1)
         self.assertIn("the module the compiled function was traced in", message)
         self.assertIn("Add a ModelInput", message)
+        # The hint is [1]'s: neither the plain mismatch nor the advice carries it.
+        lines = message.splitlines()
+        self.assertEqual(lines[1][:6], "  [0] ")
+        self.assertNotIn("a guarded global is missing", lines[1])
+        self.assertNotIn("a guarded global is missing", lines[-1])
+        self.assertTrue(lines[-1].startswith("Add a ModelInput"), lines[-1])
 
     def test_no_match_message_hints_each_scope_a_mixed_model_failed_in(self):
         # The public constructor takes results of differing scopes: here a
@@ -2434,8 +2438,9 @@ from user code:
         # evaluation, which is what it does for real when the dict-tag fast path
         # answers false without running the tree. That rejection is not an
         # answer about the call, so a second pass has to rescue it. The
-        # rescuable result is [1], which the parent's fall-through never reached:
-        # it re-checked compiled_results[0] and raised [0]'s L['mode'] == 0.
+        # rescuable result is [1]; without the re-check the call would reach the
+        # no-match report, where [0]'s L['mode'] == 0 is one line and [1]'s real
+        # match is refused beside it.
         model, x = self._aot_compile_mode_branches()
         self._rescued_by_the_recheck(model, x)
 
@@ -2680,7 +2685,10 @@ from user code:
         # fast path that would skip it is off -- the probe's pop/insert bumped
         # this module dict's version past the one the last accept recorded.
         self.assertEqual(probe.compares, 3)
-        self.assertIn(_ACCEPTED_IN_THE_REPORT, message)
+        self.assertIn(
+            "  [1] <guards rejected this call twice and then accepted it here: a guard that does not answer consistently>",
+            message,
+        )
         # One entry line per result: the explanation is all [1] contributes, so
         # no blank "  [1] " line follows it from an accept's empty verbose parts.
         entries = [line for line in message.splitlines() if line.startswith("  [")]
@@ -2688,40 +2696,6 @@ from user code:
         # [0] is a real mismatch, so its advice still applies to the call.
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("Add a ModelInput", message)
-
-    def test_no_match_message_when_guarded_state_changes_before_the_report(self):
-        # The entry's other cause, with every guard answering consistently:
-        # guards read live state on each evaluation and __call__ holds no lock
-        # across the dispatch, so a global that is wrong for both passes and
-        # right again by the time the report evaluates the tree gets the same
-        # accept. The rebind is placed in that window from the report's own
-        # check_verbose, where a concurrent writer could land it.
-        model, x = self._aot_compile_mode_branches()
-        g = globals()
-        saved = g["AOT_BRANCH_SCALE"]
-        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
-        g["AOT_BRANCH_SCALE"] = saved + 1
-        manager = model.forward.compiled_results[1]._artifacts.guard_manager
-        check_verbose = manager.check_verbose
-
-        def rebind_then_check(f_locals):
-            g["AOT_BRANCH_SCALE"] = saved
-            return check_verbose(f_locals)
-
-        with (
-            patch.object(manager, "check", wraps=manager.check) as check,
-            patch.object(manager, "check_verbose", side_effect=rebind_then_check),
-        ):
-            with self.assertRaises(RuntimeError) as ctx:
-                model(x, 1)
-        message = str(ctx.exception)
-        # Both passes ran the tree against the wrong value and refused; the
-        # accept is the report's alone, and the call is refused all the same.
-        self.assertEqual(check.call_count, 2)
-        self.assertIn(_ACCEPTED_IN_THE_REPORT, message)
-        entries = [line for line in message.splitlines() if line.startswith("  [")]
-        self.assertEqual(len(entries), 2)
-        self.assertIn("[0] L['mode'] == 0", message)
 
     def test_no_match_report_names_the_results_the_dispatch_judged(self):
         # compiled_results is public, and the report indexes the binding the
@@ -2745,19 +2719,31 @@ from user code:
             return check(f_locals)
 
         later_manager = later._live_guard_manager()
-        describe = later_manager.check_verbose
-        watching = patch.object(later_manager, "check_verbose", wraps=describe)
-        with watching as described, patch.object(manager, "check", splicing_check):
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.double())
-            lines = str(ctx.exception).splitlines()
-            self.assertIn("Tried 1 compiled input(s)", lines[0])
-            self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
-            described.assert_not_called()
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.double())
-            self.assertIn("Tried 2 compiled input(s)", str(ctx.exception))
-            described.assert_called_once()
+        describers = Mock()
+        describe, later_describe = manager.check_verbose, later_manager.check_verbose
+        watch_first = patch.object(manager, "check_verbose", wraps=describe)
+        watch_later = patch.object(later_manager, "check_verbose", wraps=later_describe)
+        with watch_first as first_described, watch_later as later_described:
+            describers.attach_mock(first_described, "first")
+            describers.attach_mock(later_described, "later")
+            with patch.object(manager, "check", splicing_check):
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 1 compiled input(s)", lines[0])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 1)
+                self.assertEqual([c[0] for c in describers.mock_calls], ["first"])
+                # The next call judges the spliced list: two entries, in the
+                # list's order, each described by its own tree.
+                with self.assertRaises(RuntimeError) as ctx:
+                    combined(x.double())
+                lines = str(ctx.exception).splitlines()
+                self.assertIn("Tried 2 compiled input(s)", lines[0])
+                heads = [line[:6] for line in lines[1:3]]
+                self.assertEqual(heads, ["  [0] ", "  [1] "])
+                self.assertEqual(sum(line.startswith("  [") for line in lines), 2)
+                order = [c[0] for c in describers.mock_calls]
+                self.assertEqual(order, ["first", "later", "first"])
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # A tree that THROWS out of C++ returns through

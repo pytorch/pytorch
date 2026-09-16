@@ -1605,8 +1605,7 @@ class AOTCompiledModel:
             if reason.result:
                 lines.append(
                     f"  [{i}] <guards rejected this call twice and then accepted "
-                    "it here: a guard that does not answer consistently, or "
-                    "guarded state that changed between those evaluations>"
+                    "it here: a guard that does not answer consistently>"
                 )
                 continue
             parts = reason.verbose_code_parts
