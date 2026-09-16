@@ -2410,9 +2410,8 @@ from user code:
         # The raise line is the one report entry whose text is arbitrary user
         # data, so it needs the collapse the verbose part above gets: a message
         # carrying any separator splitlines() breaks on would otherwise split one
-        # entry across several lines, and the whole-line assertions and
-        # one-entry-per-input counts the other tests read the report with cannot
-        # survive that.
+        # entry across several lines, and the whole-line assertions and total
+        # line counts the other tests read the report with cannot survive that.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -2429,10 +2428,13 @@ from user code:
             model(torch.randn(3, 3))
         message = str(ctx.exception)
         lines = message.splitlines()
-        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
-        # The message holds no spaces, so this says all four separators arrived
-        # and were collapsed -- without which the test is vacuous, and the last
-        # three a \n replace would not cover.
+        # Header, entry, fix-or-drop advice, ModelInput advice. A split entry adds
+        # lines here; a count of entries starting with "  [" would still read 1,
+        # the first fragment being the only one that does.
+        self.assertEqual(len(lines), 4, message)
+        # The message holds no spaces, so the whole line says all four separators
+        # arrived and were collapsed -- without which the test is vacuous; none
+        # of the four is \n, so a \n replace would cover none of them.
         raised = "  [0] <guard check raised RuntimeError: page break rec sep line>"
         self.assertIn(raised, lines)
 
@@ -2706,6 +2708,13 @@ from user code:
         self.assertIn("the module the compiled function was traced in", hints[0])
         self.assertIn(f"here vars({__name__})", hints[1])
 
+    def _line_index(self, lines, text):
+        # Located rather than searched for, so a dropped advice line reads as a
+        # message diff and not as a StopIteration from inside the test.
+        found = [i for i, ln in enumerate(lines) if text in ln]
+        self.assertEqual(len(found), 1, "\n".join(lines))
+        return found[0]
+
     def test_no_match_message_keeps_the_advice_beside_a_raise(self):
         # The same independence with a raise in play: [0] raised and has to be
         # fixed or dropped, [1] names a global the load can define, and [1]'s
@@ -2719,8 +2728,9 @@ from user code:
 
         model.forward.compiled_results[0]._artifacts.guard_manager = Raises()
         g = globals()
-        saved = g.pop("AOT_BRANCH_SCALE")
+        saved = g["AOT_BRANCH_SCALE"]
         self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
+        del g["AOT_BRANCH_SCALE"]
         with self.assertRaises(RuntimeError) as ctx:
             model(x, 2)
         message = str(ctx.exception)
@@ -2729,16 +2739,9 @@ from user code:
         self.assertIn(raised, lines)
         self.assertIn("[1] KeyError on G['AOT_BRANCH_SCALE']", message)
 
-        def line_of(text):
-            # Located rather than searched for, so a dropped advice line reads as
-            # a message diff and not as a StopIteration from inside the test.
-            found = [i for i, ln in enumerate(lines) if text in ln]
-            self.assertEqual(len(found), 1, message)
-            return found[0]
-
-        hint = line_of("a guarded global is missing")
-        fix = line_of("fix or drop that artifact")
-        add = line_of("Add a ModelInput covering this call")
+        hint = self._line_index(lines, "a guarded global is missing")
+        fix = self._line_index(lines, "fix or drop that artifact")
+        add = self._line_index(lines, "Add a ModelInput covering this call")
         self.assertLess(hint, fix)
         self.assertLess(fix, add)
 
@@ -2761,7 +2764,9 @@ from user code:
                 ModelInput(args=(x, 1), kwargs={}, contexts=[]),
                 # A dtype no call below can satisfy: an opted-out result is still
                 # evaluated by the scan, and one whose tree ACCEPTS is served
-                # there rather than withheld.
+                # there rather than withheld. The mode alone cannot reject: after
+                # [0] and [1] recompiled on it, this third trace takes mode as
+                # dynamic, and its else-branch guard L['mode'] != 1 accepts 2.
                 ModelInput(
                     args=(torch.randn(3, 3, dtype=torch.float64), 0),
                     kwargs={},
@@ -2778,8 +2783,9 @@ from user code:
         results[0]._artifacts.guard_manager = Raises()
         results[2].disable_guard_check()
         g = globals()
-        saved = g.pop("AOT_BRANCH_SCALE")
+        saved = g["AOT_BRANCH_SCALE"]
         self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", saved)
+        del g["AOT_BRANCH_SCALE"]
         with self.assertRaises(RuntimeError) as ctx:
             model(x, 2)
         message = str(ctx.exception)
@@ -2793,14 +2799,9 @@ from user code:
             lines,
         )
 
-        def line_of(text):
-            found = [i for i, ln in enumerate(lines) if text in ln]
-            self.assertEqual(len(found), 1, message)
-            return found[0]
-
-        hint = line_of("a guarded global is missing")
-        fix = line_of("fix or drop that artifact")
-        add = line_of("Add a ModelInput covering this call")
+        hint = self._line_index(lines, "a guarded global is missing")
+        fix = self._line_index(lines, "fix or drop that artifact")
+        add = self._line_index(lines, "Add a ModelInput covering this call")
         self.assertLess(hint, fix)
         self.assertLess(fix, add)
         self.assertIn("not a guard failure", lines[fix])
@@ -3379,11 +3380,11 @@ from user code:
             served = model(torch.randn(3, 3))
             self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
         message = str(ctx.exception)
-        # One raise and one rejection, so "twice" would be an invented count.
+        # One raise and one rejection: the stub was evaluated exactly twice, and
+        # the whole line counts no rejection dispatch did not get.
         self.assertEqual(stub.checks, 2)
         accepted = "  [0] <guards did not accept this call in dispatch and accepted it here: a guard that does not answer consistently>"
         self.assertIn(accepted, message.splitlines())
-        self.assertNotIn("twice", message)
         self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
         self.assertIn("Add a ModelInput", message)
         self.assertIn("every rejection this advice rests on", message)
@@ -3451,7 +3452,8 @@ from user code:
         self.assertNotIn("L['self'].mode", message)
         self.assertIn("For [0]: a guarded global is missing", message)
         # The footer is unconditional at this tree; this fences a future gate on
-        # it (the mixed case is keeps_the_advice_for_every_entry's).
+        # it. The case that pairs a hinted entry with a plain mismatch, one
+        # hinted and one not, is hints_only_the_entry_that_named_a_missing_global's.
         self.assertIn("Add a ModelInput", message)
         # The mismatch the entry above hid: with the global back, the same call
         # fails on self.mode alone. Second, not first, because a failed check()
@@ -3610,8 +3612,8 @@ from user code:
         message = str(ctx.exception)
         self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
         self.assertIn(
-            "missing from the live scope this artifact was loaded against; define "
-            "it there",
+            "For [0]: a guarded global is missing from the live scope this artifact "
+            "was loaded against; define it there",
             message,
         )
         self.assertNotIn("instance's forward", message)
@@ -3620,6 +3622,76 @@ from user code:
         self.assertIs(compiled.compiled_results[0]._guard_globals, scope)
         scope["AOT_HERMETIC_WEIGHT"] = AOT_HERMETIC_WEIGHT
         self.assertEqual(compiled(x), x @ AOT_HERMETIC_WEIGHT)
+
+    def test_no_match_message_names_forward_only_for_the_dict_it_resolves_to(self):
+        # Two SUPPLIED results whose guards hold different dicts: one a load
+        # resolved from model.forward, so it is this module's, and one the
+        # caller supplied, which no forward resolves to. The report resolves
+        # forward once and compares that one dict against each entry's, so only
+        # the entry holding it is told which forward -- whichever entry is first.
+        global GLOBAL_POOLING_CONFIG
+
+        x = torch.randn(4, 8)
+        data = self._two_input_global_guard_artifact(x)
+        by_forward = AOTCompiledModel.deserialize(GlobalConfigModule(), data)
+        scope: dict[str, object] = {"__builtins__": builtins}
+        by_caller = AOTCompiledModel.deserialize(
+            GlobalConfigModule(), data, guard_globals=scope
+        )
+        self.assertIs(by_forward.compiled_results[0]._guard_globals, globals())
+        self.assertIs(by_caller.compiled_results[0]._guard_globals, scope)
+        saved = GLOBAL_POOLING_CONFIG
+        self.addCleanup(globals().__setitem__, "GLOBAL_POOLING_CONFIG", saved)
+        del GLOBAL_POOLING_CONFIG
+        named = "this GlobalConfigModule instance's forward resolves to"
+        neutral = "the live scope this artifact was loaded against; define it there"
+        pair = by_forward.compiled_results[:1] + by_caller.compiled_results[:1]
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        cases = ((pair, [named, neutral]), (pair[::-1], [neutral, named]))
+        for results, wording in cases:
+            mixed = AOTCompiledModel(GlobalConfigModule(), results)
+            with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
+                mixed(x)
+            resolves.assert_called_once()
+            message = str(ctx.exception)
+            self.assertIn("[0] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
+            self.assertIn("[1] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
+            hints = [line for line in message.splitlines() if line.startswith("For [")]
+            prefixes = [line[:9] for line in hints]
+            self.assertEqual(prefixes, ["For [0]: ", "For [1]: "], message)
+            for hint, want in zip(hints, wording):
+                self.assertIn(want, hint)
+
+    def test_missing_key_inside_a_present_global_is_not_a_missing_global(self):
+        # A guard on G['CONFIG']['key'] reports "KeyError on
+        # G['GLOBAL_POOLING_CONFIG']['pooling']" when the KEY is gone but the
+        # global itself resolved, which is an ordinary mismatch: the report keeps
+        # the "Add a ModelInput" advice and withholds the missing-global hint,
+        # whose advice (define the global) is wrong here. The whole-verbose-part
+        # match that tells the two apart came in with the hint and is pinned
+        # there; what this pins is which of the two the module report reaches for.
+        self._hide_leaked_dynamo_globals()
+        mod = GlobalConfigModule()
+        x = torch.randn(4, 8)
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        saved = GLOBAL_POOLING_CONFIG.pop("pooling")
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                model(x)
+            message = str(ctx.exception)
+        finally:
+            GLOBAL_POOLING_CONFIG["pooling"] = saved
+        self.assertIn("[0] KeyError on G['GLOBAL_POOLING_CONFIG']['pooling']", message)
+        self.assertIn("Add a ModelInput", message)
+        self.assertNotIn("a guarded global is missing", message)
 
     def test_no_match_report_resolves_forward_only_for_a_supplied_scope(self):
         # An in-process capture keeps the CAPTURED scope, whose hint never names
@@ -3766,6 +3838,53 @@ from user code:
         self.assertTrue(lines[2].startswith("  [1] "), lines[2])
         self.assertNotIn("guard check raised", lines[2])
         self.assertIn("Add a ModelInput", lines[3])
+
+    def test_aot_compile_module_two_raisers_in_the_report_and_then_the_warning(self):
+        # [0] opted out and [1] enabled both raise, so the two records of a raise
+        # part: the chain carries the FIRST index that raised, whose line as an
+        # opt-out quotes no exception text, while the advice names the first
+        # ENABLED one -- chaining raised[raiser] instead would delete [0]'s raise.
+        # [1]'s text holds two separators splitlines() breaks on, so its line
+        # asserted whole pins the raise line's collapse.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        x = torch.randn(3, 3)
+        inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(2)]
+        model._aot_compile(inputs)
+
+        class Raises(NeverReChecked):
+            def __init__(self, message):
+                self.message = message
+
+            def check(self, f_locals):
+                raise RuntimeError(self.message)
+
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = Raises("the opted-out tree is unhappy")
+        results[0].disable_guard_check()
+        results[1]._artifacts.guard_manager = Raises("checked\x0ctree\x1eis unhappy")
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x)
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
+        withheld = "  [0] <opted out of guard checks; withheld because [1]'s guard check raised>"
+        self.assertIn(withheld, lines)
+        checked = "  [1] <guard check raised RuntimeError: checked tree is unhappy>"
+        self.assertIn(checked, lines)
+        self.assertIn("[1]'s raise, not a guard failure, is what withheld", lines[3])
+        self.assertEqual(str(ctx.exception.__cause__), "the opted-out tree is unhappy")
+        # Opted out as well, [1] withholds the last resort no longer, which serves
+        # the first opted-out result: one warning per raise, each naming that
+        # index as served and not the raiser it is about.
+        results[1].disable_guard_check()
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            self.assertEqual(model(x), x * 2)
+        self.assertEqual(len(logs.output), 2)
+        warned = "\n".join(logs.output)
+        first = "[0]'s guard check raised RuntimeError: the opted-out tree is unhappy"
+        self.assertIn(first, warned)
+        self.assertIn("[1]'s guard check raised RuntimeError: checked", warned)
+        self.assertEqual(warned.count("dispatch served [0]"), 2)
 
     def test_aot_compile_module_raising_tree_does_not_reach_an_opted_out_result(self):
         # A tree that raised never returned False, so it never rejected the
@@ -4212,17 +4331,29 @@ from user code:
         )
 
         class RejectsThenRaises:
+            def __init__(self):
+                self.checks = 0
+
             def check(self, f_locals):
+                self.checks += 1
                 return False
 
             def check_verbose(self, f_locals):
                 raise RuntimeError("the re-check is unhappy")
 
-        model.forward.compiled_results[0]._artifacts.guard_manager = RejectsThenRaises()
+        stub = RejectsThenRaises()
+        model.forward.compiled_results[0]._artifacts.guard_manager = stub
         with self.assertRaises(RuntimeError) as ctx:
             model(torch.randn(3, 3))
+        message = str(ctx.exception)
+        self.assertEqual(stub.checks, 2)
         raised = "[0] <guard check raised RuntimeError: the re-check is unhappy>"
-        self.assertIn(f"  {raised}", str(ctx.exception).splitlines())
+        self.assertIn(f"  {raised}", message.splitlines())
+        # _raised_line prints this line from either handler, so the line alone
+        # cannot tell a re-check raise from one in dispatch; the chain and the
+        # fix-or-drop advice, both of which a dispatch raise brings, can.
+        self.assertIsNone(ctx.exception.__cause__)
+        self.assertNotIn("fix or drop that artifact", message)
 
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
         # load_compiled_function returns an AOTCompiledFunction, whose guard
@@ -4758,6 +4889,11 @@ from user code:
         self.assertIn("opted out of guard checks, but", logs.output[0])
         self.assertIn("reachable only through the last resort", logs.output[0])
         self.assertNotIn("Fix or drop input", logs.output[0])
+
+    def test_aot_compiled_model_keeps_its_warning_dedup_out_of_the_constructor(self):
+        # init=False: a caller's set would share one dedup across every model.
+        init_fields = [f.name for f in dataclasses.fields(AOTCompiledModel) if f.init]
+        self.assertNotIn("_warned", init_fields)
 
     def _model_whose_tree_raises(self, text):
         # One result, opted out of the re-check, whose tree raises in the scan:
@@ -7852,35 +7988,6 @@ from user code:
             self.assertEqual(reloaded(x), x @ (saved * 2))
         finally:
             g["AOT_HERMETIC_WEIGHT"] = saved
-
-    def test_missing_key_inside_a_present_global_is_not_a_missing_global(self):
-        # A guard on G['CONFIG']['key'] reports "KeyError on
-        # G['GLOBAL_POOLING_CONFIG']['pooling']" when the KEY is gone but the
-        # global itself resolved, which is an ordinary mismatch: the report keeps
-        # the "Add a ModelInput" advice and withholds the missing-global hint,
-        # whose advice (define the global) is wrong here. The whole-verbose-part
-        # match that tells the two apart came in with the hint and is pinned
-        # there; what this pins is which of the two the module report reaches for.
-        self._hide_leaked_dynamo_globals()
-        mod = GlobalConfigModule()
-        x = torch.randn(4, 8)
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        saved = GLOBAL_POOLING_CONFIG.pop("pooling")
-        try:
-            with self.assertRaises(RuntimeError) as ctx:
-                model(x)
-            message = str(ctx.exception)
-        finally:
-            GLOBAL_POOLING_CONFIG["pooling"] = saved
-        self.assertIn("KeyError on G['GLOBAL_POOLING_CONFIG']['pooling']", message)
-        self.assertIn("Add a ModelInput", message)
-        self.assertNotIn("a guarded global is missing", message)
 
     def test_aot_compile_module_import_alias_guard_loads_across_processes(self):
         # The real deployment shape: the artifact is captured by a process that
