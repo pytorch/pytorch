@@ -244,12 +244,30 @@ if torch.distributed.is_available():
         return aten.view.default(out, post_view_shape)
 
 
+def _promote_lerp_args(*args: torch.Tensor) -> list[torch.Tensor]:
+    # Promote args to the common dtype TensorIterator would use for
+    # lerp.Tensor with a 0-d weight, so sub/addcmul below never see raw bool
+    # tensors. No fallback to float: if the common dtype is integral then
+    # eager's kernel (AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES) fails too, so
+    # keeping the integral dtype preserves eager's error behavior.
+    _, dtype = elementwise_dtypes(
+        *args, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    return [
+        arg.to(dtype) if isinstance(arg, torch.Tensor) and arg.dtype != dtype else arg
+        for arg in args
+    ]
+
+
 @register_decomposition([aten.lerp.Scalar])
 def _lerp_scalar(start: torch.Tensor, end: torch.Tensor, weight: float) -> torch.Tensor:
     # Decompose into sub + add(alpha=weight) so that the add lowering emits FMA,
     # matching eager CUDA's dual-formula (see aten/src/ATen/native/Lerp.h).
     # Convert end to start's memory format so the output preserves start's layout,
     # matching eager TensorIterator behavior.
+    # NOTE: no promotion here. Eager's lerp.Scalar meta builds its iterator
+    # from start/end alone, so bool/int inputs fail eagerly and must keep
+    # failing under Inductor.
     fmt = suggest_memory_format(start)
     if fmt != torch.contiguous_format:
         end = end.contiguous(memory_format=fmt)
@@ -268,6 +286,13 @@ def _lerp_tensor(
     fmt = suggest_memory_format(start)
     if fmt != torch.contiguous_format:
         end = end.contiguous(memory_format=fmt)
+    # Eager's lerp.Tensor meta only promotes the weight into the common dtype
+    # when it is 0-d (otherwise it requires start/end/weight dtypes to match),
+    # so only promote in that case. This fixes bool start/end with a 0-d float
+    # weight (eager returns the weight's floating dtype) while preserving
+    # eager's error for non-0-d mismatched weights.
+    if weight.dim() == 0:
+        start, end, weight = _promote_lerp_args(start, end, weight)
     diff = end - start
     mask = weight.abs() >= 0.5
     neg_omw = -(1.0 - weight)
