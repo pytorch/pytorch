@@ -124,14 +124,18 @@ import os
 import site
 import sys
 import sysconfig
+import types
 from typing import TYPE_CHECKING
 
+from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
 
 from .guards import CheckFunctionManager
+from .source import DictGetItemSource, GlobalSource
 
 
 if TYPE_CHECKING:
+    import traceback
     from collections.abc import Callable, Sequence
 
     from .types import GuardFilterEntry
@@ -203,6 +207,31 @@ def default_guard_filter_fn(
         and not any(d in unsupported for d in g.derived_guard_types)
         for g in guard_entries
     ]
+
+
+def _owning_module(value: object) -> str | None:
+    if isinstance(value, types.ModuleType):
+        return value.__name__
+    owner = getattr(value, "__module__", None)
+    return owner if isinstance(owner, str) else None
+
+
+def _source_root(source: Source) -> Source:
+    while isinstance(source, ChainedSource):
+        source = source.base
+    return source
+
+
+# Locals Dynamo synthesizes when a resume function is itself nested, passed
+# positionally into the continuation. They name generated code, not a slot any
+# config chooses, so an identity guard lost on one cannot diverge.
+_DYNAMO_SYNTHESIZED = ("__nested_resume_fns", "__nested_frame_values")
+
+
+def _is_dynamo_synthesized(source_name: str) -> bool:
+    return any(
+        source_name == n or source_name.startswith(n + "[") for n in _DYNAMO_SYNTHESIZED
+    )
 
 
 # A pip target nested inside the stdlib dir that sysconfig does not name in
@@ -283,3 +312,49 @@ def _torch_roots() -> tuple[str, ...]:
 
 def _within(path: str, roots: tuple[str, ...]) -> bool:
     return any(path == r or path.startswith(r + os.sep) for r in roots)
+
+
+def _defined_where_read(
+    value: object, user_stack: traceback.StackSummary | None
+) -> bool:
+    """
+    Whether the def lives in the file of the frame that read it.
+
+    A def bound to its own name in its OWN module takes an edit there to
+    repoint. ``from impl_a import op`` takes only a conditional import in the
+    reader, which is not an edit at all and which no checksum covers.
+    """
+    home = sys.modules.get(getattr(value, "__module__", None) or "")
+    file = getattr(home, "__file__", None)
+    return bool(user_stack) and file is not None and file == user_stack[-1].filename
+
+
+def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
+    """The module behind an ``__import_a_dot_b`` alias, mirroring import_source."""
+    prefix = "__import_"
+    if not global_name.startswith(prefix):
+        return None
+    return sys.modules.get(global_name[len(prefix) :].replace("_dot_", "."))
+
+
+# Dynamo's own handle on the builtins dict, minted by
+# OutputGraph.install_builtins_dict_in_fglobals.
+_BUILTINS_DICT_PREFIX = "__builtins_dict__"
+
+
+def _reads_a_builtin(source: Source, value: object) -> bool:
+    """
+    ``len`` or ``sorted`` reached the ordinary way, through the builtins dict
+    Dynamo installs to resolve them. No binding sits in front of those, so
+    nothing can repoint them.
+
+    A builtin parked in a slot -- ``self.act = abs``, straight out of an
+    ACT2FN-style table -- is a slot like any other, so this deliberately keys
+    on where the read comes FROM rather than on who owns the value.
+    """
+    return (
+        isinstance(source, DictGetItemSource)
+        and isinstance(source.base, GlobalSource)
+        and source.base.global_name.startswith(_BUILTINS_DICT_PREFIX)
+        and _owning_module(value) == "builtins"
+    )
