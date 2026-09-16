@@ -91,6 +91,28 @@ class TestBase(TestCase):
             ),
         )
 
+    def gpu_time(self, lmb, name, r=100):
+        b = torch.Event(enable_timing=True)
+        e = torch.Event(enable_timing=True)
+        # with magic_trace(name + ".fxt"):
+        for _ in range(r):
+            lmb()
+        b.record()
+        for _ in range(r):
+            lmb()
+        e.record()
+        e.synchronize()
+        elapsed = b.elapsed_time(e)
+        # with torch.profiler.profile(schedule=torch.profiler.schedule(
+        #     wait=0,
+        #     warmup=1,
+        #     active=2), on_trace_ready=tensorboard_trace_handler(name), with_stack=True) as profiler:
+        #     for _ in range(3):
+        #         lmb()
+        #         profiler.step()
+        print(name, elapsed / r)
+        return elapsed / r
+
     def attn(
         self,
         batch_size=1,
@@ -657,28 +679,6 @@ class TestMinCudaOnly(TestBase):
             lambda msg: f"{msg}\nextra cuda memory left allocated: {extra_memory}",
         )
         super().tearDown()
-
-    def gpu_time(self, lmb, name, r=100):
-        b = torch.cuda.Event(enable_timing=True)
-        e = torch.cuda.Event(enable_timing=True)
-        # with magic_trace(name + ".fxt"):
-        for _ in range(r):
-            lmb()
-        b.record()
-        for _ in range(r):
-            lmb()
-        e.record()
-        e.synchronize()
-        elapsed = b.elapsed_time(e)
-        # with torch.profiler.profile(schedule=torch.profiler.schedule(
-        #     wait=0,
-        #     warmup=1,
-        #     active=2), on_trace_ready=tensorboard_trace_handler(name), with_stack=True) as profiler:
-        #     for _ in range(3):
-        #         lmb()
-        #         profiler.step()
-        print(name, elapsed / r)
-        return elapsed / r
 
     def test_attn_cuda(self, device):
         # size from the BERT paper, 90% pretraining of sequence length 128
