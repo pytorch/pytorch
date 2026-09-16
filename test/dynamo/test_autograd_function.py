@@ -3242,6 +3242,31 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    @parametrize("backend", ("eager", "aot_eager"))
+    def test_input_grad_buffers_fallback(self, backend):
+        class Scale(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scale):
+                ctx.scale = scale
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input_buffer, _ = ctx.input_grad_buffers
+                if input_buffer is not None:
+                    input_buffer.add_(grad_output, alpha=ctx.scale)
+                    return None, None
+                return grad_output * ctx.scale, None
+
+        def fn(x):
+            return Scale.apply(x, 2) + Scale.apply(x, 3)
+
+        x = torch.randn(4, requires_grad=True)
+        out = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        out.sum().backward()
+
+        self.assertEqual(x.grad, torch.full_like(x, 5))
+
 
 class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
     """Tests for autograd.Function compatibility with torch.func transforms.
