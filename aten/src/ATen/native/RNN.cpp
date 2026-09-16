@@ -694,15 +694,15 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 
 void check_rnn_cell_forward_input(const Tensor& input, const c10::SymInt& input_size) {
   TORCH_CHECK(
+    input.dim() == 2,
+    "Expected 2D input (batch x feature), but got ", input.dim(), "D input");
+
+  TORCH_CHECK(
     input.sym_size(1) == input_size,
     "input has inconsistent input_size: got ", input.sym_size(1), " expected ", input_size);
 }
 
 void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const c10::SymInt& hidden_size, const c10::SymInt& hidden_label) {
-  TORCH_CHECK(
-    input.dim() == 2,
-    "Expected 2D input (batch x feature), but got ", input.dim(), "D input");
-
   TORCH_CHECK(
     hx.dim() == 2,
     "Expected 2D hidden", hidden_label, " (batch x hidden_size), but got ",
