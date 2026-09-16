@@ -3846,6 +3846,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(obj, x), fn(obj, x)))
 
+    def test_super_getattribute_bypasses_override(self):
+        class MyObject:
+            def __init__(self, value, redirected):
+                self.value = value
+                self.redirected = redirected
+
+            def __getattribute__(self, name):
+                if name == "value":
+                    return super().__getattribute__("redirected")
+                return super().__getattribute__(name)
+
+            def raw_value(self):
+                return super().__getattribute__("value")
+
+        def fn(obj, x):
+            return x * obj.raw_value()
+
+        obj = MyObject(torch.tensor(2.0), torch.tensor(12.0))
+        x = torch.tensor(3.0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(obj, x), fn(obj, x))
+
     def test_nn_module_getattr(self):
         class MyMod(torch.nn.Module):
             def __init__(self) -> None:
