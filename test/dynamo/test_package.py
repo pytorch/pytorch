@@ -1131,6 +1131,38 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
+    def test_import_alias_accepts_a_stale_module_named_for_the_key(self):
+        # The aliased-key case the other way round: the slot holds a module
+        # named for the sys.modules key while the module the key resolves to
+        # answers to another name -- the copy a BC-shim key held before a
+        # handover put the shim's target under it. The key is accepted on its
+        # own, whichever name the resolved module has, and the live module
+        # replaces the stale one.
+        key = "torch_test_package_import_alias_key_named"
+        alias = f"__import_{key}"
+        stale = types.ModuleType(key)
+        stale.VALUE = 2
+        live = types.ModuleType("torch_test_package_import_alias_key_named_target")
+        live.VALUE = 3
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            import torch_test_package_import_alias_key_named as shim
+
+            return x + shim.VALUE
+
+        try:
+            sys.modules[key] = live
+            fn.__globals__[alias] = stale
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertIs(fn.__globals__[alias], live)
+        finally:
+            sys.modules.pop(key, None)
+            _import_module.cache_clear()
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
     def test_import_alias_keeps_the_installed_live_module(self):
         # The memo is taken at the first trace of the name; install() then binds
         # the alias to the live entry a handover has since put in sys.modules.
@@ -1352,7 +1384,7 @@ def add(x, y):
         new = types.ModuleType(name)
         new.VALUE = 7
         third = types.ModuleType(name)
-        third.VALUE = 7
+        third.VALUE = 99
 
         def fn(x):
             import torch_test_package_import_alias_recorded as shim
@@ -1398,7 +1430,19 @@ def add(x, y):
             pkg2.install(backends)
             self.assertIs(fn.__globals__[alias], third)
             with torch.compiler.set_stance("fail_on_recompile"):
-                self.assertEqual(fn2(*args), compiled_fn2(*args))
+                # The artifact carries the VALUE its graph was built from and
+                # not the module: the loaded EQUALS_MATCH takes its expected
+                # value from the module install() bound, so the loaded function
+                # serves x * 7 against third.VALUE == 99 with no recompile.
+                # That is what a module pickled by name gives any loaded guard;
+                # the record's part is that third is behind the alias at all,
+                # where the guard reads it live and a change to it fails it.
+                self.assertEqual(compiled_fn2(*args), args[0] * 7)
+                self.assertNotEqual(fn2(*args), compiled_fn2(*args))
+                third.VALUE = 5
+                guard = re.escape(f"G['{alias}'].VALUE == 99")
+                with self.assertRaisesRegex(RuntimeError, guard):
+                    compiled_fn2(*args)
         finally:
             sys.modules.pop(name, None)
             _import_module.cache_clear()
