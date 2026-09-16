@@ -33,12 +33,10 @@ import sys
 from pathlib import Path
 
 from extract_verdict import (
-    _is_repo_path,
     build,
     load_structured,
     MAX_PATH,
     neutralize,
-    neutralize_path,
     parse_diff,
     Rejected,
     sanitize_findings,
@@ -46,20 +44,28 @@ from extract_verdict import (
 
 
 MAX_REPORTED_LINES = 12
+MAX_REPORTED_KEY = 60
 # Everything this module prints to stderr is folded into the model's
 # `additionalContext` by `validate-post-write.sh`, which that script's header
-# identifies as a system message. The file names come from the PR's own diff, so
-# a fork contributor chooses them: `_is_repo_path` admits any printable ASCII
-# except `|`, backtick, `\`, `<`, `>` and `&`, which leaves spaces, colons,
-# quotes and whole sentences legal, up to MAX_PATH each. Bounding the COUNT is
-# what keeps a hundred 400-character names from arriving as 40KB of
-# attacker-chosen prose wearing trusted framing.
-MAX_REPORTED_FILES = 20
-MAX_REPORTED_KEY = 60
-# The same argument for the other direction. A dropped record's `path` is what
-# the MODEL wrote, already neutralized by `sanitize_findings` but bounded only
-# per-name: `drop()` tracks up to 200 of them, so an injected model emitting
-# junk findings could still push ~80KB back through the same channel.
+# identifies as a system message. So the question for every line below is: how
+# much text of a fork contributor's choosing does it carry?
+#
+# NO CHANGED-FILE LIST. The diff's `+++` paths are chosen by the pull request
+# author, `_is_repo_path` admits any printable ASCII except ``|`\<>&`` — spaces,
+# colons, quotes and whole sentences are legal, up to MAX_PATH each — and the
+# report used to print up to twenty of them. The model is pointed at the file
+# the workflow already wrote instead; see `_report_drops`.
+DEFAULT_FILES_FILE = "/tmp/pr-files.txt"
+# WHAT STILL GETS THROUGH, stated because "none" would be wrong. Each dropped
+# record's `path` is printed. It is the MODEL's own text — it named that file
+# in its own findings file, and `sanitize_findings` has already neutralized it
+# — but the model chose it after reading the pull request, so its CONTENT is
+# not independent of the pull request. Note the path need not even NAME a real
+# file: a `path_not_in_diff` drop echoes back whatever string the model wrote,
+# so this is a round trip for arbitrary text, not only for filenames. It stays
+# because it is the only way to say WHICH finding was discarded. Bounded to one
+# name per discarded finding, MAX_PATH each, and `drop()` tracks up to 200
+# records, so the COUNT is capped here too.
 MAX_REPORTED_DROPS = 20
 
 
@@ -82,26 +88,6 @@ def _ranges(lines: set[int]) -> str:
     return ", ".join(out)
 
 
-def _safe_path(path: object) -> str:
-    """Render one RAW diff path for the system-message channel.
-
-    For keys of `touched` only. Those come straight off the diff's `+++` lines,
-    so they are PR-authored and have had nothing done to them beyond
-    `_is_repo_path`. `neutralize_path` rather than `neutralize`, deliberately:
-    the model is being told which file to anchor to, so the name has to stay
-    exactly recoverable, and escaping preserves that where rewriting would not.
-
-    NOT for a dropped record's `path`. Those have already been through
-    `sanitize_findings`, so they arrive escaped — `pkg/[click].py` is already
-    `pkg/\\[click\\].py` — and `_is_repo_path` refuses a backslash, so running
-    them through here would report a perfectly publishable name as unusable.
-    """
-    text = str(path)
-    if not _is_repo_path(text):
-        return "(not a usable repo path)"
-    return neutralize_path(text)
-
-
 def _sanitized_path(path: object) -> str:
     """Render a path that `sanitize_findings` has already neutralized.
 
@@ -111,18 +97,102 @@ def _sanitized_path(path: object) -> str:
     return str(path)[:MAX_PATH]
 
 
-def _safe_file_list(touched: dict[str, set[int]]) -> str:
-    """The changed-file list, bounded in count as well as in per-name length."""
-    names = sorted(touched)
-    if not names:
-        return "(the diff touches no files)"
-    shown = ", ".join(_safe_path(n) for n in names[:MAX_REPORTED_FILES])
-    if len(names) > MAX_REPORTED_FILES:
-        return f"{shown}, … ({len(names)} files total)"
-    return shown
+def _where_the_file_list_is(
+    files_file: str, diff_file: str, touched: dict[str, set[int]]
+) -> str:
+    """Where to READ the changed-file set, rather than the set itself.
+
+    An anchor miss means the model named a file the diff does not touch, so it
+    needs the real set to correct itself. Naming the file it is already granted
+    `Read` on does that without putting a fork contributor's choice of file
+    names into a system message, which is what printing them did — capped and
+    escaped, but still by design.
+
+    Both paths here are workflow-authored, at the same trust level as this
+    script. They are length-bounded anyway, so a mis-set variable degrades the
+    sentence rather than the channel.
+    """
+    # NO ANCHORABLE LINE ANYWHERE. "Go and read the list" is then advice the
+    # model cannot act on — it would fetch the file and come back no better
+    # off. The old changed-file list said this for free by rendering as
+    # "(the diff touches no files)"; a pointer has to say it deliberately.
+    #
+    # `any(...)`, not `if not touched`: a hunk that only REMOVES lines yields
+    # `{"x.py": set()}` — a key with nothing anchorable under it — so the
+    # mapping is non-empty while the answer to "can anything be anchored" is
+    # still no. Measured against `parse_diff`.
+    #
+    # AND IT IS NOT AUTOMATICALLY A WORKFLOW FAULT, which an earlier draft of
+    # this sentence asserted. A pull request of pure renames, deletions,
+    # mode changes or binary files legitimately anchors nothing. The model's
+    # finding is still the model's to withdraw either way, so say what was
+    # observed and what to do, and do not assign blame the validator cannot
+    # establish.
+    if not any(touched.values()):
+        return (
+            "This diff has no anchorable lines at all — a pull request of pure "
+            "renames, deletions, mode changes or binary files looks like this. "
+            "No finding can be anchored, so remove the ones that cannot be."
+        )
+    # THE LIST IS A SUPERSET OF THE ANCHORABLE SET, and saying otherwise sends
+    # the model round a loop it cannot exit. The workflow builds that file with
+    # `git diff --name-only`, which names renames, deletions, binary files and
+    # mode-only changes; `parse_diff` admits none of them, because none has a
+    # new-side hunk line to anchor to (its own docstring says so). So "anchor
+    # to one of those paths" was advice that is FALSE for some entries: the
+    # model re-anchors to a deleted file, is dropped again, and — with no
+    # shell to tell the two kinds of entry apart — repeats until `--max-turns`
+    # ends the session with no valid file at all. The rule has to travel with
+    # the pointer.
+    # WHAT "CANNOT BE ANCHORED" COVERS, and what to do about it. Two earlier
+    # drafts of this sentence were each wrong in their own way:
+    #
+    #   * the first listed only deleted/renamed/mode-only/binary files. A file
+    #     whose hunks ONLY REMOVE lines is a fifth case — `parse_diff` returns
+    #     `{"x.py": set()}` for it, a key with an empty set — so it is present
+    #     in every enumeration and still anchors nothing.
+    #   * the second said such a finding "must be REMOVED, not re-anchored".
+    #     Too strong, and it loses real findings: a defect in a module this PR
+    #     DELETED is often still reportable at the line that now imports it.
+    #     Unanchorable FILE does not mean unanchorable FINDING.
+    # POSITIVE RULE FIRST, examples second. An enumeration invites the reader
+    # to treat it as exhaustive and it is not — a newly added EMPTY file is a
+    # sixth case with no new-side hunk line, and there is no reason to think
+    # that is the last one. State what DOES anchor, then illustrate.
+    rule = (
+        "Only an added or unchanged line inside a hunk can take an anchor, so "
+        "not every entry can be anchored — a file this PR only deleted, "
+        "renamed, changed the mode of, or that is binary, and a file whose "
+        "hunks only remove lines, have no such line. Re-anchor the finding to "
+        "a line that does locate the defect; remove it only if no such line "
+        "exists."
+    )
+    if Path(files_file).is_file():
+        return (
+            f"Read {str(files_file)[:MAX_PATH]} for the files this PR changed. {rule}"
+        )
+    # NEVER send the model to a file that is not there: it cannot run a shell,
+    # so a dead pointer would leave it no way to enumerate the changed files at
+    # all. The diff is the better fallback than it looks — `parse_diff` reads
+    # the diff and nothing else, so a path there WITH a hunk is exactly an
+    # anchorable path — but the same four kinds of entry appear in it without
+    # one, so the rule above still applies.
+    # "a path that has a hunk" was wrong for the same fifth case above: a
+    # removal-only hunk is a hunk. What anchors is a NEW-SIDE line, which is
+    # what `parse_diff` collects and the only thing a `line` can refer to.
+    return (
+        f"The files this PR changed are named in the diff at "
+        f"{str(diff_file)[:MAX_PATH]}; anchor to a path whose hunk there "
+        f"contains an added or unchanged line. {rule}"
+    )
 
 
-def _report_drops(dropped: list[dict], touched: dict[str, set[int]]) -> None:
+def _report_drops(
+    dropped: list[dict],
+    touched: dict[str, set[int]],
+    files_file: str = DEFAULT_FILES_FILE,
+    diff_file: str = "/tmp/pr-diff.txt",
+) -> None:
     """Explain each dropped finding, and for an anchor miss say what WOULD work."""
     print(
         f"{len(dropped)} finding(s) would be DISCARDED before publication:",
@@ -156,22 +226,29 @@ def _report_drops(dropped: list[dict], touched: dict[str, set[int]]) -> None:
         )
         print(f"  - {where} — {reason}{detail}", file=sys.stderr)
         if reason == "line_not_in_diff" and path in touched:
+            # NO FILE NAME HERE. The line above already identifies the finding,
+            # and it does so with the MODEL's own `path` — so repeating the raw
+            # diff key would add a second, differently-escaped rendering of a
+            # name a fork contributor chose, for no information at all. Which
+            # file it is about was never in doubt.
             print(
-                f"      `line` must be a line number in the file at the head commit.\n"
-                # `path in touched` is the guard: it is a raw diff key here, so
-                # `_safe_path` is the right one and cannot double-escape.
-                f"      Lines this PR touches in {_safe_path(path)}: "
+                f"      `line` must be a line number in the file at the head "
+                f"commit.\n"
+                f"      Lines this PR touches in that file: "
                 f"{_ranges(touched[path])}",
                 file=sys.stderr,
             )
         elif reason == "path_not_in_diff":
             anchor_misses = True
-    # ONCE, not once per drop. Printing it inside the loop multiplied the capped
-    # list by the drop count: 100 names at MAX_PATH with 20 drops measured 161KB
-    # of advisory output, which defeats the per-item caps above.
+    # ONCE, not once per drop — and a POINTER, not the names. Printing the list
+    # inside the loop multiplied it by the drop count: 100 names at MAX_PATH
+    # with 20 drops measured 161KB of advisory output. Capping the list fixed
+    # the size; pointing at the file is what addresses the actual finding
+    # (#196844 — `additionalContext` is a system message, and the names in it
+    # come from the pull request).
     if anchor_misses:
         print(
-            f"      Files this PR changed: {_safe_file_list(touched)}",
+            f"      {_where_the_file_list_is(files_file, diff_file, touched)}",
             file=sys.stderr,
         )
 
@@ -180,6 +257,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--findings-file", required=True)
     ap.add_argument("--diff-file", required=True)
+    # Not required: an anchor-miss report names this path, and the default is
+    # what hardened-pr-review-run.yml writes, so a hand-run still says
+    # something true. `_where_the_file_list_is` checks it before pointing there.
+    ap.add_argument("--files-file", default=DEFAULT_FILES_FILE)
     args = ap.parse_args()
 
     findings_path = Path(args.findings_file)
@@ -229,7 +310,7 @@ def main() -> int:
         except (ValueError, TypeError):
             dropped_first = []  # a shape problem; `build()` below names it properly
         if dropped_first:
-            _report_drops(dropped_first, touched)
+            _report_drops(dropped_first, touched, args.files_file, args.diff_file)
             print(
                 "Fix these and write the file again. A discarded finding is not "
                 "published at all — it is not downgraded, it is lost.",
@@ -258,7 +339,7 @@ def main() -> int:
 
     dropped = result.get("dropped_detail") or []
     if dropped:
-        _report_drops(dropped, touched)
+        _report_drops(dropped, touched, args.files_file, args.diff_file)
         print(
             "Fix these and write the file again. A discarded finding is not "
             "published at all — it is not downgraded, it is lost.",
