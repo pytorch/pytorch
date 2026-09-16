@@ -56,6 +56,37 @@ pointwise_ops = [
 
 
 class TestCase(InductorTestCase):
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_floor_divide_cast_arange(self, device, dtype):
+        def fn():
+            values = torch.arange(32, device=device).to(dtype)
+            return torch.div(values, 2, rounding_mode="floor")
+
+        result, code = run_and_get_code(torch.compile(fn, fullgraph=True))
+        self.assertEqual(result, fn())
+        self.assertNotIn(f".to({triton_type(dtype)})", "\n".join(code))
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("emulate_precision_casts", [False, True])
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_arange_precision_casts(self, device, dtype, emulate_precision_casts):
+        start = int(2 / torch.finfo(dtype).eps)
+
+        def fn(x):
+            return torch.arange(start, start + 32, device=device).to(dtype) + x
+
+        x = torch.full((32,), 2, dtype=dtype, device=device)
+        eager = fn(x)
+        values = torch.arange(start, start + 32, device=device, dtype=torch.float32)
+        promoted = (values + x.float()).to(dtype)
+        self.assertNotEqual(eager[3].item(), promoted[3].item())
+
+        with config.patch(emulate_precision_casts=emulate_precision_casts):
+            result = torch.compile(fn, fullgraph=True)(x)
+        expected = eager if emulate_precision_casts else promoted
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
     @ops(
         pointwise_ops,
         allowed_dtypes=(

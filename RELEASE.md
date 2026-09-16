@@ -103,10 +103,16 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.10 | Dec 2025 | Jan 2026 | Not planned | Not planned |
 | 2.11 | 16 Feb 2026 | 18 Mar 2026 | Not planned | Not planned |
 | 2.12 | 13 Apr 2026 | 13 May 2026 | Jun 2026 | Not planned |
-| 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | Not planned |
+| 2.13 | 8 Jun 2026 | 8 Jul 2026 | Not planned | Not planned |
 | 2.14 | 10 Aug 2026 | 2 Sept 2026 | (Oct 2026) | Not planned |
 | 2.15 | 5 Oct 2026 | 28 Oct 2026 | (Nov 2026) | Not planned |
 | 2.16 | 30 Nov 2026 | 22 Dec 2026 | (Jan 2027) | Not planned |
+| 2.17 | 1 Feb 2027 | 24 Feb 2027 | (Mar 2027) | Not planned |
+| 2.18 | 29 Mar 2027 | 21 Apr 2027 | (May 2027) | Not planned |
+| 2.19 | 25 May 2027 | 16 Jun 2027 | (Jul 2027) | Not planned |
+| 2.20 | 19 Jul 2027 | 11 Aug 2027 | (Sep 2027) | Not planned |
+| 2.21 | 13 Sep 2027 | 6 Oct 2027 | (Nov 2027) | Not planned |
+| 2.22 | 15 Nov 2027 | 8 Dec 2027 | (Jan 2027) | Not planned |
 
 ## General Overview
 
