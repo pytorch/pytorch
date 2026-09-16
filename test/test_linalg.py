@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     skipIfNoNvmath)
+     skipIfNoNvmath, skipIfXpu)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -5047,6 +5047,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_1d_Nd(self, device, dtype):
         for backend in ["cublas", "cublaslt"]:
@@ -5062,6 +5063,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_2d_Nd(self, device, dtype):
         for backend in ["cublas", "cublaslt"]:
@@ -5077,6 +5079,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_3d_Nd(self, device, dtype):
         for backend in ["cublas", "cublaslt"]:
@@ -5384,6 +5387,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5331")
     def test_corner_cases_of_cublasltmatmul(self, device, dtype):
         # common case
         M = torch.randn(128, device=device).to(dtype)
@@ -5593,6 +5597,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3951")
     @skipIfTorchDynamo("Runtime error with torch._C._linalg.linalg_lu_factor")
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -6367,6 +6372,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5332")
     @parametrize("k", [64, 256])
     @parametrize("n", [32, 48, 64, 128])
     def test__dyn_quant_pack_4bit_weight(self, device, k, n):
@@ -6394,6 +6400,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5332")
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
@@ -6466,6 +6473,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5332")
     @parametrize("m", [1, 32])
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
