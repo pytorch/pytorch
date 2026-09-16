@@ -19,7 +19,6 @@ from typing import (
     TypeVar,
     Union,
 )
-import sys
 from collections.abc import Awaitable, Iterator
 
 import operator
@@ -39,7 +38,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_DILL,
     TestCase,
-    xfailIf,
 )
 from torch.utils._import_utils import import_dill
 from torch.utils.data import (
@@ -2127,8 +2125,6 @@ class TestFunctionalMapDataPipe(TestCase):
             datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
             self._serialization_test_for_single_dp(datapipe)
 
-    # dill doesn't support 3.15 yet
-    @xfailIf(sys.version_info >= (3, 15))
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
