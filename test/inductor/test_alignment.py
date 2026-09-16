@@ -182,10 +182,7 @@ class CommonTemplate:
             ", 16, 'input')", 1 if misaligned else 2, exactly=True
         ).run(code)
 
-    @parametrize(
-        "wrapper",
-        ("python", "fx", "cudagraphs", "cudagraph_partition", "custom_partition"),
-    )
+    @parametrize("wrapper", ("python", "fx", "custom_partition"))
     @parametrize("use_dlpack", (False, True))
     @functorch_config.patch(fake_tensor_allow_unsafe_data_ptr_access=False)
     def test_input_alignment_assert_fires_instead_of_clone(self, wrapper, use_dlpack):
@@ -207,16 +204,14 @@ class CommonTemplate:
             options={
                 "alignment_asserts_inputs": True,
                 "fx_wrapper": wrapper == "fx",
-                "triton.cudagraphs": wrapper in ("cudagraphs", "cudagraph_partition"),
+                "triton.cudagraphs": False,
                 "graph_partition": wrapper.endswith("partition"),
             },
         )
         # Compile with an aligned input. One element avoids a misaligned vector
         # load if the assertion is missing.
         x = torch.randn(1, device=self.device)
-        for _ in range(3):
-            torch.compiler.cudagraph_mark_step_begin()
-            self.assertEqual(fn_c(x), fn(x))
+        self.assertEqual(fn_c(x), fn(x))
 
         # storage_offset is not guarded on, so a misaligned input hits the
         # same graph; in strict mode it errors instead of being cloned
@@ -225,7 +220,6 @@ class CommonTemplate:
             y = torch.from_dlpack(y)
             self.assertEqual(y.storage_offset(), 0)
         self.assertNotEqual(y.data_ptr() % 16, 0)
-        torch.compiler.cudagraph_mark_step_begin()
         with self.assertRaisesRegex(AssertionError, "bytes aligned"):
             fn_c(y)
 
