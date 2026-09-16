@@ -54,7 +54,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfCppFakeTensor,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -1448,7 +1447,6 @@ def forward(self, L_nested_counter_c_0_ : {fx_class}, L_nested_counter_c_1_ : {f
     return (add_1,)""",
         )
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_nested_reference_trace(self):
         def foo(nested_queue, x):
             q1 = nested_queue.q
@@ -1741,7 +1739,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         expected = x * 4.0
         self.assertEqual(result, expected)
 
-    @skipIfCppFakeTensor("C++ FakeTensor has different FX node names")
     def test_export_joint(self):
         torch.library.define(
             "_TestOpaqueObject::module_mul",
@@ -1789,16 +1786,19 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with ExitStack() as stack:
             with FakeTensorMode(shape_env=ShapeEnv()):
                 joint = aot_export_joint_with_descriptors(stack, M(), inp)
-                self.assertExpectedInline(
-                    joint.graph_module.code.strip(),
-                    """\
+                cpp_expected = """\
 def forward(self, primals, tangents):
     primals_1, primals_2, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(primals_2);  primals_2 = None
     _opaque_obj0 = self._opaque_obj0
     module_mul = torch.ops._TestOpaqueObject.module_mul.default(_opaque_obj0, primals_1, _local_scalar_dense);  _opaque_obj0 = primals_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
-    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)""",
+    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)"""
+                self.assertExpectedInline(
+                    joint.graph_module.code.strip(),
+                    expectedIfCppFakeTensor(
+                        cpp_expected, cpp_expected.replace("mul_1", "mul")
+                    ),
                 )
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 
