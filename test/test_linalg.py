@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     TEST_WITH_SLOW,
 )
+from torch.testing._internal.common_utils import HardwareClassification
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
 mx_msg = "MX gemm is only supported on CUDA capability 10.0+ and gfx950/gfx1250"
@@ -408,6 +409,7 @@ class _TestLinalgMixin:
 
 class TestLinalg(TestCase):
     """Device-independent and CPU-only regression tests, run once rather than per device."""
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -538,6 +540,7 @@ class TestLinalg(TestCase):
 
 class TestLinalgDevice(_TestLinalgMixin, TestCase):
     """Device-generic linalg tests, instantiated once per supported device."""
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _get_other_device(self, dtype=None):
         """Return a device different from self.device_type for error-path testing."""
@@ -8993,6 +8996,7 @@ class TestLinalgSVD(TestCase):
 
 class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -11427,6 +11431,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
 
 class TestLinalgCpuOnly(_TestLinalgMixin, TestCase):
     """CPU-specific linear algebra tests."""
+    hw_classification = HardwareClassification.CPU
 
     def setUp(self):
         super().setUp()
