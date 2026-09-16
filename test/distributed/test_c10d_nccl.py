@@ -7370,7 +7370,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
             world_size=self.world_size,
             rank=self.rank,
             store=store,
-            timeout=timedelta(seconds=NCCLTraceTestDumpOnTimeoutBase.timeout_sec),
+            timeout=timedelta(seconds=self.timeout_sec),
         )
         pg = c10d.distributed_c10d._get_default_group()
         return pg
@@ -7494,6 +7494,72 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 # Force rank 1 to idle so that it will eventually timeout as well after
                 # getting the global signal to dump the debugging info.
                 time.sleep(600)
+
+
+@skip_but_pass_in_sandcastle
+class NCCLTraceTestDumpDuringShutdown(NCCLTraceTestDumpOnTimeoutBase):
+    # Give rank 1 time to observe rank 0's enqueue marker and enter shutdown
+    # before rank 0's unmatched collective times out.
+    timeout_sec = 5
+
+    @check_if_test_is_skipped
+    def _check_return_codes(self, fn, elapsed_time):
+        self.assertEqual(self.processes[0].exitcode, -6)
+        self.assertIn(self.processes[1].exitcode, {0, -signal.SIGTERM})
+
+    def _load_complete_trace(self, rank, timeout=30):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with open(self._trace_name(rank=rank), "rb") as f:
+                    return pickle.load(f)["entries"]
+            except (EOFError, FileNotFoundError, pickle.UnpicklingError):
+                time.sleep(0.1)
+        self.fail(f"rank {rank} did not write a complete trace")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_peer_dump_request_during_shutdown(self):
+        os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "1"
+        os.environ["TORCH_NCCL_COORD_CHECK_MILSEC"] = "100"
+        ready_file = (
+            f"{os.environ['TORCH_NCCL_DEBUG_INFO_TEMP_FILE']}rank0-enqueued"
+        )
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            try:
+                self.assertEqual(self._wait_process(0, timeout=90), -6)
+                rank0_trace = self._load_complete_trace(rank=0)
+                rank1_trace = self._load_complete_trace(rank=1)
+
+                self.assertEqual(len(rank0_trace), 2)
+                self.assertEqual(len(rank1_trace), 1)
+                self.assertEqual(rank1_trace[0]["collective_seq_id"], 1)
+                self.assertEqual(rank1_trace[0]["state"], "completed")
+            finally:
+                self.processes[1].terminate()
+                self.processes[1].join(30)
+            return
+
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        with torch.cuda.device(device):
+            tensor = torch.full((3, 4), float(self.rank), device=device)
+            pg.allreduce(tensor).wait()
+            torch.cuda.synchronize(device=device)
+
+            if self.rank == 0:
+                pg.allreduce(tensor).wait()
+                with open(ready_file, "w"):
+                    pass
+                torch.cuda.synchronize(device=device)
+            else:
+                deadline = time.monotonic() + 30
+                while not os.path.exists(ready_file):
+                    if time.monotonic() >= deadline:
+                        self.fail("rank 0 did not enqueue the unmatched all-reduce")
+                    time.sleep(0.1)
+                dist.destroy_process_group()
 
 
 @skip_but_pass_in_sandcastle
