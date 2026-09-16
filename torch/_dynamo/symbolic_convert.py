@@ -2433,13 +2433,14 @@ class InstructionTranslatorBase(
         # resolves the name itself -- CompilePackage.install, or an artifact load
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
-        # this checks for (two module names still mangle to one alias).
+        # this checks for (two module names still mangle to one alias): such a
+        # slot is accepted and, below, written as an empty one is.
         if alias in f_globals and f_globals[alias] is not value:
             bound = f_globals[alias]
-            # __name__ is read out of the instance dict through
-            # object.__getattribute__ so that neither a PEP 562 __getattr__ nor a
-            # class-level __getattribute__ (importlib.util._LazyModule imports on
-            # any attribute read) runs inside the trace on the way to a verdict.
+            # Both names out of the instance dicts: a PEP 562 module __getattr__
+            # and a class-level __getattribute__ (importlib.util._LazyModule
+            # imports on any attribute read) are user code that must not run
+            # inside a trace.
             bound_name = (
                 object.__getattribute__(bound, "__dict__").get("__name__")
                 if isinstance(bound, types.ModuleType)
@@ -2459,13 +2460,6 @@ class InstructionTranslatorBase(
             accepted = (module_name, value_name) if value_name else (module_name,)
             if bound_name not in accepted:
                 # Named by type, never repr'd: __repr__ is user code too.
-                # IMPORT_NAME has no break_graph_if_unsupported, so this
-                # Unsupported reaches step(): the frame is skipped outright
-                # unless a checkpoint (an empty stack after two or more ops)
-                # precedes the import, and compiled up to that checkpoint
-                # otherwise. Either outcome is cached on the code object and
-                # nothing guards this global, so fixing it afterwards does not
-                # retrace the frame until torch._dynamo.reset().
                 offender = type(bound).__name__
                 if bound_name is not None:
                     offender = f"{offender} named {bound_name}"
@@ -2485,10 +2479,6 @@ class InstructionTranslatorBase(
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        # The write is into a live namespace and nothing unwinds it -- there is
-        # no CleanupHook here, unlike install_global_unsafe -- so it outlives a
-        # trace that graph-breaks or restarts, as does the write install makes
-        # to this name.
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
