@@ -7523,9 +7523,7 @@ class NCCLTraceTestDumpDuringShutdown(NCCLTraceTestDumpOnTimeoutBase):
     def test_peer_dump_request_during_shutdown(self):
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "1"
         os.environ["TORCH_NCCL_COORD_CHECK_MILSEC"] = "100"
-        ready_file = (
-            f"{os.environ['TORCH_NCCL_DEBUG_INFO_TEMP_FILE']}rank0-enqueued"
-        )
+        ready_file = f"{os.environ['TORCH_NCCL_DEBUG_INFO_TEMP_FILE']}rank0-enqueued"
 
         if self.rank == self.MAIN_PROCESS_RANK:
             try:
