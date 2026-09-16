@@ -2824,19 +2824,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device_index is None:
                 from torch.fx.experimental.proxy_tensor import _coor_enabled
 
+                # Under compile-on-one-rank the index must stay None so the runtime
+                # resolves it per rank and one artifact serves them all.
                 if not _coor_enabled():
-                    torch_source = ImportSource("torch")
-                    install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
-                    current_device_source = CallFunctionNoArgsSource(
-                        AttrSource(
-                            AttrSource(torch_source, "accelerator"),
-                            "current_device_index",
-                        )
-                    )
-                    install_guard(
-                        current_device_source.make_guard(GuardBuilder.EQUALS_MATCH)
-                    )
-                    device_index = torch.accelerator.current_device_index()
+                    device_index = 0
 
             tx.output.create_proxy(
                 "call_function",
