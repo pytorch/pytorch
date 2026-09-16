@@ -142,6 +142,7 @@ from torch.compiler._precompile_types import (
     PrecompileSummary,
 )
 
+from .convert_frame import CatchErrorsWrapper
 from .guards import CheckFunctionManager
 from .source import AttrSource, DictGetItemSource, GlobalSource
 
@@ -150,11 +151,19 @@ if TYPE_CHECKING:
     import traceback
     from collections.abc import Callable, Iterator, Mapping, Sequence
 
+    from .convert_frame import ConvertFrameReturn
     from .package import _DynamoCacheEntry
-    from .types import GuardFilterEntry
+    from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
+    from .variables.builder import FrameStateSizeEntry
 
 
 log = logging.getLogger(__name__)
+
+# Built once: config.patch() allocates a class and a ContextVar each time it is
+# called, and this runs on every frame Dynamo compiles for a package.
+_ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
+    allow_empty_graphs=True
+)
 
 # Not a public surface -- see the module docstring. This exists so `from ...
 # import *` in a debugging session pulls the entry points rather than every
@@ -222,6 +231,29 @@ def _capture_config(training: bool) -> Iterator[None]:
             _CAPTURE_CONFIG_STACK.set(None)
             if stack is not None:
                 stack.close()
+
+
+class _AllowEmptyGraphsCallback(CatchErrorsWrapper):
+    """The package's Dynamo callback, compiling its frames with allow_empty_graphs.
+
+    An uncovered no-op branch must become a guarded variant rather than Dynamo's
+    ordinary eager-only SkipFrame, or one fallback call permanently skips that
+    frame and serving() can no longer detect it. Patched here as well as in
+    _capture_config so the package's own frames get it even when the callback
+    runs outside a capture-config scope.
+    """
+
+    def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+    ) -> ConvertFrameReturn:
+        revert = _ALLOW_EMPTY_GRAPHS()
+        try:
+            return super().__call__(frame, cache_entry, frame_state)
+        finally:
+            revert()
 
 
 def _compose_with_default(
