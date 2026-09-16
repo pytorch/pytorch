@@ -119,6 +119,7 @@ capture block.
 from __future__ import annotations
 
 import functools
+import importlib.machinery
 import logging
 import os
 import site
@@ -312,6 +313,95 @@ def _torch_roots() -> tuple[str, ...]:
 
 def _within(path: str, roots: tuple[str, ...]) -> bool:
     return any(path == r or path.startswith(r + os.sep) for r in roots)
+
+
+@functools.cache
+def _classify_file(file: str, stdlib: bool) -> bool | None:
+    """
+    Cached on the __file__ string rather than on the module name: the roots are
+    fixed for the process, so the answer for a path never changes, while the
+    module a name resolves to can.
+    """
+    if not os.path.isabs(file):
+        # Resolving it would be against a cwd that is not the one it was
+        # recorded under, so it is evidence in neither direction. torch.ops
+        # really does carry __file__ == "_ops.py".
+        return None
+    path = _norm(file)
+    if not stdlib:
+        return _within(path, _torch_roots())
+    if _INSTALL_DIR_NAMES.intersection(path.split(os.sep)):
+        return False
+    return _within(path, _stdlib_roots()) and not _within(path, _install_roots())
+
+
+def _located(module: types.ModuleType, name: str, stdlib: bool) -> bool | None:
+    """Shipped here (True), shipped elsewhere (False), or no evidence (None)."""
+    # The module dict rather than getattr: a PEP 562 module __getattr__ is user
+    # code, and a module that raises on an unknown attribute would take save()
+    # down from inside a lint.
+    attrs = getattr(module, "__dict__", None) or {}
+    file = attrs.get("__file__")
+    if isinstance(file, str) and file:
+        verdict = _classify_file(file, stdlib)
+        if verdict is not None:
+            return verdict
+    spec = attrs.get("__spec__")
+    origin = getattr(spec, "origin", None)
+    loader = attrs.get("__loader__") or getattr(spec, "loader", None)
+    if origin == "built-in" or loader is importlib.machinery.BuiltinImporter:
+        # Statically linked, and BuiltinImporter precedes PathFinder on
+        # sys.meta_path, so no file on sys.path is reachable under this name.
+        return name.partition(".")[0] in sys.builtin_module_names
+    if origin == "frozen" or loader is importlib.machinery.FrozenImporter:
+        return True  # frozen also precedes the path finder
+    return None  # namespace package, exec'd in memory, REPL __main__
+
+
+def _is_library_module(module_name: str | None) -> bool:
+    """
+    Owned by torch or the stdlib, so config on the serving machine does not
+    choose between implementations. NB this trusts the OWNER, not the binding:
+    a third party that monkeypatches ``F.gelu`` at import time still diverges,
+    and that is called out in ``_is_risky_drop``'s KNOWN GAP.
+
+    sys.stdlib_module_names is a list of NAMES, and a waiver keyed on a name is
+    a collision away from being wrong: graphlib, queue, code and distutils are
+    all stdlib names a third party can and does supply. Worse, the name can be
+    right and the code still not be the stdlib's -- in a default setuptools
+    install ``import distutils`` gets site-packages/setuptools/_distutils, and
+    SETUPTOOLS_USE_DISTUTILS picks which one, which is exactly the
+    config-chooses-the-implementation shape this lint exists to catch. So the
+    module has to RESOLVE to code shipped with the interpreter: located under a
+    stdlib root and not under an install root (purelib nests inside stdlib in
+    conda and inside platstdlib in a venv, so the exclusion is what does the
+    work), or with no file at all because it is built in or frozen, which the
+    path finder cannot shadow. A name that is not imported, a namespace
+    package, and a module with no location evidence are all untrusted.
+    """
+    if module_name is None:
+        return False
+    top = module_name.partition(".")[0]
+    if top == "torch":
+        if not _torch_roots():
+            return True
+        stdlib = False
+    elif top in sys.stdlib_module_names:
+        stdlib = True
+    else:
+        return False
+    root = sys.modules.get(top)
+    if root is None or _located(root, top, stdlib) is not True:
+        return False
+    parts = module_name.split(".")
+    for i in range(2, len(parts) + 1):
+        name = ".".join(parts[:i])
+        module = sys.modules.get(name)
+        # An unimported inner name has nothing to check, and the package it
+        # would have to be found in has already been located.
+        if module is not None and _located(module, name, stdlib) is False:
+            return False
+    return True
 
 
 def _defined_where_read(
