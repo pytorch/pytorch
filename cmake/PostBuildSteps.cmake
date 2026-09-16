@@ -82,7 +82,7 @@ if(WIN32 AND BUILD_PYTHON)
   endif()
 
   # CUDA runtime DLLs - only for CUDA builds.
-  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
+  if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR AND NOT "$ENV{PYTORCH_EXTRA_INSTALL_REQUIREMENTS}" MATCHES "cuda-toolkit")
     # CUDA 13+ moves DLLs to bin/x64.
     if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
       set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
@@ -109,17 +109,18 @@ if(WIN32 AND BUILD_PYTHON)
       endif()
     endforeach()
 
-    # NvToolsExt (legacy, may not exist on all systems).
-    set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
-    if(EXISTS "${_nvtoolsext}")
-      install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    endif()
-
     # zlibwapi (needed by some CUDA libraries).
     if(EXISTS "C:/Windows/System32/zlibwapi.dll")
       install(FILES "C:/Windows/System32/zlibwapi.dll"
               DESTINATION "${TORCH_INSTALL_LIB_DIR}")
     endif()
+  endif()
+
+  # Retain the legacy NvToolsExt DLL for existing Windows binaries until its
+  # separate deprecation; cuda-toolkit no longer provides it.
+  set(_nvtoolsext "C:/Program Files/NVIDIA Corporation/NvToolsExt/bin/x64/nvToolsExt64_1.dll")
+  if(USE_CUDA AND EXISTS "${_nvtoolsext}")
+    install(FILES "${_nvtoolsext}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 endif()
 
