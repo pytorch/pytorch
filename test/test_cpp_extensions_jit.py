@@ -90,6 +90,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 # There's only one test that runs gradcheck, run slow mode manually
 @torch.testing._internal.common_utils.markDynamoStrictTest
+@common.instantiate_parametrized_tests
 class TestCppExtensionJIT(common.TestCase):
     """Tests just-in-time cpp extensions.
     Don't confuse this with the PyTorch JIT (aka TorchScript).
@@ -1644,7 +1645,6 @@ except RuntimeError as e:
                         f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",
                     )
 
-
     def _write_ninja_isolation_sources(self, root, name, count=2):
         directory = os.path.join(root, name)
         os.makedirs(directory)
@@ -1736,18 +1736,31 @@ except RuntimeError as e:
     @unittest.skipIf(
         not torch.utils.cpp_extension.is_ninja_available(), "ninja is not available"
     )
-    def test_ninja_isolation_still_rebuilds_when_only_flags_change(self):
-        # Keying the directory on the flags means each build reads a log that does
-        # not know the other one overwrote the object, so the guarantee that a
-        # changed command recompiles now rests on ninja noticing the output moved
-        # underneath it. Check that it does, and that an unchanged rebuild is
-        # still a no-op, which is the reason for a digest over a temporary dir.
+    @common.parametrize("dependency_log", [True, False])
+    def test_ninja_isolation_still_rebuilds_when_only_flags_change(
+        self, dependency_log
+    ):
         obj_suffix = ".obj" if IS_WINDOWS else ".o"
+        writer = torch.utils.cpp_extension._write_ninja_file
         with tempfile.TemporaryDirectory() as root:
             shared = os.path.abspath(os.path.join(root, "temp.shared"))
             os.makedirs(shared)
             sources = self._write_ninja_isolation_sources(root, "ext", count=1)
             objects = [os.path.join(shared, "ext_0" + obj_suffix)]
+
+            def write_ninja(*args, **kwargs):
+                writer(*args, **kwargs)
+                if not dependency_log:
+                    # Reproduce rules without dependency logs using a CPU compiler.
+                    path = kwargs["path"]
+                    with open(path) as build_file:
+                        lines = build_file.readlines()
+                    with open(path, "w") as build_file:
+                        build_file.writelines(
+                            line
+                            for line in lines
+                            if not line.strip().startswith("deps =")
+                        )
 
             def compile_with_mode(mode):
                 self._compile_objects_into(
@@ -1756,14 +1769,16 @@ except RuntimeError as e:
                 with open(objects[0], "rb") as compiled:
                     return compiled.read()
 
-            first = compile_with_mode(1)
-            second = compile_with_mode(2)
-            self.assertTrue(
-                first != second, "changing the flags did not recompile the object"
-            )
-            self.assertTrue(
-                second == compile_with_mode(2), "rebuilt with nothing changed"
-            )
+            with unittest.mock.patch.object(
+                torch.utils.cpp_extension, "_write_ninja_file", write_ninja
+            ):
+                first = compile_with_mode(1)
+                second = compile_with_mode(2)
+                self.assertNotEqual(first, second)
+                self.assertEqual(first, compile_with_mode(1))
+                timestamp = os.stat(objects[0]).st_mtime_ns
+                self.assertEqual(first, compile_with_mode(1))
+                self.assertEqual(timestamp, os.stat(objects[0]).st_mtime_ns)
 
 
 if __name__ == "__main__":

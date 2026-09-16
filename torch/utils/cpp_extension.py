@@ -2460,7 +2460,7 @@ def _get_hipcc_path():
         return _join_rocm_home('bin', 'hipcc')
 
 def _ninja_build_key(*parts: list[str] | None) -> str:
-    """Short stable digest of everything that determines a build.ninja's contents."""
+    """Stable digest of the source and object paths for a Ninja build."""
     digest = hashlib.sha256()
     for part in parts:
         # A None flag list and an empty one mean the same thing to the writer.
@@ -2499,18 +2499,11 @@ def _write_ninja_file_and_compile_objects(
         raise AssertionError(
             "cannot have both SYCL and CUDA files in the same extension"
         )
-    # setuptools gives every extension of a project the same output directory, and
-    # ninja keeps .ninja_log / .ninja_deps beside build.ninja, so a concurrent
-    # `build_ext -j` has those clobber one another. Give each invocation its own
-    # subdirectory, keyed on every input that decides the file's contents. A digest
-    # rather than a fresh temporary directory keeps the path stable across runs, so
-    # incremental rebuilds still find ninja's log.
+    # Separate extensions must not share Ninja files. Keep the directory stable
+    # across flag changes so Ninja sees the previous command for these outputs,
+    # including rules that do not write a dependency log.
     build_directory = os.path.join(
-        build_directory,
-        '.ninja-' + _ninja_build_key(
-            sources, objects, cflags, post_cflags, cuda_cflags, cuda_post_cflags,
-            cuda_dlink_post_cflags, sycl_cflags, sycl_post_cflags,
-            sycl_dlink_post_cflags))
+        build_directory, '.ninja-' + _ninja_build_key(sources, objects))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)
