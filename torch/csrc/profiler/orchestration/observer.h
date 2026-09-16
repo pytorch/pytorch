@@ -142,8 +142,9 @@ struct TORCH_API ExperimentalConfig {
   // accessing events() raises an error.
   bool trace_only;
 
-  // Maximum number of Python stack events allowed during post-processing.
-  // If exceeded, all Python stack events are omitted from the trace.
+  // Post-processing threshold for collected Python stack events. If exceeded,
+  // all Python stack events are omitted. This does not limit collection during
+  // tracing.
   std::optional<int64_t> max_stack_events;
 };
 

@@ -462,8 +462,9 @@ void initPythonBindings(PyObject* module) {
           "    adjust_timestamps (bool) : whether to adjust timestamps for Vulkan events\n"
           "    trace_only (bool) : when True, skip building Python event objects during __exit__.\n"
           "       Only export_chrome_trace() / save() will work; accessing events() raises an error.\n"
-          "    max_stack_events (int, optional) : maximum number of Python stack events\n"
-          "       allowed per trace cycle. If exceeded, all Python stack events are omitted.\n",
+          "    max_stack_events (int, optional) : post-processing threshold for\n"
+          "       collected Python stack events. If exceeded, all Python stack events\n"
+          "       are omitted. This does not limit event collection during tracing.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
           py::arg("verbose") = false,
