@@ -683,7 +683,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, self.value.__base__, source)
         # __name__, __qualname__, __doc__, __module__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
-        resolved = type.__getattribute__(self.value, name)
+        try:
+            resolved = type.__getattribute__(self.value, name)
+        except AttributeError as e:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=list(e.args),
+            )
+
         if source:
             return VariableTracker.build(tx, resolved, source)
         from . import ConstantVariable
@@ -1687,20 +1695,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
         return new_fn is object.__new__
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        se_result = self._hasattr_check_side_effects(tx, name)
-        if se_result is not None:
-            return se_result
-        if self.source:
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-        return VariableTracker.build(tx, hasattr(self.value, name))
 
     def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         if name == "__name__":
@@ -3808,42 +3802,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
         return source
-
-    def call_obj_hasattr(
-        self, tx: "InstructionTranslatorBase", name: str
-    ) -> "ConstantVariable":
-        if self.source:
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
-
-        if not self._object_has_getattribute:
-            type_attr = self.lookup_class_mro_attr(name)
-            if (
-                (type_attr is NO_SUCH_SUBOBJ or not is_data_descriptor(type_attr))
-                and hasattr(self.value, "__dict__")
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self,
-                    name,
-                    (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
-                )
-                and not tx.output.side_effects.has_pending_mutation_of_attr(
-                    self, "__dict__", AttrMutationKind.GENERIC_SETATTR
-                )
-                and self.has_key_in_generic_dict(tx, name)
-            ):
-                return variables.ConstantVariable.create(True)
-
-        try:
-            var_vt = self.tp_getattro_impl(tx, name)
-            return VariableTracker.build(
-                tx, not isinstance(var_vt, variables.DeletedVariable)
-            )
-        except ObservedAttributeError:
-            handle_observed_exception(tx)
-            return variables.ConstantVariable.create(False)
 
     def is_hashable(self) -> bool:
         # Mirrors the __hash__ is None check in hash_impl's MRO walk.
