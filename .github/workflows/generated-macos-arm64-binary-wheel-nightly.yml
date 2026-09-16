@@ -43,7 +43,7 @@ jobs:
   wheel-build:
     needs: check-ci
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-26-xlarge
+    runs-on: xcode-27-xlarge
     timeout-minutes: 280
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
@@ -79,6 +79,13 @@ jobs:
       - name: Install libomp
         run: |
           "${PYTORCH_ROOT}/.ci/macwheel/install_libomp.sh"
+      # https://github.com/actions/runner-images/issues/14548
+      - name: Install Metal toolchain if missing
+        run: |
+          if ! xcrun --sdk macosx metal --version; then
+            xcodebuild -downloadComponent MetalToolchain
+            xcrun --sdk macosx metal --version
+          fi
       - name: Install uv
         uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -230,7 +237,7 @@ jobs:
   libtorch-cpu-shared-with-deps-release-extract:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: wheel-build
-    runs-on: macos-26-xlarge
+    runs-on: xcode-27-xlarge
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
