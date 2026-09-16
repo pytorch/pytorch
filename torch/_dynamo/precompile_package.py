@@ -132,7 +132,11 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch._guards import ChainedSource, Source
-from torch.compiler._precompile_types import FrameInvariants, PrecompileSummary
+from torch.compiler._precompile_types import (
+    FrameInvariants,
+    GuardFact as _GuardFact,
+    PrecompileSummary,
+)
 
 from .guards import CheckFunctionManager
 from .source import AttrSource, DictGetItemSource, GlobalSource
@@ -910,5 +914,102 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = frozenset(
 )
 
 
+def _saved_hooks_fingerprint() -> str:
+    """Name the installed saved-tensors hooks by content, never by address."""
+    try:
+        from torch._functorch._aot_autograd.utils import top_saved_tensors_hooks
+
+        hooks = top_saved_tensors_hooks()
+    except Exception:
+        return ""
+    if not hooks:
+        return "hooks=None"
+    names = []
+    for hook in hooks:
+        code = getattr(hook, "code", None)  # fx GraphModule renders its graph
+        if isinstance(code, str):
+            names.append(_hash_text(code))
+        else:
+            names.append(_object_identity(hook))
+    return "hooks=(" + ", ".join(names) + ")"
+
+
 def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def _value_fingerprint(entry: GuardFilterEntry) -> str:
+    """
+    What the guard checks, when the rendered code does not say.
+
+    TENSOR_MATCH is the case that matters: its code_list carries only the
+    _dynamo_*_indices hasattr checks, while everything it really compares lives
+    in the C++ leaf. Without those two specializations of one frame look
+    identical and wrongly land in the intersection, so this mirrors TensorCheck
+    -- python type and the full dispatch key set included, since a Parameter
+    against a Tensor, a conjugated view against a plain one, or an
+    inference-mode tensor against a no_grad one, splits a compilation exactly
+    as dtype does. KNOWN GAP: that leaf checks
+    nothing for a dim the compile made dynamic, so under ``dynamic=True`` the
+    concrete shape here is narrower than the guard and a shape-generic
+    TENSOR_MATCH is reported as varying rather than invariant.
+
+    An identity guard needs one too, because ``_normalize`` strips the id its
+    code renders: without a name for the object, two variants holding different
+    callables at one source collapse into one fact and are reported as an
+    invariant neither of them holds.
+
+    Every other guard takes its value from its own rendered code, which names
+    it, so fingerprinting it again SPLITS identical guards: TYPE_MATCH on an
+    unspecialized int checks only that the int is an int, and stamping 1 on one
+    variant and 2 on the next demotes a real invariant into two identical
+    'varies' lines.
+    """
+    if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
+        # Its code renders tuple(map(id, hooks)), which _normalize has to erase
+        # or the file churns -- but erasing it alone would merge two variants
+        # that differ ONLY in their hooks and report the guard that split them
+        # as an invariant. Put back a discriminator derived from what the hooks
+        # ARE rather than where they live, which is both stable across
+        # processes and still telling.
+        return _saved_hooks_fingerprint()
+    if entry.guard_type == "GRAD_MODE":
+        # Global-state guards carry no name, code or value, so two variants of
+        # one frame that differ only in grad mode render identically and land
+        # in the intersection. The filter runs in the traced frame's own state.
+        return f"grad_enabled={torch.is_grad_enabled()}"
+    if entry.guard_type == "DETERMINISTIC_ALGORITHMS":
+        # Same as GRAD_MODE: the two fields GlobalStateGuard snapshots for it.
+        warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        return f"deterministic={torch.are_deterministic_algorithms_enabled()}, warn_only={warn_only}"
+    if not entry.has_value:
+        return ""
+    value = entry.value
+    if isinstance(value, torch.Tensor):
+        # Render exactly what TensorCheck stores (notably the TLS-adjusted
+        # dispatch key set, not the tensor's own) rather than reconstructing it.
+        from .guards import convert_to_concrete_values, get_tensor_guard_code_part
+
+        try:
+            return get_tensor_guard_code_part(
+                value,
+                "",
+                convert_to_concrete_values(value.size()),
+                convert_to_concrete_values(value.stride()),
+                type(value),
+                torch._C._dispatch_keys(value),
+            )
+        except Exception:
+            return f"type={type(value).__name__}, dtype={value.dtype}, <unrenderable>"
+    if entry.guard_type in _IDENTITY_GUARD_TYPES or any(
+        d in _IDENTITY_GUARD_TYPES for d in entry.derived_guard_types
+    ):
+        return _object_identity(value)
+    return ""
+
+
+def _fact_order(fact: _GuardFact) -> tuple[str, str, str, str]:
+    # value is part of the key: once the boilerplate code parts are filtered a
+    # TENSOR_MATCH renders no code, so two shape specializations would otherwise
+    # tie and sort unstably, making the file differ run to run.
+    return (fact.source, fact.guard_type, " ".join(fact.code), fact.value)
