@@ -1499,12 +1499,23 @@ class AOTCompiledModel:
     would pass can therefore be outranked by a later result whose first check
     accepted. When neither pass accepts, the call is served by the first result
     that opted out through ``disable_guard_check()``, from any index, and only
-    when none did is it handed to ``compiled_results[0]``, which raises
-    ``GuardManager check failed``. That is all the flag does here: ``check()``
-    never reads it, so an opted-out result is scanned and re-checked like any
-    other and is served in index order when its check accepts, and on the
-    strength of its opt-out alone only after both the scan and the re-check
-    found no match.
+    when none did does it raise the ``No AOT compiled graph matched this call``
+    report below. That is all the flag does here: ``check()`` never reads it,
+    so an opted-out result is scanned and re-checked like any other and is
+    served in index order when its check accepts, and on the strength of its
+    opt-out alone only after both the scan and the re-check found no match.
+
+    The report is a ``RuntimeError`` headed ``No AOT compiled graph matched
+    this call``, then one line per compiled result quoting the verbose parts
+    of the guard that refused it, or, for a result whose guards accept the call
+    on the report's own evaluation after refusing it in both dispatch passes, a
+    ``<guards rejected this call twice and then accepted it here: ...>``
+    explanation in place of any guards, or, for a result whose refusal quotes
+    nothing -- an accessor that answered false with no parts, or a guard that
+    raised with a blank message -- ``<guard check failed without naming a
+    guard>``; the missing-global hint appended to each entry whose guards
+    failed on a global the process does not define; and the advice to add a
+    ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
@@ -1568,9 +1579,50 @@ class AOTCompiledModel:
         for result in results:
             if not result._guard_check_enabled:
                 return result.fn(self.model, *args, **kwargs)
-        # Every result's guards failed and none opted out, so results[0] is
-        # enabled and raises the guard check error.
-        return results[0](self.model, *args, **kwargs)
+        raise RuntimeError(self._no_match_report(results, bound))
+
+    def _no_match_report(
+        self, results: tuple[AOTCompiledFunction, ...], bound: list[dict[str, object]]
+    ) -> str:
+        """A report naming every compiled input and what its guards said.
+
+        ``results`` and ``bound`` are the results ``AOTCompiledModel.__call__``
+        judged and the f_locals it judged them on, one per result, so the report
+        explains the same call rather than a fresh one."""
+        lines = [
+            "No AOT compiled graph matched this call. Tried "
+            f"{len(results)} compiled input(s):"
+        ]
+        for i, result in enumerate(results):
+            reason = result._live_guard_manager().check_verbose(bound[i])
+            if reason.result:
+                lines.append(
+                    f"  [{i}] <guards rejected this call twice and then accepted "
+                    "it here: a guard that does not answer consistently, or "
+                    "guarded state that changed between those evaluations>"
+                )
+                continue
+            parts = reason.verbose_code_parts
+            # Collapse every separator splitlines() reads the report back on.
+            # Done here, not in get_verbose_code_part: the recompile logs consume
+            # the same parts and are out of this report's scope.
+            joined = " ".join("; ".join(parts).splitlines())
+            if not joined.strip():
+                # A failing accessor can answer false with no parts to quote, and
+                # a guard that raised quotes str(exc), which can be blank.
+                lines.append(f"  [{i}] <guard check failed without naming a guard>")
+                continue
+            line = f"  [{i}] {joined}"
+            if any(map(_names_a_missing_global, parts)):
+                line += result._missing_global_hint()
+            lines.append(line)
+        lines.append(
+            "Add a ModelInput covering this call, or check whether "
+            "guard_filter_fn kept a guard this call cannot satisfy -- both "
+            "belong to the process that compiles the artifacts, which need not "
+            "be the one that loaded them."
+        )
+        return "\n".join(lines)
 
     def serialize(self) -> bytes:
         # Nothing threads external_data down this path (_save_aot_compiled_module
