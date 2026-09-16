@@ -1028,6 +1028,7 @@ ldl_diagonal_panel_fused_kernel(
       // No permutation, 1x1 pivot
       piv = curr_step;
     } else {
+      __syncthreads();
       // Checking whether ilambda diagonal pivot is "stable"
       const auto [sigma, _] = ldl::find_pivot_row<scalar_t, BS>(
         dLD, lda, n, curr_step, ilambda,
@@ -1062,6 +1063,7 @@ ldl_diagonal_panel_fused_kernel(
         dipiv[curr_step + 1] = -(piv + 1);
       }
     }
+    __syncthreads();
 
     // Column/Row swaps {
     // 1x1 pivot -> swap with the current diagonal,
@@ -1164,6 +1166,7 @@ ldl_diagonal_panel_fused_kernel(
 
     // Finish iteration
     curr_step += pivot_rank;
+    __syncthreads();
   }
 
   if (tid == 0) {
