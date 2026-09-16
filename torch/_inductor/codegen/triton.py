@@ -3398,7 +3398,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @property
     def uses_device_tma(self) -> bool:
-        return any(not is_buffer_removed(name) for name in self._device_tma_buffers)
+        removed = (
+            self.removed_buffers
+            | self.inplaced_to_remove
+            | V.graph.removed_buffers
+            | V.graph.inplaced_to_remove
+        )
+        return any(name not in removed for name in self._device_tma_buffers)
 
     def triton_tensor_ndim(self) -> int:
         return sum(int(tree.tensor_dim is not None) for tree in self.range_trees)
@@ -7624,11 +7630,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.inductor_meta.pop(field, None)
             if field in final_kernel_meta:
                 self.inductor_meta[field] = final_kernel_meta[field]
-
-        if not self.uses_tma:
-            # TMA probing sets tma_min_block_sizes even when the access falls
-            # back to tl.load; a stale constraint regresses non-TMA kernels.
-            self.inductor_meta.pop("tma_min_block_sizes", None)
 
         self._filter_pdl(self.body)
 

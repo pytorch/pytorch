@@ -1129,12 +1129,9 @@ class CommonTemplate:
             },
         )
 
-        # Check the code for multiple output dims and the device-TMA metadata
-        # that constrains the descriptor store's innermost block size.
+        # Check the code for multiple output dims.
         self._assert_pointwise_ndims(code, 2)
         self._assert_reduction_ndims(code, 1)
-        self.assertIn("'tma_min_block_sizes': {'XBLOCK': 4}", code)
-        self.assertIn("'uses_device_tma': True", code)
 
     @xfail_if_cuda_tensor_descriptor
     @parametrize(
@@ -1748,6 +1745,32 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         # The store must fall back to scalar indexing, not TMA.
         self.assertIn("tl.store", code)
         self.assertNotIn("make_tensor_descriptor", code)
+
+    def test_reduction_padded_output_tiling_device_tma_metadata(self):
+        """
+        Device-TMA metadata for a reduction store: tma_min_block_sizes and
+        uses_device_tma must appear in inductor_meta when the store emits
+        an in-kernel TensorDescriptorOptions.
+        """
+        x = torch.randn((9, 11, 2), device=self.device)
+
+        result, (code,) = self._run_and_compare(
+            functools.partial(torch.amax, dim=-1),
+            x,
+            expected_num_block_pointers=2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "pad_outputs": True,
+                "padding_alignment_bytes": 32,
+                "padding_stride_threshold": 0,
+                "unroll_reductions_threshold": 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Device-TMA metadata should be present in the emitted code.
+        self.assertIn("'XBLOCK': 4", code)
+        self.assertIn("'uses_device_tma': True", code)
 
     def test_bool_dtype_skips_tma(self):
         """

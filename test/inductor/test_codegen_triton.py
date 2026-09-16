@@ -204,6 +204,15 @@ class TestCodegenTriton(InductorTestCase):
             self.assertNotIn("tma_min_block_sizes", kernel.inductor_meta_per_kernel())
             self.assertNotIn("uses_device_tma", kernel.inductor_meta_per_kernel())
 
+            # Also cover kernel-local removed_buffers and inplaced_to_remove branches.
+            kernel._device_tma_buffers.add("kernel_local_removed")
+            kernel.tma_min_block_sizes["XBLOCK"] = 4
+            kernel.removed_buffers.add("kernel_local_removed")
+            self.assertFalse(kernel.uses_device_tma)
+            kernel.removed_buffers.discard("kernel_local_removed")
+            kernel.inplaced_to_remove.add("kernel_local_removed")
+            self.assertFalse(kernel.uses_device_tma)
+
     def test_importable_constexpr_types_nested_values(self):
         type_specs = get_importable_constexpr_types(
             [
