@@ -15,16 +15,19 @@ Or use
 
 __all__ = ["NCCL4PyBackend"]
 
+from typing import Any
+
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp
 from torch.distributed._watchdog import _get_watchdog, stream_complete, stream_timeout
 
 
+nccl: Any = None
 try:
-    import nccl.core as nccl
+    import nccl.core as nccl  # pyrefly: ignore [missing-import]
 except ModuleNotFoundError:
-    nccl = None  # type: ignore[assignment]
+    pass
 
 
 class _NcclWork(dist._Work):
@@ -186,17 +189,17 @@ class NCCL4PyBackend(C10DBackend):
         The caller must close custom_op after the NCCL call is enqueued.
         """
         op_type = reduce_op.op
-        if op_type == ReduceOp.RedOpType.SUM:
+        if op_type == ReduceOp.SUM:
             return nccl.SUM, None
-        if op_type == ReduceOp.RedOpType.PRODUCT:
+        if op_type == ReduceOp.PRODUCT:
             return nccl.PROD, None
-        if op_type == ReduceOp.RedOpType.MIN:
+        if op_type == ReduceOp.MIN:
             return nccl.MIN, None
-        if op_type == ReduceOp.RedOpType.MAX:
+        if op_type == ReduceOp.MAX:
             return nccl.MAX, None
-        if op_type == ReduceOp.RedOpType.AVG:
+        if op_type == ReduceOp.AVG:
             return nccl.AVG, None
-        if op_type == ReduceOp.RedOpType.PREMUL_SUM:
+        if op_type == ReduceOp.PREMUL_SUM:
             factor = reduce_op.factor
             if isinstance(factor, torch.Tensor):
                 scalar = factor
