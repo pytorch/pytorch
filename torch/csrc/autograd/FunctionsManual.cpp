@@ -1133,6 +1133,94 @@ Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
   return grad.flip(dim).cumsum(dim).flip(dim);
 }
 
+namespace {
+
+// Subgradient of an inclusive running max/min scan: the output is
+// non-decreasing (max) / non-increasing (min) along `dim`, so the gradient
+// flows only to the first element of each constant plateau of the scan
+// output. Computed with vectorized ops only (device agnostic):
+//   r(i)    = index of the end of the plateau containing i
+//   g_x[i]  = (P[r(i)] - P[i-1]) if i is a plateau head, else 0
+// where P is the inclusive cumulative sum of the upstream gradient.
+Tensor maxmin_scan_backward(const Tensor& grad, const Tensor& y, int64_t dim) {
+  dim = at::maybe_wrap_dim(dim, y.dim());
+  const int64_t N = y.sizes()[dim];
+  if (N <= 1) {
+    return grad;
+  }
+  // diff[i] == 1 marks the last index of a plateau (y[i] != y[i+1]).
+  auto y0 = y.narrow(dim, 0, N - 1);
+  auto y1 = y.narrow(dim, 1, N - 1);
+  auto diff = y0.ne(y1);
+  auto ones_tail =
+      at::ones_like(y.narrow(dim, 0, 1), y.options().dtype(at::kBool));
+  auto diff_padded = at::cat({diff, ones_tail}, dim);
+
+  std::vector<int64_t> pos_shape(y.dim(), 1);
+  pos_shape[dim] = N;
+  auto positions =
+      at::arange(N, y.options().dtype(at::kLong)).reshape(pos_shape);
+  // r_index[i] = index of the end of the plateau containing i, i.e. the next
+  // position at or after i whose y value differs from its successor. Computed
+  // as a suffix-minimum of the end-marker positions (sentinel N).
+  auto marker = at::where(diff_padded, positions, at::full_like(positions, N));
+  auto r_index =
+      at::flip(std::get<0>(at::cummin(at::flip(marker, {dim}), dim)), {dim});
+
+  auto P = at::cumsum(grad, dim);
+  auto P_prev = at::cat(
+      {at::zeros_like(P.narrow(dim, 0, 1)), P.narrow(dim, 0, N - 1)}, dim);
+  auto summed = P.gather(dim, r_index).sub(P_prev);
+
+  // A plateau head is the first index of a run of equal values.
+  auto head = at::cat(
+      {at::ones_like(y.narrow(dim, 0, 1), y.options().dtype(at::kBool)), diff},
+      dim);
+  return at::where(head, summed, at::zeros_like(summed));
+}
+
+} // namespace
+
+Tensor associative_scan_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const std::string& combine_mode,
+    int64_t dim,
+    const Tensor& result,
+    bool reverse) {
+  if (combine_mode == "add") {
+    // forward: y = reverse ? flip(cumsum(flip(x))) : cumsum(x)
+    // backward: grad_x = reverse ? cumsum(grad) : flip(cumsum(flip(grad)))
+    if (reverse) {
+      return at::cumsum(grad, dim);
+    }
+    return cumsum_backward(grad, dim);
+  }
+  if (combine_mode == "mul") {
+    Tensor g;
+    if (reverse) {
+      // y = flip(cumprod(flip(x))), so work in the flipped frame.
+      g = cumprod_backward(
+          grad.flip(dim), self.flip(dim), dim, result.flip(dim));
+      g = g.flip(dim);
+    } else {
+      g = cumprod_backward(grad, self, dim, result);
+    }
+    return g;
+  }
+  if (combine_mode == "max" || combine_mode == "min") {
+    if (reverse) {
+      auto g = maxmin_scan_backward(grad.flip(dim), result.flip(dim), dim);
+      return g.flip(dim);
+    }
+    return maxmin_scan_backward(grad, result, dim);
+  }
+  TORCH_CHECK(
+      false,
+      "associative_scan_backward: unsupported combine_mode ",
+      combine_mode);
+}
+
 Tensor logsumexp_backward(
     Tensor grad,
     const Tensor& self,
