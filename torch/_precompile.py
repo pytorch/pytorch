@@ -1647,6 +1647,77 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     return "installed" if unreachable else "standalone"
 
 
+def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
+    """Refuse a capture whose entry an installed artifact could not rebuild.
+
+    The installed driver rebuilds the entry from its code object, and
+    ``types.FunctionType`` cannot supply a closure or defaults it was not given:
+    a closure entry fails to build at all, and a defaulted argument silently
+    goes missing on the first served call. Both are capture-time facts, so they
+    are refused here rather than at load on the serving machine.
+    """
+    from torch._dynamo.package import SerializedCode
+
+    entry_frames = [f for f in frames if f["is_entry"]]
+    if not entry_frames or not any(f["variants"] for f in entry_frames):
+        # A missing or variant-less entry frame has very different causes, and
+        # guessing the wrong one sends the caller restructuring code that was
+        # never the problem. If Dynamo BYPASSED the entry frame, it recorded
+        # why -- and _multigraph_frames DROPS bypassed codes entirely, so the
+        # bypassed-entry case arrives here as "no entry frame at all", not as
+        # an entry with no variants. Say the recorded reason, because the
+        # thin-wrapper advice below is then simply wrong. Only the ENTRY's own
+        # bypassed codes count (matched by the same heuristic that picks entry
+        # frames): an unrelated bypassed helper frame must not relabel a
+        # thin-wrapper entry as a bypass.
+        entry_name = str(entry.fn_name).rsplit(".", 1)[-1]
+        bypassed = [
+            code
+            for code in entry.codes
+            if code.bypassed
+            and code.bypass_reason
+            and not code.install_to_global
+            and SerializedCode.to_code_object(code.python_code).co_name == entry_name
+        ]
+        if bypassed:
+            reasons = ", ".join(sorted({str(c.bypass_reason) for c in bypassed}))
+            raise PrecompileError(
+                f"precompile captured no dispatchable graph for {entry.fn_name!r}: "
+                f"{len(bypassed)} entry frame(s) were BYPASSED during capture, so "
+                f"their guards were never written. Reason: {reasons}. Fix that "
+                f"rather than restructuring the captured callable."
+            )
+        if not entry_frames:
+            # Not bypassed and not compiled at all: nothing here can say why,
+            # and both diagnostics below would be guesses.
+            return
+        # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
+        # frame (external_utils.wrap_inline's `inner`) rather than the module:
+        # every graph lands there, closing over the module, and the entry frame
+        # itself holds nothing. Load cannot rebuild that closure, and `inner`'s
+        # code object is shared by every wrap_inline in the process, so serving
+        # it would let an unrelated frame hit these guards.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}. The "
+            f"entry frame produced no guarded code, so the artifact would serve "
+            f"nothing. This happens when the captured callable is a thin wrapper -- "
+            f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
+            f"compiles the wrapper's inner frame instead. Capture the function that "
+            f"CALLS the model, e.g. "
+            f"precompile.capture(lambda m, x: m(x), ...) and calling cap(model, x)."
+        )
+    code = SerializedCode.to_code_object(entry_frames[0]["code"])
+    if code.co_freevars:
+        raise PrecompileError(
+            f"precompile cannot build a self-contained artifact for {entry.fn_name!r}: "
+            f"it closes over {list(code.co_freevars)!r}, and this capture has to rebuild "
+            f"the entry from its code object, which cannot restore a closure. Capture a "
+            f"module-level function that takes what it needs as arguments, e.g. "
+            f"precompile.capture(step, ...), calling cap(model, x), with "
+            f"'def step(model, x): return model(x)'."
+        )
+
+
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
     """Enforce invariant 4 of Note [precompile programming model]: reject boundary
     effects the AOT backend's standalone composition does not handle. Detected
