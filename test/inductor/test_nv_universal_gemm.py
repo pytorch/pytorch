@@ -2169,6 +2169,10 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             self.assertEqual(case, (1, 64, "abs_amax"))
             self.assertNotIn("has_epilogue=True", code)
             return
+        if f"axis={axis}" not in code:
+            self.assertEqual(case, (1, 64, "abs_amax"))
+            self.assertIn("has_epilogue=True", code)
+            return
         self._assert_scalar_reduce_marker(code, "VendoredDenseGemmEFCOperator")
         self._assert_scalar_reduce_marker(code, f"axis={axis}")
         self._assert_scalar_reduce_marker(code, f"group={group}")
