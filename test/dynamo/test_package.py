@@ -33,7 +33,6 @@ from torch._dynamo.package import (
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.symbolic_convert import (
     _import_source_cache,
-    InstructionTranslator,
     InstructionTranslatorBase,
 )
 from torch._dynamo.testing import CompileCounter, reduce_to_scalar_loss
@@ -79,8 +78,7 @@ class UnpicklableConfig:
 
 
 def _import_alias_getattr_boom(name):
-    # PEP 562 module __getattr__: reached only if the check reads __name__ with
-    # getattr instead of out of the module __dict__.
+    # A PEP 562 module __getattr__ that must never run inside a trace.
     raise RuntimeError(f"module __getattr__ ran inside a trace for {name}")
 
 
@@ -1497,6 +1495,18 @@ def add(x, y):
             mid.VALUE = 11
             self.assertEqual(fn2(*args), compiled_fn2(*args))
             self.assertEqual(cnt.frame_count, 2)
+
+            # The alias binds the live module, so an attribute the installed
+            # one lacks is read where the graph read it, and compiles.
+            new.EXTRA = 3
+
+            def fn3(x):
+                import torch_test_package_import_alias_three_way as shim
+
+                return x - shim.EXTRA
+
+            self.assertEqual(fn3(*args), torch.compile(fn3, backend="eager")(*args))
+            self.assertIs(fn.__globals__[alias], new)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
@@ -1742,13 +1752,8 @@ def add(x, y):
         # holding something other than the module it names -- a non-module, or a
         # module of another name, which is the state two module names mangling
         # onto one alias leave it in. The condition is the user's globals, so it
-        # is a graph break, not an internal error. Without fullgraph the import
-        # is the frame's first work, so there is no checkpoint to compile up to
-        # and the whole frame is skipped -- and stays skipped, the alias left
-        # alone, after the global is removed: nothing guards it, so only
-        # torch._dynamo.reset() makes Dynamo trace the frame again. Neither
-        # refusal remembers the name in _import_source_cache; the compile that
-        # binds the alias does, which is why the pop in finally stays.
+        # is a graph break, not an internal error, and the slot is left alone;
+        # a refusal does not remember the name in _import_source_cache either.
         name = "torch_test_package_import_alias_taken"
         alias = f"__import_{name}"
         module = types.ModuleType(name)
@@ -1779,27 +1784,102 @@ def add(x, y):
                         Unsupported, f"alias {alias} for {name}.*{re.escape(expected)}"
                     ):
                         torch.compile(fn, backend="eager", fullgraph=True)(*args)
-                    self.assertNotIn(name, _import_source_cache)
-                    torch._dynamo.reset()
-                    cnt = CompileCounter()
-                    skipped = torch.compile(fn, backend=cnt)
-                    self.assertEqual(fn(*args), skipped(*args))
                     self.assertIs(fn.__globals__[alias], bound)
-                    self.assertEqual(cnt.frame_count, 0)
                     self.assertNotIn(name, _import_source_cache)
-                    del fn.__globals__[alias]
-                    self.assertEqual(fn(*args), skipped(*args))
-                    self.assertEqual(cnt.frame_count, 0)
-                    self.assertNotIn(alias, fn.__globals__)
-                    torch._dynamo.reset()
-                    self.assertEqual(fn(*args), skipped(*args))
-                    self.assertEqual(cnt.frame_count, 1)
-                    self.assertIs(fn.__globals__[alias], module)
-                    self.assertIs(_import_source_cache[name], module)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
             _import_source_cache.pop(name, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_graph_break_is_cached_until_reset(self):
+        # Without fullgraph the import is the frame's first work, so there is
+        # no checkpoint to compile up to and the whole frame is skipped -- and
+        # stays skipped, the alias left alone, after the global is removed:
+        # nothing guards it, so only torch._dynamo.reset() makes Dynamo trace
+        # the frame again, as the registry entry's third hint says. The refusal
+        # does not remember the name in _import_source_cache; the compile that
+        # binds the alias does, which is why the pop in finally stays.
+        name = "torch_test_package_import_alias_cached"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
+
+        def fn(x):
+            import torch_test_package_import_alias_cached as taken
+
+            return x + taken.VALUE
+
+        args = (torch.randn(3, 2),)
+        try:
+            sys.modules[name] = module
+            fn.__globals__[alias] = "not a module"
+            cnt = CompileCounter()
+            skipped = torch.compile(fn, backend=cnt)
+            self.assertEqual(fn(*args), skipped(*args))
+            self.assertEqual(cnt.frame_count, 0)
+            self.assertEqual(fn.__globals__[alias], "not a module")
+            self.assertNotIn(name, _import_source_cache)
+            del fn.__globals__[alias]
+            self.assertEqual(fn(*args), skipped(*args))
+            self.assertEqual(cnt.frame_count, 0)
+            self.assertNotIn(alias, fn.__globals__)
+            torch._dynamo.reset()
+            self.assertEqual(fn(*args), skipped(*args))
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertIs(fn.__globals__[alias], module)
+            self.assertIs(_import_source_cache[name], module)
+        finally:
+            sys.modules.pop(name, None)
+            _import_source_cache.pop(name, None)
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    @torch._dynamo.config.patch(record_runtime_overhead=True)
+    def test_import_alias_taken_at_codegen_skips_the_frame(self):
+        # import_source is also called after tracing, from codegen: with
+        # record_runtime_overhead on, make_call_generated_code resolves
+        # torch.autograd.profiler for the pregraph marker. An Unsupported
+        # raised there has no instruction to break the graph at, so under
+        # fullgraph it surfaces as-is and otherwise the frame is skipped to
+        # eager once the backend has already run -- the same outcome as any
+        # unimplemented() raised during reconstruction. The slot stays as it
+        # was either way.
+        alias = "__import_torch_dot_autograd_dot_profiler"
+        missing = object()
+
+        def fn(x):
+            return x + 1
+
+        ran = []
+
+        def backend(gm, example_inputs):
+            def compiled(*args):
+                ran.append(gm)
+                return gm(*args)
+
+            return compiled
+
+        args = (torch.randn(3, 2),)
+        saved = fn.__globals__.get(alias, missing)
+        try:
+            torch._dynamo.reset()
+            fn.__globals__[alias] = "not a module"
+            refused = f"alias {alias} for torch.autograd.profiler.*bound to a str"
+            with self.assertRaisesRegex(Unsupported, refused):
+                torch.compile(fn, backend=backend, fullgraph=True)(*args)
+            self.assertEqual(ran, [])
+            torch._dynamo.reset()
+            compiled_fn = torch.compile(fn, backend=backend)
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertEqual(ran, [])
+            self.assertEqual(fn.__globals__[alias], "not a module")
+        finally:
+            if saved is missing:
+                fn.__globals__.pop(alias, None)
+            else:
+                fn.__globals__[alias] = saved
             torch._dynamo.reset()
 
     def test_import_alias_the_trace_refused_is_not_recorded_for_install(self):
@@ -1981,7 +2061,7 @@ def add(x, y):
         seen = []
 
         def resolve(ctx):
-            tx = InstructionTranslator.current_tx()
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
             try:
                 source = tx.import_source(key)
             finally:
@@ -1999,6 +2079,7 @@ def add(x, y):
             refused = f"alias {alias} for {key}.*bound to a module in the globals"
             with self.assertRaisesRegex(Unsupported, refused):
                 torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertEqual(len(seen), 1)
             (recorded,) = seen
             self.assertIs(fn.__globals__[alias], nameless)
             self.assertNotIn(alias, recorded)
@@ -2008,6 +2089,7 @@ def add(x, y):
             fn.__globals__[alias] = types.ModuleType(key)
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(fn(*args), compiled_fn(*args))
+            self.assertEqual(len(seen), 2)
             recorded, source = seen
             self.assertEqual(source.global_name, alias)
             self.assertIs(fn.__globals__[alias], value)

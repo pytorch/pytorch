@@ -1955,8 +1955,11 @@ class AOTCompiledModel:
         tried_forward = False
         # An opted-out result is reported at all only because a raise vetoed the
         # last resort above; without one it is served and there is no report.
+        # One read, before check_verbose runs user code that could opt a result
+        # out under the loop: the entries and the raiser they name must agree.
+        enabled = [result._guard_check_enabled for result in results]
         raiser = next(
-            (i for i in raised if results[i]._guard_check_enabled),
+            (i for i in raised if enabled[i]),
             None,
         )
         # An entry that answered in either dispatch pass rejected this call, so a
@@ -1965,7 +1968,7 @@ class AOTCompiledModel:
         trusted_rejection = any(results[i]._guard_check_enabled for i in trusted)
         withheld = False
         for i, result in enumerate(results):
-            if not result._guard_check_enabled:
+            if not enabled[i]:
                 # Nobody asked about this result's guards, so quoting them -- a
                 # raise out of them included -- would name the wrong thing, and no
                 # ModelInput covers what kept it from serving: the raise above.
@@ -2059,16 +2062,14 @@ class AOTCompiledModel:
                 # these, and the chain carries the first raise of all. Bracketed
                 # as on the entry line and joined with a semicolon: the quoted
                 # text is arbitrary user text that may hold commas, and
-                # _raise_text has a parenthetical of its own. `- trusted` is
-                # what makes raised[i] safe to read without the gate above: an
-                # answered entry outside `trusted` raised before it rejected.
-                # Under that gate every trusted entry is opted out, so the
-                # enabled filter alone already drops them; it is there for the
-                # opted-out entries that raised and then rejected, whose guards
-                # nobody asked about and whose withheld line blames the raiser.
+                # _raise_text has a parenthetical of its own. Enabled only:
+                # nobody asked about an opted-out tree's guards, and its withheld
+                # line already blames the raiser. Under the gate above no trusted
+                # entry is enabled, so raised[i] is populated for every entry
+                # here, by the recording in accepts().
                 untrusted = [
                     f"[{i}] <{_raise_text(raised[i])}>"
-                    for i in sorted(answered - trusted)
+                    for i in sorted(answered)
                     if results[i]._guard_check_enabled
                 ]
                 plural = "s" if len(untrusted) > 1 else ""
@@ -2120,7 +2121,11 @@ class AOTCompiledModel:
         key -- which are re-taken from that live dict on every call. So a value
         the graph reads live is one a passing guard certifies, every other global
         is the one it was traced with, and a guarded global the live dict lacks
-        fails the guard rather than falling back to the serialized value.
+        fails the guard rather than falling back to the serialized value. The
+        re-take writes into the artifact's own ``fn.__globals__``, which every
+        call of it shares, so two threads serving one loaded model while either
+        rebinds a guarded global race on that dict, with or without the GIL; a
+        caller who needs isolation loads once per thread.
         Rebinding a guarded global after the load is therefore what the graph
         computes with once the guards accept it, and the certification is only as
         strong as the guard's type: a kept ``TENSOR_MATCH`` accepts a same-metadata
