@@ -83,21 +83,32 @@ if(WIN32 AND BUILD_PYTHON)
 
   # CUDA runtime DLLs - only for CUDA builds.
   if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
-    # CUDA 13+ moves DLLs to bin/x64.
-    if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
-      set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/x64")
+    # CUDA 13+ moves DLLs to an architecture-specific bin directory.
+    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
+      set(_cuda_windows_arch "arm64")
+    else()
+      set(_cuda_windows_arch "x64")
+    endif()
+
+    if(IS_DIRECTORY "${CUDA_TOOLKIT_ROOT_DIR}/bin/${_cuda_windows_arch}")
+      set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/${_cuda_windows_arch}")
     else()
       set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin")
     endif()
     # CUPTI and its nvperf helper are not where they used to be. Through 13.2
     # they ship under extras/CUPTI/lib64; 13.4 drops that tree and puts them
-    # beside the other runtime DLLs, so search both and take whichever exists.
+    # beside the other runtime DLLs, and Windows Arm64 uses
+    # extras/CUPTI/lib/<arch>. Search all of them and take whichever exists.
     # The filenames are unchanged (13.4's is cupti64_2026.1.1.dll, which the
     # same glob matches) -- only the directory moved.
     set(_cupti_dirs
       "${_cuda_bin}"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_windows_arch}"
     )
+    # lib64 is the legacy x64-only tree: on Arm64 it holds x64 binaries.
+    if(NOT _cuda_windows_arch STREQUAL "arm64")
+      list(APPEND _cupti_dirs "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64")
+    endif()
     set(_cupti_patterns "")
     set(_nvperf_patterns "")
     foreach(_dir ${_cupti_dirs})
