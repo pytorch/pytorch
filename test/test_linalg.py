@@ -194,6 +194,138 @@ class _TestLinalgMixin:
         torch.linalg.solve_triangular(A, B, upper=upper, left=left, unitriangular=uni, out=out)
         self.assertEqual(X, out)
 
+    def check_single_matmul(self, x, y):
+
+        def assertEqual(answer, expected):
+            if x.dtype.is_floating_point or x.dtype.is_complex:
+                k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
+                self.assertEqual(answer, expected,
+                                 msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
+                                 atol=k * 5e-5,
+                                 rtol=1e-4)
+            else:
+                self.assertEqual(answer, expected, msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}")
+
+        # test x @ y
+        expected = np.matmul(x.cpu(), y.cpu())
+        ans = torch.matmul(x, y)
+        self.assertTrue(ans.is_contiguous())
+        assertEqual(ans, expected)
+
+        # test out
+        out = torch.empty_like(ans)
+        ans = torch.matmul(x, y, out=out)
+        self.assertIs(ans, out)
+        self.assertTrue(ans.is_contiguous())
+        assertEqual(ans, expected)
+
+    def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=4, batch_size=3):
+        """
+        Generates sequences of tuples (x, y) of with size(x) = x_dim and
+        size(y) <= y_dim that are compatible wrt. matmul
+        """
+        if x_dim < 1:
+            raise AssertionError(f"x_dim should be >= 1, got {x_dim}")
+        if y_dim < 2:
+            raise AssertionError(f"y_dim should be >= 2, got {y_dim}")
+        x = x_dim
+        for y in range(1, y_dim + 1):
+            for batch, mn in product(product(range(batch_size), repeat=max(x - 2, y - 2, 0)),
+                                     product(range(matrix_size), repeat=min(y, 2))):
+                if x == 1:
+                    size_x = mn[:1]
+                    size_y = batch + mn
+                    yield size_x, size_y
+                else:
+                    for k in range(matrix_size):
+                        size_x = (k,) + mn[:1]
+                        if x > 2:
+                            size_x = batch[-(x - 2):] + size_x
+                        size_y = mn
+                        if y > 2:
+                            size_y = batch[-(y - 2):] + size_y
+                        yield size_x, size_y
+
+    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
+                     "Scipy not found or older than 1.4.1")
+    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
+        dtype = t.dtype
+        numpy_dtype = dtype
+        if dtype in {torch.bfloat16, torch.half}:
+            numpy_dtype = torch.float
+        if dtype.is_complex:
+            alpha = 0.9 + 0.3j if alpha is None else alpha
+            beta = 0.5 + 0.6j if beta is None else beta
+        else:
+            alpha = 1.2 if alpha is None else alpha
+            beta = 0.8 if beta is None else beta
+        if activation == "gelu":
+            res1 = f(t, m, v, alpha=alpha, beta=beta, use_gelu=True)
+        else:
+            res1 = f(t, m, v, alpha=alpha, beta=beta)
+        res2 = torch.full_like(res1, math.nan)
+        if transpose_out:
+            res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
+        if activation == "gelu":
+            f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
+        else:
+            f(t, m, v, alpha=alpha, beta=beta, out=res2)
+        res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
+        if beta != 0:
+            res3 += (beta * t).to(numpy_dtype).cpu().numpy()
+        if activation == "relu":
+            res3 = res3 * (res3 > 0)
+        elif activation == "gelu":
+            res3_t = torch.from_numpy(res3).to(dtype)
+            approximate = "tanh" if t.is_cuda else "none"
+            res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
+            res3 = res3_t.to(numpy_dtype).cpu().numpy()
+        else:
+            if activation is not None:
+                raise AssertionError(f"unsupported activation {activation}")
+        res3 = torch.from_numpy(res3).to(dtype)
+        self.assertEqual(res1, res2)
+        self.assertEqual(res1, res3)
+
+    def _test_addmm_impl(self, func, activation, device, dtype):
+        M = torch.randn(10, 25, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
+
+        # vector (or with 1-len dims in shape[:-1])/matrix-shaped bias
+        # and beta=1 result in epilogue fusion in CUDA
+        V = torch.randn(25, device=device).to(dtype)
+        for c in (V, V.unsqueeze(0), M):
+            self._test_addmm_addmv(func, c, m1, m2, beta=1, activation=activation)
+
+        # Test 0-strided
+        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
+        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
+
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), math.nan, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(func, M, m1, m2, beta=0, activation=activation)
+
+        # Test transpose
+        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
+            def maybe_transpose(cond, m):
+                if not cond:
+                    return m
+                return m.t().clone(memory_format=torch.contiguous_format).t()
+
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+
+            for c, beta in itertools.product((M, V, V.unsqueeze(0)), (0, 1)):
+                # beta=1 to test epilogue fusions with either vector or matrix input
+                self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
+
 
 class TestLinalgDevice(TestCase, _TestLinalgMixin):
     def setUp(self):
@@ -4819,31 +4951,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
-    def check_single_matmul(self, x, y):
-
-        def assertEqual(answer, expected):
-            if x.dtype.is_floating_point or x.dtype.is_complex:
-                k = max(x.shape[-1], 1)  # Scale the atol with the size of the matrix
-                self.assertEqual(answer, expected,
-                                 msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
-                                 atol=k * 5e-5,
-                                 rtol=1e-4)
-            else:
-                self.assertEqual(answer, expected, msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}")
-
-        # test x @ y
-        expected = np.matmul(x.cpu(), y.cpu())
-        ans = torch.matmul(x, y)
-        self.assertTrue(ans.is_contiguous())
-        assertEqual(ans, expected)
-
-        # test out
-        out = torch.empty_like(ans)
-        ans = torch.matmul(x, y, out=out)
-        self.assertIs(ans, out)
-        self.assertTrue(ans.is_contiguous())
-        assertEqual(ans, expected)
-
     @onlyCPU
     @dtypes(torch.float)
     @parametrize(
@@ -4874,33 +4981,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         op_names = {event.key for event in prof.key_averages()}
         self.assertIn("aten::mm", op_names)
         self.assertNotIn("aten::bmm", op_names)
-
-    def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=4, batch_size=3):
-        """
-        Generates sequences of tuples (x, y) of with size(x) = x_dim and
-        size(y) <= y_dim that are compatible wrt. matmul
-        """
-        if x_dim < 1:
-            raise AssertionError(f"x_dim should be >= 1, got {x_dim}")
-        if y_dim < 2:
-            raise AssertionError(f"y_dim should be >= 2, got {y_dim}")
-        x = x_dim
-        for y in range(1, y_dim + 1):
-            for batch, mn in product(product(range(batch_size), repeat=max(x - 2, y - 2, 0)),
-                                     product(range(matrix_size), repeat=min(y, 2))):
-                if x == 1:
-                    size_x = mn[:1]
-                    size_y = batch + mn
-                    yield size_x, size_y
-                else:
-                    for k in range(matrix_size):
-                        size_x = (k,) + mn[:1]
-                        if x > 2:
-                            size_x = batch[-(x - 2):] + size_x
-                        size_y = mn
-                        if y > 2:
-                            size_y = batch[-(y - 2):] + size_y
-                        yield size_x, size_y
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
@@ -5789,47 +5869,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         self.assertLess(eq_err, 1e-6)
 
-    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
-                     "Scipy not found or older than 1.4.1")
-    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
-        dtype = t.dtype
-        numpy_dtype = dtype
-        if dtype in {torch.bfloat16, torch.half}:
-            numpy_dtype = torch.float
-        if dtype.is_complex:
-            alpha = 0.9 + 0.3j if alpha is None else alpha
-            beta = 0.5 + 0.6j if beta is None else beta
-        else:
-            alpha = 1.2 if alpha is None else alpha
-            beta = 0.8 if beta is None else beta
-        if activation == "gelu":
-            res1 = f(t, m, v, alpha=alpha, beta=beta, use_gelu=True)
-        else:
-            res1 = f(t, m, v, alpha=alpha, beta=beta)
-        res2 = torch.full_like(res1, math.nan)
-        if transpose_out:
-            res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
-        if activation == "gelu":
-            f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
-        else:
-            f(t, m, v, alpha=alpha, beta=beta, out=res2)
-        res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
-        if beta != 0:
-            res3 += (beta * t).to(numpy_dtype).cpu().numpy()
-        if activation == "relu":
-            res3 = res3 * (res3 > 0)
-        elif activation == "gelu":
-            res3_t = torch.from_numpy(res3).to(dtype)
-            approximate = "tanh" if t.is_cuda else "none"
-            res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
-            res3 = res3_t.to(numpy_dtype).cpu().numpy()
-        else:
-            if activation is not None:
-                raise AssertionError(f"unsupported activation {activation}")
-        res3 = torch.from_numpy(res3).to(dtype)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
-
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 1e-3, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_and_complex_types_and(
@@ -5903,45 +5942,6 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
         for row_major, incx, incy, lda_tail in itertools.product((False, True), (1, 2), (1, 2), (0, 1)):
             _test(row_major, incx, incy, lda_tail)
-
-    def _test_addmm_impl(self, func, activation, device, dtype):
-        M = torch.randn(10, 25, device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
-
-        # vector (or with 1-len dims in shape[:-1])/matrix-shaped bias
-        # and beta=1 result in epilogue fusion in CUDA
-        V = torch.randn(25, device=device).to(dtype)
-        for c in (V, V.unsqueeze(0), M):
-            self._test_addmm_addmv(func, c, m1, m2, beta=1, activation=activation)
-
-        # Test 0-strided
-        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
-        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
-
-        # Test beta=0, M=nan
-        M = torch.full((10, 25), math.nan, device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(func, M, m1, m2, beta=0, activation=activation)
-
-        # Test transpose
-        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
-            def maybe_transpose(cond, m):
-                if not cond:
-                    return m
-                return m.t().clone(memory_format=torch.contiguous_format).t()
-
-            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
-            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
-            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-
-            for c, beta in itertools.product((M, V, V.unsqueeze(0)), (0, 1)):
-                # beta=1 to test epilogue fusions with either vector or matrix input
-                self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
@@ -8670,128 +8670,6 @@ class TestLinalgCudaOnly(TestCase, _TestLinalgMixin):
     def tearDown(self):
         torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
         super().tearDown()
-
-    def check_single_matmul(self, x, y):
-
-        def assertEqual(answer, expected):
-            if x.dtype.is_floating_point or x.dtype.is_complex:
-                k = max(x.shape[-1], 1)
-                self.assertEqual(answer, expected,
-                                 msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}",
-                                 atol=k * 5e-5,
-                                 rtol=1e-4)
-            else:
-                self.assertEqual(answer, expected, msg=lambda msg: f"{msg}\n{x.shape} x {y.shape} = {answer.shape}")
-
-        expected = np.matmul(x.cpu(), y.cpu())
-        ans = torch.matmul(x, y)
-        self.assertTrue(ans.is_contiguous())
-        assertEqual(ans, expected)
-
-        out = torch.empty_like(ans)
-        ans = torch.matmul(x, y, out=out)
-        self.assertIs(ans, out)
-        self.assertTrue(ans.is_contiguous())
-        assertEqual(ans, expected)
-
-    def gen_sizes_matmul(self, x_dim, y_dim=4, matrix_size=4, batch_size=3):
-        """
-        Generates sequences of tuples (x, y) of with size(x) = x_dim and
-        size(y) <= y_dim that are compatible wrt. matmul
-        """
-        if x_dim < 1:
-            raise AssertionError(f"x_dim should be >= 1, got {x_dim}")
-        if y_dim < 2:
-            raise AssertionError(f"y_dim should be >= 2, got {y_dim}")
-        x = x_dim
-        for y in range(1, y_dim + 1):
-            for batch, mn in product(product(range(batch_size), repeat=max(x - 2, y - 2, 0)),
-                                     product(range(matrix_size), repeat=min(y, 2))):
-                if x == 1:
-                    size_x = mn[:1]
-                    size_y = batch + mn
-                    yield size_x, size_y
-                else:
-                    for k in range(matrix_size):
-                        size_x = (k,) + mn[:1]
-                        if x > 2:
-                            size_x = batch[-(x - 2):] + size_x
-                        size_y = mn
-                        if y > 2:
-                            size_y = batch[-(y - 2):] + size_y
-                        yield size_x, size_y
-
-    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
-        dtype = t.dtype
-        numpy_dtype = dtype
-        if dtype in {torch.bfloat16, torch.half}:
-            numpy_dtype = torch.float
-        if dtype.is_complex:
-            alpha = 0.9 + 0.3j if alpha is None else alpha
-            beta = 0.5 + 0.6j if beta is None else beta
-        else:
-            alpha = 1.2 if alpha is None else alpha
-            beta = 0.8 if beta is None else beta
-        if activation == "gelu":
-            res1 = f(t, m, v, alpha=alpha, beta=beta, use_gelu=True)
-        else:
-            res1 = f(t, m, v, alpha=alpha, beta=beta)
-        res2 = torch.full_like(res1, math.nan)
-        if transpose_out:
-            res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
-        if activation == "gelu":
-            f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
-        else:
-            f(t, m, v, alpha=alpha, beta=beta, out=res2)
-        res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
-        if beta != 0:
-            res3 += (beta * t).to(numpy_dtype).cpu().numpy()
-        if activation == "relu":
-            res3 = res3 * (res3 > 0)
-        elif activation == "gelu":
-            res3_t = torch.from_numpy(res3).to(dtype)
-            approximate = "tanh" if t.is_cuda else "none"
-            res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
-            res3 = res3_t.to(numpy_dtype).cpu().numpy()
-        else:
-            if activation is not None:
-                raise AssertionError(f"unsupported activation {activation}")
-        res3 = torch.from_numpy(res3).to(dtype)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
-
-    def _test_addmm_impl(self, func, activation, device, dtype):
-        M = torch.randn(10, 25, device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
-
-        V = torch.randn(25, device=device).to(dtype)
-        for c in (V, V.unsqueeze(0), M):
-            self._test_addmm_addmv(func, c, m1, m2, beta=1, activation=activation)
-
-        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
-        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
-
-        M = torch.full((10, 25), math.nan, device=device).to(dtype)
-        m1 = torch.randn(10, 50, device=device).to(dtype)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(func, M, m1, m2, beta=0, activation=activation)
-
-        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
-            def maybe_transpose(cond, m):
-                if not cond:
-                    return m
-                return m.t().clone(memory_format=torch.contiguous_format).t()
-
-            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
-            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
-            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-
-            for c, beta in itertools.product((M, V, V.unsqueeze(0)), (0, 1)):
-                self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
 
     @contextlib.contextmanager
     def _tunableop_ctx(self):
