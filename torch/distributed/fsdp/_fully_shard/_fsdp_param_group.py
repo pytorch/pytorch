@@ -276,6 +276,15 @@ class FSDPParamGroup:
         floating_params = [
             p for p in self.fsdp_params if p.orig_dtype.is_floating_point
         ]
+        param_dtypes = {
+            p.param_dtype for p in floating_params if p.param_dtype is not None
+        }
+        if len(param_dtypes) > 1:
+            dtypes = ", ".join(sorted(str(dtype) for dtype in param_dtypes))
+            raise NotImplementedError(
+                "FSDP does not support multiple parameter cast dtypes within a "
+                f"parameter group but got: {dtypes}"
+            )
         trainable_params: list[FSDPParam] = [
             p for p in floating_params if p.sharded_param.requires_grad
         ]

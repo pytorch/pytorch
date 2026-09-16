@@ -60,7 +60,7 @@ class TestMixedPrecisionPolicy(TestCase):
         override_param = nn.Parameter(torch.ones(1))
 
         def param_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
-            return torch.float16 if param is override_param else None
+            return torch.float32 if param is override_param else None
 
         def reduce_dtype_fn(param: nn.Parameter) -> torch.dtype | None:
             return torch.float32 if param is override_param else None
@@ -79,7 +79,7 @@ class TestMixedPrecisionPolicy(TestCase):
         )
         self.assertEqual(
             policy._resolve_for_param(override_param),
-            MixedPrecisionPolicy(param_dtype=torch.float16, reduce_dtype=torch.float32),
+            MixedPrecisionPolicy(param_dtype=torch.float32, reduce_dtype=torch.float32),
         )
         self.assertEqual(
             policy._without_dtype_fns(),
@@ -99,6 +99,13 @@ class TestMixedPrecisionPolicy(TestCase):
                 ValueError, "must return a torch.dtype or None"
             ):
                 invalid_policy._resolve_for_param(default_param)
+
+        policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            param_dtype_fn=lambda _: torch.float16,
+        )
+        with self.assertRaisesRegex(ValueError, "parameter's original dtype"):
+            policy._resolve_for_param(default_param)
 
     def test_dtype_fns_are_keyword_only(self):
         self.assertEqual(

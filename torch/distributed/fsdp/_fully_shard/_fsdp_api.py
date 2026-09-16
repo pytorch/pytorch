@@ -59,11 +59,13 @@ class MixedPrecisionPolicy:
         param_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
             Optional per-parameter override for ``param_dtype``. The callable
             is evaluated once for each managed parameter when FSDP is applied.
-            Returning a dtype overrides ``param_dtype`` for that parameter;
-            returning ``None`` uses the default ``param_dtype``. Forward input
-            casting continues to use ``param_dtype``. If parameters within one
-            group resolve to multiple compute dtypes, configure one common
-            effective reduction dtype for the group. (Default: ``None``)
+            Returning the parameter's original dtype preserves that parameter
+            in its original dtype; returning ``None`` or ``param_dtype`` uses
+            the default ``param_dtype``. Other dtypes are not supported.
+            Forward input casting continues to use ``param_dtype``. If
+            parameters within one group resolve to multiple compute dtypes,
+            configure one common effective reduction dtype for the group.
+            (Default: ``None``)
         reduce_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
             Optional per-parameter override for ``reduce_dtype``. The callable
             is evaluated once for each managed parameter when FSDP is applied.
@@ -101,6 +103,13 @@ class MixedPrecisionPolicy:
                     raise ValueError(
                         "param_dtype_fn must return a torch.dtype or None but got "
                         f"{type(param_dtype_override)}"
+                    )
+                if param_dtype_override not in (self.param_dtype, param.dtype):
+                    raise ValueError(
+                        "param_dtype_fn must return None, param_dtype, or the "
+                        "parameter's original dtype but got "
+                        f"{param_dtype_override} for a parameter with dtype "
+                        f"{param.dtype} and param_dtype {self.param_dtype}"
                     )
                 param_dtype = param_dtype_override
         reduce_dtype = self.reduce_dtype
