@@ -1512,10 +1512,13 @@ class AOTCompiledModel:
 
     When no result matches and none opted out, the call raises ``RuntimeError``
     with a report headed ``No AOT compiled graph matched this call``: one line
-    per compiled result quoting the guards that refused it, one ``For [i, j]:``
-    line per distinct missing-global hint naming the entries whose guards failed
-    on a global the process does not define, and the advice to add a
-    ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
+    per compiled result quoting the guards that refused it, or, for a result
+    whose guards accept the call on the report's own evaluation after refusing
+    it in both dispatch passes, a ``<guards rejected this call twice and then
+    accepted it here: ...>`` explanation in place of any guards; one
+    ``For [i, j]:`` line per distinct missing-global hint naming the entries
+    whose guards failed on a global the process does not define; and the advice
+    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
     """
 
     model: torch.nn.Module
@@ -1599,6 +1602,12 @@ class AOTCompiledModel:
         hinted: dict[str, list[int]] = {}
         for i, result in enumerate(results):
             reason = result._live_guard_manager().check_verbose(bound[i])
+            if reason.result:
+                lines.append(
+                    f"  [{i}] <guards rejected this call twice and then accepted "
+                    "it here: a guard that does not answer consistently>"
+                )
+                continue
             parts = reason.verbose_code_parts
             if any(map(_names_a_missing_global, parts)):
                 hinted.setdefault(result._missing_global_hint(), []).append(i)

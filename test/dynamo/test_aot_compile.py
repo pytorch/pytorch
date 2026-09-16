@@ -2160,7 +2160,7 @@ from user code:
         self.addCleanup(g.pop, probe, None)
         del g[name]
         g[probe] = saved
-        return saved
+        return probe, saved
 
     def test_module_dispatch_evaluates_a_matching_tree_once(self):
         # The scan calls the matching result's declared `fn` field rather than the
@@ -2426,7 +2426,7 @@ from user code:
         # the next lookup, so the scan rejects [1] and the re-check accepts it:
         # the call is served [1]'s graph at the cost of one more check() of its
         # tree.
-        saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
+        _, saved = self._install_global_probe("AOT_BRANCH_SCALE", misses=1)
         manager = model.forward.compiled_results[1]._artifacts.guard_manager
         with patch.object(manager, "check", wraps=manager.check) as check:
             out = model(x, 1)
@@ -2669,6 +2669,33 @@ from user code:
         self.assertFalse(loaded._binds_alike(tuple(loaded.compiled_results)))
         for x in xs:
             self.assertEqual(loaded(x), x * 3)
+
+    def test_no_match_message_when_a_guard_answers_inconsistently(self):
+        # Both dispatch passes ran [1]'s whole tree and both rejected the call,
+        # so an accept while the report asks why contradicts them rather than
+        # correcting them: neither the guards it just passed nor "add a
+        # ModelInput" says anything true about that entry.
+        model, x = self._aot_compile_mode_branches()
+        probe, _ = self._install_global_probe("AOT_BRANCH_SCALE", misses=2)
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, 1)
+        message = str(ctx.exception)
+        # Two rejections in dispatch, then the report's accept: one lookup per
+        # evaluation, since one accessor is rooted at the global and the dict-tag
+        # fast path that would skip it is off -- the probe's pop/insert bumped
+        # this module dict's version past the one the last accept recorded.
+        self.assertEqual(probe.compares, 3)
+        self.assertIn(
+            "  [1] <guards rejected this call twice and then accepted it here: a guard that does not answer consistently>",
+            message,
+        )
+        # One entry line per result: the explanation is all [1] contributes, so
+        # no blank "  [1] " line follows it from an accept's empty verbose parts.
+        entries = [line for line in message.splitlines() if line.startswith("  [")]
+        self.assertEqual(len(entries), 2)
+        # [0] is a real mismatch, so its advice still applies to the call.
+        self.assertIn("[0] L['mode'] == 0", message)
+        self.assertIn("Add a ModelInput", message)
 
     def test_no_match_report_names_the_results_the_dispatch_judged(self):
         # compiled_results is public, and the report indexes the binding the
