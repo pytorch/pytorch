@@ -19,6 +19,7 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
+from torch.distributed.pipelining._recv_buffers import _RecvInfo
 from torch.distributed.pipelining._utils import (
     _TensorMeta,
     generate_stage_to_rank_mapping,
@@ -51,11 +52,7 @@ from torch.distributed.pipelining.schedules import (
     UNSHARD,
     W,
 )
-from torch.distributed.pipelining.stage import (
-    _PipelineStageBase,
-    _RecvInfo,
-    PipelineStage,
-)
+from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
@@ -187,6 +184,22 @@ class ScheduleTest(TestCase):
             missing_grad.allocate_buffer(stage.device)
         with self.assertRaisesRegex(PipeliningMetadataError, "expects no gradient"):
             missing_grad.set_buffer(torch.ones(2))
+
+        valid_before_invalid = _RecvInfo(
+            "valid", source=0, tensor_meta=_TensorMeta.from_tensor(torch.ones(2))
+        )
+        invalid_source = _RecvInfo(
+            "invalid", source=None, tensor_meta=_TensorMeta.from_tensor(torch.ones(2))
+        )
+        with (
+            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
+            self.assertRaisesRegex(AssertionError, "info.source"),
+        ):
+            stage._get_recv_ops(
+                (valid_before_invalid, invalid_source), stage._downstream_group
+            )
+        self.assertIsNone(valid_before_invalid.buffer)
+        self.assertIsNone(invalid_source.buffer)
 
     def test_get_schedule_class(self):
         # List of all expected schedule names

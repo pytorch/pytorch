@@ -50,6 +50,7 @@ from ._backward import (
     stage_backward_weight,
 )
 from ._debug import map_debug_info
+from ._recv_buffers import _RecvInfo
 
 
 __all__ = [
@@ -63,12 +64,6 @@ _PIPELINE_STAGE_INDEX_KEY = "pipeline_stage_index"
 _PIPELINE_MICROBATCH_INDEX_KEY = "pipeline_microbatch_index"
 _PIPELINE_METADATA_KEYS = frozenset(
     (_PIPELINE_STAGE_INDEX_KEY, _PIPELINE_MICROBATCH_INDEX_KEY)
-)
-_INCOMPLETE_RECV_BUFFER_ERROR = (
-    "Receive buffer for {input_name!r} is still owned by an incomplete pipeline "
-    "step; in-flight P2P work may still write to it. Call "
-    "dist.destroy_process_group() before constructing a new schedule; recreating "
-    "the schedule alone does not make the storage safe to reuse"
 )
 
 
@@ -103,79 +98,6 @@ def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
     # `act_send_info`
     output_tuple = output if type(output) is tuple else (output,)
     return output_tuple
-
-
-class _RecvInfo:
-    """Input tensor descriptor for a pipeline stage.
-
-    Handles both received activations from a previous stage
-    (``is_root_arg=False``) and root-level model inputs provided
-    by the user (``is_root_arg=True``).
-    """
-
-    def __init__(
-        self,
-        input_name: str,
-        source: int | None,
-        tensor_meta: TensorMeta | None,
-        *,
-        is_root_arg: bool = False,
-    ):
-        # Name of this input
-        self.input_name = input_name
-        # Stage index of the source of this input (None for root args)
-        self.source = source
-        # Allocated immediately before recv and consumed by microbatch compute
-        self.buffer: torch.Tensor | None = None
-        # Tensor metadata for validation and DTensor reconstruction
-        self.tensor_meta = tensor_meta
-        # Whether this is a root-level model input (no recv needed)
-        self.is_root_arg = is_root_arg
-
-    def allocate_buffer(self, device: torch.device | str) -> torch.Tensor:
-        if self.tensor_meta is None:
-            raise PipeliningMetadataError(
-                f"Receive '{self.input_name}' has no tensor metadata to allocate from"
-            )
-        if self.buffer is not None:
-            raise PipeliningMetadataError(
-                _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=self.input_name)
-            )
-        self.buffer = _make_tensor_from_meta(self.tensor_meta, device)
-        return self.buffer
-
-    def set_buffer(self, buffer: torch.Tensor) -> None:
-        if self.tensor_meta is None:
-            raise PipeliningMetadataError(
-                f"Receive '{self.input_name}' expects no gradient because its "
-                "tensor metadata is None, but a gradient tensor was provided"
-            )
-        if self.buffer is not None:
-            raise PipeliningMetadataError(
-                _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=self.input_name)
-            )
-        self.buffer = buffer
-
-    def take_buffer(self) -> torch.Tensor:
-        if self.buffer is None:
-            raise PipeliningMetadataError(
-                f"Receive buffer for '{self.input_name}' has not been set"
-            )
-        buffer = self.buffer
-        # Consumption transfers storage ownership to compute/autograd.
-        self.buffer = None
-        return buffer
-
-    def __repr__(self):
-        if self.is_root_arg:
-            return f"_RecvInfo(input={self.input_name}, root_arg=True)"
-        meta_type = type(self.tensor_meta).__name__ if self.tensor_meta else "None"
-        shape = self.tensor_meta.shape if self.tensor_meta is not None else "None"
-        buffer_state = "allocated" if self.buffer is not None else "unallocated"
-        return (
-            f"_RecvInfo(input={self.input_name}, source={self.source}, "
-            f"shape={shape}, meta={meta_type}, buffer={buffer_state})"
-        )
 
 
 # Cache of per-direction P2P communicators, keyed (weakly) by the PP process
@@ -503,24 +425,21 @@ class _PipelineStageBase(ABC):
         recv_infos: tuple[_RecvInfo, ...],
         group: dist.ProcessGroup | None,
     ) -> list[dist.P2POp]:
-        """
-        Helper function shared by `get_fwd_recv_ops` and `get_bwd_recv_ops`.
-        Returns a list of ops that correspond to the recv infos. ``group`` is the
-        direction-specific communicator (downstream vs upstream); it equals
-        ``self.group`` unless per-direction P2P is enabled.
-        """
-        ops: list[dist.P2POp] = []
+        """Validate all peers, then allocate and construct receive operations."""
+        peer_ranks: list[int | None] = []
         for info in recv_infos:
-            if info.is_root_arg:
-                # Root args don't need recv operations
+            if info.is_root_arg or info.tensor_meta is None:
+                peer_ranks.append(None)
                 continue
-            if info.tensor_meta is None:
-                # A missing gradient has no payload to receive.
-                continue
-            buffer = info.allocate_buffer(self.device)
             if info.source is None:
                 raise AssertionError("expected info.source to be not None")
-            peer_global_rank = self._resolve_peer_global_rank(info.source)
+            peer_ranks.append(self._resolve_peer_global_rank(info.source))
+
+        ops: list[dist.P2POp] = []
+        for info, peer_global_rank in zip(recv_infos, peer_ranks, strict=True):
+            if peer_global_rank is None:
+                continue
+            buffer = info.allocate_buffer(self.device)
             ops.append(dist.P2POp(dist.irecv, buffer, peer_global_rank, group))
 
         return ops
@@ -1007,17 +926,17 @@ class _PipelineStageBase(ABC):
         user_kwargs = kwargs or {}
         composite_kwargs = user_kwargs
         if self._pass_pipeline_metadata:
-            metadata = {
-                _PIPELINE_STAGE_INDEX_KEY: self.stage_index,
-                _PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
-            }
             collisions = _PIPELINE_METADATA_KEYS & user_kwargs.keys()
             if collisions:
                 names = ", ".join(sorted(collisions))
                 raise ValueError(
                     f"pass_pipeline_metadata reserves forward kwarg name(s): {names}"
                 )
-            composite_kwargs = {**user_kwargs, **metadata}
+            composite_kwargs = {
+                **user_kwargs,
+                _PIPELINE_STAGE_INDEX_KEY: self.stage_index,
+                _PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
+            }
 
         if self._runtime_validate:
             self._validate_stage_tensors(
@@ -1806,10 +1725,14 @@ class PipelineStage(_PipelineStageBase):
         pass_pipeline_metadata: Pass ``pipeline_stage_index`` and
             ``pipeline_microbatch_index`` to each forward. The values are the
             global logical stage index and the global microbatch index within
-            the current step. This requires complete static metadata across the
-            schedule. The wrapped module may accept the reserved keywords
-            directly or consume them in a ``with_kwargs`` forward pre-hook.
-            Compiled modules may specialize on these Python integer values.
+            current training or evaluation step. This requires complete static
+            metadata across the schedule. The wrapped module may accept the
+            reserved keywords directly or consume them in a ``with_kwargs``
+            forward pre-hook. Training with DTensor inputs also requires static
+            ``input_grads`` and ``output_grads`` metadata even when forward-only
+            evaluation succeeds without it. Compiled modules receive Python
+            integers and may recompile for each distinct value if the forward
+            uses them in control flow or shape computations.
     """
 
     def __init__(
@@ -1917,7 +1840,7 @@ class PipelineStage(_PipelineStageBase):
 
         Args:
             has_backward: Whether the schedule includes a backward pass.
-            received_acc: Accumulated product tensor from the previous
+            received_acc: Two-element accumulated vote from the previous
                 same-rank stage (V-schedule), or ``None`` for the first
                 stage / cross-rank.
 
@@ -1957,7 +1880,7 @@ class PipelineStage(_PipelineStageBase):
     ) -> torch.Tensor:
         """Backward phase of the warm-up vote protocol (stage N−1 → 0).
 
-        Propagates the final accumulated product (computed in the forward
+        Propagates the final two-element vote (computed in the forward
         phase) back through the pipeline so every stage learns the global
         inference mode.
 
@@ -2419,10 +2342,9 @@ class PipelineStage(_PipelineStageBase):
 
         if self._inference_mode == InferenceMode.DYNAMIC:
             if self._pass_pipeline_metadata:
-                raise PipeliningMetadataError(
-                    "pass_pipeline_metadata requires complete static metadata: "
-                    "provide input_args and output_args for every stage, plus "
-                    "input_grads and output_grads for DTensors with backward"
+                raise AssertionError(
+                    "the schedule-wide warm-up vote must reject dynamic metadata "
+                    "inference when pass_pipeline_metadata is enabled"
                 )
             # DYNAMIC mode: run forward metadata inference
             # args may be _StageForwardMeta for same-rank V-schedule stages

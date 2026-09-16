@@ -22,6 +22,7 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
+from ._recv_buffers import _RecvInfo
 from ._utils import (
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
@@ -34,7 +35,7 @@ from .microbatch import (
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
-from .stage import _PipelineStageBase, _RecvInfo, PipelineStage
+from .stage import _PipelineStageBase, PipelineStage
 
 
 __all__ = [
@@ -402,7 +403,9 @@ class _PipelineSchedule(ABC):
                 result = stage._warmup_backward_result(received_result=result)
             if result is None:
                 raise RuntimeError("P2P warm-up voting failed")
-            supports_static, permits_dynamic = (bool(value.item()) for value in result)
+            supports_static_value, permits_dynamic_value = result.tolist()
+            supports_static = bool(supports_static_value)
+            permits_dynamic = bool(permits_dynamic_value)
             if not supports_static and not permits_dynamic:
                 raise PipeliningMetadataError(
                     "pass_pipeline_metadata requires complete static metadata "
