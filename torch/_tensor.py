@@ -1146,7 +1146,14 @@ class Tensor(torch._C.TensorBase):
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0 and not self.is_meta and type(self) is Tensor:
+        # A cpp fake tensor's exact type is Tensor, so it needs its own check to
+        # stay out of the .item() path below.
+        if (
+            self.dim() == 0
+            and not self.is_meta
+            and type(self) is Tensor
+            and not torch._C._is_fake_tensor(self)
+        ):
             # Use detach() here to avoid the warning when converting a scalar Tensor that
             # requires gradients to a python number. It is ok for formatting.
             return self.detach().item().__format__(format_spec)

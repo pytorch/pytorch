@@ -113,6 +113,7 @@ from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
+    is_fake,
     TensorMetadata,
 )
 from torch._utils_internal import log_cache_bypass
@@ -711,7 +712,7 @@ class FxGraphCachePickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: functools.partial(self._reduce_fake_tensor),
+                FakeTensor: functools.partial(self._reduce_tensor),
                 torch.Tensor: functools.partial(self._reduce_tensor),
                 torch.nn.parameter.Parameter: functools.partial(self._reduce_tensor),
                 torch.SymInt: functools.partial(self._reduce_symint),
@@ -795,9 +796,18 @@ class FxGraphCachePickler(pickle.Pickler):
         self, t: Tensor
     ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
         """
-        Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
-        stored as attributes on the GraphModule.
+        Route fake tensors to metadata-only serialization and real tensors to
+        constant serialization.
         """
+        if is_fake(t):
+            return self._reduce_fake_tensor(t)
+
+        return self._reduce_constant_tensor(t)
+
+    def _reduce_constant_tensor(
+        self, t: Tensor
+    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
+        """Serialize a real tensor constant stored on the GraphModule."""
         from .graph import GraphLowering
 
         if t.is_mkldnn:
