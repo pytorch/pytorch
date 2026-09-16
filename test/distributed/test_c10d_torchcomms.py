@@ -260,10 +260,11 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     def test_new_group_bare_default_backend_is_auto_qualified(self):
-        if self._requires_cuda():
+        if self.device_type == "cpu":
             return
         ranks = list(range(self.world_size))
-        ng = dist.new_group(ranks=ranks, backend="nccl")
+        backend = dist.get_default_backend_for_device(self.device_type)
+        ng = dist.new_group(ranks=ranks, backend=backend)
         tensor = torch.tensor([self._rank_value], dtype=torch.float32)
         dist.all_reduce(tensor, group=ng)
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
