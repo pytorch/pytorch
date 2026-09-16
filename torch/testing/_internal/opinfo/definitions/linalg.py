@@ -593,7 +593,13 @@ def np_vander_batched(x, N=None):
 
 
 def sample_inputs_linalg_cholesky_inverse(
-    op_info, device, dtype, requires_grad=False, **kwargs
+    op_info,
+    device,
+    dtype,
+    requires_grad=False,
+    *,
+    include_nontrivial_factors=True,
+    **kwargs,
 ):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
 
@@ -613,7 +619,20 @@ def sample_inputs_linalg_cholesky_inverse(
         single_pd,
         batch_pd,
     )
-    test_cases = (torch.linalg.cholesky(a, upper=False) for a in inputs)
+    test_cases = [torch.linalg.cholesky(a, upper=False) for a in inputs]
+    if include_nontrivial_factors:
+        nontrivial_factor = torch.tensor(
+            [[2.0, 0.0, 0.0], [0.5, 1.5, 0.0], [-0.25, 0.75, 1.25]],
+            dtype=dtype,
+            device=device,
+        )
+        if dtype.is_complex:
+            nontrivial_factor = nontrivial_factor + 1j * torch.tensor(
+                [[0.0, 0.0, 0.0], [0.25, 0.0, 0.0], [-0.5, 0.125, 0.0]],
+                dtype=dtype,
+                device=device,
+            )
+        test_cases.append(nontrivial_factor)
     for l in test_cases:
         # generated lower-triangular samples
         l.requires_grad = requires_grad

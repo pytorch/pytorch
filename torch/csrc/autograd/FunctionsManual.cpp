@@ -2327,7 +2327,9 @@ Tensor cholesky_inverse_backward(
 
 // If X = (L L^H)^{-1} with L lower-triangular with a real positive diagonal,
 // then dX = -X (dL L^H + L dL^H) X = K + K^H, where
-// K = -X dL L^H X.
+// K = -X dL L^{-1}
+//   = -X dL L^H (L^{-H} L^{-1})
+//   = -X dL L^H X.
 // If X = (U^H U)^{-1} with U upper-triangular with a real positive diagonal,
 // then K becomes
 // K = -X dU^H U X.

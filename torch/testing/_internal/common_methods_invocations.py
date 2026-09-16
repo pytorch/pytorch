@@ -6516,7 +6516,13 @@ def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     cholesky_inverse_samples = sample_inputs_linalg_cholesky_inverse(
-        op_info, device, dtype, requires_grad=False
+        op_info,
+        device,
+        dtype,
+        requires_grad=False,
+        # TODO: Enable nontrivial factors after fixing cholesky_solve's factor
+        # derivative for non-diagonal inputs.
+        include_nontrivial_factors=False,
     )
 
     for sample in cholesky_inverse_samples:
