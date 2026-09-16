@@ -24,6 +24,8 @@ from .gemm_gfx950 import (
     make_wave_lds_ptr,
     mxfp_scale_stage_bytes,
     MXFP_SCALE_BLOCK_K,
+    MXFP8_HTI_SCALE_BUFFERS,
+    MXFP8_HTI_SCALE_CHUNK_TILES,
 )
 
 
@@ -511,6 +513,9 @@ def gemm_mxfp_hti_gfx950_kernel(
     has_k_tail = param.has_k_tail
     block_threads = param.block_threads
     n_waves = param.n_waves
+    use_scale_chunk = block_k == 128
+    scale_chunk_tiles = MXFP8_HTI_SCALE_CHUNK_TILES if const_expr(use_scale_chunk) else 1
+    scale_stages = MXFP8_HTI_SCALE_BUFFERS if const_expr(use_scale_chunk) else stages
     scale_k = param.scale_row_bytes
     scale_a_stage_bytes = param.scale_a_bytes
     scale_b_stage_bytes = param.scale_b_bytes
@@ -536,8 +541,8 @@ def gemm_mxfp_hti_gfx950_kernel(
     class SharedABStorage:
         a: fx.Array[elem_dtype, stages * block_m * block_k, 16]
         b: fx.Array[elem_dtype, stages * block_n * block_k, 16]
-        sa: fx.Array[fx.Uint8, stages * 2 * scale_a_stage_bytes, 16]
-        sb: fx.Array[fx.Uint8, stages * 2 * scale_b_stage_bytes, 16]
+        sa: fx.Array[fx.Uint8, scale_stages * 2 * scale_a_stage_bytes, 16]
+        sb: fx.Array[fx.Uint8, scale_stages * 2 * scale_b_stage_bytes, 16]
 
     @fx.union
     class SharedStorage:
@@ -611,19 +616,20 @@ def gemm_mxfp_hti_gfx950_kernel(
             global_outer_offset=block_m_offset + m_part * half_block_m,
             k_tile=k_tile,
         )
-        async_load_mxfp8_scales(
-            scale_a_buf,
-            smem_sa + (stage * 2 + m_part) * scale_a_stage_bytes,
-            tid,
-            block_m_offset + m_part * half_block_m,
-            m,
-            k_tile * block_k,
-            half_block_m,
-            block_k,
-            block_threads,
-            has_k_tail,
-            k,
-        )
+        if const_expr(not use_scale_chunk):
+            async_load_mxfp8_scales(
+                scale_a_buf,
+                smem_sa + (stage * 2 + m_part) * scale_a_stage_bytes,
+                tid,
+                block_m_offset + m_part * half_block_m,
+                m,
+                k_tile * block_k,
+                half_block_m,
+                block_k,
+                block_threads,
+                has_k_tail,
+                k,
+            )
 
     def async_load_b_to_lds(n_part, k_tile, stage):
         async_load_operand(
@@ -632,19 +638,49 @@ def gemm_mxfp_hti_gfx950_kernel(
             global_outer_offset=block_n_offset + n_part * half_block_n,
             k_tile=k_tile,
         )
-        async_load_mxfp8_scales(
-            scale_b_buf,
-            smem_sb + (stage * 2 + n_part) * scale_b_stage_bytes,
-            tid,
-            block_n_offset + n_part * half_block_n,
-            n,
-            k_tile * block_k,
-            half_block_n,
-            block_k,
-            block_threads,
-            has_k_tail,
-            k,
-        )
+        if const_expr(not use_scale_chunk):
+            async_load_mxfp8_scales(
+                scale_b_buf,
+                smem_sb + (stage * 2 + n_part) * scale_b_stage_bytes,
+                tid,
+                block_n_offset + n_part * half_block_n,
+                n,
+                k_tile * block_k,
+                half_block_n,
+                block_k,
+                block_threads,
+                has_k_tail,
+                k,
+            )
+
+    def issue_scale_chunk(k_tile):
+        slot = k_tile // scale_chunk_tiles % MXFP8_HTI_SCALE_BUFFERS
+        for part in range_constexpr(2):
+            async_load_mxfp8_scales(
+                scale_a_buf, smem_sa + (slot * 2 + part) * scale_a_stage_bytes,
+                tid, block_m_offset + part * half_block_m, m,
+                k_tile * block_k, half_block_m, block_k * scale_chunk_tiles,
+                block_threads, True, k,
+            )
+            async_load_mxfp8_scales(
+                scale_b_buf, smem_sb + (slot * 2 + part) * scale_b_stage_bytes,
+                tid, block_n_offset + part * half_block_n, n,
+                k_tile * block_k, half_block_n, block_k * scale_chunk_tiles,
+                block_threads, True, k,
+            )
+
+    def prefetch_scale_chunk(k_tile):
+        if const_expr(use_scale_chunk):
+            if k_tile % scale_chunk_tiles == 0:
+                # Align staggered M-wave groups before recycling a chunk slot.
+                rocdl.sched_barrier(0)
+                if wid // n_waves == 0:
+                    rocdl.s_barrier()
+                __barrier(0)
+                issue_scale_chunk(k_tile + scale_chunk_tiles)
+                if wid // n_waves == 1:
+                    rocdl.s_barrier()
+                rocdl.sched_barrier(0)
 
     def make_gC(m_part, n_part):
         return fx.flat_divide(out_buf, (half_block_m, half_block_n))[
@@ -655,6 +691,26 @@ def gemm_mxfp_hti_gfx950_kernel(
         frag_C = thr_mma.make_fragment_C(make_gC(m_part, n_part))
         frag_C.fill(0.0)
         return frag_C
+
+    def load_scale_fragment(base, stage_bytes, part, stage, rows, waves, wave, k_tile):
+        if const_expr(use_scale_chunk):
+            stage = k_tile // scale_chunk_tiles % MXFP8_HTI_SCALE_BUFFERS
+            offset = k_tile % scale_chunk_tiles * (block_k // MXFP_SCALE_BLOCK_K)
+        else:
+            offset = 0
+        scale_view = fx.make_view(
+            base + (stage * 2 + part) * stage_bytes,
+            fx.make_layout((rows, scale_k), (scale_k, 1)),
+        )
+        repeats = rows // waves // param.mma_m
+        frag = fx.make_rmem_tensor((repeats, block_k // param.mma_k), fx.Int32)
+        lane = tid % GFX950_WAVE_SIZE
+        for ki in range_constexpr(block_k // param.mma_k):
+            for ri in range_constexpr(repeats):
+                row = (ri * waves + wave) * param.mma_m + lane % param.mma_m
+                col = ki * (param.mma_k // MXFP_SCALE_BLOCK_K) + lane // param.mma_m
+                frag[ri, ki] = scale_view[row, offset + col].to(fx.Int32)
+        return frag
 
     def load_a_fragment(m_part, read_stage, k_tile):
         sA = fx.make_view(half_a_base(read_stage, m_part), a_lds_layout)
@@ -676,7 +732,12 @@ def gemm_mxfp_hti_gfx950_kernel(
                     thr_sA_s2r[None, None, block_k_iter],
                     frag_A_retile[None, None, block_k_iter],
                 )
-        return frag_A
+        # Preserve scales with the data before prefetch reuses this LDS half.
+        scales = load_scale_fragment(
+            smem_sa, scale_a_stage_bytes, m_part, read_stage,
+            half_block_m, param.m_waves, wid // n_waves, k_tile,
+        )
+        return frag_A, scales
 
     def load_b_fragment(n_part, read_stage, k_tile):
         sB = fx.make_view(half_b_base(read_stage, n_part), b_lds_layout)
@@ -698,17 +759,15 @@ def gemm_mxfp_hti_gfx950_kernel(
                     thr_sB_s2r[None, None, block_k_iter],
                     frag_B_retile[None, None, block_k_iter],
                 )
-        return frag_B
+        scales = load_scale_fragment(
+            smem_sb, scale_b_stage_bytes, n_part, read_stage,
+            half_block_n, param.n_waves, wid % n_waves, k_tile,
+        )
+        return frag_B, scales
 
-    def consume(k_tile, frag_C, frag_A, frag_B, m_part, n_part, read_stage):
-        scale_a_view = fx.make_view(
-            smem_sa + (read_stage * 2 + m_part) * scale_a_stage_bytes,
-            fx.make_layout((half_block_m, scale_k), (scale_k, 1)),
-        )
-        scale_b_view = fx.make_view(
-            smem_sb + (read_stage * 2 + n_part) * scale_b_stage_bytes,
-            fx.make_layout((half_block_n, scale_k), (scale_k, 1)),
-        )
+    def consume(k_tile, frag_C, frag_A, frag_B):
+        frag_A, scales_a = frag_A
+        frag_B, scales_b = frag_B
         rocdl.sched_barrier(0)
 
         def mma_k_chunk(block_k_iter):
@@ -716,8 +775,8 @@ def gemm_mxfp_hti_gfx950_kernel(
                 frag_C,
                 frag_A[None, None, block_k_iter],
                 frag_B[None, None, block_k_iter],
-                scale_a_view,
-                scale_b_view,
+                scales_a[None, block_k_iter],
+                scales_b[None, block_k_iter],
                 tid,
                 0,
                 0,
@@ -725,6 +784,7 @@ def gemm_mxfp_hti_gfx950_kernel(
                 half_block_m,
                 half_block_n,
                 param,
+                scales_are_fragments=True,
             )
 
         for block_k_iter in range_constexpr(block_k // param.mma_k):
@@ -803,6 +863,10 @@ def gemm_mxfp_hti_gfx950_kernel(
     c10 = make_c_fragment(1, 0)
     c11 = make_c_fragment(1, 1)
 
+    if const_expr(use_scale_chunk):
+        issue_scale_chunk(0)
+        __barrier(0)
+
     async_load_b_to_lds(0, 0, 0)
     async_load_a_to_lds(0, 0, 0)
     async_load_b_to_lds(1, 0, 0)
@@ -819,34 +883,35 @@ def gemm_mxfp_hti_gfx950_kernel(
     __barrier(half_ldg_b_iters + half_ldg_a_iters)
 
     def compute_double_tile(k_tile, prefetch_next):
+        prefetch_scale_chunk(k_tile)
         next_k_tile = k_tile + 2
 
         b0 = load_b_fragment(0, 0, k_tile)
         a0 = load_a_fragment(0, 0, k_tile)
         async_load_a_to_lds(1, k_tile + 1, 1)
         rocdl.s_barrier()
-        consume(k_tile, c00, a0, b0, 0, 0, 0)
+        consume(k_tile, c00, a0, b0)
         rocdl.s_barrier()
 
         b1 = load_b_fragment(1, 0, k_tile)
         if const_expr(prefetch_next):
             async_load_b_to_lds(0, next_k_tile, 0)
             rocdl.s_barrier()
-        consume(k_tile, c01, a0, b1, 0, 1, 0)
+        consume(k_tile, c01, a0, b1)
         rocdl.s_barrier()
 
         a1 = load_a_fragment(1, 0, k_tile)
         if const_expr(prefetch_next):
             async_load_a_to_lds(0, next_k_tile, 0)
             rocdl.s_barrier()
-        consume(k_tile, c10, a1, b0, 1, 0, 0)
+        consume(k_tile, c10, a1, b0)
         rocdl.s_barrier()
 
         b0 = load_b_fragment(0, 1, k_tile + 1)
         if const_expr(prefetch_next):
             async_load_b_to_lds(1, next_k_tile, 0)
             __barrier(2 * half_ldg_b_iters + half_ldg_a_iters)
-        consume(k_tile, c11, a1, b1, 1, 1, 0)
+        consume(k_tile, c11, a1, b1)
         if const_expr(not prefetch_next):
             __waitcnt(0)
         rocdl.s_barrier()
@@ -855,27 +920,27 @@ def gemm_mxfp_hti_gfx950_kernel(
         if const_expr(prefetch_next):
             async_load_a_to_lds(1, next_k_tile, 0)
             rocdl.s_barrier()
-        consume(k_tile + 1, c00, a0, b0, 0, 0, 1)
+        consume(k_tile + 1, c00, a0, b0)
         rocdl.s_barrier()
 
         b1 = load_b_fragment(1, 1, k_tile + 1)
         if const_expr(prefetch_next):
             async_load_b_to_lds(0, next_k_tile + 1, 1)
             rocdl.s_barrier()
-        consume(k_tile + 1, c01, a0, b1, 0, 1, 1)
+        consume(k_tile + 1, c01, a0, b1)
         rocdl.s_barrier()
 
         a1 = load_a_fragment(1, 1, k_tile + 1)
         if const_expr(prefetch_next):
             async_load_a_to_lds(0, next_k_tile + 1, 1)
             rocdl.s_barrier()
-        consume(k_tile + 1, c10, a1, b0, 1, 0, 1)
+        consume(k_tile + 1, c10, a1, b0)
         rocdl.s_barrier()
 
         if const_expr(prefetch_next):
             async_load_b_to_lds(1, next_k_tile + 1, 1)
             __barrier(half_ldg_b_iters + half_ldg_a_iters)
-        consume(k_tile + 1, c11, a1, b1, 1, 1, 1)
+        consume(k_tile + 1, c11, a1, b1)
         rocdl.s_barrier()
 
     final_double_tile = ((k_tiles % 2) == 0).select(k_tiles - 2, k_tiles - 1)

@@ -18,6 +18,8 @@ GFX950_MAX_BLOCK_THREADS = 1024
 # 32-bit buffer_load_lds: four 1-byte E8M0 scales (128 K) per thread.
 GFX950_SCALE_DMA_BYTES = 4
 MXFP_SCALE_BLOCK_K = 32
+MXFP8_HTI_SCALE_CHUNK_TILES = 4
+MXFP8_HTI_SCALE_BUFFERS = 2
 MXFP_MAX_MMA_REPEAT = 8
 _LDS_BANK_PERIOD_LOG2 = 6
 _LDS_READ_B128_BASE = 3
@@ -200,6 +202,7 @@ def make_gemm_gfx950_param(
     scale_a_bytes = 0
     scale_b_bytes = 0
     scale_row_bytes = 0
+    scale_stages = stages
     block_threads = m_waves * n_waves * GFX950_WAVE_SIZE
     if is_mxfp:
         shuffle_m = block_m // 2 if use_half_tile_interleaved else block_m
@@ -215,14 +218,23 @@ def make_gemm_gfx950_param(
                 f"block_m={block_m}, block_n={block_n}, "
                 f"block_threads={block_threads}"
             )
-        scale_row_bytes = block_k // MXFP_SCALE_BLOCK_K
+        use_scale_chunk = (
+            dtype_id == GEMM_DTYPE_MXFP8 and use_half_tile_interleaved and block_k == 128
+        )
+        scale_block_k = block_k
+        if use_scale_chunk:
+            scale_block_k *= MXFP8_HTI_SCALE_CHUNK_TILES
+            scale_stages = MXFP8_HTI_SCALE_BUFFERS
+        scale_row_bytes = scale_block_k // MXFP_SCALE_BLOCK_K
         scale_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
         scale_rows_a = block_m // 2 if use_half_tile_interleaved else block_m
         scale_rows_b = block_n // 2 if use_half_tile_interleaved else block_n
-        scale_a_bytes = mxfp_scale_stage_bytes(scale_rows_a, block_k, block_threads)
-        scale_b_bytes = mxfp_scale_stage_bytes(scale_rows_b, block_k, block_threads)
-        scale_a_iters = scale_a_bytes // scale_bytes_per_pass
-        scale_b_iters = scale_b_bytes // scale_bytes_per_pass
+        scale_a_bytes = mxfp_scale_stage_bytes(scale_rows_a, scale_block_k, block_threads)
+        scale_b_bytes = mxfp_scale_stage_bytes(scale_rows_b, scale_block_k, block_threads)
+        # Chunk DMA is fenced separately from the per-tile A/B loads.
+        if not use_scale_chunk:
+            scale_a_iters = scale_a_bytes // scale_bytes_per_pass
+            scale_b_iters = scale_b_bytes // scale_bytes_per_pass
 
     if block_k_bytes <= 0 or block_k_bytes % GFX950_DMA_BYTES != 0:
         raise ValueError(
@@ -260,7 +272,7 @@ def make_gemm_gfx950_param(
         output_bytes //= 4
     smem_bytes = max(
         stages * (a_stage_bytes + b_stage_bytes)
-        + scale_lds_factor * stages * (scale_a_bytes + scale_b_bytes),
+        + scale_lds_factor * scale_stages * (scale_a_bytes + scale_b_bytes),
         output_bytes,
     )
     smem_capacity = {
