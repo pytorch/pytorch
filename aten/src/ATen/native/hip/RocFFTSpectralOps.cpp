@@ -19,7 +19,6 @@
 #include <ATen/hip/HIPContext.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/hip/RocFFTPlanCache.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/env.h>
 
@@ -55,14 +54,6 @@ RocFFTParamsLRUCache& rocfft_get_plan_cache(DeviceIndex device_index) {
     plan_caches[device_index] = std::make_unique<RocFFTParamsLRUCache>();
   }
   return *plan_caches[device_index];
-}
-
-// rocfft_setup() has to run before any other rocFFT call. There is a matching
-// rocfft_cleanup(), but like the rest of PyTorch we leave device libraries
-// standing at exit rather than racing teardown against live tensors.
-void lazy_init_rocfft() {
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { ROCFFT_CHECK(rocfft_setup()); });
 }
 
 // Distance between batches, in elements. A single batch never indexes by

@@ -1170,6 +1170,9 @@ if(USE_ROCM)
       caffe2_update_option(USE_CUFILE OFF)
     endif()
 
+    # ---[ rocFFT JIT callbacks
+    include(${CMAKE_CURRENT_LIST_DIR}/RocFFTCallbacks.cmake)
+
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
     # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.

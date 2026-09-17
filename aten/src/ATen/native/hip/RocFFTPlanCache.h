@@ -7,7 +7,9 @@
 // under */hip/* is in the ignore list of tools/amd_build/build_amd.py.
 
 #include <ATen/hip/HIPContext.h>
+#include <ATen/native/hip/RocFFTCallbacks.h>
 #include <ATen/native/utils/ParamsHash.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
 
@@ -51,6 +53,14 @@ inline void ROCFFT_CHECK(rocfft_status error) {
   TORCH_CHECK(error == rocfft_status_success, "rocFFT error: ", _rocfftGetErrorEnum(error));
 }
 
+// rocfft_setup() has to run before any other rocFFT call. There is a matching
+// rocfft_cleanup(), but like the rest of PyTorch we leave device libraries
+// standing at exit rather than racing teardown against live tensors.
+inline void lazy_init_rocfft() {
+  static c10::once_flag flag;
+  c10::call_once(flag, [] { ROCFFT_CHECK(rocfft_setup()); });
+}
+
 enum class RocFFTTransformType : int8_t {
   C2C,
   R2C,
@@ -65,17 +75,23 @@ struct RocFFTParams {
   int64_t batch_;
   int64_t in_stride_, in_distance_;
   int64_t out_stride_, out_distance_;
+  // Folded into the transform instead of run as a separate pass over the output.
+  double scale_factor_;
   RocFFTTransformType fft_type_;
   // Unlike cuFFT, a rocFFT plan bakes in the transform direction, so it is part
   // of the key.
   bool forward_;
   ScalarType value_type_;
+  // rocFFT compiles the callback into the plan's kernels, so it keys the cache
+  // too.
+  RocFFTCallbackKind callback_kind_;
 
   RocFFTParams() = default;
 
   RocFFTParams(int64_t signal_size, int64_t batch, int64_t in_stride, int64_t in_distance,
       int64_t out_stride, int64_t out_distance, RocFFTTransformType fft_type, bool forward,
-      ScalarType value_type) {
+      ScalarType value_type, RocFFTCallbackKind callback_kind = RocFFTCallbackKind::None,
+      double scale_factor = 1.0) {
     // Padding bits must be zeroed for hashing
     std::memset(this, 0, sizeof(*this));
     signal_size_ = signal_size;
@@ -84,9 +100,11 @@ struct RocFFTParams {
     in_distance_ = in_distance;
     out_stride_ = out_stride;
     out_distance_ = out_distance;
+    scale_factor_ = scale_factor;
     fft_type_ = fft_type;
     forward_ = forward;
     value_type_ = value_type;
+    callback_kind_ = callback_kind;
   }
 };
 
@@ -156,6 +174,14 @@ class RocFFTConfig {
         /*in_offsets=*/nullptr, /*out_offsets=*/nullptr,
         /*in_strides_size=*/1, in_strides, static_cast<size_t>(params.in_distance_),
         /*out_strides_size=*/1, out_strides, static_cast<size_t>(params.out_distance_)));
+
+    if (params.scale_factor_ != 1.0) {
+      ROCFFT_CHECK(rocfft_plan_description_set_scale_factor(desc, params.scale_factor_));
+    }
+
+    if (params.callback_kind_ != RocFFTCallbackKind::None) {
+      rocfft_register_callback(desc, params.callback_kind_);
+    }
 
     const size_t length = static_cast<size_t>(params.signal_size_);
     ROCFFT_CHECK(rocfft_plan_create(&plan_.get(), rocfft_placement_notinplace, transform_type,
