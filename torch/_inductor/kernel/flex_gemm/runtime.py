@@ -214,6 +214,8 @@ def flex_gemm_epimod(
     indexed_dtypes: tuple[torch.dtype, torch.dtype] | None,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     output_contraction: FlexGemmOutputContraction | None,
+    *,
+    varlen_m: bool,
 ):
     """Build and cache a QuACK TensorSSA EpiMod from FlexGEMM metadata.
 
@@ -228,15 +230,18 @@ def flex_gemm_epimod(
         indexed_dtypes,
         None if local_reduce is None else local_reduce.cache_key,
         output_contraction,
+        varlen_m,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
         return epimod
 
+    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
     op_types = {
+        "scalar": epi_ops.Scalar,
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
@@ -247,11 +252,10 @@ def flex_gemm_epimod(
     ):
         name = f"operand{index}"
         dtype = cute_dsl_utils.torch2cute_dtype_map[arg_dtype]
-        ops[name] = (
-            epi_ops.Scalar(name, dtype=dtype)
-            if kind == "scalar"
-            else op_types[kind](name, dtype=dtype)
-        )
+        op_type = op_types[kind]
+        if varlen_m and kind == "col" and dtype.width < 32:
+            op_type = ScalarColVecLoad
+        ops[name] = op_type(name, dtype=dtype)
     if output_contraction is not None:
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
@@ -445,6 +449,7 @@ def gemm_epilogue(
         indexed_dtypes,
         local_reduce,
         output_contraction,
+        varlen_m=cu_seqlens_m is not None,
     )
     effective_C = normalize_c(C, tuple(out.shape), beta)
     operands: dict[str, Any] = {}
