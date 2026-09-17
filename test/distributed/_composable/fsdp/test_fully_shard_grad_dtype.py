@@ -32,12 +32,17 @@ class _FP32WGrad(torch.autograd.Function):
 
 
 class _Linear(nn.Module):
-    def __init__(self, device, dtype):
+    def __init__(self, device, dtype, compile_projection=False):
         super().__init__()
         self.weight = nn.Parameter(torch.full((32, 32), 0.125, device=device, dtype=dtype))
+        self.projection = (
+            torch.compile(_FP32WGrad.apply, fullgraph=True)
+            if compile_projection
+            else _FP32WGrad.apply
+        )
 
     def forward(self, inp):
-        return _FP32WGrad.apply(inp, self.weight)
+        return self.projection(inp, self.weight)
 
 
 @instantiate_parametrized_tests
@@ -59,13 +64,20 @@ class TestFullyShardGradientDtype(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    @skipIfTorchDynamo("grad_dtype is not supported in compile")
+    @skipIfTorchDynamo("Test controls eager and compiled regions explicitly")
     @parametrize("storage_dtype", [torch.bfloat16, torch.float32])
     @parametrize("reshard_after_forward", [False, True])
     @parametrize("schedule", ["sync", "no_sync", "checkpoint"])
     @parametrize("hsdp", [False, True])
+    @parametrize("compile_projection", [False, True])
     def test_fp32_gradient(
-        self, device, storage_dtype, reshard_after_forward, schedule, hsdp
+        self,
+        device,
+        storage_dtype,
+        reshard_after_forward,
+        schedule,
+        hsdp,
+        compile_projection,
     ):
         if hsdp and self.world_size < 4:
             self.skipTest("HSDP coverage requires four GPUs")
@@ -73,7 +85,9 @@ class TestFullyShardGradientDtype(FSDPTest):
         mesh_shape = (2, self.world_size // 2) if hsdp else (self.world_size,)
         mesh_dim_names = ("replicate", "shard") if hsdp else ("shard",)
         mesh = init_device_mesh(device, mesh_shape, mesh_dim_names=mesh_dim_names)
-        projection = _Linear(torch.device(device, self.rank), storage_dtype)
+        projection = _Linear(
+            torch.device(device, self.rank), storage_dtype, compile_projection
+        )
         model = nn.Sequential(projection)
         # An omitted reduce_dtype must not restore the BF16 compute dtype.
         policy = MixedPrecisionPolicy(
@@ -149,7 +163,7 @@ class TestFullyShardGradientDtype(FSDPTest):
                 )
 
     @skip_if_lt_x_gpu(2)
-    @skipIfTorchDynamo("grad_dtype is not supported in compile")
+    @skipIfTorchDynamo("Test controls eager and compiled regions explicitly")
     @parametrize("storage_dtype", [torch.bfloat16, torch.float32])
     def test_default_gradient_dtype(self, device, storage_dtype):
         projection = _Linear(
@@ -175,7 +189,7 @@ class TestFullyShardGradientDtype(FSDPTest):
         self.assertEqual(projection.weight.grad.dtype, storage_dtype)
 
     @skip_if_lt_x_gpu(2)
-    @skipIfTorchDynamo("grad_dtype is not supported in compile")
+    @skipIfTorchDynamo("Test controls eager and compiled regions explicitly")
     @parametrize("reduce_dtype", [torch.bfloat16, torch.float32])
     def test_explicit_reduction_dtype_and_unused_parameter(self, device, reduce_dtype):
         projection = _Linear(

@@ -55,8 +55,6 @@ class MixedPrecisionPolicy:
             without gradient synchronization still use ``reduce_dtype``. The
             optimizer must support this gradient dtype with the original parameter
             dtype. Higher-precision gradients may increase peak memory usage.
-            Specifying this option currently requires eager execution since
-            ``Tensor.grad_dtype`` is not supported by ``torch.compile``.
             ``None`` preserves the existing behavior: unsharded gradients use the
             compute dtype and sharded gradients use the original parameter dtype.
             (Default: ``None``)

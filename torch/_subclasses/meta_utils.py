@@ -431,6 +431,7 @@ class MetaTensorDescriber:
             is_inference=False if is_inference_mode_disabled else t.is_inference(),
             is_leaf=is_leaf,
             requires_grad=t.requires_grad,
+            grad_dtype=t.grad_dtype if t.requires_grad and is_leaf else t.dtype,
             # NB: ndim should be OK too but there is a disaster at
             # python test/dynamo/test_subclasses.py -k test_user_overridden_property_unsupported
             # Actually, this means that we have a little bit of a problem
@@ -664,6 +665,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     id: MetaTensorId
     ndim: int
     dtype: torch.dtype
+    grad_dtype: torch.dtype | None
     device: torch.device
 
     # NB: Sometimes, size, stride and storage_offset contain SymInt, in which
@@ -2256,6 +2258,11 @@ class MetaConverter(Generic[_TensorT]):
                                             t.size,
                                             t.stride,
                                         )
+
+                # pyrefly: ignore [unbound-name]
+                if t.requires_grad and t.is_leaf and r.is_leaf:
+                    # pyrefly: ignore [unbound-name]
+                    r.grad_dtype = t.grad_dtype
 
                 if t.grad is not None:
                     from torch._dynamo.source import AttrSource
