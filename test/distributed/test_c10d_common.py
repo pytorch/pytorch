@@ -127,6 +127,8 @@ def gpus_for_rank(world_size):
 
 class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
+        # The callers are decorated with retry_on_connect_failures, which re-runs
+        # them on a RuntimeError, so the group must not survive a failed attempt.
         try:
             dist.init_process_group(
                 backend=backend,
@@ -146,6 +148,9 @@ class AbstractTimeoutTest:
             # catch "Address already in use" error and report it to the main
             # thread
             c2p.append(e)
+        finally:
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     def _init_methods(self):
         with tempfile.NamedTemporaryFile(delete=False) as f:
