@@ -253,7 +253,7 @@ class autocast:
                 "get_amp_supported_dtype",
             ]
             message = f"Tried to use AMP with the `{self.custom_backend_name}` backend, but the backend has not "
-            message += "registered a module or  the module miss some necessary funcs. The backend should register "
+            message += "registered a module or the module misses some necessary funcs. The backend should register "
             message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
             message += "`get_amp_supported_dtype() -> List[torch.dtype]`. \n"
 

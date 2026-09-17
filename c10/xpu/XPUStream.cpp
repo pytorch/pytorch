@@ -363,10 +363,12 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
  *
  * syncStreamsOnDevice waits for all work previously submitted to the SYCL
  * queues we manage on `device`. Two paths exist:
- *
- *  1. Fast path (SYCL >= 2026.0 and device exposes `ext_oneapi_device_wait`):
+ *  1. Fast path (SYCL >= 2026.1 and device exposes `ext_oneapi_device_wait`):
  *     delegate to `device_synchronize`, which issues a single
- *     `ext_oneapi_wait_and_throw()` -- a true device-wide wait.
+ *     `ext_oneapi_wait_and_throw()` -- a true device-wide wait. SYCL < 2026.1
+ *     is excluded because earlier runtimes could crash (release an invalid
+ *     queue) when a device-wide wait interleaves with XPUGraph capture; see
+ *     https://github.com/pytorch/pytorch/issues/187277.
  *  2. Legacy path (otherwise): walk every reserved queue in each priority
  *     pool and `wait()` on it. This only drains queues we own; SYCL queues
  *     outside our pools are unaffected.
@@ -380,7 +382,18 @@ void syncStreamsOnDevice(DeviceIndex device) {
   }
   check_device_index(device);
 
-  auto legacy_sync = [device]() {
+// TODO: drop the legacy fallback below once a driver supporting
+// `ext_oneapi_device_wait` is widely deployed across all supported platforms.
+#if SYCL_COMPILER_VERSION >= 20260100
+  const bool use_device_wide_wait = c10::xpu::get_raw_device(device).has(
+      sycl::aspect::ext_oneapi_device_wait);
+#else
+  constexpr bool use_device_wide_wait = false;
+#endif
+
+  if (use_device_wide_wait) {
+    c10::xpu::device_synchronize(device);
+  } else {
     initXPUStreamsOnce();
     // Initializes the stream pools (once)
     initDeviceStreamOnce(device);
@@ -394,20 +407,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_device_synchronization(c10::kXPU);
     }
-  };
-
-#if SYCL_COMPILER_VERSION < 20260000
-  legacy_sync();
-#else
-  // TODO: drop the legacy fallback once a driver supporting
-  // `ext_oneapi_device_wait` is widely deployed across all supported platforms.
-  if (c10::xpu::get_raw_device(device).has(
-          sycl::aspect::ext_oneapi_device_wait)) {
-    c10::xpu::device_synchronize(device);
-  } else {
-    legacy_sync();
   }
-#endif
 }
 
 } // namespace c10::xpu

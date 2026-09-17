@@ -34,7 +34,7 @@ def forward_block_mn(
     # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose to [QK_HEAD_DIM_ROUNDED, BLOCK_N]
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_n_load = kv_base_offset + tl.arange(0, BLOCK_N)
-    k = load_checked_2d(K, offs_n_load, offs_k, stride_kn, stride_kk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
+    k = load_checked_2d(K, offs_n_load, offs_k, stride_kn, stride_kk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM, INDEX_DTYPE)
     {%- endif %}
 
     k = tl.trans(k)
@@ -58,7 +58,18 @@ def forward_block_mn(
         h="off_h",
         m="m",
         n="n",
-        out="qk"
+        out="qk",
+        input_shapes={
+            "score": ("BLOCK_M", "BLOCK_N"),
+            "m": ("BLOCK_M", "1"),
+            "n": ("1", "BLOCK_N"),
+        },
+        input_dtypes={
+            "b": "index",
+            "h": "index",
+            "m": "index",
+            "n": "index",
+        }
     ) | indent_except_first(1) }}
 
     if CHECK_BLOCK_BOUNDARY:
@@ -74,6 +85,17 @@ def forward_block_mn(
             h="off_h",
             m="m",
             n="n",
+            input_shapes={
+                "score": ("BLOCK_M", "BLOCK_N"),
+                "m": ("BLOCK_M", "1"),
+                "n": ("1", "BLOCK_N"),
+            },
+            input_dtypes={
+                "b": "index",
+                "h": "index",
+                "m": "index",
+                "n": "index",
+            }
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
@@ -110,7 +132,7 @@ def forward_block_mn(
     {%- else %}
     # Calculate offsets for V loading - reuse kv_base_offset from K loading
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
-    v = load_checked_2d(V, offs_n_load, offs_v, stride_vn, stride_vk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
+    v = load_checked_2d(V, offs_n_load, offs_v, stride_vn, stride_vk, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM, INDEX_DTYPE)
     {%- endif %}
     acc = tl.dot(p.to(MATMUL_PRECISION), v.to(q.dtype), acc, input_precision=FLOAT32_PRECISION)
 

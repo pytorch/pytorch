@@ -1,5 +1,6 @@
 #include <torch/nativert/executor/triton/TritonKernelManager.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAStream.h>
@@ -50,8 +51,13 @@ class CudaKernelInputs final : public KernelInputs {
   CudaKernelInputs(size_t num_args, size_t num_attrs)
       : KernelInputs(num_args, num_attrs),
         arg_ptrs_(num_args),
-        global_scratch_(0) {
+        global_scratch_(0),
+        profile_scratch_(0) {
     inputs_.push_back(&global_scratch_);
+    // Some Triton kernel ABIs include profile scratch after global scratch.
+    // Kernels without it ignore this trailing parameter because the compiled
+    // kernel signature determines how many entries the runtime reads.
+    inputs_.push_back(&profile_scratch_);
   }
   ~CudaKernelInputs() final = default;
 
@@ -71,6 +77,7 @@ class CudaKernelInputs final : public KernelInputs {
  private:
   std::vector<void*> arg_ptrs_;
   CUdeviceptr global_scratch_;
+  CUdeviceptr profile_scratch_;
 };
 
 class CudaTritonKernelManager final : public TritonKernelManager {
@@ -156,7 +163,9 @@ void CudaTritonKernelManager::launch(
     const LaunchParams& launch_params,
     void** args /* { ...inputs, output }*/) {
   const auto& cuda_params = static_cast<const CudaLaunchParams&>(launch_params);
-  const constexpr int kThreadsPerWarp = 2 << 4;
+  // HIP wavefront size is 64 on most AMD GPUs vs 32 on NVIDIA; query it so
+  // blockDim.x = warp_size * num_warps matches the compiled Triton kernel.
+  const int kThreadsPerWarp = at::cuda::warp_size();
 
   auto kernel_fn = load();
   TORCH_CHECK(

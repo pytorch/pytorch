@@ -1,16 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/Config.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/GroupedMMUtils.h>
-#include <ATen/BlasBackend.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -31,9 +27,7 @@
 #include <ATen/ops/mv_native.h>
 #include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/vdot_native.h>
-#include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/mul.h>
-#include <ATen/ops/matmul.h>
 #endif
 
 namespace at::meta {
@@ -46,8 +40,7 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
 
   TORCH_CHECK(self.scalar_type() == mat.scalar_type() && mat.scalar_type() == vec.scalar_type(),
     "addmv input tensors must have the same dtype, but got ", self.scalar_type(), ", ", mat.scalar_type(), ", and ", vec.scalar_type());
-  auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
-  set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
+  set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options());
 }
 } // namespace at::meta
 
@@ -93,7 +86,6 @@ TORCH_IMPL_FUNC(addmv_out_cpu)(const Tensor &self, const Tensor &mat, const Tens
     }
     if (result.numel() != 0) {
 
-      NoNamesGuard guard;
       if (use_mkldnn_matmul(mat, vec, /*result=*/Tensor())){
         mkldnn_matmul(mat, vec, result, beta_.to<float>(), alpha_.to<float>());
         return;
@@ -182,7 +174,6 @@ Tensor dot(const Tensor &self, const Tensor &other){
     }
   }
 
-  at::NoNamesGuard guard;
   dot_check(self, other);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
@@ -219,7 +210,6 @@ Tensor vdot(const Tensor &self, const Tensor &other){
     return (at::native::dot(self, other.conj())).conj();
   }
 
-  at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
 

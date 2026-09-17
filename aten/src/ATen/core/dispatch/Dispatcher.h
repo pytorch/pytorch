@@ -215,11 +215,13 @@ class TORCH_API Dispatcher final {
       DispatchKeySet dispatchKeySet,
       Stack* stack) const;
 
-  bool hasBackendFallbackForDispatchKey(DispatchKey dk) {
+  bool hasBackendFallbackForDispatchKey(DispatchKey dk) const {
     auto dispatch_ix = getDispatchTableIndexForDispatchKey(dk);
-    if (dispatch_ix < 0)
+    if (dispatch_ix < 0) {
       return false;
-    return backendFallbackKernels_[dispatch_ix].kernel.isValid();
+    }
+    const auto& kernel = backendFallbackKernels_[dispatch_ix].kernel;
+    return kernel.isValid();
   }
 
   // Used by torchdeploy/multipy for multiple  // codespell:ignore: multipy
@@ -492,8 +494,16 @@ class TORCH_API OperatorHandle {
     return operatorDef_->op.getComputedKernelForDispatchKey(k);
   }
 
+  const KernelFunction& lookup(DispatchKeySet ks) const {
+    return operatorDef_->op.lookup(ks);
+  }
+
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();
+  }
+
+  const DispatchKeyExtractor& dispatchKeyExtractor() const {
+    return operatorDef_->op.dispatchKeyExtractor();
   }
 
   void checkInvariants() const {

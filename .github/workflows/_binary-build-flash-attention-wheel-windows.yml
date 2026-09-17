@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: releng", "module: windows"]
 name: Build Flash Attention 3 wheels (Windows)
 
 on:
@@ -19,20 +20,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  get-label-type:
+  check-ci:
     if: github.repository_owner == 'pytorch'
-    name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    with:
-      triggering_actor: ${{ github.triggering_actor }}
-      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
-      curr_branch: ${{ github.head_ref || github.ref_name }}
-      curr_ref_type: ${{ github.ref_type }}
+    uses: ./.github/workflows/_check-ci.yml
 
   build-wheel:
+    needs: check-ci
+    if: github.repository_owner == 'pytorch'
     name: "Build FA3 Windows ${{ matrix.cuda_version }}"
-    needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
+    runs-on: "${{ matrix.runner }}"
     strategy:
       fail-fast: false
       matrix:
@@ -123,8 +119,8 @@ jobs:
           set -x
           mkdir -p "${FA_FINAL_PACKAGE_DIR}"
           nvcc --version
-          python -m pip install torch==${PYTORCH_VERSION} --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
-          python -m pip install einops==${EINOPS_VERSION} ninja==${NINJA_VERSION} numpy==${NUMPY_VERSION}
+          python -m pip install "torch==${PYTORCH_VERSION}" --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
+          python -m pip install "einops==${EINOPS_VERSION}" "ninja==${NINJA_VERSION}" "numpy==${NUMPY_VERSION}"
           if [[ "${{ inputs.test }}" == "true" ]]; then
             BUILD_DATE=$(date +%Y%m%d)
             export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_VERSION}"

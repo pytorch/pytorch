@@ -27,7 +27,7 @@ struct ITTThreadLocalState : ProfilerStateBase {
       c10::Device /*device*/) override {}
 
   static ITTThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    ProfilerStateBase* tls = ProfilerStateBase::getTLS();
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::ITT);
     return static_cast<ITTThreadLocalState*>(tls);

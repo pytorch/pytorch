@@ -20,7 +20,11 @@ from torch.distributed.checkpoint._experimental.checkpoint_writer import (
     CheckpointWriterConfig,
 )
 from torch.distributed.checkpoint._experimental.types import RankInfo
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def subprocess_init_fn(name: str, parent_pid: int) -> None:
@@ -117,6 +121,8 @@ def shared_tensor_verifier_init_fn(**kwargs: Any) -> CheckpointWriter:
 class TestRequestTypes(TestCase):
     """Test the request/response data structures."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_request_type_enum(self) -> None:
         """Test RequestType enum values."""
         self.assertEqual(RequestType.PING.value, "ping")
@@ -146,6 +152,8 @@ class TestRequestTypes(TestCase):
 class TestCheckpointProcessConfig(TestCase):
     """Test CheckpointProcessConfig configuration."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def test_default_options(self) -> None:
         """Test default CheckpointProcessConfig."""
         options = CheckpointProcessConfig()
@@ -163,6 +171,8 @@ class TestCheckpointProcessConfig(TestCase):
 
 
 class TestCheckpointProcess(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         """Set up common test fixtures."""
@@ -458,7 +468,7 @@ class TestCheckpointProcess(TestCase):
             shared_tensor[0][0],
             42.0,
             places=6,
-            msg=f"Expected subprocess signature 42.0, got {shared_tensor[0]}. "
+            msg=lambda msg: f"{msg}\nExpected subprocess signature 42.0, got {shared_tensor[0]}. "
             f"Shared memory not working - subprocess modifications not visible!",
         )
 

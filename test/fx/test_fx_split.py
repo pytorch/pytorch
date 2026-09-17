@@ -7,7 +7,7 @@ import torch
 import torch.fx.passes.operator_support as op_support
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.passes.split_utils import split_by_tags
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 @torch.jit.script
@@ -24,6 +24,8 @@ def wrapped_add(_dataclass, y):
 
 
 class TestFXSplit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_split_preserve_node_meta(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
@@ -115,6 +117,8 @@ class TestFXSplit(TestCase):
 
 
 class TestSplitByTags(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -194,7 +198,7 @@ class TestSplitByTags(TestCase):
             if idx < len(tags):
                 self.assertTrue(
                     name == tags[idx],
-                    f"split_gm has an incorrect submodule named {name}",
+                    lambda msg: f"{msg}\nsplit_gm has an incorrect submodule named {name}",
                 )
 
         # Ensure each submodule has expected (ordered) call_module node(s).
@@ -209,7 +213,7 @@ class TestSplitByTags(TestCase):
                 self.assertTrue(
                     node.name == tag_node[f"{sub_name}"][node_idx],
                     # pyre-fixme[61]: `name` is undefined, or not always defined.
-                    f"{sub_name} has incorrectly include {node.name}",
+                    lambda msg: f"{msg}\n{sub_name} has incorrectly include {node.name}",
                 )
                 node_idx += 1
             sub_graph_idx += 1
@@ -222,11 +226,13 @@ class TestSplitByTags(TestCase):
                 "linear3": "green.linear3",
                 "linear4": "green.linear4",
             },
-            f"{orig_to_split_fqn_mapping=}",
+            lambda msg: f"{msg}\n{orig_to_split_fqn_mapping=}",
         )
 
 
 class TestSplitOutputType(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()

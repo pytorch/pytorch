@@ -243,6 +243,33 @@ class TestCuTeDSLTopK(TestCase):
         expected.scatter_(-1, i, 1.0)
         self.assertEqual(x.grad, expected)
 
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2,
+        "requires at least 2 visible CUDA devices",
+    )
+    def test_non_current_device(self) -> None:
+        """The override must launch on the input's device even when it isn't
+        the current device. The Python-native dispatch path gets no automatic
+        CUDA device guard, so without the guard the CuTeDSL kernel launches on
+        the current device's stream and rejects the off-device input (mirrors
+        the bmm override regression fixed in #187983)."""
+        k = 32  # register kernel; _test_n(k) keeps the override in range
+        old_device = torch.cuda.current_device()
+        try:
+            torch.cuda.set_device(0)
+            x = torch.randn(256, _test_n(k), device="cuda:1", dtype=torch.float32)
+            pn = torch.backends.python_native
+            with pn.cutedsl.disabled():
+                ref_v, _ = torch.topk(x, k, dim=-1)
+            got_v, got_i = torch.topk(x, k, dim=-1)
+            # current device unchanged; result stays on the input's device
+            self.assertEqual(torch.cuda.current_device(), 0)
+            self.assertEqual(got_v.device, torch.device("cuda:1"))
+            self.assertEqual(got_v, ref_v)
+            self.assertEqual(torch.gather(x, -1, got_i), got_v)
+        finally:
+            torch.cuda.set_device(old_device)
+
 
 instantiate_parametrized_tests(TestCuTeDSLTopK)
 

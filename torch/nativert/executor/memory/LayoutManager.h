@@ -162,7 +162,7 @@ class LayoutManager {
       torch::nativert::LayoutManagerSettings settings = {});
   ~LayoutManager() = default;
 
-// this is a debugging function. it will slow thing down SIGNIFICANTLY
+// this is a debugging function. it will slow things down SIGNIFICANTLY
 // so please ensure this isn't called unless you really need it
 //
 // it checks a few things in between node executions...

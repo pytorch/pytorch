@@ -2,7 +2,6 @@
 import functools
 import inspect
 import logging
-import warnings
 
 import torch
 from torch.utils._ordered_set import OrderedSet
@@ -17,6 +16,7 @@ from ..pattern_matcher import (
 
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 aten = torch.ops.aten
 
 _scaled_dot_product_attention = aten.scaled_dot_product_attention
@@ -437,11 +437,24 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
 
 def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+    if query.device.type == "cuda" and torch.version.hip is None:
+        # Keep the Bert CUDA pattern on its original math path; generic SDPA can
+        # pick fused backends whose scaling/dropout numerics fail tight checks.
+        attn_weight = torch.matmul(query, key.transpose(-2, -1))
+        attn_weight = attn_weight.div(inv_scale) + attn_mask
+        attn_weight = attn_weight.softmax(dim=-1)
+        if dropout_p != 0.0:
+            attn_weight = torch.nn.functional.dropout(attn_weight, p=dropout_p)
+        return attn_weight.to(dtype=query.dtype).matmul(value)
+    attn_mask = attn_mask.to(dtype=query.dtype)
     return _scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
-        attn_mask=attn_mask.to(dtype=query.dtype),
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
         scale=1.0 / inv_scale,
@@ -860,22 +873,93 @@ def _sfdp_replacement_28(query, key, value, scale_factor, dropout_p):
     )
 
 
+def _sfdp_pattern_29(query, key, value, attn_mask, inv_scale):
+    # Matches _scaled_dot_product_attention_math decomposition for
+    # BERT-like models calling F.scaled_dot_product_attention with attn_mask.
+    # Scale is split as sqrt across Q and K (mul.Scalar in fp16), bmm stays
+    # in fp16, and _safe_softmax upcasts to fp32 internally.
+    # Permutations are needed to create clones in graph since real workloads
+    # have non-contiguous inputs from .transpose(1, 2).
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    q = torch.ops.aten.mul.Scalar(q, inv_scale)
+    k = torch.ops.aten.mul.Scalar(k.transpose(-2, -1), inv_scale)
+    attn_weight = (q @ k) + attn_mask
+    attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
+    return attn_weight @ v
+
+
+def _sfdp_replacement_29(query, key, value, attn_mask, inv_scale):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=inv_scale * inv_scale,
+    )
+
+
+def _sfdp_pattern_30(query, key, value, inv_scale):
+    # Same as pattern 29 but without attention mask.
+    # Permutations are needed to create clones in graph.
+    q = query.permute([0, 2, 1, 3])
+    k = key.permute([0, 2, 1, 3])
+    v = value.permute([0, 2, 1, 3])
+    q = torch.ops.aten.mul.Scalar(q, inv_scale)
+    k = torch.ops.aten.mul.Scalar(k.transpose(-2, -1), inv_scale)
+    attn_weight = q @ k
+    attn_weight = torch.ops.aten._safe_softmax(attn_weight, -1)
+    return attn_weight @ v
+
+
+def _sfdp_replacement_30(query, key, value, inv_scale):
+    counters["inductor"]["fuse_attention"] += 1
+    return _scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=None,
+        dropout_p=0.0,
+        is_causal=False,
+        scale=inv_scale * inv_scale,
+    )
+
+
 @functools.lru_cache(None)
 def _warn_tf32_disabled() -> None:
-    if (
-        torch.cuda.is_available()
-        and torch.backends.cuda.matmul.fp32_precision != "tf32"
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ):
-        warnings.warn(
+    if torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0):
+        perf_hint_log.info(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
         )
 
 
+def _is_supported_scale(scale) -> bool:
+    # The matcher may bind the scale to a graph node, whose value lives in
+    # meta["val"]; a node carrying no "val" leaves the scale unknown, so we
+    # conservatively skip the fusion. The fused kernel takes a scalar scale, so
+    # a tensor scale is rejected here. SymFloat scales are tensorified into 0-d
+    # tensors before the joint graph passes run, so they arrive as tensors too;
+    # an untensorified one would land in the same conservative skip.
+    # TODO: the scalar behind a tensorified SymFloat scale (e.g. head_dim**0.5
+    # under dynamic shapes) could be recovered from the aten.scalar_tensor node
+    # to keep the fusion - tracked in #194444.
+    if isinstance(scale, torch.fx.Node):
+        scale = scale.meta.get("val")
+    return isinstance(scale, (float, int, torch.SymInt))
+
+
 def _sfdp_params_check(match):
-    assert all(k in match.kwargs for k in ("query", "key", "value"))
+    if not all(k in match.kwargs for k in ("query", "key", "value")):
+        raise AssertionError("expected query, key, value in match.kwargs")
+    inv_scale = match.kwargs.get("inv_scale")
+    if inv_scale is not None and not _is_supported_scale(inv_scale):
+        return False
     query = match.kwargs["query"].meta["val"]
     key = match.kwargs["key"].meta["val"]
     value = match.kwargs["value"].meta["val"]
@@ -889,7 +973,8 @@ def _sfdp_params_check(match):
         and query.dtype == torch.float32
         and torch.backends.cuda.matmul.fp32_precision != "tf32"
     ):
-        _warn_tf32_disabled()
+        if torch.backends.cuda.matmul.fp32_precision != "bfx9":
+            _warn_tf32_disabled()
         return False
 
     add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
@@ -922,6 +1007,17 @@ def _sfdp_params_check(match):
     return True
 
 
+def _sfdp_pattern_13_check(match):
+    if not _sfdp_params_check(match):
+        return False
+    permutes = filter_nodes(match.nodes, aten.permute.default)
+    if len(permutes) != 1:
+        return False
+    # The serialized pattern wildcard-matches the permute dimensions.
+    permute_dims = permutes[0].args[1]
+    return isinstance(permute_dims, (list, tuple)) and tuple(permute_dims) == (0, 2, 1)
+
+
 def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     def fn(match):
         if (
@@ -933,9 +1029,7 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
         if scale_factor_op is not None:
             scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
             # Note: args[1] of the scale_factor_node is always the scale_factor for the current patterns.
-            scale_factor = scale_factor_node.args[1]
-            # make sure the scale_factor a float/int. SymInt?
-            if not isinstance(scale_factor, (float, int)):
+            if not _is_supported_scale(scale_factor_node.args[1]):
                 return False
         return _sfdp_params_check(match)
 
@@ -1018,6 +1112,17 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
     )
     m_bs1_inp = functools.partial(torch.empty, (1, 1, 1, 4), device=device)
 
+    # For patterns with permute([0,2,1,3]) inside (e.g. BERT-like models),
+    # input is [B, S, H, D] and after permute becomes [B, H, S, D].
+    # S must match the mask dimension (8) so Q@K^T shape [B, H, S, S] matches b().
+    # gp = "generic with permute"; gp_bs1 is the batch_size=1 variant (no clone).
+    gp_inp = functools.partial(
+        torch.empty, (2, 8, 4, 16), device=device, requires_grad=True
+    )
+    gp_bs1_inp = functools.partial(
+        torch.empty, (1, 8, 4, 16), device=device, requires_grad=True
+    )
+
     # softmax will generate a dtype conversion on inputs if they are in half,
     # but will not in float, so we generate a pattern for both
     for dtype in [torch.float, torch.half]:
@@ -1033,6 +1138,8 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
+        gp = functools.partial(gp_inp, dtype=dtype)
+        gp_bs1 = functools.partial(gp_bs1_inp, dtype=dtype)
         m_bs1 = functools.partial(m_bs1_inp, dtype=dtype)
         m_bs1_float = functools.partial(m_bs1_inp, dtype=torch.float)
         m_bs1_bool = functools.partial(m_bs1_inp, dtype=torch.bool)
@@ -1127,7 +1234,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_replacement_13,
                 [g_3d(), g_3d(), g_3d()],
                 d,
-                _sfdp_params_check,
+                _sfdp_pattern_13_check,
             ),
             (
                 _sfdp_pattern_14,
@@ -1143,24 +1250,19 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
-            # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_extra_check(
-                    aten.div.Tensor, disable_cuda=torch.version.hip is None
-                ),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 d,
-                _sfdp_extra_check(
-                    aten.div.Tensor, disable_cuda=torch.version.hip is None
-                ),
+                _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_17,
@@ -1295,6 +1397,34 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 d,
                 _sfdp_extra_check(aten.mul.Tensor),
             ),
+            (
+                _sfdp_pattern_29,
+                _sfdp_replacement_29,
+                [gp(), gp(), gp(), b()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
+            ),
+            (
+                _sfdp_pattern_29,
+                _sfdp_replacement_29,
+                [gp_bs1(), gp_bs1(), gp_bs1(), b()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
+            ),
+            (
+                _sfdp_pattern_30,
+                _sfdp_replacement_30,
+                [gp(), gp(), gp()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
+            ),
+            (
+                _sfdp_pattern_30,
+                _sfdp_replacement_30,
+                [gp_bs1(), gp_bs1(), gp_bs1()],
+                s,
+                _sfdp_extra_check(aten.mul.Scalar),
+            ),
         ]
         mask_fp32_patterns = ["pattern_16"]
         if dtype == torch.half:
@@ -1305,7 +1435,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
                     _sfdp_extra_check(
                         aten.div.Tensor, disable_cuda=torch.version.hip is None
                     ),
@@ -1317,7 +1446,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
                     _sfdp_extra_check(
                         aten.div.Tensor, disable_cuda=torch.version.hip is None
                     ),
@@ -1327,7 +1455,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
-            assert isinstance(workaround, dict)
+            if not isinstance(workaround, dict):
+                raise AssertionError(
+                    f"expected workaround to be a dict, got {type(workaround)}"
+                )
             name = pattern.__name__
             pattern_name = name
 
@@ -1358,7 +1489,10 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 )
             inference_workaround = {}
             if workaround:
-                assert len(workaround) <= 2
+                if len(workaround) > 2:
+                    raise AssertionError(
+                        f"expected len(workaround) <= 2, got {len(workaround)}"
+                    )
                 if "inv_scale" in workaround:
                     inference_workaround["inv_scale"] = workaround["inv_scale"]
                 if "dropout_p" in workaround:

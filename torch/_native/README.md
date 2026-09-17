@@ -328,6 +328,12 @@ All modules under `torch._native` route through Python's standard `logging` and 
 TORCH_LOGS=+native_dsl python my_script.py
 ```
 
+Per-compile instrumentation (`torch/_native/instrumentation.py`) has its own artifact, off by default to avoid log spew:
+
+```
+TORCH_LOGS=+native_dsl_compile python my_script.py
+```
+
 When adding new code under `torch/_native`, follow the existing pattern:
 * Use `log = logging.getLogger(__name__)` per module.
 * Default to `log.info(...)` for registration-time diagnostics that the average user does not need to see; reserve `log.warning(...)` for genuine misuse (e.g. user-supplied callbacks that fail).
@@ -338,7 +344,7 @@ Adding operators means that they should be tested. Given that we're dealing with
 
 The preferred testing method is to co-opt the existing `OpInfo` and `op_db` class/list and benefit from all the infrastructure built around that functionality.
 
-Each op should have a corresponding entry added in `torch/testing/_internal/common_methods_invocations.py`, with a input method appropriate for the overrides(s) in terms of shapes and dtypes. Instead of adding directly into `op_db`, add to the appropriate entry in `dsl_ops_by_dsl`, a dictionary, where the key will be the name of the DSL used - this must be present in `torch.backends.python_native.available_dsl`. These entries are then later added to `op_db` as appropriate for use in:
+Each op should have a corresponding entry added in `torch/testing/_internal/common_methods_invocations.py`, with an input method appropriate for the overrides(s) in terms of shapes and dtypes. Instead of adding directly into `op_db`, add to the appropriate entry in `dsl_ops_by_dsl`, a dictionary, where the key will be the name of the DSL used - this must be present in `torch.backends.python_native.available_dsl`. These entries are then later added to `op_db` as appropriate for use in:
 
 * `test_ops.py`
 * `test_unary_ufuncs.py`

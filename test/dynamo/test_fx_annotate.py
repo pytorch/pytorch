@@ -120,7 +120,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('get_attr', 'wrap_body_0', {'ac_sin': 0})
 [('placeholder', 'l_x_', {'ac_sin': 0}), ('call_function', 'sin', {'ac_sin': 0}), ('output', 'output', {'ac_sin': 0})]
 ('call_function', 'tag_activation_checkpoint', {'ac_sin': 0})
-('call_function', 'ac', {'ac_sin': 0})""",
+('call_function', 'getitem', {'ac_sin': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),
@@ -252,15 +252,15 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(dynamo_metadata),
             """\
-('placeholder', 's77', {'moo': 0})
 ('placeholder', 'l_x_', {'moo': 0})
+('placeholder', 's77', {'moo': 0})
 ('placeholder', 'l_y_', {'moo': 0})
-('call_function', 'x', {'moo': 0})
+('call_function', 'cat', {'moo': 0})
 ('call_method', 'item', {'moo': 0})
-('call_function', 'mul_1', {'moo': 0})
+('call_function', 'mul', {'moo': 0})
 ('call_function', 'ge', {'moo': 0})
-('call_function', '_check', {'moo': 0})
-('call_function', 'mul', {'moo': 0})""",
+('call_function', '_assert_scalar_default', {'moo': 0})
+('call_function', 'mul_1', {'moo': 0})""",
         )
 
 
@@ -317,20 +317,20 @@ class AnnotateTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             str(dynamo_metadata),
             """\
+('placeholder', 'l_gn_closure_1_cell_contents_full_kv_indices', {'compile_inductor': 0})
+('placeholder', 'l_gn_closure_1_cell_contents_full_kv_num_blocks', {'compile_inductor': 0})
+('placeholder', 'l_gn_closure_1_cell_contents_full_q_indices', {'compile_inductor': 0})
+('placeholder', 'l_gn_closure_1_cell_contents_full_q_num_blocks', {'compile_inductor': 0})
 ('placeholder', 'l_gn_closure_1_cell_contents_kv_indices', {'compile_inductor': 0})
 ('placeholder', 'l_gn_closure_1_cell_contents_kv_num_blocks', {'compile_inductor': 0})
-('placeholder', 'l_gn_closure_1_cell_contents_full_kv_num_blocks', {'compile_inductor': 0})
-('placeholder', 'l_gn_closure_1_cell_contents_full_kv_indices', {'compile_inductor': 0})
-('placeholder', 'l_gn_closure_1_cell_contents_q_num_blocks', {'compile_inductor': 0})
 ('placeholder', 'l_gn_closure_1_cell_contents_q_indices', {'compile_inductor': 0})
-('placeholder', 'l_gn_closure_1_cell_contents_full_q_num_blocks', {'compile_inductor': 0})
-('placeholder', 'l_gn_closure_1_cell_contents_full_q_indices', {'compile_inductor': 0})
-('get_attr', 'score_mod_0', {'compile_inductor': 0})
-[('placeholder', 'child', {'compile_inductor': 0}), ('placeholder', 'child_1', {'compile_inductor': 0}), ('placeholder', 'child_2', {'compile_inductor': 0}), ('placeholder', 'child_3', {'compile_inductor': 0}), ('placeholder', 'child_4', {'compile_inductor': 0}), ('call_function', 'mul', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
+('placeholder', 'l_gn_closure_1_cell_contents_q_num_blocks', {'compile_inductor': 0})
 ('get_attr', 'mask_fn_0', {'compile_inductor': 0})
 [('placeholder', 'child', {'compile_inductor': 0}), ('placeholder', 'child_1', {'compile_inductor': 0}), ('placeholder', 'child_2', {'compile_inductor': 0}), ('placeholder', 'child_3', {'compile_inductor': 0}), ('call_function', 'ge', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
+('get_attr', 'score_mod_0', {'compile_inductor': 0})
+[('placeholder', 'child', {'compile_inductor': 0}), ('placeholder', 'child_1', {'compile_inductor': 0}), ('placeholder', 'child_2', {'compile_inductor': 0}), ('placeholder', 'child_3', {'compile_inductor': 0}), ('placeholder', 'child_4', {'compile_inductor': 0}), ('call_function', 'mul', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
 ('call_function', 'flex_attention', {'compile_inductor': 0})
-('call_function', 'out', {'compile_inductor': 0})""",
+('call_function', 'getitem', {'compile_inductor': 0})""",
         )
         self.assertExpectedInline(
             str(fw_metadata),

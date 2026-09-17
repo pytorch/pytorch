@@ -278,7 +278,7 @@ def _get_cache_or_reload(
     repo_owner, repo_name, ref = _parse_repo_info(github)
     # Github allows branch name with slash '/',
     # this causes confusion with path on both Linux and Windows.
-    # Backslash is not allowed in Github branch name so no need to
+    # Backslash is not allowed in Github branch name so no need
     # to worry about it.
     normalized_br = ref.replace("/", "_")
     # Github renames folder repo-v1.x.x to repo-1.x.x
@@ -513,7 +513,7 @@ def list(
         hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
         hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
-    # We take functions starts with '_' as internal helper functions
+    # We take functions starting with '_' as internal helper functions
     entrypoints = [
         f
         for f in dir(hub_module)
@@ -587,7 +587,7 @@ def load(
     r"""
     Load a model from a github repo or a local directory.
 
-    Note: Loading a model is the typical use case, but this can also be used to
+    Note: Loading a model is the typical use case, but this can also be used
     for loading other objects such as tokenizers, loss functions, etc.
 
     If ``source`` is 'github', ``repo_or_dir`` is expected to be

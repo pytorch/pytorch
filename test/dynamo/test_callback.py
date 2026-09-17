@@ -94,7 +94,7 @@ class CallbackTests(TestCase):
                 return self.fc2(temp)
 
         model = TinyModel().to(device_type)
-        compiled_model = torch.compile(model, mode="max-autotune")
+        compiled_model = torch.compile(model, mode="max-autotune")  # noqa: UNSPECIFIED_BACKEND
         x = torch.randn(10, 10, device=device_type)
 
         loss = compiled_model(x).sum()

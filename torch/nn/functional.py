@@ -20,6 +20,7 @@ from torch._jit_internal import (
     BroadcastingList1,
     BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
     BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
+    unused as _jit_unused,
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -944,6 +945,17 @@ max_pool3d = boolean_dispatch(
 )
 
 
+@_jit_unused
+def _check_unpool_output_size(output_size: list[int], dim: int) -> None:
+    torch._check_value(
+        output_size[dim] >= 0,
+        lambda: (
+            "max_unpooling: output_size must contain non-negative spatial "
+            f"dimensions, but got output_size[{dim}]={output_size[dim]}"
+        ),
+    )
+
+
 def _unpool_output_size(
     input: Tensor,
     kernel_size: list[int],
@@ -978,6 +990,16 @@ def _unpool_output_size(
                 )
 
         ret = output_size
+    if torch.jit.is_scripting():
+        for d in range(len(kernel_size)):
+            if ret[d] < 0:
+                raise ValueError(
+                    "max_unpooling: output_size must contain non-negative spatial "
+                    f"dimensions, but got output_size[{d}]={ret[d]}"
+                )
+    else:
+        for d in range(len(kernel_size)):
+            _check_unpool_output_size(ret, d)
     return ret
 
 
@@ -1115,6 +1137,14 @@ def lp_pool3d(
             ceil_mode=ceil_mode,
         )
     kd, kw, kh = _triple(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
+        if norm_type == float("inf"):
+            return max_pool3d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool3d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1156,6 +1186,14 @@ def lp_pool2d(
             ceil_mode=ceil_mode,
         )
     kw, kh = _pair(kernel_size)
+    if isinstance(norm_type, (int, float)):
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
+        if norm_type == float("inf"):
+            return max_pool2d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool2d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1193,6 +1231,14 @@ def lp_pool1d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
+    if isinstance(norm_type, (int, float)):
+        if norm_type == 0:
+            raise ValueError(f"norm_type must be a non-zero value, but got {norm_type}")
+        if norm_type == float("inf"):
+            return max_pool1d(input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+        if norm_type == -float("inf"):
+            return -max_pool1d(-input.abs(), kernel_size, stride, 0, 1, ceil_mode)
+
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -3277,7 +3323,7 @@ def gaussian_nll_loss(
             in the input (heteroscedastic), or a single one (homoscedastic),
             or a positive scalar value to be used for all expectations.
         full (bool, optional): Whether to include the constant term in the loss calculation. Default: ``False``.
-        eps (float, optional): Value added to var, for stability. Default: 1e-6.
+        eps (float, optional): Value used to clamp ``var`` to a minimum, for stability. Default: 1e-6.
         reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
@@ -3687,14 +3733,22 @@ def linear_cross_entropy(
     Args:
         input (Tensor) : input samples.
         linear_weight (Tensor) : linear weight.
-        target (Tensor) : Ground truth class indices or class probabilities;
+        target (Tensor) : Ground truth class indices or class probabilities.
+            With ``options != None``, class probabilities use the chunked
+            path when the target dtype matches the ``input`` dtype and the
+            target does not require grad; other probability-target
+            configurations fall back to the reference implementation with a
+            warning
+            (gradients w.r.t. the target are only available on the
+            reference path).
         linear_bias (Tensor, optional): bias added to the linear
             projection (shape ``(C,)`` or ``(C, d_1, ..., d_K)`` for
             K-dimensional loss, matching :attr:`linear_weight`).
-            Currently supported only on the reference path
-            (``options=None``); setting ``linear_bias`` with a
-            non-``None`` ``options`` warns and falls back to the
-            reference path. Default: ``None``.
+            With ``options != None``, K-dimensional bias
+            (``out_features != ()``) falls back to the reference
+            implementation with a warning; the chunked path supports
+            ``(C,)``-shaped bias with both class-index and probability
+            targets. Default: ``None``.
         weight (Tensor, optional): a manual rescaling weight given to each class.
         reduction (str, optional): Specifies the reduction to apply to
             the output: ``'none'`` | ``'mean'`` |
@@ -3837,23 +3891,31 @@ def linear_cross_entropy(
         )
     ignore_index = ignore_index if ignore_index is not None else -100
 
+    # The chunked op has no gradient slot for the target, so a probability
+    # target requiring grad falls back to the reference path.
+    chunkable_prob_target = (
+        target_contains_probabilities
+        and target.dtype == input.dtype
+        and not (target.requires_grad and torch.is_grad_enabled())
+    )
     # K-dim loss falls back: the chunked op softmaxes over the full
     # linear_weight.shape[0], not per-position over num_classes.
     if options is not None and (
         out_features
-        or reduction not in {"mean", "sum"}
+        or reduction not in {"mean", "sum", "none"}
         or label_smoothing != 0.0
-        or target.dtype != torch.int64
+        or (target.dtype != torch.int64 and not chunkable_prob_target)
         or torch.jit.is_tracing()
-        or linear_bias is not None
     ):
         warnings.warn(
             "linear_cross_entropy: ``options`` ignored; chunked path needs "
-            "reduction in {'mean','sum'}, label_smoothing == 0, target.dtype"
-            " == int64, out_features == (), linear_bias is None. Got "
+            "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
+            " == int64 (or a probability target with dtype matching input and"
+            " requires_grad == False), out_features == (). Got "
             f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
             f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
             f", tracing={torch.jit.is_tracing()}"
+            f", target.requires_grad={target.requires_grad}"
             f", linear_bias.shape="
             f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
             stacklevel=2,
@@ -3861,12 +3923,11 @@ def linear_cross_entropy(
 
     if (
         options is not None
-        and reduction in {"mean", "sum"}
+        and reduction in {"mean", "sum", "none"}
         and label_smoothing == 0.0
-        and target.dtype == torch.int64
+        and (target.dtype == torch.int64 or chunkable_prob_target)
         and not out_features
         and not torch.jit.is_tracing()
-        and linear_bias is None
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]
@@ -3883,40 +3944,64 @@ def linear_cross_entropy(
             num_classes=num_classes,
             dtype=input.dtype,
             device=input.device,
+            prob_target=target.dtype.is_floating_point,
         )
-
-        # Force allow_retain_graph=True under torch.compile: the default
-        # second-backward guard uses a Python ``ctx._gi = None`` mutation
-        # that Dynamo doesn't preserve, breaking double-backward.
-        if not options.allow_retain_graph and torch.compiler.is_compiling():
-            warnings.warn(
-                "linear_cross_entropy: forcing allow_retain_graph=True under "
-                "torch.compile (adds one gradient-sized allocation/call). "
-                "Construct options with allow_retain_graph=True to silence.",
-                stacklevel=2,
-            )
-            options = dataclasses.replace(options, allow_retain_graph=True)
 
         # Local import avoids a circular init via torch.library.custom_op.
         from torch.nn.modules.linear_cross_entropy import (
             _linear_cross_entropy_batch_chunked,
+            _linear_cross_entropy_batch_chunked_no_reduction,
         )
 
-        result = _linear_cross_entropy_batch_chunked(
-            input,
-            linear_weight,
-            target,
-            weight,
-            reduction,
-            ignore_index,
-            label_smoothing,
-            options.batch_chunk_size,
-            options.acc_policy,
-            options.acc_dtype,
-            options.allow_retain_graph,
-            input.requires_grad and torch.is_grad_enabled(),
-            linear_weight.requires_grad and torch.is_grad_enabled(),
-        )[0]
+        if reduction == "none":
+            # reduction='none' recomputes grads in backward (no forward
+            # precompute), so allow_retain_graph / compute_* flags do not
+            # apply -- the op takes a reduced argument list.
+            result = _linear_cross_entropy_batch_chunked_no_reduction(
+                input,
+                linear_weight,
+                target,
+                linear_bias,
+                weight,
+                ignore_index,
+                options.batch_chunk_size,
+                options.acc_policy,
+                options.acc_dtype,
+            )
+        else:
+            # Force allow_retain_graph=True under torch.compile: the default
+            # mode's second-backward guard relies on a Python ``ctx._gi = None``
+            # mutation that Dynamo's autograd tracing does not preserve, so
+            # without this override double-backward under torch.compile would
+            # silently return wrong gradients.
+            if not options.allow_retain_graph and torch.compiler.is_compiling():
+                warnings.warn(
+                    "linear_cross_entropy: forcing allow_retain_graph=True under "
+                    "torch.compile (adds one gradient-sized allocation/call). "
+                    "Construct options with allow_retain_graph=True to silence.",
+                    stacklevel=2,
+                )
+                options = dataclasses.replace(options, allow_retain_graph=True)
+
+            result = _linear_cross_entropy_batch_chunked(
+                input,
+                linear_weight,
+                target,
+                linear_bias,
+                weight,
+                reduction,
+                ignore_index,
+                label_smoothing,
+                options.batch_chunk_size,
+                options.acc_policy,
+                options.acc_dtype,
+                options.allow_retain_graph,
+                input.requires_grad and torch.is_grad_enabled(),
+                linear_weight.requires_grad and torch.is_grad_enabled(),
+                linear_bias is not None
+                and linear_bias.requires_grad
+                and torch.is_grad_enabled(),
+            )[0]
 
         if not has_batches:
             result = result.squeeze(0)
@@ -5222,6 +5307,20 @@ def interpolate(  # noqa: F811
                 align_corners,
                 scale_factors,
             )
+        # Use two nested guards so TorchScript does not analyze the runtime
+        # deterministic-algorithms query or the dynamic import below.
+        if not torch.jit.is_scripting():
+            # Select the decomposition during forward so autograd records its
+            # deterministic backward. The native CPU backward is deterministic.
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # The decomposition accumulates through deterministic index_put.
+                # Import it lazily: a top-level import creates a cycle, while a
+                # nested import statement is unsupported by TorchScript.
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                ).upsample_bicubic2d_vec(
+                    input, output_size, align_corners, scale_factors
+                )
         return torch._C._nn.upsample_bicubic2d(
             input,
             # pyrefly: ignore [bad-argument-type]
@@ -5301,7 +5400,7 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
 
     Args:
         input (Tensor): input
-        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
 
@@ -6383,8 +6482,9 @@ scaled_dot_product_attention = _add_docstr(
         For math backend, all intermediates are kept in torch.float if inputs are in torch.half or torch.bfloat16.
     For more information please see :doc:`/notes/numerical_accuracy`
 
-        Grouped Query Attention (GQA) is an experimental feature. It currently works only for Flash_attention
-        and math kernel on CUDA tensor, and does not support Nested tensor.
+        Grouped Query Attention (GQA) is an experimental feature. It works with FlashAttention,
+        cuDNN attention, and the math kernel on CUDA tensors. Memory-efficient attention also supports
+        GQA on NVIDIA CUDA. GQA does not support Nested tensors.
         Constraints for GQA:
 
             - number_of_heads_query % number_of_heads_key_value == 0 and,
@@ -7058,7 +7158,9 @@ def grouped_mm(
             updates), the trailing dimension of ``mat_a`` and the leading dimension of
             ``mat_b`` are partitioned according to the same ``offs`` tensor. For the
             common forward pass (``out = input @ weight.T``) ``mat_b`` is 3D with
-            shape ``(num_groups, N, K)``.
+            shape ``(num_groups, K, N)``. If expert weights are stored in the standard
+            ``nn.Linear`` layout ``(num_groups, N, K)``, pass
+            ``weight.transpose(-2, -1)`` as ``mat_b``.
         offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
             delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
             of group ``i`` and ``offs[-1]`` must be strictly less than the total
@@ -7132,7 +7234,8 @@ def scaled_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         output_dtype: dtype used for the output tensor
-        contraction_dim: describe which dimensions are :math:`K` in the matmul.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
@@ -7159,6 +7262,133 @@ def scaled_mm(
     )
 
     return out
+
+
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""Compute a scaled matrix product and add it to ``input``.
+
+    The result is
+
+    .. math::
+        \mathrm{out} = \beta\,\mathrm{input} +
+        \alpha\,\mathrm{scaled\_mm}(\mathrm{mat1}, \mathrm{mat2}).
+
+    The scaling recipes and swizzles have the same meaning as in
+    :func:`scaled_mm`. ``input`` must be a canonically contiguous, 16-byte-aligned
+    matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
+    ``float32``. The result has the dtype of ``input``; there is no separate
+    output dtype. CUDA recipes are supported when their selected implementation
+    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported.
+
+    Args:
+        input: Matrix accumulated into the scaled matrix product.
+        mat1: Left matrix operand.
+        mat2: Right matrix operand.
+        scale_a: Tensor containing decoding scaling factors for ``mat1``.
+        scale_recipe_a: Scaling recipe for ``mat1``.
+        scale_b: Tensor containing decoding scaling factors for ``mat2``.
+        scale_recipe_b: Scaling recipe for ``mat2``.
+        swizzle_a: Swizzling pattern, if any, for ``scale_a``.
+        swizzle_b: Swizzling pattern, if any, for ``scale_b``.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
+        use_fast_accum: Whether to enable tensor-core fast accumulation.
+        beta: Multiplier for ``input``.
+        alpha: Multiplier for the scaled matrix product.
+
+    .. note::
+        Fusing the addition removes an intermediate output rounding step, so
+        the result need not be bitwise equal to a separate scaled matrix
+        multiply followed by an addition.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
+
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""In-place version of :func:`scaled_addmm`.
+
+    This function accumulates in ``input.dtype`` (``float16``, ``bfloat16``, or
+    ``float32``), preserves the storage of ``input``, and returns ``input``. A
+    serialized WGRAD loop can create the first contribution with
+    :func:`scaled_mm`, then use ``scaled_addmm_`` for later contributions.
+
+    .. warning::
+        In-place accumulation is not safe for concurrent writers. Callers must
+        serialize writes or provide external coordination.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm_(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
 
 
 def scaled_grouped_mm(
