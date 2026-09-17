@@ -305,10 +305,15 @@ class TreeManagerContainer:
 
         weakref.finalize(fn, self.finalize_cudagraphify_fn)
 
-    def get_tree_manager(self) -> CUDAGraphTreeManager:
+    def get_tree_manager(
+        self, initial_mempool_allocation_gb: float | None = None
+    ) -> CUDAGraphTreeManager:
         with self.lock:
             if self.tree_manager is None:
-                self.tree_manager = CUDAGraphTreeManager(self.device_index)
+                self.tree_manager = CUDAGraphTreeManager(
+                    self.device_index,
+                    initial_mempool_allocation_gb=initial_mempool_allocation_gb,
+                )
             return self.tree_manager
 
 
@@ -533,6 +538,7 @@ def cudagraphify(
     user_visible_output_idxs: tuple[int, ...] = (),
     cudagraph_managed_input_rerecord_limit: int | None = None,
     cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] | None = None,
+    cudagraph_initial_mempool_allocation_gb: float | None = None,
     compile_id: CompileId | None = None,
 ) -> tuple[ModelType, OutputType]:
     if is_backward and is_inference:
@@ -552,7 +558,9 @@ def cudagraphify(
         )
 
     with dynamo_timed_cudagraph("cudagraphify.get_container", compile_id, mode):
-        manager = get_container(device_index).get_tree_manager()
+        manager = get_container(device_index).get_tree_manager(
+            cudagraph_initial_mempool_allocation_gb
+        )
 
     return manager.add_function(
         model,
@@ -2395,7 +2403,9 @@ class CUDAGraphTreeManager:
     replay.
     """
 
-    def __init__(self, device_index: int) -> None:
+    def __init__(
+        self, device_index: int, *, initial_mempool_allocation_gb: float | None = None
+    ) -> None:
         # roots are functions which have no dependencies on an other node. I.e.,
         # when they are first invoked, none of their inputs are outputs are outputs
         # of another node, nor are there any live outputs of another node whose
@@ -2443,7 +2453,15 @@ class CUDAGraphTreeManager:
                     capture_error_mode="thread_local",
                 ),
             ):
-                pass
+                prime_gb = initial_mempool_allocation_gb
+                if prime_gb is None:
+                    prime_gb = config.triton.cudagraph_initial_mempool_allocation_gb
+                if prime_gb:
+                    # Freed immediately, but cached in the pool for later recordings.
+                    nbytes = int(prime_gb * (1 << 30))
+                    torch.empty(
+                        nbytes, dtype=torch.uint8, device=f"cuda:{device_index}"
+                    )
 
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
