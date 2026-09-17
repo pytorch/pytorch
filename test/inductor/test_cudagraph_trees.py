@@ -5199,7 +5199,6 @@ if HAS_CUDA_AND_TRITON:
                     loss.backward()
                     optimizer.step()
 
-            self.assertTrue(forward_cudagraph_partitioned)
             self.assertIsNotNone(bw_graph)
             # Assert on what compile_fx_backward handed to the lowering, named
             # independently of how it computes them.
@@ -5211,6 +5210,10 @@ if HAS_CUDA_AND_TRITON:
             self.assertNotIn("mul", static_names)
             # Non-vacuous: the name-based classification this replaces kept it.
             self.assertIn("mul", names[: count_tangents(bw_graph)])
+            # Checked after the classification, not before: the flag is the
+            # mechanism and the idxs above are the effect, so a regression
+            # should report the effect rather than abort on the proxy.
+            self.assertTrue(forward_cudagraph_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
