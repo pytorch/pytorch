@@ -20,12 +20,6 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-_ReduceScatterInputFn = Callable[
-    [list[FSDPParam], list[torch.Tensor], int],
-    Sequence[torch.Size],
-]
-
-
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
@@ -37,9 +31,6 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
-
-
-_AllGatherOutputFn = Callable[[list[FSDPParam], AllGatherResult, int], None]
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -479,7 +470,7 @@ def _default_all_gather_output_fn(
         split_with_sizes_out,
         world_size,
     )
-    _foreach_all_gather_reorder(shard_i_copy_infos, world_size)
+    _reassemble_all_gather_outputs(shard_i_copy_infos, world_size)
 
 
 @torch.no_grad()
@@ -488,7 +479,7 @@ def foreach_all_gather_copy_out(
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
     *,
-    all_gather_output_fn: _AllGatherOutputFn = _default_all_gather_output_fn,
+    all_gather_output_fn: Callable = _default_all_gather_output_fn,
 ) -> None:
     all_gather_event = all_gather_result.all_gather_event
     all_gather_work = all_gather_result.all_gather_work
@@ -530,7 +521,7 @@ def _copy_all_gather_outputs(
         )
 
 
-def _foreach_all_gather_reorder(
+def _reassemble_all_gather_outputs(
     shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]], world_size: int
 ) -> None:
     for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
@@ -604,9 +595,7 @@ def foreach_reduce(
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
     *,
-    prepare_reduce_scatter_inputs: _ReduceScatterInputFn = (
-        _default_reduce_scatter_input_fn
-    ),
+    prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
 ) -> tuple[
     torch.Tensor,
     torch.Event,

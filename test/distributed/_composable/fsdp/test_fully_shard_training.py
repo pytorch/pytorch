@@ -30,7 +30,6 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_reduce_scatter_input_fn,
-    _ReduceScatterInputFn,
     foreach_all_gather,
     foreach_reduce,
 )
@@ -2578,9 +2577,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
             *,
-            prepare_reduce_scatter_inputs: _ReduceScatterInputFn = (
-                _default_reduce_scatter_input_fn
-            ),
+            prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn,
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)

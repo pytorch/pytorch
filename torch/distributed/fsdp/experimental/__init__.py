@@ -10,7 +10,7 @@ import math
 import torch
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _copy_all_gather_outputs,
-    _foreach_all_gather_reorder,
+    _reassemble_all_gather_outputs,
     AllGatherResult,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
@@ -79,7 +79,7 @@ def all_gather_output_fn_with_dim0_views(
         copy_outputs,
         world_size,
     )
-    _foreach_all_gather_reorder(reorder_infos, world_size)
+    _reassemble_all_gather_outputs(reorder_infos, world_size)
 
 
 def reduce_scatter_input_fn_with_dim0_views(

@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
-    from ._fsdp_collectives import _AllGatherOutputFn, _ReduceScatterInputFn
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -678,9 +677,7 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
-    def set_all_gather_output_fn(
-        self, fn: _AllGatherOutputFn, *, recurse: bool = True
-    ) -> None:
+    def set_all_gather_output_fn(self, fn: Callable, *, recurse: bool = True) -> None:
         """Set the function that copies a parameter group's all-gather outputs.
 
         .. warning::
@@ -712,7 +709,7 @@ class FSDPModule:
                     fsdp_param_group._all_gather_output_fn = fn
 
     def set_reduce_scatter_input_fn(
-        self, fn: _ReduceScatterInputFn, *, recurse: bool = True
+        self, fn: Callable, *, recurse: bool = True
     ) -> None:
         """Set the function that prepares reduce-scatter inputs.
 

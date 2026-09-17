@@ -5,6 +5,7 @@ import copy
 import functools
 import math
 import threading
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -15,7 +16,6 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import _AllGatherOutputFn
 from torch.distributed.fsdp.experimental import all_gather_output_fn_with_dim0_views
 from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -261,7 +261,7 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
         reshard_after_forward: bool,
         *,
         shard_dim: int = 0,
-        all_gather_output_fn: _AllGatherOutputFn | None = None,
+        all_gather_output_fn: Callable | None = None,
     ):
         torch.manual_seed(42)
         model = self._init_two_tensor_mlp()
