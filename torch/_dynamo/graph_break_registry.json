@@ -2064,6 +2064,17 @@
       ]
     }
   ],
+  "GB7935": [
+    {
+      "Gb_type": "checkpoint context_fn bound to a non-constant receiver",
+      "Context": "context_fn={ctx}",
+      "Explanation": "checkpoint needs context_fn as a Python callable, but the receiver of this bound method cannot be resolved to a constant object at trace time.",
+      "Hints": [
+        "Bind context_fn to an object created outside the compiled ",
+        "region, or pass a function or functools.partial instead."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",
@@ -5377,6 +5388,16 @@
       "Hints": [
         "Remove the wrap_triton/capture_triton call or its additional args.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3003": [
+    {
+      "Gb_type": "method comparison with undecidable receiver",
+      "Context": "{self} {op} {other}",
+      "Explanation": "Dynamo cannot tell at trace time whether the two bound methods share a receiver.",
+      "Hints": [
+        "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
       ]
     }
   ],
