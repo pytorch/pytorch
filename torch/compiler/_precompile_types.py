@@ -71,7 +71,7 @@ class PrecompileSummary:
     resume_functions: int
     guarded_codes: int
     backend_graphs: int
-    bypassed: tuple[str, ...]
+    bypassed: tuple[str, ...] = ()
     truncated: tuple[str, ...] = ()
     uncovered_frames: tuple[str, ...] = ()
     wont_generalize: tuple[str, ...] = ()
@@ -141,7 +141,12 @@ class PrecompileSummary:
         if self.dropped_guards:
             base += f", dropped guards {self.dropped_guard_types()}"
         if self.risky_dropped_guards:
-            base += f", RISKY drops {[n for _, n in self.risky_dropped_guards]}"
+            # Type AND source: the histogram one label over counts types only, and two
+            # risky drops of different types on one source are not the same drop.
+            risky = [f"{t} on {s}" for t, s in self.risky_dropped_guards]
+            base += f", RISKY drops {risky}"
+        if self.policy_dropped_guards:
+            base += f", {len(self.policy_dropped_guards)} policy drops"
         if self.uncovered_frames:
             base += (
                 f", {len(self.uncovered_frames)} UNCOVERED: "
