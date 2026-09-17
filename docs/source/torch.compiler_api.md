@@ -67,10 +67,13 @@ deprecation cycle.
    caller-driven: this runs nothing on its own. Enter the returned object as a context
    manager and call it with the positional arguments ``fn`` takes inside the block -- each
    call runs for real, folds what it exercised into the capture, and returns the served
-   result (a computed output does not require grad; an output that is or aliases an input
-   or parameter comes back as-is, with its own ``requires_grad``) -- and
-   the ``(python_code, cache)`` artifact is written to ``artifact_path`` / ``cache_path``
-   when the block exits::
+   result (a computed output does not require grad; an output that IS an input or
+   parameter comes back as that same tensor, hence with its own ``requires_grad``, while
+   an output that ALIASES an input is rebuilt at serve time and its ``requires_grad`` is
+   not part of the contract -- call ``.requires_grad_()`` on it if you depend on it) --
+   and the ``(python_code, cache)`` artifact is written to ``artifact_path`` /
+   ``cache_path`` when the block exits cleanly (a block that raised writes nothing, and a
+   clean exit that never called the capture raises instead of writing)::
 
        with torch.compiler.precompile.capture(
            fn, artifact_path="m.py", cache_path="m.cache"
@@ -80,8 +83,11 @@ deprecation cycle.
 
    Because the caller makes the calls, inputs flow through naturally and return values stay
    available, so the capture drops into an ordinary training or pipeline loop where
-   intermediate values are needed; to checkpoint the artifact partway instead of only at
-   exit, call ``cap.save()`` inside the block, which re-renders and rewrites both files.
+   intermediate values are needed; call ``cap.save()`` inside the block to write the
+   artifact without ending the capture. With :class:`precompile.DynamoTracer` that
+   checkpoints the calls made so far, re-rendering and rewriting both files; a
+   :class:`precompile.MakeFxTracer` capture records a single call, so ``save()`` and
+   block exit write the same files.
    ``tracer`` picks the capture front-end and carries its tracer-specific
    configuration: :class:`precompile.MakeFxTracer` (the default) is one non-strict ATen
    trace and takes exactly one call (a second call raises); :class:`precompile.DynamoTracer`
@@ -98,9 +104,11 @@ deprecation cycle.
    .. note::
 
       With :class:`precompile.MakeFxTracer`, capture is non-strict. Control flow is
-      specialized to the captured call, and shapes are static -- each size is baked in. A
-      data-dependent op (``.item()``, a branch over a tensor value) instead raises at
-      capture, since the trace runs under fake mode where the value is unknown. The
+      specialized to the captured call, and shapes are static -- each size is baked in. With
+      no dim marked unbacked (below), a data-dependent op (``.item()``, a branch over a
+      tensor value) instead raises at capture, since the trace runs under fake mode where
+      the value is unknown; once a dim is marked, the value is held as an unbacked symbol
+      and a use that never guards on it captures, while a guard on it fails. The
       exception to static shapes is a tensor dim explicitly marked unbacked with
       ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call (with
       ``make_fx`` this requires the inductor backend; with :class:`precompile.DynamoTracer`
@@ -153,13 +161,17 @@ deprecation cycle.
        ambient one: ``True`` runs it under ``torch.enable_grad()``, ``False`` under
        ``torch.no_grad()``.
    :returns: A :class:`precompile.Capture` -- a context manager and callable. The artifact
-       is written to the two files when the block exits.
+       is written to the two files on a clean exit from the block that captured at least
+       one call. Two exits write nothing: a block that raised leaves the files untouched
+       (the exception propagates), and a clean exit that never called the capture raises
+       ``PrecompileError`` instead of writing an empty artifact.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below); if ``tracer`` is a
-       :class:`precompile.DynamoTracer` (not available in this build yet); a second
-       make_fx call also raises.
-   :raises ValueError: for an unknown ``backend``, or a ``cache_path``/``artifact_path``
-       given without the other.
+       :class:`precompile.DynamoTracer` (not available in this build yet); if the block
+       exits cleanly without ever calling the capture (nothing was captured, so nothing
+       is written); a second make_fx call also raises.
+   :raises ValueError: for an unknown ``backend``, for one file named as both halves, or
+       for a path that exists but is not a regular file.
    :raises TypeError: if ``tracer`` is not a :class:`precompile.MakeFxTracer` or
        :class:`precompile.DynamoTracer`.
 
@@ -189,8 +201,9 @@ deprecation cycle.
            cap(example_b)
        compiled = torch.compiler.precompile.load("s.py", "s.cache")
        # staged() breaks only within its own frame, so this artifact is
-       # STANDALONE: a plain callable (an installing artifact -- one whose
-       # capture holds frames the entry cannot reach -- supports `with`).
+       # STANDALONE: `installed` is False, so its `with` / `unload()` are
+       # no-ops (they take something back out only for an installing artifact --
+       # one whose capture holds frames the entry cannot reach).
        with torch.no_grad():
            out = compiled(example_a)
 ```
@@ -241,12 +254,17 @@ deprecation cycle.
        shape arrives with :class:`precompile.DynamoTracer` and is not available in this
        build yet (``load`` raises ``PrecompileError`` for an artifact whose
        ``SERVING_MODE`` is ``'installed'``).
-   :raises PrecompileError: if ``python_code`` is not a valid precompile artifact (it
-       fails to parse or is missing its calling-convention metadata), if ``cache`` is
-       paired with a different ``python_code`` (mismatched ``backend`` tag, ``tracer``
-       tag, or ``code_hash``), if the artifact declares ``SERVING_MODE = 'installed'``
-       or ``fn=`` is passed (neither is available in this build), or if a runtime call
-       violates the precompile contract.
+   :raises PrecompileError: if either half cannot be read (a missing or unreadable file,
+       one of the two paths handed artifact contents rather than a path, or the two paths
+       swapped -- the cache's bytes then fail to decode as source); if ``python_code`` is
+       not a valid precompile artifact (it fails to parse or is missing its
+       calling-convention metadata); if ``cache`` is paired with a different
+       ``python_code`` (mismatched ``backend`` tag, ``tracer`` tag, or ``code_hash``); if
+       the artifact declares ``SERVING_MODE = 'installed'`` or ``fn=`` is passed (neither
+       is available in this build); or if a runtime call violates the precompile
+       contract.
+   :raises ValueError: for one file named as both halves, or for a path that exists but
+       is not a regular file. These are checked before either file is opened.
 
 .. autoexception:: torch.compiler.PrecompileError
 
@@ -318,13 +336,17 @@ deprecation cycle.
    The object :func:`precompile.capture` returns. Enter it as a context manager and call
    it like ``fn`` inside the block to fold each call into the capture (see
    :func:`precompile.capture` for the semantics); it is not constructed directly. The
-   artifact is written to the two files when the block exits. Also exposes:
+   artifact is written to the two files on a clean exit from the block that captured at
+   least one call: a block that raised leaves the files untouched, and a clean exit that
+   never called the capture raises ``PrecompileError`` rather than writing. Also exposes:
 
    .. py:method:: save()
 
-      Checkpoint everything captured so far to the two files without ending the capture.
-      Call it as often as you like inside the block; each call re-renders and rewrites both
-      files, so a job that dies between saves leaves the last checkpoint loadable. A gate
+      Write everything captured so far to the two files without ending the capture. Call
+      it as often as you like inside the block. With :class:`precompile.DynamoTracer` each
+      call re-renders and rewrites both files, so a job that dies between saves leaves the
+      last checkpoint loadable; a :class:`precompile.MakeFxTracer` capture records a single
+      call, so ``save()`` and block exit write the same files. A gate
       refusal (the ``DynamoTracer`` ``require_*`` fields) or a write failure raises but
       writes nothing partial: the previous files stay intact and the capture stays open.
 

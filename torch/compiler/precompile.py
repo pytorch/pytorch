@@ -27,11 +27,24 @@ from torch.compiler._precompile_types import (
 )
 
 
+# The two tracers come from torch._precompile, which is under `from __future__ import
+# annotations`, so their annotations are still strings that only resolve against THAT
+# module's globals: resolve them BEFORE the re-homing below points
+# typing.get_type_hints (which resolves through a class's __module__) at this module
+# instead. The three _precompile_types classes need nothing -- that module has no
+# future-annotations import, so their annotations are already objects. Only
+# __annotations__ is rewritten here; dataclasses.fields() keeps the original strings,
+# since it reads __dataclass_fields__, frozen at decoration.
+for _t in (MakeFxTracer, DynamoTracer):
+    _t.__annotations__ = typing.get_type_hints(_t)
+
+
 # These types are defined in torch._precompile / a private module (for
 # import-layering reasons, and because dataclass decoration resolves annotations
 # against the defining module). Declare this module their home so introspection
 # (test_public_bindings, Sphinx) resolves them under torch.compiler.precompile,
-# where they are re-exported.
+# where they are re-exported; that rewrites their __module__ process-globally, and the
+# public spelling is the only one either defining module documents.
 for _t in (
     MakeFxTracer,
     DynamoTracer,
@@ -39,17 +52,10 @@ for _t in (
     FrameInvariants,
     GuardFact,
 ):
-    # Resolve the string annotations against the DEFINING module's globals before
-    # re-homing, so typing.get_type_hints (which resolves a class's annotations
-    # through its __module__) does not later fail to find names like Callable in
-    # this module's namespace.
-    _t.__annotations__ = typing.get_type_hints(_t)
     _t.__module__ = "torch.compiler.precompile"
 
 
 del _t
-
-
 del typing  # not part of the public surface
 
 
