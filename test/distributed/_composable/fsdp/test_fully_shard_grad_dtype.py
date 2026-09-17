@@ -212,6 +212,53 @@ class TestFullyShardGradientDtype(FSDPTest):
         self.assertEqual(projection.unused.grad.dtype, torch.float32)
         self.assertEqual(torch.count_nonzero(projection.unused.grad.to_local()), 0)
 
+    @skip_if_lt_x_gpu(2)
+    @skipIfTorchDynamo("Parameter conversion is tested in eager mode")
+    @parametrize("storage_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("grad_dtype", [None, torch.float32])
+    def test_parameter_conversion_with_gradient(self, device, storage_dtype, grad_dtype):
+        device = torch.device(torch.device(device).type, self.rank)
+        model = nn.Sequential(_Linear(device, storage_dtype))
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, grad_dtype=grad_dtype
+            ),
+        )
+        inp = torch.full((3, 32), 1.0078125, device=device, dtype=torch.bfloat16)
+        model(inp).backward(torch.full_like(inp, 1.0078125))
+        param = model[0].weight
+        expected_param = param.to_local().detach().clone()
+        expected_grad = param.grad.to_local().clone()
+        expected_dtype = grad_dtype or storage_dtype
+
+        def fail_on_parameter(tensor):
+            if tensor.requires_grad:
+                raise RuntimeError("parameter conversion failed")
+            return tensor.clone()
+
+        original_grad = param.grad
+        with self.assertRaisesRegex(RuntimeError, "parameter conversion failed"):
+            model._apply(fail_on_parameter)
+        self.assertIs(param.grad, original_grad)
+        del original_grad
+
+        model.cpu()
+        self.assertIs(model[0].weight, param)
+        self.assertEqual(param.device.type, "cpu")
+        self.assertEqual(param.grad.device.type, "cpu")
+        self.assertEqual(param.grad_dtype, expected_dtype)
+        self.assertEqual(param.grad.dtype, expected_dtype)
+        self.assertEqual(param.grad._spec.tensor_meta.dtype, expected_dtype)
+        self.assertEqual(param.to_local(), expected_param.cpu(), atol=0, rtol=0)
+        self.assertEqual(param.grad.to_local(), expected_grad.cpu(), atol=0, rtol=0)
+
+        model.to(device=device)
+        self.assertEqual(param.grad.dtype, expected_dtype)
+        self.assertEqual(param.grad.to_local(), expected_grad, atol=0, rtol=0)
+        model(inp).backward(torch.full_like(inp, 1.0078125))
+        self.assertEqual(param.grad.to_local(), expected_grad * 2, atol=0, rtol=0)
+
 
 instantiate_device_type_tests(TestFullyShardGradientDtype, globals(), only_for="cuda")
 
