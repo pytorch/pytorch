@@ -53,9 +53,6 @@ if TYPE_CHECKING:
     USER_INPUT_DTYPES: list[str | None] = []
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
-    # Device types the captured graph dispatches on. The drivers neutralize
-    # ambient autocast on these; see _autocast_off.
-    GRAPH_DEVICES: tuple[str, ...] = ()
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -143,71 +140,73 @@ def _check_structure(pb, names):
 _AUTOCAST_SKIPS_REPORTED: set[str] = set()
 
 
-def _autocast_off(devices):
-    """Neutralize ambient autocast on the devices the captured graph uses.
+def _autocast_off():
+    """Neutralize this process's ambient autocast while a served call runs.
 
-    Whatever the capture ran under is already baked into the artifact -- ATen
-    casts for make_fx, generated kernels for inductor -- but the graph still
-    re-dispatches (an inductor artifact calls extern_kernels, which hit the
-    autocast key), so a serving process with autocast on would cast a second
-    time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
-    than from the runtime tensors: a graph built from factory ops has no input
-    device at all.
+    Whatever the capture ran under is already baked into the artifact -- ATen casts
+    for make_fx, generated kernels for inductor -- but the graph still re-dispatches
+    (an inductor artifact calls extern_kernels, which hit the autocast key), so a
+    serving process with autocast on would cast a second time.
+
+    Every autocast-capable device of the SERVING build is covered, taken from
+    ``torch._C._autocast_supported_devices()`` behind the same ``hasattr(torch, dev)``
+    guard that ``torch._functorch._aot_autograd.graph_capture_wrappers.disable_autocast``
+    uses -- the precedent this mirrors, and which AOTAutograd (the subsystem precompile
+    lowers through) applies for its backward_pass_autocast policy. Inlined rather than
+    imported because the artifact is self-contained and must not depend on a private
+    torch name. From the build rather than from the captured graph so that an op whose
+    body moves work to a device the traced tensors never name is covered too.
 
     Nothing is entered for a device that has no autocast on it, which is the
     overwhelmingly common case: ``is_autocast_enabled(dev)`` is exactly the bit
     ``autocast(dev, enabled=False)`` clears, so gating on it keeps a served call from
-    paying a context enter/exit per graph device (whose exit would also drop a
-    caller's own weight-cast cache) to disable what is already off.
+    paying a context construct plus enter/exit per supported device to disable what is
+    already off.
 
-    A device this build cannot autocast is SKIPPED with a logged warning, not an error.
-    The skip that costs something is the one whose probe ANSWERS and whose disable then
-    refuses to construct: an out-of-tree backend that reports autocast enabled and
-    raises ``AssertionError`` out of the ``autocast`` constructor (``privateuseone``
-    with no registered device module). That one leaves a live region on and the served
-    call casts a second time, which is what the report is for. A probe that RAISES
-    proves the opposite -- ``is_autocast_enabled`` and ``set_autocast_enabled`` share
-    one dispatch-key lookup, so a device the probe cannot answer for cannot have its
-    autocast bit set either, and there is no region to leave on. Both raising spellings
-    take the same skip: an unknown device type (``RuntimeError``) and a
-    deprecated-but-parseable one (``mkldnn``) whose device parse emits a
-    ``UserWarning`` -- which under ``-W error`` IS the raise, hence ``Warning`` in the
-    catch, kept for a device that both warns and supports autocast. Nothing else is
-    swallowed. Reported through ``logging`` rather than ``warnings`` (a ``UserWarning``
-    would fail the very call this skip keeps working under ``-W error``) and once per
-    device per LOADED artifact (_AUTOCAST_SKIPS_REPORTED is the artifact's own copy, so
-    a second ``load`` reports again). The stack is built inside a ``with`` and handed
-    back with ``pop_all`` so a propagating failure unwinds the disables already
-    entered, not leaving the caller's autocast off.
+    A device that passes the guard, REPORTS autocast enabled and then still refuses to
+    construct the disable is SKIPPED with a logged warning rather than failed on: a
+    registered device module missing ``get_amp_supported_dtype`` raises
+    ``AssertionError`` out of the ``autocast`` constructor (an explicit ``raise``, not a
+    bare assert, so ``python -O`` cannot strip it out from under the catch). That is the
+    one case where a served call really does cast a second time on top of the casts
+    already baked in, which is what the report is for. Only the probe and the construct
+    are inside the catch: a failure to ENTER propagates instead, since a swallowed
+    ``__enter__`` would return with the caller's own region switched off -- the opposite
+    of what the skip reports. Reported through ``logging`` rather than ``warnings`` (a
+    ``UserWarning`` would fail the very call this skip keeps working under ``-W error``)
+    and once per device per LOADED artifact (_AUTOCAST_SKIPS_REPORTED is the artifact's
+    own copy, so a second ``load`` reports again). The stack is built inside a ``with``
+    and handed back with ``pop_all`` so a propagating failure unwinds the disables
+    already entered, not leaving the caller's autocast off.
     """
     import contextlib as _contextlib
     import logging as _logging
 
     with _contextlib.ExitStack() as stack:
         _skipped = []
-        for _dev in devices:
-            try:
-                if _torch.is_autocast_enabled(_dev):
-                    stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
+        for _dev in _torch._C._autocast_supported_devices():
+            if not hasattr(_torch, _dev):
                 continue
-            except (RuntimeError, AssertionError, Warning):
-                pass
-            if _dev not in _AUTOCAST_SKIPS_REPORTED:
-                _AUTOCAST_SKIPS_REPORTED.add(_dev)
-                _skipped.append(_dev)
+            try:
+                if not _torch.is_autocast_enabled(_dev):
+                    continue
+                _cm = _torch.amp.autocast(_dev, enabled=False)
+            except AssertionError:
+                if _dev not in _AUTOCAST_SKIPS_REPORTED:
+                    _AUTOCAST_SKIPS_REPORTED.add(_dev)
+                    _skipped.append(_dev)
+                continue
+            stack.enter_context(_cm)
         if _skipped:
             # The logger named literally, not from __name__: this body is inlined
             # into the artifact, which is not this module.
             _logging.getLogger("torch._precompile_driver").warning(
-                "precompile: this build cannot neutralize autocast on the captured "
-                "graph's device(s) %s, so any autocast that IS on for them is left "
-                "on. If a device reported autocast enabled and the disable then "
-                "refused to construct (a backend with no registered autocast "
-                "module), a call served inside that region casts a second time on "
-                "top of the casts already baked into the artifact and returns a "
-                "different dtype than the capture did. A device whose autocast probe "
-                "RAISED instead cannot have autocast on at all -- the same lookup "
-                "backs torch.set_autocast_enabled -- so nothing is left on for it.",
+                "precompile: this build reports autocast enabled on device(s) %s but "
+                "cannot construct the disable for them (a device module with no "
+                "registered autocast support), so their autocast is left ON for this "
+                "served call: it casts a second time on top of the casts already "
+                "baked into the artifact and returns a different dtype than the "
+                "capture did.",
                 _skipped,
             )
         return stack.pop_all()
@@ -282,7 +281,7 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    with _autocast_off(GRAPH_DEVICES), _torch.no_grad():
+    with _autocast_off(), _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -396,7 +395,7 @@ def _inductor_forward(*args):
         # The generated code re-dispatches through extern_kernels for anything
         # inductor did not fuse, so ambient autocast reaches it even though the
         # casts the capture ran under are already baked into the kernels.
-        with _autocast_off(GRAPH_DEVICES):
+        with _autocast_off():
             out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
