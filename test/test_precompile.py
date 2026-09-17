@@ -48,6 +48,12 @@ _pytree.register_pytree_node(
 )
 
 
+def _precompile_pair(fn, *args, **kwargs):
+    """Public-API entry point for the tests added with the fake-tensor capture, behind one
+    indirection so the tracer/module switch above this commit re-points it in one place."""
+    return torch.compiler.precompile(fn, *args, **kwargs)
+
+
 def _strip_artifact(cache: bytes) -> bytes:
     """Return the cache envelope with its compiled artifact removed, forcing load()
     onto the inlined (no-cache) path that JIT-compiles from python_code. Many tests
@@ -2154,10 +2160,13 @@ class TestPrecompile(TestCase):
             (items, DataDependentOutputException),
             (nonzero, DynamicOutputShapeException),
         ):
-            refused = self.assertRaisesRegex(PrecompileError, "data-dependent op")
-            with self.subTest(fn=fn.__name__), refused as cm:
-                torch.compiler.precompile(fn, model, torch.randn(3, 4), backend="eager")
-            self.assertIsInstance(cm.exception.__cause__, cause)
+            with self.subTest(fn=fn.__name__):
+                # Both asserts stay inside the subTest: chained after it, a regressed
+                # refusal would be swallowed by subTest and then re-reported as an
+                # AttributeError on cm.exception, aborting the loop before the next case.
+                with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
+                    _precompile_pair(fn, model, torch.randn(3, 4), backend="eager")
+                self.assertIsInstance(cm.exception.__cause__, cause)
 
         # Both op registrations are global, so undo them: the scoped library takes
         # its own op with it, and the custom_op's library is destroyed in finally.
@@ -2246,6 +2255,35 @@ class TestPrecompile(TestCase):
         self.assertNotIsInstance(cm.exception, PrecompileError)
         self.assertIn("doesn't have storage", str(cm.exception))
 
+    def test_capture_refuses_a_numpy_conversion(self):
+        # A NumPy conversion reads the traced tensor's data exactly as .data_ptr() does,
+        # but tensor_numpy.cpp rejects it earlier and blames "tensor subclasses" -- the
+        # subclass being capture's own FakeTensor, nothing the caller wrote -- so that text
+        # is matched too and relabeled. This is everyday logging/metric code
+        # (loss.detach().cpu().numpy()) inside a forward, and unrelabeled it sent the user
+        # after a subclass that does not exist. np.asarray(t) reaches the same raise site
+        # through __array__, which is the case covered here: importing numpy in this
+        # process is what must be avoided, since mkl-service sets MKL_THREADING_LAYER on
+        # import and the inherited env then breaks the fresh-process subprocess test.
+        model = torch.nn.Linear(4, 4)
+        for name, read in (
+            ("numpy", lambda t: t.numpy()),
+            ("numpy_force", lambda t: t.numpy(force=True)),
+            ("dunder_array", lambda t: t.__array__()),
+        ):
+
+            def logs_through_numpy(m, x, read=read):
+                read(x.detach())
+                return m(x)
+
+            with (
+                self.subTest(read=name),
+                self.assertRaisesRegex(PrecompileError, r"reads a tensor's data"),
+            ):
+                _precompile_pair(
+                    logs_through_numpy, model, torch.randn(3, 4), backend="eager"
+                )
+
     def test_unfakeifiable_input_refused_without_clobbering_grad(self):
         # Fakeification runs INSIDE the .grad save/restore window, so an example input
         # the meta converter cannot represent (a quantized tensor) is refused with a
@@ -2313,6 +2351,85 @@ class TestPrecompile(TestCase):
                     lambda m, t: m(t), mod, torch.randn(2, 3), backend="eager"
                 )
 
+        # ... and a nested PARAMETER, the other half of input_labels' model side.
+        class HasNestedParam(torch.nn.Module):
+            def __init__(self, nt):
+                super().__init__()
+                self.p = torch.nn.Parameter(nt)
+
+            def forward(self, t):
+                return t
+
+        with self.assertRaisesRegex(PrecompileError, "parameter p is a nested tensor"):
+            _precompile_pair(
+                lambda m, t: m(t),
+                HasNestedParam(torch.nested.nested_tensor(parts, layout=torch.jagged)),
+                torch.randn(2, 3),
+                backend="eager",
+            )
+
+    def test_inputs_whose_metadata_a_fake_drops_are_refused(self):
+        # from_tensor ACCEPTS these three and silently drops metadata the trace then reads
+        # at Python level and bakes -- an mkldnn tensor comes back strided (so
+        # to_dense()/to_mkldnn() record no node), a sparse one comes back with 0 nnz (so
+        # .values() is annotated empty and a Python nnz read bakes 0), a pinned one comes
+        # back unpinned (so is_pinned() reads False and a branch on it bakes the unpinned
+        # side) -- each of which a real-tensor trace baked correctly. So they are refused
+        # by name in the same capture-wide loop as a nested input, which also puts the
+        # refusal ahead of every recorded shape read.
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        cases = [
+            # Each regex carries the layout AND its diagnosis, so one branch cannot
+            # stand in for another (every one of them opens "has <layout> layout").
+            (
+                x.to_mkldnn(),
+                r"user input 0 has torch._mkldnn layout.*comes back STRIDED",
+            ),
+            (x.to_sparse(), r"user input 0 has torch.sparse_coo layout.*reports 0 nnz"),
+            (x.to_sparse_csr(), r"user input 0 has torch.sparse_csr layout.*0 nnz"),
+        ]
+        if TEST_CUDA:  # pin_memory needs an accelerator allocator
+            cases.append((x.pin_memory(), "user input 0 is in pinned memory"))
+        for t, message in cases:
+            with (
+                self.subTest(case=message),
+                self.assertRaisesRegex(PrecompileError, message),
+            ):
+                _precompile_pair(lambda m, u: m(u), model, t, backend="eager")
+
+        # The model half is named the same way: torch.utils.mkldnn.to_mkldnn registers the
+        # converted weight as a BUFFER, and before this refusal that capture died inside
+        # the TorchScript interpreter ("itensor_view_from_dense expects CPU tensor input").
+        from torch.utils.mkldnn import to_mkldnn
+
+        with self.assertRaisesRegex(
+            PrecompileError,
+            r"buffer weight has torch._mkldnn layout.*comes back STRIDED",
+        ):
+            _precompile_pair(
+                lambda m, t: m(t.to_mkldnn()).to_dense(),
+                to_mkldnn(torch.nn.Linear(4, 4)),
+                x,
+                backend="eager",
+            )
+
+        # The sibling idiom -- fn PINNING a tensor instead of being handed a pinned one --
+        # is refused as a missing fake kernel: FakeTensorMode declines aten._pin_memory
+        # with a bare AssertionError("NYI: <op>"), which is relabeled rather than escaping
+        # raw. Needs no accelerator: the fake dispatch declines before any allocator call.
+        with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+            _precompile_pair(lambda m, t: m(t.pin_memory()), model, x, backend="eager")
+
+        # Capture-WIDE: the unbacked path refuses the same input, before it fakeifies
+        # anything. Unbacked capture is inductor-only, so no backend override.
+        marked = torch.randn(4, 4)
+        mark_unbacked(marked, 0)
+        with self.assertRaisesRegex(
+            PrecompileError, r"user input 1 has torch.sparse_coo layout.*reports 0 nnz"
+        ):
+            _precompile_pair(lambda m, t, u: m(t), model, marked, x.to_sparse())
+
     def test_unbacked_capture_refuses_an_unfakeifiable_input(self):
         # Both fakeify paths refuse an input the meta converter cannot represent through
         # the same helper, so a quantized example input gets the same named
@@ -2339,6 +2456,39 @@ class TestPrecompile(TestCase):
             PrecompileError, "user input 0 cannot be represented as a fake tensor"
         ):
             torch.compiler.precompile(lambda m, u: m(u.dequantize()), model, marked_q)
+
+        # The MODEL half is named too, on both paths: the unbacked path routes its
+        # params/buffers through the same helper (a bare from_tensor there lets a
+        # quantized buffer escape as the raw UnsupportedFakeTensorException), and this is
+        # the only assertion on the "buffer {name}" half of input_labels for this refusal.
+        class HasQuantizedBuffer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(3, 3)
+                self.register_buffer(
+                    "q",
+                    torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8),
+                )
+
+            def forward(self, t):
+                return self.lin(t)
+
+        for marked_input in (False, True):
+            t = torch.randn(4, 3)
+            if marked_input:
+                mark_unbacked(t, 0)
+            with (
+                self.subTest(unbacked=marked_input),
+                self.assertRaisesRegex(
+                    PrecompileError, "buffer q cannot be represented as a fake tensor"
+                ),
+            ):
+                _precompile_pair(
+                    lambda m, u: m(u),
+                    HasQuantizedBuffer(),
+                    t,
+                    **({} if marked_input else {"backend": "eager"}),
+                )
 
     def test_unbacked_capture_refuses_a_data_ptr_read(self):
         # The unbacked fake mode carries the same two hardenings as the static one, so the
@@ -2376,6 +2526,25 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
                 torch.compiler.precompile(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
+    def test_data_dependent_refusal_omits_the_mark_unbacked_hint_when_unbacked(self):
+        # The refusal's closing advice ("mark a user-input dim with mark_unbacked") is only
+        # actionable for a STATIC capture. On the unbacked path the caller has already
+        # marked a dim and the ShapeEnv exists, so an op no ShapeEnv can help with
+        # (aten.equal) must not be answered with "go mark a dim". Unbacked capture is
+        # inductor-only, so that half takes the default backend.
+        def equal_branch(m, t):
+            return m(t) if torch.equal(t, t) else m(t) * 2
+
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(4, 4)
+        mark_unbacked(x, 0)
+        with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
+            _precompile_pair(equal_branch, model, x)
+        self.assertNotIn("mark_unbacked", str(cm.exception))
+        with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
+            _precompile_pair(equal_branch, model, torch.randn(4, 4), backend="eager")
+        self.assertIn("mark_unbacked", str(cm.exception))
+
     def test_user_runtime_error_from_fn_propagates_unchanged(self):
         # Capture catches EVERY RuntimeError out of the trace to relabel the two it
         # owns (a missing fake impl, a data-pointer read), so a RuntimeError raised by
@@ -2395,6 +2564,25 @@ class TestPrecompile(TestCase):
             self.assertNotIn("no meta/fake kernel", str(e))
         else:
             self.fail("expected fn's RuntimeError to propagate out of capture")
+
+        # The two defensive guards in that same except chain, each otherwise unpinned: an
+        # AttributeError from fn must be re-raised (only while_loop's
+        # "ignore_fresh_unbacked_symbols" one becomes the control-flow refusal, else fn's
+        # own message comes back dressed as a control-flow refusal), and a RuntimeError
+        # with an EMPTY message must not turn the propagation into an IndexError off
+        # splitlines()[0]. assertIs pins that the SAME exception object came through.
+        for raised in (AttributeError("my own attribute error"), RuntimeError("")):
+
+            def raises_it(m, x, raised=raised):
+                raise raised
+
+            with self.subTest(raised=type(raised).__name__):
+                with self.assertRaises(type(raised)) as cm:
+                    _precompile_pair(
+                        raises_it, model, torch.randn(3, 4), backend="eager"
+                    )
+                self.assertIs(cm.exception, raised)
+                self.assertNotIsInstance(cm.exception, PrecompileError)
 
     def test_precompile_error_from_fn_is_not_relabeled(self):
         # PrecompileError subclasses RuntimeError, so the trace's RuntimeError clause would
@@ -2846,8 +3034,8 @@ class TestPrecompileNumerics(TestCase):
         pre_rv = bn.running_var.clone()
         pre_nbt = bn.num_batches_tracked.clone()
         code, cache = torch.compiler.precompile(lambda model, xx: model(xx), example, x)
-        # Capture reparametrizes FAKE params/buffers in (invariant 3), so the example
-        # module's running stats must not move; a real-tensor trace advanced them.
+        # Capture reparametrizes the module with FAKE params/buffers (invariants 1 and 2),
+        # so the example module's running stats must not move; a real trace advanced them.
         self.assertEqual(bn.running_mean, pre_rm)
         self.assertEqual(bn.running_var, pre_rv)
         self.assertEqual(bn.num_batches_tracked, pre_nbt)
