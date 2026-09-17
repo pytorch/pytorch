@@ -5335,6 +5335,30 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_wrapper_user_method_not_a_wrapper_user_function(self):
+        """WrapperUserMethodVariable must not subclass WrapperUserFunctionVariable.
+
+        In CPython, MethodType is not a subclass of FunctionType; the VTs
+        should mirror that.
+        """
+        import types
+
+        from torch._dynamo.variables.functions import (
+            BaseUserFunctionVariable,
+            WrapperUserFunctionVariable,
+            WrapperUserMethodVariable,
+        )
+
+        self.assertFalse(
+            issubclass(WrapperUserMethodVariable, WrapperUserFunctionVariable)
+        )
+        self.assertTrue(
+            issubclass(WrapperUserFunctionVariable, BaseUserFunctionVariable)
+        )
+        self.assertTrue(issubclass(WrapperUserMethodVariable, BaseUserFunctionVariable))
+        self.assertIs(WrapperUserMethodVariable._cpython_type, types.MethodType)
+        self.assertIs(WrapperUserFunctionVariable._cpython_type, types.FunctionType)
+
     def test_wraps_stacked_on_lru_cache(self):
         # Stacking two functools.wraps layers over an lru_cache-wrapped fn.
         @functools.lru_cache
