@@ -18,6 +18,7 @@ from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard._fsdp_init import _get_managed_modules
 from torch.distributed.tensor import Replicate, Shard
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousForInstantiateTest,
     run_subtests,
@@ -26,7 +27,6 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import check_sharded_parity, MLPStack
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
