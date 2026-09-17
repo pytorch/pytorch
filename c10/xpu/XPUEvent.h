@@ -24,12 +24,11 @@ struct XPUEvent {
       const sycl::ext::oneapi::experimental::ipc::handle_data_t& handle_data)
       : device_index_(device_index) {
 #ifdef _WIN32
-    TORCH_INTERNAL_ASSERT(
-        false, "XPU IPC events are not supported on Windows.");
+    TORCH_CHECK(false, "XPU IPC events are not supported on Windows.");
 #endif
     auto& device = c10::xpu::get_raw_device(device_index);
     reusable_ = device.has(sycl::aspect::ext_oneapi_ipc_event);
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
         reusable_,
         "XPUEvent reconstructed from an IPC handle must be reusable.");
     event_ = std::make_unique<sycl::event>(
@@ -197,7 +196,6 @@ struct XPUEvent {
         enable_ipc_,
         "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
     if (!isCreated()) {
-      namespace syclex = sycl::ext::oneapi::experimental;
       createEvent(c10::xpu::current_device());
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
@@ -205,9 +203,8 @@ struct XPUEvent {
             c10::kXPU, reinterpret_cast<uintptr_t>(event_.get()));
       }
     }
-    TORCH_INTERNAL_ASSERT(
-        reusable_, "XPUEvent must be reusable to support IPC.");
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(reusable_, "XPUEvent must be reusable to support IPC.");
+    TORCH_CHECK(
         event().ext_oneapi_ipc_enabled(),
         "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
     return sycl::ext::oneapi::experimental::ipc::event::get(*event_).data();
@@ -236,7 +233,7 @@ struct XPUEvent {
 #if SYCL_COMPILER_VERSION >= 20260200
     if (enable_ipc_) {
       auto& device = c10::xpu::get_raw_device(device_index_);
-      TORCH_INTERNAL_ASSERT(
+      TORCH_CHECK(
           device.has(sycl::aspect::ext_oneapi_ipc_event),
           "Requires the ext_oneapi_ipc_event extension, "
           "which is not supported on this device. ",
@@ -250,6 +247,7 @@ struct XPUEvent {
     reusable_ = enable_ipc_;
 #if SYCL_COMPILER_VERSION >= 20260200
     if (reusable_) {
+      namespace syclex = sycl::ext::oneapi::experimental;
       event_ = std::make_unique<sycl::event>(syclex::make_event(
           c10::xpu::get_device_context(),
           syclex::properties{
