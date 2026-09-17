@@ -1046,7 +1046,12 @@ class FSDPParam:
             )
         spec = self._sharding_spec
         if spec.tensor_meta is not None and spec.tensor_meta.dtype != tensor.dtype:
-            spec = replace(spec, tensor_meta=replace(spec.tensor_meta, dtype=tensor.dtype))
+            spec = replace(
+                spec,
+                tensor_meta=TensorMeta(
+                    spec.tensor_meta.shape, spec.tensor_meta.stride, tensor.dtype
+                ),
+            )
         return _from_local_no_grad(tensor, spec)
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
