@@ -1502,16 +1502,12 @@ class CheckpointPolicy(enum.Enum):
         save additional tensors not limited to ones that are actually needed for
         gradient computation.
 
-        Eager selective checkpointing overrides policies that would replay an
-        operator to save the outputs of non-aliasing operators with an ordered
-        effect. An operator may be explicitly registered with an ordered effect
-        through ``torch.library`` or inferred to have one from non-whitelisted
-        TorchBind arguments. This override does not apply to ``MUST_RECOMPUTE`` or
-        operators in the ``c10d`` namespace. CPU-offload policies use this fallback
-        because eager SAC does not yet implement CPU offload and would otherwise
-        replay the operator. AOTAutograd rejects ``MUST_RECOMPUTE`` for an ordered
-        effect because a forward effect cannot join the backward effect-token chain
-        after partitioning.
+        For example, eager selective checkpointing overrides
+        ``PREFER_RECOMPUTE`` to save the outputs of non-aliasing operators with an
+        ordered effect. An operator may be explicitly registered with an ordered
+        effect through ``torch.library`` or inferred to have one from
+        non-whitelisted TorchBind arguments. This override does not apply to
+        ``MUST_RECOMPUTE`` or operators in the ``c10d`` namespace.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1

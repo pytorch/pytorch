@@ -767,8 +767,7 @@ void all2all_single_equal_split(
 #if defined(USE_ROCM)
   // RCCL spells the collective with a capital T.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
-#elif defined(NCCL_ALLTOALL_SUPPORTED) || \
-    NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
   // Using the collective rather than a send/recv loop lets NCCL differentiate
   // send/recv operations issued as part of the collective (e.g. alltoall) vs
   // those inside traditional p2p operations.
