@@ -2309,15 +2309,15 @@ class TestPrecompile(TestCase):
         def raises(m, x):
             raise RuntimeError("my own capture-time failure")
 
-        args = (raises, model, torch.randn(3, 4))
-        with self.assertRaisesRegex(RuntimeError, "my own capture-time failure"):
-            torch.compiler.precompile(*args, backend="eager")
         try:
-            torch.compiler.precompile(*args, backend="eager")
+            torch.compiler.precompile(raises, model, torch.randn(3, 4), backend="eager")
         except RuntimeError as e:
+            self.assertIn("my own capture-time failure", str(e))
             # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
             self.assertNotIsInstance(e, PrecompileError)
             self.assertNotIn("no meta/fake kernel", str(e))
+        else:
+            self.fail("expected fn's RuntimeError to propagate out of capture")
 
     def test_callable_api_traces_a_backward_under_ambient_no_grad(self):
         # The callable API keeps grad enabled around the trace whatever the caller's
@@ -2348,6 +2348,7 @@ class TestPrecompile(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
+
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y
