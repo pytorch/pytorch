@@ -64,10 +64,14 @@ class TORCH_API NCCLDevCommManager {
   //     ncclDevComm devcomm = ncclDevCommCreate(...);
   //     devcomm_opt = register_devcomm(group_name, devcomm);
   //   }
-  //   ncclDevComm& devcomm_ref = *devcomm_opt;
-  //   // Use devcomm_ref
+  //   ncclDevComm devcomm = *devcomm_opt;
+  //   // Use devcomm
   // }
-  std::optional<std::reference_wrapper<ncclDevComm>> get_devcomm(
+  // Returned by value, not by reference: `mutex_` is released here, and
+  // `register_comm` can evict the registry entry while a caller still holds
+  // what it got back. Callers pass the devcomm to a kernel launch, which copies
+  // it anyway.
+  std::optional<ncclDevComm> get_devcomm(
       const std::string& group_name,
       const std::string& key = __builtin_FUNCTION()) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -81,10 +85,7 @@ class TORCH_API NCCLDevCommManager {
     if (key_it == group_it->second.end()) {
       return std::nullopt;
     }
-    // Return a reference wrapper to the device communicator
-    // Using reference_wrapper because std::optional cannot hold references
-    // directly
-    return std::make_optional(std::ref(key_it->second));
+    return std::make_optional(key_it->second);
   }
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
@@ -191,7 +192,8 @@ class TORCH_API NCCLDevCommManager {
   // You can provide your own `key` if your function uses two different
   // device communicators on the same group at the same time, for example,
   // when concurrent collective operations are used.
-  // Returns a reference to the newly registered device communicator.
+  // Returns a copy of the newly registered device communicator; see
+  // `get_devcomm` for why this is not a reference.
   // @throws TORCH_CHECK if the device communicator is already registered for
   //         the given group and key combination.
   // Example:
@@ -203,8 +205,8 @@ class TORCH_API NCCLDevCommManager {
   //     ncclDevComm devcomm = ncclDevCommCreate(...);
   //     devcomm_opt = register_devcomm(group_name, devcomm);
   //   }
-  //   ncclDevComm& devcomm_ref = *devcomm_opt;
-  //   // Use devcomm_ref
+  //   ncclDevComm devcomm = *devcomm_opt;
+  //   // Use devcomm
   // }
   // void bar(const std::string& group_name) {
   //   ncclDevComm devcomm0 = ncclDevCommCreate(...);
@@ -214,7 +216,7 @@ class TORCH_API NCCLDevCommManager {
   //   register_devcomm(group_name, devcomm0, "bar0");
   //   register_devcomm(group_name, devcomm1, "bar1");
   // }
-  std::optional<std::reference_wrapper<ncclDevComm>> register_devcomm(
+  std::optional<ncclDevComm> register_devcomm(
       const std::string& group_name,
       ncclDevComm devcomm,
       const std::string& key = __builtin_FUNCTION()) {
@@ -237,8 +239,7 @@ class TORCH_API NCCLDevCommManager {
           key,
           " already registered.");
     }
-    // Return a reference to the newly registered device communicator
-    return std::make_optional(std::ref(key_it->second));
+    return std::make_optional(key_it->second);
   }
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
@@ -250,16 +251,29 @@ class TORCH_API NCCLDevCommManager {
   void register_comm(const std::string& group_name, ncclComm_t comm) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto registered_comm = group_to_comm_.find(group_name);
-    const bool is_new_registration = registered_comm == group_to_comm_.end() ||
+    [[maybe_unused]] const bool is_new_registration =
+        registered_comm == group_to_comm_.end() ||
         registered_comm->second != comm;
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Device communicators are built from a specific host comm, so a
     // replacement invalidates every one of them. Drop them here or
     // `get_devcomm` would hand a kernel a devcomm tied to a comm this registry
-    // no longer owns. Erasing without `ncclDevCommDestroy` is safe for the
-    // reason given at `unregister_comm`: the predecessor's own destroy
-    // reclaims what the devcomm holds.
-    if (is_new_registration && registered_comm != group_to_comm_.end()) {
+    // no longer owns, and `~NCCLDevCommManager` would pass the successor's comm
+    // to `ncclDevCommDestroy` alongside a predecessor-built devcomm.
+    //
+    // The erase skips `ncclDevCommDestroy` for the reason given at
+    // `unregister_comm`: whatever the devcomm holds is reclaimed when the
+    // predecessor comm is itself destroyed. On the replacement path that
+    // destroy is someone else's to make, so this is a precondition on the
+    // producer rather than something this registry guarantees.
+    //
+    // Identity here is the pointer alone, so a successor handed a recycled
+    // `ncclComm_t` address is indistinguishable from a re-registration of the
+    // same comm and skips the eviction. Reaching that requires the predecessor
+    // to have been destroyed without retiring its entry, which the producers in
+    // this tree do not do.
+    if (registered_comm != group_to_comm_.end() &&
+        registered_comm->second != comm) {
       devcomm_registry_.erase(group_name);
     }
 #endif
@@ -356,6 +370,34 @@ class TORCH_API NCCLDevCommManager {
 #endif
     }
   }
+
+#ifdef USE_ROCM
+  // Same as above, but identified by the generation the caller was handed when
+  // it registered. `ncclComm_t` addresses are recycled -- the predecessor is
+  // destroyed before the successor is created, so the allocator routinely hands
+  // the successor the predecessor's address -- and the pointer-only overload
+  // cannot tell the two apart. A delayed predecessor teardown would then erase
+  // a live successor's entry.
+  void unregister_comm(
+      const std::string& group_name,
+      ncclComm_t comm,
+      uint64_t generation) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = group_to_comm_.find(group_name);
+    auto generation_it = group_to_comm_generation_.find(group_name);
+    if (it != group_to_comm_.end() && it->second == comm &&
+        generation_it != group_to_comm_generation_.end() &&
+        generation_it->second == generation) {
+      group_to_comm_.erase(it);
+      group_to_device_api_support_.erase(group_name);
+      group_to_capture_allocation_support_.erase(group_name);
+      group_to_comm_generation_.erase(generation_it);
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+      devcomm_registry_.erase(group_name);
+#endif
+    }
+  }
+#endif // USE_ROCM
 
   // Destructor: Clean up all registered device communicators.
   // This is a best-effort cleanup. If the CUDA context has already been
