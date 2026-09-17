@@ -427,23 +427,6 @@ def _get_param_all_gather_inputs(
     return param_all_gather_inputs
 
 
-@torch.no_grad()
-def foreach_all_gather_copy_out(
-    all_gather_result: AllGatherResult,
-    fsdp_params: list[FSDPParam],
-    group: dist.ProcessGroup,
-) -> None:
-    all_gather_event = all_gather_result.all_gather_event
-    all_gather_work = all_gather_result.all_gather_work
-    device = all_gather_result.all_gather_output.device
-    device_handle = _get_device_handle(device.type)
-    if all_gather_event is not None:  # sync op
-        device_handle.current_stream().wait_event(all_gather_event)
-    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
-        all_gather_work.wait()
-    _default_all_gather_output_fn(fsdp_params, all_gather_result, group.size())
-
-
 def _default_all_gather_output_fn(
     fsdp_params: list[FSDPParam],
     all_gather_result: AllGatherResult,
@@ -481,6 +464,38 @@ def _default_all_gather_output_fn(
             shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
         split_with_sizes_out.extend(param_all_gather_outputs)
 
+    _copy_all_gather_outputs(
+        all_gather_output,
+        all_gather_input_split_sizes,
+        split_with_sizes_out,
+        world_size,
+    )
+    _foreach_all_gather_reorder(shard_i_copy_infos, world_size)
+
+
+@torch.no_grad()
+def foreach_all_gather_copy_out(
+    all_gather_result: AllGatherResult,
+    fsdp_params: list[FSDPParam],
+    group: dist.ProcessGroup,
+) -> None:
+    all_gather_event = all_gather_result.all_gather_event
+    all_gather_work = all_gather_result.all_gather_work
+    device = all_gather_result.all_gather_output.device
+    device_handle = _get_device_handle(device.type)
+    if all_gather_event is not None:  # sync op
+        device_handle.current_stream().wait_event(all_gather_event)
+    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
+        all_gather_work.wait()
+    _default_all_gather_output_fn(fsdp_params, all_gather_result, group.size())
+
+
+def _copy_all_gather_outputs(
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: list[int],
+    split_with_sizes_out: list[torch.Tensor],
+    world_size: int,
+) -> None:
     all_gather_output = all_gather_output.view(world_size, -1)
     if all_gather_output.dtype == torch.uint8:
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
@@ -500,6 +515,10 @@ def _default_all_gather_output_fn(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
 
+
+def _foreach_all_gather_reorder(
+    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]], world_size: int
+) -> None:
     for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
         # Chunk-cat from the temporary to the final all-gather output tensors
         shard_dim = fsdp_param.fsdp_placement.dim
