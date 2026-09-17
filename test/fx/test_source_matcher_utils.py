@@ -483,7 +483,7 @@ class TestSourceMatcher(JitTestCase):
         self.assertEqual(len(module_partitions), 1)
         self.assertEqual(len(module_partitions[k]), 1)
         self.assertEqual(len(module_partitions[k][0].output_nodes), 1)
-        self.assertEqual(module_partitions[k][0].output_nodes[0].name, "linear")
+        self.assertEqual(module_partitions[k][0].output_nodes[0].name, "linear_default")
         input_node_names = {node.name for node in module_partitions[k][0].input_nodes}
         self.assertEqual(input_node_names, {"x"})
 
