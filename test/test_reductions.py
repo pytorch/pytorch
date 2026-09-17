@@ -1763,6 +1763,14 @@ class TestReductions(TestCase):
             rtol=0.0,
         )
 
+    @dtypes(*all_types_and(torch.half))
+    @skipIfMPS
+    def test_count_nonzero_empty_tensor(self, device, dtype):
+        x = torch.empty(0, device=device)
+        ret = torch.count_nonzero(x, dtype=dtype)
+        self.assertEqual(ret.item(), 0)
+        self.assertEqual(ret.dtype, dtype)
+
     # TODO: Investigate why the output is not close to numpy.
     def _get_relaxed_tolerances_for(self, dtype):
         if dtype == torch.float16:
