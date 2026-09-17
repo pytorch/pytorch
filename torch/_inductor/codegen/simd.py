@@ -4324,7 +4324,11 @@ class SIMDScheduling(BaseScheduling):
                     value_resolver.materialize_sources(
                         relation
                         for relation in sub_parent_stage.access_relations
-                        if relation.requires_live_source
+                        if relation.mapping_kind
+                        in (
+                            scheduler.SubParentAccessKind.LANE,
+                            scheduler.SubParentAccessKind.IDENTITY_TRANSLATION,
+                        )
                     )
                     self._codegen_sub_parent_output_groups(
                         kernel,
@@ -4677,10 +4681,14 @@ class SIMDScheduling(BaseScheduling):
         rnumel = plan.parent_rnumel
         sub_parent_epilogue_nodes = stage.epilogue_nodes
         parent_nodes = list(plan.parent_nodes)
-        required_lane_relations = tuple(
+        required_replay_relations = tuple(
             relation
             for relation in stage.access_relations
-            if relation.requires_live_source
+            if relation.mapping_kind
+            in (
+                scheduler.SubParentAccessKind.LANE,
+                scheduler.SubParentAccessKind.IDENTITY_TRANSLATION,
+            )
         )
         parent_schedule = self.generate_node_schedule(
             parent_nodes,
@@ -4762,10 +4770,10 @@ class SIMDScheduling(BaseScheduling):
                 )
                 with V.set_ops_handler(value_resolver):
                     self._codegen_node_schedule_body(parent_schedule, kernel)
-                if not required_lane_relations:
+                if not required_replay_relations:
                     kernel.codegen_body()
                 else:
-                    value_resolver.materialize_sources(required_lane_relations)
+                    value_resolver.materialize_sources(required_replay_relations)
                 self._codegen_sub_parent_output_groups(
                     kernel,
                     stage,
