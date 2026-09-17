@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import builtins
-import importlib.util
 import math
 import os
 import sys
