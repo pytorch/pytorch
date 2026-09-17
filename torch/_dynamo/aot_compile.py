@@ -699,11 +699,12 @@ class AOTCompiledFunction:
                     self._live_global_names = tuple(sorted(certified))
                     # Bound at load as well as re-taken per call in _serve: a
                     # certified name the bytecode reads but the graph never
-                    # lifted -- a global the forward mutates or returns -- is
-                    # in external_refs and in no serialized scope, so
-                    # forward_callable's check fails unless it is bound here or
-                    # by f_globals. Taken with .get, as in _serve, so a del
-                    # racing the load cannot raise KeyError out of it.
+                    # lifted -- a global the forward mutates or returns -- is in
+                    # external_refs but in neither import_sources nor
+                    # used_globals, the only dicts forward_callable builds
+                    # fn.__globals__ from, so its check fails unless it is bound
+                    # here or by f_globals. Taken with .get, as in _serve, so a
+                    # del racing the load cannot raise KeyError out of it.
                     live = {
                         n: v
                         for n in certified
@@ -988,7 +989,12 @@ class AOTCompiledFunction:
         a guarded global race on that dict and one can run the graph on the
         value the other just wrote; a caller who needs isolation loads the
         artifact once per thread, since each load builds its own dict."""
-        if self._live_global_names and (scope := self._guard_globals) is not None:
+        if self._live_global_names:
+            # Narrowing for pyrefly, not a live check: __post_init__ records the
+            # set only under a supplied scope, and nothing nulls _guard_globals.
+            scope = self._guard_globals
+            if scope is None:
+                raise AssertionError("_live_global_names recorded without a scope")
             f_globals = self.fn.__globals__
             for name in self._live_global_names:
                 value = scope.get(name, _UNBOUND)
@@ -1798,6 +1804,12 @@ class AOTCompiledModel:
         strong as the guard's type: a kept ``TENSOR_MATCH`` accepts a same-metadata
         swap, checking metadata and not values, and a root ``TYPE_MATCH`` on a
         container checks its type, not the members the graph reads through it.
+        It also stops at a result that opted out through ``disable_guard_check()``:
+        dispatch serves that result once every checked result refused the call,
+        and the re-read serves it whatever the live dict binds -- a value a kept
+        guard refused included, or, for a name the dict no longer binds, the last
+        value read -- since holding the load-time values instead would be no more
+        checked, only stale.
         Loading also MUTATES that dict: a recorded ``__import_*`` alias a kept guard
         still reads, that builtins key when a guard source names it, and the
         ``___unnamed_scope_*`` key of an inlined frame's globals when the graph
