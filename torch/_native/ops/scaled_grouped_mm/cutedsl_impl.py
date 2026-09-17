@@ -3,7 +3,10 @@ from typing import cast
 
 import torch
 from torch import Tensor
-from torch.nn.functional import ScalingType, SwizzleType
+from torch._C import (
+    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
+    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
+)
 
 from ... import cutedsl_utils as cu
 

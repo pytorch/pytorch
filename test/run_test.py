@@ -118,7 +118,11 @@ NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
+# The periodic config hosts slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+IS_SLOW = (
+    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+)
 IS_S390X = platform.machine() == "s390x"
 
 
@@ -293,6 +297,7 @@ XPU_BLOCKLIST = [
 
 XPU_TEST = [
     "test_xpu",
+    "test_xpu_expandable_segments",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -1415,7 +1420,6 @@ CUSTOM_HANDLERS = {
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
     "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
-    "distributed/test_store": run_test_with_subprocess,
     "distributed/test_pg_wrapper": run_test_with_subprocess,
     "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
@@ -1836,6 +1840,7 @@ def get_selected_tests(options) -> list[str]:
             "test_mps",
             "test_metal",
             "test_modules",
+            "test_linalg",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -1914,7 +1919,9 @@ def get_selected_tests(options) -> list[str]:
         ]
     )
 
-    selected_tests = exclude_tests(options.exclude, selected_tests)
+    # Exact match: a caller asking to exclude "inductor/test_torchinductor" means
+    # that file, not every file whose name starts with it.
+    selected_tests = exclude_tests(options.exclude, selected_tests, exact_match=True)
 
     if IS_WINDOWS and not options.ignore_win_blocklist:
         from torch.testing._internal.common_cuda import SM120OrLater, SM89OrLater

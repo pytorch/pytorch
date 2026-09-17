@@ -1,4 +1,4 @@
-from inspect import isclass, signature
+from inspect import isclass
 
 import cuda.bindings.driver as cuda
 
@@ -12,43 +12,6 @@ from cutlass.cute.nvgpu import cpasync, tcgen05
 from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 
 from ._clc_scheduler import ClcState, create_clc_pipeline, make_clc_problem_shape
-
-
-# CuTeDSL >= 4.7 added cached_problem_shape_0/1 to the base scheduler; they are
-# unused when use_cached_problem_shapes is False but are positionally required.
-_SCHED_WANTS_CACHED_SHAPES = (
-    "cached_problem_shape_0"
-    in signature(utils.StaticPersistentGroupTileScheduler.__init__).parameters
-)
-_SCHED_NUM_BASE_VALUES = 19 if _SCHED_WANTS_CACHED_SHAPES else 11
-
-
-# CuTeDSL 4.5 added the overload taking separate a_dtype/b_dtype; 4.4 has only
-# the single-ab_dtype form, so passing both shifts every argument by one there.
-_MMA_WANTS_AB_DTYPE = (
-    "ab_dtype" in signature(sm100_utils.make_blockscaled_trivial_tiled_mma).parameters
-)
-
-
-def _make_blockscaled_tiled_mma(
-    ab_dtype, a_major_mode, b_major_mode, sf_dtype, sf_vec_size, cta_group, mma_tiler_mn
-):
-    dtypes = (ab_dtype,) if _MMA_WANTS_AB_DTYPE else (ab_dtype, ab_dtype)
-    return sm100_utils.make_blockscaled_trivial_tiled_mma(
-        *dtypes,
-        a_major_mode,
-        b_major_mode,
-        sf_dtype,
-        sf_vec_size,
-        cta_group,
-        mma_tiler_mn,
-    )
-
-
-def _zero_cached_problem_shapes():
-    if not _SCHED_WANTS_CACHED_SHAPES:
-        return []
-    return [tuple(cutlass.Int32(0) for _ in range(4)) for _ in range(2)]
 
 
 class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler):
@@ -74,11 +37,10 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             utils.create_initial_search_state(),
             group_count,
             problem_shape_mnkl,
-            *_zero_cached_problem_shapes(),
         )
 
     def __new_from_mlir_values__(self, values):
-        if len(values) < _SCHED_NUM_BASE_VALUES:
+        if len(values) < 11:
             raise ValueError("Length of mlir values extracted is incorrect.")
         new_num_persistent_clusters = cutlass.new_from_mlir_values(
             self.num_persistent_clusters, [values[0]]
@@ -96,15 +58,7 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
         problem_shape_mnkl = cutlass.new_from_mlir_values(
             self.problem_shape_mnkl, [values[10]]
         )
-        cached_shapes = []
-        if _SCHED_WANTS_CACHED_SHAPES:
-            cached_shapes = [
-                tuple(cutlass.Int32(v) for v in values[11:15]),
-                tuple(cutlass.Int32(v) for v in values[15:19]),
-            ]
-        params = cutlass.new_from_mlir_values(
-            self.params, values[_SCHED_NUM_BASE_VALUES:]
-        )
+        params = cutlass.new_from_mlir_values(self.params, values[11:])
 
         return ClcGroupedGemmTileSchedulerHelper(
             params,
@@ -116,7 +70,6 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             search_state,
             self.group_count,
             problem_shape_mnkl,
-            *cached_shapes,
         )
 
     def delinearize_z(self, cta_tile_coord, problem_shape_mnkl):
@@ -260,8 +213,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             cute.round_up(self.mma_inst_shape_mn[1], 128),
         )
 
-        tiled_mma = _make_blockscaled_tiled_mma(
+        tiled_mma = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -270,8 +224,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.mma_inst_shape_mn,
         )
 
-        tiled_mma_sfb = _make_blockscaled_tiled_mma(
+        tiled_mma_sfb = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -452,8 +407,9 @@ class Sm100GroupedBlockScaledGemmKernel:
         )
         tensor_sfb = cute.make_tensor(tensor_sfb.iterator, sfb_layout)
 
-        tiled_mma = _make_blockscaled_tiled_mma(
+        tiled_mma = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
@@ -462,8 +418,9 @@ class Sm100GroupedBlockScaledGemmKernel:
             self.mma_inst_shape_mn,
         )
 
-        tiled_mma_sfb = _make_blockscaled_tiled_mma(
+        tiled_mma_sfb = sm100_utils.make_blockscaled_trivial_tiled_mma(
             self.a_dtype,
+            self.b_dtype,
             self.a_major_mode,
             self.b_major_mode,
             self.sf_dtype,
