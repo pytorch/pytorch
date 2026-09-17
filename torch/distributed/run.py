@@ -149,6 +149,25 @@ node in your training cluster, but ideally you should pick a node that has a hig
 .. note::
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
+Shell completion
+----------------
+
+``torchrun`` can emit a completion script for ``bash``, ``zsh`` or ``tcsh``. The
+script is generated from the argument parser, so it stays in sync with the
+options above. This requires the optional `shtab <https://tqdm.github.io/shtab>`_
+package (``pip install shtab``); torchrun only imports it when the flag is used.
+
+::
+
+    # zsh
+    torchrun --print-completion zsh > ~/.zsh/completions/_torchrun
+
+    # bash
+    torchrun --print-completion bash > ~/.local/share/bash-completion/completions/torchrun
+
+Refer to your shell's documentation for the directory it loads completions from;
+the paths above are the common defaults.
+
 Note on rendezvous backend
 --------------------------
 
@@ -239,6 +258,35 @@ The following environment variables are made available to you in your script:
 
 13. ``PYTHON_EXEC`` - System executable override. If provided, the python user script will
     use the value of ``PYTHON_EXEC`` as executable. The `sys.executable` is used by default.
+
+Logging
+-------
+
+By default each worker's ``stdout``/``stderr`` go to the console unchanged, which
+interleaves the output of every rank with no way to tell them apart.
+
+``--redirects`` writes the streams to log files under ``--log-dir`` instead of the
+console; ``--tee`` writes them to log files *and* echoes them to the console. Both
+take the same format: a single value applies to all workers (``3`` for both
+streams, ``1`` for stdout, ``2`` for stderr), or a per-local-rank mapping such as
+``0:1,1:2``. For example ``--tee 3`` tees both streams for every worker.
+
+Tee'd console lines are prefixed with ``[${role_name}${local_rank}]:`` (e.g.
+``[default3]: foobar``). Use ``--log-line-prefix-template`` to change that; the
+macros ``${role_name}``, ``${local_rank}``, ``${rank}`` and ``${hostname}`` are
+substituted per worker. ``${hostname}`` is the name of the node the worker runs
+on, which is what identifies the offending host in a multi-node job::
+
+    torchrun --nnodes 2 --nproc-per-node 8 --tee 3 \
+             --log-line-prefix-template "${hostname}:${rank}: " train.py
+
+    r12i0n8:3: python: src/psm2_nccl_net.c:756: Assertion `r->used' failed.
+    r12i0n8:3: Fatal Python error: Segmentation fault
+
+The template may also be set with the ``TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE``
+environment variable; the command line option takes precedence.
+``--local-ranks-filter`` restricts which ranks reach the console, without
+affecting the log files written by ``--redirects``/``--tee``.
 
 Deployment
 ----------
@@ -385,7 +433,7 @@ utility
 import os
 import sys
 import uuid
-from argparse import ArgumentParser, REMAINDER
+from argparse import Action as _Action, ArgumentParser, REMAINDER
 from collections.abc import Callable
 from importlib import metadata
 
@@ -405,6 +453,31 @@ from torch.utils.backend_registration import _get_custom_mod_func
 
 
 logger = get_logger(__name__)
+
+
+class _PrintCompletionAction(_Action):
+    """Print a shell completion script for ``torchrun`` and exit.
+
+    ``shtab`` derives the script from this parser, so completions stay in sync
+    with the options defined below. It is an optional dependency: torchrun only
+    imports it when this flag is used.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        try:
+            import shtab
+        except ImportError:
+            parser.exit(
+                1,
+                f"{option_string} requires the 'shtab' package: pip install shtab\n",
+            )
+        else:
+            # Completions are for the `torchrun` console script. parser.prog is
+            # `__main__.py` when invoked as `python -m torch.distributed.run`,
+            # which would bind the completion to the wrong command.
+            parser.prog = "torchrun"
+            print(shtab.complete(parser, shell=values))
+            parser.exit()
 
 
 def get_args_parser() -> ArgumentParser:
@@ -580,6 +653,18 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--log-line-prefix-template",
+        "--log_line_prefix_template",
+        action=env,
+        type=str,
+        default="",
+        help="Template for the prefix prepended to each console log line of a tee'd stream "
+        "(e.g. [--log-line-prefix-template '${hostname}:${rank}: '] renders as 'r12i0n8:3: '). "
+        "Available macros: ${role_name}, ${local_rank}, ${rank}, ${hostname}. Defaults to "
+        "'[${role_name}${local_rank}]:'.",
+    )
+
+    parser.add_argument(
         "--local-ranks-filter",
         "--local_ranks_filter",
         action=env,
@@ -704,6 +789,29 @@ def get_args_parser() -> ArgumentParser:
         help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
         "for all workers and CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
         "assigned GPU at device index 0.",
+    )
+
+    #
+    # Shell completion.
+    #
+
+    try:
+        import shtab
+    except ImportError:
+        # shtab is optional; fall back to the shells it supports today so the
+        # flag still validates its argument when shtab is not installed
+        choices = ["bash", "zsh", "tcsh"]
+    else:
+        choices = shtab.SUPPORTED_SHELLS
+
+    parser.add_argument(
+        "--print-completion",
+        "--print_completion",
+        action=_PrintCompletionAction,
+        choices=choices,
+        help="Print a shell completion script for torchrun to stdout and exit "
+        "(e.g. [--print-completion zsh > ~/.zsh/completions/_torchrun]). "
+        "Requires the optional 'shtab' package.",
     )
 
     #
@@ -883,7 +991,9 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
 
-    log_line_prefix_template = os.getenv("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE")
+    log_line_prefix_template = args.log_line_prefix_template or os.getenv(
+        "TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE"
+    )
 
     rdzv_configs = _parse_rendezvous_config(args.rdzv_conf)
 

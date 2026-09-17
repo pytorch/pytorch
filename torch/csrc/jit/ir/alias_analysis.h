@@ -330,7 +330,7 @@ TORCH_API void Lint(const AliasDb* db);
 /**
  * ValueAndMemoryLocationSet
  *
- * A insert-only set of values which also maintains a MemoryLocations bitset
+ * An insert-only set of values which also maintains a MemoryLocations bitset
  * of the memory locations that the values alias. It is insert-only. It
  * should be constructed by calling aliasDb.getValueAndMemoryLocationSet().
  *

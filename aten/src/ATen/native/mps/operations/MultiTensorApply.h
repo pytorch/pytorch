@@ -191,7 +191,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
       auto [fusedOptimizerPSO, fusedOptimizerFunc] = getFusedAdamCPLState(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]});
+      getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]}, mpsStream);
 
       [computeEncoder setComputePipelineState:fusedOptimizerPSO];
 
@@ -284,7 +284,7 @@ static void multi_tensor_apply_for_fused_optimizer(const std::string& kernel_nam
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
       }
 
-      getMPSProfiler().endProfileKernel(fusedOptimizerPSO);
+      getMPSProfiler().endProfileKernel(fusedOptimizerPSO, mpsStream);
     }
   });
 }
