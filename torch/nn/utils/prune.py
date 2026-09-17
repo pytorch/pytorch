@@ -9,17 +9,16 @@ import torch
 
 
 def _move_parameter(module, name, index):
-    """Place parameter ``name`` at ``index`` in ``module._parameters``.
+    """Put ``name`` at ``index`` in ``module._parameters``.
 
-    ``register_parameter`` / ``setattr`` append to the OrderedDict, which
-    reorders ``state_dict()`` keys after pruning. Keep using those APIs
-    (RNN modules listen to ``setattr``) and then restore the slot.
+    ``register_parameter`` / ``setattr`` append, which reorders ``state_dict()``
+    keys. Keep those APIs (RNN modules listen to ``setattr``) and rotate in
+    place so existing references to ``_parameters`` stay valid.
     """
     params = module._parameters
-    value = params[name]
-    items = [(k, v) for k, v in params.items() if k != name]
-    items.insert(index, (name, value))
-    module._parameters = params.__class__(items)
+    for key in list(params)[index:]:
+        if key != name:
+            params[key] = params.pop(key)
 
 
 class BasePruningMethod(ABC):
@@ -187,6 +186,7 @@ class BasePruningMethod(ABC):
             module.register_parameter(name + "_orig", orig)
             # temporarily delete `module[name]`
             del module._parameters[name]
+            # `_orig` occupies the slot `name` had; remove() restores from that slot.
             _move_parameter(module, name + "_orig", param_index)
             default_mask = torch.ones_like(orig)  # temp
         # If this is not the first time pruning is applied, all of the above
@@ -276,11 +276,12 @@ class BasePruningMethod(ABC):
 
         # delete and reset
         orig_key = self._tensor_name + "_orig"
-        param_index = list(module._parameters).index(orig_key)
         if hasattr(module, self._tensor_name):
             delattr(module, self._tensor_name)
         orig = module._parameters[orig_key]
         orig.data = weight.data
+        # `_orig` is in the slot `name` had (see apply); reclaim that slot after delete.
+        param_index = list(module._parameters).index(orig_key)
         del module._parameters[orig_key]
         del module._buffers[self._tensor_name + "_mask"]
         setattr(module, self._tensor_name, orig)
