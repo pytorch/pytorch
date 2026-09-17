@@ -811,10 +811,14 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
-    @unittest.skipIf(IS_S390X, "Test sometimes fails on s390x due to optimizations")
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
+    @skipOps(
+        {skip("grid_sampler_2d", device_type="cpu", dtypes=(torch.float32,))}
+        if IS_S390X
+        else set()
+    )
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
