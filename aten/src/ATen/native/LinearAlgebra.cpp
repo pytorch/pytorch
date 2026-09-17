@@ -1721,6 +1721,52 @@ static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const T
 // optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
 // but this seems to be a first starting point.
 
+#if defined(_M_ARM64)
+static void bf16_bmm_with_gemm_parallel_(const Tensor& result, const Tensor& mat1, const Tensor& mat2, const Scalar& beta_, const Scalar& alpha_) {
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
+
+  const auto result_sizes = result.sizes();
+  const auto result_strides = result.strides();
+  const auto mat1_strides = mat1.strides();
+  const auto mat2_strides = mat2.strides();
+  const auto mat1_sizes = mat1.sizes();
+  const auto mat2_sizes = mat2.sizes();
+
+  auto is_transposed = [](const c10::IntArrayRef& strides, const c10::IntArrayRef& sizes) {
+    return strides[1] == 1 && strides[2] >= sizes[1];
+  };
+
+  const auto transa = is_transposed(mat2_strides, mat2_sizes) ? TransposeType::Transpose : TransposeType::NoTranspose;
+  const auto transb = is_transposed(mat1_strides, mat1_sizes) ? TransposeType::Transpose : TransposeType::NoTranspose;
+
+  const int64_t batch_size = mat1_sizes[0];
+  const int64_t m = result_sizes[2];
+  const int64_t n = result_sizes[1];
+  const int64_t k = mat2_sizes[1];
+
+  const int64_t lda = mat2_strides[transa == TransposeType::Transpose ? 2 : 1];
+  const int64_t ldb = mat1_strides[transb == TransposeType::Transpose ? 2 : 1];
+  const int64_t ldc = result_strides[1];
+
+  const auto alpha = alpha_.to<float>();
+  const auto beta = beta_.to<float>();
+  const auto* a = mat2.const_data_ptr<at::BFloat16>();
+  const auto* b = mat1.const_data_ptr<at::BFloat16>();
+  auto* c = result.data_ptr<at::BFloat16>();
+
+  at::parallel_for(0, batch_size, 1, [&](int64_t begin, int64_t end) {
+    for (const auto batch : c10::irange(begin, end)) {
+      at::native::cpublas::gemm(
+          transa, transb, m, n, k, alpha,
+          a + mat2_strides[0] * batch, lda,
+          b + mat1_strides[0] * batch, ldb,
+          beta,
+          c + result_strides[0] * batch, ldc);
+    }
+  });
+}
+#endif // defined(_M_ARM64)
+
 static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
@@ -1765,6 +1811,14 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       TORCH_WARN("mkldnn_matmul failed, switching to baddbmm:", e.what());
       at::globalContext().setUserEnabledMkldnn(false);
     }
+  }
+#endif
+#if defined(_M_ARM64)
+  if (contraction_size * res_rows * res_cols >= 400 && self_or_result.scalar_type() == kBFloat16 &&
+      batch_items_contiguous_or_transposed(batch1) &&  batch_items_contiguous_or_transposed(batch2) &&
+      self_or_result.is_contiguous()) {
+    bf16_bmm_with_gemm_parallel_(self_or_result, batch1, batch2, beta, alpha);
+    return;
   }
 #endif
   if (contraction_size * res_rows * res_cols < 400) {

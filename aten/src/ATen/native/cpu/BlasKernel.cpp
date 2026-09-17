@@ -6,6 +6,7 @@
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+#include <algorithm>
 
 #if !defined(C10_MOBILE)
 namespace at::native::blas_impl {
@@ -49,6 +50,12 @@ void fp16_gemv_notrans(
     const int incy);
 } // namespace at::native::blas_impl
 #endif
+#if (defined(__aarch64__) || defined(_M_ARM64)) && !defined(C10_MOBILE)
+#define AT_BLASKERNEL_ARM_NEON 1
+#if !defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+#endif
 
 namespace at::native {
 namespace cpublas {
@@ -78,7 +85,11 @@ void scale_(int64_t m, int64_t n, opmath_t alpha, scalar_t *a, int64_t lda) {
 
 template <typename Func>
 auto sum(int64_t N, Func f) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  constexpr int ilp_factor = 8;
+#else
   constexpr int ilp_factor = 4;
+#endif
   using acc_t = decltype(f(0));
 
   // Calculate independent partial sums then add together at the end
@@ -136,6 +147,131 @@ gemm_notrans_(
   }
 }
 
+#if defined(AT_BLASKERNEL_ARM_NEON)
+constexpr int64_t kNeonGemmMinWorkPerChunk = 32768;
+
+C10_ALWAYS_INLINE float32x4_t load_bf16_as_f32(const at::BFloat16* p) {
+  const uint16x4_t bits = vld1_u16(reinterpret_cast<const uint16_t*>(p));
+#if defined(_MSC_VER) && !defined(__clang__)
+  return vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(bits), 16));
+#else
+  return vreinterpretq_f32_u32(vshll_n_u16(bits, 16));
+#endif
+}
+
+template <typename out_t>
+C10_ALWAYS_INLINE void store_f32x4(float32x4_t acc, float beta, out_t* dst) {
+  float tmp[4];
+  vst1q_f32(tmp, acc);
+  for (const auto t : c10::irange(4)) {
+    dst[t] = static_cast<out_t>(
+        beta == 0.0f ? tmp[t] : beta * static_cast<float>(dst[t]) + tmp[t]);
+  }
+}
+
+template <int NRC, typename out_t>
+void gemm_notrans_bf16_neon_panel(
+    int64_t m,
+    int64_t k,
+    float alpha,
+    const at::BFloat16* a,
+    int64_t lda,
+    const at::BFloat16* b,
+    int64_t ldb,
+    float beta,
+    out_t* c,
+    int64_t ldc) {
+  int64_t i = 0;
+  for (; i + 16 <= m; i += 16) {
+    float32x4_t acc[NRC][4];
+    c10::ForcedUnroll<NRC>{}([&](auto jj) {
+      acc[jj][0] = vdupq_n_f32(0.0f);
+      acc[jj][1] = vdupq_n_f32(0.0f);
+      acc[jj][2] = vdupq_n_f32(0.0f);
+      acc[jj][3] = vdupq_n_f32(0.0f);
+    });
+    for (const auto l : c10::irange(k)) {
+      const at::BFloat16* a_col = a + l * lda + i;
+      const float32x4_t a0 = load_bf16_as_f32(a_col);
+      const float32x4_t a1 = load_bf16_as_f32(a_col + 4);
+      const float32x4_t a2 = load_bf16_as_f32(a_col + 8);
+      const float32x4_t a3 = load_bf16_as_f32(a_col + 12);
+      c10::ForcedUnroll<NRC>{}([&](auto jj) {
+        const float32x4_t bv = vdupq_n_f32(static_cast<float>(b[jj * ldb + l]) * alpha);
+        acc[jj][0] = vfmaq_f32(acc[jj][0], a0, bv);
+        acc[jj][1] = vfmaq_f32(acc[jj][1], a1, bv);
+        acc[jj][2] = vfmaq_f32(acc[jj][2], a2, bv);
+        acc[jj][3] = vfmaq_f32(acc[jj][3], a3, bv);
+      });
+    }
+    c10::ForcedUnroll<NRC>{}([&](auto jj) {
+      out_t* c_col = c + jj * ldc + i;
+      store_f32x4(acc[jj][0], beta, c_col);
+      store_f32x4(acc[jj][1], beta, c_col + 4);
+      store_f32x4(acc[jj][2], beta, c_col + 8);
+      store_f32x4(acc[jj][3], beta, c_col + 12);
+    });
+  }
+  for (; i + 4 <= m; i += 4) {
+    float32x4_t acc[NRC];
+    c10::ForcedUnroll<NRC>{}([&](auto jj) { acc[jj] = vdupq_n_f32(0.0f); });
+    for (const auto l : c10::irange(k)) {
+      const float32x4_t av = load_bf16_as_f32(a + l * lda + i);
+      c10::ForcedUnroll<NRC>{}([&](auto jj) {
+        const float32x4_t bv = vdupq_n_f32(static_cast<float>(b[jj * ldb + l]) * alpha);
+        acc[jj] = vfmaq_f32(acc[jj], av, bv);
+      });
+    }
+    c10::ForcedUnroll<NRC>{}([&](auto jj) { store_f32x4(acc[jj], beta, c + jj * ldc + i); });
+  }
+  for (; i < m; ++i) {
+    float acc[NRC] = {};
+    for (const auto l : c10::irange(k)) {
+      const float av = static_cast<float>(a[l * lda + i]);
+      c10::ForcedUnroll<NRC>{}([&](auto jj) {
+        acc[jj] += av * (static_cast<float>(b[jj * ldb + l]) * alpha);
+      });
+    }
+    c10::ForcedUnroll<NRC>{}([&](auto jj) {
+      out_t* dst = c + jj * ldc + i;
+      *dst = static_cast<out_t>(
+          beta == 0.0f ? acc[jj] : beta * static_cast<float>(*dst) + acc[jj]);
+    });
+  }
+}
+
+template <typename out_t>
+void gemm_notrans_bf16_neon(
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    float alpha,
+    const at::BFloat16* a,
+    int64_t lda,
+    const at::BFloat16* b,
+    int64_t ldb,
+    float beta,
+    out_t* c,
+    int64_t ldc) {
+  constexpr int NR = 4;
+  const int64_t num_blocks = (n + NR - 1) / NR;
+  const int64_t work_per_block = std::max<int64_t>(1, NR * m * k);
+  const int64_t grain = std::max<int64_t>(1, kNeonGemmMinWorkPerChunk / work_per_block);
+  parallel_for(0, num_blocks, grain, [&](int64_t begin, int64_t end) {
+    for (const auto block : c10::irange(begin, end)) {
+      const int64_t j = block * NR;
+      if (j + NR <= n) {
+        gemm_notrans_bf16_neon_panel<NR>(m, k, alpha, a, lda, b + j * ldb, ldb, beta, c + j * ldc, ldc);
+      } else {
+        for (const auto jt : c10::irange(j, n)) {
+          gemm_notrans_bf16_neon_panel<1>(m, k, alpha, a, lda, b + jt * ldb, ldb, beta, c + jt * ldc, ldc);
+        }
+      }
+    }
+  });
+}
+#endif // defined(AT_BLASKERNEL_ARM_NEON)
+
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t, typename out_t>
 std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
@@ -151,18 +287,38 @@ gemm_notrans_(
     opmath_t beta,
     out_t* c,
     int64_t ldc) {
-  // c += alpha * (a @ b)
-  for (const auto i : c10::irange(m)) {
+#if defined(AT_BLASKERNEL_ARM_NEON)
+  if constexpr (std::is_same_v<scalar_t, at::BFloat16> && std::is_same_v<opmath_t, float>) {
+    gemm_notrans_bf16_neon(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    return;
+  }
+#endif
+  const auto c_size = m * n;
+  auto c_accum = std::make_unique<opmath_t[]>(c_size);
+  if (beta == opmath_t(0)) {
+    std::fill_n(c_accum.get(), c_size, opmath_t(0));
+  } else {
     for (const auto j : c10::irange(n)) {
-      const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a[l * lda + i]) *
-            static_cast<opmath_t>(b[j * ldb + l]);
-      });
-      if (beta == opmath_t(0)) {
-        c[j * ldc + i] = alpha * dot;
-      } else {
-        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      for (const auto i : c10::irange(m)) {
+        c_accum[j * m + i] = beta * static_cast<opmath_t>(c[j * ldc + i]);
       }
+    }
+  }
+
+  for (const auto l : c10::irange(k)) {
+    for (const auto j : c10::irange(n)) {
+      const opmath_t val = static_cast<opmath_t>(b[j * ldb + l]) * alpha;
+      opmath_t* c_col = c_accum.get() + j * m;
+      const scalar_t* a_col = a + l * lda;
+      for (const auto i : c10::irange(m)) {
+        c_col[i] += static_cast<opmath_t>(a_col[i]) * val;
+      }
+    }
+  }
+
+  for (const auto j : c10::irange(n)) {
+    for (const auto i : c10::irange(m)) {
+      c[j * ldc + i] = c_accum[j * m + i];
     }
   }
 }
