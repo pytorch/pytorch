@@ -2159,7 +2159,6 @@ class PerEdgeScheduleTest(MultiProcContinuousTest):
                 2 * self.world_size,
                 loss_fn=loss_fn,
                 scale_grads=False,
-                reuse_recv_buffers=True,
             )
 
             out = None
