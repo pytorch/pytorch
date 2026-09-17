@@ -908,9 +908,14 @@ class FSDPModule:
         try:
             ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
         except Exception:
-            for fsdp_param, grad, _ in saved_grads:
-                fsdp_param.sharded_param.grad_dtype = fsdp_param.mp_policy.grad_dtype
-                fsdp_param.sharded_param.grad = grad
+            with torch.no_grad():
+                for fsdp_param, grad, _ in saved_grads:
+                    # Earlier parameters may have moved before a later conversion failed.
+                    fsdp_param.reset_sharded_param()
+                    param = fsdp_param.sharded_param
+                    restored_grad = grad.to(device=param.device)
+                    restored_grad.requires_grad_(grad.requires_grad)
+                    param.grad = restored_grad
             raise
         if not state._fsdp_param_groups:
             return ret
