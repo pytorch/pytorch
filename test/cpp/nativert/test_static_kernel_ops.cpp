@@ -326,6 +326,73 @@ TEST(StaticKernelTest, SymSizeInt) {
   }
 }
 
+TEST(StaticKernelTest, RepeatInterleaveSingletonCpu) {
+  const std::string graph = R"(graph(%self, %repeats, %dim, %output_size):
+    %out = torch.ops.aten.repeat_interleave.self_Tensor(self=%self, repeats=%repeats, dim=%dim, output_size=%output_size)
+    return (%out)
+  )";
+
+  for (const auto repeatCount : {0, 1, 7, 1024}) {
+    for (const auto& dim : {c10::IValue(), c10::IValue(0)}) {
+      std::vector<c10::IValue> inputs = {
+          at::tensor({42}, at::kInt),
+          at::tensor({repeatCount}, at::kInt),
+          dim,
+          c10::IValue()};
+      testStaticKernelEquality(graph, inputs);
+    }
+  }
+
+  std::vector<c10::IValue> fallbackInputs = {
+      at::tensor({1, 2}, at::kInt),
+      at::tensor({2, 3}, at::kInt),
+      c10::IValue(0),
+      c10::IValue(5)};
+  testStaticKernelEquality(graph, fallbackInputs);
+
+  ExecutorConfig config;
+  config.enableStaticCPUKernels = true;
+  SimpleTestModelRunner staticKernelModel(graph, config);
+  const auto intOutput = staticKernelModel
+                             .run(
+                                 {at::tensor({42}, at::kInt),
+                                  at::tensor({2}, at::kInt),
+                                  c10::IValue(),
+                                  c10::IValue()})
+                             .at(0)
+                             .toTensor();
+  EXPECT_EQ(intOutput.scalar_type(), at::kInt);
+  const auto floatOutput = staticKernelModel
+                               .run(
+                                   {at::tensor({1.5}, at::kFloat),
+                                    at::tensor({2}, at::kInt),
+                                    c10::IValue(),
+                                    c10::IValue()})
+                               .at(0)
+                               .toTensor();
+  EXPECT_EQ(floatOutput.scalar_type(), at::kFloat);
+  EXPECT_TRUE(floatOutput.equal(at::tensor({1.5, 1.5}, at::kFloat)));
+  std::vector<c10::IValue> complexFallbackInputs = {
+      at::tensor({c10::complex<float>(1.5, 0.25)}),
+      at::tensor({2}, at::kInt),
+      c10::IValue(),
+      c10::IValue()};
+  testStaticKernelEquality(graph, complexFallbackInputs);
+  std::vector<c10::IValue> negativeInputs = {
+      at::tensor({42}, at::kInt),
+      at::tensor({-1}, at::kInt),
+      c10::IValue(0),
+      c10::IValue()};
+  try {
+    staticKernelModel.run(negativeInputs);
+    FAIL() << "negative repeats must be rejected";
+  } catch (const c10::Error& error) {
+    EXPECT_NE(
+        std::string(error.what()).find("repeats can not be negative"),
+        std::string::npos);
+  }
+}
+
 TEST(StaticKernelTest, BucketizeTensor) {
   const std::string graph =
       R"(graph(%input, %boundaries, %out_int32, %right):
