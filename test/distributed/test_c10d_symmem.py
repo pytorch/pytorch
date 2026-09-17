@@ -2,6 +2,8 @@
 
 import os
 import unittest
+from datetime import timedelta
+from unittest.mock import Mock, patch
 
 import torch
 import torch.distributed as dist
@@ -59,6 +61,24 @@ class TestSymmemBackendUnit(TestCase):
         self.assertEqual(reduce_op_name(dist.ReduceOp.MIN), "min")
         self.assertEqual(reduce_op_name(dist.ReduceOp.PRODUCT), "product")
         self.assertEqual(reduce_op_name(dist.ReduceOp.AVG), "avg")
+
+    def test_work_timeout(self):
+        from torch.distributed.pysymmem.backend import _SymmemWork
+
+        event = Mock()
+        event.query.return_value = False
+        work = _SymmemWork(event)
+        with patch(
+            "torch.distributed.pysymmem.backend.time.monotonic",
+            side_effect=[0.0, 0.01],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+                work.wait(timedelta(milliseconds=5))
+
+        self.assertIs(work._event, event)
+        event.query.return_value = True
+        self.assertTrue(work.wait(timedelta(seconds=1)))
+        self.assertIsNone(work._event)
 
 
 @skip_unless_symmem
@@ -118,7 +138,7 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
         t = torch.ones(4, device=self.device) * (self.rank + 1)
         work = dist.all_reduce(t, async_op=True)
         self.assertIsNotNone(work)
-        work.wait()
+        work.wait(timedelta(seconds=10))
         torch.cuda.synchronize(self.device)
         self.assertEqual(t, torch.full((4,), 3.0, device=self.device))
         self._destroy_pg()

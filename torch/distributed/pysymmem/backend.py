@@ -20,6 +20,7 @@ Or use
 import atexit
 import hashlib
 import os
+import time
 from datetime import timedelta
 
 import torch
@@ -71,10 +72,20 @@ class _SymmemWork(dist._Work):
         self._event = event
         self._device = device
 
-    def wait(self, timeout=None):
-        if self._event is not None:
+    def wait(self, timeout: timedelta | None = None) -> bool:
+        if self._event is None:
+            return True
+
+        if timeout is None or timeout == timedelta(0):
             self._event.synchronize()
-            self._event = None
+        else:
+            deadline = time.monotonic() + timeout.total_seconds()
+            while not self._event.query():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Operation timed out!")
+                time.sleep(0.001)
+
+        self._event = None
         return True
 
     def get_future(self):
