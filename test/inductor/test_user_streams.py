@@ -2926,6 +2926,24 @@ class TestAOTIUserStreams(InductorTestCase):
             return cuda_name.replace("cuda", "hip", 1)
         return cuda_name
 
+    def _assert_record_event_emitted(self, code, count=1):
+        # XPU has no cudaEventRecord equivalent; record_event lowers to a call
+        # into the AOTI event cache instead (see streams_xpu.h).
+        if GPU_TYPE == "xpu":
+            self.assertGreaterEqual(code.count("_aoti_event_cache.record("), count)
+        else:
+            self.assertGreaterEqual(
+                code.count(self._runtime_name("cudaEventRecord")), count
+            )
+
+    def _assert_wait_event_emitted(self, code, count=1):
+        if GPU_TYPE == "xpu":
+            self.assertGreaterEqual(code.count("_aoti_event_cache.wait("), count)
+        else:
+            self.assertGreaterEqual(
+                code.count(self._runtime_name("cudaStreamWaitEvent")), count
+            )
+
     def _compile_and_run(self, model, inputs):
         from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
 
@@ -2940,7 +2958,6 @@ class TestAOTIUserStreams(InductorTestCase):
             result = loaded(*inputs)
         return result, code
 
-    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5177")
     def test_record_wait_event_basic(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -2958,14 +2975,10 @@ class TestAOTIUserStreams(InductorTestCase):
         result, code = self._compile_and_run(model, inputs)
 
         self.assertEqual(result, expected)
-        # XPU AOTI relies on SYCL in-order queues for event ordering, so the
-        # CUDA/HIP event helper symbols are not emitted into the generated code.
-        if TEST_CUDA:
-            self.assertIn(self._runtime_name("cudaEventRecord"), code)
-            self.assertIn(self._runtime_name("cudaStreamWaitEvent"), code)
-            self.assertIn("AOTIPerThreadStreamCache", code)
+        self._assert_record_event_emitted(code)
+        self._assert_wait_event_emitted(code)
+        self.assertIn("AOTIPerThreadStreamCache", code)
 
-    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5177")
     def test_two_stream_dependency(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -2988,16 +3001,10 @@ class TestAOTIUserStreams(InductorTestCase):
         result, code = self._compile_and_run(model, inputs)
 
         self.assertEqual(result, expected)
-        if TEST_CUDA:
-            self.assertGreaterEqual(
-                code.count(self._runtime_name("cudaEventRecord")), 2
-            )
-            self.assertGreaterEqual(
-                code.count(self._runtime_name("cudaStreamWaitEvent")), 2
-            )
-            self.assertIn("_aoti_aux_stream_cache.get(2", code)
+        self._assert_record_event_emitted(code, count=2)
+        self._assert_wait_event_emitted(code, count=2)
+        self.assertIn("_aoti_aux_stream_cache.get(2", code)
 
-    @skipIfXpu(msg="intel/torch-xpu-ops/issues/5177")
     def test_stream_synchronize_raises(self):
         class Model(torch.nn.Module):
             def forward(self, x):
