@@ -18,6 +18,7 @@ from collections.abc import Callable
 import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
+from torch.fx._compatibility import compatibility
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
@@ -39,6 +40,21 @@ _IN_PLACE_OPERATORS = frozenset(
         "isub",
         "itruediv",
         "ixor",
+    }
+)
+
+
+# Operator namespaces whose ordering relative to surrounding compute is
+# load-bearing (comm/compute overlap, in-place collective reuse). `symm_mem`
+# additionally carries synchronization primitives (nvshmem_wait_for_signal),
+# where reordering compute across the wait breaks the sync contract rather than
+# just costing overlap.
+_ORDER_SENSITIVE_NAMESPACES = frozenset(
+    {
+        "_c10d_functional",
+        "_c10d_functional_autograd",
+        "symm_mem",
+        "_dtensor",
     }
 )
 
@@ -67,14 +83,89 @@ def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> obj
         return _computation_node_key(node, canonical_idx)
 
 
+# Higher order operators whose whole effect is the subgraphs they are handed:
+# if every branch is pure, the HOP is pure. Anything not listed here keeps its
+# trace-order position, because its effects can hide somewhere this pass cannot
+# see -- a mutable custom op passed as a plain argument (auto_functionalized), a
+# side-table kernel index (triton_kernel_wrapper_mutation), a torchbind object.
+_SUBGRAPH_ONLY_EFFECT_HOPS = frozenset(
+    {
+        "cond",
+        "switch",
+        "while_loop",
+        "invoke_subgraph",
+        "wrap",
+        "tag_activation_checkpoint",
+        "scan",
+        "associative_scan",
+        "map_impl",
+        "flex_attention",
+    }
+)
+
+
+def _hop_effects_are_pure(node: fx.Node) -> bool:
+    """Whether a higher order operator node can be reordered.
+
+    ``Node.is_impure()`` never looks inside a HOP's subgraphs, so a ``cond``
+    whose branches mutate their inputs (legal under inference mode, later
+    cleaned up by auto_functionalization) reports pure. Reordering it lets a
+    read of a mutated tensor hoist above the HOP and observe the pre-mutation
+    value. Recurse into the branches instead, and treat anything we cannot
+    resolve as a barrier.
+    """
+    name = getattr(node.target, "__name__", "")
+    if name not in _SUBGRAPH_ONLY_EFFECT_HOPS:
+        return False
+    owning_module = node.graph.owning_module
+    if owning_module is None:
+        return False
+    subgraphs = [
+        arg
+        for arg in itertools.chain(node.args, node.kwargs.values())
+        if isinstance(arg, fx.Node) and arg.op == "get_attr"
+    ]
+    if not subgraphs:
+        return False
+    for attr in subgraphs:
+        try:
+            submodule = owning_module.get_submodule(str(attr.target))
+        except AttributeError:
+            return False
+        if not isinstance(submodule, fx.GraphModule):
+            return False
+        # Placeholders/outputs are structural; recursion covers nested HOPs.
+        if not all(
+            n.op in ("placeholder", "output", "get_attr") or _is_safe_to_reorder(n)
+            for n in submodule.graph.nodes
+        ):
+            return False
+    return True
+
+
 def _is_safe_to_reorder(node: fx.Node) -> bool:
     """Check if a node is safe to reorder during graph canonicalization.
 
     Builds on Node.is_impure() (used by DCE) with additional checks for cases
-    it doesn't cover: in-place call_method nodes and non-OpOverload
-    state-changing functions detected by no-node-arguments and
-    no-tensor-or-symbolic-value heuristics.
+    it doesn't cover: in-place call_method nodes, higher order operators whose
+    subgraphs mutate, functional collectives, nodes binding unbacked symbols,
+    and non-OpOverload state-changing functions detected by no-node-arguments
+    and no-tensor-or-symbolic-value heuristics.
+
+    Returning False is a graph-scale decision, not a node-scale one: barriers
+    partition the graph into segments (see ``canonicalize_graph``) and pure nodes
+    are confined to their segment, so each barrier trades determinism for
+    ordering safety across the whole graph. A graph with N barriers only
+    canonicalizes within N+1 segments, which for data-dependent graphs degrades
+    toward trace order. Add barriers only where ordering is load-bearing.
     """
+    # Nodes that bind unbacked symbols (item()/_local_scalar_dense, nonzero,
+    # ...) keep their trace-order position. Reordering them changes the order
+    # the ShapeEnv resolves symbol replacements, which can blow up compile time
+    # (superlinear SymNode.expr / _find work) even though the graph is
+    # value-equivalent. Trace order is already deterministic across ranks.
+    if node.meta.get("unbacked_bindings"):
+        return False
     if node.op == "call_method":
         return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
     if node.op == "call_module":
@@ -82,6 +173,25 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     if node.op != "call_function":
         return True
     if node.is_impure():
+        return False
+    if isinstance(node.target, torch._ops.HigherOrderOperator):
+        return _hop_effects_are_pure(node)
+    # Functional collectives (all_reduce, wait_tensor, ...) keep their
+    # trace-order position. Reordering a collective relative to surrounding
+    # compute changes comm/compute overlap and defeats Inductor's in-place
+    # collective reuse. Trace order is already deterministic across ranks
+    # (identical SPMD code), so canonicalization loses nothing here. In Dynamo
+    # output graphs these appear as OpOverloadPackets, in aten graphs as
+    # OpOverloads, so check both. OpOverloadPacket has no public namespace
+    # accessor, hence _qualified_op_name (test_canonical_graph_collectives_are_barriers
+    # covers both dispatch forms, so a rename there fails loudly).
+    if isinstance(node.target, torch._ops.OpOverload):
+        collective_namespace = node.target.namespace
+    elif isinstance(node.target, torch._ops.OpOverloadPacket):
+        collective_namespace = node.target._qualified_op_name.split("::", 1)[0]
+    else:
+        collective_namespace = None
+    if collective_namespace in _ORDER_SENSITIVE_NAMESPACES:
         return False
     if not isinstance(node.target, torch._ops.OpOverload):
         name = getattr(node.target, "__name__", "")
@@ -94,10 +204,6 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
-        # triton_kernel_wrapper_mutation mutates tensors via kwargs but
-        # is not detected by is_impure() or trailing-underscore checks.
-        if name == "triton_kernel_wrapper_mutation":
-            return False
         # Non-OpOverload targets with no FX Node arguments are likely
         # state-changing (e.g., _vmap_increment_nesting,
         # _set_fwd_grad_enabled). This is intentionally conservative:
@@ -109,12 +215,6 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         # functorch batch dim ops modify the vmap interpreter stack.
         if name in ("_add_batch_dim", "_remove_batch_dim"):
             return False
-        # HigherOrderOperators are proper operators whose impurity is_impure()
-        # already tracks via the effects system, and graph passes (e.g. Dynamo
-        # graph deduplication) create HOP nodes without example_value/val
-        # meta, so the value heuristic below does not apply to them.
-        if isinstance(node.target, torch._ops.HigherOrderOperator):
-            return True
         # State-changing functions that consume other nodes escape the
         # no-node-arguments heuristic above (e.g. _exit_inference_mode takes
         # the token produced by _enter_inference_mode, _sdpa_kernel takes
@@ -131,6 +231,7 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     return True
 
 
+@compatibility(is_backward_compatible=False)
 def rename_nodes_to_canonical(
     graph: fx.Graph,
     skip_ops: frozenset[str] = frozenset(),
@@ -250,6 +351,7 @@ def _group_getitem_nodes(order: list[fx.Node]) -> None:
     order[:] = new_order
 
 
+@compatibility(is_backward_compatible=False)
 def canonicalize_graph(
     graph: fx.Graph,
     canonical_key_fn: Callable[[fx.Node, dict[fx.Node, int]], object],
