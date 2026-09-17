@@ -12,7 +12,16 @@ def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
 
 @dataclasses.dataclass(frozen=True)
 class GuardFact:
-    """One guard observed while compiling a frame variant."""
+    """One guard observed while compiling a frame variant.
+
+    Attributes:
+        guard_type: The Dynamo guard type, e.g. ``"TENSOR_MATCH"``.
+        source: The guarded source expression, e.g. ``"L['x']"``; empty for a
+            guard checked against no source.
+        code: The rendered check parts; empty when the guard renders none.
+        value: The rendered value the check compares against; empty when it has none.
+        enforced: Whether the artifact still checks this guard (it was serialized).
+    """
 
     guard_type: str
     source: str
@@ -26,12 +35,27 @@ class GuardFact:
         if self.value:
             body = f"{body} {self.value}"
         where = f" on {self.source}" if self.source else ""
-        return f"[{'enforced' if self.enforced else 'dropped '}] {body}{where}"
+        label = "enforced" if self.enforced else "dropped"
+        return f"[{label:<8}] {body}{where}"
 
 
 @dataclasses.dataclass(frozen=True)
 class FrameInvariants:
-    """Guards that held, varied, or were undetermined across frame variants."""
+    """Guards that held, varied, or were undetermined across one frame's variants.
+
+    Guards from different frames are not comparable (an entry frame guards its
+    arguments, a resume frame whatever crossed the break), so the report is per frame.
+
+    Attributes:
+        frame: The frame's code name.
+        filename: The file its code lives in.
+        lineno: Its first line.
+        variants: How many guarded variants of the frame were captured.
+        invariant: Guards that held identically in every variant: preconditions
+            the artifact is only valid under.
+        varying: Guards that differed between variants: what tells its graphs apart.
+        undetermined: Guards a single variant could not classify either way.
+    """
 
     frame: str
     filename: str
@@ -84,8 +108,9 @@ class PrecompileSummary:
     def complete(self) -> bool:
         """Whether the capture covers everything it exercised.
 
-        False if any frame produced NO guarded code at all, if any frame hit the
-        recompile limit, if any was bypassed, or if a capture call raised.
+        False if the capture produced NO guarded code at all, if any frame hit the
+        recompile limit, if any was bypassed, if any was left uncovered (never
+        reached by the calls), or if a capture call raised.
 
         ``backend_graphs`` is checked too, because ``guarded_codes`` alone cannot
         tell a real capture from an empty one: ``allow_empty_graphs`` lets a frame
