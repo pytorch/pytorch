@@ -74,7 +74,7 @@ Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
     input_contig.size(0), // batch_size
     reinterpret_cast<const uint8_t*>(input_contig.const_data_ptr<c10::quint8>()), // input_data
     num_elems, // input_stride
-    (uint8_t*)qy.data_ptr<c10::quint8>(), // output_data
+    reinterpret_cast<uint8_t*>(qy.mutable_data_ptr<c10::quint8>()), // output_data
     num_elems); // output_stride
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK Clamp operator");
