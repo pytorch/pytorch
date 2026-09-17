@@ -7,14 +7,16 @@ create, and the recompiled variants of each -- stored through CompilePackage
 directly.
 
 This module holds the guard filter for the serialized guards
-(``default_guard_filter_fn``), the lint over the guards it drops
-(``_is_risky_drop``), the guard-type classification and fingerprints behind
-the ``PrecompileSummary`` report, the per-frame comparison of captured
-variants and the summary builder (``_varying_guard_slots``, ``_summarize``),
-and the compiler configuration and frame converter a capture runs under
-(``_capture_config``, ``_AllowEmptyGraphsConvertFrame``). Everything here is
-internal. The capture session that drives them, ``torch.compiler.precompile``,
-is a follow-up; nothing under ``torch/`` calls into this module yet. It is
+(``default_guard_filter_fn``), the lint over the identity guards it drops
+(``_is_risky_drop``), the fingerprints and the guard-type classification
+behind the ``PrecompileSummary`` report -- which also decides the only guards
+an invariance policy may drop (``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the
+per-frame comparison of captured variants and the summary builder
+(``_varying_guard_slots``, ``_summarize``), and the compiler configuration and
+frame converter a capture runs under (``_capture_config``,
+``_AllowEmptyGraphsConvertFrame``). Everything here is internal. The
+multi-graph Dynamo capture session that drives them is a follow-up stack;
+nothing under ``torch/`` calls into this module yet. This precompile is
 distinct from ``torch._dynamo.config.caching_precompile``, which caches
 ``torch.compile`` artifacts transparently without an explicit capture.
 """
@@ -37,14 +39,16 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     Drop every guard ``CheckFunctionManager.serialize_guards`` would refuse for
     its type or a derived type, and keep everything else.
 
-    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
-    identity guards ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH,
-    NN_MODULE and CLASS_MATCH, plus DICT_VERSION and WEAKREF_ALIVE. Dropping
-    one gives up on noticing that the guarded object was rebound, mutated or
-    collected: rebind a global function between capture and load and the
-    artifact serves the graph traced against the old one, with no error
-    (``test_default_guard_filter_through_serialize_guards``). Every drop is
-    reported in ``PrecompileSummary.dropped_guards``.
+    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: ID_MATCH,
+    FUNCTION_MATCH, MODULE_MATCH, NN_MODULE and CLASS_MATCH, which check the
+    guarded object's identity, CLOSURE_MATCH, which checks a function by its
+    ``__code__`` id, plus DICT_VERSION and WEAKREF_ALIVE. Dropping one gives up
+    on noticing that the guarded object was rebound, mutated or collected:
+    rebind a global function between capture and load and the artifact serves
+    the graph traced against the old one, with no error
+    (``test_default_guard_filter_through_serialize_guards``). Every dropped
+    slot is reported in ``PrecompileSummary.dropped_guards``, once however many
+    variants dropped it.
 
     The test is the serializer's own pre-check over the entry's type and
     derived types: a guard is dropped if its type is refused or one of its
@@ -60,7 +64,10 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     where a DICT_KEYS_MATCH on ``torch.utils._pytree.SUPPORTED_NODES`` is
     promoted to a DICT_VERSION, while the save build pins it to the keys-match
     the pre-check accepts
-    (``test_default_guard_filter_keeps_the_pytree_registry_keys_match``).
+    (``test_default_guard_filter_keeps_the_pytree_registry_keys_match``). That
+    pair only: a DICT_KEYS_MATCH deriving another refused type, and any other
+    type deriving DICT_VERSION, are dropped as the pre-check would refuse them
+    (``test_default_guard_filter_drops_the_unserializable_types``).
 
     Passing this filter does not mean the artifact serializes: the pre-check
     also refuses a kept TYPE_MATCH on a local-scope type, which cannot be
