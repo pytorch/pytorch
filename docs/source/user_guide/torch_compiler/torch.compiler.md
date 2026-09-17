@@ -49,7 +49,8 @@ f = torch.compiler.precompile.load("m.py", "m.cache")
 ```
 
 -- and it writes a self-contained, runnable Python source artifact plus an acceleration
-cache when the block exits. The default tracer captures several calls, with the graph breaks
+cache when the block exits cleanly having captured at least one call (a block that raised
+writes nothing). The default tracer captures several calls, with the graph breaks
 and recompilations between them; pass `tracer=torch.compiler.precompile.MakeFxTracer()` to
 capture a single call instead. Call `cap.save()` inside the block to checkpoint the on-disk
 artifact partway through a training loop without ending the capture (a `MakeFxTracer`
