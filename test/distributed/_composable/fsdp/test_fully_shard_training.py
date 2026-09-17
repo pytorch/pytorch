@@ -38,6 +38,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     HSDPMeshInfo,
     ShardPlacementResult,
 )
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_dim0_views,
+    reduce_scatter_input_fn_with_dim0_views,
+)
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -377,16 +381,26 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 # Sharding on nonzero dim requires even sharding
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
+                "bias": [False, True],
+                "use_all_gather_output_fn": [False, True],
+                "use_reduce_scatter_input_fn": [False, True],
             },
             self._test_train_parity_single_group,
         )
 
     def _test_train_parity_single_group(
-        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
+        self,
+        lin_shapes: list[tuple[int, int]],
+        use_shard_placement_fn: bool,
+        bias: bool = True,
+        use_all_gather_output_fn: bool = False,
+        use_reduce_scatter_input_fn: bool = False,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
-            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+            nn.Linear(*lin_shapes[0], bias=bias),
+            nn.ReLU(),
+            nn.Linear(*lin_shapes[1], bias=bias),
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
@@ -397,17 +411,22 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
+        if use_all_gather_output_fn:
+            model.set_all_gather_output_fn(all_gather_output_fn_with_dim0_views)
+        if use_reduce_scatter_input_fn:
+            model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_dim0_views)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
         for iter_idx in range(10):
-            losses: list[torch.Tensor] = []
+            outputs: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(*inp).sum())
-                losses[-1].backward()
+                outputs.append(_model(*inp))
+                outputs[-1].sum().backward()
                 _optim.step()
-            self.assertEqual(losses[0], losses[1])
+            self.assertEqual(outputs[0], outputs[1])
+            check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(

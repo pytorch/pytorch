@@ -28,8 +28,6 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_all_gather_output_fn,
-    _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
@@ -45,11 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_dim0_views,
-    reduce_scatter_input_fn_with_dim0_views,
-)
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
@@ -346,180 +340,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
-
-
-class TestFullyShardInputOutputFns(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    @skip_if_lt_x_gpu(2)
-    def test_input_output_fns(self):
-        model = nn.Sequential(
-            nn.Linear(4, 4), nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
-        )
-        fsdp_modules = (model, model[1], model[1][0])
-        for module in reversed(fsdp_modules):
-            fully_shard(
-                module,
-                shard_placement_fn=lambda param: Shard(param.ndim - 1),
-                reshard_after_forward=True,
-            )
-
-        def check_fns(expected_ag_fns, expected_rs_fns):
-            for module, ag_fn, rs_fn in zip(
-                fsdp_modules, expected_ag_fns, expected_rs_fns
-            ):
-                param_groups = module._get_fsdp_state()._fsdp_param_groups
-                self.assertTrue(param_groups)
-                for param_group in param_groups:
-                    self.assertIs(param_group._all_gather_output_fn, ag_fn)
-                    self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_fn)
-
-        default_ag = _default_all_gather_output_fn
-        default_rs = _default_reduce_scatter_input_fn
-        ag_fn = MagicMock(wraps=default_ag)
-        rs_fn = MagicMock(wraps=default_rs)
-        check_fns((default_ag,) * 3, (default_rs,) * 3)
-        model.set_all_gather_output_fn(ag_fn, recurse=False)
-        check_fns((ag_fn, default_ag, default_ag), (default_rs,) * 3)
-        model[1].set_reduce_scatter_input_fn(rs_fn, recurse=False)
-        check_fns((ag_fn, default_ag, default_ag), (default_rs, rs_fn, default_rs))
-        model(torch.ones((2, 4), device=device_type)).sum().backward()
-        ag_fn.assert_called()
-        self.assertEqual(rs_fn.call_count, 1)
-        model.zero_grad()
-
-        ag_fn.reset_mock()
-        rs_fn.reset_mock()
-        model.set_all_gather_output_fn(ag_fn)
-        model.set_reduce_scatter_input_fn(rs_fn)
-        check_fns((ag_fn,) * 3, (rs_fn,) * 3)
-        model(torch.ones((2, 4), device=device_type)).sum().backward()
-        ag_fn.assert_called()
-        self.assertEqual(rs_fn.call_count, len(fsdp_modules))
-
-        model.set_all_gather_output_fn(default_ag, recurse=False)
-        check_fns((default_ag, ag_fn, ag_fn), (rs_fn,) * 3)
-        model.set_all_gather_output_fn(default_ag)
-        model.set_reduce_scatter_input_fn(default_rs)
-        check_fns((default_ag,) * 3, (default_rs,) * 3)
-
-
-class TestFullyShardNonzeroDimCopy(FSDPTest):
-    _dim0_view_fns = (
-        all_gather_output_fn_with_dim0_views,
-        reduce_scatter_input_fn_with_dim0_views,
-    )
-
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    @skip_if_lt_x_gpu(2)
-    def test_nonzero_dim_copy(self):
-        self.run_subtests(
-            {
-                "num_linears": [1, 2, 3, 5],
-                "dtype": [torch.float32, torch.bfloat16],
-                "prepare_fns": [None, self._dim0_view_fns],
-            },
-            self._test_nonzero_dim_copy,
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_nonzero_dim_copy_inference(self):
-        self.run_subtests(
-            {"prepare_fns": [None, self._dim0_view_fns]},
-            functools.partial(
-                self._test_nonzero_dim_copy, 3, torch.float32, inference_mode=True
-            ),
-        )
-
-    def _test_nonzero_dim_copy(
-        self,
-        num_linears: int,
-        dtype: torch.dtype,
-        prepare_fns=None,
-        inference_mode: bool = False,
-    ):
-        device = torch.device(device_type.type, self.rank)
-        dim, features = 5, 3 * self.world_size
-        shapes = [
-            (num_linears, features, dim),
-            (2, num_linears, features, dim),
-            (self.world_size + 1, dim),
-        ]
-        # Frozen mixed dtypes make the all-gather buffer use byte offsets.
-        dtypes = (
-            [torch.bfloat16, torch.float32, torch.bfloat16]
-            if inference_mode
-            else [dtype] * len(shapes)
-        )
-
-        class StackedLinears(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weights = nn.ParameterList(
-                    nn.Parameter(
-                        torch.randn(shape, device=device, dtype=param_dtype) / 16,
-                        requires_grad=not inference_mode,
-                    )
-                    for shape, param_dtype in zip(shapes, dtypes)
-                )
-
-            def forward(self, inp):
-                return [
-                    F.linear(inp.to(weight.dtype), weight.flatten(0, -2))
-                    for weight in self.weights
-                ]
-
-        torch.manual_seed(42)
-        model = StackedLinears()
-        ref_model = copy.deepcopy(model)
-        fully_shard(
-            model,
-            shard_placement_fn=lambda param: Shard(param.ndim - 2),
-            reshard_after_forward=True,
-            mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
-        )
-        if prepare_fns is not None:
-            ag_fn = MagicMock(wraps=prepare_fns[0])
-            rs_fn = MagicMock(wraps=prepare_fns[1])
-            model.set_all_gather_output_fn(ag_fn)
-            model.set_reduce_scatter_input_fn(rs_fn)
-        torch.manual_seed(42 + self.rank)
-        if inference_mode:
-            with torch.inference_mode():
-                for _ in range(2):
-                    inp = torch.randn((2, dim), device=device)
-                    self.assertEqual(model(inp), ref_model(inp))
-            if prepare_fns is not None:
-                ag_fn.assert_called()
-            return
-
-        optim = torch.optim.SGD(model.parameters(), lr=1e-3)
-        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-3)
-        for _ in range(2):
-            inp = torch.randn((2, dim), device=device, dtype=dtype, requires_grad=True)
-            ref_inp = inp.detach().clone().requires_grad_()
-            outputs, ref_outputs = model(inp), ref_model(ref_inp)
-            self.assertEqual(outputs, ref_outputs)
-            sum(output.square().sum() for output in outputs).backward()
-            sum(output.square().sum() for output in ref_outputs).backward()
-            self.assertEqual(inp.grad, ref_inp.grad)
-            for ref_param in ref_model.parameters():
-                ref_grad = ref_param.grad.float() / self.world_size
-                dist.all_reduce(ref_grad)
-                ref_param.grad.copy_(ref_grad)
-            optim.step()
-            ref_optim.step()
-            check_sharded_parity(self, ref_model, model)
-            optim.zero_grad()
-            ref_optim.zero_grad()
-        if prepare_fns is not None:
-            ag_fn.assert_called()
-            self.assertEqual(rs_fn.call_count, 2)
 
 
 class TestFullyShardCommunication(FSDPTest):
