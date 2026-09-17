@@ -113,11 +113,17 @@ class TestPrecompile(TestCase):
             risky_dropped_guards=risky,
             policy_dropped_guards=(("CONSTANT_MATCH", "flag"),),
             dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
-            capture_errors=("boom",),
+            capture_errors=("RuntimeError: boom",),
         )
         clone = pickle.loads(pickle.dumps(summary))
         self.assertEqual(clone, summary)
         self.assertEqual(hash(clone), hash(summary))
+        # Every clause at once: the notes come first and the shouted frame
+        # failures last, so a failure never sits between two notes.
+        self.assertExpectedInline(
+            str(summary),
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'ID_MATCH': 1, 'HASATTR': 1} (1 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
         # Keyword-only: four leading ints would otherwise transpose silently.
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
             PrecompileSummary(3, 1, 4, 3)
