@@ -14,6 +14,8 @@ import torch.distributed.pipelining.stage as stage_module
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
+    PIPELINE_MICROBATCH_INDEX_KEY,
+    PIPELINE_STAGE_INDEX_KEY,
     PipelineStage,
     ScheduleGPipe,
 )
@@ -85,7 +87,7 @@ class PipelineStageBackendWarningTest(TestCase):
 instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
-class PipelineStageMetadataInferenceTest(TestCase):
+class PipelineStageMetadataTest(TestCase):
     def test_pipeline_metadata_forward_kwargs(self):
         class MetadataModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -132,16 +134,24 @@ class PipelineStageMetadataInferenceTest(TestCase):
                 schedule.step(x, scale=scale, target=torch.zeros(2)), x * scale
             )
             self.assertEqual(module.received, [(0, 0), (0, 1)])
-            self.assertEqual([len(inputs) for inputs in cached_inputs], [2, 2])
+            self.assertEqual(cached_inputs[0], (x[:1], scale[:1]))
+            self.assertEqual(cached_inputs[1], (x[1:], scale[1:]))
             self.assertEqual(x.grad, torch.full_like(x, 18))
             self.assertEqual(scale.grad, torch.full_like(scale, 6))
 
-            with self.assertRaisesRegex(ValueError, "reserves forward kwarg"):
-                stage.forward_one_chunk(
-                    0,
-                    (x,),
-                    {"pipeline_microbatch_index": 0},
-                )
+            stage.clear_runtime_states()
+            reserved_value = torch.tensor(-1.0, requires_grad=True)
+            stage.forward_one_chunk(
+                0,
+                (x[:1],),
+                {
+                    "scale": scale[:1],
+                    PIPELINE_STAGE_INDEX_KEY: reserved_value,
+                    PIPELINE_MICROBATCH_INDEX_KEY: reserved_value,
+                },
+            )
+            self.assertEqual(module.received[-1], (0, 0))
+            self.assertEqual(stage.fwd_cache[0][1], [x[:1], scale[:1]])
 
     def test_pipeline_metadata_pre_hook(self):
         class StrictModule(torch.nn.Module):
@@ -153,8 +163,8 @@ class PipelineStageMetadataInferenceTest(TestCase):
         def consume_metadata(module, args, kwargs):
             received.append(
                 (
-                    kwargs.pop("pipeline_stage_index"),
-                    kwargs.pop("pipeline_microbatch_index"),
+                    kwargs.pop(PIPELINE_STAGE_INDEX_KEY),
+                    kwargs.pop(PIPELINE_MICROBATCH_INDEX_KEY),
                 )
             )
             return args, kwargs
@@ -188,6 +198,8 @@ class PipelineStageMetadataInferenceTest(TestCase):
 
             stage.backward_one_chunk(2, loss=output.sum())
             self.assertEqual(stage.bwd_cache[2], (scale.detach(),))
+            # stage_backward releases direct input-leaf grads after copying
+            # them into the previous-stage gradient tuple.
             self.assertIsNone(scale.grad)
 
     def test_pipeline_metadata_requires_static_schedule(self):
