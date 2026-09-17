@@ -51,6 +51,7 @@ from ._backward import (
 from ._debug import map_debug_info
 from ._p2p import _build_p2p_edge_groups, _P2PWarmupRound, _warn_if_eager_nccl
 from ._recv_buffers import (
+    _assign_recv_info_buffers,
     _clear_unlaunched_recv_infos,
     _ensure_recv_infos_drained,
     _RecvBufferPool,
@@ -650,15 +651,21 @@ class _PipelineStageBase(ABC):
     def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int) -> None:
         """Pass outputs from a same-rank stage as forward inputs (V-schedule).
 
-        Detaches tensors and sets ``requires_grad`` so they serve as autograd
-        leaves. Handles DTensor activations transparently.
+        This stores detached local tensors; receive retrieval later configures
+        ``requires_grad`` so they become leaves of the destination stage's
+        autograd graph. DTensor activations are handled transparently.
+
+        Args:
+            prev_stage_outputs: Outputs produced by the preceding local stage.
+            mb_index: Microbatch whose forward receive descriptors are filled.
         """
         recv_infos: tuple[_RecvInfo, ...] = self.args_recv_info[mb_index]
 
         # See [Note: pipeline model output type]
         prev_stage_outputs = _normalize_model_output_as_tuple(prev_stage_outputs)
 
-        for info, tensor in zip(recv_infos, prev_stage_outputs, strict=True):
+        assignments: list[tuple[_RecvInfo, torch.Tensor]] = []
+        for info, tensor in tuple(zip(recv_infos, prev_stage_outputs, strict=True)):
             if not isinstance(tensor, torch.Tensor):
                 raise AssertionError(
                     f"expected tensor values as outputs from prev stage, got {type(tensor)}"
@@ -670,7 +677,8 @@ class _PipelineStageBase(ABC):
 
             # Pass the activation tensor directly (same rank for local execution).
             # Detach to create a new autograd leaf for the fresh autograd graph.
-            info.set_buffer(to_local_if_dtensor(tensor, detach=True))
+            assignments.append((info, to_local_if_dtensor(tensor, detach=True)))
+        _assign_recv_info_buffers(tuple(assignments))
 
     def get_local_fwd_output(self, output: Any) -> Any:
         """Return a same-rank output without aliases to this stage's pools."""
@@ -693,10 +701,15 @@ class _PipelineStageBase(ABC):
     def set_local_bwd_input(
         self, next_stage_bwd_outputs: tuple[torch.Tensor | None, ...], mb_index: int
     ) -> None:
-        """
-        Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
-        Does not detach or set '_requires_grad'.
-        Handles DTensor gradients for V-schedule local passing.
+        """Pass same-rank input gradients without P2P communication.
+
+        The tensors remain attached to their existing autograd state. A missing
+        gradient is represented by a zero receive buffer when metadata exists.
+
+        Args:
+            next_stage_bwd_outputs: Input gradients produced by the next local
+                stage, in receive-descriptor order.
+            mb_index: Microbatch whose backward receive descriptors are filled.
         """
         if not isinstance(next_stage_bwd_outputs, tuple):
             raise AssertionError(f"Expected tuple, got {type(next_stage_bwd_outputs)}")
@@ -708,22 +721,30 @@ class _PipelineStageBase(ABC):
         if self.is_last:
             raise AssertionError("can't set bwd input if this stage is last")
         recv_infos = self.grad_recv_info[mb_index]
-        for info, tensor in zip(recv_infos, next_stage_bwd_outputs, strict=True):
+        assignments: list[tuple[_RecvInfo, torch.Tensor]] = []
+        for info, tensor in tuple(zip(recv_infos, next_stage_bwd_outputs, strict=True)):
+            if info.is_root_arg:
+                raise AssertionError(
+                    "set_local_bwd_input should only be called with non-root RecvInfo"
+                )
             if tensor is None:
                 if info.tensor_meta is not None:
-                    info.allocate_buffer(self.device).zero_()
+                    assignments.append(
+                        (
+                            info,
+                            _make_tensor_from_meta(
+                                info.tensor_meta, self.device
+                            ).zero_(),
+                        )
+                    )
                 continue
             if not isinstance(tensor, torch.Tensor):
                 raise AssertionError(
                     f"expected tensor values as outputs from prev stage, got {type(tensor)}"
                 )
-            if info.is_root_arg:
-                raise AssertionError(
-                    "set_local_bwd_input should only be called with non-root RecvInfo"
-                )
-
             # Extract local tensor for the buffer (handles DTensor or plain tensor)
-            info.set_buffer(to_local_if_dtensor(tensor))
+            assignments.append((info, to_local_if_dtensor(tensor)))
+        _assign_recv_info_buffers(tuple(assignments))
 
     def get_fwd_recv_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
