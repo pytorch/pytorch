@@ -1012,6 +1012,157 @@ instantiate_device_type_tests(
 )
 
 
+@instantiate_parametrized_tests
+class TestAfterAotDeviceDecoupling(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_infer_repro_device_type_defaults_to_cpu(self):
+        self.assertEqual(after_aot._infer_repro_device_type([]), "cpu")
+        self.assertEqual(after_aot._infer_repro_device_type([torch.zeros(2)]), "cpu")
+        self.assertEqual(
+            after_aot._infer_repro_device_type([None, torch.zeros(2)]), "cpu"
+        )
+
+    def test_repro_system_info_comment_keeps_cuda_collector(self):
+        # cpu / no-device repros keep the original CUDA collector verbatim
+        sentinel = "# sentinel cuda system info"
+        with patch.object(
+            after_aot, "_cuda_system_info_comment", return_value=sentinel
+        ):
+            self.assertEqual(after_aot._repro_system_info_comment([]), sentinel)
+            self.assertEqual(
+                after_aot._repro_system_info_comment([torch.zeros(2)]), sentinel
+            )
+
+    def test_repro_system_info_comment_generic_collection(self):
+        npu_mod = SimpleNamespace(
+            is_available=lambda: True,
+            device_count=lambda: 8,
+            get_device_name=lambda idx: f"Ascend910B{idx}",
+        )
+        with patch.object(after_aot, "_infer_repro_device_type", return_value="npu"):
+            with patch.object(torch, "npu", npu_mod, create=True):
+                with patch.object(torch.version, "npu", "6.0.RC1", create=True):
+                    comment = after_aot._repro_system_info_comment([torch.zeros(2)])
+        self.assertIn("# torch npu version: 6.0.RC1", comment)
+        self.assertIn("# npu device count: 8", comment)
+        self.assertIn("# npu device 0: Ascend910B0", comment)
+
+    def test_repro_system_info_comment_unavailable_degrades(self):
+        npu_mod = SimpleNamespace(is_available=lambda: False)
+        with patch.object(after_aot, "_infer_repro_device_type", return_value="npu"):
+            with patch.object(torch, "npu", npu_mod, create=True):
+                self.assertIn(
+                    "# npu is not available", after_aot._repro_system_info_comment([])
+                )
+            # no torch.npu module at all -> still a comment, never raises
+            with patch.object(torch, "npu", None, create=True):
+                self.assertIn(
+                    "# npu is not available", after_aot._repro_system_info_comment([])
+                )
+
+    def test_repro_system_info_comment_error_degrades(self):
+        def boom():
+            raise RuntimeError("boom")
+
+        npu_mod = SimpleNamespace(is_available=boom)
+        with patch.object(after_aot, "_infer_repro_device_type", return_value="npu"):
+            with patch.object(torch, "npu", npu_mod, create=True):
+                self.assertEqual(
+                    after_aot._repro_system_info_comment([]),
+                    "# Failed to collect npu system info\n",
+                )
+
+    def test_repro_system_info_comment_generic_trailing_newline(self):
+        # the generated script concatenates this comment directly before code,
+        # so the collector must end with a newline (same contract as the
+        # CUDA collector); without it kernel_side_table.reset_table() gets
+        # swallowed into the comment line.
+        npu_mod = SimpleNamespace(is_available=lambda: True, device_count=lambda: 8)
+        with patch.object(after_aot, "_infer_repro_device_type", return_value="npu"):
+            with patch.object(torch, "npu", npu_mod, create=True):
+                comment = after_aot._repro_system_info_comment([torch.zeros(2)])
+        self.assertTrue(comment.endswith("\n"))
+
+    def test_oot_backend_imports(self):
+        with patch.object(
+            torch._C,
+            "_get_privateuse1_backend_name",
+            return_value="npu",
+            create=True,
+        ):
+            self.assertIn("import torch_npu", after_aot._oot_backend_imports("npu"))
+            # built-in devices need no extra import
+            self.assertEqual(after_aot._oot_backend_imports("cpu"), "")
+            self.assertEqual(after_aot._oot_backend_imports("cuda"), "")
+            self.assertEqual(after_aot._oot_backend_imports("xpu"), "")
+        # no PrivateUse1 name registered -> no import lines
+        with patch.object(
+            torch._C,
+            "_get_privateuse1_backend_name",
+            side_effect=RuntimeError("unset"),
+            create=True,
+        ):
+            self.assertEqual(after_aot._oot_backend_imports("npu"), "")
+
+    def test_repro_string_injects_oot_import(self):
+        gm = torch.fx.symbolic_trace(torch.nn.ReLU())
+        args = [torch.zeros(2)]
+        # cpu args, no patches: no out-of-tree import is injected
+        repro = after_aot.generate_compiler_repro_string(gm, args)
+        self.assertNotIn("import torch_npu", repro)
+        with patch.object(after_aot, "_infer_repro_device_type", return_value="npu"):
+            with patch.object(
+                torch._C,
+                "_get_privateuse1_backend_name",
+                return_value="npu",
+                create=True,
+            ):
+                repro = after_aot.generate_compiler_repro_string(gm, args)
+        self.assertIn("try:", repro)
+        self.assertIn("import torch_npu", repro)
+        self.assertIn("except ImportError:", repro)
+
+    def test_minifier_env_variables_cuda_default_unchanged(self):
+        # historical behavior kept verbatim for cpu / cuda / unmapped types
+        with patch.object(torch.cuda, "device_count", return_value=3):
+            self.assertEqual(
+                after_aot._minifier_env_variables([torch.zeros(2)]),
+                {"CUDA_VISIBLE_DEVICES": "1"},
+            )
+        with patch.object(torch.cuda, "device_count", return_value=1):
+            self.assertEqual(
+                after_aot._minifier_env_variables([]),
+                {"CUDA_VISIBLE_DEVICES": "0"},
+            )
+
+    @parametrize(
+        "npu_mod,expected",
+        (
+            (SimpleNamespace(device_count=lambda: 8), "1"),
+            (SimpleNamespace(device_count=lambda: 1), "0"),
+            (None, "0"),
+        ),
+    )
+    def test_minifier_env_variables_npu_mapping(self, npu_mod, expected):
+        with patch.object(after_aot, "_infer_repro_device_type", return_value="npu"):
+            with patch.object(torch, "npu", npu_mod, create=True):
+                self.assertEqual(
+                    after_aot._minifier_env_variables([]),
+                    {"ASCEND_RT_VISIBLE_DEVICES": expected},
+                )
+
+    def test_minifier_env_variables_unmapped_falls_back(self):
+        # device types outside the mapping table (e.g. hpu) keep the
+        # historical CUDA_VISIBLE_DEVICES behavior verbatim, never raise
+        with patch.object(after_aot, "_infer_repro_device_type", return_value="hpu"):
+            with patch.object(torch.cuda, "device_count", return_value=1):
+                self.assertEqual(
+                    after_aot._minifier_env_variables([]),
+                    {"CUDA_VISIBLE_DEVICES": "0"},
+                )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
