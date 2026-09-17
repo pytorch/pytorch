@@ -318,7 +318,16 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         name = None
         if isinstance(target, torch._ops.OpOverload):
-            name = self.tracer.graph._target_to_str(target.overloadpacket.__name__)
+            # Match whichever naming scheme produced the incoming graph, so a
+            # no-op transform preserves node names. Export's canonical naming is
+            # overload-qualified (`add_tensor`) but is config-gated (see
+            # `_canonicalize_export_graph` in torch/export/_trace.py); with the
+            # config off the graph carries overloadpacket names (`add`), and
+            # re-deriving the other scheme would rename every node on every pass.
+            if torch._dynamo.config.canonicalize_output_graph_node_order:
+                name = self.tracer.graph._target_to_str(target)
+            else:
+                name = self.tracer.graph._target_to_str(target.overloadpacket.__name__)
 
         res_proxy = self.tracer.create_proxy(
             kind, target, args_proxy, kwargs_proxy, name=name
