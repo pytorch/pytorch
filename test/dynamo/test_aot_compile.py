@@ -552,6 +552,21 @@ class HermeticModule(torch.nn.Module):
         return x @ AOT_HERMETIC_WEIGHT
 
 
+class EpsOnlyModule(torch.nn.Module):
+    def forward(self, x):
+        return x * EPS
+
+
+AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
+
+
+class TwoGlobalsModule(torch.nn.Module):
+    # Under keep_tensor_guards_unsafe the TENSOR_MATCH on EPS, a plain tensor,
+    # is kept and the one on AOT_UNGUARDED_PARAM, a Parameter, is dropped.
+    def forward(self, x):
+        return x * EPS + AOT_UNGUARDED_PARAM
+
+
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
 
 
@@ -2270,9 +2285,8 @@ from user code:
         return probe, saved
 
     def test_module_dispatch_evaluates_a_matching_tree_once(self):
-        # The scan calls the matching result's declared `fn` field rather than the
-        # result, whose __call__ would evaluate the guards that just passed a
-        # second time.
+        # The scan calls the matching result's _serve rather than the result,
+        # whose __call__ would evaluate the guards that just passed a second time.
         mod = ScaleModule()
         model = torch.compile(mod, fullgraph=True, backend="eager")
         x = torch.randn(4, 8)
@@ -3199,8 +3213,8 @@ from user code:
         # loaded redirects dispatch. A copy taken at load time would go on
         # serving whichever graph matched then, with no error and a wrong answer.
         # The graph specialized on this global rather than lifting it, so the
-        # bytecode never reads it: its globals carry the name, but only the
-        # guards consult its value.
+        # bytecode never reads it: its globals carry the name, and every call
+        # refreshes it, but only the guards consult its value.
         #
         # _set_pool_mode REBINDS the global, which is what makes the helper's
         # post-load checks pin the by-reference read. The helper's other callers
@@ -4039,14 +4053,9 @@ from user code:
         global EPS, AOT_UNGUARDED_PARAM
 
         self._hide_leaked_dynamo_globals()
-        saved_eps = EPS
+        saved_eps, saved_param = EPS, AOT_UNGUARDED_PARAM
         self.addCleanup(globals().__setitem__, "EPS", saved_eps)
-        AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
-        saved_param = AOT_UNGUARDED_PARAM
-
-        class TwoGlobalsModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS + AOT_UNGUARDED_PARAM
+        self.addCleanup(globals().__setitem__, "AOT_UNGUARDED_PARAM", saved_param)
 
         x = torch.randn(3)
         keep_tensors = torch.compiler.keep_tensor_guards_unsafe
@@ -4248,30 +4257,10 @@ from user code:
         # certified set and no more.
         global EPS, AOT_UNGUARDED_PARAM
 
-        self._hide_leaked_dynamo_globals()
-        self.addCleanup(globals().__setitem__, "EPS", EPS)
-        AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
         load_time_param = AOT_UNGUARDED_PARAM
-
-        class TwoGlobalsModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS + AOT_UNGUARDED_PARAM
-
-        x = torch.randn(3)
-        keep_tensors = torch.compiler.keep_tensor_guards_unsafe
-        options = {"guard_filter_fn": keep_tensors}
-        model = torch.compile(
-            TwoGlobalsModule(), fullgraph=True, backend="eager", options=options
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-
+        self.addCleanup(globals().__setitem__, "AOT_UNGUARDED_PARAM", load_time_param)
+        (x,), reloaded, _ = self._load_armed_module(TwoGlobalsModule, 3)
         load_time_eps = EPS
-        reloaded = torch.compile(
-            TwoGlobalsModule(), fullgraph=True, backend="eager", options=options
-        )
-        reloaded._load_aot_compiled_module(data)
         self.assertEqual(reloaded(x), x * load_time_eps + load_time_param)
 
         rebound = torch.tensor(2.0)
@@ -4283,6 +4272,147 @@ from user code:
         EPS = rebound
         AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.full((3,), 9.0))
         self.assertEqual(reloaded(x), x * rebound + load_time_param)
+
+    def _load_armed_module(self, module_cls, *sizes):
+        # module_cls compiled for one ModelInput per size, saved, and loaded
+        # under keep_tensor_guards_unsafe, which keeps the TENSOR_MATCH on EPS
+        # and so arms the re-read of it on every result: a served load-time
+        # value is then the caller's doing and not an unarmed artifact. EPS is
+        # restored at cleanup, so the caller rebinds it freely.
+        self._hide_leaked_dynamo_globals()
+        self.addCleanup(globals().__setitem__, "EPS", EPS)
+        xs = [torch.randn(n) for n in sizes]
+        options = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        model = torch.compile(
+            module_cls(), fullgraph=True, backend="eager", options=options
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        reloaded = torch.compile(
+            module_cls(), fullgraph=True, backend="eager", options=options
+        )
+        reloaded._load_aot_compiled_module(data)
+        results = reloaded.forward.compiled_results
+        self.assertEqual(len(results), len(sizes))
+        for result in results:
+            self.assertEqual(result._live_global_names, ("EPS",))
+        return xs, reloaded, results
+
+    def test_aot_compile_module_sweep_rebind_is_served(self):
+        # Dispatch's sweep over results[1:] re-reads the guarded global as well.
+        # Two results compiled for different input shapes: the first pass
+        # refuses the (4,) call on [0], and the sweep serves it from [1], which
+        # has to compute with the rebind its own guards just accepted, not the
+        # value the load merged into its globals.
+        global EPS
+
+        (_, x4), reloaded, results = self._load_armed_module(EpsOnlyModule, 3, 4)
+        load_time_eps = EPS
+        rebound = torch.tensor(2.0)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        EPS = rebound
+        served = reloaded(x4)
+        self.assertEqual(served, x4 * rebound)
+        self.assertNotEqual(served.tolist(), (x4 * load_time_eps).tolist())
+        # [1] served the call and re-read; [0] refused it and read nothing.
+        self.assertIs(results[1].fn.__globals__["EPS"], rebound)
+        self.assertIs(results[0].fn.__globals__["EPS"], load_time_eps)
+
+    def test_aot_compile_module_second_pass_rebind_is_served(self):
+        # Dispatch's re-check pass re-reads the guarded global as well. A check()
+        # can reject from the recursive dict-tag fast path without running the
+        # tree, which answers nothing about the call, so the pass that rescues it
+        # serves a call whose guards did pass and owes the graph the same live
+        # value the first pass would have handed it -- not the value an EARLIER
+        # accepted call re-read into the bytecode's globals, which persists there
+        # between calls. A probe that makes the guard on EPS miss the global once
+        # forces that pass on a LOADED artifact, the only kind the re-read is
+        # armed for.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        load_time_eps = EPS
+        # A call the first pass accepts leaves its re-read in fn.__globals__.
+        first_rebind = torch.tensor(3.0)
+        EPS = first_rebind
+        self.assertEqual(reloaded(x), x * first_rebind)
+        self.assertIs(result.fn.__globals__["EPS"], first_rebind)
+
+        rebound = torch.tensor(2.0)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        # Rebound BEFORE the probe re-keys the name: a STORE_GLOBAL after it
+        # would consume the miss and insert a second "EPS" key.
+        EPS = rebound
+        self._install_global_probe("EPS", misses=1)
+        manager = result._artifacts.guard_manager
+        with patch.object(manager, "check", wraps=manager.check) as check:
+            served = reloaded(x)
+        # The scan's check() rejected the call and the re-check's accepted it.
+        self.assertEqual(check.call_count, 2)
+        self.assertEqual(served, x * rebound)
+        self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
+        self.assertNotEqual(served.tolist(), (x * first_rebind).tolist())
+
+    def test_aot_compile_module_opted_out_load_rebind_is_served(self):
+        # The re-read reaches the last resort too, the site that serves a result
+        # which opted out: the name set is recorded by the load, before
+        # disable_guard_check() flips anything, so the graph goes on following the
+        # guard scope -- here past a rebind the kept TENSOR_MATCH refuses, which
+        # is what pushes dispatch off both earlier passes onto that site.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        load_time_eps = EPS
+        self.assertEqual(reloaded(x), x * load_time_eps)
+
+        rebound = torch.nn.Parameter(torch.tensor(2.0), requires_grad=False)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        EPS = rebound
+        with self.assertRaises(RuntimeError) as ctx:
+            reloaded(x)
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        # EPS's own guard is the refusal, not a missing name or another guard.
+        self.assertIn(
+            "expected type of 'G['EPS']' to be <class 'torch.Tensor'>, "
+            "but found <class 'torch.nn.parameter.Parameter'>",
+            message,
+        )
+        result.disable_guard_check()
+        served = reloaded(x)
+        self.assertEqual(served, x * rebound)
+        self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
+        # A name the scope no longer binds is skipped, not deleted, so the
+        # opted-out call serves the last value read.
+        del EPS
+        self.assertEqual(reloaded(x), x * rebound)
+
+    def test_aot_compile_module_global_deleted_under_the_re_read_is_skipped(self):
+        # The scope is live, so a del of the guarded name can land between the
+        # guard check and _serve's read of it. The read is one lookup under
+        # try/except, so the name is skipped and the bytecode's globals keep the
+        # last value read, where a membership test and then a read would let a
+        # bare KeyError out of a call whose guards passed. A dict that answers
+        # the membership test and fails the read stands in for that window; the
+        # guards hold the live module dict by reference and go on passing.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        rebound = torch.tensor(2.0)
+        EPS = rebound
+        self.assertEqual(reloaded(x), x * rebound)
+        self.assertIs(result.fn.__globals__["EPS"], rebound)
+
+        class DeletedBetweenTestAndRead(dict):
+            def __contains__(self, name):
+                return True
+
+            def __getitem__(self, name):
+                raise KeyError(name)
+
+        with patch.object(result, "_guard_globals", DeletedBetweenTestAndRead()):
+            self.assertEqual(reloaded(x), x * rebound)
 
     @torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True)
     def test_aot_compile_module_shape_only_global_arms_the_guard_scope(self):
