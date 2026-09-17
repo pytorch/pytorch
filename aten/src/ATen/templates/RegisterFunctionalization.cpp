@@ -31,6 +31,8 @@ namespace functionalization {
 // Exclude any modes: the purpose of calling into meta kernels is only as an implementation
 // detail to perform shape inference, and we don't want any modal keys to run.
 // Specifically, we want to prevent functionalization and Python modes from running.
+// We must also exclude Fake before Functionalization calls Meta kernels
+// internally to infer metadata.
 constexpr auto exclude_keys_for_meta_dispatch =
     c10::functorch_transforms_ks |
     c10::DispatchKeySet({
@@ -38,7 +40,7 @@ constexpr auto exclude_keys_for_meta_dispatch =
         c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
         c10::DispatchKey::Python,
         c10::DispatchKey::PreDispatch,
-
+        c10::DispatchKey::Fake,
     });
 
 // Helper around at::has_internal_overlap.

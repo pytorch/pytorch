@@ -922,6 +922,8 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // checks; if at all possible, refactor the code to stop using DispatchKey in
 // those cases.
 inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
+  // Fake is an overlay like Python/functorch dispatch, not a device backend, so
+  // remove it before selecting the legacy backend key.
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this
@@ -934,7 +936,8 @@ inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
                DispatchKey::FuncTorchGradWrapper,
                DispatchKey::FuncTorchVmapMode,
                DispatchKey::FuncTorchBatched,
-               DispatchKey::Python}))
+               DispatchKey::Python,
+               DispatchKey::Fake}))
       .highestPriorityTypeId();
 }
 
