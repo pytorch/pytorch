@@ -31,7 +31,7 @@ def create_one_event(
     p2p_seq_id=0,
     output_dtypes="float32",
     input_dtypes="float32",
-    backend="nccl",
+    backend=backend,
 ):
     return {
         "profiling_name": f"{backend}:{collective_name}",
@@ -388,7 +388,7 @@ def create_one_entry(
     output_dtypes="float32",
     pg_info=("0", "default"),
     input_dtypes="float32",
-    backend="nccl",
+    backend=backend,
 ):
     event = create_one_event(
         collective_name,
