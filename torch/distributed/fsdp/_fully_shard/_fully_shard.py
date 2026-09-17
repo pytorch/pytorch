@@ -900,7 +900,12 @@ class FSDPModule:
                     if param not in params or param.grad is None:
                         continue
                     grad = param.grad
-                    converted_grad = fn(grad).to(group.mp_policy.grad_dtype)
+                    converted_grad = fn(grad)
+                    if converted_grad.dtype != group.mp_policy.grad_dtype:
+                        # Keep the target device/layout and original gradient values.
+                        converted_grad = torch.empty_like(
+                            converted_grad, dtype=group.mp_policy.grad_dtype
+                        ).copy_(grad)
                     converted_grad.requires_grad_(grad.requires_grad)
                     saved_grads.append((fsdp_param, grad, converted_grad))
         for fsdp_param, _, _ in saved_grads:

@@ -301,6 +301,46 @@ class TestFullyShardGradientDtype(FSDPTest):
         for param, expected in zip(params, expected_grads):
             self.assertEqual(param.grad.to_local(), expected * 2, atol=0, rtol=0)
 
+    @skip_if_lt_x_gpu(2)
+    @skipIfTorchDynamo("Parameter conversion is tested in eager mode")
+    @parametrize("storage_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("conversion", ["bfloat16", "half", "to_bfloat16", "to_cpu_bfloat16"])
+    def test_parameter_dtype_conversion_preserves_gradient(
+        self, device, storage_dtype, conversion
+    ):
+        device = torch.device(torch.device(device).type, self.rank)
+        model = _Linear(device, storage_dtype)
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, grad_dtype=torch.float32
+            ),
+        )
+        inp = torch.full((3, 32), 1.0078125, device=device, dtype=torch.bfloat16)
+        model(inp).backward(torch.full_like(inp, 1.0078125))
+        expected = model.weight.grad.to_local().clone()
+        self.assertNotEqual(expected, expected.bfloat16().float())
+        self.assertNotEqual(expected, expected.half().float())
+
+        target_dtype = torch.float16 if conversion == "half" else torch.bfloat16
+        target_device = (
+            torch.device("cpu") if conversion == "to_cpu_bfloat16" else device
+        )
+        if conversion in ("bfloat16", "half"):
+            getattr(model, conversion)()
+        else:
+            model.to(device=target_device, dtype=target_dtype)
+        self.assertEqual(model.weight.dtype, target_dtype)
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
+        self.assertEqual(model.weight.grad.device, target_device)
+        self.assertEqual(
+            model.weight.grad.to_local(), expected.to(target_device), atol=0, rtol=0
+        )
+
+        model.to(device=device, dtype=storage_dtype)
+        model(inp).backward(torch.full_like(inp, 1.0078125))
+        self.assertEqual(model.weight.grad.to_local(), expected * 2, atol=0, rtol=0)
+
 
 instantiate_device_type_tests(TestFullyShardGradientDtype, globals(), only_for="cuda")
 
