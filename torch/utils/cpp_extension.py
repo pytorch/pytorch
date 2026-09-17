@@ -2632,9 +2632,11 @@ def _jit_compile(name,
         logger.info('Loading extension module %s...', name)
 
     if is_standalone:
-        return _get_exec_path(name, build_directory)
+        return _get_exec_path(
+            name, build_directory, with_cuda=with_cuda, with_cudnn=with_cudnn)
 
-    return _import_module_from_library(name, build_directory, is_python_module)
+    return _import_module_from_library(
+        name, build_directory, is_python_module, with_cuda=with_cuda, with_cudnn=with_cudnn)
 
 def _get_hipcc_path():
     if IS_WINDOWS:
@@ -3154,7 +3156,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         raise RuntimeError(message) from e
 
 
-def _get_exec_path(module_name, path):
+def _get_exec_path(module_name, path, with_cuda=False, with_cudnn=False):
     if IS_WINDOWS and TORCH_LIB_PATH not in os.getenv('PATH', '').split(';'):
         torch_lib_in_path = any(
             os.path.exists(p) and os.path.samefile(p, TORCH_LIB_PATH)
@@ -3162,12 +3164,14 @@ def _get_exec_path(module_name, path):
         )
         if not torch_lib_in_path:
             os.environ['PATH'] = f"{TORCH_LIB_PATH};{os.getenv('PATH', '')}"
-    _add_cudnn_runtime_dir()
+    if with_cuda or with_cudnn:
+        _add_cudnn_runtime_dir()
     return os.path.join(path, f'{module_name}{EXEC_EXT}')
 
 
-def _import_module_from_library(module_name, path, is_python_module):
-    _add_cudnn_runtime_dir()
+def _import_module_from_library(module_name, path, is_python_module, with_cuda=False, with_cudnn=False):
+    if with_cuda or with_cudnn:
+        _add_cudnn_runtime_dir()
     filepath = os.path.join(path, f"{module_name}{LIB_EXT}")
     if is_python_module:
         # https://stackoverflow.com/questions/67631/how-to-import-a-module-given-the-full-path

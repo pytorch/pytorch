@@ -188,6 +188,31 @@ class TestCppExtensionJIT(_TestCppExtensionJITBase):
             self.fail("cpp_extension.load() deadlocked on a stale lock file (#189245)")
         self.assertIn("STALE_LOCK_OK", proc.stdout, msg=proc.stderr)
 
+    def test_cudnn_runtime_dir_requires_cuda_or_cudnn(self):
+        # CPU-only JIT loads must not prepend cuDNN onto PATH / DLL search.
+        with mock.patch.object(
+            torch.utils.cpp_extension, "_add_cudnn_runtime_dir"
+        ) as add:
+            torch.utils.cpp_extension._get_exec_path("mod", ".")
+            add.assert_not_called()
+            torch.utils.cpp_extension._get_exec_path("mod", ".", with_cuda=True)
+            add.assert_called_once()
+            add.reset_mock()
+            torch.utils.cpp_extension._get_exec_path("mod", ".", with_cudnn=True)
+            add.assert_called_once()
+            add.reset_mock()
+            with self.assertRaises(Exception):
+                torch.utils.cpp_extension._import_module_from_library(
+                    "missing", ".", True
+                )
+            add.assert_not_called()
+            add.reset_mock()
+            with self.assertRaises(Exception):
+                torch.utils.cpp_extension._import_module_from_library(
+                    "missing", ".", True, with_cuda=True
+                )
+            add.assert_called_once()
+
     def test_inline_jit_compile_extension_with_functions_as_list(self):
         cpp_source = """
         torch::Tensor tanh_add(torch::Tensor x, torch::Tensor y) {
