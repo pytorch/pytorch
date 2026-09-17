@@ -1439,13 +1439,13 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         destroy_process_group() resets to 0 for the whole world, so the first
         new_group() call after a fresh init is named "1" again -- same as the
         first subgroup created before teardown, but with different
-        membership. With a per-process counter that survived teardown, rank 1
-        (a member of both incarnations of "1") would still hold that
-        counter's value from before teardown, 1, while rank 2 (new to "1")
-        started at 0: the two members of the new "1" disagreed on the store
-        key and the rendezvous hung. The counter is dropped when the group is
-        unregistered, which destroy_process_group() does before it resets the
-        name counter, so the reused name starts from zero on every member.
+        membership. With the counter keyed on that name, rank 1 (a member of
+        both incarnations of "1") would still hold the value from before
+        teardown, 1, while rank 2 (new to "1") started at 0: the two members
+        of the new "1" disagreed on the store key and the rendezvous hung.
+        The counter is keyed on the group's store instead, and new_group()
+        builds a fresh one per group, so the reused name starts from zero on
+        every member.
         """
         self._init_process(set_device=True)
 
