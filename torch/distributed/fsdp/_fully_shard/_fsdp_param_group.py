@@ -289,6 +289,13 @@ class FSDPParamGroup:
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
+        if len(trainable_params) > 0 and len(reduce_dtypes) != 1:
+            # This can be relaxed if we issue one reduce-scatter per reduce
+            # dtype (but we would need a way for users to specify multiple
+            # reduce dtypes)
+            raise AssertionError(
+                f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
+            )
         dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
         self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
         self._reduce_dtype = (
