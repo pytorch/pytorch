@@ -250,9 +250,11 @@ c10::SymbolicShape extractListShape(
   }
   Node* list_construct = list->node();
   std::vector<std::optional<int64_t>> output_shape;
+  output_shape.reserve(list_construct->inputs().size());
   for (Value* input : list_construct->inputs()) {
-    if (symbolic_shape_values.count(input)) {
-      output_shape.emplace_back(symbolic_shape_values[input]);
+    if (auto it = symbolic_shape_values.find(input);
+        it != symbolic_shape_values.end()) {
+      output_shape.emplace_back(it->second);
     } else {
       output_shape.push_back(constant_as<int64_t>(input));
     }
@@ -836,7 +838,7 @@ struct SymbolicShapeGraphAnalyzer {
         continue;
       }
 
-      if (!partial_evaluated_graphs.count(curr)) {
+      if (!partial_evaluated_graphs.contains(curr)) {
         GRAPH_DEBUG("No graph ", getHeader(curr));
         return std::nullopt;
       }
@@ -879,9 +881,10 @@ struct SymbolicShapeGraphAnalyzer {
       Value* output = stitched_shape_compute_graph->outputs().at(i);
       // this Value is already contained, so the symbolic shape for i must be
       // equal to the symbolic shape at the existing index
-      if (graph_output_to_symbolic_shape_dim.count(output)) {
+      if (auto it = graph_output_to_symbolic_shape_dim.find(output);
+          it != graph_output_to_symbolic_shape_dim.end()) {
         auto curr_sym_shape = output_index_to_symbolic_shape_[i];
-        auto existing_sym_shape = graph_output_to_symbolic_shape_dim[output];
+        auto existing_sym_shape = it->second;
         discovered_sym_shape_equalities[curr_sym_shape] = existing_sym_shape;
         erase_indices.push_back(i);
       } else {
@@ -922,11 +925,12 @@ struct SymbolicShapeGraphAnalyzer {
         bool changed = false;
         std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
         auto new_sizes =
-            c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
+            c10::fmap(std::move(shape_vec), [&](const at::ShapeSymbol& shape) {
               auto value = shape.value();
-              if (sym_shape_equalities.count(value)) {
+              if (auto it = sym_shape_equalities.find(value);
+                  it != sym_shape_equalities.end()) {
                 changed = true;
-                return sym_shape_equalities[value];
+                return it->second;
               }
               return value;
             });
@@ -1014,7 +1018,7 @@ struct SymbolicShapeGraphAnalyzer {
         for (size_t j = 0; j < rank; ++j) {
           auto shape = tt->symbolic_sizes()[j];
           if (shape.is_static() ||
-              symbolic_shape_value_to_graph_output_.count(shape.value())) {
+              symbolic_shape_value_to_graph_output_.contains(shape.value())) {
             continue;
           }
           auto input = enclosing_graph_value_to_shape_graph_input_[node_input];
@@ -1056,7 +1060,7 @@ struct SymbolicShapeGraphAnalyzer {
           continue;
         }
         int64_t symbolic_shape = symbolic_sizes[i].value();
-        if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
+        if (symbolic_shape_value_to_graph_output_.contains(symbolic_shape)) {
           continue;
         }
         registerStitchedComputeOutput(

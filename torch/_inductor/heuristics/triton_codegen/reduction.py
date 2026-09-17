@@ -275,6 +275,29 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             min(rnumel, MAX_R0_BLOCK),
             register_intensive=register_intensive,
         )
+
+        sm103_inner = (
+            triton_meta["device"].cc == 103  # B300/GB300
+            and reduction_hint == ReductionHint.INNER
+            and rnumel >= 2048
+            and not register_intensive
+        )
+        sm103_config = None
+        if sm103_inner:
+            # We found that sm_103 (b300/gb300) requires more memory level parallelism
+            # than sm_100 (B200) or sm_90 (h100) to reach the same % of HBM peak BW.
+            # At 4 elm/thread GB300 reaches 33% of peak HBM on GB300 where B200 reaches
+            # 69%, leading to poor GB300 inductor kernel perf for memory bound kernels.
+            # We also confirmed both GB300 & B200 have identical SASS therefore proving
+            # the HBM BW issues are due to sm_103 HW behavior differences.
+            # During testing we found 16 elm/thread (from 4 elm/thread) and 4096 R0
+            # (from 1024) recovers HBM util and brings GB300 to ~70% HBM BW utilization
+            # and on par or better performance with B200 for inductor reduction kernels.
+            sm103_r0 = min(rnumel, 4096)
+            sm103_config = make_config(
+                1, sm103_r0, num_warps=max(sm103_r0 // (warp_size * 16), 1)
+            )
+
         tiny_config = make_config(
             2 * (256 // rnumel) if rnumel <= 256 else 1,
             min(rnumel, MAX_R0_BLOCK),
@@ -308,6 +331,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
+            if sm103_config is not None:
+                # Adding B300/GB300 config as autotuning option
+                return configs + [contiguous_config, sm103_config]
             return configs + [contiguous_config]
         elif reduction_hint == ReductionHint.OUTER:
             return configs + [outer_config]
@@ -613,6 +639,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
                 MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
             else:
+                MAX_NUM_STAGES = 1
+            # Triton's tl.range pipeliner cannot predicate the ttng.tensormap_create
+            # emitted by device-side descriptors.
+            if inductor_meta.get("uses_device_tma"):
                 MAX_NUM_STAGES = 1
             c.kwargs["NUM_STAGES"] = min(  # type: ignore[union-attr]
                 max(num_iters // 4, 1), MAX_NUM_STAGES

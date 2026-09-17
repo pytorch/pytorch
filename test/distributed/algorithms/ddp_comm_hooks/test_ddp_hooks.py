@@ -77,7 +77,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         return local_model
 
     def _get_grads(self, process_group, hook_type=None):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = torch.accelerator.current_device_index()
         gpu_model = DistributedDataParallel(
             TestDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -202,7 +202,7 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
             return fut
 
         flags = []
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = torch.accelerator.current_device_index()
         model = nn.Sequential(
             nn.Linear(2, 4000, bias=False),
             *[nn.Linear(4000, 4000, bias=False) for _ in range(10)],

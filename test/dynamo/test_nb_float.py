@@ -3,10 +3,16 @@
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test, skipIfCrossRef
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+    skipIfCrossRef,
+)
 
 
 class NbFloatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- float / int / bool (ConstantVariable) ---
 
     @make_dynamo_test
@@ -179,6 +185,23 @@ class NbFloatTests(TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
         self.assertIn("__float__ returned non-float", result)
 
+    def test_float_returning_int_raises(self):
+        # A numeric-but-wrong-type return (int is not float) must still raise.
+        class Bad:
+            def __float__(self):
+                return 3
+
+        obj = Bad()
+
+        def fn(x):
+            try:
+                return float(obj)
+            except TypeError as e:
+                return str(e)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
+        self.assertIn("__float__ returned non-float (type int)", result)
+
     def test_float_raising_exception_propagates(self):
         class RaisingFloat:
             def __float__(self):
@@ -291,7 +314,12 @@ class NbFloatTests(TestCase):
         self.assertIn(
             "value cannot be converted to type double without overflow", result
         )
-        self.assertEqual(result, eager_result)
+        # Eager now raises c10::Error, and under TORCH_SHOW_CPP_STACKTRACES the
+        # translator reports what() rather than what_without_backtrace(),
+        # appending a C++ backtrace; run_test.py sets that flag when it retries a
+        # single test. Only eager is trimmed - the compiled `result` is a literal
+        # Dynamo synthesizes, so it must stay one line.
+        self.assertEqual(result, eager_result.splitlines()[0])
 
     @skipIfCrossRef
     def test_tensor_dunder_float(self):

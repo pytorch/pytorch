@@ -69,7 +69,6 @@
 #include <ATen/ops/cudnn_convolution.h>
 #include <ATen/ops/cudnn_convolution_transpose.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/miopen_convolution.h>
 #include <ATen/ops/miopen_convolution_transpose.h>
@@ -596,10 +595,11 @@ struct ConvParams {
     // These checks need to be expanded. Currently we have very limited set of
     // checks for MPS.
 #ifdef USE_MPS
-    if (needs_64bit_indexing_no_split(input, weight)) {
+    if (!input.is_mps()) {
       return false;
     }
-    if (!input.is_mps()) {
+    // conv3d forward handles 64-bit shapes (long-indexed Metal kernel variant)
+    if (needs_64bit_indexing_no_split(input, weight) && !(input.ndimension() == 5 && !transposed)) {
       return false;
     }
     return true;
@@ -1078,17 +1078,19 @@ static Tensor convolution_same(
 
   // Calculate the correct padding
   SymDimVector padding_l, padding_r;
+  padding_l.reserve(dim);
+  padding_r.reserve(dim);
   bool symmetric_padding = true;
   for (auto i: c10::irange(dim)) {
     auto s = stride.size() == 1 ? stride[0] : stride[i];
     auto d = dilation.size() == 1 ? dilation[0] : dilation[i];
     auto pad = pooling_same_mode_padding_lr(
         input_sizes[i + 2], weight_sizes[i + 2], s, d);
-    padding_l.push_back(pad.first);
-    padding_r.push_back(pad.second);
     if (!TORCH_GUARD_OR_FALSE(pad.first.sym_eq(pad.second))) {
       symmetric_padding = false;
     }
+    padding_l.push_back(std::move(pad.first));
+    padding_r.push_back(std::move(pad.second));
   }
 
   if (symmetric_padding) {

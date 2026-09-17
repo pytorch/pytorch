@@ -370,7 +370,7 @@ class LookupTableChoices(InductorChoices):
     ) -> list[KernelTemplateChoice]:
         """Fallback to parent if no lookup table or no matches."""
         # NOTE: this is broken out, so that subclasses are able to override this
-        # to handle explicitly the situations where the lookup take had a miss vs
+        # to handle explicitly the situations where the lookup table had a miss vs
         # overriding the entire logic
         return super()._finalize_template_configs(
             template_choices,

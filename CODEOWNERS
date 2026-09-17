@@ -3,262 +3,1193 @@
 # related to a specific file path. Approvals from people in this
 # file are not required for merges.
 
-# This is a comment.
-# Each line is a file pattern followed by one or more owners.
+# CODEOWNERS semantics:
+# - GitHub uses the last matching pattern for each path.
+# - Active rules name one or more owners; commented rules mark paths whose
+#   ownership is still to be determined.
+# - Sections are ordered from broad defaults to narrower overrides.
+#
 # For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.
 
-/torch/utils/cpp_extension.py @fmassa @ezyang @malfet
-
-# Not there to strictly require the approval, but to be tagged as a reviewer
-# on the PRs to push them into a high priority inbox.
-/torch/csrc/autograd/ @albanD @soulitzer
-/torch/autograd/ @albanD @soulitzer
-/tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
-/torch/optim/ @albanD @janeyx99
-/test/test_public_bindings.py @albanD
-/test/allowlist_for_publicAPI.json @albanD
-/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
-/docs/source/conf.py @albanD
-/aten/src/ATen/native/tags.yaml @ezyang
-/.github/merge_rules.yaml @albanD @malfet
-
-# Architecture Optimization (quantization, sparsity, etc.)
-/aten/src/ATen/native/ao_sparse @salilsdesai @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cuda @jerryzh168
-/aten/src/ATen/native/quantized/cudnn @jerryzh168
-/test/test_quantization.py @jerryzh168
-/test/ao/ @jerryzh168
-/test/quantization/ @jerryzh168
-/torch/quantization/ @jerryzh168
-ao/quantization/ @jerryzh168
-nn/intrinsic/ @jerryzh168
-nn/quantized/ @jerryzh168
-nn/quantizable/ @jerryzh168
-nn/qat/ @jerryzh168
-
-# Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
-
-# Distributed
-# c10d backend APIs
-/torch/csrc/distributed/c10d @d4l3k @fduwjj @kapilsh
-/torch/csrc/distributed/c10d/Backend.* @kwen2501
-/torch/csrc/distributed/c10d/Ops.* @kwen2501
-/torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
-# FSDP, DDP
-/torch/distributed/_composable/fsdp/ @weifengpy
-/torch/distributed/_composable/replicate.py @weifengpy
-/torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
-/torch/distributed/fsdp/ @weifengpy
-/torch/distributed/optim/ @weifengpy
-/torch/nn/parallel/ @weifengpy
-# DTensor view, matmul, _StridedShard
-/torch/distributed/tensor/placement_types.py @weifengpy
-/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
-/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
-
-# TVM backend
-/torch/_dynamo/backends/tvm.py @guan404ming
-
-# ONNX Export
-/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
-/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
-/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
-/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
-/torch/onnx/ @titaiwangms @xadupre @justinchuby
-/test/onnx/  @titaiwangms @xadupre @justinchuby
-
-# CI
-/.ci  @pytorch/pytorch-dev-infra
-
-# Docker
-/.ci/docker/ubuntu-rocm/ @jeffdaily
-/.ci/docker/common/install_roc*.sh @jeffdaily
-/.ci/docker/common/install_miopen.sh @jeffdaily
-/.ci/docker/common/install_amdsmi.sh @jeffdaily
-/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @jeffdaily @jataylo @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
-
-# Github Actions
-# This list is for people wanting to be notified every time there's a change
-# related to Github Actions
-/.github/ @pytorch/pytorch-dev-infra
-
-# Custom Test Infrastructure
-/test/run_test.py @pytorch/pytorch-dev-infra
-/torch/testing/_internal/common_device_type.py @mruberry
-/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
-
-# Parametrizations
-/torch/nn/utils/parametriz*.py @lezcano
-
-# torch.linalg
-# docs
-/torch/linalg/ @lezcano @nikitaved
-# code
+# CODEOWNERS review-surface taxonomy
+#
+# Every tracked path resolves to one review surface. Every listed pattern must
+# match at least one committed path. The fast lintrunner set enforces these
+# rules, declared sections, valid owners, source order, and no duplicate or
+# ineffective patterns.
+#
+# Review-surface hierarchy:
+# - Compiler: compiler_dynamo, compiler_inductor, compiler_export_fx, compiler_autograd, functorch
+# - Core operators and runtime: core_aten_native_ops, core_aten_linalg, sparse, core_aten_optimizers, core_aten_runtime, core_c10_dispatch, autograd, core_csrc_misc, core_lazy_runtime, core_tests
+# - Backends and devices: backend_device_runtime, backend_cuda, backend_mps, backend_xpu, backend_rocm, backend_vulkan
+# - Public APIs and extensions: python_core_api, python_nn_api, python_data_api, python_specialized_api, python_api_tests, cpp_api_custom_ops, cpp_runtime_tests, nativert
+# - Distributed: distributed
+# - Serialization and export: jit_torchscript, onnx_export, serialization_package
+# - Quantization: quantization
+# - Profiling: profiler
+# - Mobile: mobile_runtime, mobile_android, mobile_delegates
+# - Build and developer infrastructure: infra_ci, infra_github_automation, infra_build_packaging, infra_linting, infra_codegen, infra_developer_tools, infra_test
+# - Third-party dependencies: third_party_backend_deps, third_party_core_build_deps, third_party_serialization_schema
+# - Benchmarks: benchmark_compiler, benchmark_operator_runtime, benchmark_models
+# - Legacy: caffe2
+# - Repository-wide material: ai_agent_tooling, docs_general
+# - Protected ownership: protected_codeownership
+#
+# Grouped review-surface definitions:
+#
+# [core_aten_native_ops]
+# /aten/
+#
+# [functorch]
+# /aten/src/ATen/functorch/
+# /functorch/
+# /test/functorch/
+# /torch/_functorch/
+# /torch/csrc/functorch/
+# /torch/func/
+/test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
+/test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
+#
+# [compiler_autograd]
+# /test/compiled_autograd_skips/
+# /test/functorch/test_aot_joint_with_descriptors.py
+/test/functorch/test_aotdispatch.py @ezyang @Chillee
+# /test/functorch/test_codegen_backward_epilogue.py
+# /test/functorch/test_codegen_backward_prologue.py
+# /test/functorch/test_codegen_debug_assert.py
+# /test/functorch/test_codegen_dedup.py
+# /test/functorch/test_codegen_mutation_epilogue.py
+# /test/functorch/test_codegen_output_alias.py
+# /test/functorch/test_codegen_runtime_wrapper.py
+# /test/functorch/test_compile_to_python.py
+# /test/functorch/test_memory_efficient_fusion.py
+# /test/functorch/test_minifier.py
+# /test/functorch/test_source_emit.py
+# /test/functorch/test_subclass_codegen.py
+# /test/test_functionalization_of_rng_ops.py
+# /torch/_functorch/_aot_autograd/
+/torch/_functorch/aot_autograd.py @bdhirsh @aorenste
+# /torch/_functorch/compile_utils.py
+# /torch/_functorch/compilers.py
+# /torch/_functorch/partitioners.py
+/torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
+#
+# [core_aten_linalg]
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
-# tests
+# /aten/src/ATen/native/BatchLinearAlgebra.cpp
+# /aten/src/ATen/native/BatchLinearAlgebra.h
+# /aten/src/ATen/native/BatchLinearAlgebraKernel.cpp
+# /aten/src/ATen/native/Blas.cpp
+# /aten/src/ATen/native/BlasKernel.cpp
+# /aten/src/ATen/native/CPUBlas.cpp
+# /aten/src/ATen/native/CPUBlas.h
+# /aten/src/ATen/native/Cross.cpp
+# /aten/src/ATen/native/Cross.h
+# /aten/src/ATen/native/Distance.cpp
+# /aten/src/ATen/native/Distance.h
+# /aten/src/ATen/native/FunctionOfAMatrixUtils.cpp
+# /aten/src/ATen/native/FunctionOfAMatrixUtils.h
+# /aten/src/ATen/native/GroupedMMUtils.h
+# /aten/src/ATen/native/LinearAlgebra.cpp
+# /aten/src/ATen/native/LinearAlgebra.h
+# /aten/src/ATen/native/LinearAlgebraUtils.h
+# /aten/src/ATen/native/ScaledBlas.cpp
+# /aten/src/ATen/native/ScaledBlasUtils.cpp
+# /aten/src/ATen/native/ScaledBlasUtils.h
+# /aten/src/ATen/native/SpectralOps.cpp
+# /aten/src/ATen/native/SpectralOpsUtils.h
+# /aten/src/ATen/native/TriangularOps.cpp
+# /aten/src/ATen/native/TriangularOpsUtils.h
 /test/test_linalg.py @lezcano @nikitaved
-
-# OpInfo-related files
-/torch/testing/_internal/common_methods_invocations.py @mruberry
-/torch/testing/_internal/common_device_type.py @mruberry
-test/test_ops.py @mruberry
-test/test_ops_gradients.py @mruberry @soulitzer
-test/test_ops_fwd_gradients.py @mruberry @soulitzer
-test/test_unary_ufuncs.py @mruberry
-test/test_binary_ufuncs.py @mruberry
-test/test_reductions.py @mruberry
-test/test_type_promotion.py @mruberry
-
-# functorch-related things
-# This list is for people wanting to be notified every time there's a change
-# Useful for e.g. auditing xfails that other folks add to tests
-test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
-test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
-
-# This is the file where people can add new argument types to torch.fx.
-torch/fx/proxy.py @zou3519
-
-# HOPs
-torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
-torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
-docs/source/higher_order_ops/ @bohnstingl
-test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
-torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
-
-# AOTAutograd
-torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
-torch/_functorch/aot_autograd.py @bdhirsh @aorenste
-
-# FakeTensor
-torch/_subclasses/fake_tensor.py @aorenste
-torch/_subclasses/fake_utils.py @aorenste
-
-# torch MPS
-test/test_mps.py @malfet
-c10/metal/ @malfet
-aten/src/ATen/mps/ @malfet
-aten/src/ATen/native/mps/ @malfet
-
-# MTIA
-aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
-torch/csrc/mtia/ @egienvalue
-
-# Profiler
-torch/csrc/autograd/profiler* @scotts @ryanzhang22
-torch/autograd/profiler* @scotts @ryanzhang22
-torch/csrc/profiler/ @scotts @ryanzhang22
-torch/profiler/ @scotts @ryanzhang22
-
-# AOTDispatch tests
-test/functorch/test_aotdispatch.py @ezyang @Chillee
-
-# Dataloader
-torch/utils/data/ @divyanshk @ramanishsingh @scotts @aelavender
-
-# hipify
-torch/utils/hipify/ @jeffdaily @jithunnair-amd
-tools/amd_build/ @jeffdaily @jithunnair-amd
-
-# ROCm-specific files
-aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
-aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
-aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
-c10/hip @jeffdaily @jithunnair-amd
-caffe2/core/hip @jeffdaily @jithunnair-amd
-caffe2/operators/hip @jeffdaily @jithunnair-amd
-caffe2/operators/rnn/hip @jeffdaily @jithunnair-amd
-caffe2/utils/hip @jeffdaily @jithunnair-amd
-
-# XPU-specific files
-/aten/src/ATen/xpu/ @EikanWang @gujinghui
-/aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
-/c10/xpu/ @EikanWang @gujinghui
-/torch/csrc/xpu/ @EikanWang @gujinghui
-/torch/xpu/ @EikanWang @gujinghui
-/test/xpu/ @EikanWang @gujinghui
-/test/test_xpu.py @EikanWang @gujinghui
-/third_party/xpu.txt @EikanWang @gujinghui
-/docs/source/notes/get_start_xpu.rst @EikanWang @gujinghui
-
-# torch.export
-/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
-/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
-/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
-
-# Dynamic Shapes
-/torch/fx/experimental/symbolic_shapes.py @laithsakka
-/torch/fx/experimental/sym_node.py @laithsakka
-/torch/fx/experimental/recording.py @laithsakka
-
-# ProxyTorchDispatchMode
-torch/fx/experimental/proxy_tensor.py @aorenste
-
-# serialization-related files
-/aten/src/ATen/MapAllocator* @mikaylagawarecki
-/caffe2/serialize/ @mikaylagawarecki
-/torch/serialization.py @mikaylagawarecki
-/torch/storage.py @mikaylagawarecki
-/torch/csrc/Storage* @mikaylagawarecki
-# subscribing for PyTorchFileWriter/PyTorchFileReader changes
-/torch/csrc/jit/python/init.cpp @mikaylagawarecki
-
-# CUDA and CUDA math libraries
-aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
-aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
-aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
-aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
-c10/cuda @eqy @syed-ahmed @Aidyn-A
-torch/cuda/ @eqy @syed-ahmed @Aidyn-A
-torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
-torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
-torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
-
-# PyTree utilities
-/torch/utils/_pytree.py @XuehaiPan
-/torch/utils/_cxx_pytree.py @XuehaiPan
-/torch/utils/pytree/ @XuehaiPan
-/torch/_dynamo/polyfills/pytree.py @XuehaiPan
-
-# Relating to libtorch ABI
-/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
-/torch/headeronly/ @janeyx99
-/torch/header_only_apis.txt @janeyx99
-
-# FlexAttention
-/torch/nn/attention/flex_attention.py @drisspg
-/torch/_higher_order_ops/flex_attention.py @drisspg
-/torch/_inductor/kernel/flex/ @drisspg
-/torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
-/test/inductor/test_flex_attention.py @drisspg
-/test/inductor/test_flex_decoding.py @drisspg
-
-# Low Precision & Grouped GEMMs
+# /test/test_matmul_cuda.py
+/test/test_scaled_matmul_cuda.py @drisspg @slayton58
+# /test/test_spectral_ops.py
+/torch/linalg/ @lezcano @nikitaved
+#
+# [sparse]
+# /aten/src/ATen/native/SparseTensorUtils.cpp
+# /aten/src/ATen/native/SparseTensorUtils.h
+/aten/src/ATen/native/sparse/ @amjames @pearu @nikitaved
+# /test/expect/TestSparseCPU.test_print_coalesced_cpu_float64.expect
+# /test/expect/TestSparseCPU.test_print_uncoalesced_cpu_float64.expect
+# /test/expect/TestSparseCUDA.test_print_coalesced_cuda_float64.expect
+# /test/expect/TestSparseCUDA.test_print_uncoalesced_cuda_float64.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseBSC_cpu.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseBSR_cpu.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseCSC_cpu.expect
+# /test/expect/TestSparseCompressedCPU.test_print_SparseCSR_cpu.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseBSC_cuda.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseBSR_cuda.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseCSC_cuda.expect
+# /test/expect/TestSparseCompressedCUDA.test_print_SparseCSR_cuda.expect
+# /test/expect/TestSparseMPS.test_print_coalesced_mps_float32.expect
+# /test/expect/TestSparseMPS.test_print_uncoalesced_mps_float32.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseBSC_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseBSR_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
+# /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+/test/test_sparse.py @amjames @pearu @nikitaved
+/test/test_sparse_csr.py @amjames @pearu @nikitaved
+# /test/test_sparse_semi_structured.py
+/torch/sparse/ @amjames @pearu @nikitaved
+/aten/src/ATen/native/ao_sparse/ @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/SparseCsrTensorImpl.cpp @amjames @pearu @nikitaved
+# /aten/src/ATen/SparseCsrTensorImpl.h
+# /aten/src/ATen/SparseCsrTensorUtils.h
+/aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
+# /aten/src/ATen/SparseTensorImpl.h
+#
+# [core_aten_optimizers]
+/aten/src/ATen/native/Foreach* @janeyx99
+/aten/src/ATen/native/Fused* @janeyx99
+# /test/test_functional_optim.py
+/torch/foreach/ @janeyx99
+/torch/optim/ @albanD @janeyx99
+#
+# [core_aten_runtime]
+# /aten/CMakeLists.txt
+# /aten/src/ATen/.gitignore
+# /aten/src/ATen/ATen.h
+# /aten/src/ATen/ATenConfig.cmake.in
+# /aten/src/ATen/AccumulateType.cpp
+# /aten/src/ATen/AccumulateType.h
+# /aten/src/ATen/ArrayRef.h
+# /aten/src/ATen/Backend.h
+# /aten/src/ATen/Backtrace.h
+# /aten/src/ATen/BlasBackend.h
+# /aten/src/ATen/CMakeLists.txt
+# /aten/src/ATen/CPUApplyUtils.h
+# /aten/src/ATen/CPUGeneratorImpl.cpp
+# /aten/src/ATen/CPUGeneratorImpl.h
+# /aten/src/ATen/CachedTensorUtils.cpp
+# /aten/src/ATen/CachedTensorUtils.h
+# /aten/src/ATen/CollapseDims.h
+# /aten/src/ATen/Config.h.in
+# /aten/src/ATen/ConjugateFallback.cpp
+# /aten/src/ATen/Context.cpp
+# /aten/src/ATen/Context.h
+# /aten/src/ATen/DLConvertor.cpp
+# /aten/src/ATen/DLConvertor.h
+# /aten/src/ATen/DTensorState.cpp
+# /aten/src/ATen/DTensorState.h
+# /aten/src/ATen/Device.h
+# /aten/src/ATen/DeviceAccelerator.cpp
+# /aten/src/ATen/DeviceAccelerator.h
+# /aten/src/ATen/DeviceGuard.h
+# /aten/src/ATen/DimVector.h
+# /aten/src/ATen/Dispatch.cpp
+# /aten/src/ATen/Dispatch.h
+# /aten/src/ATen/Dispatch_v2.h
+# /aten/src/ATen/DynamicLibrary.cpp
+# /aten/src/ATen/DynamicLibrary.h
+# /aten/src/ATen/EmptyTensor.cpp
+# /aten/src/ATen/EmptyTensor.h
+# /aten/src/ATen/ExpandBase.h
+# /aten/src/ATen/ExpandUtils.cpp
+# /aten/src/ATen/ExpandUtils.h
+# /aten/src/ATen/FakeTensorDispatchTables.cpp
+# /aten/src/ATen/FakeTensorDispatchTables.h
+# /aten/src/ATen/Formatting.h
+# /aten/src/ATen/FuncTorchTLS.cpp
+# /aten/src/ATen/FuncTorchTLS.h
+# /aten/src/ATen/FunctionalInverses.cpp
+# /aten/src/ATen/FunctionalStorageImpl.cpp
+# /aten/src/ATen/FunctionalStorageImpl.h
+# /aten/src/ATen/FunctionalTensorWrapper.cpp
+# /aten/src/ATen/FunctionalTensorWrapper.h
+# /aten/src/ATen/FunctionalizeFallbackKernel.cpp
+# /aten/src/ATen/FunctionalizeFallbackKernel.h
+# /aten/src/ATen/Generator.h
+# /aten/src/ATen/InferSize.h
+# /aten/src/ATen/InitialTensorOptions.h
+# /aten/src/ATen/Layout.h
+# /aten/src/ATen/LegacyBatchedFallback.cpp
+# /aten/src/ATen/LegacyBatchedFallback.h
+# /aten/src/ATen/LegacyBatchedTensorImpl.cpp
+# /aten/src/ATen/LegacyBatchedTensorImpl.h
+# /aten/src/ATen/LegacyBatchingRegistrations.cpp
+# /aten/src/ATen/LegacyVmapMode.cpp
+# /aten/src/ATen/LegacyVmapMode.h
+# /aten/src/ATen/LegacyVmapTransforms.cpp
+# /aten/src/ATen/LegacyVmapTransforms.h
+# /aten/src/ATen/LinalgBackend.h
+# /aten/src/ATen/MapAllocator*
+# /aten/src/ATen/MapAllocator.cpp
+# /aten/src/ATen/MapAllocator.h
+# /aten/src/ATen/MatrixRef.h
+# /aten/src/ATen/MemoryOverlap.cpp
+# /aten/src/ATen/MemoryOverlap.h
+# /aten/src/ATen/NestedTensorImpl.cpp
+# /aten/src/ATen/NestedTensorImpl.h
+# /aten/src/ATen/NodeCreationHooks.cpp
+# /aten/src/ATen/NodeCreationHooks.h
+# /aten/src/ATen/NumericUtils.h
+# /aten/src/ATen/OpMathType.h
+# /aten/src/ATen/OpaqueTensorImpl.h
+# /aten/src/ATen/PTThreadPool.h
+# /aten/src/ATen/PadNd.h
+# /aten/src/ATen/Parallel-inl.h
+# /aten/src/ATen/Parallel.h
+# /aten/src/ATen/ParallelCommon.cpp
+# /aten/src/ATen/ParallelFuture.h
+# /aten/src/ATen/ParallelNative.cpp
+# /aten/src/ATen/ParallelNative.h
+# /aten/src/ATen/ParallelOpenMP.cpp
+# /aten/src/ATen/ParallelOpenMP.h
+# /aten/src/ATen/ParallelThreadPoolNative.cpp
+# /aten/src/ATen/PythonTorchFunctionTLS.cpp
+# /aten/src/ATen/PythonTorchFunctionTLS.h
+# /aten/src/ATen/ROCmFABackend.h
+# /aten/src/ATen/SDPBackend.h
+# /aten/src/ATen/SavedTensorHooks.cpp
+# /aten/src/ATen/SavedTensorHooks.h
+# /aten/src/ATen/Scalar.h
+# /aten/src/ATen/ScalarOps.cpp
+# /aten/src/ATen/ScalarOps.h
+# /aten/src/ATen/ScalarType.h
+# /aten/src/ATen/SequenceNumber.cpp
+# /aten/src/ATen/SequenceNumber.h
+# /aten/src/ATen/SmallVector.h
+# /aten/src/ATen/Storage.h
+# /aten/src/ATen/StorageUtils.cpp
+# /aten/src/ATen/StorageUtils.h
+# /aten/src/ATen/Tensor.h
+# /aten/src/ATen/TensorAccessor.h
+# /aten/src/ATen/TensorGeometry.cpp
+# /aten/src/ATen/TensorGeometry.h
+# /aten/src/ATen/TensorIndexing.cpp
+# /aten/src/ATen/TensorIndexing.h
+# /aten/src/ATen/TensorIterator.cpp
+# /aten/src/ATen/TensorIterator.h
+# /aten/src/ATen/TensorIteratorInternal.h
+# /aten/src/ATen/TensorMeta.cpp
+# /aten/src/ATen/TensorMeta.h
+# /aten/src/ATen/TensorOperators.h
+# /aten/src/ATen/TensorOptions.h
+# /aten/src/ATen/TensorSubclassLikeUtils.h
+# /aten/src/ATen/TensorUtils.cpp
+# /aten/src/ATen/TensorUtils.h
+# /aten/src/ATen/ThreadLocalPythonObjects.cpp
+# /aten/src/ATen/ThreadLocalPythonObjects.h
+# /aten/src/ATen/ThreadLocalState.cpp
+# /aten/src/ATen/ThreadLocalState.h
+# /aten/src/ATen/TracerMode.h
+# /aten/src/ATen/TypeDefault.h
+# /aten/src/ATen/Utils.cpp
+# /aten/src/ATen/Utils.h
+# /aten/src/ATen/Version.cpp
+# /aten/src/ATen/Version.h
+# /aten/src/ATen/VmapModeRegistrations.cpp
+# /aten/src/ATen/WrapDimUtils.h
+# /aten/src/ATen/WrapDimUtilsMulti.h
+# /aten/src/ATen/ZeroTensorFallback.cpp
+# /aten/src/ATen/accelerator/
+# /aten/src/ATen/autocast_mode.cpp
+# /aten/src/ATen/autocast_mode.h
+# /aten/src/ATen/benchmarks/
+# /aten/src/ATen/ceil_div.h
+# /aten/src/ATen/code_template.h
+# /aten/src/ATen/core/
+# /aten/src/ATen/cpp_custom_type_hack.h
+# /aten/src/ATen/cpu/
+# /aten/src/ATen/detail/
+# /aten/src/ATen/div_rtn.h
+# /aten/src/ATen/dlpack.h
+# /aten/src/ATen/jit_macros.h
+# /aten/src/ATen/jiterator_macros.h
+# /aten/src/ATen/mkl/
+# /aten/src/ATen/nnapi/
+# /aten/src/ATen/ops/
+# /aten/src/ATen/quantized/
+# /aten/src/ATen/record_function.cpp
+# /aten/src/ATen/record_function.h
+# /aten/src/ATen/templates/
+# /aten/src/ATen/test/
+# /aten/src/ATen/vulkan/
+# /aten/src/README.md
+# /aten/src/THC/
+# /aten/tools/
+#
+# [core_c10_dispatch]
+# /c10/
+#
+# [autograd]
+/torch/autograd/ @albanD @soulitzer
+/torch/csrc/autograd/ @albanD @soulitzer
+#
+# [core_csrc_misc]
+# /torch/csrc/CudaIPCTypes.cpp
+# /torch/csrc/CudaIPCTypes.h
+# /torch/csrc/DataLoader.cpp
+# /torch/csrc/DataLoader.h
+# /torch/csrc/Device.cpp
+# /torch/csrc/Device.h
+# /torch/csrc/DeviceAccelerator.cpp
+# /torch/csrc/DeviceAccelerator.h
+# /torch/csrc/Dtype.cpp
+# /torch/csrc/Dtype.h
+# /torch/csrc/DynamicTypes.cpp
+# /torch/csrc/DynamicTypes.h
+# /torch/csrc/Event.cpp
+# /torch/csrc/Event.h
+# /torch/csrc/Exceptions.cpp
+# /torch/csrc/Exceptions.h
+# /torch/csrc/Export.h
+# /torch/csrc/Generator.cpp
+# /torch/csrc/Generator.h
+# /torch/csrc/Layout.cpp
+# /torch/csrc/Layout.h
+# /torch/csrc/MemoryFormat.cpp
+# /torch/csrc/MemoryFormat.h
+# /torch/csrc/Module.cpp
+# /torch/csrc/Module.h
+# /torch/csrc/PyInterpreter.cpp
+# /torch/csrc/PyInterpreter.h
+# /torch/csrc/PyInterpreterHooks.cpp
+# /torch/csrc/PyInterpreterHooks.h
+# /torch/csrc/PyObjectConversion.cpp
+# /torch/csrc/PyObjectConversion.h
+# /torch/csrc/PyObjectConversionPythonImpl.cpp
+# /torch/csrc/QScheme.cpp
+# /torch/csrc/QScheme.h
+# /torch/csrc/README.md
+# /torch/csrc/Size.cpp
+# /torch/csrc/Size.h
+# /torch/csrc/Storage*
+# /torch/csrc/Storage.cpp
+# /torch/csrc/Storage.h
+# /torch/csrc/StorageMethods.cpp
+# /torch/csrc/StorageMethods.h
+# /torch/csrc/StorageSharing.cpp
+# /torch/csrc/StorageSharing.h
+# /torch/csrc/Stream.cpp
+# /torch/csrc/Stream.h
+# /torch/csrc/THConcat.h
+# /torch/csrc/THP.h
+# /torch/csrc/TensorIterator.cpp
+# /torch/csrc/TensorIterator.h
+# /torch/csrc/TypeInfo.cpp
+# /torch/csrc/TypeInfo.h
+# /torch/csrc/Types.h
+# /torch/csrc/acc/
+# /torch/csrc/copy_utils.h
+# /torch/csrc/cpu/
+# /torch/csrc/empty.c
+# /torch/csrc/export/
+# /torch/csrc/functionalization/
+# /torch/csrc/fx/
+# /torch/csrc/instruction_counter/
+# /torch/csrc/itt.cpp
+# /torch/csrc/itt.h
+# /torch/csrc/itt_wrapper.cpp
+# /torch/csrc/itt_wrapper.h
+# /torch/csrc/monitor/
+# /torch/csrc/multiprocessing/
+# /torch/csrc/onnx/
+# /torch/csrc/python_headers.h
+# /torch/csrc/serialization.cpp
+# /torch/csrc/serialization.h
+/torch/csrc/shim* @janeyx99
+/torch/csrc/stable/ @janeyx99
+# /torch/csrc/stub.c
+# /torch/csrc/tensor/
+# /torch/csrc/utils.cpp
+# /torch/csrc/utils.h
+# /torch/csrc/utils/
+#
+# [core_lazy_runtime]
+# /torch/csrc/lazy/
+#
+# [core_tests]
+# /test/HowToWriteTestsUsingFileCheck.md
+/test/allowlist_for_publicAPI.json @albanD
+# /test/backends/
+# /test/bench_mps_ops.py
+# /test/complex_tensor/
+# /test/conftest.py
+# /test/create_dummy_torchscript_model.py
+# /test/error_messages/
+# /test/expect/HasDecompTest.test_aten_core_operators.expect
+# /test/expect/HasDecompTest.test_has_decomposition.expect
+# /test/expect/TestAutograd.test_function-x_grad_desc.expect
+# /test/expect/TestAutograd.test_function-y_grad_desc.expect
+# /test/expect/TestFXAPIBackwardCompatibility.test_class_member_back_compat-fx_backcompat_class_members.expect
+# /test/expect/TestFXAPIBackwardCompatibility.test_function_back_compat-fx_backcompat_function_signatures.expect
+# /test/expect/TestJit.test_cu_escaped_number.expect
+# /test/expect/TestJit.test_import_method.expect
+# /test/expect/TestJit.test_non_ascii_string.expect
+# /test/expect/TestJit.test_pretty_printer-empty_float_list_test.expect
+# /test/expect/TestJit.test_pretty_printer-empty_int_list_test.expect
+# /test/expect/TestJit.test_pretty_printer-if_one.expect
+# /test/expect/TestJit.test_pretty_printer-if_test.expect
+# /test/expect/TestJit.test_pretty_printer-loop_use_test.expect
+# /test/expect/TestJit.test_pretty_printer-print_weird_test.expect
+# /test/expect/TestJit.test_pretty_printer-python_op_name_test.expect
+# /test/expect/TestJit.test_pretty_printer-while_if_test.expect
+# /test/expect/TestJit.test_pretty_printer-while_test.expect
+# /test/expect/TestPytorchExportModes.test_aten_fallback.expect
+# /test/expect/TestPytorchExportModes.test_onnx_aten.expect
+# /test/expect/TestScript.test_annot_ast_mypy_fn.expect
+# /test/expect/TestScript.test_annot_ast_mypy_method.expect
+# /test/expect/TestScript.test_annot_ast_py3_fn.expect
+# /test/expect/TestScript.test_annot_ast_py3_method.expect
+# /test/expect/TestScript.test_annot_string_mypy_fn.expect
+# /test/expect/TestScript.test_annot_string_mypy_method.expect
+# /test/expect/TestScript.test_annot_string_py3_fn.expect
+# /test/expect/TestScript.test_annot_string_py3_method.expect
+# /test/expect/TestScript.test_annotated_script_fn.expect
+# /test/expect/TestScript.test_annotated_script_method.expect
+# /test/expect/TestScript.test_format-stdout.expect
+# /test/expect/TestScript.test_listconstruct_erasure.expect
+# /test/expect/TestScript.test_parser_type_annotations.expect
+# /test/expect/TestScript.test_parser_type_annotations_comment.expect
+# /test/expect/TestScript.test_print-stdout.expect
+# /test/expect/TestScript.test_python_frontend.expect
+# /test/expect/TestScript.test_python_frontend_py2.expect
+# /test/expect/TestScript.test_python_frontend_py3.expect
+# /test/expect/TestScript.test_string_print-stdout.expect
+# /test/expect/TestScript.test_torch_dot_tensor_annotation.expect
+# /test/expect/TestTensorBoard.test_audio.expect
+# /test/expect/TestTensorBoard.test_caffe2_simple_cnnmodel.expect
+# /test/expect/TestTensorBoard.test_caffe2_simple_model.expect
+# /test/expect/TestTensorBoard.test_histogram_auto.expect
+# /test/expect/TestTensorBoard.test_histogram_doane.expect
+# /test/expect/TestTensorBoard.test_histogram_fd.expect
+# /test/expect/TestTensorBoard.test_hparams_bool.expect
+# /test/expect/TestTensorBoard.test_hparams_number.expect
+# /test/expect/TestTensorBoard.test_hparams_string.expect
+# /test/expect/TestTensorBoard.test_image_with_3_channel_batched.expect
+# /test/expect/TestTensorBoard.test_image_with_boxes.expect
+# /test/expect/TestTensorBoard.test_image_with_one_channel.expect
+# /test/expect/TestTensorBoard.test_image_with_one_channel_batched.expect
+# /test/expect/TestTensorBoard.test_image_without_channel.expect
+# /test/expect/TestTensorBoard.test_mesh.expect
+# /test/expect/TestTensorBoard.test_nested_nn_squential.expect
+# /test/expect/TestTensorBoard.test_pr_curve.expect
+# /test/expect/TestTensorBoard.test_pr_curve_raw.expect
+# /test/expect/TestTensorBoard.test_pytorch_graph.expect
+# /test/expect/TestTensorBoard.test_scalar_new_style.expect
+# /test/expect/TestTensorBoard.test_text.expect
+# /test/expect/TestTensorBoard.test_video.expect
+# /test/expect/TestTorch.test_is_nonzero-empty.expect
+# /test/expect/TestTorch.test_is_nonzero-multiple.expect
+# /test/expect/TestTorch.test_print-non_contiguous.expect
+# /test/expect/__init__.py
+# /test/forward_backward_compatibility/
+# /test/lazy/
+# /test/linear.py
+# /test/load_torchscript_model.py
+# /test/minioptest_failures_dict.json
+# /test/mkl_verbose.py
+# /test/mkldnn_verbose.py
+# /test/pytest_shard_custom.py
+# /test/python_native/
+# /test/run_doctests.sh
+# /test/simulate_nccl_errors.py
+# /test/slow_tests.json
+# /test/test_accelerator.py
+# /test/test_ao_sparsity.py
+# /test/test_appending_byte_serializer.py
+# /test/test_as_strided.py
+# /test/test_autocast.py
+# /test/test_autoload.py
+# /test/test_binary_ufuncs.py
+# /test/test_bmm_outer_product.py
+# /test/test_bundled_images.py
+# /test/test_bundled_inputs.py
+# /test/test_ci_sanity_check_fail.py
+# /test/test_comparison_utils.py
+# /test/test_compile_benchmark_util.py
+# /test/test_complex.py
+# /test/test_content_store.py
+# /test/test_dataloader.py
+# /test/test_datapipe.py
+# /test/test_decomp.py
+# /test/test_determination.py
+# /test/test_dispatch.py
+# /test/test_dlpack.py
+# /test/test_dynamic_shapes.py
+# /test/test_expanded_weights.py
+# /test/test_extension_utils.py
+# /test/test_fake_tensor.py
+# /test/test_file_check.py
+# /test/test_flop_counter.py
+/test/test_foreach.py @janeyx99
+# /test/test_function_schema.py
+# /test/test_functionalization.py
+# /test/test_futures.py
+/test/test_hop_infra.py @zou3519 @aorenste @bohnstingl
+# /test/test_hub.py
+# /test/test_img/
+# /test/test_import_stats.py
+# /test/test_indexing.py
+# /test/test_inspect_utils.py
+# /test/test_itt.py
+# /test/test_kernel_launch_checks.py
+# /test/test_legacy_vmap.py
+# /test/test_license.py
+# /test/test_logging.py
+# /test/test_meta.py
+# /test/test_mkl_verbose.py
+# /test/test_mkldnn.py
+# /test/test_mkldnn_fusion.py
+# /test/test_mkldnn_verbose.py
+# /test/test_model_exports_to_core_aten.py
+# /test/test_module_tracker.py
+# /test/test_monitor.py
+# /test/test_multiprocessing.py
+# /test/test_multiprocessing_spawn.py
+# /test/test_namedtuple_return_api.py
+# /test/test_native_functions.py
+# /test/test_native_mha.py
+# /test/test_nestedtensor.py
+# /test/test_numa_binding.py
+# /test/test_numba_integration.py
+# /test/test_opaque_obj_v2.py
+# /test/test_openmp.py
+# /test/test_ops.py
+/test/test_ops_fwd_gradients.py @soulitzer
+/test/test_ops_gradients.py @soulitzer
+# /test/test_ops_jit.py
+# /test/test_ops_unbacked.py
+# /test/test_out_dtype_op.py
+# /test/test_overrides.py
+# /test/test_per_overload_api.py
+# /test/test_prims.py
+# /test/test_privateuseone_python_backend.py
+# /test/test_proxy_tensor.py
+# /test/test_pruning_op.py
+# /test/test_python_dispatch.py
+# /test/test_pytree.py
+# /test/test_reductions.py
+# /test/test_rename_privateuse1_to_existing_device.py
+# /test/test_scatter_gather_ops.py
+# /test/test_schema_check.py
+# /test/test_segment_reductions.py
+# /test/test_set_default_mobile_cpu_allocator.py
+# /test/test_shape_ops.py
+# /test/test_show_pickle.py
+# /test/test_sort_and_select.py
+# /test/test_stateless.py
+# /test/test_stateless_rng.py
+# /test/test_static_runtime.py
+# /test/test_subclass.py
+# /test/test_sympy_utils.py
+# /test/test_tensor_creation_ops.py
+# /test/test_tensor_iterator.py
+# /test/test_tensorboard.py
+# /test/test_torch.py
+# /test/test_torch_config_hash_determinism.py
+# /test/test_torchfuzz_repros.py
+# /test/test_tsan.py
+# /test/test_type_info.py
+# /test/test_type_promotion.py
+# /test/test_unary_ufuncs.py
+# /test/test_view_ops.py
+# /test/test_weak.py
+/test/forward_backward_compatibility/check_forward_backward_compatibility.py @larryliu0820
+#
+# [backend_device_runtime]
+# /test/custom_backend/
+# /torch/backends/
+/aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
+/torch/csrc/mtia/ @egienvalue
+#
+# [backend_cuda]
+/aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
+/aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
+# /test/test_cuda.py
+# /test/test_cuda_compatibility.py
+# /test/test_cuda_expandable_segments.py
+# /test/test_cuda_graph_debug.py
+# /test/test_cuda_graph_utils.py
+# /test/test_cuda_multigpu.py
+# /test/test_cuda_nvml_based_avail.py
+# /test/test_cuda_primary_ctx.py
+# /test/test_cuda_sanitizer.py
+# /test/test_cuda_trace.py
+/torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
+/torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
+# /torch/backends/cusparselt/
+/torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
+/torch/cuda/ @eqy @syed-ahmed @Aidyn-A
+/c10/cuda/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
 /aten/src/ATen/native/cuda/GroupedBlas.cpp @drisspg @slayton58
 /aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.cpp @drisspg @slayton58
-/aten/src/ATen/cuda/CUDAScaledBlas.h @drisspg @slayton58
-/test/test_scaled_matmul_cuda.py @drisspg @slayton58
-
-# Sparse Tensors
-/aten/src/ATen/native/sparse/ @amjames @pearu @nikitaved
-/aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
-/aten/src/ATen/SparseCsrTensorImpl.cpp @amjames @pearu @nikitaved
-/torch/sparse/ @amjames @pearu @nikitaved
-/test/test_sparse.py @amjames @pearu @nikitaved
-/test/test_sparse_csr.py @amjames @pearu @nikitaved
-
-# Python/DSL native ops
+/aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
+/aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
+#
+# [backend_mps]
+# /aten/src/ATen/metal/
+/aten/src/ATen/mps/ @malfet
+/aten/src/ATen/native/mps/ @malfet
+/c10/metal/ @malfet
+# /test/metal/
+# /test/test_metal.py
+/test/test_mps.py @malfet
+# /torch/backends/mps/
+# /torch/csrc/mps/
+# /torch/mps/
+#
+# [backend_xpu]
+/aten/src/ATen/xpu/ @EikanWang @gujinghui
+/c10/xpu/ @EikanWang @gujinghui
+/test/test_xpu.py @EikanWang @gujinghui
+# /test/test_xpu_expandable_segments.py
+/test/xpu/ @EikanWang @gujinghui
+/torch/csrc/xpu/ @EikanWang @gujinghui
+/torch/xpu/ @EikanWang @gujinghui
+/aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
+#
+# [backend_rocm]
+/aten/src/ATen/hip/ @jeffdaily @jithunnair-amd
+# /torch/backends/miopen/
+/c10/hip/ @jeffdaily @jithunnair-amd
+/aten/src/ATen/native/miopen/ @jeffdaily @jithunnair-amd
+/aten/src/ATen/miopen/ @jeffdaily @jithunnair-amd
+#
+# [backend_vulkan]
+# /aten/src/ATen/native/vulkan/
+#
+# [python_core_api]
+# /torch/CMakeLists.txt
+# /torch/_C/
+# /torch/_C_flatbuffer/
+# /torch/_VF.py
+# /torch/__config__.py
+# /torch/__future__.py
+# /torch/__init__.py
+# /torch/_appdirs.py
+# /torch/_awaits/
+# /torch/_compile.py
+# /torch/_decomp/
+# /torch/_dispatch/
+# /torch/_environment.py
+# /torch/_guards.py
+# /torch/_jit_internal.py
+# /torch/_lazy/
+# /torch/_linalg_utils.py
+# /torch/_lobpcg.py
+# /torch/_lowrank.py
+# /torch/_meta_registrations.py
 /torch/_native/ @slayton58 @drisspg
-
-# Vendored quack library
+# /torch/_numpy/
+# /torch/_opaque_base.py
+# /torch/_prims/
+# /torch/_prims_common/
+# /torch/_python_dispatcher.py
+# /torch/_refs/
+# /torch/_size_docs.py
+# /torch/_sources.py
+# /torch/_storage_docs.py
+# /torch/_streambase.py
+# /torch/_strobelight/
+# /torch/_subclasses/
+# /torch/_tensor.py
+# /torch/_tensor_docs.py
+# /torch/_tensor_iterator.py
+# /torch/_tensor_str.py
+# /torch/_thread_safe_fork.py
+# /torch/_torch_docs.py
+# /torch/_utils.py
+# /torch/_utils_internal.py
+# /torch/_vendor/
+# /torch/_vmap_internals.py
+# /torch/_weights_only_unpickler.py
+# /torch/accelerator/
+# /torch/amp/
+# /torch/compiler/
+# /torch/contrib/
+# /torch/cpu/
+# /torch/distributions/
+# /torch/fft/
+# /torch/functional.py
+# /torch/futures/
+/torch/header_only_apis.txt @janeyx99
+/torch/headeronly/ @janeyx99
+# /torch/hub.py
+# /torch/legacy/
+# /torch/lib/
+# /torch/monitor/
+# /torch/mtia/
+# /torch/multiprocessing/
+# /torch/nested/
+# /torch/numa/
+# /torch/overrides.py
+# /torch/py.typed
+# /torch/quasirandom.py
+# /torch/random.py
+# /torch/return_types.py
+# /torch/script.h
+# /torch/signal/
+# /torch/special/
+# /torch/storage.py
+# /torch/torch_version.py
+# /torch/types.py
+# /torch/utils/
+/torch/_subclasses/fake_tensor.py @aorenste
+/torch/_subclasses/fake_utils.py @aorenste
+/torch/utils/hipify/ @jeffdaily @jithunnair-amd
+/torch/utils/_pytree.py @XuehaiPan
+/torch/utils/_cxx_pytree.py @XuehaiPan
 /torch/_vendor/quack/ @slayton58 @drisspg
+#
+# [python_nn_api]
+/torch/nn/ @albanD @jbschlosser
+/torch/nn/utils/parametriz*.py @lezcano
+/torch/nn/attention/flex_attention.py @drisspg
+#
+# [python_data_api]
+/torch/utils/data/ @divyanshk @ramanishsingh @scotts @aelavender
+#
+# [python_specialized_api]
+# /test/test_masked.py
+# /test/test_maskedtensor.py
+# /torch/masked/
+# /torch/utils/tensorboard/
+#
+# [python_api_tests]
+/test/autograd/ @soulitzer
+# /test/cpython/
+# /test/distributions/
+# /test/nn/
+/test/optim/ @janeyx99
+/test/test_autograd.py @soulitzer
+/test/test_autograd_fallback.py @soulitzer
+# /test/test_modules.py
+# /test/test_nn.py
+# /test/test_nnapi.py
+# /test/test_numpy_interop.py
+/test/test_optim.py @janeyx99
+# /test/test_transformers.py
+# /test/test_type_hints.py
+# /test/test_typing.py
+/test/test_varlen_attention.py @liangel-02
+# /test/torch_np/
+# /test/typing/
+# /test/xpu/test_transformers.py
+#
+# [cpp_runtime_tests]
+# /test/cpp/
+# /test/cpp_api_parity/
+# /test/test_cpp_api_parity.py
+#
+# [jit_torchscript]
+# /test/cpp/jit/test_jit_logging_levels.cpp
+# /test/cpp/jit/test_jit_type.cpp
+# /test/cpp/jit/test_save_load.cpp
+# /test/jit/
+# /test/jit_hooks/
+# /test/test_jit.py
+# /test/test_jit_autocast.py
+# /test/test_jit_disabled.py
+# /test/test_jit_fuser.py
+# /test/test_jit_fuser_legacy.py
+# /test/test_jit_fuser_te.py
+# /test/test_jit_legacy.py
+# /test/test_jit_llga_fuser.py
+# /test/test_jit_profiling.py
+# /test/test_jit_simple.py
+# /test/test_jit_string.py
+# /test/test_jiterator.py
+# /test/test_tensorexpr.py
+# /test/test_tensorexpr_pybind.py
+# /torch/csrc/jit/
+# /torch/jit/
+# /torch/csrc/jit/python/init.cpp
+#
+# [cpp_api_custom_ops]
+# /aten/src/ATen/native/native_functions.yaml
+# /aten/src/ATen/native/prim_native_functions.cpp
+/aten/src/ATen/native/tags.yaml @ezyang
+# /aten/src/ATen/native/ts_native_functions.yaml
+# /test/cpp/jit/test_custom_operators.cpp
+# /test/cpp_extensions/
+# /test/custom_operator/
+# /test/jit/test_custom_operators.py
+# /test/test_cpp_extensions_aot.py
+# /test/test_cpp_extensions_jit.py
+# /test/test_cpp_extensions_mtia_backend.py
+# /test/test_cpp_extensions_stream_and_event.py
+# /test/test_custom_ops.py
+# /torch/_classes.py
+# /torch/_custom_class_base.py
+# /torch/_custom_op/
+# /torch/_custom_ops.py
+# /torch/_library/
+# /torch/_ops.py
+# /torch/csrc/api/
+# /torch/csrc/jit/frontend/function_schema_parser.cpp
+# /torch/csrc/jit/frontend/function_schema_parser.h
+# /torch/csrc/jit/python/pybind_utils.cpp
+# /torch/csrc/jit/python/pybind_utils.h
+# /torch/csrc/utils/python_dispatch.cpp
+# /torch/csrc/utils/python_dispatch.h
+# /torch/custom_class.h
+# /torch/custom_class_detail.h
+# /torch/extension.h
+# /torch/library.h
+# /torch/library.py
+# /torch/utils/_cpp_extension_versioner.py
+/torch/utils/cpp_extension.py @fmassa @ezyang @malfet
+#
+# [onnx_export]
+/test/onnx/ @titaiwangms @xadupre @justinchuby
+/torch/onnx/ @titaiwangms @xadupre @justinchuby
+/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
+#
+# [quantization]
+/test/ao/ @jerryzh168
+# /test/onnx/test_models_quantized_onnxruntime.py
+/test/quantization/ @jerryzh168
+/test/test_quantization.py @jerryzh168
+# /torch/ao/
+/torch/ao/quantization/ @jerryzh168
+/torch/ao/nn/intrinsic/ @jerryzh168
+/torch/ao/nn/quantized/ @jerryzh168
+/torch/ao/nn/quantizable/ @jerryzh168
+/torch/ao/nn/qat/ @jerryzh168
+/torch/quantization/ @jerryzh168
+/aten/src/ATen/native/quantized/ @jerryzh168 @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu/ @jerryzh168 @salilsdesai @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cuda/ @jerryzh168
+/aten/src/ATen/native/quantized/cudnn/ @jerryzh168
+#
+# [profiler]
+# /test/cpp/profiler/test_profiler_collection.cpp
+# /test/profiler/
+# /test/test_throughput_benchmark.py
+/torch/autograd/profiler* @scotts @ryanzhang22
+# /torch/autograd/profiler.py
+# /torch/autograd/profiler_legacy.py
+# /torch/autograd/profiler_util.py
+/torch/csrc/autograd/profiler* @scotts @ryanzhang22
+# /torch/csrc/autograd/profiler.h
+# /torch/csrc/autograd/profiler_kineto.cpp
+# /torch/csrc/autograd/profiler_kineto.h
+# /torch/csrc/autograd/profiler_legacy.cpp
+# /torch/csrc/autograd/profiler_legacy.h
+# /torch/csrc/autograd/profiler_python.cpp
+# /torch/csrc/autograd/profiler_python.h
+/torch/csrc/profiler/ @scotts @ryanzhang22
+/torch/profiler/ @scotts @ryanzhang22
+#
+# [mobile_runtime]
+# /test/cpp/jit/test_mobile_type_parser.cpp
+# /test/cpp/lite_interpreter_runtime/test_mobile_profiler.cpp
+# /test/mobile/
+# /test/test_mobile_optimizer.py
+# /torch/csrc/jit/mobile/
+#
+# [mobile_android]
+# /android/
+# /test/mobile/custom_build/
+#
+# [mobile_delegates]
+# /test/test_vulkan.py
+# /test/test_xnnpack_integration.py
+# /torch/backends/_coreml/
+# /torch/backends/_nnapi/
+# /torch/backends/xnnpack/
+# /torch/csrc/jit/backends/
+#
+# [infra_ci]
+/.ci/ @pytorch/pytorch-dev-infra
+/.ci/docker/ubuntu-rocm/ @jeffdaily
+/.ci/docker/common/install_roc*.sh @jeffdaily
+/.ci/docker/common/install_amdsmi.sh @jeffdaily
+/.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
+#
+# [infra_github_automation]
+/.github/ @pytorch/pytorch-dev-infra
+#
+# [infra_build_packaging]
+# /.ci/manywheel/
+# /.coveragerc
+# /.ctags.d/
+# /.dockerignore
+# /.editorconfig
+# /.gdbinit
+# /.git-blame-ignore-revs
+# /.gitattributes
+# /.gitignore
+# /.lldbinit
+# /.spin/
+# /BUCK.oss
+# /CMakeLists.txt
+# /Dockerfile
+# /Makefile
+# /buckbuild.bzl
+# /build.bzl
+# /build_variables.bzl
+# /cmake/
+# /codex_setup.sh
+# /defs.bzl
+# /docker.Makefile
+# /pt_ops.bzl
+# /pt_template_srcs.bzl
+# /pyproject.toml
+# /pytest.ini
+# /setup.py
+# /ubsan.supp
+# /ufunc_defs.bzl
+# /version.txt
+#
+# [third_party_core_build_deps]
+# /.gitmodules
+# /requirements-build.txt
+# /requirements.txt
+# /third_party/
+#
+# [third_party_backend_deps]
+# /third_party/NNPACK
+# /third_party/VulkanMemoryAllocator
+# /third_party/XNNPACK
+# /third_party/aiter
+# /third_party/composable_kernel
+# /third_party/cpuinfo
+# /third_party/cudnn_frontend
+# /third_party/cutlass
+# /third_party/fbgemm
+# /third_party/flash-attention
+# /third_party/gemmlowp/
+# /third_party/ideep
+# /third_party/kleidiai
+# /third_party/pthreadpool
+# /third_party/xnnpack.buck.bzl
+# /third_party/xnnpack_buck_shim.bzl
+# /third_party/xnnpack_src_defs.bzl
+# /third_party/xnnpack_wrapper_defs.bzl
+/third_party/xpu.txt @EikanWang @gujinghui
+#
+# [third_party_serialization_schema]
+# /third_party/flatbuffers
+# /third_party/miniz-3.0.2/
+# /third_party/onnx
+# /third_party/protobuf
+#
+# [benchmark_compiler]
+# /benchmarks/
+#
+# [distributed]
+# /benchmarks/distributed/
+# /test/distributed/
+# /torch/csrc/distributed/
+# /torch/distributed/
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @lw
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @lw
+/torch/csrc/distributed/c10d/ @d4l3k @fduwjj @kapilsh
+/torch/csrc/distributed/c10d/Backend.* @kwen2501
+/torch/csrc/distributed/c10d/Ops.* @kwen2501
+/torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
+/torch/distributed/_composable/fsdp/ @weifengpy
+/torch/distributed/_composable/replicate.py @weifengpy
+/torch/distributed/_composable/replicate_with_fsdp.py @weifengpy
+/torch/distributed/fsdp/ @weifengpy
+/torch/distributed/optim/ @weifengpy
+/torch/distributed/tensor/placement_types.py @weifengpy
+/torch/distributed/tensor/_ops/_view_ops.py @weifengpy
+/torch/distributed/tensor/_ops/_matrix_ops.py @weifengpy
+/torch/nn/parallel/ @weifengpy
+#
+# [infra_developer_tools]
+# /.devcontainer/
+# /.vscode/
+# /benchmarks/README.md
+# /benchmarks/compare.sh
+# /benchmarks/upload_scribe.py
+# /binaries/
+# /scripts/
+# /tools/
+/tools/amd_build/ @jeffdaily @jithunnair-amd
+#
+# [infra_linting]
+# /.bc-linter.yml
+# /.clang-format
+# /.clang-tidy
+# /.cmakelintrc
+# /.flake8
+# /.github/actionlint.yaml
+# /.github/scripts/lint_native_functions.py
+# /.github/scripts/lintrunner.sh
+# /.github/workflows/_lint.yml
+# /.github/workflows/apply-lint.yml
+# /.github/workflows/lint-bc.yml
+# /.github/workflows/lint.yml
+# /.lintrunner.toml
+# /mypy-strict.ini
+# /mypy.ini
+# /mypy_plugins/
+# /pyrefly.toml
+# /scripts/codeowners/
+# /scripts/lint_urls.sh
+# /scripts/lint_xrefs.sh
+# /scripts/lintrunner.py
+# /tools/linter/
+#
+# [infra_codegen]
+/tools/autograd/ @albanD @soulitzer
+# /torchgen/
+#
+# [infra_test]
+# /test/benchmark_utils/
+# /test/scripts/
+# /test/spincli/
+# /test/strobelight/
+/test/test_public_bindings.py @albanD
+# /test/test_testing.py
+# /test/test_utils.py
+# /test/test_utils_config_module.py
+# /test/test_utils_filelock.py
+# /tools/test/
+# /tools/testing/
+# /torch/_logging/
+# /torch/testing/
+# /torch/utils/benchmark/
+/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+# /torch/testing/_internal/common_methods_invocations.py
+# /torch/testing/_internal/common_device_type.py
+/torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste @bohnstingl
+/test/run_test.py @pytorch/pytorch-dev-infra
+#
+# [benchmark_operator_runtime]
+# /benchmarks/framework_overhead_benchmark/
+# /benchmarks/functional_autograd_benchmark/
+# /benchmarks/instruction_counts/
+# /benchmarks/operator_benchmark/
+# /benchmarks/overrides_benchmark/
+# /benchmarks/profiler_benchmark/
+# /benchmarks/record_function_benchmark/
+# /benchmarks/sparse/
+# /benchmarks/static_runtime/
+# /test/test_functional_autograd_benchmark.py
+#
+# [benchmark_models]
+# /benchmarks/compare-fastrnn-results.py
+# /benchmarks/data/
+# /benchmarks/diffusion/
+# /benchmarks/fastrnns/
+# /benchmarks/gpt_fast/
+# /benchmarks/inference/
+# /benchmarks/nested/
+# /benchmarks/transformer/
+#
+# [caffe2]
+# /caffe2/
+#
+# [serialization_package]
+# /benchmarks/serialization/
+# /caffe2/serialize/
+# /test/package/
+# /test/test_package.py
+# /test/test_serialization.py
+# /torch/package/
+# /torch/serialization.py
+#
+# [compiler_export_fx]
+# /test/export/
+# /test/fx/
+# /test/higher_order_ops/
+# /test/onnx/exporter/test_exportable_module.py
+# /test/onnx/test_fx_type_promotion.py
+# /test/package/package_bc/test_fx_module.pt
+# /test/test_dynamic_spec_make_fx.py
+# /test/test_fx.py
+# /test/test_fx_experimental.py
+# /test/test_fx_graph_print.py
+# /test/test_fx_passes.py
+# /test/test_fx_reinplace_pass.py
+/torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_higher_order_ops/ @zou3519 @aorenste @bohnstingl
+/torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+# /torch/fx/
+/torch/fx/proxy.py @zou3519
+/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
+/torch/fx/experimental/symbolic_shapes.py @laithsakka
+/torch/fx/experimental/sym_node.py @laithsakka
+/torch/fx/experimental/recording.py @laithsakka
+/torch/fx/experimental/proxy_tensor.py @aorenste
+#
+# [compiler_dynamo]
+# /test/distributed/test_dynamo_distributed.py
+# /test/dynamo/
+# /test/dynamo_expected_failures/
+# /test/dynamo_skips/
+# /test/export/test_dynamic_shapes.py
+# /test/onnx/exporter/test_dynamic_shapes.py
+# /test/test_cpython_diff_sync.py
+# /torch/_dynamo/
+# /torch/csrc/dynamo/
+/torch/_dynamo/backends/tvm.py @guan404ming
+/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
+/torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste @bohnstingl
+/torch/_dynamo/polyfills/pytree.py @XuehaiPan
+#
+# [compiler_inductor]
+# /test/distributed/test_inductor_collectives.py
+# /test/distributed/test_inductor_compile_collectives.py
+# /test/inductor/
+# /test/inductor_expected_failures/
+# /test/inductor_skips/
+# /test/test_precompile.py
+# /test/test_triton_utils.py
+/torch/_higher_order_ops/flex_attention.py @drisspg
+# /torch/_inductor/
+# /torch/_precompile.py
+# /torch/_precompile_driver.py
+# /torch/csrc/inductor/
+# /torch/utils/_indented_buffer.py
+/torch/_inductor/kernel/flex/ @drisspg
+/torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
+/test/inductor/test_flex_attention.py @drisspg
+/test/inductor/test_flex_decoding.py @drisspg
+#
+# [nativert]
+# /test/cpp/nativert/
+# /test/export/test_nativert.py
+# /torch/csrc/api/include/torch/nativert/
+# /torch/nativert/
+#
+# [ai_agent_tooling]
+# /.claude/
+# /.github/copilot-instructions.md
+# /.github/workflows/claude-autorevert-advisor.yml
+# /.github/workflows/claude-code.yml
+# /.github/workflows/claude-distributed-triage-cron.yml
+# /.github/workflows/claude-distributed-triage.yml
+# /.github/workflows/claude-issue-triage-run.yml
+# /.github/workflows/claude-issue-triage.yml
+# /AGENTS.md
+# /AI_POLICY.md
+# /CLAUDE.md
+# /torch/_dynamo/CLAUDE.md
+#
+# [docs_general]
+# /CITATION.cff
+# /CODE_OF_CONDUCT.md
+# /CONTRIBUTING.md
+# /GLOSSARY.md
+# /LICENSE
+# /NOTICE
+# /README.md
+# /RELEASE.md
+# /SECURITY.md
+# /docs/
+/docs/source/conf.py @albanD
+/docs/source/higher_order_ops/ @bohnstingl
+/docs/source/notes/get_start_xpu.md @EikanWang @gujinghui
+#
+# [protected_codeownership]
+# DO NOT MODIFY WITHOUT REVIEW FROM @albanD AND @malfet.
+# Keep these rules last so they override broader patterns.
+/CODEOWNERS @albanD @malfet
+/.github/merge_rules.yaml @pytorch/pytorch-dev-infra @albanD @malfet
+#

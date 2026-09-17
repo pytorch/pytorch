@@ -95,6 +95,29 @@ def _(x):
     return [torch.randn(i0)]
 
 
+@torch.library.custom_op("aoti_custom_ops::fn_ret_nested_tensor_lists", mutates_args={})
+def fn_ret_nested_tensor_lists(
+    x: torch.Tensor,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    return (
+        [x.new_ones(x.numel()), x.new_full((x.numel() + 1,), 2)],
+        [x.new_zeros(x.numel() + 2), x.new_full((x.numel() + 3,), 3)],
+    )
+
+
+@fn_ret_nested_tensor_lists.register_fake
+def _(x):
+    ctx = torch._custom_op.impl.get_ctx()
+    i0 = ctx.new_dynamic_size()
+    i1 = ctx.new_dynamic_size()
+    i2 = ctx.new_dynamic_size()
+    i3 = ctx.new_dynamic_size()
+    return (
+        [x.new_empty(i0), x.new_empty(i1)],
+        [x.new_empty(i2), x.new_empty(i3)],
+    )
+
+
 @torch.library.custom_op("aoti_custom_ops::fn_ret_single_tensor", mutates_args={})
 def fn_ret_single_tensor(x: torch.Tensor) -> torch.Tensor:
     s = x.sum().to(torch.int64)
@@ -402,6 +425,23 @@ class AOTInductorTestsTemplate:
 
         m = Model().to(device=self.device)
         args = (torch.randn(3, 4),)
+        self.check_model(m, args)
+
+    def test_custom_op_return_nested_tensor_lists(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                values, lengths = torch.ops.aoti_custom_ops.fn_ret_nested_tensor_lists(
+                    x
+                )
+                return (
+                    values[0] + 1,
+                    values[1] + 2,
+                    lengths[0] + 3,
+                    lengths[1] + 4,
+                )
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(3, 4, device=self.device),)
         self.check_model(m, args)
 
     def test_custom_op_return_single_tensor(self) -> None:

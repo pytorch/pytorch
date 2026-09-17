@@ -72,7 +72,7 @@ from ..utils import (
     unpatched_nn_module_call,
     unpatched_nn_module_call_impl,
 )
-from .base import typestr, ValueMutationNew, VariableTracker
+from .base import Method, typestr, ValueMutationNew, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lazy import LazyVariableTracker
 from .user_defined import UserDefinedObjectVariable
@@ -97,7 +97,7 @@ def initialize_lazy_module(
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    if hasattr(mod, "_initialize_hook"):
+    if inspect.getattr_static(mod, "_initialize_hook", None) is not None:
 
         def convert_to_fake(x: Any) -> Any:
             if is_namedtuple(x):
@@ -117,7 +117,10 @@ def initialize_lazy_module(
                         s.node.hint if isinstance(s, torch.SymInt) else s
                         for s in fake.shape
                     ]
-                    assert all(isinstance(s, int) for s in shape), shape  # noqa: S101
+                    if not all(isinstance(s, int) for s in shape):
+                        raise AssertionError(
+                            f"expected all shape entries to be int, got {shape}"
+                        )
                     return torch.empty(  # pyrefly: ignore[no-matching-overload]
                         shape, dtype=fake.dtype, device=fake.device
                     )
@@ -168,7 +171,7 @@ def guard_to_detect_forward_monkeypatching(
 ) -> None:
     # Users sometimes patch the forward method of a nn module instance to
     # perform optimizations like quantization. Though this is not a good
-    # software practice, but python allows this and Dynamo needs to detect
+    # software practice, python allows this and Dynamo needs to detect
     # this patching.
     #
     # One way to do this is to add an ID_MATCH guard on every function
@@ -300,7 +303,7 @@ class NNModuleVariable(VariableTracker):
     def get_real_python_backed_value(self) -> object:
         return self.value
 
-    def bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         """nb_bool for nn.Module.
 
         nn.Module itself has no __bool__ or __len__, so bare modules are always
@@ -313,7 +316,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         return ConstantVariable.create(bool(mod))
 
-    def repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         mod = tx.output.get_submodule(self.module_key)
         return VariableTracker.build(tx, repr(mod))
 
@@ -410,7 +413,7 @@ class NNModuleVariable(VariableTracker):
             except Unsupported:
                 unimplemented(
                     gb_type="Custom __getattribute__ in nn.Module attribute access",
-                    context=f"getattro_impl {self} {name}",
+                    context=f"tp_getattro_impl {self} {name}",
                     explanation="Dynamo could not trace through the custom "
                     "`__getattribute__` method on this `nn.Module`.",
                     hints=[
@@ -427,7 +430,7 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented(
                 gb_type="torch.nn.Module with a non-function custom __getattr__",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation=(
                     "Dynamo detected a nn.Module object with a custom "
                     "`__getattr__` method, but this method is not a standard "
@@ -449,7 +452,7 @@ class NNModuleVariable(VariableTracker):
             tx, [VariableTracker.build(tx, name)], {}
         )
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
@@ -467,7 +470,7 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented(
                 gb_type="getattr with no source",
-                context=f"getattro_impl {self} {name}",
+                context=f"tp_getattro_impl {self} {name}",
                 explanation="Dynamo does not know how to access an attribute "
                 "on an `nn.Module` instance that lacks a source. This is "
                 "usually an internal error in Dynamo.",
@@ -510,9 +513,6 @@ class NNModuleVariable(VariableTracker):
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
-
-        if name == "__class__" and not object_member:
-            return VariableTracker.build(tx, base.__class__, source=source)
 
         if object_member:
             out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
@@ -566,7 +566,7 @@ class NNModuleVariable(VariableTracker):
                     ],
                 )
 
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def call_function(
         self,
@@ -587,7 +587,7 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(mod):
                     # We do not want to unroll sequential if it has hooks, since evaporating it
                     # will cause hooks to not fire!
-                    # This terminates and restart the tracing process
+                    # This terminates and restarts the tracing process
                     self.convert_to_unspecialized(tx)
 
                 # Unroll sequential
@@ -785,6 +785,424 @@ class NNModuleVariable(VariableTracker):
             self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
         )
 
+    @staticmethod
+    def _gen_source(source: Source, name: str) -> Source:
+        name_split = name.split(".")
+        if name_split[0] == "":
+            return source
+        while len(name_split) > 0:
+            x = name_split.pop(0)
+            source = AttrSource(source, x)
+        return source
+
+    def _generic_call_method_helper(
+        self, tx: "InstructionTranslatorBase", name: str, args: Any, kwargs: Any
+    ) -> VariableTracker:
+        # Put a `call_method` node in the FX graph, with the nn.Module as the
+        # first arg.
+        module = tx.output.get_submodule(self.module_key)
+        mod_proxy = tx.output.create_proxy("get_attr", self.module_key, (), {})
+        set_example_value(mod_proxy.node, module)
+        proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_method", name, args=(mod_proxy, *proxy_args), kwargs=proxy_kwargs
+            ),
+        )
+
+    def _assert_all_args_kwargs_const(
+        self, tx: "InstructionTranslatorBase", name: str, args: Any, kwargs: Any
+    ) -> None:
+        if not all(
+            x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+        ):
+            module = tx.output.get_submodule(self.module_key)
+            unimplemented(
+                gb_type="non-const argument in nn.Module method",
+                context=f"call_method: {self} {name} {args} {kwargs}",
+                explanation="Dynamo does not support calling "
+                f"method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
+                hints=[],
+            )
+
+    def _get_kwargs(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: Any,
+        kwargs: Any,
+        *names: str,
+    ) -> dict[str, Any]:
+        self._assert_all_args_kwargs_const(tx, name, args, kwargs)
+        module = tx.output.get_submodule(self.module_key)
+        fn = getattr(module, name)
+        bound_args = inspect.signature(fn).bind(
+            *([x.as_python_constant() for x in args]),
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+        bound_args.apply_defaults()
+        bound_args = bound_args.arguments
+        return {k: bound_args[k] for k in names}
+
+    def _wrap_values(
+        self, tx: "InstructionTranslatorBase", items: Iterable[tuple[Any, Any]]
+    ) -> "variables.ListIteratorVariable":
+        result: list[VariableTracker] = []
+        for name, submod in items:
+            result.append(
+                tx.output.register_attr_or_module(
+                    submod,
+                    self.module_key,
+                    name,
+                    source=NNModuleSource(self._gen_source(self.source, name)),
+                )
+            )
+        return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
+
+    def _named_embed(
+        self, tx: "InstructionTranslatorBase", name: str, obj: Any
+    ) -> "variables.TupleVariable":
+        return variables.TupleVariable(
+            [
+                VariableTracker.build(tx, name),
+                tx.output.register_attr_or_module(
+                    obj,
+                    self.module_key,
+                    name,
+                    source=NNModuleSource(self._gen_source(self.source, name)),
+                ),
+            ]
+        )
+
+    def _call_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Example: `self.layer.__call__(x)`. Dynamo inlines `__call__`,
+        # including hooks.
+        return self.call_function(tx, args, kwargs)
+
+    def forward(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Example: `self.layer.forward(x)`. Dynamo puts a `call_method` node in
+        # the FX graph and does not trigger hooks.
+        module = tx.output.get_submodule(self.module_key)
+        with record_nn_module_stack(
+            self.module_key, self.get_nn_module_stack_source(), tx, module
+        ):
+            return self._generic_call_method_helper(tx, "forward", args, kwargs)
+
+    def _get_item_by_idx(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        if not args[1].is_python_constant():
+            raise_type_error(
+                tx,
+                f"``nn.Module`` {module}'s call method _get_item_by_idx requires a constant index argument",
+            )
+        if not isinstance(args[0], variables.TupleVariable):
+            raise_type_error(
+                tx,
+                f"``nn.Module`` {module}'s call method _get_item_by_idx requires a tuple as first argument",
+            )
+        mod_var = args[0].items[args[1].as_python_constant()]
+        if isinstance(mod_var, UnspecializedNNModuleVariable):
+            return mod_var
+        key = mod_var.module_key
+        submod = tx.output.get_submodule(key)
+        return tx.output.register_attr_or_module(
+            submod, key, key, source=NNModuleSource(GetItemSource(self.source, key))
+        )
+
+    def named_children(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                "named_children",
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        result: list[VariableTracker] = []
+        for n, submod in module.named_children():
+            result.append(self._named_embed(tx, n, submod))
+        return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
+
+    def named_parameters(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
+        kw = self._get_kwargs(tx, "named_parameters", args, kwargs, "prefix", "recurse")
+        result: list[VariableTracker] = []
+        for n, param in module.named_parameters(**kw):
+            result.append(self._named_embed(tx, n, param))
+        return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
+
+    def named_buffers(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
+        kw = self._get_kwargs(
+            tx, "named_buffers", args, kwargs, "prefix", "recurse", "remove_duplicate"
+        )
+        result: list[VariableTracker] = []
+        for n, buffer in module.named_buffers(**kw):
+            result.append(self._named_embed(tx, n, buffer))
+        return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
+
+    def named_modules(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
+        kw = self._get_kwargs(
+            tx, "named_modules", args, kwargs, "memo", "prefix", "remove_duplicate"
+        )
+        result: list[VariableTracker] = []
+        for n, submod in module.named_modules(**kw):
+            result.append(self._named_embed(tx, n, submod))
+        return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
+
+    def children(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                "children",
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        return self._wrap_values(tx, module.named_children())
+
+    def modules(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
+        return self._wrap_values(tx, module.named_modules())
+
+    def parameters(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
+        kw = self._get_kwargs(tx, "parameters", args, kwargs, "recurse")
+        return self._wrap_values(tx, module.named_parameters(**kw))
+
+    def buffers(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
+        kw = self._get_kwargs(tx, "buffers", args, kwargs, "recurse")
+        return self._wrap_values(tx, module.named_buffers(**kw))
+
+    def keys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                "keys",
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        result: list[VariableTracker] = []
+        # pyrefly: ignore[not-iterable]
+        for tmp in module:
+            result.append(VariableTracker.build(tx, tmp))
+        return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
+
+    def values(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                "values",
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        return self._wrap_values(tx, module.items())  # type: ignore[operator]
+
+    def items(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        if args or kwargs:
+            raise_args_mismatch(
+                tx,
+                "items",
+                "0 args and 0 kwargs",
+                f"{len(args)} args and {len(kwargs)} kwargs",
+            )
+        result: list[VariableTracker] = []
+        for n, submod in module.items():  # type: ignore[operator]
+            result.append(self._named_embed(tx, n, submod))
+        return variables.ListIteratorVariable(result, mutation_type=ValueMutationNew())
+
+    def _inline_nn_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        module = tx.output.get_submodule(self.module_key)
+        fn = getattr(module, name).__func__
+        fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
+        return tx.inline_user_function_return(
+            variables.UserFunctionVariable(fn, source=fn_source),
+            [self] + list(args),
+            kwargs,
+        )
+
+    def _check_input_dim(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        from .constant import ConstantVariable
+
+        module = tx.output.get_submodule(self.module_key)
+        check = getattr(type(module), "_check_input_dim", None)
+        if check is None:
+            return None
+        try:
+            filename = inspect.getfile(check)
+        except TypeError:
+            return None
+        if not trace_rules.is_torch_inline_allowed(filename):
+            return None
+        return ConstantVariable.create(True)
+
+    def _module_contains(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict)):
+            return None
+        if not item.is_python_constant():
+            return None
+        return VariableTracker.build(tx, item.as_python_constant() in module)
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        result = self._module_contains(tx, item)
+        if result is not None:
+            return result
+        return super().sq_contains_impl(tx, item)
+
+    def _get_abs_string_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._inline_nn_method(tx, "_get_abs_string_index", args, kwargs)
+
+    def _conv_forward(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, torch.nn.modules.conv._ConvNd):
+            return None
+        return self._inline_nn_method(tx, "_conv_forward", args, kwargs)
+
+    def _output_padding(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        module = tx.output.get_submodule(self.module_key)
+        if not isinstance(module, torch.nn.modules.conv._ConvTransposeNd):
+            return None
+        return self._inline_nn_method(tx, "_output_padding", args, kwargs)
+
+    tp_methods = {
+        "_call_impl": Method(_call_impl),
+        "_wrapped_call_impl": Method(_call_impl),
+        "forward": Method(forward),
+        "_get_item_by_idx": Method(_get_item_by_idx),
+        "named_children": Method(named_children),
+        "named_parameters": Method(named_parameters),
+        "named_buffers": Method(named_buffers),
+        "named_modules": Method(named_modules),
+        "children": Method(children),
+        "modules": Method(modules),
+        "parameters": Method(parameters),
+        "buffers": Method(buffers),
+        "keys": Method(keys),
+        "values": Method(values),
+        "items": Method(items),
+        "_check_input_dim": Method(_check_input_dim),
+        "_get_abs_string_index": Method(_get_abs_string_index),
+        "_conv_forward": Method(_conv_forward),
+        "_output_padding": Method(_output_padding),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -793,284 +1211,30 @@ class NNModuleVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
     ) -> VariableTracker:
-        from . import ListIteratorVariable, TupleVariable
-        from .constant import ConstantVariable
+        module = tx.output.get_submodule(self.module_key)
 
-        key = self.module_key
-        module = tx.output.get_submodule(key)
-
-        def generic_call_method_helper(name: str) -> VariableTracker:
-            # Helper function to put a `call_method` node in FX graph,
-            # with nn.Module as the first arg.
-            mod_proxy = tx.output.create_proxy(
-                "get_attr",
-                self.module_key,
-                (),
-                {},
-            )
-            set_example_value(mod_proxy.node, module)
-
-            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-
-            from .builder import wrap_fx_proxy
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    args=(mod_proxy, *proxy_args),
-                    kwargs=proxy_kwargs,
-                ),
-            )
-
-        if name in ["_call_impl", "_wrapped_call_impl"]:
-            # Example: `self.layer.__call__(x)`
-            # This is used for explicit calling `__call__` in a forward function.
-            # Dynamo inlines `__call__`, includes hooks.
-            return self.call_function(tx, args, kwargs)
-        elif name == "forward":
-            # Example: `self.layer.forward(x)`
-            # This is used for explicit calling `forward` in a forward function.
-            # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
-            with record_nn_module_stack(
-                self.module_key, self.get_nn_module_stack_source(), tx, module
-            ):
-                return generic_call_method_helper(name)
-
-        if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
-            inspect.getfile(module.__class__._check_input_dim)  # type: ignore[union-attr]
-        ):
-            return ConstantVariable.create(True)
-
-        if name == "_get_item_by_idx":
-            if not args[1].is_python_constant():
-                raise_type_error(
-                    tx,
-                    f"``nn.Module`` {module}'s call method {name} requires a constant index argument",
-                )
-            if not isinstance(args[0], TupleVariable):
-                raise_type_error(
-                    tx,
-                    f"``nn.Module`` {module}'s call method {name} requires a tuple as first argument",
-                )
-            mod_var = args[0].items[args[1].value]  # type: ignore[attr-defined]
-            if isinstance(mod_var, UnspecializedNNModuleVariable):
-                return mod_var
-            key = mod_var.module_key  # type: ignore[attr-defined]
-            submod = tx.output.get_submodule(key)
-            return tx.output.register_attr_or_module(
-                submod,
-                key,
-                key,
-                source=NNModuleSource(GetItemSource(self.source, key)),
-            )
-
+        # `constant=` is a Dynamo-internal extra arg from UserMethodVariable,
+        # not a Python method. Base call_method cannot take it.
         if constant:
             fn = getattr(module, name)
-            name = f"{module.__class__.__name__}_{name}_result"
-            return invoke_and_store_as_constant(tx, fn, name, args, kwargs)
+            const_name = f"{module.__class__.__name__}_{name}_result"
+            return invoke_and_store_as_constant(tx, fn, const_name, args, kwargs)
 
-        def assert_all_args_kwargs_const() -> None:
-            if not all(
-                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-            ):
-                unimplemented(
-                    gb_type="non-const argument in nn.Module method",
-                    context=f"call_method: {self} {name} {args} {kwargs}",
-                    explanation="Dynamo does not support calling "
-                    f"method `{name}` of ``nn.Module`` {module} with non-constant arguments.",
-                    hints=[],
-                )
-
-        def get_kwargs(*names: str) -> dict[str, Any]:
-            assert_all_args_kwargs_const()
-            fn = getattr(module, name)
-            bound_args = inspect.signature(fn).bind(
-                *([x.as_python_constant() for x in args]),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            bound_args.apply_defaults()
-            bound_args = bound_args.arguments
-            return {k: bound_args[k] for k in names}
-
-        def wrap_values(
-            items: Iterable[tuple[Any, Any]],
-        ) -> "variables.ListIteratorVariable":
-            named_children: list[VariableTracker] = []
-            for name, submod in items:
-                named_children.append(
-                    tx.output.register_attr_or_module(
-                        submod,
-                        key,
-                        name,
-                        source=NNModuleSource(gen_source(self.source, name)),
-                    )
-                )
-            return ListIteratorVariable(
-                named_children, mutation_type=ValueMutationNew()
-            )
-
-        def named_embed(name: str, obj: Any) -> "variables.TupleVariable":
-            return TupleVariable(
-                [
-                    VariableTracker.build(tx, name),
-                    tx.output.register_attr_or_module(
-                        obj,
-                        key,
-                        name,
-                        source=NNModuleSource(gen_source(self.source, name)),
-                    ),
-                ]
-            )
-
-        def gen_source(source: Source, name: str) -> Source:
-            name_split = name.split(".")
-            if name_split[0] == "":
-                return source
-            while len(name_split) > 0:
-                x = name_split.pop(0)
-                source = AttrSource(source, x)
-            return source
-
-        if name == "named_children":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            named_children: list[VariableTracker] = []
-            for name, submod in module.named_children():
-                named_children.append(named_embed(name, submod))
-            return ListIteratorVariable(
-                named_children, mutation_type=ValueMutationNew()
-            )
-        elif name == "named_parameters":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
-            named_parameters: list[VariableTracker] = []
-            for name, param in module.named_parameters(
-                **get_kwargs("prefix", "recurse")
-            ):
-                named_parameters.append(named_embed(name, param))
-            return ListIteratorVariable(
-                named_parameters, mutation_type=ValueMutationNew()
-            )
-        elif name == "named_buffers":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
-            named_buffers: list[VariableTracker] = []
-            for name, buffer in module.named_buffers(
-                **get_kwargs("prefix", "recurse", "remove_duplicate")
-            ):
-                named_buffers.append(named_embed(name, buffer))
-            return ListIteratorVariable(named_buffers, mutation_type=ValueMutationNew())
-        elif name == "named_modules":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
-            named_modules_list: list[VariableTracker] = []
-            for name, submod in module.named_modules(
-                **get_kwargs("memo", "prefix", "remove_duplicate")
-            ):
-                named_modules_list.append(named_embed(name, submod))
-            return ListIteratorVariable(
-                named_modules_list, mutation_type=ValueMutationNew()
-            )
-        elif name == "children":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return wrap_values(module.named_children())
-        elif name == "modules":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
-            return wrap_values(module.named_modules())
-        elif name == "parameters":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
-            return wrap_values(module.named_parameters(**get_kwargs("recurse")))
-        elif name == "buffers":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
-            return wrap_values(module.named_buffers(**get_kwargs("recurse")))
-        elif name == "keys":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            result = []
-            # pyrefly: ignore[not-iterable]
-            for tmp in module:
-                result.append(VariableTracker.build(tx, tmp))
-            return ListIteratorVariable(result, mutation_type=ValueMutationNew())
-        elif name == "values":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            return wrap_values(module.items())  # type: ignore[operator]
-        elif name == "items":
-            if args or kwargs:
-                raise_args_mismatch(
-                    tx,
-                    name,
-                    "0 args and 0 kwargs",
-                    f"{len(args)} args and {len(kwargs)} kwargs",
-                )
-            items_result: list[VariableTracker] = []
-            for name, submod in module.items():  # type: ignore[operator]
-                items_result.append(named_embed(name, submod))
-            return ListIteratorVariable(items_result, mutation_type=ValueMutationNew())
-        elif name == "__iter__":
-            return self.tp_iter_impl(tx)
-        elif (
-            name == "__contains__"
-            and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
-            and args
-            and args[0].is_python_constant()
-        ):
-            return VariableTracker.build(
-                tx, args[0].as_python_constant() in module._modules
-            )
-        elif (
-            name == "_get_abs_string_index"
-            or (
-                isinstance(module, torch.nn.modules.conv._ConvNd)
-                and name == "_conv_forward"
-            )
-            or (
-                isinstance(module, torch.nn.modules.conv._ConvTransposeNd)
-                and name == "_output_padding"
-            )
-        ):
-            # Inline the function
-            fn = getattr(module, name).__func__
-            fn_source = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
-            return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=fn_source),
-                [self] + list(args),
-                kwargs,
-            )
-        # A loose heuristic, but seems to be generally good before we drop into the
-        # manual handling of inputs
-        elif (
-            name in module.__class__.__dict__
+        # Loose heuristic for remaining class methods with all-tensor args.
+        # Skip tp_methods and slot names so they reach base call_method.
+        # Empty-args calls (e.g. __iter__) would otherwise match
+        # `all(x.is_tensor() for x in ())`.
+        if (
+            name not in self.tp_methods
+            and self.lookup_slotdefs(name) is None
+            and name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
             and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
         ):
-            return generic_call_method_helper(name)
-        else:
-            return super().call_method(tx, name, list(args), kwargs)
+            return self._generic_call_method_helper(tx, name, args, kwargs)
+        return super().call_method(tx, name, list(args), kwargs)
 
-    def sq_length(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> "VariableTracker":
         """Sequence length for container modules (e.g., nn.Sequential)."""
         module = tx.output.get_submodule(self.module_key)
         return VariableTracker.build(tx, len(module))  # type: ignore[arg-type]
@@ -1202,7 +1366,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 globals_vt = tx.nn_modules_globals_vt
 
                 def _hooks_dict_len(obj: VariableTracker, attr: str) -> int:
-                    vt = obj.getattro_impl(tx, attr)
+                    vt = obj.tp_getattro_impl(tx, attr)
                     vt = vt.realize() if hasattr(vt, "realize") else vt
                     return vt.len()  # type: ignore[union-attr]
 
@@ -1357,14 +1521,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def getattr_helper(
         self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> VariableTracker | None:
-        dict_vt = self.getattro_impl(tx, field)
+        dict_vt = self.tp_getattro_impl(tx, field)
         if isinstance(dict_vt, variables.UserDefinedDictVariable):
             dict_vt = dict_vt._base_vt
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
-    def getattro_impl(
+    def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         if (
@@ -1403,19 +1567,21 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
-                    if self.source:
-                        hooks_source = AttrSource(self.source, name)
+                    hooks_source = (
+                        AttrSource(self.source, name) if self.source else None
+                    )
+                    if hooks_source:
                         install_guard(
                             hooks_source.make_guard(
                                 GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT
                             )
                         )
                     hooks_vt_cls = (
-                        variables.OrderedItemsDictVariable
+                        variables.OrderedDictVariable
                         if isinstance(hooks_dict, collections.OrderedDict)
                         else variables.ConstDictVariable
                     )
-                    return hooks_vt_cls({})
+                    return hooks_vt_cls({}, source=hooks_source)
 
         # For non-empty hook dicts, one way is to just fallback to VariableTracker.build() and create a ConstDictVariable.
         # However, ConstDictVariable guards on keys. This can cause recompiles when the same hook is installed for
@@ -1457,7 +1623,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             )
 
             return variables.NNModuleHooksDictVariable(result, source=hooks_dict_source)
-        return super().getattro_impl(tx, name)
+        return super().tp_getattro_impl(tx, name)
 
     def manually_trace_nn_module_getattr(
         self, tx: "InstructionTranslatorBase", name: str

@@ -197,7 +197,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # Premul Sum
         if torch.cuda.nccl.version() >= (2, 11, 1):
-            for dtype in torch.half, torch.float, torch.double:
+            for dtype in torch.half, torch.float, torch.double, torch.bfloat16:
                 for factor in (
                     3.0,
                     torch.tensor([5.0], device=local_device_id, dtype=dtype),

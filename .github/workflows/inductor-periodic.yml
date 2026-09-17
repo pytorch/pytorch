@@ -105,6 +105,7 @@ jobs:
           { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
           { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-default-label-prefix.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.1" },
         ]}
+      build-additional-packages: "fbgemm"
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-test:
