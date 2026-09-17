@@ -1,7 +1,8 @@
 # Row-reduction launch policy and plan cache for tile.TileReduce. Runtime loops share
 # each kernel across a vector class; narrow rows may use one thread and TMA staging.
 import math
-from typing import NamedTuple
+from collections.abc import Sequence
+from typing import Any, NamedTuple
 
 import cutlass.cute as cute
 from cutlass import Int32
@@ -47,7 +48,6 @@ _CHUNK_LADDER = ((65536, 32), (16384, 16), (4096, 6))
 # 7001 GB/s at N=16 versus 4584 at N=32. TMA with smem rotation gains 1.49-1.86x;
 # the rotation mask requires power-of-two fp32 N.
 _TMA_MIN_STRIDE = 128
-_TMA_ALIGNMENT = 16
 
 
 def narrow_row(N: int, itemsize: int, M: int) -> bool:
@@ -61,7 +61,12 @@ def narrow_row(N: int, itemsize: int, M: int) -> bool:
     return False
 
 
-def tma_ok(N: int, itemsize: int, M: int, device=None) -> bool:
+def tma_ok(
+    N: int,
+    itemsize: int,
+    M: int,
+    device: torch.device | int | str | None = None,
+) -> bool:
     """Should this geometry stage its load through TMA rather than load direct?"""
     if itemsize != 4 or N <= 0 or N & (N - 1) or N * itemsize < _TMA_MIN_STRIDE:
         return False
@@ -83,7 +88,7 @@ class _RowConfig(NamedTuple):
     threads_per_block: int  # threads per block
 
 
-def row_config(N: int, dtype_width: int) -> "_RowConfig":
+def row_config(N: int, dtype_width: int) -> _RowConfig:
     """Choose occupancy by N and dtype.
 
     The byte rung takes priority because the element ladder underthreads it by about
@@ -108,7 +113,7 @@ def row_config(N: int, dtype_width: int) -> "_RowConfig":
     )
 
 
-def single_row_config(N: int, dtype_width: int):
+def single_row_config(N: int, dtype_width: int) -> _RowConfig | None:
     """Choose the widest feedable legal rung for a single-row launch.
 
     Computed widths changed the tree and returned wrong variance. This improves
@@ -128,17 +133,17 @@ def single_row_config(N: int, dtype_width: int):
 
 
 def reduce_row_tile(
-    trait,
-    trait_key,
-    x,
-    out_dtypes,
-    nouts=1,
-    threads_per_row=None,
-    threads_per_block=None,
-    final=True,
-    unroll=None,
-    use_tma=None,
-):
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out_dtypes: Sequence[torch.dtype],
+    nouts: int = 1,
+    threads_per_row: int | None = None,
+    threads_per_block: int | None = None,
+    final: bool = True,
+    unroll: int | None = None,
+    use_tma: bool | None = None,
+) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`."""
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
@@ -160,9 +165,11 @@ def reduce_row_tile(
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
     isz = x.element_size()
-    tma_base_aligned = _L.supported_alignment(x, _TMA_ALIGNMENT) == _TMA_ALIGNMENT
+    tma_base_aligned = (
+        _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT) == tile.TRANSFER_ALIGNMENT
+    )
     tma_stride_bytes = x.stride(0) * isz
-    tma_stride_aligned = tma_stride_bytes % _TMA_ALIGNMENT == 0
+    tma_stride_aligned = tma_stride_bytes % tile.TRANSFER_ALIGNMENT == 0
     if use_tma is None:
         use_tma = (
             threads_per_row == 1
@@ -171,10 +178,11 @@ def reduce_row_tile(
             and tma_ok(N, isz, M, x.device)
         )
     elif use_tma and not tma_base_aligned:
-        raise ValueError("TMA requires a 16-byte aligned input")
+        raise ValueError(f"TMA requires a {tile.TRANSFER_ALIGNMENT}-byte aligned input")
     elif use_tma and not tma_stride_aligned:
         raise ValueError(
-            f"TMA requires a 16-byte aligned row stride, got {tma_stride_bytes} bytes"
+            f"TMA requires a {tile.TRANSFER_ALIGNMENT}-byte aligned row stride, "
+            f"got {tma_stride_bytes} bytes"
         )
     dt = torch2cute[x.dtype]
     op = tile.TileReduce(
@@ -198,7 +206,7 @@ def reduce_row_tile(
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
     # outside TMA. Runtime folds share a vector class; TMA bakes its box width.
     align = (
-        _TMA_ALIGNMENT
+        tile.TRANSFER_ALIGNMENT
         if use_tma
         else _L.supported_alignment(x, tile.align_bytes(N, isz))
     )
@@ -210,7 +218,7 @@ def reduce_row_tile(
                 dt,
                 (_L.sym(), N),
                 (
-                    cute.sym_int64(divisibility=_TMA_ALIGNMENT // isz),
+                    cute.sym_int64(divisibility=tile.TRANSFER_ALIGNMENT // isz),
                     1,
                 ),
                 assumed_align=align,
