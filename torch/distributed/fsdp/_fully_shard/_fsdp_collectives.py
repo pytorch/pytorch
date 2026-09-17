@@ -442,31 +442,44 @@ def _default_all_gather_output_fn(
     world_size: int,
 ) -> None:
     """Copy all-gather outputs and reorder nonzero-dimension shards."""
-    all_gather_output = all_gather_result.all_gather_output
+    (
+        all_gather_output,
+        _,
+        _,
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_input_split_sizes,
+    ) = all_gather_result
     device = all_gather_output.device
-    copy_outputs: list[torch.Tensor] = []
-    reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
+    split_with_sizes_out: list[torch.Tensor] = []
+    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
-        all_gather_result.param_all_gather_input_numels,
-        all_gather_result.param_all_gather_input_dtypes,
-        fsdp_params,
+        param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
         fsdp_param.init_all_gather_outputs(
-            all_gather_input_numels, all_gather_input_dtypes, world_size, device
+            all_gather_input_numels,
+            all_gather_input_dtypes,
+            world_size,
+            device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        outputs = fsdp_param.all_gather_outputs
+        param_all_gather_outputs = fsdp_param.all_gather_outputs
         if fsdp_param.fsdp_placement.dim != 0:
-            outputs = [torch.empty_like(t) for t in outputs]
-            reorder_infos.append((fsdp_param, outputs))
-        copy_outputs.extend(outputs)
+            # Copy to a temporary and then chunk-cat into the final all-gather
+            # output tensors
+            param_all_gather_outputs = [
+                torch.empty_like(t) for t in param_all_gather_outputs
+            ]
+            shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
+        split_with_sizes_out.extend(param_all_gather_outputs)
+
     _copy_all_gather_outputs(
         all_gather_output,
-        all_gather_result.all_gather_input_split_sizes,
-        copy_outputs,
+        all_gather_input_split_sizes,
+        split_with_sizes_out,
         world_size,
     )
-    _foreach_all_gather_reorder(reorder_infos, world_size)
+    _foreach_all_gather_reorder(shard_i_copy_infos, world_size)
 
 
 def _all_gather_output_fn_with_dim0_views(
@@ -546,14 +559,14 @@ def foreach_all_gather_copy_out(
 def _copy_all_gather_outputs(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
-    copy_outputs: list[torch.Tensor],
+    split_with_sizes_out: list[torch.Tensor],
     world_size: int,
 ) -> None:
     all_gather_output = all_gather_output.view(world_size, -1)
     if all_gather_output.dtype == torch.uint8:
-        out = [t.view(world_size, -1).view(torch.uint8) for t in copy_outputs]
+        out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
-        out = [t.view(world_size, -1) for t in copy_outputs]
+        out = [t.view(world_size, -1) for t in split_with_sizes_out]
     # Expanding a parameter adds outputs; a single prefix leaves sizes unchanged.
     if len(out) != len(all_gather_input_split_sizes):
         all_gather_input_split_sizes = [t.size(1) for t in out]
@@ -573,9 +586,9 @@ def _copy_all_gather_outputs(
 
 
 def _foreach_all_gather_reorder(
-    copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]], world_size: int
+    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]], world_size: int
 ) -> None:
-    for fsdp_param, param_all_gather_outputs in copy_infos:
+    for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
         # Chunk-cat from the temporary to the final all-gather output tensors
         shard_dim = fsdp_param.fsdp_placement.dim
 
@@ -617,8 +630,7 @@ def _default_reduce_scatter_input_fn(
                 continue
             if unsharded_grad.size(shard_dim) % world_size != 0:
                 raise AssertionError(
-                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} "
-                    f"{world_size=}"
+                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
                 )
             chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
