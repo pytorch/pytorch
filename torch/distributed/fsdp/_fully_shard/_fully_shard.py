@@ -683,6 +683,10 @@ class FSDPModule:
     ) -> None:
         """Set the function that copies a parameter group's all-gather outputs.
 
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
         The function takes ``(fsdp_params, all_gather_result, world_size)`` and
         returns ``None``. ``all_gather_result`` is an ``AllGatherResult`` with the
         flat rank-major collective buffer, per-parameter input element counts
@@ -711,6 +715,10 @@ class FSDPModule:
         self, fn: _PrepareReduceScatterInputs, *, recurse: bool = True
     ) -> None:
         """Set the function that prepares reduce-scatter inputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
 
         The function takes ``(fsdp_params, unsharded_grads, world_size)``
         and returns a sequence of padded unsharded ``torch.Size`` values, one per

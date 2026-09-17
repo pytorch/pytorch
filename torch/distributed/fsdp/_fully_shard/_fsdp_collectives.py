@@ -487,7 +487,11 @@ def _all_gather_output_fn_with_dim0_views(
     all_gather_result: AllGatherResult,
     world_size: int,
 ) -> None:
-    """Use views of the final outputs when the shard layout supports them."""
+    """Copy all-gather outputs through dim-0 views when the shard layout supports them.
+
+    Register with :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`,
+    which documents the callback contract.
+    """
     all_gather_output = all_gather_result.all_gather_output
     device = all_gather_output.device
     copy_outputs: list[torch.Tensor] = []
@@ -646,7 +650,11 @@ def _prepare_reduce_scatter_inputs_with_dim0_views(
     unsharded_grads: list[torch.Tensor],
     world_size: int,
 ) -> list[torch.Size]:
-    """Prepare copy inputs while keeping one padded size per original parameter."""
+    """Prepare reduce-scatter inputs through dim-0 views when the layout supports them.
+
+    Register with :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`,
+    which documents the callback contract.
+    """
     copy_in_grads: list[torch.Tensor] = []
     padded_unsharded_sizes: list[torch.Size] = []
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):

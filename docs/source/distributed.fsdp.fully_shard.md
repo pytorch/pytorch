@@ -209,3 +209,27 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. autoclass:: DataParallelMeshDims
     :members:
 ```
+
+## Experimental APIs
+
+```{eval-rst}
+.. automodule:: torch.distributed.fsdp.experimental
+```
+
+After applying `fully_shard`, register either or both callbacks to use contiguous
+dim-0 views for copying nonzero-dimension shards where the layout supports them:
+
+```python
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_dim0_views,
+    reduce_scatter_input_fn_with_dim0_views,
+)
+
+model.set_all_gather_output_fn(all_gather_output_fn_with_dim0_views)
+model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_dim0_views)
+```
+
+```{eval-rst}
+.. autofunction:: torch.distributed.fsdp.experimental.all_gather_output_fn_with_dim0_views
+.. autofunction:: torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_dim0_views
+```

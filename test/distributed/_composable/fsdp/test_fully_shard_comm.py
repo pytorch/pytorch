@@ -28,12 +28,10 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _all_gather_output_fn_with_dim0_views,
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
-    _prepare_reduce_scatter_inputs_with_dim0_views,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -47,6 +45,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_dim0_views,
+    reduce_scatter_input_fn_with_dim0_views,
+)
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
@@ -406,8 +408,8 @@ class TestFullyShardInputOutputFns(FSDPTest):
 
 class TestFullyShardNonzeroDimCopy(FSDPTest):
     _dim0_view_fns = (
-        _all_gather_output_fn_with_dim0_views,
-        _prepare_reduce_scatter_inputs_with_dim0_views,
+        all_gather_output_fn_with_dim0_views,
+        reduce_scatter_input_fn_with_dim0_views,
     )
 
     @property
