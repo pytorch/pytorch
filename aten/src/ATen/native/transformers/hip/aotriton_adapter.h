@@ -7,6 +7,7 @@
 #include <aotriton/dtypes.h>
 #include <aotriton/util.h>
 #include <aotriton/config.h>
+#include <aotriton/flash.h>
 #include <ATen/native/transformers/hip/aotriton_versions.h>
 #include <tuple>
 #include <optional>
@@ -120,6 +121,32 @@ inline aotriton::TensorView<0> mk_atomictensor(const int32_t* ptr)
   return aotriton::TensorView<0>(reinterpret_cast<intptr_t>(ptr),
                                  aotriton::DType::kInt32);
 }
+
+#if AOTRITON_VARLEN_BITS_API
+// AOTriton 0.14+ replaced the four-value VarlenType enum with a VarlenBits
+// bit-field struct so Q/K can each independently choose how their sequence
+// lengths are stored. PyTorch only ever needs the two symmetric Q==K shapes
+// it always has: dense (varlen_bits left zero-initialized), and stacked
+// (THD) with lengths given as a cumulative offsets array, whose start
+// position within that array is either reused directly (packed varlen) or
+// read from a second, separately strided array (seqused_k-style varlen).
+inline aotriton::v3::flash::VarlenBits mk_varlen_bits(bool is_varlen, bool has_position_array)
+{
+  using aotriton::v3::flash::VarlenBits;
+  using aotriton::v3::flash::VarlenMode;
+  using aotriton::v3::flash::VarlenStacked;
+  using aotriton::v3::flash::VarlenLength;
+  using aotriton::v3::flash::VarlenPosition;
+  if (!is_varlen) {
+    return VarlenBits{};
+  }
+  VarlenMode mode{};
+  mode.stacked = VarlenStacked::THD;
+  mode.length = VarlenLength::CUMULATIVE;
+  mode.position = has_position_array ? VarlenPosition::ARRAY : VarlenPosition::REUSE;
+  return VarlenBits{.qmode = mode, .kmode = mode};
+}
+#endif // AOTRITON_VARLEN_BITS_API
 
 #if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 11)
 

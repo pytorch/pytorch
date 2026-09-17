@@ -275,7 +275,6 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
   auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
   using aotriton::v3::flash::CausalType;
-  using aotriton::v3::flash::VarlenType;
   aotriton::v3::flash::attn_fwd_params params;
   params.Q = mk_aotensor(q_t, "q");
   params.K = mk_aotensor(k_t, "k");
@@ -283,8 +282,8 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   params.Sm_scale = softmax_scale;
   params.L = mk_aotensor<2>(M, "M");
   params.Out = mk_aotensor(output_t, "Out");
-  params.Max_seqlen_q = seqlen_q;    // Unused if cu_seqlens_q is empty
-  params.Max_seqlen_k = seqlen_k;    // Unused if cu_seqlens_k is empty
+  params.Max_seqlen_q = seqlen_q;    // Unused if seqinfo_q0 is empty
+  params.Max_seqlen_k = seqlen_k;    // Unused if seqinfo_k0 is empty
   params.dropout_p = p_dropout;
   params.philox_seed_ptr = seed;
   params.philox_offset1 = offset1;
@@ -294,7 +293,9 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
   params.persistent_atomic_counter = persistent_counter;
   params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
-  params.varlen_type = VarlenType::None;
+#if !AOTRITON_VARLEN_BITS_API
+  params.varlen_type = aotriton::v3::flash::VarlenType::None;
+#endif
   params.window_left = window_left;
   params.window_right = window_right;
   AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
@@ -468,7 +469,11 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : nullscalar;
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
     using aotriton::v3::flash::CausalType;
+#if AOTRITON_VARLEN_BITS_API
+    using sdp::aotriton_adapter::mk_varlen_bits;
+#else
     using aotriton::v3::flash::VarlenType;
+#endif
     aotriton::v3::flash::attn_fwd_params params;
     params.Q = mk_aotensor(q_padded, "q");
     params.K = mk_aotensor(k_padded, "k");
@@ -476,8 +481,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     params.Sm_scale = softmax_scale;
     params.L = mk_aotensor<2>(M, "logsumexp");
     params.Out = mk_aotensor(out_padded, "Out");
-    params.Max_seqlen_q = max_seqlen_q;    // Unused if cu_seqlens_q is empty
-    params.Max_seqlen_k = max_seqlen_k;    // Unused if cu_seqlens_k is empty
+    params.Max_seqlen_q = max_seqlen_q;    // Unused if seqinfo_q0 is empty
+    params.Max_seqlen_k = max_seqlen_k;    // Unused if seqinfo_k0 is empty
     params.dropout_p = p_dropout;
     params.philox_seed_ptr = seed;
     params.philox_offset1 = offset1;
@@ -487,6 +492,25 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
     params.persistent_atomic_counter = persistent_counter;
     params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
+#if AOTRITON_VARLEN_BITS_API
+    params.varlen_bits = mk_varlen_bits(/*is_varlen=*/true, /*has_position_array=*/strided_varlen);
+    if (strided_varlen) {
+      // seqused_k holds per-batch actual kv lengths; the kernel expects cumulative
+      // offsets for seqinfo_k0 so it can compute seqlen_k via differencing.
+      // seqinfo_k1 carries the real memory offsets into the KV cache.
+      const auto& seqused = seqused_k.value();
+      const int num_seqs = seqused.size(0);
+      at::Tensor cu_seqlens_k_from_seqused = at::zeros({num_seqs + 1}, seqused.options());
+      cu_seqlens_k_from_seqused.slice(0, 1).copy_(seqused.cumsum(0));
+      params.seqinfo_q0 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+      params.seqinfo_k0 = mk_aotensor<1>(cu_seqlens_k_from_seqused, "seqinfo_k0");
+      params.seqinfo_q1 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q1");
+      params.seqinfo_k1 = mk_aotensor<1>(cu_seqlens_k, "seqinfo_k1");
+    } else {
+      params.seqinfo_q0 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+      params.seqinfo_k0 = mk_aotensor<1>(cu_seqlens_k, "seqinfo_k0");
+    }
+#else
     params.varlen_type = strided_varlen ? VarlenType::StridedVarlen : VarlenType::CompactVarlen;
     if (strided_varlen) {
       // seqused_k holds per-batch actual kv lengths; the kernel expects cumulative
@@ -504,6 +528,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
       params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
       params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
     }
+#endif
     params.window_left = window_left;
     params.window_right = window_right;
     AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
@@ -649,7 +674,6 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   using sdp::aotriton_adapter::mk_aoscalartensor;
   // Fused BWD does not support SWA
   using aotriton::v3::flash::CausalType;
-  using aotriton::v3::flash::VarlenType;
   aotriton::v3::flash::attn_bwd_params params;
   params.Q = mk_aotensor(q_t, "q");
   params.K = mk_aotensor(k_t, "k");
@@ -661,17 +685,19 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   params.DK = mk_aotensor(dk_t, "dk");
   params.DV = mk_aotensor(dv_t, "dv");
   params.L = mk_aotensor<2>(softmax_lse_cont, "L");
-  params.Max_seqlen_q = seqlen_q;        // Unused if cu_seqlens_q is empty
-  params.Max_seqlen_k = seqlen_k;        // Unused if cu_seqlens_k is empty
+  params.Max_seqlen_q = seqlen_q;        // Unused if seqinfo_q0 is empty
+  params.Max_seqlen_k = seqlen_k;        // Unused if seqinfo_k0 is empty
   params.dropout_p = p_dropout;
   params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
   params.philox_offset1 = mk_aoscalartensor(philox_offset);
   params.philox_offset2 = 0;
   // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
   params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
+#if !AOTRITON_VARLEN_BITS_API
+  params.varlen_type = aotriton::v3::flash::VarlenType::None;
+#endif
   params.window_left = window_left;
   params.window_right = window_right;
-  params.varlen_type = VarlenType::None;
   using sdp::aotriton_adapter::mklazy_empty_like;
   using sdp::aotriton_adapter::mklazy_fp32zeros;
   using sdp::aotriton_adapter::LazyTensorContext;
@@ -852,7 +878,11 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using aotriton::v3::flash::CausalType;
+#if AOTRITON_VARLEN_BITS_API
+    using sdp::aotriton_adapter::mk_varlen_bits;
+#else
     using aotriton::v3::flash::VarlenType;
+#endif
     aotriton::v3::flash::attn_bwd_params params;
     params.Q = mk_aotensor(q_padded, "q");
     params.K = mk_aotensor(k_padded, "k");
@@ -864,17 +894,26 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     params.DV = mk_aotensor(dv_padded, "dv");
     params.DQ = mk_aotensor(dq_padded, "dq");
     params.L = mk_aotensor<2>(softmax_lse_cont, "L");
+#if AOTRITON_VARLEN_BITS_API
+    params.seqinfo_q0 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+    params.seqinfo_k0 = mk_aotensor<1>(cu_seqlens_k, "seqinfo_k0");
+#else
     params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
     params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
-    params.Max_seqlen_q = max_seqlen_q;        // Unused if cu_seqlens_q is empty
-    params.Max_seqlen_k = max_seqlen_k;        // Unused if cu_seqlens_k is empty
+#endif
+    params.Max_seqlen_q = max_seqlen_q;        // Unused if seqinfo_q0 is empty
+    params.Max_seqlen_k = max_seqlen_k;        // Unused if seqinfo_k0 is empty
     params.dropout_p = p_dropout;
     params.philox_seed_ptr =  mk_aoscalartensor(philox_seed);
     params.philox_offset1 = mk_aoscalartensor(philox_offset);
     params.philox_offset2 = 0;
     // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
     params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
+#if AOTRITON_VARLEN_BITS_API
+    params.varlen_bits = mk_varlen_bits(/*is_varlen=*/true, /*has_position_array=*/false);
+#else
     params.varlen_type = VarlenType::CompactVarlen;
+#endif
     params.window_left = window_left;
     params.window_right = window_right;
     using sdp::aotriton_adapter::mklazy_empty_like;
