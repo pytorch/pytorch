@@ -135,8 +135,8 @@ original function but runs the pre-compiled code. It also exposes:
   it, from any index, the one that serves a call no result's guards accept. The
   opt-out does not stop the per-call re-read of a global that is itself the
   source of a kept guard, so a loaded artifact that opted out goes on serving
-  whatever its guard scope binds -- or, for a name it no longer binds, the last
-  value read -- unchecked.
+  whatever its guard scope binds -- or, for a name it no longer binds, whatever
+  the bytecode's globals last held -- unchecked.
 
 **Requirements:**
 
@@ -187,7 +187,8 @@ Load a previously saved AOT-compiled function from a file.
   global serves this dict's value on every call where eager counts up.
   The re-read writes into the loaded artifact's own globals dict, which every
   call of it shares, so two threads serving one loaded artifact race on that
-  write; a caller who needs isolation loads the artifact once per thread.
+  write while either rebinds a guarded global; a caller who needs isolation
+  loads the artifact once per thread.
   Every other global is read once, at load time, from this dict merged over the
   globals serialized with the artifact, which is why a name the dict omits still
   resolves.
