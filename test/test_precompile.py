@@ -144,7 +144,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(summary.dropped_guard_types, {"HASATTR": 1})
         self.assertExpectedInline(
             str(summary),
-            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1} (0 kept), RISKY drops ['self.act'], 1 policy-dropped guard""",
+            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1} (0 kept), RISKY drops ['HASATTR self.act'], 1 policy-dropped guard""",
         )
 
     def test_summary_complete_requires_every_term(self):
@@ -193,8 +193,10 @@ class TestPrecompile(TestCase):
             str(plain),
             """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'ID_MATCH': 2, 'HASATTR': 1} (2 kept), 1 policy-dropped guard, 1 value-pinned source""",
         )
-        # The risky slot is a dropped slot too; the digest names its source.
-        risky = (("ID_MATCH", "self.act"),)
+        # The risky slots are dropped slots too; the digest names them whole,
+        # since a dropped ID_MATCH and its HASATTR companion share a source.
+        # Only the first line of the first capture error is shown.
+        risky = (("HASATTR", "self.act"), ("ID_MATCH", "self.act"))
         bad = PrecompileSummary(
             frames=3,
             resume_functions=0,
@@ -205,11 +207,27 @@ class TestPrecompile(TestCase):
             uncovered_frames=("helper",),
             dropped_guards=risky,
             risky_dropped_guards=risky,
-            capture_errors=("boom",),
+            capture_errors=("RuntimeError: boom\nHint: do not.",),
         )
         self.assertExpectedInline(
             str(bad),
-            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'ID_MATCH': 1} (0 kept), RISKY drops ['self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR""",
+            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
+        # The list clauses stop at five entries and count the rest, so the
+        # digest stays one line however many frames a model has.
+        wide = PrecompileSummary(
+            frames=8,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            uncovered_frames=tuple(f"f{i}" for i in range(7)),
+            dropped_guards=risky,
+            risky_dropped_guards=risky,
+            capture_errors=("RuntimeError: boom", "TypeError: bad", "ValueError: no"),
+        )
+        self.assertExpectedInline(
+            str(wide),
+            """8 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 7 UNCOVERED: ['f0', 'f1', 'f2', 'f3', 'f4'] +2 more, 3 CAPTURE ERRORS: 'RuntimeError: boom' +2 more""",
         )
 
     @parametrize("mode", ["make_fx", "dynamo", "installed"])
