@@ -193,9 +193,21 @@ class TestPrecompile(TestCase):
             str(plain),
             """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'ID_MATCH': 2, 'HASATTR': 1} (2 kept), 1 policy-dropped guard, 1 value-pinned source""",
         )
+        # No optional clause: kept guards show up only beside the drops.
+        clean = PrecompileSummary(
+            frames=1,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            kept_guards=(("TENSOR_MATCH", "x"),),
+        )
+        self.assertExpectedInline(
+            str(clean),
+            """1 frame (0 from graph breaks), 1 guarded code, 1 backend graph""",
+        )
         # The risky slots are dropped slots too; the digest names them whole,
         # since a dropped ID_MATCH and its HASATTR companion share a source.
-        # Only the first line of the first capture error is shown.
+        # Only the first non-empty line of the first capture error is shown.
         risky = (("HASATTR", "self.act"), ("ID_MATCH", "self.act"))
         bad = PrecompileSummary(
             frames=3,
@@ -207,7 +219,7 @@ class TestPrecompile(TestCase):
             uncovered_frames=("helper",),
             dropped_guards=risky,
             risky_dropped_guards=risky,
-            capture_errors=("RuntimeError: boom\nHint: do not.",),
+            capture_errors=("\nRuntimeError: boom\nHint: do not.",),
         )
         self.assertExpectedInline(
             str(bad),
