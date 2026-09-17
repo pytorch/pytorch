@@ -273,6 +273,7 @@ class _FunctionBase:
     _raw_saved_tensors: tuple[Any]
     next_functions: tuple[tuple[Any, _int], ...]
     needs_input_grad: tuple[_bool]
+    _input_grad_buffers: tuple[Tensor | None, ...]
     metadata: dict
     _materialize_non_diff_grads: _bool
     # skip adding type hints for the fields that have wrappers defined
@@ -1401,6 +1402,14 @@ def _has_torch_function_unary(Any) -> _bool: ...  # THPModule_has_torch_function
 def _has_torch_function_variadic(
     *args: Any,
 ) -> _bool: ...  # THPModule_has_torch_function_variadic
+
+class _TorchFunctionState(Enum):
+    ENABLED = ...
+    SUBCLASSES_DISABLED = ...
+    ALL_DISABLED = ...
+
+def _get_torch_function_state() -> _TorchFunctionState: ...
+def _set_torch_function_state(state: _TorchFunctionState) -> None: ...
 def _vmapmode_increment_nesting() -> _int: ...  # THPModule_vmapmode_increment_nesting
 def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_nesting
 def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython

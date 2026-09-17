@@ -1154,6 +1154,77 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 kwargs,
             )
 
+        @register(math.ceil)
+        def handle_ceil(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.ceil", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.ceil() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__ceil__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.floor)
+        def handle_floor(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.floor", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.floor() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__floor__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.trunc)
+        def handle_trunc(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            no_keywords(tx, "math.trunc", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.trunc() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__trunc__", [])
+            if result is None:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __trunc__ method"
+                )
+            return result
+
         @register(math.radians)
         def handle_radians(
             self,
@@ -2812,10 +2883,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
+            device_index = device.index
+            if device_index is None:
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                # Under compile-on-one-rank the index must stay None so the runtime
+                # resolves it per rank and one artifact serves them all.
+                if not _coor_enabled():
+                    device_index = 0
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device_index),
                 {},
             )
             return ConstantVariable.create(None)
