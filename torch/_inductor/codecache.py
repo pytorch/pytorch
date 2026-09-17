@@ -7,6 +7,7 @@ import functools
 import hashlib
 import importlib
 import importlib.resources
+import inspect
 import io
 import itertools
 import json
@@ -49,6 +50,7 @@ import torch._library.opaque_object as opaque_object
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.device_interface import (
+    DeviceInterface,
     get_interface_for_device,
     get_registered_device_interfaces,
 )
@@ -370,6 +372,12 @@ class CacheBase:
             # cache key, so a broken third-party backend must not break CPU-only
             # compilation.
             try:
+                # Availability probes may initialize device runtimes. Avoid them
+                # when the interface cannot contribute cache metadata.
+                if inspect.getattr_static(
+                    interface, "get_cache_system_info"
+                ) is inspect.getattr_static(DeviceInterface, "get_cache_system_info"):
+                    continue
                 if not interface.is_available():
                     continue
                 info = interface.get_cache_system_info()

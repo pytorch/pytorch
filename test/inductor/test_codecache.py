@@ -254,6 +254,26 @@ class TestCacheKeyStrategy(TestCase):
     def test_device_interface_cache_system_info(self):
         self.assertIsNone(DeviceInterface.get_cache_system_info())
 
+        class DefaultDeviceInterface(DeviceInterface):
+            availability_calls = 0
+
+            @classmethod
+            def is_available(cls) -> bool:
+                cls.availability_calls += 1
+                return True
+
+        class StaticDeviceInterface(DeviceInterface):
+            calls = 0
+
+            @staticmethod
+            def is_available() -> bool:
+                return True
+
+            @staticmethod
+            def get_cache_system_info():
+                StaticDeviceInterface.calls += 1
+                return None
+
         class FakeDeviceInterface(DeviceInterface):
             info = None
             calls = 0
@@ -286,22 +306,27 @@ class TestCacheKeyStrategy(TestCase):
                 mock.patch(
                     "torch._inductor.codecache.get_registered_device_interfaces",
                     return_value=[
+                        ("default", DefaultDeviceInterface),
+                        ("static", StaticDeviceInterface),
                         ("fake", FakeDeviceInterface),
                         ("fake:0", FakeDeviceInterface),
                     ],
                 ),
             ):
                 base = CacheBase.get_system()
+                self.assertEqual(DefaultDeviceInterface.availability_calls, 0)
                 self.assertNotIn(
                     "device_interfaces",
                     fake_strategy.key_from_json.call_args.args[0],
                 )
+                self.assertEqual(StaticDeviceInterface.calls, 1)
                 self.assertEqual(FakeDeviceInterface.calls, 1)
 
                 FakeDeviceInterface.info = {"runtime": "1"}
                 CacheBase.get_system.cache_clear()
                 first = CacheBase.get_system()
                 self.assertEqual(first["device_interfaces"], {"fake": {"runtime": "1"}})
+                self.assertEqual(StaticDeviceInterface.calls, 2)
                 self.assertEqual(FakeDeviceInterface.calls, 2)
                 first_payload = copy.deepcopy(
                     fake_strategy.key_from_json.call_args.args[0]
