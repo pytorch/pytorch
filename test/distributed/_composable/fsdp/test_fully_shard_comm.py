@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -2116,6 +2116,86 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+class TestFullyShardGradientStream(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, device_module.device_count())
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @skip_if_lt_x_gpu(2)
+    def test_record_gradient_stream(self):
+        self.run_subtests(
+            {"register_backend": [True, False], "mixed_precision": [False, True]},
+            self._test_record_gradient_stream,
+        )
+
+    def _test_record_gradient_stream(
+        self, register_backend: bool, mixed_precision: bool
+    ):
+        torch.manual_seed(42)
+        dtype = torch.bfloat16 if mixed_precision else torch.float32
+        model = nn.Sequential(*[nn.Linear(16, 16) for _ in range(2)]).to(
+            device=device_type, dtype=dtype
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=dtype,
+            reduce_dtype=torch.float32 if mixed_precision else None,
+        )
+        for module in model:
+            fully_shard(module, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        recorded = []
+        orig_record_stream = torch.Tensor.record_stream
+
+        def record_stream(tensor, stream):
+            recorded.append(
+                (
+                    tensor.untyped_storage().data_ptr(),
+                    tensor.dtype,
+                    (stream.stream_id, stream.device_index, stream.device_type),
+                )
+            )
+            return orig_record_stream(tensor, stream)
+
+        def record_gradient_stream(tensor, stream_id, device_index, device_type):
+            stream = torch.Stream(
+                stream_id=stream_id,
+                device_index=device_index,
+                device_type=device_type,
+            )
+            tensor.record_stream(stream)
+
+        caller_stream = torch.cuda.Stream()
+        caller_stream.wait_stream(torch.cuda.current_stream())
+        with torch.library._scoped_library("fsdp", "IMPL") as lib:
+            if register_backend:
+                lib.impl("record_gradient_stream", record_gradient_stream, "CUDA")
+            with patch.object(torch.Tensor, "record_stream", record_stream):
+                with torch.cuda.stream(caller_stream):
+                    inp = torch.randn(8, 16, device=device_type, dtype=dtype)
+                    model(inp).sum().backward()
+            caller_stream.synchronize()
+
+        if register_backend:
+            expected_stream = (
+                caller_stream.stream_id,
+                caller_stream.device_index,
+                caller_stream.device_type,
+            )
+            grad_storage_ptrs = {
+                param.grad.to_local().untyped_storage().data_ptr()
+                for param in model.parameters()
+            }
+            self.assertEqual(len(recorded), len(model))
+            self.assertEqual({ptr for ptr, _, _ in recorded}, grad_storage_ptrs)
+            for _, recorded_dtype, recorded_stream in recorded:
+                self.assertEqual(recorded_dtype, dtype)
+                self.assertEqual(recorded_stream, expected_stream)
+        else:
+            self.assertEqual(recorded, [])
 
 
 if __name__ == "__main__":

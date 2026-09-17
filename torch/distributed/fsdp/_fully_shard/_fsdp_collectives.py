@@ -48,6 +48,43 @@ lib.define(
 )
 
 
+lib.define(
+    "record_gradient_stream(Tensor tensor, int stream_id, int device_index, int device_type) -> ()"
+)
+
+
+@torch.library.impl(lib, "record_gradient_stream", "CompositeExplicitAutograd")
+@torch.library.impl(lib, "record_gradient_stream", "Meta")
+def _record_gradient_stream_default(
+    tensor: torch.Tensor, stream_id: int, device_index: int, device_type: int
+) -> None:
+    pass
+
+
+torch.library._register_effectful_op(
+    "fsdp::record_gradient_stream", torch.library.EffectType.ORDERED, lib=lib
+)
+
+
+def record_gradient_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
+    """Notify the backend of the final gradient buffer's consumer stream.
+
+    Backends may register a kernel for ``fsdp::record_gradient_stream(Tensor
+    tensor, int stream_id, int device_index, int device_type) -> ()`` to protect
+    the allocation until queued consumer work completes, for example by calling
+    ``tensor.record_stream``. The kernel must preserve the tensor's storage and
+    contents. The default preserves FSDP's existing stream-ordering behavior.
+
+    Stream fields keep this lifetime side effect traceable without treating it
+    as a tensor mutation. CPU's placeholder stream needs no lifetime tracking.
+    """
+    if tensor.device.type == "cpu":
+        return
+    torch.ops.fsdp.record_gradient_stream(
+        tensor, stream.stream_id, stream.device_index, stream.device_type
+    )
+
+
 class DefaultAllocMixin:
     def allocate(
         self,
@@ -694,6 +731,7 @@ def foreach_reduce(
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        record_gradient_stream(reduce_output, current_stream)
         # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(

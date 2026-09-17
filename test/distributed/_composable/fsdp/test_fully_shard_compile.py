@@ -3,6 +3,7 @@
 
 import copy
 import unittest
+from contextlib import nullcontext
 
 import torch
 import torch._dynamo.compiled_autograd as compiled_autograd
@@ -10,6 +11,7 @@ import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
 from torch._dynamo.utils import counters
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     fully_shard,
@@ -17,17 +19,80 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     ShardingStrategy,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import record_gradient_stream
 from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUDA,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 device_type = torch.device(get_devtype())
+
+
+@instantiate_parametrized_tests
+class TestRecordGradientStream(TestCase):
+    def test_cpu_placeholder_stream(self):
+        tensor = torch.empty(4)
+        self.assertIsNone(record_gradient_stream(tensor, torch.cpu.current_stream()))
+
+    @parametrize("fake", [False, True])
+    def test_meta_noop(self, fake):
+        with FakeTensorMode() if fake else nullcontext():
+            tensor = torch.empty(4, device="cpu" if fake else "meta")
+            self.assertIsNone(torch.ops.fsdp.record_gradient_stream(tensor, 0, 0, 0))
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_compiled_hook_preserves_storage(self, backend):
+        if backend == "inductor" and not HAS_GPU:
+            self.skipTest("Inductor+gpu needs triton and recent GPU arch")
+        torch._dynamo.reset()
+        self.addCleanup(torch._dynamo.reset)
+        recorded = []
+
+        def record(tensor, stream_id, device_index, device_type):
+            recorded.append(
+                (
+                    tensor.untyped_storage().data_ptr(),
+                    tensor.storage_offset(),
+                    stream_id,
+                    device_index,
+                    device_type,
+                )
+            )
+
+        def fn(tensor):
+            record_gradient_stream(tensor, torch.cuda.current_stream())
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        streams = (torch.cuda.current_stream(), torch.cuda.Stream()) * 2
+        tensors = [torch.empty(8, device="cuda")[2:] for _ in streams]
+        expected = []
+        with torch.library._scoped_library("fsdp", "IMPL") as lib:
+            lib.impl("record_gradient_stream", record, "CUDA")
+            for stream, tensor in zip(streams, tensors, strict=True):
+                expected.append(
+                    (
+                        tensor.untyped_storage().data_ptr(),
+                        tensor.storage_offset(),
+                        stream.stream_id,
+                        stream.device_index,
+                        stream.device_type,
+                    )
+                )
+                with torch.cuda.stream(stream):
+                    self.assertIsNone(compiled_fn(tensor))
+                self.assertEqual(recorded, expected)
 
 
 class Mod(torch.nn.Module):
