@@ -1814,7 +1814,13 @@ class AOTCompiledModel:
         lifted a value through it -- bound to the dict serialized with the artifact,
         since the key embeds an ``id()`` from the tracing process that no live
         namespace holds -- are inserted (never overwriting an existing key) so
-        guards rooted at them resolve in a process that never traced.
+        guards rooted at them resolve in a process that never traced. Every CALL
+        writes as well, in the other direction: the certified names are written
+        into the globals of the artifact this returns, which all of its calls
+        share, so two threads calling one loaded artifact while either rebinds a
+        guarded global race on that dict and one can run the graph on the value
+        the other thread's guard check accepted. A caller who needs isolation
+        loads the artifact once per thread, since each load builds its own dict.
 
         A symbolic-shape guard on a global with a dynamic dim resolves its
         operands in that live dict as well, whether it installs as a Python
