@@ -7865,7 +7865,7 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
     for tensor, args in test_cases:
         yield SampleInput(tensor, *args)
 
-        if not requires_grad:
+        if not requires_grad and dtype not in float8_types():
             yield SampleInput(tensor.detach().clone(), *args, reduce='add')
 
             if dtype.is_floating_point:
@@ -19635,6 +19635,8 @@ op_db: list[OpInfo] = [
            error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.float8_e4m3fn),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_scatter,
@@ -19643,6 +19645,12 @@ op_db: list[OpInfo] = [
                # Compiler issue on ROCm. Regression started in ROCm 6.4.
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+               # These do float8-unsupported arithmetic (mul, allclose, randn_like) on the samples
+               DecorateInfo(unittest.skip('Skipped!'), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=float8_types()),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestTensorMetaProp', 'test_inplace_ops_propagate_requires_grad_metadata',
+                            dtypes=float8_types()),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive', dtypes=float8_types()),
            )),
     UnaryUfuncInfo(
         'bfloat16',
