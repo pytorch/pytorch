@@ -6620,15 +6620,5 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
-  ],
-  "GB7753": [
-    {
-      "Gb_type": "length_hint on an iterator that does not track its source",
-      "Context": "length_hint {self}",
-      "Explanation": "This iterator is a snapshot taken while tracing, so its remaining length can diverge from the source container's.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
   ]
 }
