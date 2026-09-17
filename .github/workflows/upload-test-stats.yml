@@ -12,6 +12,7 @@ on:
       - periodic-rocm-mi200
       - periodic-rocm-mi300
       - periodic-rocm-mi350
+      - many-periodic-rocm-mi350
       - inductor
       - unstable
       - td-holdout-unstable
