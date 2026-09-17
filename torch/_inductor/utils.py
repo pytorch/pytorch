@@ -3160,16 +3160,7 @@ def get_k_splits(
 
     legacy_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
 
-    # A caller can provide its backend-specific CTA geometry. Ranking solely
-    # by K-part alignment can badly over-split a skinny GEMM: once there are
-    # enough output CTAs for a few GPU waves, additional splits mostly grow the
-    # FP32 partial workspace and final-reduction traffic.
-    #
-    # Keep this device-aware path opt-in so existing CUDA/ROCm/XPU behavior is
-    # unchanged.  We use a conservative 64x64 output tile estimate, offer the
-    # two nearest exact divisors to each of the 1, 2, and 4 wave targets, and
-    # retain one nearest 8-wave candidate.  The normal end-to-end subgraph
-    # autotuner still makes the final choice.
+    # Rank exact splits near a few device waves while bounding partial-workspace cost.
     if (
         num_sms is not None
         and num_sms > 0

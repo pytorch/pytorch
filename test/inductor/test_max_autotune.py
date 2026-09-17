@@ -2902,19 +2902,18 @@ class TestMaxAutotune(TestCase):
             "max_autotune_gemm_search_space": "DEFAULT",
         }
     )
-    def test_decompose_k_blackwell_aten_split_candidates(self):
+    def test_decompose_k_device_aware_aten_split_candidates(self):
         get_k_splits.cache_clear()
         candidates = get_k_splits(
             80,
             72,
             1_343_232,
             num_sms=148,
-            ctas_per_tile=2,
             max_workspace_bytes=128 * 1024 * 1024,
         )
         self.assertEqual(
             candidates,
-            [18, 16, 36, 33, 72, 66, 144, 159],
+            [44, 48, 72, 66, 144, 159, 288, 318],
         )
         self.assertLessEqual(len(candidates), config.triton.num_decompose_k_splits)
         self.assertLessEqual(len(candidates), 8)
@@ -2934,31 +2933,16 @@ class TestMaxAutotune(TestCase):
         self.assertNotIn(10494, candidates)
 
         get_k_splits.cache_clear()
-        one_cta_candidates = get_k_splits(
-            80,
-            72,
-            1_343_232,
-            num_sms=148,
-            ctas_per_tile=1,
-            max_workspace_bytes=128 * 1024 * 1024,
-        )
-        self.assertEqual(
-            one_cta_candidates,
-            [36, 33, 72, 66, 144, 159, 288, 318],
-        )
-
-        get_k_splits.cache_clear()
         irregular_candidates = get_k_splits(
             20,
             20,
             296_192,
             num_sms=148,
-            ctas_per_tile=2,
             max_workspace_bytes=128 * 1024 * 1024,
         )
         self.assertEqual(
             irregular_candidates,
-            [64, 89, 128, 178, 256, 356, 712, 104],
+            [178, 208, 256, 356, 712, 832, 1157, 2314],
         )
         self.assertLessEqual(len(irregular_candidates), 8)
 

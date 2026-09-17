@@ -65,17 +65,13 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         m, n, k = kernel_inputs.mnk_symbolic()
         device_properties = DeviceProperties.create(kernel_inputs.device())
-        if device_properties.type == "cuda" and device_properties.major == 10:
-            k_splits = get_k_splits(
-                m,
-                n,
-                k,
-                num_sms=device_properties.multi_processor_count,
-                ctas_per_tile=2,
-                max_workspace_bytes=128 * 1024 * 1024,
-            )
-        else:
-            k_splits = get_k_splits(m, n, k)
+        k_splits = get_k_splits(
+            m,
+            n,
+            k,
+            num_sms=device_properties.multi_processor_count,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
 
         for k_split in k_splits:
             if not V.graph.sizevars.statically_known_true(
