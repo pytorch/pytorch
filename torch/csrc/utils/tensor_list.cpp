@@ -4,11 +4,39 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_scalars.h>
 
 using namespace at;
 
 namespace torch::utils {
+
+// A fake tensor has no real storage, so the default tolist() (which reads the
+// data pointer) does not work. Recurse with item() instead, which dispatches
+// through the active fake mode rather than touching storage.
+// returns python object matching item(), constant int/float or
+// symint/symfloat/symbool depending on input
+//
+// non constant data will return unbacked symint if allow_scalar_outputs else
+// raise error
+PyObject* fake_tensor_to_list(const Tensor& tensor) {
+  if (tensor.dim() == 0) {
+    return py::cast(tensor.item()).release().ptr();
+  }
+  auto n = tensor.size(0);
+  auto list = THPObjectPtr(PyList_New(n));
+  if (!list)
+    throw python_error();
+  for (const auto i : c10::irange(n)) {
+    Tensor elem = tensor.select(0, i);
+    PyObject* obj = tensor.dim() == 1 ? py::cast(elem.item()).release().ptr()
+                                      : fake_tensor_to_list(elem);
+    if (!obj)
+      throw python_error();
+    PyList_SET_ITEM(list.get(), i, obj);
+  }
+  return list.release();
+}
 
 static PyObject* recursive_to_list(
     const char* data,
@@ -38,13 +66,16 @@ static PyObject* recursive_to_list(
   return list.release();
 }
 
-const Tensor& recursive_unwrap(const Tensor& tensor) {
+static const Tensor& recursive_unwrap(const Tensor& tensor) {
   if (auto* wrapper = at::functorch::maybeGetTensorWrapper(tensor))
     return recursive_unwrap(wrapper->value());
   return tensor;
 }
 
 PyObject* tensor_to_list(const Tensor& tensor) {
+  if (tensor.is_fake()) {
+    return fake_tensor_to_list(tensor);
+  }
   {
     py::object pytensor =
         py::reinterpret_steal<py::object>(THPVariable_Wrap(tensor));
