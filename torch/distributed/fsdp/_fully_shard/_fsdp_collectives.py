@@ -116,7 +116,7 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> dist.Work | None:
-        return dist.all_gather_into_tensor(
+        return dist.all_gather_single(
             output_tensor,
             input_tensor,
             group=group,
@@ -135,7 +135,7 @@ class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> dist.Work | None:
-        return dist.all_gather_into_tensor(
+        return dist.all_gather_single(
             output_tensor,
             input_tensor,
             group=group,
@@ -164,7 +164,7 @@ class SymmMemAllGather(SymmMemAllocMixin, AllGather):
         # use its optimized all-gather implementation for symmetric memory:
         # - Copy Engine All-Gather (when zero-CTA policy is enabled)
         # - Symmetric Kernel All-Gather (when zero-CTA policy is not enabled)
-        return dist.all_gather_into_tensor(
+        return dist.all_gather_single(
             output_tensor,
             input_tensor,
             group=group,
@@ -180,8 +180,8 @@ class DefaultReduceScatter(DefaultAllocMixin, ReduceScatter):
         group: dist.ProcessGroup,
         op: _ReduceOp,
         async_op: bool = False,
-    ) -> dist.Work:
-        return dist.reduce_scatter_tensor(
+    ) -> dist.Work | None:
+        return dist.reduce_scatter_single(
             output=output_tensor,
             input=input_tensor,
             group=group,
@@ -201,8 +201,8 @@ class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
         group: dist.ProcessGroup,
         op: _ReduceOp,
         async_op: bool = False,
-    ) -> dist.Work:
-        return dist.reduce_scatter_tensor(
+    ) -> dist.Work | None:
+        return dist.reduce_scatter_single(
             output=output_tensor,
             input=input_tensor,
             group=group,
@@ -231,7 +231,7 @@ class SymmMemReduceScatter(SymmMemAllocMixin, ReduceScatter):
         symm_mem.rendezvous(output_tensor, group=group.group_name)
         # Calling regular reduce-scatter would already cause libraries like NCCL to
         # use its optimized reduce-scatter implementation for symmetric memory
-        return dist.reduce_scatter_tensor(
+        return dist.reduce_scatter_single(
             output=output_tensor,
             input=input_tensor,
             group=group,
@@ -495,7 +495,7 @@ def foreach_all_gather_copy_out(
         shard_dim = fsdp_param.fsdp_placement.dim
 
         with torch.autograd._unsafe_preserve_version_counter(
-            tuple(fsdp_param.all_gather_outputs)
+            tuple(t for t in fsdp_param.all_gather_outputs if not t.is_inference())
         ):
             for param_all_gather_output, target_all_gather_output in zip(
                 param_all_gather_outputs, fsdp_param.all_gather_outputs
@@ -625,7 +625,7 @@ def foreach_reduce(
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
-            if gradient_divide_factor is not None:
+            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
                 reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
             else:
                 reduce_output.copy_(reduce_scatter_input)

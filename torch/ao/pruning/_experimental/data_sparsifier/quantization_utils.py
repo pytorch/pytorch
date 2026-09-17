@@ -35,15 +35,15 @@ def post_training_sparse_quantize(
 
     Args:
         - model (nn.Module)
-            model whose embeddings needs to be sparsified
+            model whose embeddings need to be sparsified
         - data_sparsifier_class (type of data sparsifier)
             Type of sparsification that needs to be applied to model
         - sparsify_first (bool)
             if true, sparsifies first and then quantizes
             otherwise, quantizes first and then sparsifies.
         - select_embeddings (List of Embedding modules)
-            List of embedding modules to in the model to be sparsified & quantized.
-            If None, all embedding modules with be sparsified
+            List of embedding modules in the model to be sparsified & quantized.
+            If None, all embedding modules will be sparsified
         - sparse_config (Dict)
             config that will be passed to the constructor of data sparsifier object.
 

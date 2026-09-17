@@ -9,7 +9,7 @@ import torch
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Dim, draft_export, export
-from torch.export._draft_export import FailureType
+from torch.export._draft_export import DraftExportReport, FailureReport, FailureType
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
@@ -33,6 +33,34 @@ class TestDraftExport(TestCase):
 
     def tearDown(self):
         return
+
+    def test_report_warning_color_is_readable_on_light_background(self):
+        report = DraftExportReport(
+            [
+                FailureReport(
+                    FailureType.MISSING_FAKE_KERNEL,
+                    {"op": "mylib.foo.default"},
+                )
+            ],
+            {},
+            {},
+            {},
+        )
+
+        rendered = str(report)
+        self.assertIn("\033[31m", rendered)
+        self.assertNotIn("\033[93m", rendered)
+        self.assertLess(
+            rendered.index("\033[0m"),
+            rendered.index("1. Missing fake kernel."),
+        )
+
+    def test_report_success_color_is_readable_on_light_background(self):
+        report = DraftExportReport([], {}, {}, {})
+
+        rendered = str(report)
+        self.assertIn("\033[32m", rendered)
+        self.assertNotIn("\033[92m", rendered)
 
     def test_retry_on_constraint_violation_uses_dim_auto(self):
         class M(torch.nn.Module):
@@ -69,6 +97,28 @@ class TestDraftExport(TestCase):
         self.assertEqual(getattr(second_dim, "min", None), first_dim.min)
         self.assertEqual(getattr(second_dim, "max", None), first_dim.max)
         self.assertIn("AUTO", repr(second_dim))
+
+    def test_shared_storage_parameters_with_offset(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                base = torch.randn(12)
+                self.p0 = torch.nn.Parameter(base[:6].view(2, 3))
+                self.p1 = torch.nn.Parameter(base[6:].view(2, 3))
+
+            def forward(self, x):
+                return x + self.p0.sum() + self.p1.sum()
+
+        mod = M()
+        x = torch.randn(2, 3)
+
+        ep = draft_export(
+            mod,
+            (x,),
+            dynamic_shapes={"x": {0: Dim("batch", min=1, max=4)}},
+        )
+        self.assertTrue(ep._report.successful())
+        self.assertEqual(ep.module()(x), mod(x))
 
     def test_missing_meta_kernel_custom_op_basic(self):
         with torch.library._scoped_library("mylib", "FRAGMENT"):

@@ -236,7 +236,7 @@ class CausalBias(torch.Tensor):
                 query, key, value, None, dropout_p, is_causal, enable_gqa
             )
             if can_use_flash_attention(sdpa_params):
-                alignment = 64 if query.device.type == "xpu" else 8
+                alignment = 1 if query.device.type == "xpu" else 8
                 og_head_size = query.size(-1)
                 og_scale = _calculate_scale(og_head_size, scale)
                 needs_padding = og_head_size % alignment != 0
@@ -309,7 +309,7 @@ def causal_upper_left(*size) -> CausalBias:
     """
     Creates an upper-left triangular causal bias.
 
-    This function generates a upper-left triangular matrix to represent causal attention bias with a
+    This function generates an upper-left triangular matrix to represent causal attention bias with a
     diagonal offset set so that the inclusive values are aligned to the upper left corner of the matrix.
     This equivalent to the `is_causal=True` argument in `scaled_dot_product_attention`.
 

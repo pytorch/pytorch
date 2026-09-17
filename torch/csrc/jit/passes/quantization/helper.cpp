@@ -281,7 +281,7 @@ static bool matchArgPattern(
 bool isWeight(Value* v) {
   bool result = matchArgPattern(
       v,
-      // ate::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
+      // aten::embedding_bag(%weight, %input, %offsets, %scale_grad_by_freq,
       // %mode_enum, %sparse, %per_sample_weights, %include_last_offset)
       AtenFuncArgs(
           {{"conv1d", 1},

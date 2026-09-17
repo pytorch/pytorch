@@ -10,7 +10,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/Resize.h>

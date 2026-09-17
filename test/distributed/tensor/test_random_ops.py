@@ -145,7 +145,9 @@ class DistTensorRandomInitTest(DTensorTestBase):
             # run a second time, to make sure that `rng`'s offset-state is advancing on the second usage
             torch.nn.init.uniform_(t1, 0.0, 1.0)
             torch.nn.init.uniform_(t2, 0.0, 1.0, rng)
-            self.assertEqual(t1.full_tensor(), t2.full_tensor(), f"Failed at {i=}")
+            self.assertEqual(
+                t1.full_tensor(), t2.full_tensor(), lambda msg: f"{msg}\nFailed at {i=}"
+            )
 
         # ensure that we do not cache the 'seed' from the first time we see it in DTensor
         # this is a behavior change, DTensor used to cache the generator state and not modify the original generator,
@@ -179,7 +181,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        gathered_local_tensors = funcol.all_gather_tensor(
+        gathered_local_tensors = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -211,7 +213,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertTrue(not random._rng_tracker.distribute_region_enabled)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
+        local_tensor = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -254,7 +256,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -315,7 +317,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -478,7 +480,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         WORLD = torch.distributed.group.WORLD
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
-        tensor_gather = funcol.all_gather_tensor(
+        tensor_gather = funcol.all_gather_single(
             spmd_dtensor.to_local(),
             gather_dim=0,
             group=WORLD,
@@ -516,7 +518,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = dropout(dtensor)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
+        local_tensor = funcol.all_gather_single(
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
@@ -546,7 +548,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             torch.distributed.tensor.randn,
         ]:
             dtensor = fn(size, device_mesh=device_mesh, placements=[Shard(1)])
-            local_tensor = funcol.all_gather_tensor(
+            local_tensor = funcol.all_gather_single(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -568,7 +570,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # we should set manual seed to the same value on all SPMD ranks
             torch.manual_seed(0)
             dtensor = fn(size, device_mesh=device_mesh, placements=[Replicate()])
-            local_tensor = funcol.all_gather_tensor(
+            local_tensor = funcol.all_gather_single(
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
@@ -730,23 +732,52 @@ class DistTensorRandomOpTest(DTensorTestBase):
         philox.seed = test_seed
         philox.seed = philox.seed.clone()
 
+    def test_run_dtensor_rng_op_rejects_non_accelerator(self):
+        """run_dtensor_rng_op only supports the current accelerator device."""
+        from torch._prims.rng_prims import run_dtensor_rng_op
+
+        with self.assertRaisesRegex(
+            RuntimeError, "run_dtensor_rng_op only supports the current accelerator"
+        ):
+            run_dtensor_rng_op(
+                0, 4, torch.ops.aten.rand_like.default, torch.empty(8, device="cpu")
+            )
+
+    @skip_unless_torch_gpu
+    def test_run_dtensor_rng_op_on_accelerator(self):
+        """run_dtensor_rng_op runs on the accelerator and advances the offset."""
+        from torch._prims.rng_prims import run_dtensor_rng_op
+        from torch.distributed.tensor._random import _PhiloxState
+
+        device_mod = torch.get_device_module(self.device_type)
+        device_mod.manual_seed(0)
+        x = torch.empty(8, device=self.device_type)
+        offset_before = _PhiloxState(device_mod.get_rng_state()).offset.clone()
+
+        out = run_dtensor_rng_op(0, 4, torch.ops.aten.rand_like.default, x)
+
+        offset_after = _PhiloxState(device_mod.get_rng_state()).offset
+        self.assertEqual(out.device.type, self.device_type)
+        self.assertEqual(offset_after, offset_before + 4)
+
 
 class DistTensorRandomOpCompileTest(DTensorTestBase):
     def _run_with_seed(self, fn, create_input, num_runs):
         """Run fn num_runs times after resetting RNG, returning results and states."""
+        device_mod = torch.get_device_module(self.device_type)
         torch.manual_seed(0)
         results = []
-        rng_states = [torch.cuda.get_rng_state()]
+        rng_states = [device_mod.get_rng_state()]
         for _ in range(num_runs):
             x = create_input()
             result = fn(x)
             results.append(result.to_local().clone())
-            rng_states.append(torch.cuda.get_rng_state())
+            rng_states.append(device_mod.get_rng_state())
         # verify RNG state advances after each call
         for i in range(len(rng_states) - 1):
             self.assertFalse(
                 torch.equal(rng_states[i], rng_states[i + 1]),
-                f"RNG state did not change between call {i} and {i + 1}",
+                lambda msg: f"{msg}\nRNG state did not change between call {i} and {i + 1}",
             )
         return results, rng_states
 
@@ -775,14 +806,14 @@ class DistTensorRandomOpCompileTest(DTensorTestBase):
             self.assertEqual(
                 eager_rng_states[i + 1],
                 compiled_rng_states[i + 1],
-                f"RNG state mismatch between eager and compiled after call {i}",
+                lambda msg: f"{msg}\nRNG state mismatch between eager and compiled after call {i}",
             )
 
     def _assert_replicate_cross_rank_equal(self, results, device_mesh):
         """Assert all ranks produced identical results (for Replicate placement)."""
         for i in range(len(results)):
             local_result = results[i]
-            gathered = funcol.all_gather_tensor(
+            gathered = funcol.all_gather_single(
                 local_result, gather_dim=0, group=(device_mesh, 0)
             ).wait()
             local_size = local_result.shape[0]
@@ -996,7 +1027,7 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         if WORLD is None:
             raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
-        weight_gather = funcol.all_gather_tensor(
+        weight_gather = funcol.all_gather_single(
             weight_local,
             gather_dim=0,
             group=WORLD,
@@ -1040,6 +1071,9 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # cross-pp-stage seeding is not simulated in local tensor mode
         "test_pipeline_parallel_manual_seed",
+        # LocalTensorMode has no rule for the run_dtensor_rng_op HigherOrderOperator
+        "test_run_dtensor_rng_op_rejects_non_accelerator",
+        "test_run_dtensor_rng_op_on_accelerator",
     ],
 )
 

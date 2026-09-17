@@ -3,16 +3,12 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/Layout.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
-#include <ATen/NamedTensorUtils.h>
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
@@ -61,8 +57,6 @@
 #include <ATen/ops/_sparse_mask_projection_native.h>
 #include <ATen/ops/sparse_resize_and_clear_native.h>
 #include <ATen/ops/sparse_resize_native.h>
-#include <ATen/ops/to_dense_native.h>
-#include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
 #include <ATen/ops/view_as_real.h>
@@ -591,9 +585,7 @@ SparseTensor& copy_sparse_wrapper_(
     bool non_blocking) {
   // TODO: Once copy_ is fully migrated to use dispatcher, handle named
   // inference using dispatcher instead of doing it everywhere
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
-    NoNamesGuard guard;
     if (!self.is_sparse() || !src.is_sparse()) {
       TORCH_CHECK(false,
           "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
@@ -603,7 +595,6 @@ SparseTensor& copy_sparse_wrapper_(
     }
     at::copy_sparse_to_sparse_(self, src, non_blocking);
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 

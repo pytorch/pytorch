@@ -49,8 +49,8 @@ def dump_chrome_trace(
         devices = ["cuda"]
 
     global synchronize
-    if devices != ["cpu"] and torch.cuda.is_available():
-        synchronize = torch.cuda.synchronize
+    if devices != ["cpu"] and torch.accelerator.is_available():
+        synchronize = torch.accelerator.synchronize
 
     if kwargs_for_f is None:
         kwargs_for_f = {}

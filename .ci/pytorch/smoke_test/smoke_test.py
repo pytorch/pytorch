@@ -348,13 +348,21 @@ def smoke_test_cuda(
                 version = imported_module._extension._check_cuda_version()
             print(f"{module['name']} CUDA: {version}")
 
-    if torch_compile_check == "enabled" and target_os in [
-        "linux",
-        "linux-aarch64",
-        "macos-arm64",
-        "darwin",
-    ]:
+    # torch.compile is not supported on Python 3.15+ yet (it raises at runtime),
+    # so skip the compile smoke test there instead of failing the wheel test.
+    if (
+        torch_compile_check == "enabled"
+        and sys.version_info < (3, 15)
+        and target_os
+        in [
+            "linux",
+            "linux-aarch64",
+            "macos-arm64",
+            "darwin",
+        ]
+    ):
         smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
+        smoke_test_compile_dynamic_indirect_indexing()
 
     if torch.cuda.is_available():
         if torch.version.cuda != gpu_arch_ver:
@@ -519,6 +527,57 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x = torch.rand(64, 1, 28, 28, device=device).type(torch.float32)
     model = Net().to(device=device)
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
+
+
+def smoke_test_compile_dynamic_indirect_indexing(device: str = "cuda") -> None:
+    """Regression check for gh-194490: gather/scatter around a loop reduction
+    emitted Triton whose epilogue read a loop-local temp. Only reproduces on the
+    second compile, once a differing shape triggers automatic dynamic shapes.
+    """
+    # fix (gh-194786) is in 2.14. This skip should be removed if also cherry-picked
+    # into prior versions.
+    from torch.torch_version import TorchVersion
+
+    if TorchVersion(torch.__version__) < (2, 14):
+        print(f"Skipping dynamic indirect indexing test on torch {torch.__version__}")
+        return
+
+    if not torch.cuda.is_available():
+        print("CUDA is not available, skipping dynamic indirect indexing test")
+        return
+
+    def normalize_selected(
+        x: torch.Tensor, buf: torch.Tensor, idx: torch.Tensor, beta: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        idx = idx.unsqueeze(-1)
+        selected = torch.gather(buf, -2, idx)
+        stat = x.float().pow(2).mean(dim=-1, keepdim=True)
+        updated = torch.where(
+            (1.0 - beta).abs() >= 0.5,
+            stat,
+            torch.lerp(selected, stat, 1.0 - beta),
+        )
+        normalized = x.float() / (updated.sqrt() + 1e-8)
+        return normalized, buf.scatter(-2, idx, updated)
+
+    compiled = torch.compile(normalize_selected, fullgraph=True)
+
+    # Second shape forces automatic dynamic; 4096 keeps the reduction non-persistent.
+    for rows in (64, 32):
+        k = rows // 4
+        torch.manual_seed(0)
+        x = torch.randn(2, k, 4096, device=device, dtype=torch.bfloat16)
+        buf = torch.randn(2, rows, 1, device=device, dtype=torch.float32).abs()
+        idx = torch.stack([torch.randperm(rows, device=device)[:k] for _ in range(2)])
+        beta = torch.tensor(0.95, device=device)
+
+        print(f"Testing compile with dynamic indirect indexing, rows={rows}")
+        expected = normalize_selected(x, buf, idx, beta)
+        actual = compiled(x, buf, idx, beta)
+        torch.cuda.synchronize()
+        # Loose: eager/Inductor differ by reduction order; codegen success is the check.
+        for got, want in zip(actual, expected):
+            torch.testing.assert_close(got, want, rtol=1e-4, atol=1e-4)
 
 
 def smoke_test_nvshmem() -> None:

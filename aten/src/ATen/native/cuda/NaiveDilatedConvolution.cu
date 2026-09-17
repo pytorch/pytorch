@@ -492,7 +492,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cuda(
       weight_,
       undefined,
       grad_output_,
-      grad_input,
+      grad_input_,
       grad_weight,
       grad_bias,
       kernel_size,
@@ -538,7 +538,7 @@ Tensor slow_conv_dilated3d_cuda(
   Tensor output_ = (is_batch ? output : output.unsqueeze(0));
 
   slow_conv_dilated_all_cuda_template<3>(
-      output,
+      output_,
       input_,
       weight_,
       bias_,
@@ -598,7 +598,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cuda(
       weight_,
       undefined,
       grad_output_,
-      grad_input,
+      grad_input_,
       grad_weight,
       grad_bias,
       kernel_size,

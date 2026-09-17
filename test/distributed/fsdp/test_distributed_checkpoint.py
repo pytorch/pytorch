@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 from torch import distributed as dist
@@ -12,9 +13,12 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, SkipModel
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -40,6 +44,8 @@ _DISTRIBUTED_STATE_DICT_IMPLS = (
 
 
 class TestDistributedCheckpoint(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         if torch.accelerator.is_available():
@@ -48,10 +54,22 @@ class TestDistributedCheckpoint(FSDPTestContinuous):
                 return gpu_cnt
         return 2
 
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/144918"
+    )
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/113936"
+    )
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/145807"
+    )
+    @unittest.skipIf(
+        IS_LINUX or TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/113937"
+    )
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
     @parametrize("state_dict_type", _DISTRIBUTED_STATE_DICT_IMPLS)
-    def test_distributed_checkpoint(self, state_dict_type) -> None:
+    def test_distributed_checkpoint(self, device, state_dict_type) -> None:
         with enable_wrap(wrapper_cls=FSDP):
             torch.manual_seed(100)
             model = wrap(SkipModel(double_nest=True))
@@ -95,9 +113,8 @@ class TestDistributedCheckpoint(FSDPTestContinuous):
         # TODO: add resharding test case.
 
 
-devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
-    TestDistributedCheckpoint, globals(), only_for=devices, allow_xpu=True
+    TestDistributedCheckpoint, globals(), except_for=("cpu",), allow_xpu=True
 )
 if __name__ == "__main__":
     run_tests()

@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     run_tests,
     skipIfCrossRef,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -107,9 +108,9 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(tangents_1, [1, 0])
         mm_1: "f32[2, 3]" = torch.ops.aten.mm.default(transpose_1, primals_3);  transpose_1 = primals_3 = None
         transpose_2: "f32[3, 2]" = torch.ops.prims.transpose.default(mm_1, [1, 0]);  mm_1 = None
@@ -361,9 +362,9 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, primals_4);  add = None
         mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, primals_4);  tangents_1 = primals_4 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(mul_3, [1, 0])
@@ -443,15 +444,15 @@ class inner_f(torch.nn.Module):
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_5, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
-        mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
-        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
-        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
+        broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(primals_2, [4, 2], [1]);  primals_2 = None
+        mul_1: "f32[4, 2]" = torch.ops.prims.mul.default(broadcast_in_dim, 1.0);  broadcast_in_dim = None
+        add: "f32[4, 2]" = torch.ops.prims.add.default(mul, mul_1);  mul = mul_1 = None
         transpose_1: "f32[3, 4]" = torch.ops.prims.transpose.default(primals_3, [1, 0]);  primals_3 = None
         mm_1: "f32[4, 4]" = torch.ops.aten.mm.default(primals_5, transpose_1);  transpose_1 = None
         mul_2: "f32[4, 4]" = torch.ops.prims.mul.default(mm_1, 1.0);  mm_1 = None
-        mul_3: "f32[4]" = torch.ops.prims.mul.default(primals_4, 1.0);  primals_4 = None
-        broadcast_in_dim_1: "f32[4, 4]" = torch.ops.prims.broadcast_in_dim.default(mul_3, [4, 4], [1]);  mul_3 = None
-        add_1: "f32[4, 4]" = torch.ops.prims.add.default(mul_2, broadcast_in_dim_1);  mul_2 = broadcast_in_dim_1 = None
+        broadcast_in_dim_1: "f32[4, 4]" = torch.ops.prims.broadcast_in_dim.default(primals_4, [4, 4], [1]);  primals_4 = None
+        mul_3: "f32[4, 4]" = torch.ops.prims.mul.default(broadcast_in_dim_1, 1.0);  broadcast_in_dim_1 = None
+        add_1: "f32[4, 4]" = torch.ops.prims.add.default(mul_2, mul_3);  mul_2 = mul_3 = None
         transpose_2: "f32[4, 4]" = torch.ops.prims.transpose.default(tangents_2, [1, 0])
         mm_2: "f32[4, 3]" = torch.ops.aten.mm.default(transpose_2, primals_5);  transpose_2 = None
         transpose_3: "f32[3, 4]" = torch.ops.prims.transpose.default(mm_2, [1, 0]);  mm_2 = None
@@ -1175,6 +1176,7 @@ class inner_f(torch.nn.Module):
                 )
         self.assertEqual(joint._aot_state.fw_metadata.static_input_indices, [0, 1])
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/182599")
     def test_no_annotation_on_gradient_acc_nodes(self):
         """Test basic linear module with aot_export_joint_with_descriptors"""
 

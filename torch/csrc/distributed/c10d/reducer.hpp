@@ -163,7 +163,7 @@ class TORCH_API Reducer {
   // a tensor where index i = 1 if the Variable with that index has been used.
   at::Tensor get_local_used_map_on_device() const;
 
-  // An function for users to set sample_rate of collecting
+  // A function for users to set sample_rate of collecting
   // runtime stats. The time stats will be recorded for the
   // first 10 iterations, after 10 iterations time stats will be
   // recorded once every "sample_rate" training iterations.
@@ -200,6 +200,19 @@ class TORCH_API Reducer {
 
   // Resets reducer state.
   void reset_state();
+
+  // Requires the caller to manually finalize backward after all buckets are
+  // ready. Cannot be changed after forward while backward is expected or in
+  // progress.
+  void set_manual_finalization_required(bool required);
+
+  // Returns whether the current backward must complete before the caller can
+  // manually finalize it.
+  bool should_finalize_after_backward() const;
+
+  // Validates that manual backward finalization is required and all buckets
+  // are ready, then prepares and finalizes backward.
+  void finalize_backward_manual();
 
  protected:
   // Forward declaration.
@@ -284,6 +297,8 @@ class TORCH_API Reducer {
   void mark_bucket_ready(size_t bucket_index);
 
   void finalize_bucket_dense(Bucket& bucket);
+
+  void prepare_for_backward_finalization();
 
   void finalize_backward();
 
@@ -477,6 +492,10 @@ class TORCH_API Reducer {
 
   // Following variables are to help build dynamic bucket order
   bool has_rebuilt_bucket_;
+
+  // When true, the caller must manually finalize backward.
+  bool is_manual_finalization_required_{false};
+
   std::vector<at::Tensor> rebuilt_params_;
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;

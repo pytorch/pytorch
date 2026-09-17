@@ -125,7 +125,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
       optTypeMetaToScalarType(input.options().dtype_opt()),
       input.options().device_opt());
 
-  return std::make_tuple(dst, mean, rstd);
+  return std::make_tuple(std::move(dst), std::move(mean), std::move(rstd));
 }
 
 

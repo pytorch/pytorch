@@ -60,7 +60,7 @@ class Wishart(ExponentialFamily):
     [1] Wang, Z., Wu, Y. and Chu, H., 2018. `On equivalence of the LKJ distribution and the restricted Wishart distribution`.
     [2] Sawyer, S., 2007. `Wishart Distributions and Inverse-Wishart Sampling`.
     [3] Anderson, T. W., 2003. `An Introduction to Multivariate Statistical Analysis (3rd ed.)`.
-    [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a SampleCovariance Matrix`. JASA, 61(313):199-203.
+    [4] Odell, P. L. & Feiveson, A. H., 1966. `A Numerical Procedure to Generate a Sample Covariance Matrix`. JASA, 61(313):199-203.
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
 
@@ -266,7 +266,7 @@ class Wishart(ExponentialFamily):
         sample_shape = torch.Size(sample_shape)
         sample = self._bartlett_sampling(sample_shape)
 
-        # Below part is to improve numerical stability temporally and should be removed in the future
+        # Below part is to improve numerical stability temporarily and should be removed in the future
         is_singular = self.support.check(sample)
         if self._batch_shape:
             is_singular = is_singular.amax(self._batch_dims)

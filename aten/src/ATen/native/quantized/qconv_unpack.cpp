@@ -9,6 +9,7 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <tuple>
+#include <utility>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/List.h>
@@ -48,8 +49,11 @@ class QConvUnpackWeightsInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       return packed_weight->unpack();
     }
 #endif
@@ -65,7 +69,8 @@ class QConvUnpackWeightsInt8 final {
 #endif
 
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN
+        || ctx.qEngine() == at::QEngine::X86) {
       return packed_weight->unpack();
     }
 #endif
@@ -85,11 +90,15 @@ class QConv1dUnpackWeightsInt8 final {
     at::Tensor weight;
     std::optional<at::Tensor> bias;
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       std::tie(weight, bias) = packed_weight->unpack();
       weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, std::optional<at::Tensor>>(weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(
+          std::move(weight), std::move(bias));
     }
 #endif
 
@@ -98,16 +107,19 @@ class QConv1dUnpackWeightsInt8 final {
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
       new_weight = new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(
+          std::move(new_weight), std::move(bias));
     }
 #endif
 
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN ||
+        ctx.qEngine() == at::QEngine::X86) {
       std::tie(weight, bias) = packed_weight->unpack();
       at::Tensor new_weight = weight.clone();
       new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(
+          std::move(new_weight), std::move(bias));
     }
 #endif
 

@@ -14,9 +14,9 @@ TEST(TestVecHalf, TestConversion) {
     float x = torch::headeronly::vec::half2float_scalar(u16);
     EXPECT_EQ(
         u16, torch::headeronly::detail::fp16_ieee_from_fp32_value(f32s[i]))
-        << "Test failed for float to uint16 " << f32s[i] << "\n";
+        << "Test failed for float to uint16 " << f32s[i] << '\n';
     EXPECT_EQ(x, torch::headeronly::detail::fp16_ieee_to_fp32_value(u16))
-        << "Test failed for uint16 to float " << u16 << "\n";
+        << "Test failed for uint16 to float " << u16 << '\n';
 #endif
   }
 }

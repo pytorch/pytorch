@@ -71,7 +71,7 @@ class ScriptDict final {
       f = true;
     }
     s << '}';
-    return s.str();
+    return std::move(s).str();
   }
 
   // Return an iterator over the keys of the dictionary.

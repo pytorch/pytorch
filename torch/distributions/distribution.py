@@ -100,7 +100,7 @@ class Distribution:
 
         Returns:
             New distribution instance with batch dimensions expanded to
-            `batch_size`.
+            `batch_shape`.
         """
         raise NotImplementedError
 

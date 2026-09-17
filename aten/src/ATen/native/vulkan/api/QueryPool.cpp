@@ -175,7 +175,7 @@ static std::string stringize(const VkExtent3D& extents) {
   std::stringstream ss;
   ss << '{' << extents.width << ", " << extents.height << ", " << extents.depth
      << '}';
-  return ss.str();
+  return std::move(ss).str();
 }
 
 std::string QueryPool::generate_string_report() {
@@ -210,7 +210,7 @@ std::string QueryPool::generate_string_report() {
     ss << std::endl;
   }
 
-  return ss.str();
+  return std::move(ss).str();
 }
 
 void QueryPool::print_results() {

@@ -150,8 +150,7 @@ if __name__ == "__main__":
         ]
         shutil.copyfile(ops_yaml, backup)
         with open(ops_yaml, "a") as f:
-            for op in _OPERATORS:
-                f.write(f"- {op}\n")
+            f.writelines(f"- {op}\n" for op in _OPERATORS)
     elif command == "shutdown":
         for file in _MODELS:
             if os.path.isfile(file):
