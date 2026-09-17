@@ -75,6 +75,21 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
+    def test_guard_fact_render(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
+        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
+        # No rendered code falls back to <guard_type>, a value is appended, and
+        # the dropped label pads to the width of "enforced" so lines align.
+        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
+        self.assertEqual(
+            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        )
+        # Several code parts are joined; no source drops the " on ..." suffix.
+        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
+        self.assertEqual(joined.render(), "[enforced] a ; b")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
@@ -1630,13 +1645,14 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "do not match the traced model"):
             f_c(renamed, x)
 
-    def test_example_input_inplace_mutation_not_restored(self):
-        # Capture EXECUTES fn once on the example inputs (invariant 3), so an in-place
-        # mutation fn performs on its example user input happens at capture time and is
-        # NOT restored -- only .grad is snapshotted/restored. Pin this surprising contract
-        # so it stays covered: the example tensor reflects the mutation afterward.
+    def test_example_input_is_not_mutated_by_capture(self):
+        # Capture traces fn on FAKE tensors (invariant 3), so an in-place mutation fn
+        # performs on its example user input never reaches the caller's tensor; the
+        # served artifact is what mutates a real input, exactly once per call.
         scratch = torch.zeros(4)
-        torch.compiler.precompile(lambda a: a.add_(1.0), scratch)
+        python_code, cache = torch.compiler.precompile(lambda a: a.add_(1.0), scratch)
+        self.assertEqual(scratch, torch.zeros(4))
+        torch.compiler.precompile.load(python_code, cache)(scratch)
         self.assertEqual(scratch, torch.ones(4))
 
     @parametrize("path", ("cached", "inlined", "eager"))
@@ -2055,12 +2071,132 @@ class TestPrecompile(TestCase):
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know is refused rather than baked from the example. The distinct
+        # fake-tensor failure paths, each through the public entry point: .item()
+        # (DataDependentOutputException), .nonzero() (DynamicOutputShapeException),
+        # and an op with no meta/fake kernel (UnsupportedOperatorException for a
+        # library op, a RuntimeError naming the missing fake impl for a custom_op).
+        from torch.library import _scoped_library
+
+        model = torch.nn.Linear(4, 4)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        def nonzero(m, x):
+            return m(x)[x[:, 0].nonzero().flatten()]
+
+        for fn in (items, nonzero):
+            with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
+                torch.compiler.precompile(fn, model, torch.randn(3, 4), backend="eager")
+
+        # Both op registrations are global, so undo them: the scoped library takes
+        # its own op with it, and the custom_op's library is destroyed in finally.
+        with _scoped_library("mlprecompile", "FRAGMENT") as lib:
+            lib.define("no_meta(Tensor x) -> Tensor")
+            lib.impl("no_meta", lambda x: x * 2, "CPU")
+
+            @torch.library.custom_op("mlprecompile::no_fake_impl", mutates_args=())
+            def no_fake_impl(x: torch.Tensor) -> torch.Tensor:
+                return x * 2
+
+            try:
+                for op in (torch.ops.mlprecompile.no_meta, no_fake_impl):
+                    with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                        torch.compiler.precompile(
+                            lambda m, x, op=op: op(m(x)),
+                            model,
+                            torch.randn(3, 4),
+                            backend="eager",
+                        )
+            finally:
+                no_fake_impl._lib._destroy()
+
+    def test_capture_refuses_a_data_ptr_read(self):
+        # Capture traces on fake tensors, which have no real memory behind them, so a
+        # .data_ptr() read in fn (or in a kernel that dereferences one) could only
+        # return a meaningless value: the capture fake mode is built with
+        # fake_tensor_allow_unsafe_data_ptr_access off, which turns the read into a
+        # refusal at capture time.
+        model = torch.nn.Linear(4, 4)
+
+        def reads_pointer(m, x):
+            x.data_ptr()
+            return m(x)
+
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            torch.compiler.precompile(
+                reads_pointer, model, torch.randn(3, 4), backend="eager"
+            )
+
+    def test_unfakeifiable_input_refused_without_clobbering_grad(self):
+        # Fakeification runs INSIDE the .grad save/restore window, so an example input
+        # the meta converter cannot represent (a quantized tensor) is refused with a
+        # PrecompileError naming it, and the caller's example .grad is put back -- the
+        # same object, not a copy.
+        model = torch.nn.Linear(3, 3)
+        grad = torch.ones_like(model.weight)
+        model.weight.grad = grad
+        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+        ):
+            torch.compiler.precompile(
+                lambda m, t: m(t.dequantize()), model, q, backend="eager"
+            )
+        self.assertIs(model.weight.grad, grad)
+
+    def test_user_runtime_error_from_fn_propagates_unchanged(self):
+        # Capture catches EVERY RuntimeError out of the trace to relabel the two it
+        # owns (a missing fake impl, a data-pointer read), so a RuntimeError raised by
+        # fn itself must fall through the substring checks and reach the caller with
+        # its ORIGINAL message, not be relabeled as a missing meta/fake kernel.
+        model = torch.nn.Linear(4, 4)
+
+        def raises(m, x):
+            raise RuntimeError("my own capture-time failure")
+
+        args = (raises, model, torch.randn(3, 4))
+        with self.assertRaisesRegex(RuntimeError, "my own capture-time failure"):
+            torch.compiler.precompile(*args, backend="eager")
+        try:
+            torch.compiler.precompile(*args, backend="eager")
+        except RuntimeError as e:
+            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
+            self.assertNotIsInstance(e, PrecompileError)
+            self.assertNotIn("no meta/fake kernel", str(e))
+
+    def test_callable_api_traces_a_backward_under_ambient_no_grad(self):
+        # The callable API keeps grad enabled around the trace whatever the caller's
+        # ambient mode, so a training step captured inside no_grad still carries
+        # its backward and the artifact does not depend on the call site: the served
+        # gradients match the eager ones, not merely being present.
+        torch.manual_seed(0)
+        model = torch.nn.Linear(4, 2)
+        x, t = torch.randn(3, 4), torch.randn(3, 2)
+
+        def step(m, x, t):
+            torch.nn.functional.mse_loss(m(x), t).backward()
+
+        with torch.no_grad():
+            python_code, cache = torch.compiler.precompile(
+                step, model, x, t, backend="eager"
+            )
+        torch.compiler.precompile.load(python_code, cache)(model, x, t)
+        self.assertIsNotNone(model.weight.grad)
+        ref = torch.nn.Linear(4, 2)
+        ref.load_state_dict(model.state_dict())
+        step(ref, x, t)
+        self.assertEqual(model.weight.grad, ref.weight.grad)
+        self.assertEqual(model.bias.grad, ref.bias.grad)
+
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
-
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y
@@ -2425,7 +2561,8 @@ class TestPrecompileNumerics(TestCase):
     def test_batchnorm_train_buffer_mutation(self, device):
         # A stateful module (BatchNorm in training mode) mutates its running stats.
         # precompile reflects that onto the runtime model's buffers and matches eager
-        # -- the mutation handling comes from AOTAutograd's codegen.
+        # -- the mutation handling comes from AOTAutograd's codegen -- while CAPTURE
+        # leaves the example model's buffers alone.
         def fresh():
             torch.manual_seed(0)
             m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.BatchNorm1d(4))
@@ -2433,7 +2570,17 @@ class TestPrecompileNumerics(TestCase):
             return m.to(device)
 
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), fresh(), x)
+        example = fresh()
+        bn = example[1]
+        pre_rm = bn.running_mean.clone()
+        pre_rv = bn.running_var.clone()
+        pre_nbt = bn.num_batches_tracked.clone()
+        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), example, x)
+        # Capture reparametrizes FAKE params/buffers in (invariant 3), so the example
+        # module's running stats must not move; a real-tensor trace advanced them.
+        self.assertEqual(bn.running_mean, pre_rm)
+        self.assertEqual(bn.running_var, pre_rv)
+        self.assertEqual(bn.num_batches_tracked, pre_nbt)
 
         ref = fresh()
         ref_out = ref(x)
@@ -2456,7 +2603,8 @@ class TestPrecompileNumerics(TestCase):
         # mutated inputs go through AOTAutograd's now-codegen'd synthetic-base wrapper.
         fn = lambda a, b: (a.mul_(2.0), a + b)[1]  # noqa: E731
         t = make_tensor((4,), device=device, dtype=torch.float32)
-        # Clone references BEFORE precompile: capture runs fn once, mutating t.
+        # Capture traces on fakes and leaves t alone; only the served artifact mutates
+        # its input, so give each run its own clone of t.
         ref = t.clone()
         ref_out = fn(ref, ref)
         run = t.clone()
