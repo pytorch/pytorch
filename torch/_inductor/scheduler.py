@@ -18,7 +18,16 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import Any, Generic, Literal, overload, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import (
+    Any,
+    Generic,
+    Literal,
+    overload,
+    Protocol,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+)
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -110,6 +119,252 @@ def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
     """Names of real reads/writes, excluding WeakDep (ordering-only deps that
     do not actually read or write the buffer)."""
     return OrderedSet(dep.name for dep in deps if not isinstance(dep, WeakDep))
+
+
+class AffineProofContext(Protocol):
+    """Optional symbolic facts supplied by the caller's shape environment."""
+
+    def simplify(self, expr: sympy.Expr) -> sympy.Expr: ...
+
+    def statically_known_equals(self, left: Any, right: Any) -> bool: ...
+
+    def statically_known_geq(self, left: Any, right: Any) -> bool: ...
+
+    def statically_known_leq(self, left: Any, right: Any) -> bool: ...
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryDepMatch:
+    """An exact producer write and consumer read relation."""
+
+    write: MemoryDep
+    read: MemoryDep
+
+
+@dataclasses.dataclass(frozen=True)
+class IdentityTranslationProof:
+    """Facts proved for one or more dense staged access relations."""
+
+    matched_dependencies: tuple[MemoryDepMatch, ...]
+    compatible_extents: tuple[tuple[sympy.Expr, sympy.Expr], ...]
+    translation: tuple[sympy.Expr, ...]
+
+    @property
+    def matches(self) -> tuple[MemoryDepMatch, ...]:
+        return self.matched_dependencies
+
+
+def _affine_proof_simplify(
+    expr: sympy.Expr, context: AffineProofContext | None
+) -> sympy.Expr:
+    return context.simplify(expr) if context is not None else sympy.simplify(expr)
+
+
+def _affine_proof_equal(
+    left: sympy.Expr, right: sympy.Expr, context: AffineProofContext | None
+) -> bool:
+    if left == right:
+        return True
+    difference = _affine_proof_simplify(left - right, context)
+    if difference == 0:
+        return True
+    return bool(
+        context is not None and context.statically_known_equals(left, right)
+    )
+
+
+def _affine_proof_geq(
+    left: sympy.Expr, right: sympy.Expr, context: AffineProofContext | None
+) -> bool:
+    if left == right:
+        return True
+    difference = _affine_proof_simplify(left - right, context)
+    if difference.is_nonnegative is True:
+        return True
+    return bool(
+        context is not None and context.statically_known_geq(left, right)
+    )
+
+
+def _affine_proof_leq(
+    left: sympy.Expr, right: sympy.Expr, context: AffineProofContext | None
+) -> bool:
+    if left == right:
+        return True
+    difference = _affine_proof_simplify(left - right, context)
+    if difference.is_nonpositive is True:
+        return True
+    return bool(
+        context is not None and context.statically_known_leq(left, right)
+    )
+
+
+def _affine_proof_strides(
+    dep: MemoryDep, context: AffineProofContext | None
+) -> tuple[sympy.Expr, ...] | None:
+    """Extract and validate ordinary affine coefficients from an access."""
+    zero = {var: sympy.S.Zero for var in dep.var_names}
+    offset = sympy_subs(dep.index, zero)
+    strides = []
+    for var in dep.var_names:
+        one = dict(zero)
+        one[var] = sympy.S.One
+        strides.append(
+            _affine_proof_simplify(
+                sympy_subs(dep.index, one) - offset,
+                context,
+            )
+        )
+    reconstructed = offset + sum(
+        (stride * var for stride, var in zip(strides, dep.var_names)),
+        sympy.S.Zero,
+    )
+    if not _affine_proof_equal(reconstructed, dep.index, context):
+        return None
+    return tuple(strides)
+
+
+def _prove_identity_translation_pair(
+    producer: MemoryDep,
+    consumer: MemoryDep,
+    context: AffineProofContext | None,
+) -> IdentityTranslationProof | None:
+    if producer.name != consumer.name:
+        return None
+    if producer.mode is not None or consumer.mode is not None:
+        return None
+    if producer.is_indirect() or consumer.is_indirect():
+        return None
+    if producer.num_vars == 0 or producer.num_vars != consumer.num_vars:
+        return None
+    if len(producer.size) != producer.num_vars or len(consumer.size) != (
+        consumer.num_vars
+    ):
+        return None
+    if len(set(producer.var_names)) != producer.num_vars or len(
+        set(consumer.var_names)
+    ) != consumer.num_vars:
+        return None
+
+    producer_strides = _affine_proof_strides(producer, context)
+    consumer_strides = _affine_proof_strides(consumer, context)
+    if producer_strides is None or consumer_strides is None:
+        return None
+
+    expected_strides = tuple(
+        sympy.prod(producer.size[index + 1 :])
+        for index in range(producer.num_vars)
+    )
+    if any(
+        not _affine_proof_equal(coefficient, expected, context)
+        for coefficient, expected in zip(producer_strides, expected_strides)
+    ) or not _affine_proof_equal(
+        producer_strides[-1], sympy.S.One, context
+    ):
+        return None
+    if any(
+        not _affine_proof_equal(producer_coefficient, consumer_coefficient, context)
+        for producer_coefficient, consumer_coefficient in zip(
+            producer_strides, consumer_strides
+        )
+    ):
+        return None
+    if any(
+        not _affine_proof_geq(producer_extent, consumer_extent, context)
+        for producer_extent, consumer_extent in zip(producer.size, consumer.size)
+    ):
+        return None
+
+    delta = _affine_proof_simplify(
+        consumer.get_offset() - producer.get_offset(), context
+    )
+    if not _affine_proof_geq(delta, sympy.S.Zero, context):
+        return None
+
+    remaining = delta
+    translation_reversed: list[sympy.Expr] = []
+    for axis in reversed(range(producer.num_vars)):
+        stride = producer_strides[axis]
+        if not _affine_proof_geq(stride, sympy.S.One, context):
+            return None
+        remainder = _affine_proof_simplify(
+            sympy.Mod(remaining, stride), context
+        )
+        if not _affine_proof_equal(remainder, sympy.S.Zero, context):
+            return None
+        quotient = _affine_proof_simplify(FloorDiv(remaining, stride), context)
+        digit = _affine_proof_simplify(
+            sympy.Mod(quotient, producer.size[axis]), context
+        )
+        if not _affine_proof_geq(digit, sympy.S.Zero, context):
+            return None
+        if not _affine_proof_leq(
+            consumer.size[axis] + digit, producer.size[axis], context
+        ):
+            return None
+        translation_reversed.append(digit)
+        remaining = _affine_proof_simplify(
+            remaining - digit * stride, context
+        )
+
+    if not _affine_proof_equal(remaining, sympy.S.Zero, context):
+        return None
+    translation = tuple(reversed(translation_reversed))
+    translated_offset = producer.get_offset() + sum(
+        (stride * offset for stride, offset in zip(producer_strides, translation)),
+        sympy.S.Zero,
+    )
+    if not _affine_proof_equal(
+        translated_offset, consumer.get_offset(), context
+    ):
+        return None
+
+    return IdentityTranslationProof(
+        matched_dependencies=(MemoryDepMatch(producer, consumer),),
+        compatible_extents=tuple(zip(producer.size, consumer.size)),
+        translation=translation,
+    )
+
+
+def prove_identity_translation(
+    source_accesses: MemoryDep | typing.Sequence[MemoryDep],
+    consumer_access: MemoryDep,
+    *,
+    context: AffineProofContext | None = None,
+) -> IdentityTranslationProof | None:
+    """Prove a dense identity-plus-translation source-to-consumer relation."""
+    if isinstance(source_accesses, MemoryDep):
+        sources = (source_accesses,)
+    else:
+        sources = tuple(source_accesses)
+    if not sources or not isinstance(consumer_access, MemoryDep):
+        return None
+    if not all(isinstance(source, MemoryDep) for source in sources):
+        return None
+
+    proofs = tuple(
+        _prove_identity_translation_pair(source, consumer_access, context)
+        for source in sources
+    )
+    if any(proof is None for proof in proofs):
+        return None
+    first = proofs[0]
+    assert first is not None
+    if any(
+        proof is None
+        or proof.translation != first.translation
+        or proof.compatible_extents != first.compatible_extents
+        for proof in proofs[1:]
+    ):
+        return None
+    return dataclasses.replace(
+        first,
+        matched_dependencies=tuple(
+            match
+            for proof in proofs
+            for match in proof.matched_dependencies  # type: ignore[union-attr]
+        ),
+    )
 
 
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
@@ -2477,274 +2732,20 @@ class SubParentAccessRelation:
         source_accesses: MemoryDep | typing.Sequence[MemoryDep],
         consumer_access: MemoryDep,
         *,
-        sizevars: Any | None = None,
+        sizevars: AffineProofContext | None = None,
     ) -> "IdentityTranslationProof | None":
-        """Prove a dense identity-plus-translation source-to-consumer relation.
-
-        The returned translation uses the convention
-        ``producer_coordinate = consumer_coordinate + translation``.  The
-        proof is deliberately independent of scheduling: it compares only the
-        dependency expressions and their iteration extents.  ``sizevars`` may
-        be supplied by a caller already inside a symbolic-shape context; when
-        it is omitted, only identities that SymPy can prove directly are
-        accepted.
-
-        A valid relation has the same row-major affine strides on both sides,
-        a unit innermost stride, and a non-negative per-axis translation whose
-        translated consumer domain is contained in the producer domain.  The
-        per-axis bounds are what prevent a feature-axis shift from silently
-        crossing into another row.
-
-        Multiple source accesses are allowed only when every one proves the
-        same translation.  This keeps an ambiguous or partially matching
-        writer from becoming a later fusion fact.
-        """
-        sizevars = cls._proof_sizevars(sizevars)
-        if isinstance(source_accesses, MemoryDep):
-            sources = (source_accesses,)
-        else:
-            sources = tuple(source_accesses)
-        if not sources or not isinstance(consumer_access, MemoryDep):
-            return None
-        if not all(isinstance(source, MemoryDep) for source in sources):
-            return None
-
-        proofs = tuple(
-            cls._prove_identity_translation_pair(source, consumer_access, sizevars)
-            for source in sources
-        )
-        if any(proof is None for proof in proofs):
-            return None
-        first = typing.cast("IdentityTranslationProof", proofs[0])
-        if any(
-            proof.translation != first.translation
-            or proof.compatible_extents != first.compatible_extents
-            for proof in proofs[1:]
-            if proof is not None
-        ):
-            return None
-        return dataclasses.replace(
-            first,
-            matched_dependencies=tuple(
-                match
-                for proof in proofs
-                for match in typing.cast(
-                    "IdentityTranslationProof", proof
-                ).matched_dependencies
-            ),
+        """Compatibility wrapper for the module-level affine proof."""
+        return prove_identity_translation(
+            source_accesses, consumer_access, context=sizevars
         )
 
     def prove_translation(
-        self, *, sizevars: Any | None = None
+        self, *, sizevars: AffineProofContext | None = None
     ) -> "IdentityTranslationProof | None":
         """Prove the relation represented by this access record."""
-        return self.prove_identity_translation(
-            self.source_accesses, self.consumer_access, sizevars=sizevars
+        return prove_identity_translation(
+            self.source_accesses, self.consumer_access, context=sizevars
         )
-
-    @staticmethod
-    def _proof_sizevars(sizevars: Any | None) -> Any:
-        if sizevars is not None:
-            return sizevars
-        try:
-            return V.graph.sizevars
-        except AttributeError:
-            # Keep direct proof-unit tests independent of a live GraphLowering
-            # context while using the same stride and symbolic-shape routines.
-            from .sizevars import SizeVarAllocator
-
-            return SizeVarAllocator()
-
-    @staticmethod
-    def _proof_simplify(expr: sympy.Expr, sizevars: Any | None) -> sympy.Expr:
-        if sizevars is not None:
-            return sizevars.simplify(expr)
-        return sympy.simplify(expr)
-
-    @classmethod
-    def _proof_equal(
-        cls, left: sympy.Expr, right: sympy.Expr, sizevars: Any | None
-    ) -> bool:
-        if left == right:
-            return True
-        difference = cls._proof_simplify(left - right, sizevars)
-        if difference == 0:
-            return True
-        return bool(
-            sizevars is not None
-            and sizevars.statically_known_equals(left, right)
-        )
-
-    @classmethod
-    def _proof_geq(
-        cls, left: sympy.Expr, right: sympy.Expr, sizevars: Any | None
-    ) -> bool:
-        if left == right:
-            return True
-        difference = cls._proof_simplify(left - right, sizevars)
-        if difference.is_nonnegative is True:
-            return True
-        return bool(
-            sizevars is not None
-            and sizevars.statically_known_geq(left, right)
-        )
-
-    @classmethod
-    def _proof_leq(
-        cls, left: sympy.Expr, right: sympy.Expr, sizevars: Any | None
-    ) -> bool:
-        if left == right:
-            return True
-        difference = cls._proof_simplify(left - right, sizevars)
-        if difference.is_nonpositive is True:
-            return True
-        return bool(
-            sizevars is not None
-            and sizevars.statically_known_leq(left, right)
-        )
-
-    @classmethod
-    def _proof_strides(
-        cls, dep: MemoryDep, sizevars: Any
-    ) -> tuple[sympy.Expr, ...] | None:
-        """Read affine strides from the existing MemoryDep analysis."""
-        strides = tuple(sizevars.stride_vars(dep.index, dep.var_names, dep.var_names))
-        reconstructed = dep.get_offset() + sum(
-            (stride * var for stride, var in zip(strides, dep.var_names)),
-            sympy.S.Zero,
-        )
-        if not cls._proof_equal(reconstructed, dep.index, sizevars):
-            return None
-        return strides
-
-    @classmethod
-    def _prove_identity_translation_pair(
-        cls,
-        producer: MemoryDep,
-        consumer: MemoryDep,
-        sizevars: Any | None,
-    ) -> "IdentityTranslationProof | None":
-        if producer.name != consumer.name:
-            return None
-        if producer.mode is not None or consumer.mode is not None:
-            return None
-        if producer.is_indirect() or consumer.is_indirect():
-            return None
-        if producer.num_vars == 0 or producer.num_vars != consumer.num_vars:
-            return None
-        if len(producer.size) != producer.num_vars or len(consumer.size) != consumer.num_vars:
-            return None
-        if len(set(producer.var_names)) != producer.num_vars or len(
-            set(consumer.var_names)
-        ) != consumer.num_vars:
-            return None
-        producer_strides = cls._proof_strides(producer, sizevars)
-        consumer_strides = cls._proof_strides(consumer, sizevars)
-        if producer_strides is None or consumer_strides is None:
-            return None
-
-        # The producer is the dense row-major storage frame.  In particular,
-        # the innermost coordinate must have unit stride; this excludes
-        # diagonal scaling, reversal, and arbitrary strided layouts before any
-        # offset is considered.
-        expected_strides = tuple(
-            sympy.prod(producer.size[index + 1 :])
-            for index in range(producer.num_vars)
-        )
-        if any(
-            not cls._proof_equal(coefficient, expected, sizevars)
-            for coefficient, expected in zip(producer_strides, expected_strides)
-        ) or not cls._proof_equal(producer_strides[-1], sympy.S.One, sizevars):
-            return None
-        if any(
-            not cls._proof_equal(producer_coefficient, consumer_coefficient, sizevars)
-            for producer_coefficient, consumer_coefficient in zip(
-                producer_strides, consumer_strides
-            )
-        ):
-            return None
-        if any(
-            not cls._proof_geq(producer_extent, consumer_extent, sizevars)
-            for producer_extent, consumer_extent in zip(
-                producer.size, consumer.size
-            )
-        ):
-            return None
-
-        delta = cls._proof_simplify(
-            consumer.get_offset() - producer.get_offset(), sizevars
-        )
-        if not cls._proof_geq(delta, sympy.S.Zero, sizevars):
-            return None
-
-        # Decompose the address delta into row-major coordinate digits.  This
-        # canonical choice prefers the trailing feature axis, so a 96-element
-        # suffix of a 128-element row yields [0, 96], not an equivalent
-        # cross-row representation.
-        remaining = delta
-        translation_reversed: list[sympy.Expr] = []
-        for axis in reversed(range(producer.num_vars)):
-            stride = producer_strides[axis]
-            if not cls._proof_geq(stride, sympy.S.One, sizevars):
-                return None
-            remainder = cls._proof_simplify(sympy.Mod(remaining, stride), sizevars)
-            if not cls._proof_equal(remainder, sympy.S.Zero, sizevars):
-                return None
-            quotient = cls._proof_simplify(FloorDiv(remaining, stride), sizevars)
-            digit = cls._proof_simplify(
-                sympy.Mod(quotient, producer.size[axis]), sizevars
-            )
-            if not cls._proof_geq(digit, sympy.S.Zero, sizevars):
-                return None
-            if not cls._proof_leq(
-                consumer.size[axis] + digit, producer.size[axis], sizevars
-            ):
-                return None
-            translation_reversed.append(digit)
-            remaining = cls._proof_simplify(
-                remaining - digit * stride, sizevars
-            )
-
-        if not cls._proof_equal(remaining, sympy.S.Zero, sizevars):
-            return None
-        translation = tuple(reversed(translation_reversed))
-        translated_offset = producer.get_offset() + sum(
-            (stride * offset for stride, offset in zip(producer_strides, translation)),
-            sympy.S.Zero,
-        )
-        if not cls._proof_equal(
-            translated_offset, consumer.get_offset(), sizevars
-        ):
-            return None
-
-        return IdentityTranslationProof(
-            matched_dependencies=(MemoryDepMatch(producer, consumer),),
-            compatible_extents=tuple(zip(producer.size, consumer.size)),
-            translation=translation,
-        )
-
-
-@dataclasses.dataclass(frozen=True)
-class MemoryDepMatch:
-    """An exact producer write and consumer read relation proved for fusion."""
-
-    write: MemoryDep
-    read: MemoryDep
-
-
-@dataclasses.dataclass(frozen=True)
-class IdentityTranslationProof:
-    """Facts proved for one or more dense staged access relations."""
-
-    matched_dependencies: tuple[MemoryDepMatch, ...]
-    compatible_extents: tuple[tuple[sympy.Expr, sympy.Expr], ...]
-    translation: tuple[sympy.Expr, ...]
-
-    @property
-    def matches(self) -> tuple[MemoryDepMatch, ...]:
-        """Short alias used by later planner code."""
-        return self.matched_dependencies
-
 
 @dataclasses.dataclass(frozen=True)
 class SubParentEpilogueCandidate:
