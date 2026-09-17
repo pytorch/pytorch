@@ -110,23 +110,47 @@ static ncclComm_t get_nccl_comm(
         pg->getGroupName());
 }
 
+// Destructors are noexcept; a throwing CHECK would std::terminate. The NCCL
+// comm may already be gone (cached TokenSwitch past destroy_process_group).
+// Warn and leak instead of throwing. Library NCCL_CHECK_RESULT still exit()s.
+static void warn_destroy_result(ncclResult_t r, const char* what) {
+    if (r != ncclSuccess) {
+        TORCH_WARN(what, " ignoring ", ncclGetErrorString(r));
+    }
+}
+
 NcclEpGroup::~NcclEpGroup() {
     if (group) {
-        // Best-effort: destroy_process_group may have already torn down
-        // the NCCL comm (MultiProcContinuousTest caches TokenSwitch past PG
-        // shutdown). ncclEpGroupDestroy synchronizes and deregisters windows.
         try {
-          ncclEpGroupDestroy(reinterpret_cast<ncclEpGroup_t>(group));
-        } catch (const std::exception&) {}
+            warn_destroy_result(
+                ncclEpGroupDestroy(reinterpret_cast<ncclEpGroup_t>(group)),
+                "NcclEpGroup::~NcclEpGroup()");
+        } catch (const std::exception& e) {
+            TORCH_WARN(
+                "NcclEpGroup::~NcclEpGroup() ignoring error during teardown: ",
+                e.what());
+        } catch (...) {
+            TORCH_WARN(
+                "NcclEpGroup::~NcclEpGroup() ignoring unknown error during teardown");
+        }
         group = nullptr;
     }
 }
 
 NcclEpHandle::~NcclEpHandle() {
     if (handle) {
-      try {
-        ncclEpHandleDestroy(reinterpret_cast<ncclEpHandle_t>(handle));
-      } catch (const std::exception&){}
+        try {
+            warn_destroy_result(
+                ncclEpHandleDestroy(reinterpret_cast<ncclEpHandle_t>(handle)),
+                "NcclEpHandle::~NcclEpHandle()");
+        } catch (const std::exception& e) {
+            TORCH_WARN(
+                "NcclEpHandle::~NcclEpHandle() ignoring error during teardown: ",
+                e.what());
+        } catch (...) {
+            TORCH_WARN(
+                "NcclEpHandle::~NcclEpHandle() ignoring unknown error during teardown");
+        }
         handle = nullptr;
     }
 }
