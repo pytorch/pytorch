@@ -7,17 +7,21 @@ import torch
 import torch._functorch.config as functorch_config
 import torch.fx as fx
 import torch.utils._pytree as pytree
+from torch._dynamo.testing import EagerAndRecordGraphs
 from torch._functorch._aot_autograd.codegen import GeneratedSource
 from torch._functorch._aot_autograd.to_standalone_python import (
     _compose_standalone_module,
     _find_effectful_op,
+    _graph_has_dynamic_shapes,
     _known_helper_table,
     _module_level_names,
 )
 from torch._functorch.aot_autograd import compile_to_python, load_from_python
 from torch._higher_order_ops.effects import _get_effect, hop_print
 from torch._inductor.utils import fresh_cache
+from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -765,9 +769,47 @@ class TestAOTCompileToPython(TestCase):
 @instantiate_parametrized_tests
 class TestComposerHelpers(TestCase):
     # Unit coverage of the composer's own helpers: the _known_helper_table stable-import
-    # contract, _module_level_names (inner-binding collision seeding), and the recursive
-    # _find_effectful_op scan. (Source-emission helper tests live in test_source_emit.py.)
+    # contract, _module_level_names (inner-binding collision seeding), the recursive
+    # _find_effectful_op scan, and the _graph_has_dynamic_shapes metadata probe.
+    # (Source-emission helper tests live in test_source_emit.py.)
     hw_classification = HardwareClassification.GENERIC
+
+    def test_graph_has_dynamic_shapes_reads_either_key(self):
+        # make_fx stashes the placeholder fake under "val", Dynamo under "example_value";
+        # a symbolic fake under either key must read as dynamic, a static one as static.
+        g = fx.Graph()
+        node = g.placeholder("x")
+        g.output(node)
+        gm = fx.GraphModule(torch.nn.Module(), g)
+        self.assertFalse(_graph_has_dynamic_shapes(gm))
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        node.meta["val"] = mode.from_tensor(torch.randn(3), static_shapes=True)
+        self.assertFalse(_graph_has_dynamic_shapes(gm))
+        dyn = mode.from_tensor(torch.randn(3), static_shapes=False)
+        node.meta["example_value"] = dyn
+        self.assertTrue(_graph_has_dynamic_shapes(gm))
+        del node.meta["val"]
+        self.assertTrue(_graph_has_dynamic_shapes(gm))
+
+    def test_graph_has_dynamic_shapes_on_dynamo_graph(self):
+        # Pin the contract the "example_value" read relies on against real Dynamo output:
+        # a dynamic=True capture stores a symbolic fake under exactly that key (and no
+        # "val"), and the probe reads it as dynamic; a dynamic=False capture reads static.
+        def f(x):
+            return x * 2
+
+        graphs = {}
+        for dynamic in (True, False):
+            backend = EagerAndRecordGraphs()
+            torch.compile(f, backend=backend, dynamic=dynamic)(torch.randn(3))
+            (graphs[dynamic],) = backend.graphs
+        phs = [n for n in graphs[True].graph.nodes if n.op == "placeholder"]
+        fakes = [n.meta["example_value"] for n in phs if "val" not in n.meta]
+        self.assertEqual(len(fakes), len(phs))
+        (x_fake,) = [v for v in fakes if isinstance(v, torch.Tensor)]
+        self.assertTrue(any(isinstance(s, torch.SymInt) for s in x_fake.shape))
+        self.assertTrue(_graph_has_dynamic_shapes(graphs[True]))
+        self.assertFalse(_graph_has_dynamic_shapes(graphs[False]))
 
     def test_known_helper_table_imports_are_stable_surface(self):
         # Stability contract: every runtime helper the composer recognizes must emit an

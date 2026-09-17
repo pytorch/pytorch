@@ -159,16 +159,28 @@ def _autocast_off(devices):
     time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
     than from the runtime tensors: a graph can reach a device none of its
     inputs live on, and one built from factory ops has no input device at all.
+
+    A device this build cannot autocast at all is SKIPPED, not an error: a
+    device type the serving build does not know makes
+    ``is_autocast_available`` raise, and an out-of-tree backend with no
+    registered autocast module reports available and then refuses to construct
+    (``privateuseone``). There is no ambient autocast to neutralize on a device
+    this process cannot enter, so an unfamiliar name in GRAPH_DEVICES must not
+    fail every served call. The stack is built inside a ``with`` and handed
+    back with ``pop_all`` so any other failure unwinds the disables already
+    entered instead of leaving the caller's autocast region off.
     """
     import contextlib as _contextlib
 
-    import torch as _t
-
-    stack = _contextlib.ExitStack()
-    for _dev in devices:
-        if _t.amp.is_autocast_available(_dev):
-            stack.enter_context(_t.amp.autocast(_dev, enabled=False))
-    return stack
+    with _contextlib.ExitStack() as stack:
+        for _dev in devices:
+            try:
+                if not _torch.amp.is_autocast_available(_dev):
+                    continue
+                stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
+            except Exception:
+                continue
+        return stack.pop_all()
 
 
 def _eager_forward(*args):
