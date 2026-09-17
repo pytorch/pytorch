@@ -123,9 +123,13 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
     # SystemError whose str() is the bound method's repr, so report what
     # _PyErr_FormatFromCause chained behind it. __cause__, not __context__: that
     # call sets both, but PEP 3134 sets __context__ for ANY exception raised while
-    # another was handled, so it would quote what the CALLER was handling.
-    cause = e.__cause__ if isinstance(e, SystemError) else None
-    reason: BaseException = e if cause is None else cause
+    # another was handled, so it would quote what the CALLER was handling. The
+    # whole chain, not one hop: a leaf's own `raise SystemError(...) from <exc>`
+    # is wrapped again at that boundary, so what the tree meant can sit two hops
+    # down, and an interrupt down there must not be read as an answer.
+    reason: BaseException = e
+    while isinstance(reason, SystemError) and reason.__cause__ is not None:
+        reason = reason.__cause__
     return type(reason).__name__, reason
 
 
@@ -746,15 +750,18 @@ class AOTCompiledFunction:
                 if self._has_global_guards:
                     # The narrow set, because a passing guard is the only thing
                     # that certifies a live value is the one the graph was
-                    # compiled for. The builtins dict key is left out as well: a
-                    # guard rooted at it certifies the live dict itself, which
-                    # the graph's globals never copy. Not intersected with the
-                    # scope: a name it does not bind yet fails the guard rooted
-                    # at it, so with the check on nothing is served on that name
-                    # until a caller who populates the dict after the load binds
-                    # it -- and then the re-read is what the graph gets, not the
-                    # value the artifact was traced with.
-                    certified = _guard_source_globals(output_graph) - {builtins_key}
+                    # compiled for. The builtins dict key needs no subtracting
+                    # here: it can only arrive through a CHAINED source, which
+                    # _guard_source_globals drops already, since
+                    # load_builtin_from_argval is the one site that mints a
+                    # source under that key and mints a DictGetItemSource.
+                    # Not intersected with the scope: a name it does not bind
+                    # yet fails the guard rooted at it, so with the check on
+                    # nothing is served on that name until a caller who
+                    # populates the dict after the load binds it -- and then the
+                    # re-read is what the graph gets, not the value the artifact
+                    # was traced with.
+                    certified = _guard_source_globals(output_graph)
                     self._live_global_names = tuple(sorted(certified))
                     # Bound at load as well as re-taken per call in _serve: a
                     # certified name the bytecode reads but the graph never
@@ -1767,31 +1774,43 @@ class AOTCompiledModel:
     it fits or accept one it does not, with no raise on record to veto. An
     opted-out input's warning names only the accept: ``check()`` ignores the
     flag, so a stale accept is served in index order, displacing a later result
-    that fits or, from the last index, the earlier opted-out result the last
-    resort would have served -- so the warning names a later match only when a
-    later result exists. A stale rejection forfeits only the calls the last
-    resort does not then hand it (those an opted-out result ahead of it takes,
-    or an enabled input's raise withholds); and its raise leaves its graph
-    reachable only through its own later accept or the last resort, which any
-    enabled input's raise withholds.
+    that fits -- so the warning names a later match only when a later result
+    exists. From the last index the warning states the remedy alone: what the
+    accept displaces there depends on the results ahead of it -- an earlier
+    opted-out result the last resort would have served, or the no-match report
+    an enabled input's raise leaves in its place -- and nothing at all where
+    the last resort would have served this result anyway. A stale rejection
+    forfeits only the calls the last resort does not then hand it (those an
+    opted-out result ahead of it takes, or an enabled input's raise withholds);
+    and its raise leaves its graph reachable only through its own later accept
+    or the last resort, which any enabled input's raise withholds.
 
     The warning is logged once per ``(input index, exception type name,
     opt-out state)`` per model, starting over when ``compiled_results``
-    changes, and is not spent while the logger would drop it. The type name
+    changes, and is not spent while the logger would drop it. The index served
+    is named in every warning but is not part of the key, so a defect whose
+    serve moves is reported once, for whichever serve came first. The type name
     tells two defects at one index apart only when they raise different
     types, which real trees seldom do -- a ``TORCH_CHECK`` that fires in a
     guard reaches ``check()`` as ``RuntimeError`` -- so in practice it is one
-    warning per index and opt-out state. A ``KeyboardInterrupt`` or ``SystemExit`` that
-    reaches dispatch is never read as an answer and propagates -- as itself
-    from a Python-level guard manager, or as the ``SystemError`` the pybind
-    boundary wrapped it in when a leaf left it set. One leaf keeps an interrupt
-    from reaching dispatch at all, and every artifact's tree holds it:
+    warning per index and opt-out state.
+
+    A ``KeyboardInterrupt`` or ``SystemExit`` anywhere on the ``SystemError``
+    cause chain that reaches dispatch is never read as an answer and
+    propagates -- as itself from a Python-level guard manager, or as the
+    ``SystemError`` the pybind boundary wrapped it in when a leaf left it set.
+    An interrupt the tree's own code caught and re-raised as something else is
+    not read: it sits on ``__context__``, which the unwrap does not follow.
+    One leaf keeps an interrupt from reaching dispatch at all, and every
+    artifact's tree holds it:
     ``LAMBDA_GUARD::check_nopybind`` (``guards.cpp:1918-1928``) clears whatever
     its lambda raised, of whatever type, and answers false, so an interrupt
     raised under a kept lambda guard is read as an ordinary mismatch and
     ``check_verbose`` quotes its text as the guard's (``:1930-1936``) -- a
     pre-existing C++ gap this Python-only stack leaves in place, beside the
-    dead ``result == -1`` branch below.
+    dead ``result == -1`` branch in ``DICT_CONTAINS`` and ``SET_CONTAINS``
+    (``guards.cpp:2476``, ``:2507``), the leaves a ``DICT_NOT_CONTAINS`` or
+    ``SET_NOT_CONTAINS`` guard installs.
 
     When no result matches -- or every result that opted out is withheld by a
     raise -- the call raises ``RuntimeError`` with a report headed ``No AOT
@@ -1827,7 +1846,7 @@ class AOTCompiledModel:
     ``KeyboardInterrupt`` or ``SystemExit`` still reaches the caller as itself.
     A raise only out of ``check_verbose`` here is quoted on its line and
     chained nowhere; so is one recorded in dispatch that the next evaluation of
-    the same tree answered, until the caveat a commit above appends to the
+    the same tree answered, until the caveat a follow-up change appends to the
     advice names those trees and quotes their raises.
     """
 
@@ -1897,9 +1916,11 @@ class AOTCompiledModel:
                     "it fits or accept one it does not."
                 )
             else:
-                # The displaced later match is positional: at the last index
-                # there is none, and what a stale accept costs there instead is
-                # the last resort's own earlier opted-out choice.
+                # The displaced later match is positional: from the last
+                # index there is none, and what a stale accept displaces there
+                # depends on the results ahead of it -- an earlier opted-out
+                # result's serve, or the no-match report -- so the line drops
+                # the clause and states the remedy alone.
                 later = " ahead of a later match" if i + 1 < len(results) else ""
                 advice = (
                     f"Input [{i}] opted out of guard checks, but its next check "
@@ -1924,11 +1945,12 @@ class AOTCompiledModel:
         # recorded in two places: `raised`, the LAST exception per index in
         # first-raise order, and `unanswered`, the indices whose LAST evaluation
         # RAISED, so the report knows which entries have no guard to quote. The
-        # exception is kept with its traceback, which holds this frame, and so
+        # exception is kept with its traceback, which is what makes the report's
+        # chained cause worth reading. That traceback holds this frame, and so
         # args and kwargs, until the cyclic collector runs -- the `except ... as
-        # e` cleanup that breaks that cycle is undone by the store: the traceback
-        # is what makes the chained cause worth reading, and only a call some
-        # tree raised on pays for it.
+        # e` cleanup that breaks that cycle is undone by the store -- so an exit
+        # that serves a graph, and so builds no report to read the record,
+        # clears both first and leaves this call's inputs to reference counting.
         raised: dict[int, Exception] = {}
         unanswered: set[int] = set()
         # Indices that ever reached an answer, which a ModelInput could have covered.
@@ -2015,6 +2037,10 @@ class AOTCompiledModel:
             if accepts(i, result):
                 if raised:
                     self._warn_swallowed(results, raised, i)
+                # Nothing reads the record on a serving exit, and holding it
+                # holds this call's args through the raise's traceback.
+                raised.clear()
+                unanswered.clear()
                 return result._serve(self.model, *args, **kwargs)
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
@@ -2029,6 +2055,8 @@ class AOTCompiledModel:
             if accepts(i, result):
                 if raised:
                     self._warn_swallowed(results, raised, i)
+                raised.clear()
+                unanswered.clear()
                 return result._serve(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
         # only after both passes failed to find a real match and no tree whose
@@ -2036,11 +2064,13 @@ class AOTCompiledModel:
         # answer after a throw can stand on relational guard state the throw left
         # stale (a C++ throw skips the reset the normal exits run), not on this
         # call. A NO_TENSOR_ALIASING set still holding the throwing evaluation's
-        # tensors rejects the re-check; SYMBOLIC_SHAPE_GUARD's _args_seen count
-        # completes it over stale slots and answers true for this call's remaining
-        # args, an accept the second pass serves like any other. Neither can be
-        # told from a real answer or cleared from Python. A raise from the
-        # opted-out result itself withholds nothing: nobody wanted its answer.
+        # tensors rejects the re-check; under enable_cpp_symbolic_shape_guards
+        # (off by default) SYMBOLIC_SHAPE_GUARD's _args_seen count completes the
+        # evaluation over stale slots, which can answer true for this call's
+        # remaining args, an accept the second pass serves like any other.
+        # Neither can be told from a real answer or cleared from Python. A raise
+        # from the opted-out result itself withholds nothing: nobody wanted its
+        # answer.
         # The flags are read once, for the veto, the last resort and the report
         # alike: disable_guard_check() is a plain store any thread can make.
         enabled = [result._guard_check_enabled for result in results]
@@ -2051,6 +2081,8 @@ class AOTCompiledModel:
                 if not enabled[i]:
                     if raised:
                         self._warn_swallowed(results, raised, i)
+                    raised.clear()
+                    unanswered.clear()
                     return result._serve(self.model, *args, **kwargs)
         report = self._no_match_report(
             results,
@@ -2141,8 +2173,8 @@ class AOTCompiledModel:
                 # the footer's fix-or-drop line when it was recorded first of the
                 # inputs nobody opted out. When it is neither -- another checked
                 # tree raised before it -- this report carries that raise nowhere,
-                # until the caveat the commits above append to the advice names
-                # such trees and quotes their raises.
+                # until the caveat a follow-up change appends to the advice
+                # names such trees and quotes their raises.
                 lines.append(_raised_line(i, raised[i]))
                 continue
             manager = result._live_guard_manager()
