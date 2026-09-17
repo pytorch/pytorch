@@ -66,16 +66,21 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       tensors. Python control flow is specialized to the example inputs, and shapes are
       static -- each size is baked in; a control-flow HOP (``torch.cond`` /
       ``torch.while_loop``) is refused rather than specialized. Tracing on fakes also
-      refuses what it cannot know: a data-dependent op (``.item()``, ``.nonzero()``, a
-      Python branch over a tensor value), an op with no meta/fake kernel, a read of a
-      traced tensor's data (``.data_ptr()``, ``.numpy()``), and an example input a fake
-      tensor cannot represent (quantized) or whose metadata it silently drops (pinned,
-      mkldnn, sparse, nested).
+      refuses what a STATIC capture cannot know: a data-dependent op (``.item()``,
+      ``.nonzero()``, a Python branch over a tensor value), an op with no meta/fake kernel,
+      a read of a traced tensor's data (``.data_ptr()``, ``.numpy()``), an example input a
+      fake tensor cannot represent (quantized) or whose metadata it silently drops (pinned,
+      mkldnn, sparse), or a nested one, which capture does not support on either path. It
+      also refuses to run inside another trace, whose fake mode would outrank its own.
       The exception to static shapes is a tensor dim explicitly marked unbacked (inductor
-      backend only) with ``torch._dynamo.decorators.mark_unbacked`` before the call; such
-      a dim is captured as an unbacked symint, so one artifact serves any runtime size of
-      it, and a graph that needs to guard on it fails at capture. Each input's dtype and
-      device are specialized too (a runtime mismatch is rejected), and the inductor backend
+      backend only) with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before
+      the call; such a dim is captured as an unbacked symint, so one artifact serves any
+      runtime size of it, and a graph that needs to guard on it fails at capture. Such an
+      unbacked capture also holds a data-dependent value symbolically -- it can capture an
+      ``.item()`` result or a ``.nonzero()``-sized intermediate that a static one refuses,
+      and fails if the computation must guard on that value (or if the op is one no
+      ``ShapeEnv`` can fake, e.g. ``aten.equal``). Each input's dtype and device are
+      specialized too (a runtime mismatch is rejected), and the inductor backend
       additionally specializes on input memory format. See Note [precompile programming
       model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).

@@ -634,8 +634,9 @@ def _placeholder_fake_inputs(gm: GraphModule) -> list[Any]:
     contract for a post-AOTAutograd graph. These fake tensors already carry the
     AOTAutograd-decided static/symbolic shapes under one consistent ``FakeTensorMode``, so
     lowering against them (rather than re-fakifying the caller's ``example_inputs``, which
-    may be real or already fake) preserves symbolic dims. A placeholder without ``val`` means ``gm`` was not traced under a
-    ``FakeTensorMode``, violating the post-AOTAutograd precondition."""
+    may be real or already fake) preserves symbolic dims. A placeholder without ``val``
+    means ``gm`` was not traced under a ``FakeTensorMode``, violating the post-AOTAutograd
+    precondition."""
     fake_inputs = []
     for node in gm.graph.nodes:
         if node.op != "placeholder":
