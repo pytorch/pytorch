@@ -117,7 +117,9 @@ def _distribution_matches(name: str, origin: str | None) -> bool | None:
         for file in files:
             path = _Path(file.locate())
             if str(path) == origin or (
-                path.name == origin_path.name and path.resolve() == origin_path
+                path.name == origin_path.name
+                and path.parent.name == origin_path.parent.name
+                and path.resolve() == origin_path
             ):
                 return _record_hash_matches(origin_path, file.hash)
             located.append(str(path))
