@@ -126,6 +126,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # assert_size_stride would fail to compile.
         return
 
+    # Alignment assertions are queued only for ExternKernel outputs. Fallback
+    # codegen disables stack allocation below, so those values are
+    # RAIIAtenTensorHandle and can use CppWrapperCpu's assertion emitter.
+
     def _codegen_v2_raw_input_bindings(self, code: IndentedBuffer):
         for idx, (input_key, input_value) in enumerate(V.graph.graph_inputs.items()):
             input_cpp_type = CppWrapperCpuArrayRef.get_input_element_cpp_type(
@@ -988,6 +992,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 f"}} }}({outer_input});"
             )
             self.writeline(f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);")
+
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        # The region's outputs are pre-declared as RAIIAtenTensorHandle and
+        # codegen_subgraph_suffix std::moves the region's output buffer into
+        # them. A stack-allocated buffer is an ArrayRefTensor<T>, which has no
+        # conversion to RAIIAtenTensorHandle, so that assignment would not
+        # compile -- the same clash cond and while_loop hit. Turn stack
+        # allocation off for the graph, as the extern-kernel paths below do,
+        # rather than emitting C++ that fails to build.
+        self.allow_stack_allocation = False
+        return super().codegen_invoke_subgraph(invoke_subgraph)
 
     def codegen_while_loop(self, while_loop, stack_output=False):
         if stack_output:
