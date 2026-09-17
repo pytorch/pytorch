@@ -2133,6 +2133,10 @@ class TestPrecompile(TestCase):
         # (DataDependentOutputException), .nonzero() (DynamicOutputShapeException),
         # and an op with no meta/fake kernel (UnsupportedOperatorException for a
         # library op, a RuntimeError naming the missing fake impl for a custom_op).
+        from torch._subclasses.fake_tensor import (
+            DataDependentOutputException,
+            DynamicOutputShapeException,
+        )
         from torch.library import _scoped_library
 
         model = torch.nn.Linear(4, 4)
@@ -2143,9 +2147,17 @@ class TestPrecompile(TestCase):
         def nonzero(m, x):
             return m(x)[x[:, 0].nonzero().flatten()]
 
-        for fn in (items, nonzero):
-            with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
+        # The two fake-tensor classes are asserted per case: both raises produce a
+        # byte-identical message, so the regex alone cannot tell them apart and a swap
+        # (or a future change that degenerates .nonzero() to the value class) would pass.
+        for fn, cause in (
+            (items, DataDependentOutputException),
+            (nonzero, DynamicOutputShapeException),
+        ):
+            refused = self.assertRaisesRegex(PrecompileError, "data-dependent op")
+            with self.subTest(fn=fn.__name__), refused as cm:
                 torch.compiler.precompile(fn, model, torch.randn(3, 4), backend="eager")
+            self.assertIsInstance(cm.exception.__cause__, cause)
 
         # Both op registrations are global, so undo them: the scoped library takes
         # its own op with it, and the custom_op's library is destroyed in finally.
@@ -2159,7 +2171,10 @@ class TestPrecompile(TestCase):
 
             try:
                 for op in (torch.ops.mlprecompile.no_meta, no_fake_impl):
-                    with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                    with (
+                        self.subTest(op=str(op)),
+                        self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"),
+                    ):
                         torch.compiler.precompile(
                             lambda m, x, op=op: op(m(x)),
                             model,
@@ -2201,6 +2216,35 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile(
                 reads_pointer, model, torch.randn(3, 4), backend="eager"
             )
+
+        # A kernel that dereferences a fake tensor hits the TYPED data-pointer check
+        # instead, whose message is about uninitialized storage rather than FakeTensor;
+        # both are refused (tensor_split reads its index tensor's values).
+        def splits_on_tensor_indices(m, x):
+            a, b = torch.tensor_split(x, torch.tensor([1]))
+            return m(x) + a.sum() + b.sum()
+
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            torch.compiler.precompile(
+                splits_on_tensor_indices, model, torch.randn(3, 4), backend="eager"
+            )
+
+        # Conversely, a REAL tensor with no storage raises "Cannot access data pointer of
+        # Tensor that doesn't have storage" from the same c10 code. It has data (it is
+        # sparse, not fake), so the relabel must not claim otherwise: the refusal matches
+        # the fake-specific texts only, and this failure reaches the caller as it is.
+        sparse = torch.randn(3, 3).to_sparse()
+
+        def reads_a_real_sparse_pointer(m, x):
+            sparse.data_ptr()
+            return m(x)
+
+        with self.assertRaises(RuntimeError) as cm:
+            torch.compiler.precompile(
+                reads_a_real_sparse_pointer, model, torch.randn(3, 4), backend="eager"
+            )
+        self.assertNotIsInstance(cm.exception, PrecompileError)
+        self.assertIn("doesn't have storage", str(cm.exception))
 
     def test_unfakeifiable_input_refused_without_clobbering_grad(self):
         # Fakeification runs INSIDE the .grad save/restore window, so an example input
@@ -2247,6 +2291,28 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "user input 1 is a nested tensor"):
             torch.compiler.precompile(lambda m, t, u: m(t), model, x, nt)
 
+        # A nested BUFFER is refused by name too, which is what pins the refusal ahead of
+        # the recorded param/buffer shape reads: those read t.shape, so a STRIDED nested
+        # buffer would otherwise escape as the raw NestedTensorImpl error.
+        class HasNestedBuffer(torch.nn.Module):
+            def __init__(self, nt):
+                super().__init__()
+                self.lin = torch.nn.Linear(3, 3)
+                self.register_buffer("nt", nt)
+
+            def forward(self, t):
+                return self.lin(t)
+
+        for layout in (torch.jagged, torch.strided):
+            mod = HasNestedBuffer(torch.nested.nested_tensor(parts, layout=layout))
+            with (
+                self.subTest(buffer_layout=layout),
+                self.assertRaisesRegex(PrecompileError, "buffer nt is a nested tensor"),
+            ):
+                torch.compiler.precompile(
+                    lambda m, t: m(t), mod, torch.randn(2, 3), backend="eager"
+                )
+
     def test_unbacked_capture_refuses_an_unfakeifiable_input(self):
         # Both fakeify paths refuse an input the meta converter cannot represent through
         # the same helper, so a quantized example input gets the same named
@@ -2262,6 +2328,17 @@ class TestPrecompile(TestCase):
             torch.compiler.precompile(
                 lambda m, t, u: m(t) + m(u.dequantize()).sum(), model, x, q
             )
+
+        # Including when the unfakeifiable input is the MARKED one: its unbacked rebuild
+        # never consults the meta converter, so the marked branch validates the leaf
+        # through the same helper -- without that it escapes as a raw meta-kernel error
+        # ("SymIntArrayRef expected to contain only concrete integers").
+        marked_q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        mark_unbacked(marked_q, 0)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+        ):
+            torch.compiler.precompile(lambda m, u: m(u.dequantize()), model, marked_q)
 
     def test_unbacked_capture_refuses_a_data_ptr_read(self):
         # The unbacked fake mode carries the same two hardenings as the static one, so the
@@ -2318,6 +2395,47 @@ class TestPrecompile(TestCase):
             self.assertNotIn("no meta/fake kernel", str(e))
         else:
             self.fail("expected fn's RuntimeError to propagate out of capture")
+
+    def test_precompile_error_from_fn_is_not_relabeled(self):
+        # PrecompileError subclasses RuntimeError, so the trace's RuntimeError clause would
+        # relabel a refusal of precompile's OWN whose text happens to carry one of the two
+        # matched substrings. An explicit "except PrecompileError: raise" sits ahead of that
+        # clause; without it this message comes back as "... no meta/fake kernel ...".
+        model = torch.nn.Linear(4, 4)
+        message = "precompile: my own refusal, no fake impl registered for t::op"
+
+        def raises(m, x):
+            raise PrecompileError(message)
+
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile(raises, model, torch.randn(3, 4), backend="eager")
+        self.assertEqual(str(cm.exception), message)
+        self.assertIsNone(cm.exception.__cause__)
+
+    def test_mutating_custom_op_captures_without_a_registered_fake(self):
+        # The one carve-out in "fake tracing needs a meta/fake kernel for every op": a
+        # torch.library.custom_op that only mutates its arguments and returns nothing gets
+        # a trivial fake impl synthesized, so it captures with no register_fake and the
+        # call is recorded in the artifact (and still mutates when served).
+        model = torch.nn.Linear(4, 4)
+
+        @torch.library.custom_op("mlprecompile::add_one_", mutates_args={"x"})
+        def add_one_(x: torch.Tensor) -> None:
+            x.add_(1.0)
+
+        def fn(m, x):
+            torch.ops.mlprecompile.add_one_(x)
+            return m(x)
+
+        try:
+            x = torch.zeros(3, 4)
+            code, cache = torch.compiler.precompile(fn, model, x, backend="eager")
+            self.assertIn("mlprecompile.add_one_", code)
+            self.assertEqual(x, torch.zeros(3, 4))  # capture ran on fakes
+            torch.compiler.precompile.load(code, cache)(model, x)
+            self.assertEqual(x, torch.ones(3, 4))
+        finally:
+            add_one_._lib._destroy()
 
     def test_callable_api_traces_a_backward_under_ambient_no_grad(self):
         # The callable API keeps grad enabled around the trace whatever the caller's
