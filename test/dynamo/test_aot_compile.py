@@ -580,6 +580,30 @@ class DictBranchModule(torch.nn.Module):
         return x * 3
 
 
+class RaisingTree:
+    # A stub guard manager whose every check raises RuntimeError(text): the
+    # dispatch semantics it pins do not depend on how a tree raised.
+    def __init__(self, text):
+        self.text = text
+        self.checks = 0
+
+    def check(self, f_locals):
+        self.checks += 1
+        raise RuntimeError(self.text)
+
+
+class Accepts:
+    # A stub guard manager that matches every call.
+    def check(self, f_locals):
+        return True
+
+
+class UnprintableError(RuntimeError):
+    # A tree's exception is user code down to its __str__.
+    def __str__(self):
+        raise TypeError("str() of the tree's exception raised")
+
+
 # Not the identity: an identity weight makes "read the serialized weight" and
 # "dropped the matmul" produce the same tensor.
 AOT_HERMETIC_WEIGHT = torch.eye(3) * 3
@@ -2074,6 +2098,16 @@ from user code:
 
         self.addCleanup(restore)
 
+    def _model_with_stub_trees(self, *stubs):
+        # One ScaleModule result per stub, each swapped in for the real guard
+        # tree: the artifact the stub-tree tests share.
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        inputs = [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        model._aot_compile(inputs * len(stubs))
+        for result, stub in zip(model.forward.compiled_results, stubs):
+            result._artifacts.guard_manager = stub
+        return model
+
     def _check_module_global_guard_dispatch(self, make_mod, set_mode):
         # Shared body of the module global-guard tests: capture one ModelInput
         # per value of a guarded global, then check that dispatch follows the
@@ -3235,6 +3269,178 @@ from user code:
                 order = [c[0] for c in describers.mock_calls]
                 self.assertEqual(order, ["first", "later", "first"])
 
+    def test_no_match_report_describes_the_other_entries_when_one_raises(self):
+        # check_verbose runs paths check() does not -- the repr of a user object
+        # inside a DIMENSION_DYNAMIC_MARKING_GUARD, for one -- so an entry's
+        # describer can raise where dispatch's rejection was clean, and it must
+        # not take the other entries' usable lines with it.
+        mod, x = ScaleModule(), torch.randn(3, 3)
+        first = aot_compile_forward(mod, make_scaling_forward(2), x)
+        second = aot_compile_forward(mod, make_scaling_forward(3), x)
+        combined = AOTCompiledModel(mod, [first, second])
+
+        def raising_check_verbose(f_locals):
+            # User code under the report: an opt-out flipped here must not turn
+            # [1] into a withheld entry; the report judges the read it began with.
+            second.disable_guard_check()
+            raise ValueError("boom")
+
+        manager = first._live_guard_manager()
+        with patch.object(manager, "check_verbose", raising_check_verbose):
+            with self.assertRaises(RuntimeError) as ctx:
+                combined(x.double())
+        lines = str(ctx.exception).splitlines()
+        self.assertIn("Tried 2 compiled input(s)", lines[0])
+        self.assertEqual(lines[1], "  [0] <guard check raised ValueError: boom>")
+        self.assertTrue(lines[2].startswith("  [1] "), lines[2])
+        self.assertNotIn("guard check raised", lines[2])
+        self.assertIn("Add a ModelInput", lines[3])
+
+    def test_no_match_message_reads_a_systemerror_cause_not_the_handled_exception(self):
+        # _PyErr_FormatFromCause sets __cause__ and __context__ alike, so only a
+        # SystemError whose two differ tells the reads apart: raised inside an
+        # `except ValueError:` block, its __context__ is what the CALLER was handling.
+        self._hide_leaked_dynamo_globals()
+
+        class Raises:
+            def check(self, f_locals):
+                raise SystemError("stub tree is unhappy")
+
+        model = self._model_with_stub_trees(Raises())
+        try:
+            raise ValueError("the caller was handling this")
+        except ValueError:
+            with self.assertRaises(RuntimeError) as ctx:
+                model(torch.randn(3, 3))
+        message = str(ctx.exception)
+        raised = "  [0] <guard check raised SystemError: stub tree is unhappy>"
+        self.assertIn(raised, message.splitlines())
+        self.assertNotIn("the caller was handling this", message)
+
+    def test_no_match_message_survives_a_raise_whose_str_raises(self):
+        # The exception is the tree's down to its __str__, so quoting it is the
+        # last place a raise can still take the whole report with it.
+        self._hide_leaked_dynamo_globals()
+
+        class Raises:
+            def check(self, f_locals):
+                raise UnprintableError("never printed")
+
+        model = self._model_with_stub_trees(Raises())
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3))
+        lines = str(ctx.exception).splitlines()
+        raised = "  [0] <guard check raised UnprintableError: <str() raised TypeError>>"
+        self.assertIn(raised, lines)
+        self.assertIsInstance(ctx.exception.__cause__, UnprintableError)
+
+    def test_aot_compile_module_with_no_results_raises_the_no_match_report(self):
+        # aot_compile_module refuses an empty list, but the constructor and
+        # deserialize() take one, and the parent indexed results[0]: IndexError.
+        # Both passes and the last resort are no-ops over nothing, so the call
+        # ends in the report, with the one advice that fits it.
+        compiled = AOTCompiledModel(ScaleModule(), [])
+        with self.assertRaises(RuntimeError) as ctx:
+            compiled(torch.randn(3, 3))
+        lines = str(ctx.exception).splitlines()
+        header = "No AOT compiled graph matched this call. Tried 0 compiled input(s):"
+        self.assertEqual(lines[0], header)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 0, lines)
+        self.assertIn("Add a ModelInput", lines[-1])
+        self.assertIsNone(ctx.exception.__cause__)
+
+    def test_no_match_report_reads_the_dispatch_record_after_a_raise(self):
+        # [0] raised in the scan and rejected on the second pass, so its line is
+        # the accept line its check_verbose produces, not its raise line; [1]
+        # raised in both passes with two texts and is quoted for the last, the
+        # one that left it unanswered. The chain carries [0]'s raise: the FIRST
+        # index that raised.
+        self._hide_leaked_dynamo_globals()
+
+        class RaisesThenRejects:
+            def __init__(self):
+                self.checks = 0
+
+            def check(self, f_locals):
+                self.checks += 1
+                if self.checks == 1:
+                    raise RuntimeError("the first pass is unhappy")
+                return False
+
+            def check_verbose(self, f_locals):
+                return types.SimpleNamespace(result=True, verbose_code_parts=[])
+
+        class RaisesTwice(RaisesThenRejects):
+            def check(self, f_locals):
+                self.checks += 1
+                # Chained on purpose: only a SystemError is unwrapped to its cause.
+                raise RuntimeError(f"pass {self.checks} unhappy") from ValueError("x")
+
+        stubs = [RaisesThenRejects(), RaisesTwice()]
+        model = self._model_with_stub_trees(*stubs)
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3))
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual([stub.checks for stub in stubs], [2, 2])
+        accepted = f"  [0] {_ACCEPTED_IN_THE_REPORT}"
+        self.assertIn(accepted, lines)
+        self.assertNotIn("ValueError", message)
+        self.assertIn("  [1] <guard check raised RuntimeError: pass 2 unhappy>", lines)
+        self.assertNotIn("pass 1 unhappy", message)
+        self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
+        self.assertNotIn("the first pass is unhappy", message)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
+
+    def test_aot_compile_module_two_raisers_in_the_report(self):
+        # [0] opted out and [1] enabled both raise, so the two records of a raise
+        # part: the chain carries the FIRST index that raised, whose opt-out line
+        # quotes no exception text, while the advice names the first ENABLED one.
+        # [1]'s text holds two separators splitlines() breaks on, so its line
+        # asserted whole pins the raise line's collapse.
+        self._hide_leaked_dynamo_globals()
+        x = torch.randn(3, 3)
+        model = self._model_with_stub_trees(
+            RaisingTree("the opted-out tree is unhappy"),
+            RaisingTree("checked\x0ctree\x1eis unhappy"),
+        )
+        results = model.forward.compiled_results
+        results[0].disable_guard_check()
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x)
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
+        withheld = "  [0] <opted out of guard checks; withheld because [1]'s guard check raised>"
+        self.assertIn(withheld, lines)
+        checked = "  [1] <guard check raised RuntimeError: checked tree is unhappy>"
+        self.assertIn(checked, lines)
+        self.assertIn("[1]'s raise, not a guard failure, is what withheld", lines[3])
+        self.assertEqual(str(ctx.exception.__cause__), "the opted-out tree is unhappy")
+        # Opted out as well, [1] withholds the last resort no longer, which serves
+        # the first opted-out result.
+        results[1].disable_guard_check()
+        self.assertEqual(model(x), x * 2)
+
+    def test_aot_compile_module_interrupt_out_of_a_guard_tree_propagates(self):
+        # Neither dispatch handler, [0]'s inline check or accepts(), reads a
+        # Ctrl-C inside a tree as an answer about this call: it leaves as itself,
+        # where a handler that kept it would serve another result over it or end
+        # the call in a report quoting it.
+        self._hide_leaked_dynamo_globals()
+
+        class Interrupts:
+            def check(self, f_locals):
+                raise KeyboardInterrupt("ctrl-c inside the tree")
+
+        x = torch.randn(3, 3)
+        # [1] accepts, so [0]'s handler keeping the interrupt would serve over it.
+        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+            self._model_with_stub_trees(Interrupts(), Accepts())(x)
+        # Behind a raiser, the interrupt reaches accepts() with a raise on record.
+        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
+            self._model_with_stub_trees(RaisingTree("unhappy"), Interrupts())(x)
+
     def test_aot_compile_module_raising_tree_does_not_reach_an_opted_out_result(self):
         # A tree that raised rejected nothing, so an opted-out result answering
         # on its strength serves a graph whose guards never passed. A plain call
@@ -3313,6 +3519,41 @@ from user code:
                         served = model(x, evil)
                         self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
                     self.assertIs(ctx.exception.__cause__, interrupt)
+
+    def test_aot_compile_module_serves_a_later_match_after_an_earlier_raise(self):
+        # The one path where tolerating a raise changes an ANSWER and not a
+        # message: [0] raised, [1]'s guards passed on this call, and the parent
+        # propagated [0]'s raise and served nothing. A raise is not a rejection
+        # and says nothing about [1], so [1]'s graph is what dispatch owes the
+        # caller; refusing would not undo the relational residue a C++ throw
+        # leaves either, so the raise is served over.
+        self._hide_leaked_dynamo_globals()
+        mod = GlobalConfigModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(4, 8)
+        with _set_pooling("mean"):
+            expected = mod(x)
+        with _set_pooling("sum"):
+            self.assertNotEqual(mod(x), expected)
+        model._aot_compile(
+            [
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
+                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
+            ]
+        )
+
+        results = model.forward.compiled_results
+        results[0]._artifacts.guard_manager = RaisingTree("guard tree is unhappy")
+        with _set_pooling("mean"):
+            served = model(x)
+        self.assertEqual(served, expected)
+        # Checked once: [1] matched in the scan, so the serve was not pass 2's.
+        self.assertEqual(results[0]._artifacts.guard_manager.checks, 1)
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # A tree that THROWS out of C++ returns through
@@ -3406,6 +3647,34 @@ from user code:
         with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
             loaded(nested)
         self.assertEqual(torch._C._get_torch_function_state(), state)
+
+    def test_aot_compile_module_serves_a_tree_that_raised_and_then_accepted(self):
+        # The one direction the veto is NOT applied to: [0] raised in the scan
+        # and its own accept on the second pass is what serves. The veto holds
+        # the last resort back because a raise rejected nothing and an unguarded
+        # graph needs real rejections; an accept is that tree's own answer, and
+        # vetoing it would not contain the stale relational state either (below).
+        self._hide_leaked_dynamo_globals()
+
+        class RaisesThenAccepts:
+            def __init__(self):
+                self.checks = 0
+
+            def check(self, f_locals):
+                self.checks += 1
+                if self.checks == 1:
+                    raise RuntimeError("the scan is unhappy")
+                return True
+
+        stub = RaisesThenAccepts()
+        model = self._model_with_stub_trees(stub)
+        x = torch.randn(3, 3)
+        self.assertEqual(model(x), x * 2)
+        # Two checks: the serve is the second pass's.
+        self.assertEqual(stub.checks, 2)
+        # The same tree's next answer is acted on with no raise on record at all,
+        # which is why a per-call veto is not what keeps a stale tree honest.
+        self.assertEqual(model(x), x * 2)
 
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
