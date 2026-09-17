@@ -102,8 +102,6 @@ struct XPUEvent {
   }
 
   void record(const XPUStream& stream) {
-    namespace syclex = sycl::ext::oneapi::experimental;
-
     const bool first_record = !isCreated();
     if (first_record) {
       createEvent(stream.device_index());
@@ -118,7 +116,8 @@ struct XPUEvent {
 
     if (reusable_) {
 #if SYCL_COMPILER_VERSION >= 20260200
-      syclex::enqueue_signal_event(stream.queue(), *event_);
+      sycl::ext::oneapi::experimental::enqueue_signal_event(
+          stream.queue(), *event_);
 #endif
     } else {
       assignEvent(stream.queue());
