@@ -3,7 +3,9 @@
 # Inner-tree order promises upstream's exact bits, not closeness. The opt-in gate leaves
 # unsupported configurations on the default order; explicit requests raise.
 
+import hashlib
 import os
+import sys
 import unittest
 from contextlib import contextmanager
 
@@ -13,15 +15,30 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfNoCuteDSL,
+    TEST_CUTEDSL,
     TestCase,
+)
+
+
+if not TEST_CUTEDSL:
+    sys.stderr.write("CuTeDSL not available\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("CuTeDSL not available")
+
+import cutlass
+
+from torch._native.ops.reductions import (
+    inner_tree_kernel as up,
+    kernel_general as kg,
+    kernel_rowtile as rt,
+    tile,
+    traits as T,
 )
 
 
 @contextmanager
 def _order_on():
-    from torch._native.ops.reductions import kernel_rowtile as rt
-
     prev = os.environ.get(rt._INNER_TREE_ENV)
     os.environ[rt._INNER_TREE_ENV] = "1"
     try:
@@ -89,8 +106,6 @@ def _golden_input(m, n, dtype, prod):
 
 def _sha(t):
     # Hash raw bytes because NumPy lacks bfloat16 and bits are the contract.
-    import hashlib
-
     b = t.cpu().contiguous().flatten().view(torch.uint8).numpy().tobytes()
     return hashlib.sha256(b).hexdigest()[:16]
 
@@ -101,13 +116,8 @@ def _trait_key(trait):
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
-@skipIfNoCuteDSL
 class TestInnerTreeOrder(TestCase):
     def _run(self, trait, x):
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
         acc = cutlass.Float64 if x.dtype is torch.float64 else cutlass.Float32
         (got,) = rt.reduce_row_tile(
             trait(acc=acc), _trait_key(trait), x, [x.dtype], order="inner_tree"
@@ -115,15 +125,11 @@ class TestInnerTreeOrder(TestCase):
         return got
 
     def test_off_by_default(self):
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
         self.assertFalse(rt.inner_tree_order_enabled())
 
     def test_plan_covers_every_n(self):
         # Every N needs a plan or silently keeps launch order. Enforce MAX_UNROLL because
         # TileMap raises above it.
-        from torch._native.ops.reductions import kernel_rowtile as rt, tile
-
         for itemsize in (2, 4, 8):
             for n in (1, 2, 3, 7, 8, 17, 33, 127, 1000, 8191, 8192, 24577, 10**6):
                 for m in (1, 1024):
@@ -136,12 +142,6 @@ class TestInnerTreeOrder(TestCase):
     @parametrize("op", ["sum", "prod"])
     def test_exact_bits_match_golden_and_upstream(self, op):
         # One launch checks both the durable oracle and the temporary reference.
-        from torch._native.ops.reductions import (
-            inner_tree_kernel as up,
-            kernel_rowtile as rt,
-            traits as T,
-        )
-
         dtypes = {
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
@@ -180,12 +180,6 @@ class TestInnerTreeOrder(TestCase):
     def test_signed_zero_matches_upstream_per_shape(self):
         # A stray identity changes all -0.0 rows because 0.0 + -0.0 is +0.0. Upstream seeds
         # only some shapes, and close comparison hides the resulting disagreement.
-        from torch._native.ops.reductions import (
-            inner_tree_kernel as up,
-            kernel_rowtile as rt,
-            traits as T,
-        )
-
         for m, n in ((256, 8), (256, 1024), (64, 100000)):
             with self.subTest(shape=(m, n), shape_kind=rt.itree_plan(n, m, 4).shape):
                 x = torch.full((m, n), -0.0, device="cuda")
@@ -200,10 +194,6 @@ class TestInnerTreeOrder(TestCase):
 
     def test_order_is_reproducible_across_batch(self):
         # An N-only DAG makes each row independent of batch size, unlike the default order.
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
-
         n = 4096
         big = torch.randn(64, n, device="cuda")
         trait = T.SumOps(acc=cutlass.Float32)
@@ -229,8 +219,6 @@ class TestInnerTreeOrder(TestCase):
     def test_no_plan_pairs_an_exact_tile_with_a_bound_or_an_offset_base(self):
         # Exact only covers the tile's N from column 0; a bound or offset invalidates its
         # unpredicated load. No plan may pair them because wrong columns can look plausible.
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
         checked = paired = 0
         for itemsize in (2, 4, 8):
             for n in list(range(1, 512)) + [
@@ -262,10 +250,6 @@ class TestInnerTreeOrder(TestCase):
 
     def test_golden_input_can_detect_a_reorder(self):
         # Verify the input distinguishes orders in fp32/fp64; narrowing can erase differences.
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
-
         cases = [
             ("sum", torch.float32, 8, 16),
             ("sum", torch.float64, 8, 1024),
@@ -297,14 +281,6 @@ class TestInnerTreeOrder(TestCase):
 
     def test_the_gate_routes_the_dispatcher_through_the_order(self):
         # Test dispatcher routing because wrong paths still compute valid reductions.
-        import cutlass
-
-        from torch._native.ops.reductions import (
-            kernel_general as kg,
-            kernel_rowtile as rt,
-            traits as T,
-        )
-
         for m, n in [(524288, 16), (64, 100000), (8192, 1024)]:
             with self.subTest(shape=(m, n)):
                 x = torch.randn(m, n, device="cuda")
@@ -329,10 +305,6 @@ class TestInnerTreeOrder(TestCase):
     def test_multi_field_and_two_output_traits_under_the_order(self):
         # Exercise per-field staging/partials, two outputs from one accumulator, and ragged
         # identity padding. Compare only plumbing with launch order because the DAGs differ.
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
-
         x = torch.randn(64, 4097, device="cuda")
         cases = [
             ("welford", T.WelfordOps, {"correction": 1}, 1, [torch.float32]),
@@ -363,17 +335,13 @@ class TestInnerTreeOrder(TestCase):
                     if a.dtype in (torch.int32, torch.int64):
                         self.assertEqual(a, b, msg=f"{label} field {k}")
                     else:
-                        self.assertEqual(
+                        torch.testing.assert_close(
                             a, b, atol=1e-4, rtol=1e-4, msg=f"{label} field {k}"
                         )
 
     def test_tree_fold_matches_the_serial_fold_for_every_value_trait(self):
         # Trait law: combine(leaf(a), leaf(b)) == reduce(reduce(init(), a), b).
         # Otherwise tree order can fold raw values into plausible wrong results.
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
-
         x = (
             torch.rand(64, 512, device="cuda") + 0.5
         )  # positive: prod / norm stay finite
@@ -407,12 +375,10 @@ class TestInnerTreeOrder(TestCase):
                     [torch.float32],
                     order="inner_tree",
                 )
-                self.assertEqual(tree, serial, atol=1e-4, rtol=1e-4)
+                torch.testing.assert_close(tree, serial, atol=1e-4, rtol=1e-4)
 
     def test_staging_is_actually_used_in_the_mid_band(self):
         # Bit-neutral hashes cannot prove staging ran. Check its gate and both exclusions.
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
         for n in (1024, 2048, 4096, 8192):
             with self.subTest(n=n, staged=True):
                 self.assertGreater(rt.itree_plan(n, 4096, 4).stage_e, 0)
@@ -431,14 +397,6 @@ class TestInnerTreeOrder(TestCase):
     def test_staged_fold_pads_a_short_row_bitwise(self):
         # span > N exercises identity padding through cp.async tail redirection and refill.
         # Compare bits because reading live data for padding can still look plausible.
-        import cutlass
-
-        from torch._native.ops.reductions import (
-            inner_tree_kernel as ref,
-            kernel_rowtile as rt,
-            traits as T,
-        )
-
         staged = [
             n
             for n in (1056, 3072, 6144)
@@ -459,7 +417,7 @@ class TestInnerTreeOrder(TestCase):
                     order="inner_tree",
                 )
                 want = torch.empty(256, device="cuda")
-                ref.inner_tree_sum_into(want, x)
+                up.inner_tree_sum_into(want, x)
                 torch.cuda.synchronize()
                 self.assertTrue(
                     torch.equal(got.view(torch.int32), want.view(torch.int32)),

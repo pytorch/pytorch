@@ -3,15 +3,23 @@
 # Host-only tests for TileMap, the arithmetic description of a fold order's thread map.
 
 import math
+import sys
+import unittest
 
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
 
 
-@skipIfNoCuteDSL
+if not TEST_CUTEDSL:
+    sys.stderr.write("CuTeDSL not available\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("CuTeDSL not available")
+
+from torch._native.ops.reductions import tile
+
+
 class TestTileDatapath(TestCase):
     def _tm(self, **kw):
-        from torch._native.ops.reductions import tile
-
         return tile.TileMap(**kw)
 
     def test_rejects_a_partial_warp(self):

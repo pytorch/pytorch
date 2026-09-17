@@ -2,6 +2,8 @@
 # canonicalisation, keepdim, and out=. 112 hashes pin the reference DAG's bits.
 # Measured 1.08-3.00x of that reference on fp32 sum at a fixed 256 MiB footprint.
 
+from typing import Any
+
 import cutlass
 
 import torch
@@ -9,7 +11,7 @@ import torch
 from . import kernel_rowtile as rt, traits as T
 
 
-def _acc(dtype):
+def _acc(dtype: torch.dtype) -> Any:
     # Accumulator affects bits: fp64 uses fp64; all other supported dtypes use fp32.
     return cutlass.Float64 if dtype is torch.float64 else cutlass.Float32
 
