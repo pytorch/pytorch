@@ -593,13 +593,7 @@ def np_vander_batched(x, N=None):
 
 
 def sample_inputs_linalg_cholesky_inverse(
-    op_info,
-    device,
-    dtype,
-    requires_grad=False,
-    *,
-    include_nontrivial_factors=True,
-    **kwargs,
+    op_info, device, dtype, requires_grad=False, **kwargs
 ):
     from torch.testing._internal.common_utils import random_well_conditioned_matrix
 
@@ -620,7 +614,10 @@ def sample_inputs_linalg_cholesky_inverse(
         batch_pd,
     )
     test_cases = [torch.linalg.cholesky(a, upper=False) for a in inputs]
-    if include_nontrivial_factors:
+    if op_info.name == "cholesky_inverse":
+        # Regression sample for https://github.com/pytorch/pytorch/issues/196682.
+        # Keep it specific to cholesky_inverse: cholesky_solve also reuses this
+        # generator, but its factor derivative fails for non-diagonal inputs.
         nontrivial_factor = torch.tensor(
             [[2.0, 0.0, 0.0], [0.5, 1.5, 0.0], [-0.25, 0.75, 1.25]],
             dtype=dtype,
