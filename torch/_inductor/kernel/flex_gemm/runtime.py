@@ -42,6 +42,7 @@ def flex_gemm_problem(
     concat_layout: Any,
     *,
     blockscaled: bool = False,
+    varlen_m: bool = False,
 ) -> Any:
     """Describe a FlexGEMM call (physical GEMM M and N) for QuACK config pruning."""
     from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn, ModProblem
@@ -51,6 +52,7 @@ def flex_gemm_problem(
         m=m,
         n=n,
         b_kn=mod_b_kn(device, concat_layout),
+        varlen_m=varlen_m,
         blockscaled=blockscaled,
         concat=bool(concat_layout),
     )
@@ -205,6 +207,8 @@ def flex_gemm_epimod(
     aux_output_count: int,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     output_contraction: FlexGemmOutputContraction | None,
+    *,
+    varlen_m: bool,
 ):
     """Build and cache a QuACK TensorSSA EpiMod from FlexGEMM metadata.
 
@@ -218,15 +222,18 @@ def flex_gemm_epimod(
         aux_output_count,
         None if local_reduce is None else local_reduce.cache_key,
         output_contraction,
+        varlen_m,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
         return epimod
 
+    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
     op_types = {
+        "scalar": epi_ops.Scalar,
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
@@ -237,11 +244,10 @@ def flex_gemm_epimod(
     ):
         name = f"operand{index}"
         dtype = cute_dsl_utils.torch2cute_dtype_map[arg_dtype]
-        ops[name] = (
-            epi_ops.Scalar(name, dtype=dtype)
-            if kind == "scalar"
-            else op_types[kind](name, dtype=dtype)
-        )
+        op_type = op_types[kind]
+        if varlen_m and kind == "col" and dtype.width < 32:
+            op_type = ScalarColVecLoad
+        ops[name] = op_type(name, dtype=dtype)
     if output_contraction is not None:
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
@@ -355,12 +361,17 @@ def gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...] = (),
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
+    cu_seqlens_m: torch.Tensor | None = None,
     config: QuackConfigKey,
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod.
+    """Run a dense, block-scaled or varlen-M FlexGEMM call through the vendored QuACK EpiMod.
 
     ``config`` pins the exact GemmConfig Inductor selected at lowering time.
+    ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
+    ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
+    row/col vectors are always passed rank-1; QuACK shares a row across groups
+    and offsets a ``[total_m]`` column per group.
     """
     from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -389,6 +400,7 @@ def gemm_epilogue(
         len(aux_outs),
         local_reduce,
         output_contraction,
+        varlen_m=cu_seqlens_m is not None,
     )
     effective_C = normalize_c(C, tuple(out.shape), beta)
     operands: dict[str, Any] = {}
@@ -399,9 +411,9 @@ def gemm_epilogue(
     for index, (arg, kind) in enumerate(
         zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
     ):
-        operands[f"operand{index}"] = (
-            arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
-        )
+        if kind in ("row", "col"):
+            arg = arg.squeeze(0 if kind == "row" else -1)
+        operands[f"operand{index}"] = arg
     initialize_local_reduce_out = None
     if local_reduce is not None:
         # QuACK's host_validate checks the compressed buffer against the GEMM
@@ -477,6 +489,7 @@ def gemm_epilogue(
             config=quack_config,
             tuned=False,
             concat_layout=concat_layout,
+            cu_seqlens_m=cu_seqlens_m,
             compile_dispatch=False,
             **operands,
         )
