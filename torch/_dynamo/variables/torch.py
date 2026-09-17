@@ -1000,6 +1000,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return _register
 
+        def as_python_device(device: VariableTracker, /) -> Any:
+            """Preserve CooR's indexless device when unwrapping device arguments."""
+            from .tensor import CurrentDeviceVariable
+
+            if isinstance(device, CurrentDeviceVariable):
+                return device.value
+            return device.as_python_constant()
+
         from torch.backends.cuda import SDPAParams
 
         from . import (
@@ -2762,9 +2770,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = kwargs["device"].as_python_constant()
+                    device = as_python_device(kwargs["device"])
                 elif args:
-                    device = args[0].as_python_constant()
+                    device = as_python_device(args[0])
                 else:
                     device = None
                 module = torch.get_device_module(device)
@@ -2814,9 +2822,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             try:
                 if kwargs:
-                    device = torch.device(kwargs["device"].as_python_constant())
+                    device = torch.device(as_python_device(kwargs["device"]))
                 elif args:
-                    device = torch.device(args[0].as_python_constant())
+                    device = torch.device(as_python_device(args[0]))
                 else:
                     device = None
 
@@ -2829,6 +2837,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
+                        current_device=stream_var.current_device,
                         source=stream_var.source,
                     )
                 return stream_var
@@ -2863,9 +2872,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             device = None
             if kwargs and "device" in kwargs:
-                device = torch.device(kwargs["device"].as_python_constant())
+                device = torch.device(as_python_device(kwargs["device"]))
             elif args:
-                device = torch.device(args[0].as_python_constant())
+                device = torch.device(as_python_device(args[0]))
 
             if device is None:
                 device_type = _synchronize_fn_to_device_type.get(self.value)
@@ -2883,10 +2892,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
+            device_index = device.index
+            if device_index is None:
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                # Under compile-on-one-rank the index must stay None so the runtime
+                # resolves it per rank and one artifact serves them all.
+                if not _coor_enabled():
+                    device_index = 0
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device_index),
                 {},
             )
             return ConstantVariable.create(None)

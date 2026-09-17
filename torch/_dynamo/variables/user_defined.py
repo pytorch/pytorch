@@ -1302,9 +1302,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder, wrap_fx_proxy
         from .ctx_manager import (
+            CurrentDeviceContextVariable,
             GenericContextWrappingVariable,
             get_device_context_manager,
         )
+        from .tensor import CurrentDeviceVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -1487,6 +1489,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and len(args) == 1
             and (variable_cls := get_device_context_manager(self.value)) is not None
         ):
+            if (
+                isinstance(args[0], CurrentDeviceVariable)
+                and self.value is not torch.accelerator.device_index
+            ):
+                variable_cls._get_device_index_fn(args[0].value, optional=True)
+                return CurrentDeviceContextVariable(args[0].value.type, self.value)
             if not args[0].is_python_constant():
                 raise_type_error(
                     tx,
@@ -1668,13 +1676,69 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if issubclass(self.value, torch.Stream):
                 from .lists import TupleVariable
 
-                var_kwargs = ConstDictVariable(
-                    {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
-                )
-                var_args = TupleVariable(list(args))
+                example_args: list[Any] = [
+                    arg.value
+                    if isinstance(arg, CurrentDeviceVariable)
+                    else arg.as_python_constant()
+                    for arg in args
+                ]
+                example_kwargs: dict[str, Any] = {
+                    key: (
+                        value.value
+                        if isinstance(value, CurrentDeviceVariable)
+                        else value.as_python_constant()
+                    )
+                    for key, value in kwargs.items()
+                }
                 stream = self.value(
-                    *(var_args.as_python_constant()),
-                    **(var_kwargs.as_python_constant()),
+                    *example_args,
+                    **example_kwargs,
+                )
+                current_device = next(
+                    (
+                        arg
+                        for arg in (*args, *kwargs.values())
+                        if isinstance(arg, CurrentDeviceVariable)
+                    ),
+                    None,
+                )
+                has_public_device_arg = len(args) < 3 and "device_index" not in kwargs
+                if current_device is None and has_public_device_arg:
+                    from torch.fx.experimental.proxy_tensor import (
+                        _coor_device_index_is_current,
+                    )
+
+                    device_arg = args[0] if args else kwargs.get("device")
+                    device_value = (
+                        None if device_arg is None else device_arg.as_python_constant()
+                    )
+                    uses_current_device = (
+                        device_value is None
+                        or (type(device_value) is int and device_value < 0)
+                        or (
+                            isinstance(device_value, (str, torch.device))
+                            and torch.device(device_value).index is None
+                        )
+                    )
+                    if uses_current_device and _coor_device_index_is_current(
+                        stream.device
+                    ):
+                        current_device = CurrentDeviceVariable(
+                            torch.device(stream.device.type)
+                        )
+                reconstruct_args = list(args)
+                reconstruct_kwargs = dict(kwargs)
+                if current_device is not None and has_public_device_arg:
+                    if args:
+                        reconstruct_args[0] = current_device
+                    elif "device" in kwargs:
+                        reconstruct_kwargs["device"] = current_device
+                var_args = TupleVariable(reconstruct_args)
+                var_kwargs = ConstDictVariable(
+                    {
+                        VariableTracker.build(tx, key): value
+                        for key, value in reconstruct_kwargs.items()
+                    }
                 )
                 from ..graph_bytecode_inputs import register_graph_created_object
                 from .streams import StreamVariable
@@ -1690,6 +1754,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     proxy=tx.output.create_proxy(
                         "call_function", get_external_object_by_index, (ind,), {}
                     ),
+                    current_device=current_device,
                 )
             elif issubclass(self.value, torch.Event):
                 from .lists import TupleVariable

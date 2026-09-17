@@ -1003,6 +1003,43 @@ def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
+def _guard_device_index_is_current(value: torch.Tensor) -> bool:
+    """Whether this tensor's device index may be guarded as "the current device".
+
+    Only under compile_on_one_rank, and only for an accelerator tensor. There the
+    index is just the compiling rank's and carries no information: any tensor on a
+    different accelerator was already refused while tracing, by
+    _coor_check_tensor_device. cpu is left alone -- it is portable across ranks
+    already, and its index is not a rank identity. Outside CooR several accelerator
+    devices can legitimately be live at once, so there the index stays pinned.
+
+    This deliberately does not compare against the current index. Guards are rebuilt
+    when a serialized state is loaded on another rank, where the saved tensor carries
+    the *saving* rank's device; anything derived from that comparison would be the
+    wrong answer there. Keyed on the device type alone, the answer is the same on
+    every rank, so there is nothing to record and replay.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if not _coor_enabled():
+        return False
+    acc = torch.accelerator.current_accelerator()
+    return acc is not None and value.device.type == acc.type
+
+
+def _stream_is_current(stream: torch.Stream) -> bool:
+    if type(stream) is torch.Stream:
+        current = get_current_stream(torch.device(stream.device.type))
+    else:
+        from .device_interface import get_interface_for_device
+
+        interface = get_interface_for_device(stream.device)
+        if not isinstance(stream, interface.Stream):
+            return False
+        current = interface.current_stream(stream.device)  # type: ignore[call-arg]
+    return stream == current
+
+
 def get_tensor_guard_code_part(
     value: torch.Tensor,
     name: str,
@@ -1010,12 +1047,17 @@ def get_tensor_guard_code_part(
     strides: list[int | None],
     pytype: type,
     dispatch_keys: DispatchKeySet,
+    device_index_is_current: bool = False,
 ) -> str:
     dispatch_key = (
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
     dtype = value.dtype
-    device_index = value.device.index
+    # Render the relaxed form as "current" so diagnostics describe the
+    # rank-relative runtime check rather than the compiling rank's device index.
+    device_index: int | str | None = (
+        "current" if device_index_is_current else value.device.index
+    )
     requires_grad = value.requires_grad
     guard_str = (
         f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
@@ -3013,6 +3055,33 @@ class GuardBuilder(GuardBuilderBase):
         return
 
     @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: (
+            value.device.type,
+            _stream_is_current(value),
+        ),
+        eval_fn=lambda value, metadata: value.device.type == metadata[0]
+        and _stream_is_current(value) == metadata[1],
+    )
+    def CURRENT_STREAM_MATCH(self, guard: Guard) -> None:
+        ref = self.arg_ref(guard)
+        value = self.get(guard)
+        device_type = value.device.type
+        expected = _stream_is_current(value)
+
+        def guard_fn(stream: torch.Stream) -> bool:
+            return (
+                stream.device.type == device_type
+                and _stream_is_current(stream) == expected
+            )
+
+        relation = "==" if expected else "!="
+        code = f"{ref} {relation} ___get_current_stream(torch.device('{device_type}'))"
+        self.get_guard_manager(guard).add_lambda_guard(
+            guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+        self._set_guard_export_info(guard, [code])
+
+    @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )
@@ -3849,6 +3918,7 @@ class GuardBuilder(GuardBuilderBase):
                 ]
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
+                device_index_is_current = _guard_device_index_is_current(value)
 
                 verbose_code_parts = get_verbose_code_parts(
                     get_tensor_guard_code_part(
@@ -3858,6 +3928,7 @@ class GuardBuilder(GuardBuilderBase):
                         stride,
                         pytype,
                         dispatch_keys,
+                        device_index_is_current,
                     ),
                     guard,
                 )
@@ -3871,6 +3942,7 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
+                    device_index_is_current,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
