@@ -257,12 +257,13 @@ struct XPUEvent {
               syclex::enable_profiling{enable_timing_}}));
 #endif
     }
+  }
 
-    bool enable_timing_ = false;
-    bool enable_ipc_ = false;
-    bool reusable_ = false;
-    c10::DeviceIndex device_index_ = -1;
-    std::unique_ptr<sycl::event> event_;
-  };
+  bool enable_timing_ = false;
+  bool enable_ipc_ = false;
+  bool reusable_ = false;
+  c10::DeviceIndex device_index_ = -1;
+  std::unique_ptr<sycl::event> event_;
+};
 
 } // namespace c10::xpu
