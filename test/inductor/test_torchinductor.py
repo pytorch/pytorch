@@ -1513,6 +1513,7 @@ class CommonTemplate:
                 a ^ b,
                 torch.logical_and(a, b),
                 torch.logical_or(a, b),
+                torch.logical_xor(a, b),
                 torch.logical_not(a),
                 torch.sign(b),
             )
@@ -7470,11 +7471,6 @@ for dtype in (torch.int32, torch.int64):
     @skip_if_halide  # copysign not implemented
     def test_copysign(self):
         self.common(torch.copysign, (torch.randn(16, 16), torch.randn(16, 16)))
-
-    def test_logical_xor(self):
-        ints = torch.randint(0, 3, (16, 16), dtype=torch.int32)
-        self.common(torch.logical_xor, (torch.randn(16, 16) > 0, ints))
-        self.common(torch.logical_xor, (ints, torch.rand(16, 16)))
 
     @skip_if_halide  # frexp not implemented
     def test_frexp(self):
