@@ -37,6 +37,7 @@ from torch._inductor.output_code import (
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import getArtifactLogger
 
+from .codegen import aggregate_runtime_wrapper_sources
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -633,12 +634,13 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 self._load_and_post_compile(args, fx_config)
             )
 
-        compiled_function = self._apply_runtime_wrappers(
-            compiled_fw_func,
-            compiled_bw_func,
-            needs_autograd,
-            runtime_aot_config,
-        )
+        with aggregate_runtime_wrapper_sources():
+            compiled_function = self._apply_runtime_wrappers(
+                compiled_fw_func,
+                compiled_bw_func,
+                needs_autograd,
+                runtime_aot_config,
+            )
         # Now that we're pretty sure it's a successful load, add guards
         # to the existing shape environment from the cache.
         self._check_guards(args)

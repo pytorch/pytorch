@@ -40,7 +40,6 @@ from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
-    MI200_ARCH,
     MI300_ARCH,
     skipIfRocmArch,
     TEST_XPU,
@@ -860,7 +859,6 @@ class TestExternKernelCaller(TestCase):
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
-    @skipIfRocmArch(MI200_ARCH)
     @patches
     def test_extern_kernel_caller_hash_key_deduplication(self):
         def fn(a, b, c, d):
@@ -887,7 +885,6 @@ class TestExternKernelCaller(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocmArch(MI200_ARCH)
     # gfx942: the 128x128x64 / 8-warp Triton candidate is miscompiled by the AMD
     # block-pingpong schedule (LDS race, stale-by-one-BLOCK_K A operands), so the
     # autotune correctness check fails intermittently; the compile-worker pool
@@ -1310,8 +1307,8 @@ class TestTemplateRender(TestCase):
         kernel.num_buffers_warp_spec = 0
 
         with patch.object(
-            select_algorithm.DeviceProperties,
-            "create",
+            select_algorithm,
+            "triton_meta_device_props",
             return_value=unittest.mock.MagicMock(),
         ):
             TritonTemplateKernel.jit_lines(kernel)
