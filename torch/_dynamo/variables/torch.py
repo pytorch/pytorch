@@ -1203,16 +1203,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             from .object_protocol import pynumber_index
 
-            return self.call_function(
-                tx,
-                [
-                    pynumber_index(tx, arg)
-                    if isinstance(arg, UserDefinedObjectVariable)
-                    else arg
-                    for arg in args
-                ],
-                {},
-            )
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(math.lcm)
         def handle_lcm(
@@ -1228,16 +1219,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             from .object_protocol import pynumber_index
 
-            return self.call_function(
-                tx,
-                [
-                    pynumber_index(tx, arg)
-                    if isinstance(arg, UserDefinedObjectVariable)
-                    else arg
-                    for arg in args
-                ],
-                {},
-            )
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
