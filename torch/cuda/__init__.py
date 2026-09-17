@@ -371,7 +371,7 @@ DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION: dict[
 }
 
 # TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
-# Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
+# Kept in sync with .ci/wheel/linux/build_env_setup.py by the validator in
 # .github/scripts/generate_binary_build_matrix.py.
 PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
     "12.6": {
