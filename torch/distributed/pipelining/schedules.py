@@ -396,31 +396,35 @@ class _PipelineSchedule(ABC):
                 )
                 return
             acc: torch.Tensor | None = None
-            for stage in cast(list[PipelineStage], stages):
+            for stage in pp_stages:
                 acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
             result: torch.Tensor | None = acc
-            for stage in reversed(cast(list[PipelineStage], stages)):
+            for stage in reversed(pp_stages):
                 result = stage._warmup_backward_result(received_result=result)
             if result is None:
                 raise RuntimeError("P2P warm-up voting failed")
-            supports_static_value, permits_dynamic_value = result.tolist()
-            supports_static = bool(supports_static_value)
-            permits_dynamic = bool(permits_dynamic_value)
+            supports_static, permits_dynamic = map(bool, result.tolist())
             if not supports_static and not permits_dynamic:
+                local_status = ", ".join(
+                    f"stage {stage.stage_index}: "
+                    f"needs_dynamic={InferenceMode.needs_dynamic(stage._user_meta, has_backward)}, "
+                    f"pass_pipeline_metadata={stage._pass_pipeline_metadata}"
+                    for stage in pp_stages
+                )
                 raise PipeliningMetadataError(
                     "pass_pipeline_metadata requires complete static metadata "
                     "across the pipeline: provide input_args and output_args for "
                     "every stage, plus input_grads and output_grads for DTensors "
-                    "with backward"
+                    f"with backward. Local stage status: {local_status}"
                 )
             determined_mode = (
                 InferenceMode.STATIC if supports_static else InferenceMode.DYNAMIC
             )
-            for stage in cast(list[PipelineStage], stages):
+            for stage in pp_stages:
                 stage._inference_mode = determined_mode
             logger.debug(
                 "Rank determined inference_mode=%s for %d stage(s)",
-                determined_mode.value if determined_mode else "None",
+                determined_mode.value,
                 len(stages),
             )
         elif not p2p_done:
@@ -823,6 +827,39 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
         return [work for work in recv_works if work is not None]
 
     return dist.batch_isend_irecv(p2p_ops)
+
+
+def _build_recv_ops(
+    requests: list[tuple[_PipelineStageBase, bool, int]],
+) -> list[dist.P2POp]:
+    """Build one timestep's receives without retaining a partial allocation.
+
+    Args:
+        requests: ``(stage, is_forward, microbatch_index)`` receive requests.
+
+    Returns:
+        The P2P operations for the complete timestep.
+    """
+    ops: list[dist.P2POp] = []
+    acquired: list[tuple[_PipelineStageBase, bool, int]] = []
+    try:
+        for stage, is_forward, microbatch_index in requests:
+            if is_forward:
+                recv_ops = stage.get_fwd_recv_ops(microbatch_index)
+            else:
+                recv_ops = stage.get_bwd_recv_ops(microbatch_index)
+            acquired.append((stage, is_forward, microbatch_index))
+            ops.extend(recv_ops)
+    except Exception:
+        # No operation has been submitted yet, so these references are safe to
+        # release. Once this helper returns, launch failures remain fail-closed.
+        for stage, is_forward, microbatch_index in acquired:
+            if is_forward:
+                stage._clear_unlaunched_fwd_recv(microbatch_index)
+            else:
+                stage._clear_unlaunched_bwd_recv(microbatch_index)
+        raise
+    return ops
 
 
 def _sorted_batch_p2p(
@@ -2309,6 +2346,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
             try:
                 ops: list[dist.P2POp] = []
+                recv_requests: list[tuple[_PipelineStageBase, bool, int]] = []
                 if action is not None:
                     computation_type = action.computation_type
                     mb_index = action.microbatch_index
@@ -2403,7 +2441,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                                 # TODO: We are assuming that stage will always receive from stage-1
                                 # however that is not necessarily true of get_fwd_recv_ops
                                 stage = stage_index_to_stage[stage_index + 1]
-                                ops.extend(stage.get_fwd_recv_ops(mb_index))
+                                recv_requests.append((stage, True, mb_index))
                         elif computation_type in (
                             FULL_BACKWARD,
                             BACKWARD_INPUT,
@@ -2438,13 +2476,14 @@ class PipelineScheduleMulti(_PipelineSchedule):
                                 # TODO: We are assuming that stage will always receive from stage+1
                                 # however that is not necessarily true of get_bwd_recv_ops
                                 stage = stage_index_to_stage[stage_index - 1]
-                                ops.extend(stage.get_bwd_recv_ops(mb_index))
+                                recv_requests.append((stage, False, mb_index))
                         else:
                             raise ValueError(
                                 f"Unknown computation type {computation_type}"
                             )
 
                 # do the communication
+                ops.extend(_build_recv_ops(recv_requests))
                 _wait_batch_p2p(_batch_p2p(ops))
             except Exception as e:
                 logger.error(
