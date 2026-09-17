@@ -1016,10 +1016,11 @@ def load_compiled_function(
 
         This API is currently experimental and subject to change.
 
-    When a kept guard reads a global, the returned callable re-reads that global
-    from ``f_globals`` before every call, so it is not safe to share between
-    threads whose scopes differ or that rebind such a global concurrently, with
-    or without the GIL; load the artifact once per thread instead.
+    When ``f_globals`` is passed and a global is itself the source of a kept
+    guard, the returned callable re-reads that global from it before every call,
+    so it is not safe to share between threads that rebind such a global
+    concurrently, with or without the GIL; load the artifact once per thread
+    instead.
 
     Args:
         file: A file-like object containing the serialized compiled function.
@@ -1059,14 +1060,15 @@ def load_compiled_function(
                    checks metadata, not values -- is what the call computes
                    with, and a store the compiled function itself makes to
                    such a global does not carry over to its next call. A
-                   global no kept guard reads keeps its load-time value, and
-                   so does a container a guard reaches only through a sub-path
-                   such as ``D['a']``, whose other members nothing certifies:
-                   a rebind of either is not seen, even when the guard on
-                   ``D['a']`` passes. The re-read is not atomic with the guard
-                   check before it, and it writes into the loaded callable's
-                   own globals, shared by every call of it; the user guide
-                   covers both.
+                   global that is not itself a kept guard's source keeps its
+                   load-time value -- one only a symbolic-shape guard reads
+                   included -- and so does a container a guard reaches only
+                   through a sub-path such as ``D['a']``, whose other members
+                   nothing certifies: a rebind of either is not seen, even
+                   when the guard on ``D['a']`` passes. The re-read is not
+                   atomic with the guard check before it, and it writes into
+                   the loaded callable's own globals, shared by every call of
+                   it; the user guide covers both.
         external_data: Optional data to be loaded into the runtime environment
                        of the compiled function. This should contain the same
                        data as AOTCompileResult.external_data returned from save_compiled_function() call.

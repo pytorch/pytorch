@@ -543,7 +543,7 @@ _HOOK_REGISTRARS = {
 
 
 class RaisesOnCompare:
-    # Hashes into "foo"'s slot, so a guard's PyDict_Contains("foo", d) has to
+    # Hashes into "foo"'s slot, so a guard's PyDict_Contains(d, "foo") has to
     # compare against this key; the raise leaves the exception set, which CPython
     # turns into SystemError at the pybind boundary of the guard tree. The two
     # keys here reach a raise through that leaf on purpose, so restoring its dead
@@ -555,6 +555,20 @@ class RaisesOnCompare:
 
     def __eq__(self, other):
         raise ValueError("boom from __eq__")
+
+
+class InterruptsOnCompare:
+    # RaisesOnCompare's slot, raising the BaseException it is given -- a
+    # KeyboardInterrupt or SystemExit -- which the boundary wraps into
+    # SystemError just the same.
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __hash__(self):
+        return hash("foo")
+
+    def __eq__(self, other):
+        raise self.exc
 
 
 class DictBranchModule(torch.nn.Module):
@@ -574,6 +588,21 @@ AOT_HERMETIC_WEIGHT = torch.eye(3) * 3
 class HermeticModule(torch.nn.Module):
     def forward(self, x):
         return x @ AOT_HERMETIC_WEIGHT
+
+
+class EpsOnlyModule(torch.nn.Module):
+    def forward(self, x):
+        return x * EPS
+
+
+AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
+
+
+class TwoGlobalsModule(torch.nn.Module):
+    # Under keep_tensor_guards_unsafe the TENSOR_MATCH on EPS, a plain tensor,
+    # is kept and the one on AOT_UNGUARDED_PARAM, a Parameter, is dropped.
+    def forward(self, x):
+        return x * EPS + AOT_UNGUARDED_PARAM
 
 
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
@@ -2330,11 +2359,10 @@ from user code:
         self.assertIn("page break rec sep", message)
 
     def test_no_match_message_survives_a_raising_guard(self):
-        # __call__ has already established that nothing matched; re-evaluating
-        # the guards to say WHY must not replace that answer with a secondary
-        # failure from one entry, which hides both the entry that raised and
-        # every other entry's reason. A DICT_NOT_CONTAINS guard is a real way in:
-        # RaisesOnCompare above says how its leaf raises.
+        # Dispatch recorded [0]'s raise as no answer, and the report quotes that
+        # record for [0] and still describes [1]; at the parent the scan's raise
+        # left __call__ with no report at all. A DICT_NOT_CONTAINS guard is a
+        # real way in: RaisesOnCompare above says how its leaf raises.
         model = torch.compile(DictBranchModule(), fullgraph=True, backend="eager")
         x = torch.randn(3, 3)
         model._aot_compile(
@@ -2443,9 +2471,8 @@ from user code:
         return probe, saved
 
     def test_module_dispatch_evaluates_a_matching_tree_once(self):
-        # The scan calls the matching result's declared `fn` field rather than the
-        # result, whose __call__ would evaluate the guards that just passed a
-        # second time.
+        # The scan calls the matching result's _serve rather than the result,
+        # whose __call__ would evaluate the guards that just passed a second time.
         mod = ScaleModule()
         model = torch.compile(mod, fullgraph=True, backend="eager")
         x = torch.randn(4, 8)
@@ -3208,168 +3235,6 @@ from user code:
                 order = [c[0] for c in describers.mock_calls]
                 self.assertEqual(order, ["first", "later", "first"])
 
-    def test_no_match_report_describes_the_other_entries_when_one_raises(self):
-        # check_verbose runs paths check() does not -- the repr of a user object
-        # inside a DIMENSION_DYNAMIC_MARKING_GUARD, for one -- so an entry's
-        # describer can raise where dispatch's rejection was clean, and it must
-        # not take the other entries' usable lines with it.
-        mod, x = ScaleModule(), torch.randn(3, 3)
-        first = aot_compile_forward(mod, make_scaling_forward(2), x)
-        second = aot_compile_forward(mod, make_scaling_forward(3), x)
-        combined = AOTCompiledModel(mod, [first, second])
-
-        def raising_check_verbose(f_locals):
-            # User code under the report: an opt-out flipped here must not turn
-            # [1] into a withheld entry; the report judges the read it began with.
-            second.disable_guard_check()
-            raise ValueError("boom")
-
-        manager = first._live_guard_manager()
-        with patch.object(manager, "check_verbose", raising_check_verbose):
-            with self.assertRaises(RuntimeError) as ctx:
-                combined(x.double())
-        lines = str(ctx.exception).splitlines()
-        self.assertIn("Tried 2 compiled input(s)", lines[0])
-        self.assertEqual(lines[1], "  [0] <guard check raised ValueError: boom>")
-        self.assertTrue(lines[2].startswith("  [1] "), lines[2])
-        self.assertNotIn("guard check raised", lines[2])
-        self.assertIn("Add a ModelInput", lines[3])
-
-    def test_no_match_message_reads_a_systemerror_cause_not_the_handled_exception(self):
-        # _PyErr_FormatFromCause sets __cause__ and __context__ alike, so only a
-        # SystemError whose two differ tells the reads apart: raised inside an
-        # `except ValueError:` block, its __context__ is what the CALLER was handling.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        x = torch.randn(3, 3)
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-
-        class Raises:
-            def check(self, f_locals):
-                raise SystemError("stub tree is unhappy")
-
-        model.forward.compiled_results[0]._artifacts.guard_manager = Raises()
-        try:
-            raise ValueError("the caller was handling this")
-        except ValueError:
-            with self.assertRaises(RuntimeError) as ctx:
-                model(x)
-        message = str(ctx.exception)
-        raised = "  [0] <guard check raised SystemError: stub tree is unhappy>"
-        self.assertIn(raised, message.splitlines())
-        self.assertNotIn("the caller was handling this", message)
-
-    def test_no_match_report_reads_the_dispatch_record_after_a_raise(self):
-        # [0] raised in the scan and rejected on the second pass, so the accept
-        # line is reached with ONE rejection on record; [1] raised in both passes
-        # with two texts and is quoted for the last, the one that left it
-        # unanswered. The chain carries [0]'s raise: the FIRST index that raised.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        x = torch.randn(3, 3)
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])] * 2)
-
-        class RaisesThenRejects:
-            checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                if self.checks == 1:
-                    raise RuntimeError("the first pass is unhappy")
-                return False
-
-            def check_verbose(self, f_locals):
-                return types.SimpleNamespace(result=True, verbose_code_parts=[])
-
-        class RaisesTwice(RaisesThenRejects):
-            def check(self, f_locals):
-                self.checks += 1
-                # Chained on purpose: only a SystemError is unwrapped to its cause.
-                raise RuntimeError(f"pass {self.checks} unhappy") from ValueError("x")
-
-        stubs = [RaisesThenRejects(), RaisesTwice()]
-        for result, stub in zip(model.forward.compiled_results, stubs):
-            result._artifacts.guard_manager = stub
-        with self.assertRaises(RuntimeError) as ctx:
-            model(x)
-        message = str(ctx.exception)
-        lines = message.splitlines()
-        self.assertEqual([stub.checks for stub in stubs], [2, 2])
-        accepted = f"  [0] {_ACCEPTED_IN_THE_REPORT}"
-        self.assertIn(accepted, lines)
-        self.assertNotIn("twice", message)
-        self.assertNotIn("ValueError", message)
-        self.assertIn("  [1] <guard check raised RuntimeError: pass 2 unhappy>", lines)
-        self.assertNotIn("pass 1 unhappy", message)
-        self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
-        self.assertNotIn("the first pass is unhappy", message)
-        self.assertIn("[0]'s guard check raised while checking this call", message)
-        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
-
-    def test_aot_compile_module_two_raisers_in_the_report_and_then_the_warning(self):
-        # [0] opted out and [1] enabled both raise, so the two records of a raise
-        # part: the chain carries the FIRST index that raised, whose opt-out line
-        # quotes no exception text, while the advice names the first ENABLED one.
-        # [1]'s text holds two separators splitlines() breaks on, so its line
-        # asserted whole pins the raise line's collapse.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        x = torch.randn(3, 3)
-        inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(2)]
-        model._aot_compile(inputs)
-
-        class Raises:
-            def __init__(self, message):
-                self.message = message
-
-            def check(self, f_locals):
-                raise RuntimeError(self.message)
-
-        results = model.forward.compiled_results
-        results[0]._artifacts.guard_manager = Raises("the opted-out tree is unhappy")
-        results[0].disable_guard_check()
-        results[1]._artifacts.guard_manager = Raises("checked\x0ctree\x1eis unhappy")
-        with self.assertRaises(RuntimeError) as ctx:
-            model(x)
-        lines = str(ctx.exception).splitlines()
-        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
-        withheld = "  [0] <opted out of guard checks; withheld because [1]'s guard check raised>"
-        self.assertIn(withheld, lines)
-        checked = "  [1] <guard check raised RuntimeError: checked tree is unhappy>"
-        self.assertIn(checked, lines)
-        self.assertIn("[1]'s raise, not a guard failure, is what withheld", lines[3])
-        self.assertEqual(str(ctx.exception.__cause__), "the opted-out tree is unhappy")
-        # Opted out as well, [1] withholds the last resort no longer, which serves
-        # the first opted-out result: one warning per raise, each naming that
-        # index as served and not the raiser it is about.
-        results[1].disable_guard_check()
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            self.assertEqual(model(x), x * 2)
-        self.assertEqual(len(logs.output), 2)
-        warned = "\n".join(logs.output)
-        first = "[0]'s guard check raised RuntimeError: the opted-out tree is unhappy"
-        self.assertIn(first, warned)
-        # Raw, unlike the report line: only _raised_line collapses separators.
-        raw = "[1]'s guard check raised RuntimeError: checked\x0ctree\x1eis unhappy"
-        self.assertIn(raw, warned)
-        self.assertEqual(warned.count("dispatch served [0]"), 2)
-
-    def test_aot_compile_module_interrupt_out_of_a_guard_tree_propagates(self):
-        # accepts() catches Exception, not BaseException: a Ctrl-C inside a tree is
-        # no answer about this call. Widened, the call ends in a report quoting it.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        x = torch.randn(3, 3)
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-
-        class Interrupts:
-            def check(self, f_locals):
-                raise KeyboardInterrupt("ctrl-c inside the tree")
-
-        model.forward.compiled_results[0]._artifacts.guard_manager = Interrupts()
-        with self.assertRaisesRegex(KeyboardInterrupt, "ctrl-c inside the tree"):
-            model(x)
-
     def test_aot_compile_module_raising_tree_does_not_reach_an_opted_out_result(self):
         # A tree that raised rejected nothing, so an opted-out result answering
         # on its strength serves a graph whose guards never passed. A plain call
@@ -3393,14 +3258,13 @@ from user code:
             served = model(x, evil)
             self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
         message = str(ctx.exception)
-        raised = "[0] <guard check raised ValueError: boom from __eq__ (through the guard tree's pybind boundary)>"
-        self.assertIn(raised, message)
+        lines = message.splitlines()
+        raised = "  [0] <guard check raised ValueError: boom from __eq__ (through the guard tree's pybind boundary)>"
+        self.assertIn(raised, lines)
         # The only path that reports an opted-out result: its guards say nothing
         # about why the call was refused, so the report names the artifact to fix.
-        withheld = (
-            "[1] <opted out of guard checks; withheld because [0]'s guard check raised>"
-        )
-        self.assertIn(withheld, message)
+        withheld = "  [1] <opted out of guard checks; withheld because [0]'s guard check raised>"
+        self.assertIn(withheld, lines)
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
         chained = []
         # Start at the cause: the report itself quotes the raise in [0]'s line,
@@ -3412,57 +3276,43 @@ from user code:
         # The raise a plain call surfaces stays reachable from the report.
         self.assertTrue(any("boom from __eq__" in c for c in chained), chained)
 
-    def test_aot_compile_module_serves_a_later_match_after_an_earlier_raise(self):
-        # The one path where tolerating a raise changes an ANSWER and not a
-        # message: [0] raised, [1]'s guards passed on this call, and the parent
-        # propagated [0]'s raise and served nothing. A raise is not a rejection
-        # and says nothing about [1], so [1]'s graph is what dispatch owes the
-        # caller; refusing would not undo the relational residue a C++ throw
-        # leaves either, so the raise is served over and warned about.
-        self._hide_leaked_dynamo_globals()
-        mod = GlobalConfigModule()
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
+    def test_aot_compile_module_wrapped_interrupt_out_of_a_guard_tree_propagates(self):
+        # The pybind boundary wraps WHATEVER a leaf left set into SystemError, a
+        # Ctrl-C inside a key's __eq__ included, so `except Exception` alone
+        # reads the interrupt as no answer: served over when another result
+        # accepts, otherwise the cause of a report when dispatch caught it, or
+        # only a quoted line of one when check_verbose did. Each handler
+        # re-raises when the unwrapped cause is not an Exception, so the
+        # SystemError leaves the call as the boundary made it, the interrupt one
+        # hop down.
+        x = torch.ones(3, 3)
+        dict_input = ModelInput(args=(x, {}), kwargs={}, contexts=[])
+        none_input = ModelInput(args=(x, None), kwargs={}, contexts=[])
+        # Which handler sees the wrapped raise: [0]'s inline check, with [1]
+        # patched to accept so a swallowed raise would be served over; accepts()
+        # on [1], after [0] refused; the report's check_verbose, after [0]'s
+        # check() refused in both passes.
+        cases = (
+            ("inline", [dict_input, none_input], 1, True),
+            ("accepts", [none_input, dict_input], 0, False),
+            ("report", [dict_input], 0, False),
         )
-        x = torch.randn(4, 8)
-        with _set_pooling("mean"):
-            expected = mod(x)
-        with _set_pooling("sum"):
-            self.assertNotEqual(mod(x), expected)
-        model._aot_compile(
-            [
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("sum")]),
-                ModelInput(args=(x,), kwargs={}, contexts=[_set_pooling("mean")]),
-            ]
-        )
-
-        class RaisingGuardManager:
-            checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                raise RuntimeError("guard tree is unhappy")
-
-        # A stub, not the dict leaf: the answer does not depend on how the tree raised.
-        results = model.forward.compiled_results
-        results[0]._artifacts.guard_manager = RaisingGuardManager()
-        logger = "torch._dynamo.aot_compile"
-        with self.assertLogs(logger, level="WARNING") as logs:
-            with _set_pooling("mean"):
-                served = model(x)
-        self.assertEqual(served, expected)
-        # Checked once: [1] matched in the scan, so the serve was not pass 2's.
-        self.assertEqual(results[0]._artifacts.guard_manager.checks, 1)
-        # Nothing else records the raise on this path: the report is never built.
-        warned = "\n".join(logs.output)
-        self.assertIn(
-            "[0]'s guard check raised RuntimeError: guard tree is unhappy", warned
-        )
-        self.assertIn("dispatch served [1]", warned)
-        self.assertIn("Fix or drop input [0]", warned)
+        boundary = "returned a result with an exception set"
+        for handler, inputs, patched, answer in cases:
+            model = torch.compile(DictBranchModule(), fullgraph=True, backend="eager")
+            model._aot_compile(inputs)
+            manager = model.forward.compiled_results[patched]._live_guard_manager()
+            for exc in (KeyboardInterrupt, SystemExit):
+                interrupt = exc("inside __eq__")
+                evil = {InterruptsOnCompare(interrupt): 1}
+                with self.subTest(exc=exc.__name__, handler=handler):
+                    with (
+                        patch.object(manager, "check", return_value=answer),
+                        self.assertRaisesRegex(SystemError, boundary) as ctx,
+                    ):
+                        served = model(x, evil)
+                        self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
+                    self.assertIs(ctx.exception.__cause__, interrupt)
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # A tree that THROWS out of C++ returns through
@@ -3501,8 +3351,8 @@ from user code:
         # and has the same non-RAII exit. Here check() refuses cleanly and the
         # tree throws only when the report describes it: TENSOR_MATCH's verbose
         # failure branch calls is_parameter, which runs the Parameter metaclass's
-        # __instancecheck__, patched to raise. The throw propagates in place of
-        # the report; only the state it leaves is pinned.
+        # __instancecheck__, patched to raise. The report catches the throw and
+        # quotes it as [0]'s line; the state it leaves is pinned.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
@@ -3519,10 +3369,14 @@ from user code:
             patch.object(manager, "check", return_value=False) as check,
             patch.object(meta, "__instancecheck__", raising_instancecheck),
         ):
-            with self.assertRaisesRegex(RuntimeError, "__instancecheck__ raised"):
+            with self.assertRaises(RuntimeError) as ctx:
                 model(torch.randn(3, 3, dtype=torch.float64))
         # Both passes refused, so the throw is the report's check_verbose.
         self.assertEqual(check.call_count, 2)
+        self.assertIn(
+            "  [0] <guard check raised RuntimeError: __instancecheck__ raised>",
+            str(ctx.exception).splitlines(),
+        )
         self.assertEqual(torch._C._get_torch_function_state(), state)
 
     def test_aot_compile_function_restores_torch_function_after_a_throw(self):
@@ -3552,143 +3406,6 @@ from user code:
         with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
             loaded(nested)
         self.assertEqual(torch._C._get_torch_function_state(), state)
-
-    def test_aot_compile_module_serves_a_tree_that_raised_and_then_accepted(self):
-        # The one direction the veto is NOT applied to: [0] raised in the scan
-        # and its own accept on the second pass is what serves. The veto holds
-        # the last resort back because a raise rejected nothing and an unguarded
-        # graph needs real rejections; an accept is that tree's own answer, and
-        # vetoing it would not contain the stale relational state either (below),
-        # so the warning names both directions a stale tree can bend an answer.
-        self._hide_leaked_dynamo_globals()
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
-        )
-
-        class RaisesThenAccepts:
-            def __init__(self):
-                self.checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                if self.checks == 1:
-                    raise RuntimeError("the scan is unhappy")
-                return True
-
-        stub = RaisesThenAccepts()
-        model.forward.compiled_results[0]._artifacts.guard_manager = stub
-        x = torch.randn(3, 3)
-        logger = "torch._dynamo.aot_compile"
-        with self.assertLogs(logger, level="WARNING") as logs:
-            served = model(x)
-        self.assertEqual(served, x * 2)
-        # Two checks: the serve is the second pass's, the raiser the index served.
-        self.assertEqual(stub.checks, 2)
-        warned = "\n".join(logs.output)
-        raised = "[0]'s guard check raised RuntimeError: the scan is unhappy"
-        self.assertIn(raised, warned)
-        self.assertIn("dispatch served [0]", warned)
-        self.assertIn("reject a call it fits or accept one it does not", warned)
-        # The same tree's next answer is acted on with no raise on record at all,
-        # which is why a per-call veto is not what keeps a stale tree honest.
-        with self.assertNoLogs(logger, level="WARNING"):
-            self.assertEqual(model(x), x * 2)
-
-    def test_aot_compile_module_warns_once_per_model_not_per_process(self):
-        # The dedup set is a field on the model, which is the whole reason it is
-        # not torch._logging.warning_once: that cache is process-global, so the
-        # first model to log would silence every later one with the same defect.
-        self._hide_leaked_dynamo_globals()
-        x = torch.randn(3, 3)
-        logger = "torch._dynamo.aot_compile"
-        first = self._model_whose_tree_raises("guard tree is unhappy")
-        second = self._model_whose_tree_raises("guard tree is unhappy")
-        with self.assertLogs(logger, level="WARNING") as logs:
-            self.assertEqual(first(x), x * 2)
-        self.assertEqual(len(logs.output), 1)
-        with self.assertNoLogs(logger, level="WARNING"):
-            first(x)
-        with self.assertLogs(logger, level="WARNING") as logs:
-            self.assertEqual(second(x), x * 2)
-        self.assertEqual(len(logs.output), 1)
-        self.assertIn("[0]'s guard check raised RuntimeError", logs.output[0])
-        # The helper's result opted out, so the advice is the last resort's.
-        self.assertIn("opted out of guard checks, but", logs.output[0])
-        self.assertIn("reachable only through the last resort", logs.output[0])
-        self.assertNotIn("Fix or drop input", logs.output[0])
-
-    def test_aot_compile_module_warns_once_per_exception_type_at_one_index(self):
-        # The dedup key is (index, exception type), not the index: two defects at
-        # one index told apart by type alone warn twice; a repeat of one is silent.
-        self._hide_leaked_dynamo_globals()
-        x = torch.randn(3, 3)
-
-        class Raises:
-            error = ValueError
-
-            def check(self, f_locals):
-                raise self.error("guard tree is unhappy")
-
-        model = self._model_whose_tree_raises("guard tree is unhappy")
-        model.forward.compiled_results[0]._artifacts.guard_manager = Raises()
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            self.assertEqual(model(x), x * 2)
-            Raises.error = TypeError
-            self.assertEqual(model(x), x * 2)
-            self.assertEqual(model(x), x * 2)
-        self.assertEqual(len(logs.output), 2, logs.output)
-        self.assertIn("[0]'s guard check raised ValueError: guard tree", logs.output[0])
-        self.assertIn("[0]'s guard check raised TypeError: guard tree", logs.output[1])
-
-    def test_aot_compiled_model_keeps_its_warning_dedup_out_of_the_constructor(self):
-        # A factory, not a default: a class-level set would share one dedup
-        # across every model as surely as a caller-supplied one would.
-        mod = ScaleModule()
-        first, second = AOTCompiledModel(mod, []), AOTCompiledModel(mod, [])
-        self.assertIsNot(first._warned[1], second._warned[1])
-        # init=False: a caller's set would share one dedup across every model.
-        init_fields = [f.name for f in dataclasses.fields(AOTCompiledModel) if f.init]
-        self.assertNotIn("_warned", init_fields)
-
-    def _model_whose_tree_raises(self, text):
-        # One opted-out result whose tree raises: the artifact the two dedup
-        # tests around this helper share, told apart by the raise's text.
-        class Raises:
-            def check(self, f_locals):
-                raise RuntimeError(text)
-
-        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
-        model._aot_compile(
-            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
-        )
-        result = model.forward.compiled_results[0]
-        result._artifacts.guard_manager = Raises()
-        result.disable_guard_check()
-        return model
-
-    def test_aot_compile_module_warns_again_about_a_replaced_single_result(self):
-        # A one-result model binds nothing a second time, so a dedup reset tied
-        # to the binding verdict never runs for it and the (0, "RuntimeError")
-        # its first call logged would silence every artifact later put at [0].
-        self._hide_leaked_dynamo_globals()
-        x = torch.randn(3, 3)
-        logger = "torch._dynamo.aot_compile"
-        model = self._model_whose_tree_raises("the first artifact is unhappy")
-        with self.assertLogs(logger, level="WARNING") as logs:
-            self.assertEqual(model(x), x * 2)
-        self.assertEqual(len(logs.output), 1)
-        self.assertIn("RuntimeError: the first artifact is unhappy", logs.output[0])
-        with self.assertNoLogs(logger, level="WARNING"):
-            model(x)
-        replacement = self._model_whose_tree_raises("the second artifact is unhappy")
-        model.forward.compiled_results[0] = replacement.forward.compiled_results[0]
-        with self.assertLogs(logger, level="WARNING") as logs:
-            self.assertEqual(model(x), x * 2)
-        self.assertEqual(len(logs.output), 1)
-        self.assertIn("RuntimeError: the second artifact is unhappy", logs.output[0])
-        with self.assertNoLogs(logger, level="WARNING"):
-            model(x)
 
     def test_aot_compile_module_scope_resolves_through_forward_hook(self):
         # A registered forward hook makes get_traced_fn(model) return
@@ -4616,14 +4333,9 @@ from user code:
         global EPS, AOT_UNGUARDED_PARAM
 
         self._hide_leaked_dynamo_globals()
-        saved_eps = EPS
+        saved_eps, saved_param = EPS, AOT_UNGUARDED_PARAM
         self.addCleanup(globals().__setitem__, "EPS", saved_eps)
-        AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
-        saved_param = AOT_UNGUARDED_PARAM
-
-        class TwoGlobalsModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS + AOT_UNGUARDED_PARAM
+        self.addCleanup(globals().__setitem__, "AOT_UNGUARDED_PARAM", saved_param)
 
         x = torch.randn(3)
         keep_tensors = torch.compiler.keep_tensor_guards_unsafe
@@ -4825,30 +4537,10 @@ from user code:
         # certified set and no more.
         global EPS, AOT_UNGUARDED_PARAM
 
-        self._hide_leaked_dynamo_globals()
-        self.addCleanup(globals().__setitem__, "EPS", EPS)
-        AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
         load_time_param = AOT_UNGUARDED_PARAM
-
-        class TwoGlobalsModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS + AOT_UNGUARDED_PARAM
-
-        x = torch.randn(3)
-        keep_tensors = torch.compiler.keep_tensor_guards_unsafe
-        options = {"guard_filter_fn": keep_tensors}
-        model = torch.compile(
-            TwoGlobalsModule(), fullgraph=True, backend="eager", options=options
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-
+        self.addCleanup(globals().__setitem__, "AOT_UNGUARDED_PARAM", load_time_param)
+        (x,), reloaded, _ = self._load_armed_module(TwoGlobalsModule, 3)
         load_time_eps = EPS
-        reloaded = torch.compile(
-            TwoGlobalsModule(), fullgraph=True, backend="eager", options=options
-        )
-        reloaded._load_aot_compiled_module(data)
         self.assertEqual(reloaded(x), x * load_time_eps + load_time_param)
 
         rebound = torch.tensor(2.0)
@@ -4861,62 +4553,86 @@ from user code:
         AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.full((3,), 9.0))
         self.assertEqual(reloaded(x), x * rebound + load_time_param)
 
-    def test_aot_compile_module_second_pass_rebind_is_served(self):
-        # Dispatch's second pass re-reads the guarded global as well. A check()
-        # can reject from the recursive dict-tag fast path without running the
-        # tree, which answers nothing about the call, so the pass that rescues it
-        # serves a call whose guards did pass and owes the graph the same live
-        # value the first pass would have handed it. A stub that rejects once and
-        # then defers to the real tree forces that pass on a LOADED artifact, the
-        # only kind the re-read is armed for.
-        global EPS
-
+    def _load_armed_module(self, module_cls, *sizes):
+        # module_cls compiled for one ModelInput per size, saved, and loaded
+        # under keep_tensor_guards_unsafe, which keeps the TENSOR_MATCH on EPS
+        # and so arms the re-read of it on every result: a served load-time
+        # value is then the caller's doing and not an unarmed artifact. EPS is
+        # restored at cleanup, so the caller rebinds it freely.
         self._hide_leaked_dynamo_globals()
         self.addCleanup(globals().__setitem__, "EPS", EPS)
-
-        class EpsOnlyModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS
-
-        x = torch.randn(3)
-        keep_tensors = torch.compiler.keep_tensor_guards_unsafe
-        options = {"guard_filter_fn": keep_tensors}
+        xs = [torch.randn(n) for n in sizes]
+        options = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
         model = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
+            module_cls(), fullgraph=True, backend="eager", options=options
         )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
         data = model._save_aot_compiled_module()
         torch._dynamo.reset()
-
-        load_time_eps = EPS
         reloaded = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
+            module_cls(), fullgraph=True, backend="eager", options=options
         )
         reloaded._load_aot_compiled_module(data)
-        result = reloaded.forward.compiled_results[0]
-        # Armed, so a served load-time value would be this test's own doing.
-        self.assertEqual(result._live_global_names, ("EPS",))
+        results = reloaded.forward.compiled_results
+        self.assertEqual(len(results), len(sizes))
+        for result in results:
+            self.assertEqual(result._live_global_names, ("EPS",))
+        return xs, reloaded, results
 
-        class RejectsThenDefers:
-            def __init__(self, tree):
-                self.tree = tree
-                self.checks = 0
+    def test_aot_compile_module_sweep_rebind_is_served(self):
+        # Dispatch's sweep over results[1:] re-reads the guarded global as well.
+        # Two results compiled for different input shapes: the first pass
+        # refuses the (4,) call on [0], and the sweep serves it from [1], which
+        # has to compute with the rebind its own guards just accepted, not the
+        # value the load merged into its globals.
+        global EPS
 
-            def check(self, f_locals):
-                self.checks += 1
-                return self.checks > 1 and self.tree.check(f_locals)
-
-        stub = RejectsThenDefers(result._artifacts.guard_manager)
-        result._artifacts.guard_manager = stub
-
+        (_, x4), reloaded, results = self._load_armed_module(EpsOnlyModule, 3, 4)
+        load_time_eps = EPS
         rebound = torch.tensor(2.0)
         self.assertNotEqual(rebound.item(), load_time_eps.item())
         EPS = rebound
-        served = reloaded(x)
-        # The real tree, not the stub, is what accepted the rebind.
-        self.assertEqual(stub.checks, 2)
+        served = reloaded(x4)
+        self.assertEqual(served, x4 * rebound)
+        self.assertNotEqual(served.tolist(), (x4 * load_time_eps).tolist())
+        # [1] served the call and re-read; [0] refused it and read nothing.
+        self.assertIs(results[1].fn.__globals__["EPS"], rebound)
+        self.assertIs(results[0].fn.__globals__["EPS"], load_time_eps)
+
+    def test_aot_compile_module_second_pass_rebind_is_served(self):
+        # Dispatch's re-check pass re-reads the guarded global as well. A check()
+        # can reject from the recursive dict-tag fast path without running the
+        # tree, which answers nothing about the call, so the pass that rescues it
+        # serves a call whose guards did pass and owes the graph the same live
+        # value the first pass would have handed it -- not the value an EARLIER
+        # accepted call re-read into the bytecode's globals, which persists there
+        # between calls. A probe that makes the guard on EPS miss the global once
+        # forces that pass on a LOADED artifact, the only kind the re-read is
+        # armed for.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        load_time_eps = EPS
+        # A call the first pass accepts leaves its re-read in fn.__globals__.
+        first_rebind = torch.tensor(3.0)
+        EPS = first_rebind
+        self.assertEqual(reloaded(x), x * first_rebind)
+        self.assertIs(result.fn.__globals__["EPS"], first_rebind)
+
+        rebound = torch.tensor(2.0)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        # Rebound BEFORE the probe re-keys the name: a STORE_GLOBAL after it
+        # would consume the miss and insert a second "EPS" key.
+        EPS = rebound
+        self._install_global_probe("EPS", misses=1)
+        manager = result._artifacts.guard_manager
+        with patch.object(manager, "check", wraps=manager.check) as check:
+            served = reloaded(x)
+        # The scan's check() rejected the call and the re-check's accepted it.
+        self.assertEqual(check.call_count, 2)
         self.assertEqual(served, x * rebound)
         self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
+        self.assertNotEqual(served.tolist(), (x * first_rebind).tolist())
 
     def test_aot_compile_module_opted_out_load_rebind_is_served(self):
         # The re-read reaches the last resort too, the site that serves a result
@@ -4926,43 +4642,57 @@ from user code:
         # is what pushes dispatch off both earlier passes onto that site.
         global EPS
 
-        self._hide_leaked_dynamo_globals()
-        self.addCleanup(globals().__setitem__, "EPS", EPS)
-
-        class EpsOnlyModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS
-
-        x = torch.randn(3)
-        keep_tensors = torch.compiler.keep_tensor_guards_unsafe
-        options = {"guard_filter_fn": keep_tensors}
-        model = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
-        )
-        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
-        data = model._save_aot_compiled_module()
-        torch._dynamo.reset()
-
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
         load_time_eps = EPS
-        reloaded = torch.compile(
-            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
-        )
-        reloaded._load_aot_compiled_module(data)
-        result = reloaded.forward.compiled_results[0]
-        self.assertEqual(result._live_global_names, ("EPS",))
         self.assertEqual(reloaded(x), x * load_time_eps)
 
         rebound = torch.nn.Parameter(torch.tensor(2.0), requires_grad=False)
         self.assertNotEqual(rebound.item(), load_time_eps.item())
         EPS = rebound
-        with self.assertRaisesRegex(
-            RuntimeError, "No AOT compiled graph matched this call"
-        ):
+        with self.assertRaises(RuntimeError) as ctx:
             reloaded(x)
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        # EPS's own guard is the refusal, not a missing name or another guard.
+        self.assertIn(
+            "expected type of 'G['EPS']' to be <class 'torch.Tensor'>, "
+            "but found <class 'torch.nn.parameter.Parameter'>",
+            message,
+        )
         result.disable_guard_check()
         served = reloaded(x)
         self.assertEqual(served, x * rebound)
         self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
+        # A name the scope no longer binds is skipped, not deleted, so the
+        # opted-out call serves the last value read.
+        del EPS
+        self.assertEqual(reloaded(x), x * rebound)
+
+    def test_aot_compile_module_global_deleted_under_the_re_read_is_skipped(self):
+        # The scope is live, so a del of the guarded name can land between the
+        # guard check and _serve's read of it. The read is one lookup under
+        # try/except, so the name is skipped and the bytecode's globals keep the
+        # last value read, where a membership test and then a read would let a
+        # bare KeyError out of a call whose guards passed. A dict that answers
+        # the membership test and fails the read stands in for that window; the
+        # guards hold the live module dict by reference and go on passing.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        rebound = torch.tensor(2.0)
+        EPS = rebound
+        self.assertEqual(reloaded(x), x * rebound)
+        self.assertIs(result.fn.__globals__["EPS"], rebound)
+
+        class DeletedBetweenTestAndRead(dict):
+            def __contains__(self, name):
+                return True
+
+            def __getitem__(self, name):
+                raise KeyError(name)
+
+        with patch.object(result, "_guard_globals", DeletedBetweenTestAndRead()):
+            self.assertEqual(reloaded(x), x * rebound)
 
     @torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True)
     def test_aot_compile_module_shape_only_global_arms_the_guard_scope(self):
@@ -5595,9 +5325,9 @@ from user code:
         # resolves and a name it binds is what the graph computes with. That is
         # all a global no kept guard is rooted at ever gets -- the per-call
         # re-read covers the certified names only, and under the default filter
-        # here there are none, which is also why this passes on the parent. It
-        # is here because the other half REPLACES the guard scope, and the two
-        # are easy to conflate.
+        # here there are none, so a rebind of the scope after the load is not
+        # followed. It is here because the other half REPLACES the guard scope,
+        # and the two are easy to conflate.
         def fn(x):
             return x * EPS
 
@@ -5613,8 +5343,12 @@ from user code:
         self.assertEqual(omitted(x), x * EPS)
 
         live = torch.tensor(2.0)
+        scope = {"EPS": live}
         with open(self.path(), "rb") as f:
-            bound = torch.compiler.load_compiled_function(f, f_globals={"EPS": live})
+            bound = torch.compiler.load_compiled_function(f, f_globals=scope)
+        self.assertEqual(bound._live_global_names, ())
+        self.assertEqual(bound(x), x * live)
+        scope["EPS"] = torch.tensor(3.0)
         self.assertEqual(bound(x), x * live)
 
     def test_load_compiled_function_empty_f_globals_is_an_empty_guard_scope(self):
@@ -5735,41 +5469,54 @@ from user code:
         self.assertEqual(loaded(x), fn(x))
 
     def test_load_compiled_function_f_globals_accepted_rebind_is_served(self):
-        # A global a kept guard is rooted at is re-read from f_globals before
+        # A global a kept guard's own source IS is re-read from f_globals before
         # every call, so a rebind a kept TENSOR_MATCH accepts -- it compares
         # metadata, not values -- is what the graph computes with, not the value
         # the load snapshotted. Serving the snapshot instead would be a wrong
         # answer with nothing raising: the guard the swap satisfies certifies
         # exactly the metadata the graph was compiled for, so the new tensor is
         # the one it should read. test_..._guard_checks_the_tensor_type pins the
-        # rejected end of the same swap.
-        def fn(x):
-            return x * EPS
+        # rejected end of the same swap. The Parameter no kept guard is rooted
+        # at (keep_tensor_guards_unsafe drops TENSOR_MATCH on a Parameter) is
+        # rebound the same way and must NOT be served, so the re-read covers
+        # exactly the certified set and no more, as
+        # test_aot_compile_module_rebind_after_load_is_served pins for the
+        # module path.
+        from torch._dynamo.source import get_global_source_name, GlobalSource
 
-        x = torch.randn(3, 4)
+        global AOT_UNGUARDED_PARAM
+
         self._hide_leaked_dynamo_globals()
-        compiled_fn = torch.compile(
-            fn,
-            fullgraph=True,
-            backend="eager",
-            options={"guard_filter_fn": keep_global_guards},
-        ).aot_compile(((x,), {}))
+        AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
+        load_time_param = AOT_UNGUARDED_PARAM
+
+        def fn(x):
+            return x * EPS + AOT_UNGUARDED_PARAM
+
+        x = torch.randn(3)
+        options = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        compiled = torch.compile(fn, fullgraph=True, backend="eager", options=options)
+        captured = compiled.aot_compile(((x,), {}))
         # The rebind being ACCEPTED has to be a guard's answer rather than an
         # absent one: both the served value and guard_check returning True also
-        # hold for an artifact that kept no guard on G['EPS'] at all.
-        guards_state = load_guards_state(compiled_fn._artifacts.guards_state)
-        kept = [str(guard) for guard in guards_state.output_graph.guards]
-        self.assertTrue(any("G['EPS']" in guard for guard in kept), kept)
-        compiled_fn.save_compiled_function(self.path())
+        # hold for an artifact that kept no guard on G['EPS'] at all. And the
+        # Parameter has to be one no kept guard reaches, or its leg would hold
+        # for a guarded global that failed to be re-read.
+        output_graph = load_guards_state(captured._artifacts.guards_state).output_graph
+        sources = [guard.originating_source for guard in output_graph.guards]
+        self.assertIn(GlobalSource("EPS"), sources)
+        roots = {get_global_source_name(source) for source in sources}
+        self.assertNotIn("AOT_UNGUARDED_PARAM", roots)
+        captured.save_compiled_function(self.path())
         torch._dynamo.reset()
 
         # Not EPS.clone(): x * 1e-7 sits inside assertEqual's tolerance of zero,
         # so the first call could not tell the scope's value from the serialized.
         load_time = torch.tensor(3.0)
-        scope = {"EPS": load_time}
+        scope = {"EPS": load_time, "AOT_UNGUARDED_PARAM": load_time_param}
         with open(self.path(), "rb") as f:
             loaded = torch.compiler.load_compiled_function(f, f_globals=scope)
-        self.assertEqual(loaded(x), x * load_time)
+        self.assertEqual(loaded(x), x * load_time + load_time_param)
 
         rebound = torch.tensor(5.0)
         self.assertEqual(rebound.dtype, load_time.dtype)
@@ -5778,7 +5525,8 @@ from user code:
         self.assertEqual(rebound.requires_grad, load_time.requires_grad)
         self.assertNotEqual(rebound.item(), load_time.item())
         scope["EPS"] = rebound
-        self.assertEqual(loaded(x), x * rebound)
+        scope["AOT_UNGUARDED_PARAM"] = torch.nn.Parameter(torch.full((3,), 9.0))
+        self.assertEqual(loaded(x), x * rebound + load_time_param)
 
     def test_load_compiled_function_graph_rebind_of_a_guarded_global_is_re_read(self):
         # A forward that rebinds a guarded global has Dynamo replay the store as
@@ -5898,7 +5646,7 @@ from user code:
 
     def test_load_compiled_function_opted_out_rebind_is_served_unchecked(self):
         # disable_guard_check() does not stop the per-call re-read: the names a
-        # kept guard is rooted at are recorded by the load, before the opt-out
+        # kept guard's own source IS are recorded by the load, before the opt-out
         # flips anything, so an opted-out artifact goes on serving whatever
         # f_globals binds -- including the nn.Parameter the kept TENSOR_MATCH
         # rejects while the check is on, which is the same swap
@@ -5906,7 +5654,8 @@ from user code:
         # the opt-out being unsafe as documented rather than an accident:
         # holding the load-time value here would be no more checked, only stale.
         # The tail pins the other half of that entry: a name the scope no longer
-        # binds is skipped, not reverted, so the graph keeps the last value read.
+        # binds is skipped, not reverted, so the graph keeps whatever the
+        # bytecode's globals last held.
         def fn(x):
             return x * EPS
 
@@ -6931,9 +6680,9 @@ from user code:
         )
         self.assertEqual(loaded(x), fn(x))
         # Re-checked after the call: the guard scope's binding is never copied
-        # over the bytecode's. A function-path load leaves _bytecode_reads_guard_scope
-        # off, so __post_init__ records no _live_global_names and _serve copies
-        # nothing; the module path that arms it subtracts this key from certified.
+        # over the bytecode's. __post_init__ subtracts this key from both the
+        # arming set and the certified set on every load path, so it is never in
+        # _live_global_names and _serve never copies it.
         self.assertTrue(
             loaded.fn.__globals__[builtins_key] is builtins.__dict__,
             "a call rewired the bytecode to the guard scope's binding",
