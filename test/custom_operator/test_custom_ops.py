@@ -9,13 +9,20 @@ from model import get_custom_op_library_path, Model
 import torch
 import torch._library.utils as utils
 from torch import ops
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    run_tests,
+    TestCase,
+)
 
 
 torch.ops.import_module("pointwise")
 
 
 class TestCustomOperators(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.library_path = get_custom_op_library_path()
@@ -55,7 +62,7 @@ class TestCustomOperators(TestCase):
     def test_abstract_impl_pystub_faketensor(self):
         from functorch import make_fx
 
-        x = torch.randn(3, device="cpu")
+        x = torch.randn(3)
         self.assertNotIn("my_custom_ops", sys.modules.keys())
 
         with self.assertRaises(
