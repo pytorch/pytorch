@@ -480,22 +480,23 @@ static void registerXpuPluggableAllocator(PyObject* module) {
         return c10::xpu::XPUCachingAllocator::getCheckpointState(device, id);
       });
   m.def(
-    "_construct_XPU_Tensor_From_Storage_And_Metadata",
-    [](py::dict& metadata, c10::Storage storage) {
-    TORCH_CHECK(
-      storage.device_type() == c10::DeviceType::XPU,
-      "Expected XPU storage");
-    auto dtype = scalarTypeToTypeMeta(toScalarType(metadata["dtype"].ptr()));
-    constexpr c10::DispatchKeySet xpu_dispatch_keys(c10::DispatchKey::XPU);
-    at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
-      std::move(storage), xpu_dispatch_keys, dtype);
-    tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
-      metadata["size"].cast<std::vector<int64_t>>(),
-      metadata["stride"].cast<std::vector<int64_t>>());
-    tensor.unsafeGetTensorImpl()->set_storage_offset(
-      metadata["storage_offset"].cast<int64_t>());
-    return tensor;
-    });
+      "_construct_XPU_Tensor_From_Storage_And_Metadata",
+      [](py::dict& metadata, c10::Storage storage) {
+        TORCH_CHECK(
+            storage.device_type() == c10::DeviceType::XPU,
+            "Expected XPU storage");
+        auto dtype =
+            scalarTypeToTypeMeta(toScalarType(metadata["dtype"].ptr()));
+        constexpr c10::DispatchKeySet xpu_dispatch_keys(c10::DispatchKey::XPU);
+        at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
+            std::move(storage), xpu_dispatch_keys, dtype);
+        tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+            metadata["size"].cast<std::vector<int64_t>>(),
+            metadata["stride"].cast<std::vector<int64_t>>());
+        tensor.unsafeGetTensorImpl()->set_storage_offset(
+            metadata["storage_offset"].cast<int64_t>());
+        return tensor;
+      });
   m.def("_xpu_has_standard_deleter", [](size_t storage_impl_ptr) {
     auto* storage_impl = reinterpret_cast<c10::StorageImpl*>(storage_impl_ptr);
     if (storage_impl->device_type() != c10::DeviceType::XPU) {
@@ -503,7 +504,7 @@ static void registerXpuPluggableAllocator(PyObject* module) {
     }
     auto* allocator = c10::xpu::XPUCachingAllocator::get();
     return storage_impl->data_ptr().get_deleter() == allocator->raw_deleter();
-    });
+  });
   m.def("_xpu_free_and_remove_deleter", [](size_t storage_impl_ptr) {
     auto* storage_impl = reinterpret_cast<c10::StorageImpl*>(storage_impl_ptr);
     TORCH_CHECK(
@@ -515,7 +516,7 @@ static void registerXpuPluggableAllocator(PyObject* module) {
         allocator->raw_deleter(), c10::detail::deleteNothing);
     TORCH_CHECK(succeeded, "Expected standard deleter");
     allocator->raw_delete(data_ptr);
-    });
+  });
   m.def(
       "_xpu_checkPoolLiveAllocations",
       [](c10::DeviceIndex device,
