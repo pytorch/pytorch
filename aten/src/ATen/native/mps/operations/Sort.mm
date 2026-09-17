@@ -207,35 +207,35 @@ static void sort_radix(const Tensor& input,
         const Tensor& k_out_buf = ping ? keys_0 : keys_1;
         const Tensor& i_out_buf = ping ? idxs_0 : idxs_1;
 
-        const auto dims = std::array<int32_t, 3>{sort_size, n_blocks, shift};
+        const auto dims = c10::metal::vec3<int32_t>{sort_size, n_blocks, shift};
         const auto flags = std::array<uint8_t, 2>{static_cast<uint8_t>(descending), static_cast<uint8_t>(first_pass)};
 
         if (use_fused_count_scan) {
-          getMPSProfiler().beginProfileKernel(count_scan_pso, count_scan_kernel, {k_in});
+          getMPSProfiler().beginProfileKernel(count_scan_pso, count_scan_kernel, {k_in}, mpsStream);
           [enc setComputePipelineState:count_scan_pso];
           mtl_setArgs(enc, k_in, histograms, dims, descending);
           [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-          getMPSProfiler().endProfileKernel(count_scan_pso);
+          getMPSProfiler().endProfileKernel(count_scan_pso, mpsStream);
         } else {
-          getMPSProfiler().beginProfileKernel(count_pso, count_kernel, {k_in});
+          getMPSProfiler().beginProfileKernel(count_pso, count_kernel, {k_in}, mpsStream);
           [enc setComputePipelineState:count_pso];
           mtl_setArgs(enc, k_in, histograms, dims, descending);
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1)
               threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-          getMPSProfiler().endProfileKernel(count_pso);
+          getMPSProfiler().endProfileKernel(count_pso, mpsStream);
 
           if (!use_fused_scan) {
-            getMPSProfiler().beginProfileKernel(scan_pso, "radix_scan", {histograms});
+            getMPSProfiler().beginProfileKernel(scan_pso, "radix_scan", {histograms}, mpsStream);
             [enc setComputePipelineState:scan_pso];
             mtl_setArgs(enc, histograms, n_entries);
             [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(1024, 1, 1)];
-            getMPSProfiler().endProfileKernel(scan_pso);
+            getMPSProfiler().endProfileKernel(scan_pso, mpsStream);
           }
         }
 
         auto pso = use_direct ? scatter_final_pso : scatter_pso;
         const auto& kernel_name = use_direct ? scatter_final_kernel : scatter_kernel;
-        getMPSProfiler().beginProfileKernel(pso, kernel_name, {k_in});
+        getMPSProfiler().beginProfileKernel(pso, kernel_name, {k_in}, mpsStream);
         [enc setComputePipelineState:pso];
         if (use_direct && sel_mode) {
           mtl_setArgs(
@@ -246,7 +246,7 @@ static void sort_radix(const Tensor& input,
           mtl_setArgs(enc, k_in, i_in, k_out_buf, i_out_buf, histograms, dims, flags);
         }
         [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(RADIX_TPTG, 1, 1)];
-        getMPSProfiler().endProfileKernel(pso);
+        getMPSProfiler().endProfileKernel(pso, mpsStream);
 
         ping = !ping;
       }
@@ -286,7 +286,7 @@ static void sort_single_block(const Tensor& input,
     @autoreleasepool {
       auto enc = mpsStream->commandEncoder();
       auto pso = lib.getPipelineStateForFunc(kernel);
-      getMPSProfiler().beginProfileKernel(pso, kernel, {input});
+      getMPSProfiler().beginProfileKernel(pso, kernel, {input}, mpsStream);
       [enc setComputePipelineState:pso];
       const auto strides = std::array<int64_t, 2>{stride_sort, stride_seg};
       if (sel_mode) {
@@ -296,7 +296,7 @@ static void sort_single_block(const Tensor& input,
         mtl_setArgs(enc, input, values, indices, sort_size, strides, descending);
       }
       [enc dispatchThreadgroups:MTLSizeMake(1, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 }
@@ -376,11 +376,11 @@ static void sort_multi_block(const Tensor& input,
 
       // Stage 1: independently sort each block
       auto block_pso = lib.getPipelineStateForFunc(block_fn);
-      getMPSProfiler().beginProfileKernel(block_pso, block_fn, {work_in});
+      getMPSProfiler().beginProfileKernel(block_pso, block_fn, {work_in}, mpsStream);
       [enc setComputePipelineState:block_pso];
       mtl_setArgs(enc, work_in, buf_v0, buf_i0, sort_size, std::array<int64_t, 2>{stride_sort, stride_seg}, descending);
       [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-      getMPSProfiler().endProfileKernel(block_pso);
+      getMPSProfiler().endProfileKernel(block_pso, mpsStream);
 
       // Stage 2: pairwise merge passes, doubling run length each round
       if (n_blocks > 1) {
@@ -399,16 +399,16 @@ static void sort_multi_block(const Tensor& input,
           // Final keyed merge inverts keys with the real direction; intermediate
           // keyed merges sort keys ascending (direction already baked into the key).
           const bool stage_desc = (keyed && !is_last) ? false : descending;
-          getMPSProfiler().beginProfileKernel(pso, is_last ? final_fn : merge_fn, {v_in});
+          getMPSProfiler().beginProfileKernel(pso, is_last ? final_fn : merge_fn, {v_in}, mpsStream);
           [enc setComputePipelineState:pso];
-          const auto dims = std::array<int32_t, 3>{sort_size, merge_tiles, n_blocks};
+          const auto dims = c10::metal::vec3<int32_t>{sort_size, merge_tiles, n_blocks};
           if (is_last && sel_mode) {
             mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc, std::array<int32_t, 2>{sel.offset, sel.count});
           } else {
             mtl_setArgs(enc, v_in, i_in, v_out, i_out, dims, stage_desc);
           }
           [enc dispatchThreadgroups:MTLSizeMake(n_blocks, n_rows, 1) threadsPerThreadgroup:MTLSizeMake(tptg, 1, 1)];
-          getMPSProfiler().endProfileKernel(pso);
+          getMPSProfiler().endProfileKernel(pso, mpsStream);
         }
       }
     }
@@ -568,11 +568,11 @@ static void median_sort_gather(const Tensor& in_l, const Tensor& out_vals, const
       auto enc = mpsStream->commandEncoder();
       const auto kernel = fmt::format("median_gather_{}", scalarToMetalTypeString(in_l));
       auto pso = lib.getPipelineStateForFunc(kernel);
-      getMPSProfiler().beginProfileKernel(pso, kernel, {sorted_vals});
+      getMPSProfiler().beginProfileKernel(pso, kernel, {sorted_vals}, mpsStream);
       [enc setComputePipelineState:pso];
       mtl_setArgs(enc, sorted_vals, sorted_idxs, out_vals, out_idxs, static_cast<uint32_t>(sort_size), ignore_nan);
       mtl_dispatch1DJob(enc, pso, n_rows);
-      getMPSProfiler().endProfileKernel(pso);
+      getMPSProfiler().endProfileKernel(pso, mpsStream);
     }
   });
 }
@@ -652,7 +652,7 @@ static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool 
       auto enc = mpsStream->commandEncoder();
       auto hist_pso = lib.getPipelineStateForFunc(hist_name);
       auto pick_pso = lib.getPipelineStateForFunc(pick_name);
-      getMPSProfiler().beginProfileKernel(hist_pso, hist_name, {flat});
+      getMPSProfiler().beginProfileKernel(hist_pso, hist_name, {flat}, mpsStream);
       for (int p = 0; p < n_passes; p++) {
         const auto shift = static_cast<uint32_t>((n_passes - 1 - p) * 8);
         const bool first = p == 0;
@@ -664,7 +664,7 @@ static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool 
         mtl_setArgs(enc, out_val, state, hist, numel, first, last, ignore_nan);
         mtl_dispatch1DJob(enc, pick_pso, 1);
       }
-      getMPSProfiler().endProfileKernel(hist_pso);
+      getMPSProfiler().endProfileKernel(hist_pso, mpsStream);
     }
   });
 }

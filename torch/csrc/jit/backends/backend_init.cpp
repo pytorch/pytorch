@@ -17,7 +17,7 @@ static std::unordered_set<TypePtr> getSharedModuleTypes(Module& mod) {
   // Iterate over all modules in the hierarchy, including the root.
   for (auto module : mod.modules()) {
     auto module_type = module.type();
-    if (types.count(module_type) > 0) {
+    if (types.contains(module_type)) {
       duplicate_types.insert(module_type);
     }
 
@@ -66,7 +66,7 @@ static void toBackendSelectiveImpl(
     }
 
     // Check that the parent type is not shared and therefore can be edited.
-    if (duplicate_types.count(parent.type()) > 0) {
+    if (duplicate_types.contains(parent.type())) {
       throw py::cast_error(c10::str(
           "Selective lowering is only supported for module hierarchies with unique types for selected modules; ",
           parent.type()->repr_str(),

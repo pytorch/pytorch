@@ -10,6 +10,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     TestCase,
     run_tests,
     gradcheck,
@@ -36,6 +37,8 @@ def get_default_value(initial_value, reduction):
 
 
 class TestSegmentReductions(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _test_common(
         self,
         reduction,

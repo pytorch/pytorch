@@ -26,6 +26,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      # Needed by the advisor's `gh pr view` investigation step, since the
+      # scoped GITHUB_TOKEN below replaces the action's own app token.
+      pull-requests: read
 
     steps:
       - name: Checkout pytorch/pytorch trunk
@@ -38,6 +41,32 @@ jobs:
         run: |
           git fetch origin ${{ inputs.suspect_commit }} --depth=32 || true
 
+      # Install Bun ourselves so that claude-code-action skips its own "Install
+      # Bun" step. That step runs oven-sh/setup-bun, which resolves the Bun
+      # version by requesting the oven-sh/bun tag list from api.github.com on
+      # every run, even though the version is already pinned. That request counts
+      # against this workflow's GITHUB_TOKEN API rate limit, and a 403 there fails
+      # the advisor run outright. Supplying an explicit download URL skips version
+      # resolution, so when this step succeeds that request is never made.
+      #
+      # continue-on-error preserves the existing bootstrap path: if this step
+      # fails, path_to_bun_executable below resolves to the empty string and the
+      # action falls back to installing Bun itself, as it does today.
+      #
+      # This runs before the AWS credentials are configured so that the download
+      # happens without them in the environment.
+      #
+      # The URL selects OS, architecture and version -- it does not pin the
+      # asset's bytes. Keep it consistent with the runs-on label above and with
+      # the bun-version pinned inside the claude-code-action ref below;
+      # -baseline is the portable x86-64 build.
+      - name: Install Bun
+        id: bun
+        continue-on-error: true
+        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
+        with:
+          bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.6/bun-linux-x64-baseline.zip
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
@@ -48,6 +77,14 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@6e2bd52842c65e914eba5c8badd17560bd26b5de # v1.0.89
         with:
+          # Providing the workflow token stops the action from minting its own
+          # app token, bypassing Anthropic's OIDC app-token exchange -- the
+          # source of the observed intermittent "Workflow validation failed"
+          # 401s, which require the workflow to match the default branch.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Skips the action's own Install Bun step. Empty if that install
+          # failed, in which case the action installs Bun itself -- see the note.
+          path_to_bun_executable: ${{ steps.bun.outcome == 'success' && steps.bun.outputs.bun-path || '' }}
           allowed_bots: "pytorch-auto-revert[bot],pytorch-bot[bot]"
           use_bedrock: "true"
           claude_args: |
@@ -90,6 +127,12 @@ jobs:
 
             **Principle 3 — A missing baseline is not a green baseline.** Many jobs are periodic or `ciflow`-label-gated and do not run on every commit, so a signal may have no `successful` baseline at all. Absence of a baseline is NOT evidence the suspect introduced the failure — check recent runs of the same job on trunk or neighbor PRs (via `gh` or hud.pytorch.org) to see whether it was already failing the same way. Without evidence that the signal was green before and fails only at or after the suspect, a `related` resting on a plausible mechanism alone should be `unsure`.
 
+            **Principle 4 — `related` outranks every dismissal; settle causality first.** For precedence only, `not_related`, `infra_issue` and `garbage` are one family: none may override an established causal chain to the suspect. Each keeps its own positive-evidence bar. Settle causality first, then ask which dismissal the evidence supports.
+
+            This matters most when a failure looks environmental but the suspect broke it. A commit can cause an infra-shaped or pre-test failure by changing workflow/action YAML, a Dockerfile or image tag, a submodule pointer, a dependency pin, build/CMake config, a runner label, or a setup script — and the log then reads like an ordinary infra fault (checkout fails, image will not pull, dependency will not resolve, build dies before any test runs). Read the suspect diff before dismissing any such failure.
+
+            Causation must be shown, not assumed. Merely touching CI machinery is NOT a causal chain (Principle 2): trace a specific suspect change to the observed breakage and it is `related`; file overlap or a bare plausible mechanism is `unsure`. The converse also holds — finding no chain does not establish independence, so if both a suspect-caused and an external explanation stay plausible, that is `unsure`.
+
             ## Investigation Steps
 
             1. **Read the suspect commit diff.** `git show ${{ inputs.suspect_commit }}` and read the modified files for context.
@@ -103,10 +146,12 @@ jobs:
                - `related` — the code change caused (is causally related to) the failure, via a structurally traceable chain, direct or indirect. Confidence reflects how direct and clear the chain is.
                - `not_related` — the failure is real and the signal historically reliable, but the cause is not the suspect: after tracing, no plausible causal chain from the suspect remains, AND a positive alternative is established (a concurrent commit, an upstream dependency change, a failure pre-dating the suspect, or a genuine one-off flake — an isolated red in an otherwise-clean `commits[]`/run history). A dead identifier chain alone does not qualify (Principle 2).
                - `unsure` — investigation is inconclusive. The default when completed evidence is scarce (Principle 1) or a causal chain failed without a positive alternative (Principle 2).
-               - `infra_issue` — CI machinery (runner, container, GPU environment, network, or checkout) broke the run before a real test outcome was produced, evidenced in a COMPLETED job's log. NEVER from pending events or empty pending logs.
+               - `infra_issue` — CI machinery (runner, container, GPU environment, network, or checkout) broke the run before a real test outcome was produced, evidenced in a COMPLETED job's log, AND the evidence positively indicates the suspect did not cause that breakage. Absence of a chain is not independence (Principle 4). NEVER from pending events or empty pending logs.
                - `garbage` — the signal itself is unreliable noise: the historic view shows it flipping red/green across commits regardless of their content (comes-and-goes in `commits[]`, mixed `failure_runs`/`success_runs` across the window), so this red carries no trustworthy information. Flakiness confined to the suspect's own runs alone does not qualify — that is a one-off (`not_related`) or the suspect introducing the flakiness (`related`) — and a flaky history never overrides a real causal chain to the suspect. NEVER from pending events or empty pending logs.
 
-            When in doubt between `unsure` and any dismissal (`not_related`, `infra_issue`, `garbage`), prefer `unsure`: a false dismissal wrongly clears a real regression, whereas `unsure` honestly reflects inconclusive evidence. To pick among the dismissals, ask what the evidence positively shows: the machinery broke (`infra_issue`), the signal's own history shows its red is noise (`garbage`), or the red is real and reliably reported but has a different established cause (`not_related`); if none is established, that is `unsure`. Hold `related` to a structurally traceable chain — a false `related` wrongly blames a clean commit.
+            Decide in this order under Principles 1-4. A structurally traceable chain from the suspect is `related`, whatever the failure looks like. Otherwise, if positive evidence establishes a dismissal's full criteria AND independence from the suspect, choose that dismissal: the machinery broke and the suspect did not break it (`infra_issue`), the signal's own history shows its red is noise (`garbage`), or the red is real and reliably reported but has a different established cause (`not_related`). Otherwise, `unsure`.
+
+            When in doubt between `unsure` and any dismissal, prefer `unsure`: a false dismissal wrongly clears a real regression. Hold `related` to a structurally traceable chain — a false `related` wrongly blames a clean commit.
 
             IMPORTANT: Be thorough. Read actual code. Trace actual call paths. Do not guess based on file names alone.
 
@@ -166,6 +211,60 @@ jobs:
 
           aws s3 cp /tmp/advisor_verdict.json \
             "s3://ossci-raw-job-status/autorevert_advisor_verdicts/${{ github.repository }}/${{ github.run_id }}_${{ github.run_attempt }}.json"
+
+      # --- Debug observability: persist the exact per-job input and the full
+      # reasoning trace so a disputed verdict can be diagnosed after the fact
+      # (confabulation vs. a wrong/truncated input feed). Runs on always() so the
+      # pathological runs (empty/failed verdict) are the ones we can inspect.
+      # continue-on-error keeps logging from ever failing the advisor itself.
+      - name: Save advisor input payload
+        if: always()
+        continue-on-error: true
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SUSPECT_COMMIT: ${{ inputs.suspect_commit }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          SIGNAL_PATTERN: ${{ inputs.signal_pattern }}
+        run: |
+          mkdir -p /tmp/advisor_input
+          # Verbatim per-job payload the advisor was dispatched with.
+          printf '%s' "$SIGNAL_PATTERN" > /tmp/advisor_input/signal_pattern.json
+          jq -n \
+            --arg repo "$REPO" \
+            --arg run_id "$RUN_ID" \
+            --arg run_attempt "$RUN_ATTEMPT" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%S.000)" \
+            --arg suspect_commit "$SUSPECT_COMMIT" \
+            --arg pr_number "$PR_NUMBER" \
+            '{
+              repo: $repo,
+              run_id: ($run_id | tonumber),
+              run_attempt: ($run_attempt | tonumber),
+              timestamp: $timestamp,
+              suspect_commit: $suspect_commit,
+              pr_number: $pr_number
+            }' > /tmp/advisor_input/meta.json
+          aws s3 cp --recursive /tmp/advisor_input \
+            "s3://ossci-raw-job-status/autorevert_advisor_inputs/$REPO/${RUN_ID}_${RUN_ATTEMPT}/"
+
+      - name: Save advisor reasoning trace
+        if: always() && steps.claude.outputs.execution_file != ''
+        continue-on-error: true
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          mkdir -p /tmp/advisor_trace
+          # Full turn-by-turn trace: thinking (alwaysThinkingEnabled), every tool
+          # call (git show / gh pr view / log fetches) and its result, and the
+          # final output — i.e. everything the model saw and reasoned over.
+          cp "$EXECUTION_FILE" /tmp/advisor_trace/execution.json
+          aws s3 cp /tmp/advisor_trace/execution.json \
+            "s3://ossci-raw-job-status/autorevert_advisor_traces/$REPO/${RUN_ID}_${RUN_ATTEMPT}.json"
 
       - name: Upload usage metrics
         if: always()

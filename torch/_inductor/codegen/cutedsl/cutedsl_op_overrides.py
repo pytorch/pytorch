@@ -11,6 +11,7 @@ import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from typing import cast
 
 import sympy
 
@@ -68,10 +69,14 @@ TENSORSSA_REDUCTIONS: dict[str, TensorSSAReduction] = {
     "sum": TensorSSAReduction("cute.ReductionOp.ADD", "0.0", "lhs + rhs"),
     "prod": TensorSSAReduction("cute.ReductionOp.MUL", "1.0", "lhs * rhs"),
     "max": TensorSSAReduction(
-        "cute.ReductionOp.MAX", 'float("-inf")', "cutlass.max(lhs, rhs)"
+        "cute.ReductionOp.MAX",
+        'float("-inf")',
+        "cutlass.max(lhs, rhs)",
     ),
     "min": TensorSSAReduction(
-        "cute.ReductionOp.MIN", 'float("inf")', "cutlass.min(lhs, rhs)"
+        "cute.ReductionOp.MIN",
+        'float("inf")',
+        "cutlass.min(lhs, rhs)",
     ),
 }
 
@@ -111,8 +116,10 @@ class CuteDSLOpOverrides(OpOverrides):
         torch.int32: "cutlass.Int32",
         torch.int64: "cutlass.Int64",
         torch.uint8: "cutlass.Uint8",
+        torch.uint16: "cutlass.Uint16",
         torch.bool: "cutlass.Boolean",
         torch.float8_e4m3fn: "cutlass.Float8E4M3FN",
+        torch.float8_e8m0fnu: "cutlass.Float8E8M0FNU",
         torch.float8_e5m2: "cutlass.Float8E5M2",
     }
 
@@ -172,7 +179,11 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def _ensure_tensor_ssa(
-        arg: CuteDSLArg, template_tensor: CuteDSLArg, *, is_tensor: bool
+        arg: CuteDSLArg,
+        template_tensor: CuteDSLArg,
+        *,
+        is_tensor: bool,
+        dtype: torch.dtype | None = None,
     ) -> str:
         """
         Convert scalar arguments to TensorSSA using cute.full_like if needed.
@@ -188,7 +199,10 @@ class CuteDSLOpOverrides(OpOverrides):
         if is_tensor:
             return arg_expr
         template_expr = CuteDSLOpOverrides._as_expr(template_tensor)
-        return f"cute.full_like({template_expr}, {arg_expr})"
+        if dtype is None:
+            return f"cute.full_like({template_expr}, {arg_expr})"
+        cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE[dtype]
+        return f"cute.full_like({template_expr}, {arg_expr}, {cute_dtype})"
 
     @staticmethod
     def _extract_dtype_and_bounds(
@@ -229,6 +243,8 @@ class CuteDSLOpOverrides(OpOverrides):
         node_flags = CuteDSLOpOverrides._node_tensor_flags()
         if node_flags is not None:
             a_is_tensor, b_is_tensor = node_flags
+            a_is_tensor &= not CuteDSLOpOverrides._is_scalar_expr(a)
+            b_is_tensor &= not CuteDSLOpOverrides._is_scalar_expr(b)
         else:
             a_is_tensor = CuteDSLOpOverrides._is_tensor_like(a)
             b_is_tensor = CuteDSLOpOverrides._is_tensor_like(b)
@@ -644,7 +660,7 @@ class CuteDSLOpOverrides(OpOverrides):
                 b, tensor_arg, is_tensor=b_is_tensor
             )
             cond_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(
-                condition, tensor_arg, is_tensor=cond_is_tensor
+                condition, tensor_arg, is_tensor=cond_is_tensor, dtype=torch.bool
             )
             result_expr = f"cute.where({cond_ssa}, {a_ssa}, {b_ssa})"
 
@@ -719,6 +735,153 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_unary_op(
             x, "(-{x})", index_expr_fn=lambda expr: -expr
         )
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def inline_asm_elementwise(
+        *inputs: CuteDSLArg,
+        asm: str,
+        constraints: str | None = None,
+        dtype: torch.dtype | tuple[torch.dtype, ...] = torch.float32,
+        is_pure: bool = True,
+        pack: int = 1,
+        input_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_dtypes: tuple[torch.dtype, ...] | None = None,
+        output_index: int = 0,
+        scalar_sources: tuple[bool, ...] | None = None,
+    ) -> CuteDSLArg | tuple[CuteDSLArg, ...]:
+        """Emit an inline PTX block elementwise over a fragment.
+
+        The requested dtype or dtypes control the logical results and eventual
+        storage.
+        """
+        if constraints is None:
+            raise NotImplementedError(
+                "CuteDSL inline asm requires an explicit constraint list"
+            )
+        return_all_outputs = output_dtypes is None and isinstance(dtype, tuple)
+        all_output_dtypes = (
+            output_dtypes
+            if output_dtypes is not None
+            else dtype
+            if isinstance(dtype, tuple)
+            else (dtype,)
+        )
+        if not 0 <= output_index < len(all_output_dtypes):
+            raise AssertionError(
+                f"Expected output_index in [0, {len(all_output_dtypes)}), "
+                f"got {output_index}"
+            )
+        result_types = tuple(
+            CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(dt) for dt in all_output_dtypes
+        )
+        if any(result_type is None for result_type in result_types):
+            raise NotImplementedError(
+                f"CuteDSL inline asm result dtype not supported: {all_output_dtypes}"
+            )
+        result_types = cast(tuple[str, ...], result_types)
+        multiple_outputs = len(result_types) > 1 or return_all_outputs
+        result_type_expr = (
+            f"({', '.join(result_types)}{',' if len(result_types) == 1 else ''})"
+            if multiple_outputs
+            else result_types[0]
+        )
+
+        constraint_parts = [part.strip() for part in constraints.split(",")]
+        input_constraints = [
+            part.lstrip("=&") for part in constraint_parts if not part.startswith("=")
+        ]
+
+        cast_inputs = list(inputs)
+        if input_dtypes is not None:
+            for source_index, (value, input_dtype) in enumerate(
+                zip(inputs, input_dtypes)
+            ):
+                source_constraints = input_constraints[
+                    source_index * pack : (source_index + 1) * pack
+                ]
+                cse_var = CuteDSLOpOverrides._get_cse_var(value)
+                if (
+                    source_constraints
+                    and all(constraint == "h" for constraint in source_constraints)
+                    and input_dtype in (torch.float16, torch.bfloat16)
+                    and (cse_var is None or cse_var.dtype != input_dtype)
+                ):
+                    if cse_var is None:
+                        cast_inputs[source_index] = CuteDSLOpOverrides._cast_expr(
+                            CuteDSLOpOverrides._as_expr(value), input_dtype
+                        )
+                    else:
+                        cast_inputs[source_index] = CuteDSLOpOverrides.to_dtype(
+                            value, input_dtype, use_compute_types=False
+                        )
+
+        operands = ", ".join(
+            str(CuteDSLOpOverrides._as_expr(value)) for value in cast_inputs
+        )
+        if scalar_sources is None:
+            scalar_sources = (False,) * len(inputs)
+        elif len(scalar_sources) != len(inputs):
+            raise ValueError(
+                f"CuteDSL inline asm received {len(scalar_sources)} scalar-source "
+                f"flags for {len(inputs)} inputs"
+            )
+        scalar_sources = tuple(
+            source_is_scalar or CuteDSLOpOverrides._is_scalar_expr(value)
+            for source_is_scalar, value in zip(scalar_sources, cast_inputs)
+        )
+        expr = (
+            f"inline_asm_elementwise_intrinsic({operands}, asm={asm!r}, "
+            f"constraints={constraints!r}, result_type={result_type_expr}, "
+            f"is_pure={is_pure!r}, pack={pack!r}, "
+            f"scalar_sources={scalar_sources!r})"
+        )
+        compute_dtypes = tuple(
+            torch.float32 if dt == torch.float8_e8m0fnu else dt
+            for dt in all_output_dtypes
+        )
+        if not any(
+            CuteDSLOpOverrides._get_cse_var(value) is not None for value in inputs
+        ):
+            if return_all_outputs:
+                return tuple(f"{expr}[{index}]" for index in range(len(result_types)))
+            return f"{expr}[{output_index}]" if multiple_outputs else expr
+
+        if not multiple_outputs:
+            return V.kernel.cse.generate(
+                V.kernel.body,
+                expr,
+                dtype=compute_dtypes[0],
+            )
+
+        cache_key = f"inline_asm_elementwise({expr})"
+        if return_all_outputs:
+            cached = tuple(
+                V.kernel.cse.try_get(f"{cache_key}[{index}]")
+                for index in range(len(result_types))
+            )
+            if all(result is not None for result in cached):
+                return cast(tuple[CuteDSLArg, ...], cached)
+        elif result := V.kernel.cse.try_get(f"{cache_key}[{output_index}]"):
+            return result
+
+        output_shape = next(
+            (
+                cse_var.shape
+                for value in inputs
+                if (cse_var := CuteDSLOpOverrides._get_cse_var(value)) is not None
+                and not CuteDSLOpOverrides._is_scalar_expr(value)
+            ),
+            None,
+        )
+        results = tuple(
+            V.kernel.cse.newvar(dtype=compute_dtype, shape=output_shape)
+            for compute_dtype in compute_dtypes
+        )
+        V.kernel.body.writeline(f"{', '.join(map(str, results))} = {expr}")
+        for index, result in enumerate(results):
+            V.kernel.cse.put(f"{cache_key}[{index}]", result)
+        return results if return_all_outputs else results[output_index]
 
     @staticmethod
     def to_dtype(

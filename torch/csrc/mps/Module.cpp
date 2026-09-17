@@ -564,7 +564,12 @@ void initModule(PyObject* module) {
   m.def("_mps_startCapture", [](const std::string& fileName) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
-  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_stopCapture", []() {
+    // See MPSModule_deviceSynchronize: stopCapture drains the stream, so the
+    // GIL must be released while waiting on GPU work
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getMPSProfiler().stopCapture();
+  });
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
@@ -582,6 +587,19 @@ void initModule(PyObject* module) {
     c10::Storage host_alias = allocator->getHostAliasStorage(mps_storage);
     return py::reinterpret_steal<py::object>(
         THPStorage_Wrap(std::move(host_alias)));
+  });
+  // This function is added just to test that `MPSAllocator::waitForEvents`
+  // properly waits for every recorded stream
+  m.def("_mps_allocator_waitForEvents", [](const std::vector<int64_t>& ptrs) {
+    auto* allocator = at::mps::getIMPSAllocator();
+    TORCH_INTERNAL_ASSERT(allocator, "MPS allocator is not available");
+    std::vector<const void*> buffers;
+    buffers.reserve(ptrs.size());
+    for (const auto ptr : ptrs) {
+      buffers.push_back(reinterpret_cast<const void*>(ptr));
+    }
+    pybind11::gil_scoped_release no_gil;
+    return allocator->waitForEvents(buffers);
   });
 }
 #endif /* USE_MPS */
