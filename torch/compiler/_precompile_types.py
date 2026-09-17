@@ -54,8 +54,8 @@ class PrecompileSummary:
     error.
     Everything here describes the calls that ran, not every possible input or
     unexecuted branch, and once ``truncated`` is non-empty every count and
-    frame list is a lower bound: the frames called beneath a truncated one ran
-    untraced, so nothing here saw them.
+    frame list is a lower bound: executions after a limit hit ran untraced, so
+    nothing here saw them.
 
     The guard fields hold ``(guard_type, source)`` slots, the source spelled as
     ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
@@ -102,37 +102,37 @@ class PrecompileSummary:
             of the frame was bypassed (``OutputGraph.bypass_package``: its
             guards could not be serialized, or its graph held parameters by
             static address), or a backend artifact was missing when the package
-            was saved. Not an eager fallback: the frame ran compiled during capture
-            (Dynamo installed its guarded code, it just went unrecorded), no
-            variant of it survives a load (a save-time bypass leaves the stale
-            guarded codes in the artifact and the load drops them), and an
+            was saved. Not an eager fallback: the frame ran compiled during
+            capture, the package kept no variant of it a load can serve, and an
             install re-traces it rather than skipping it as trivial.
         truncated: ``co_name (filename:firstlineno)`` of each frame that hit the
             recompile limit. A lower bound, which is why the digest prints it
-            as ``>=``: Dynamo runs a frame that hit the limit, and every frame
-            called beneath it, without tracing (its ``FrameExecStrategy`` is
-            ``RUN_ONLY`` for the frame and its callees alike), so a limit hit
-            below the first one is never seen.
-        uncovered_frames: ``co_name``s of frames that ended with no guarded code and
-            were not bypassed, so the artifact cannot serve them: a thin wrapper
-            whose graphs all landed in an inner frame, or a frame Dynamo gave up
-            on. The remainder after ``bypassed``, which also holds no guarded
-            code but has a different cause and remedy.
+            as ``>=``: from a limit hit on, that frame and the frames it calls
+            run without tracing (its ``FrameExecStrategy`` is ``RUN_ONLY`` for
+            the frame and its callees alike), so a limit hit that would follow
+            it there is never recorded.
+        uncovered_frames: ``co_name``s of frames the capture ran that ended with no
+            guarded code and were not bypassed, so the artifact cannot serve
+            them: a thin wrapper whose graphs all landed in an inner frame, or a
+            frame Dynamo gave up on. A different cause and remedy from
+            ``bypassed``. Not a remainder: which frames count as a gap is the
+            producer's decision, and a frame the package holds an entry for but
+            never ran is not one, so this is not ``frames`` minus ``bypassed``
+            minus the frames that hold guarded code.
         wont_generalize: Guard *sources* (not frame names) a kept guard pins to
             one value in some variant while no other variant of the same frame
             guards the source without pinning it, so as captured no variant
             served another value. Observed, not proven: a variant that never
             guarded the source does not count as serving other values of it.
-        dropped_guards: Slots the serialized copy's guard filter rejected. Under
-            the default filter (``default_guard_filter_fn`` in
-            ``torch._dynamo.precompile_package``) that is the guards of a type
-            the serializer refuses (the identity guards, plus ``DICT_VERSION``
-            and ``WEAKREF_ALIVE``) and the guards of another type whose check
-            derives one, listed under their own type (a ``TENSOR_MATCH`` that
-            checks identity is a dropped ``TENSOR_MATCH``), except the types
-            that filter keeps by type before it looks at what they derive; its
-            docstring names them and says why, and this one does not repeat the
-            list. A caller-supplied filter decides its own set.
+        dropped_guards: Slots the serialized copy's guard filter rejected, so the
+            artifact does not check them and a load cannot notice whatever they
+            checked. Which guards a filter rejects is that filter's own
+            contract, stated in its docstring and not repeated here: the default
+            is ``default_guard_filter_fn`` in
+            ``torch._dynamo.precompile_package``, and a caller-supplied filter
+            decides its own set. A slot is listed under the guard's own type
+            whatever the reason for the drop, so a ``TENSOR_MATCH`` rejected for
+            what its check derives is a dropped ``TENSOR_MATCH``.
         kept_guards: Slots the artifact still checks.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
             captured variants apart, or flagged by the risky-drop lint as a
