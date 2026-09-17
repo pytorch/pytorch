@@ -14,6 +14,11 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -22,12 +27,6 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
-)
-
-from torch.testing._internal.common_device_type import (
-    Capability,
-    instantiate_device_type_tests,
-    requires_capabilities,
 )
 
 
