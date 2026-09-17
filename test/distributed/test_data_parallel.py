@@ -20,13 +20,13 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
 )
 from torch.testing._internal.common_utils import (
-    TEST_MULTIACCELERATOR,
     _assertGradAndGradgradChecks,
     dtype2prec_DONTUSE,
     gradcheck,
     HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
     TestCase,
 )
 
