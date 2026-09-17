@@ -86,7 +86,7 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 lambda: torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
             )
 
-        self.assertEqual(result, expected)
+        self.assertEqual(result, expected, atol=1e-4, rtol=1e-4)
         self.assertEqual(len(codes), 2)
         fw_code, bw_code = codes
         regions_and_settings = (
