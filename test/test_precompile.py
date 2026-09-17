@@ -8,11 +8,14 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import warnings
 
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import PrecompileError
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -2270,9 +2273,9 @@ class TestPrecompile(TestCase):
 
     def test_capture_refuses_a_numpy_conversion(self):
         # A NumPy conversion reads the traced tensor's data exactly as .data_ptr() does,
-        # but tensor_numpy.cpp rejects it earlier and blames "tensor subclasses" -- the
-        # subclass being capture's own FakeTensor, nothing the caller wrote -- so that text
-        # is matched too and relabeled. This is everyday logging/metric code
+        # but tensor_numpy.cpp rejects it earlier and blames "tensor subclasses", which
+        # under capture is usually capture's own FakeTensor and not one the caller wrote --
+        # so that text is matched too and relabeled. This is everyday logging/metric code
         # (loss.detach().cpu().numpy()) inside a forward, and unrelabeled it sent the user
         # after a subclass that does not exist. np.asarray(t) funnels through __array__, so
         # calling that directly covers it and keeps the test independent of numpy being
@@ -2468,18 +2471,49 @@ class TestPrecompile(TestCase):
         # The is_pinned() probe in that loop DISPATCHES, so a tensor whose dispatch has no
         # rule for it (a vmap-batched one: "Batching rule not implemented for
         # aten::is_pinned") would leak that RuntimeError out of capture. It is guarded, so
-        # such an input still reaches its real refusal -- here invariant 1, since a batched
-        # tensor makes the closed-over model's compute a baked constant.
+        # such an input reaches its own refusal instead: invariant 1, because the batched
+        # input is not the tensor make_fx lifts as the placeholder (its unbatched level
+        # traces through as a constant). The regex pins WHICH refusal, so an unguarded
+        # probe cannot pass by raising something else.
         model = torch.nn.Linear(4, 4)
 
         def capture_inside_vmap(row):
-            with self.assertRaises(PrecompileError):
+            with self.assertRaisesRegex(PrecompileError, "neither a graph input"):
                 _precompile_pair(
                     lambda m, t: m(t), model, row.unsqueeze(0), backend="eager"
                 )
             return row.sum()
 
         torch.vmap(capture_inside_vmap)(torch.randn(2, 4))
+
+    def test_dispatch_declining_subclass_input_still_captures(self):
+        # The same probe raises a TypeError, not a RuntimeError, for the decline protocol
+        # PyTorch documents (every __torch_dispatch__ handler returning NotImplemented ->
+        # "Multiple dispatch failed"), which torch.masked.MaskedTensor does for is_pinned.
+        # Both raises are swallowed, so the probe neither escapes the public API nor costs
+        # a capture that fake tracing supports.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            mt = torch.masked.as_masked_tensor(torch.randn(3, 4), torch.randn(3, 4) > 0)
+            code, cache = _precompile_pair(lambda t: t.sum(), mt, backend="eager")
+        self.assertIn("aten.sum", code)
+
+    def test_capture_inside_another_trace_refused(self):
+        # An ambient TracingContext.fake_mode outranks both mode sources capture hands
+        # make_fx, and it carries neither allow_fallback_kernels=False nor the
+        # unsafe-data-ptr-access snapshot every refusal here is built on -- under it a
+        # .data_ptr() read bakes 0 instead of raising (test_capture_refuses_a_data_ptr_read
+        # pins the refusal outside a trace). So capture refuses up front, on a fn that
+        # captures cleanly on its own, rather than tracing under a foreign contract.
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with torch._guards.tracing(torch._guards.TracingContext(fake_mode)):
+            with self.assertRaisesRegex(
+                PrecompileError, "cannot run inside another trace"
+            ):
+                _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
+        _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
 
     def test_unbacked_capture_refuses_an_unfakeifiable_input(self):
         # Both fakeify paths refuse an input the meta converter cannot represent through
@@ -2639,7 +2673,6 @@ class TestPrecompile(TestCase):
                         raises_it, model, torch.randn(3, 4), backend="eager"
                     )
                 self.assertIs(cm.exception, raised)
-                self.assertNotIsInstance(cm.exception, PrecompileError)
 
     def test_precompile_error_from_fn_is_not_relabeled(self):
         # PrecompileError subclasses RuntimeError, so the trace's RuntimeError clause would
