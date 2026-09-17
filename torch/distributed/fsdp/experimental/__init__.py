@@ -73,9 +73,14 @@ def all_gather_output_fn_with_dim0_views(
         outputs = [torch.empty_like(t) for t in outputs]
         copy_outputs.extend(outputs)
         reorder_infos.append((fsdp_param, outputs))
+    # Split sizes use collective-buffer elements, or bytes for mixed dtypes.
+    copy_split_sizes = [
+        t.numel() * t.element_size() // (world_size * all_gather_output.element_size())
+        for t in copy_outputs
+    ]
     _copy_all_gather_outputs(
         all_gather_output,
-        all_gather_result.all_gather_input_split_sizes,
+        copy_split_sizes,
         copy_outputs,
         world_size,
     )

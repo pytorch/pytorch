@@ -503,9 +503,6 @@ def _copy_all_gather_outputs(
         out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
-    # Expanding a parameter adds outputs; a single prefix leaves sizes unchanged.
-    if len(out) != len(all_gather_input_split_sizes):
-        all_gather_input_split_sizes = [t.size(1) for t in out]
 
     # only avoid VC bump if we are not in inference mode
     non_inference_outs = [o for o in out if not o.is_inference()]
