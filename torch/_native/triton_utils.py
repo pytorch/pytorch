@@ -87,8 +87,8 @@ def _record_hash_matches(path: _Path, file_hash: _Any) -> bool | None:
             for chunk in iter(lambda: file.read(1024 * 1024), b""):
                 digest.update(chunk)
         value = _base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode()
-        return value == file_hash.value
-    except (AttributeError, OSError, TypeError, ValueError):
+        return file_hash.value in (value, digest.hexdigest())
+    except (OSError, TypeError, ValueError):
         return None
 
 
@@ -109,16 +109,18 @@ def _distribution_matches(name: str, origin: str | None) -> bool | None:
 
     try:
         origin_path = _Path(origin).resolve()
-        located = [(file, _Path(file.locate())) for file in files]
-        for file, path in located:
+        located: list[str] = []
+        for file in files:
+            path = _Path(file.locate())
             if str(path) == origin or (
                 path.name == origin_path.name and path.resolve() == origin_path
             ):
-                return _record_hash_matches(origin_path, getattr(file, "hash", None))
+                return _record_hash_matches(origin_path, file.hash)
+            located.append(str(path))
     except Exception:
         return None
 
-    if _records_only_import_shims([str(path) for _, path in located]):
+    if _records_only_import_shims(located):
         return None
     return False
 
@@ -151,14 +153,18 @@ def _candidate_versions(
 
 def _resolve_ambiguous_version(
     candidates: list[tuple[str, Version]],
+    origin: str | None,
+    verdicts: dict[str, bool | None],
     *,
     fallback: bool,
 ) -> Version | None:
-    origin = _module_origin("triton")
     matched: list[tuple[str, Version]] = []
     undecidable: list[tuple[str, Version]] = []
     for candidate in candidates:
-        result = _distribution_matches(candidate[0], origin)
+        name = candidate[0]
+        if name not in verdicts:
+            verdicts[name] = _distribution_matches(name, origin)
+        result = verdicts[name]
         if result is True:
             matched.append(candidate)
         elif result is None:
@@ -170,13 +176,11 @@ def _resolve_ambiguous_version(
         return None
 
     choices = matched or undecidable or candidates
-    if len(choices) == 1 or len({version for _, version in choices}) == 1:
-        return choices[0][1]
-
-    log.warning(
-        "Could not uniquely identify the triton distribution; using %s %s",
-        *choices[0],
-    )
+    if len(choices) > 1 and len({version for _, version in choices}) > 1:
+        log.warning(
+            "Could not uniquely identify the triton distribution; using %s %s",
+            *choices[0],
+        )
     return choices[0][1]
 
 
@@ -190,11 +194,16 @@ def _available_triton_version() -> Version | None:
     for `triton`. This function must not import triton.
     """
     seen: set[str] = set()
+    origin: str | None = None
+    verdicts: dict[str, bool | None] = {}
     candidates = _candidate_versions(_TRITON_DISTRIBUTIONS, seen)
     if len(candidates) == 1:
         return candidates[0][1]
     if len(candidates) > 1:
-        version = _resolve_ambiguous_version(candidates, fallback=False)
+        origin = _module_origin("triton")
+        version = _resolve_ambiguous_version(
+            candidates, origin, verdicts, fallback=False
+        )
         if version is not None:
             return version
 
@@ -215,7 +224,9 @@ def _available_triton_version() -> Version | None:
     if len(candidates) == 1:
         return candidates[0][1]
     if candidates:
-        return _resolve_ambiguous_version(candidates, fallback=True)
+        if not verdicts:
+            origin = _module_origin("triton")
+        return _resolve_ambiguous_version(candidates, origin, verdicts, fallback=True)
 
     log.info(
         "no installed distribution reports a parseable version for the `triton` "
