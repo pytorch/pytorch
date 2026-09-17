@@ -226,6 +226,7 @@ def _available_triton_version() -> Version | None:
     if len(candidates) == 1:
         return candidates[0][1]
     if candidates:
+        # A nonempty cache means origin was computed, including a None result.
         if not verdicts:
             origin = _module_origin("triton")
         return _resolve_ambiguous_version(candidates, origin, verdicts, fallback=True)
