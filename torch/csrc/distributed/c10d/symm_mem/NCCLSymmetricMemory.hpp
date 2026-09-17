@@ -79,17 +79,14 @@ class TORCH_API NCCLSymmetricMemory : public SymmetricMemory {
   // starts at the signal pad, so this is buffer_offset + get_offset().
   size_t get_window_offset();
 
+ private:
 #ifdef USE_ROCM
-  // True while the RCCL communicator this handle rendezvoused against is still
-  // the one registered for its group. Public because out-of-class users of the
-  // handle (the one-sided device ops in nccl_extension.cu, the allocator's
-  // rendezvous cache) resolve that communicator themselves and must gate on
-  // the same fact the member functions do.
-  bool is_live() const;
+  friend class NCCLSymmetricMemoryAllocator;
+
+  bool has_successor_comm() const;
   void check_liveness() const;
 #endif
 
- private:
   c10::intrusive_ptr<NCCLPeerAllocInfo> pai_;
   size_t offset_;
   int rank_;

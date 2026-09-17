@@ -1366,6 +1366,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>>
       inInitializationCommMap_;
 
+  // Generation stamped on our NCCLDevCommManager registration, keyed the same
+  // way as devNCCLCommMap_. Only populated on ROCm, where retiring needs it to
+  // tell our own entry from a same-name successor's. Declared unconditionally:
+  // a member whose presence depends on a macro would make the class layout
+  // differ across translation units.
+  std::unordered_map<std::string, uint64_t> symmMemCommGenerationMap_;
+
   // Mutex to guard maps like devNCCLCommMap_.
   std::mutex mutex_;
 
