@@ -167,7 +167,7 @@
   "test_longformer_chunk_dynamic_shapes (__main__.DynamicShapesReproTests)": 104.55644395616319,
   "test_low_memory_max_pool_dilation_1_dim_3_use_block_ptr_False_cpu_halide (__main__.HalideCpuTests)": 583.5033365885416,
   "test_low_memory_max_pool_dilation_2_dim_3_use_block_ptr_False_cpu_halide (__main__.HalideCpuTests)": 516.3889973958334,
-  "test_lstm_cpu (__main__.TestMkldnnCPU)": 68.73433176676433,
+  "test_lstm (__main__.TestMkldnn)": 68.73433176676433,
   "test_many_overlapping_inputs_does_not_explode_guards_dynamic_shapes (__main__.DynamicShapesReproTests)": 108.97577582465277,
   "test_max_autotune_remote_caching_dynamic_True (__main__.TestMaxAutotuneRemoteCache)": 61.8836669921875,
   "test_memory_format_operators_cuda (__main__.TestTorchDeviceTypeCUDA)": 125.83300018310547,

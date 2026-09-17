@@ -68,7 +68,9 @@ from ..utils import (
     DeferredLineBase,
     DelayReplaceLine,
     get_benchmark_name,
+    get_constexpr_repr_children,
     get_dtype_size,
+    get_importable_constexpr_types,
     IndentedBuffer,
     is_codegen_graph_partition_subgraph,
     is_using_cudagraph_partition,
@@ -117,21 +119,20 @@ def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
     return CleanDiv(numerator, denominator)
 
 
-def _sanitize_for_repr(obj: Any) -> Any:
+def _sanitize_for_repr(obj: object) -> object:
     """Convert Enum values to their underlying value for valid Python repr in code generation."""
-    if isinstance(obj, dict):
-        return {_sanitize_for_repr(k): _sanitize_for_repr(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sanitize_for_repr(v) for v in obj]
-    # For namedtuples (have _fields), reconstruct to preserve the type
-    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return getattr(type(obj), "_make")(  # noqa: B009
-            _sanitize_for_repr(getattr(obj, field)) for field in obj._fields
-        )
-    if isinstance(obj, tuple):
-        return tuple(_sanitize_for_repr(v) for v in obj)
     if isinstance(obj, Enum):
         return _sanitize_for_repr(obj.value)
+    repr_children = get_constexpr_repr_children(obj)
+    if repr_children is not None:
+        children = tuple(_sanitize_for_repr(child) for child in repr_children.values)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if all(
+            child is original for child, original in zip(children, repr_children.values)
+        ):
+            return obj
+        return repr_children.rebuild(children)
     return obj
 
 
@@ -1139,6 +1140,10 @@ class AllocateLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # The index is only meaningful within this scheduler's node list: an inlined
+        # subgraph emits its lines into the parent's list while V.graph is the
+        # SUBGRAPH. See should_reuse_buffer.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1146,6 +1151,21 @@ class AllocateLine(MemoryPlanningLine):
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
         if self.comm_buffer:
             return True
+        if free_line.scheduler is not self.scheduler:
+            # A parent free paired with an allocation from an inlined invoke_subgraph
+            # region. codegen_invoke_subgraph inlines without the EnterSubgraphLine /
+            # ExitSubgraphLine bracket codegen_switch and codegen_while_loop wrap their
+            # branches in, and only that bracket makes memory_plan_reuse push a fresh
+            # MemoryPlanningState and swap estimate_peak. So the region's lines land in
+            # the parent's pool, scored against the parent's tree, and the two
+            # scheduler_node_index values index different node lists: the adjacency
+            # test below is meaningless and summarize_range raises on the inverted
+            # range. Bailing out costs regions the cross-boundary reuse that cond and
+            # while_loop keep.
+            # TODO: bracket the region instead. EnterSubgraphLine.codegen calls
+            # code.do_indent(), which needs an enclosing Python block statement -- an
+            # if/while branch emits one, a region does not.
+            return False
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
@@ -1263,6 +1283,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     def __post_init__(self):
         if V.graph.scheduler.current_node is None:
             raise AssertionError("expected scheduler.current_node to be set")
+        # See AllocateLine.__post_init__ -- the index is only meaningful
+        # relative to this scheduler's node list.
+        self.scheduler = V.graph.scheduler
         self.scheduler_node_index = V.graph.scheduler.nodes.index(
             V.graph.scheduler.current_node
         )
@@ -1276,6 +1299,11 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             raise AssertionError("expected line to not be reused")
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
+        if self.node.get_name() in V.graph.never_reuse_but_free_buffers:
+            # Emit the free but keep the storage out of the reuse pool: freeing
+            # only drops inductor's own reference, so a tensor retained behind
+            # inductor's back (stashed away by an effectful op) survives.
+            return self
         if config.allow_buffer_reuse:
             if self.comm_buffer:
                 # Comm buffers use separate pool (comm-comm reuse only)
@@ -1473,9 +1501,12 @@ class SymbolicCallArgLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     arg: SymbolicCallArg
     graph: GraphLowering
+    in_profile_scope: bool = False
 
     def codegen(self, code: IndentedBuffer) -> None:
-        self.wrapper._generate_symbolic_call_arg_helper(self.arg, self.graph)
+        self.wrapper._generate_symbolic_call_arg_helper(
+            self.arg, self.graph, self.in_profile_scope
+        )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_symbolic_call_arg
@@ -1533,6 +1564,23 @@ class GroupedAssertSizeStrideLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class AssertAlignmentLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+    name: str
+    alignment: int
+    op_name: str
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper._codegen_assert_alignment(
+            code, self.name, self.alignment, self.op_name
+        )
+
+    @staticmethod
+    def codegen_fx(converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_assert_alignment
+
+
+@dataclasses.dataclass
 class AssertDivByZeroLine(WrapperLine):
     """Deferred AOTI runtime check that a sizevar divisor is non-zero.
 
@@ -1551,6 +1599,50 @@ class AssertDivByZeroLine(WrapperLine):
 
 BufferName = str
 Line = MemoryPlanningLine | LineContext
+
+
+def _resolve_nested_output(
+    outputs: Any, keypath: pytree.KeyPath
+) -> tuple[ir.IRNode, pytree.KeyPath]:
+    """Follow ``SequenceKey`` entries into (possibly nested) custom-op outputs
+    until reaching the IR node an unbacked symbol is bound to, returning that
+    node together with the keypath entries that still apply to it.
+    """
+    # Fast path for a single output. When a fallback kernel returns a list
+    # consisting of a single tensor, the output is a MultiOutput with non-empty
+    # indices, and we strip the leading keypath entry.
+    if len(outputs) == 1 and isinstance(outputs[0], ir.IRNode):
+        single_output = outputs[0]
+        remaining = (
+            keypath[1:]
+            if isinstance(single_output, ir.MultiOutput) and single_output.indices
+            else keypath
+        )
+        return single_output, remaining
+
+    # Otherwise descend through nested list/tuple containers via SequenceKeys.
+    current_output = outputs
+    remaining_keypath = keypath
+    while isinstance(current_output, (list, tuple)):
+        if not remaining_keypath or not isinstance(
+            remaining_keypath[0], pytree.SequenceKey
+        ):
+            raise AssertionError(
+                "expected SequenceKey while traversing nested "
+                f"outputs, got {remaining_keypath}"
+            )
+        key = remaining_keypath[0]
+        if not 0 <= key.idx < len(current_output):
+            raise AssertionError(
+                f"output index {key.idx} is out of range for "
+                f"{type(current_output).__name__} with "
+                f"{len(current_output)} elements"
+            )
+        current_output = current_output[key.idx]
+        remaining_keypath = remaining_keypath[1:]
+    if not isinstance(current_output, ir.IRNode):
+        raise AssertionError(f"expected IRNode output, got {type(current_output)}")
+    return current_output, remaining_keypath
 
 
 class PythonWrapperCodegen(CodeGen):
@@ -1597,6 +1689,13 @@ class PythonWrapperCodegen(CodeGen):
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
+        # Nesting depth of the kernel-profiling {} scope blocks currently open.
+        # A symbolic numel emitted inside one is block-scoped, so it has to be
+        # redeclared rather than assigned. Only the guard begin/end pair keeps
+        # this up to date, so a block opened any other way -- the C shim writes
+        # its own braces -- does not register; anything emitting a numel inside
+        # one has to maintain the depth too.
+        self.kernel_profile_scope_depth: int = 0
         self.lines: list[Line] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -2114,6 +2213,16 @@ class PythonWrapperCodegen(CodeGen):
             f"assert_size_stride_grouped(({names}), ({sizes}), ({strides}), {op_name!r})"
         )
 
+    def write_assert_alignment(self, name: str, alignment: int, op_name: str) -> None:
+        """Queue an assert_alignment for emission during replay."""
+        self.writeline(AssertAlignmentLine(self, name, alignment, op_name))
+
+    def _codegen_assert_alignment(
+        self, code: IndentedBuffer, name: str, alignment: int, op_name: str
+    ) -> None:
+        """Emit one assert_alignment line to `code` (replay-phase target)."""
+        code.writeline(f"assert_alignment({name}, {alignment}, {op_name!r})")
+
     def register_alignment_check_inputs(self) -> None:
         """Populate pending alignment copies for non-mutated inputs.
         Called from the scheduler after mutated_input_idxs is computed."""
@@ -2483,6 +2592,18 @@ class PythonWrapperCodegen(CodeGen):
                 wrapper_name = kernel
             self.writeline(f"{wrapper_name}({', '.join(args)})")
 
+    def _tma_descriptor_tensor_ref(self, desc, in_autotune_block):
+        """Reference to the descriptor's source tensor.
+
+        The compile-time autotune block is Python even when the wrapper emits C++,
+        and it already materializes an example tensor in the descriptor tensor's
+        own layout. Referring to that buffer by name keeps the block valid Python;
+        codegen_reference() would emit a C++ reinterpret (e.g. a `0L` literal).
+        """
+        if in_autotune_block:
+            return desc.get_tensor().get_name()
+        return desc.tensor.codegen_reference()
+
     def _generate_tma_descriptor_call_experimental(self, desc, apply_size_hints=False):
         dims = desc.dims
         block_dims = desc.block_dims
@@ -2490,7 +2611,7 @@ class PythonWrapperCodegen(CodeGen):
             dims = V.graph.sizevars.optimization_hint(dims)
             block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
-        ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
+        ptr = f"{self._tma_descriptor_tensor_ref(desc, apply_size_hints)}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
         dims = ", ".join(PythonWrapperCodegen.val_to_arg_str(self, dim) for dim in dims)
         block_dims = ", ".join(
@@ -2510,7 +2631,8 @@ class PythonWrapperCodegen(CodeGen):
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
-        args = f"{desc.tensor.codegen_reference()}, {block_shape}"
+        tensor_ref = self._tma_descriptor_tensor_ref(desc, apply_size_hints)
+        args = f"{tensor_ref}, {block_shape}"
         call = f"{fn}({args})"
         return call
 
@@ -3881,6 +4003,13 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
         compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
+        for type_spec in get_importable_constexpr_types(
+            triton_meta.get("constants", {}).values()
+        ):
+            compile_wrapper.writeline(
+                f"from {type_spec.module} import "
+                f"{type_spec.root_name} as {type_spec.root_name}"
+            )
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
@@ -3938,12 +4067,19 @@ class PythonWrapperCodegen(CodeGen):
 
         is_benchmark_kernel = kernel_name == ""
         if not is_benchmark_kernel:
-            self.writeline(SymbolicCallArgLine(self, arg, V.graph))
+            self.writeline(
+                SymbolicCallArgLine(
+                    self,
+                    arg,
+                    V.graph,
+                    in_profile_scope=self.kernel_profile_scope_depth > 0,
+                )
+            )
 
         return arg
 
     def _generate_symbolic_call_arg_helper(
-        self, arg: SymbolicCallArg, graph: GraphLowering
+        self, arg: SymbolicCallArg, graph: GraphLowering, in_profile_scope: bool = False
     ) -> None:
         self.writeline(f"{arg.inner} = {pexpr(arg.inner_expr)}")
 
@@ -4672,13 +4808,13 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(FreeIfNotReusedLine(self, buffer, comm_buffer=True))
             return
 
-        if not self.can_reuse(buffer):
+        if not self.can_free(buffer):
             return
         self.freed.add(name)
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
-    def can_reuse(self, input_buffer, output_buffer=None):
+    def can_free(self, input_buffer):
         name = input_buffer.get_name()
         return not (
             name in V.graph.removed_buffers
@@ -4692,6 +4828,11 @@ class PythonWrapperCodegen(CodeGen):
             or name in V.graph.torchbind_constants
             or name in V.graph.never_reuse_buffers
             or name in self.freed
+        )
+
+    def can_reuse(self, input_buffer, output_buffer=None):
+        return self.can_free(input_buffer) and (
+            input_buffer.get_name() not in V.graph.never_reuse_but_free_buffers
         )
 
     def did_reuse(self, buffer, reused_buffer):
@@ -4791,23 +4932,8 @@ class PythonWrapperCodegen(CodeGen):
                     # because self.get_name() is actually never bound; the
                     # individual output arguments are bound by
                     # generate_c_shim_fallback_kernel
-                    if len(outputs) == 1:
-                        out = outputs[0]
-                        # When fallback kernel returns a list consisting of a single tensor,
-                        # the output is represented as a MultiOutput with non empty indices.
-                        # In this case, we strip the first key path away.
-                        return go(
-                            outputs[0].get_name(),
-                            keypath[1:]
-                            if isinstance(out, ir.MultiOutput) and len(out.indices) != 0
-                            else keypath,
-                        )
-                    else:
-                        if not isinstance(keypath[0], pytree.SequenceKey):
-                            raise AssertionError(
-                                f"expected SequenceKey, got {type(keypath[0])}"
-                            )
-                        return go(outputs[keypath[0].idx].get_name(), keypath[1:])
+                    node, remaining_keypath = _resolve_nested_output(outputs, keypath)
+                    return go(node.get_name(), remaining_keypath)
                 else:
                     return go(output_name, keypath)
 
@@ -5191,28 +5317,19 @@ class PythonWrapperCodegen(CodeGen):
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
 
-    def write_kernel_context_guard(
+    @contextlib.contextmanager
+    def kernel_profile_scope(
         self,
         kernel_name: str,
         node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+        enabled: bool | None = None,
     ):
-        return
+        """Emit a kernel call inside a profiling {} scope block.
 
-    def write_kernel_context_guard_begin(
-        self,
-    ):
+        A profiling block is a C++ construct, so this does nothing for the
+        Python wrapper; CppWrapperCpu overrides it to emit the real block.
         """
-        Mark the beginning of kernel context guard
-        """
-        return
-
-    def write_kernel_context_guard_end(
-        self,
-    ):
-        """
-        Mark the end of kernel context guard
-        """
-        return
+        yield
 
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
