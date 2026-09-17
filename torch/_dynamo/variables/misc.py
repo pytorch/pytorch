@@ -2811,7 +2811,14 @@ class ConstantLikeVariable(VariableTracker):
                 ],
             )
 
-        result = getattr(self.value, name)(*cargs, **ckwargs)
+        try:
+            result = getattr(self.value, name)(*cargs, **ckwargs)
+        except Exception as e:
+            raise_observed_exception(
+                type(e),
+                tx,
+                args=list(e.args),
+            )
 
         if variables.ConstantVariable.is_literal(result):
             return VariableTracker.build(tx, result)
