@@ -70,3 +70,37 @@ jobs:
       compiler: gcc11
       cuda-version: "13.0"
     secrets: inherit
+
+  linux-jammy-cuda13_2-py3_10-gcc11-sm90-build-cutlass-backend:
+    name: linux-jammy-cuda13.2-py3.10-gcc11-sm90-cutlass-backend
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-cuda13.2-py3.10-gcc11-sm90-cutlass-backend
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '9.0'
+      test-matrix: |
+        { include: [
+          { config: "h100_cutlass_backend", shard: 1, num_shards: 1, runner: "linux.aws.h100", owners: ["oncall:pt2"] },
+        ]}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit
+
+  linux-jammy-cuda13_2-py3_10-gcc11-sm90-test:
+    name: linux-jammy-cuda13.2-py3.10-gcc11-sm90-cutlass-backend
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_2-py3_10-gcc11-sm90-build-cutlass-backend
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-sm90-build-cutlass-backend.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-sm90-build-cutlass-backend.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_10-gcc11-sm90-build-cutlass-backend.outputs.test-matrix }}
+      python-version: "3.10"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit

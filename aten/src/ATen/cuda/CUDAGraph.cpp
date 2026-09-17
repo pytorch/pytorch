@@ -150,6 +150,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // that are not allowed once stream capture is active.
   if (at::globalContext().blasPreferredBackend() == at::BlasBackend::Cublaslt) {
     (void)at::cuda::getCurrentCUDABlasLtHandle();
+    // The line above only covers this thread. Backward inside the capture
+    // region runs its gemms from an autograd worker thread, whose first
+    // hipblaslt use on the capture stream would create a handle mid-capture;
+    // stock a spare in the shared pool for it to reserve instead.
+    at::cuda::ensureCublasLtHandlesAvailable(1);
   }
 #endif
 
@@ -383,8 +388,9 @@ void CUDAGraph::reset() {
       capturing_to_pool_ = false;
     }
 
-    // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
-    // private pool cleanup
+    // Clean up cached cuBLAS workspaces allocated on the capture stream;
+    // otherwise live allocations prevent private pool cleanup. CUDA's default
+    // eager workspace mode does not populate this cache.
     clearCublasWorkspacesForStream(capture_stream_.stream());
 
     // notifyCaptureDestroy may throw. How should we handle this?
@@ -629,6 +635,10 @@ void CUDAGraph::end_capture_to_conditional_node() {
   CUDAStream stream = conditional_node_streams_.top().current_stream();
   AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
   c10::cuda::CUDACachingAllocator::markCaptureEnd(capture_dev_);
+
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
   conditional_node_handles_.pop();
@@ -636,8 +646,6 @@ void CUDAGraph::end_capture_to_conditional_node() {
   TORCH_INTERNAL_ASSERT(!conditional_node_raw_streams_.empty());
   conditional_node_raw_streams_.pop();
 
-  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
-  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
   if (conditional_graph_capture_ids_.empty()) {
     c10::cuda::CUDACachingAllocator::beginAllocateToPool(
         capture_dev_, mempool_id_, create_allocate_filter<cudaStream_t>());
