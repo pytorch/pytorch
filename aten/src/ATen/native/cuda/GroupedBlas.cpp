@@ -99,11 +99,8 @@ bool should_use_cublaslt_grouped_gemm(
   if (fp16_grouped_gemm) {
     return true;
   }
-  if (!bf16_grouped_gemm) {
-    return false;
-  }
 #if CUDA_VERSION >= 13040
-  return true;
+  return bf16_grouped_gemm;
 #else
   return false;
 #endif
