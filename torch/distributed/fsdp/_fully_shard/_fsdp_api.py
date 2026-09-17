@@ -26,7 +26,7 @@ class MixedPrecisionPolicy:
     parameters for the optimizer step.
 
     .. warning::
-        ``param_dtype_fn`` must return the same result for each logical parameter
+        ``param_dtype_override_fn`` must return the same result for each logical parameter
         on every rank. Rank-dependent results may cause ranks to build incompatible
         collective buffers, which can fail or hang.
 
@@ -55,7 +55,7 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
-        param_dtype_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
+        param_dtype_override_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
             Optional per-parameter override for ``param_dtype``. The callable
             is evaluated once for each managed parameter when FSDP is applied.
             Returning the parameter's original dtype preserves that parameter
@@ -71,25 +71,25 @@ class MixedPrecisionPolicy:
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
-    param_dtype_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
+    param_dtype_override_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
         default=None, kw_only=True
     )
 
     def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
-        if self.param_dtype_fn is None:
+        if self.param_dtype_override_fn is None:
             return self
         param_dtype = self.param_dtype
-        if self.param_dtype_fn is not None:
-            param_dtype_override = self.param_dtype_fn(param)
+        if self.param_dtype_override_fn is not None:
+            param_dtype_override = self.param_dtype_override_fn(param)
             if param_dtype_override is not None:
                 if not isinstance(param_dtype_override, torch.dtype):
                     raise ValueError(
-                        "param_dtype_fn must return a torch.dtype or None but got "
+                        "param_dtype_override_fn must return a torch.dtype or None but got "
                         f"{type(param_dtype_override)}"
                     )
                 if param_dtype_override not in (self.param_dtype, param.dtype):
                     raise ValueError(
-                        "param_dtype_fn must return None, param_dtype, or the "
+                        "param_dtype_override_fn must return None, param_dtype, or the "
                         "parameter's original dtype but got "
                         f"{param_dtype_override} for a parameter with dtype "
                         f"{param.dtype} and param_dtype {self.param_dtype}"
@@ -98,7 +98,7 @@ class MixedPrecisionPolicy:
         return replace(
             self,
             param_dtype=param_dtype,
-            param_dtype_fn=None,
+            param_dtype_override_fn=None,
         )
 
 
