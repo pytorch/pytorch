@@ -1,5 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
+import collections
+import dataclasses
 import functools
 import os
 import site
@@ -13,7 +16,10 @@ import torch
 import torch._dynamo.precompile_package as precompile_package
 import torch._inductor.test_case
 import torch.nn.functional as F
+from torch._dynamo.aot_compile import AOTCompiledFunction
+from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
+from torch._dynamo.package import load_guards_state
 from torch._dynamo.source import (
     AttrSource,
     DictGetItemSource,
@@ -60,20 +66,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(precompile_package.default_guard_filter_fn([derived]), [False])
 
     def test_default_guard_filter_keeps_what_the_serializer_accepts(self):
-        class Local:
-            pass
-
-        # The one divergence: TYPE_MATCH marks a class whose __qualname__ is not
-        # its __name__ here and serialize_guards refuses it through this
-        # attribute. The filter keeps it so the refusal stays loud rather than
-        # shipping an artifact that never checks the type.
         g = GlobalSource("g")
-        local_type = _entry(g, None, "TYPE_MATCH")
-        local_type.orig_guard._unserializable = Local
         entries = [
             _entry(g, None, "TENSOR_MATCH"),
             _entry(g, None, "TYPE_MATCH"),
-            local_type,
             # An id_match_unchecked on a builtin records ID_MATCH as its derived
             # type; serialize_guards takes its TYPE_MATCH/BUILTIN_MATCH branch
             # first and never reaches the derived-type refusal, so neither does
@@ -81,7 +77,42 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             _entry(g, None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
         ]
         keep = precompile_package.default_guard_filter_fn(entries)
-        self.assertEqual(keep, [True] * 4)
+        self.assertEqual(keep, [True] * 3)
+
+    def test_default_guard_filter_through_serialize_guards(self):
+        def fn(x):
+            return x + len(x.shape)
+
+        x = torch.randn(3)
+        options = {"guard_filter_fn": precompile_package.default_guard_filter_fn}
+        compiled = torch.compile(fn, fullgraph=True, backend="eager", options=options)
+        compiled = compiled.aot_compile(((x,), {}))
+        state = load_guards_state(compiled._artifacts.guards_state)
+        kept = {guard.create_fn_name() for guard in state.output_graph._guards}
+        self.assertIn("BUILTIN_MATCH", kept)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data)
+        self.assertEqual(loaded(x), fn(x))
+        # The kept guard is live in the loaded artifact: a swapped builtin trips it.
+        real_len = len
+        with mock.patch.object(builtins, "len", lambda *args: real_len(*args)):
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                loaded(x)
+
+        # A local-scope class passes the filter (the TYPE_MATCH on L['obj']) and
+        # serialization refuses it. The filter keeps the guard so the refusal is
+        # loud rather than an artifact that never checks the type; dropping it
+        # would not avoid the error anyway, since the pickler refuses the
+        # instance wherever it sits in the guard tree.
+        class Local:
+            n = 1
+
+        def fn2(x, obj):
+            return x + obj.n
+
+        compiled = torch.compile(fn2, fullgraph=True, backend="eager", options=options)
+        with self.assertRaisesRegex(PackageError, "defined in local scope"):
+            compiled.aot_compile(((x, Local()), {}))
 
     def test_roots_locate_the_stdlib_install_and_torch_dirs(self):
         stdlib = precompile_package._stdlib_roots()
@@ -148,6 +179,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(
             reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, "op"), _user_op)
         )
+        # functools.wraps copies __module__ and __name__, so a shim installed as
+        # builtins.sum passes both; only a value CPython built is waived.
+        shim = functools.wraps(sum)(lambda *args: 0)
+        self.assertEqual((shim.__module__, shim.__name__), ("builtins", "sum"))
+        sum_read = DictGetItemSource(_BUILTINS_DICT, "sum")
+        self.assertFalse(reads_a_builtin(sum_read, shim))
+        self.assertTrue(reads_a_builtin(sum_read, sum))
+        self.assertTrue(reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, "int"), int))
 
     def test_dynamo_synthesized_covers_only_the_resume_function_list(self):
         synthesized = precompile_package._is_dynamo_synthesized
@@ -211,18 +250,43 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(defined_where_read(cached, "_user_op", _HERE))
         decorated = torch.no_grad()(_user_op)
         self.assertFalse(defined_where_read(decorated, "_user_op", _HERE))
-        # A class has no code object, so its __module__'s file decides.
+        # A class has no code object, and namedtuple, make_dataclass and type()
+        # all stamp __module__ from the calling frame under a BARE __qualname__,
+        # so a class a library mints for this file claims it exactly like a
+        # class statement written here. The methods tell: a class statement
+        # compiled its defs in this file, and a class with no def of its own
+        # compiled here fails closed. A factory fed a same-file method passes,
+        # the class analogue of the conditional-bind gap pinned below.
         cls = type(self)
         self.assertTrue(defined_where_read(cls, cls.__name__, _HERE))
         self.assertFalse(defined_where_read(cls, cls.__name__, _ELSEWHERE))
         self.assertFalse(defined_where_read(torch.nn.Linear, "Linear", _HERE))
+        point = collections.namedtuple("Point", "x")
+        self.assertEqual((point.__module__, point.__qualname__), (__name__, "Point"))
+        self.assertFalse(defined_where_read(point, "Point", _HERE))
+        point = dataclasses.make_dataclass("Point", [("x", int)])
+        self.assertEqual((point.__module__, point.__qualname__), (__name__, "Point"))
+        self.assertFalse(defined_where_read(point, "Point", _HERE))
+        self.assertFalse(defined_where_read(type("Point", (), {}), "Point", _HERE))
+        point = type("Point", (), {"area": _user_op})
+        self.assertTrue(defined_where_read(point, "Point", _HERE))
 
         # A method extracted under its own name and a def returned by a factory
         # are assignments, not a def under its own name: __qualname__ tells.
+        # Ops itself, a same-file class statement with a method, is waived; a
+        # class with no method of its own is not, nor is one whose only methods
+        # are generated (a fields-only dataclass compiles them in <string>).
         class Ops:
             @staticmethod
             def op(x):
                 return x
+
+        class Marker:
+            pass
+
+        @dataclasses.dataclass
+        class Cfg:
+            x: int
 
         def availability_fork():
             def _user_op(x):
@@ -230,6 +294,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
             return _user_op
 
+        self.assertTrue(defined_where_read(Ops, Ops.__qualname__, _HERE))
+        self.assertFalse(defined_where_read(Marker, Marker.__qualname__, _HERE))
+        self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, _HERE))
         self.assertFalse(defined_where_read(Ops.op, "op", _HERE))
         self.assertFalse(defined_where_read(availability_fork(), "_user_op", _HERE))
         # A module-level same-name fork inside this file binds a different def
@@ -299,10 +366,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             for r in roots()
             if isinstance(r, LocalSource) and r.local_name.startswith("__nested")
         }
-        self.assertEqual(
-            synthesized,
-            {"__nested_resume_fns": True, "__nested_frame_values": False},
-        )
+        # The resume function list is always passed; whether the frame values
+        # are guarded depends on which locals stay live across the break.
+        self.assertTrue(synthesized["__nested_resume_fns"])
+        self.assertFalse(synthesized.get("__nested_frame_values", False))
 
 
 if __name__ == "__main__":
