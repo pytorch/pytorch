@@ -48,10 +48,13 @@ class GuardFact:
 class PrecompileSummary:
     """Coverage and guard information from an observed precompile capture.
 
-    ``str(summary)`` renders a one-line digest. Everything here describes the
-    calls that ran, not every possible input or unexecuted branch, and once
-    ``truncated`` is non-empty every count and frame list is a lower bound: the
-    frames called beneath a truncated one ran untraced, so nothing here saw them.
+    ``str(summary)`` renders a one-line digest: the counts, the dropped guards
+    tallied by type, the risky slots and frame lists cut to their first five
+    entries (``+N more``), and the first line of the first capture error.
+    Everything here describes the calls that ran, not every possible input or
+    unexecuted branch, and once ``truncated`` is non-empty every count and
+    frame list is a lower bound: the frames called beneath a truncated one ran
+    untraced, so nothing here saw them.
 
     The guard fields hold ``(guard_type, source)`` slots, the source spelled as
     ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
@@ -121,28 +124,20 @@ class PrecompileSummary:
             one that had none.
         dropped_guard_code: ``(guard_type, source, rendered_check)``, one per slot
             of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
-            rendered a check, i.e. whose ``GuardBuilder`` method set
-            ``Guard.code_list``. How the check is installed does not predict
-            that (``AUTOGRAD_SAVED_TENSORS_HOOKS`` checks through a lambda and
-            ``DEFAULT_DEVICE`` through a C++ leaf, and both export code); the
-            methods that render none today include ``GLOBAL_STATE``,
-            ``TORCH_FUNCTION_STATE``, ``DISPATCH_KEY_SET_MATCH`` and
-            ``TENSOR_SUBCLASS_METADATA_MATCH``, and ``CLOSURE_MATCH`` on a plain
-            function, which guards its ``__code__`` through a separate guard
-            (on any other callable it falls through to ``ID_MATCH`` and renders
-            that check). Such a slot has no entry here. The entry holds one
-            rendering however many variants dropped the slot: a check that
-            embeds the guarded value (``EQUALS_MATCH`` renders ``L['n'] == 3``)
-            differs between variants that differ in the value, and the entry
-            then shows one variant's, the producer's pick rather than a merge,
-            so it tells the form of the check and not the value; that the slot
-            varied at all is what ``risky_dropped_guards`` records.
-            A slot alone can be ambiguous: a dropped ``('HASATTR', "counts['pixel']")``
-            is either the benign companion of a kept ``TENSOR_MATCH`` on the same
-            source or the only guard on an optional attribute, and only the
-            rendered check tells them apart. Kept beside the slot lists rather
-            than folded into them, so the slots stay the identity the policy
-            compares on; for programmatic consumers, not the digest.
+            rendered a check (its ``GuardBuilder`` method set ``Guard.code_list``;
+            how the check is installed does not predict that, and a slot whose
+            guard rendered none has no entry). One rendering however many
+            variants dropped the slot: where the check embeds the guarded value
+            (``EQUALS_MATCH`` renders ``L['n'] == 3``) it is one variant's, the
+            producer's pick rather than a merge, so it tells the form of the
+            check and not the value; that the slot varied at all is what
+            ``risky_dropped_guards`` records. Carried because a slot alone can
+            be ambiguous: a dropped ``('HASATTR', "counts['pixel']")`` is either
+            the benign companion of a kept ``TENSOR_MATCH`` on the same source
+            or the only guard on an optional attribute, and only the rendered
+            check tells them apart. Kept beside the slot lists so the slots stay
+            the identity the policy compares on; for programmatic consumers,
+            not the digest.
         capture_errors: Messages from capture calls that raised.
     """
 
@@ -200,6 +195,10 @@ class PrecompileSummary:
         def count(k: int, noun: str) -> str:
             return f"{k} {noun}" if k == 1 else f"{k} {noun}s"
 
+        def some(items: tuple[str, ...]) -> str:
+            more = len(items) - 5
+            return f"{list(items[:5])}" + (f" +{more} more" if more > 0 else "")
+
         base = (
             f"{count(self.frames, 'frame')} ({self.resume_functions} from graph breaks), "
             f"{count(self.guarded_codes, 'guarded code')}, "
@@ -209,22 +208,25 @@ class PrecompileSummary:
             kept = len(self.kept_guards)
             base += f", dropped guards {self.dropped_guard_types} ({kept} kept)"
         if self.risky_dropped_guards:
-            base += f", RISKY drops {[src for _, src in self.risky_dropped_guards]}"
+            # Both halves of the slot: two risky slots can share a source (a
+            # dropped ID_MATCH and its HASATTR companion).
+            risky = tuple(f"{t} {src}" for t, src in self.risky_dropped_guards)
+            base += f", RISKY drops {some(risky)}"
         if self.policy_dropped_guards:
             policy = len(self.policy_dropped_guards)
             base += f", {count(policy, 'policy-dropped guard')}"
         if self.wont_generalize:
             base += f", {count(len(self.wont_generalize), 'value-pinned source')}"
         if self.uncovered_frames:
-            base += (
-                f", {len(self.uncovered_frames)} UNCOVERED: "
-                f"{list(self.uncovered_frames)}"
-            )
+            base += f", {len(self.uncovered_frames)} UNCOVERED: {some(self.uncovered_frames)}"
         if self.truncated:
-            base += f", >={len(self.truncated)} TRUNCATED: {list(self.truncated)}"
+            base += f", >={len(self.truncated)} TRUNCATED: {some(self.truncated)}"
         if self.bypassed:
-            base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
+            base += f", {len(self.bypassed)} BYPASSED: {some(self.bypassed)}"
         if self.capture_errors:
             errors = len(self.capture_errors)
-            base += f", {errors} CAPTURE ERROR{'' if errors == 1 else 'S'}"
+            first = self.capture_errors[0].partition("\n")[0]
+            base += f", {errors} CAPTURE ERROR{'' if errors == 1 else 'S'}: {first!r}"
+            if errors > 1:
+                base += f" +{errors - 1} more"
         return base
