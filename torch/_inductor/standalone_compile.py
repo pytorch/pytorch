@@ -827,7 +827,8 @@ def compile_to_python(
 
     # Lower against the placeholders' fake ``val`` metadata (the compile-time input
     # contract, carrying the graph's static/symbolic shapes under one FakeTensorMode)
-    # rather than re-fakifying ``example_inputs``, which are real and would drop symbolic
+    # rather than re-fakifying ``example_inputs``, which belong to the caller's own capture
+    # mode (real tensors for some callers, fakes for precompile) and would drop symbolic
     # dims. A post-AOTAutograd graph's shapes are already baked into this metadata, so
     # there is no separate dynamic-shapes knob.
     fake_inputs = _placeholder_fake_inputs(gm)
