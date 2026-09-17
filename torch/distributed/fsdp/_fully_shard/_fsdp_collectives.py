@@ -23,7 +23,7 @@ from ._fsdp_param import FSDPParam, ShardedState
 _PrepareAllGatherOutputs = Callable[[FSDPParam], tuple[list[torch.Tensor], bool]]
 _PrepareReduceScatterInputs = Callable[
     [list[FSDPParam], list[torch.Tensor], int],
-    tuple[list[torch.Tensor], list[torch.Size]],
+    tuple[list[torch.Tensor], Sequence[torch.Size]],
 ]
 
 
@@ -576,7 +576,7 @@ def _prepare_reduce_scatter_inputs_with_reorder(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> tuple[list[torch.Tensor], list[torch.Size]]:
+) -> tuple[list[torch.Tensor], tuple[torch.Size, ...]]:
     """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
     if world_size > 1:
         for i, (fsdp_param, unsharded_grad) in enumerate(
@@ -591,9 +591,9 @@ def _prepare_reduce_scatter_inputs_with_reorder(
             chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
 
-    padded_unsharded_sizes = [
+    padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
-    ]
+    )
     return unsharded_grads, padded_unsharded_sizes
 
 

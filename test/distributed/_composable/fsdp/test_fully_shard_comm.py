@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import torch
 import torch.distributed as dist
@@ -343,6 +343,66 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
 
 
+class TestFullyShardCopyHooks(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_copy_hooks(self):
+        model = nn.Sequential(
+            nn.Linear(4, 4), nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
+        )
+        fsdp_modules = (model, model[1], model[1][0])
+        for module in reversed(fsdp_modules):
+            fully_shard(
+                module,
+                shard_placement_fn=lambda param: Shard(param.ndim - 1),
+                reshard_after_forward=True,
+            )
+
+        def check_hooks(expected_ag_hooks, expected_rs_hooks):
+            for module, ag_hook, rs_hook in zip(
+                fsdp_modules, expected_ag_hooks, expected_rs_hooks
+            ):
+                param_groups = module._get_fsdp_state()._fsdp_param_groups
+                self.assertTrue(param_groups)
+                for param_group in param_groups:
+                    self.assertIs(param_group._prepare_all_gather_outputs, ag_hook)
+                    self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_hook)
+
+        default_ag = _prepare_all_gather_outputs_with_reorder
+        default_rs = _prepare_reduce_scatter_inputs_with_reorder
+        ag_hook = MagicMock(wraps=default_ag)
+        rs_hook = MagicMock(wraps=default_rs)
+        check_hooks((default_ag,) * 3, (default_rs,) * 3)
+        model._set_all_gather_copy_out_hook(ag_hook, recurse=False)
+        check_hooks((ag_hook, default_ag, default_ag), (default_rs,) * 3)
+        model[1]._set_reduce_scatter_copy_in_hook(rs_hook, recurse=False)
+        check_hooks(
+            (ag_hook, default_ag, default_ag), (default_rs, rs_hook, default_rs)
+        )
+        model(torch.ones((2, 4), device=device_type)).sum().backward()
+        ag_hook.assert_called()
+        self.assertEqual(rs_hook.call_count, 1)
+        model.zero_grad()
+
+        ag_hook.reset_mock()
+        rs_hook.reset_mock()
+        model._set_all_gather_copy_out_hook(ag_hook)
+        model._set_reduce_scatter_copy_in_hook(rs_hook)
+        check_hooks((ag_hook,) * 3, (rs_hook,) * 3)
+        model(torch.ones((2, 4), device=device_type)).sum().backward()
+        ag_hook.assert_called()
+        self.assertEqual(rs_hook.call_count, len(fsdp_modules))
+
+        model._set_all_gather_copy_out_hook(default_ag, recurse=False)
+        check_hooks((default_ag, ag_hook, ag_hook), (rs_hook,) * 3)
+        model._set_all_gather_copy_out_hook(default_ag)
+        model._set_reduce_scatter_copy_in_hook(default_rs)
+        check_hooks((default_ag,) * 3, (default_rs,) * 3)
+
+
 class TestFullyShardNonzeroDimCopy(FSDPTest):
     _dim0_view_hooks = (
         _prepare_all_gather_outputs_with_dim0_views,
@@ -372,89 +432,6 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
                 self._test_nonzero_dim_copy, 3, torch.float32, inference_mode=True
             ),
         )
-
-    @skip_if_lt_x_gpu(2)
-    def test_copy_hooks(self):
-        torch.manual_seed(42)
-        model = nn.Sequential(
-            nn.Linear(4, 4), nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
-        )
-        fsdp_modules = (model, model[1], model[1][0])
-        for module in reversed(fsdp_modules):
-            fully_shard(
-                module,
-                shard_placement_fn=lambda param: Shard(param.ndim - 1),
-                reshard_after_forward=True,
-            )
-
-        def check_hooks(expected_ag_hooks, expected_rs_hooks):
-            expected_by_param = {}
-            for module, ag_hook, rs_hook in zip(
-                fsdp_modules, expected_ag_hooks, expected_rs_hooks
-            ):
-                param_groups = module._get_fsdp_state()._fsdp_param_groups
-                self.assertTrue(param_groups)
-                for param_group in param_groups:
-                    self.assertIs(param_group._prepare_all_gather_outputs, ag_hook)
-                    self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_hook)
-                    expected_by_param[id(param_group.fsdp_params[0])] = (
-                        ag_hook,
-                        rs_hook,
-                    )
-
-            with (
-                patch(
-                    "torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather_copy_out",
-                    wraps=foreach_all_gather_copy_out,
-                ) as all_gather_copy_out,
-                patch(
-                    "torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce",
-                    wraps=foreach_reduce,
-                ) as reduce,
-            ):
-                inp = torch.randn((2, 4), device=device_type, requires_grad=True)
-                model(inp).sum().backward()
-                model.zero_grad()
-
-            for collective, params_arg, keyword, option in (
-                (all_gather_copy_out, 1, "prepare_all_gather_outputs", 0),
-                (reduce, 0, "prepare_reduce_scatter_inputs", 1),
-            ):
-                seen_params = set()
-                for call in collective.call_args_list:
-                    param_id = id(call.args[params_arg][0])
-                    self.assertIs(
-                        call.kwargs[keyword], expected_by_param[param_id][option]
-                    )
-                    seen_params.add(param_id)
-                self.assertEqual(seen_params, set(expected_by_param))
-
-        default_ag = _prepare_all_gather_outputs_with_reorder
-        default_rs = _prepare_reduce_scatter_inputs_with_reorder
-        ag_hook = MagicMock(wraps=_prepare_all_gather_outputs_with_dim0_views)
-        rs_hook = MagicMock(wraps=_prepare_reduce_scatter_inputs_with_dim0_views)
-        check_hooks((default_ag,) * 3, (default_rs,) * 3)
-        model._set_all_gather_copy_out_hook(ag_hook, recurse=False)
-        check_hooks((ag_hook, default_ag, default_ag), (default_rs,) * 3)
-        ag_hook.assert_called()
-        ag_hook.reset_mock()
-        model._set_all_gather_copy_out_hook(ag_hook)
-        check_hooks((ag_hook,) * 3, (default_rs,) * 3)
-        ag_hook.assert_called()
-
-        model[1]._set_reduce_scatter_copy_in_hook(rs_hook, recurse=False)
-        check_hooks((ag_hook,) * 3, (default_rs, rs_hook, default_rs))
-        self.assertEqual(rs_hook.call_count, 1)
-        rs_hook.reset_mock()
-        model._set_reduce_scatter_copy_in_hook(rs_hook)
-        check_hooks((ag_hook,) * 3, (rs_hook,) * 3)
-        self.assertEqual(rs_hook.call_count, len(fsdp_modules))
-
-        model._set_all_gather_copy_out_hook(default_ag, recurse=False)
-        check_hooks((default_ag, ag_hook, ag_hook), (rs_hook,) * 3)
-        model._set_all_gather_copy_out_hook(default_ag)
-        model._set_reduce_scatter_copy_in_hook(default_rs)
-        check_hooks((default_ag,) * 3, (default_rs,) * 3)
 
     def _test_nonzero_dim_copy(
         self,
