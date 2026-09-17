@@ -27,8 +27,8 @@ from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
-    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     instantiate_device_type_tests,
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
 from torch.testing._internal.common_utils import HardwareClassification, TEST_CUDA
 from torch.utils import _pytree as pytree
