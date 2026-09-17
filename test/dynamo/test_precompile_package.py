@@ -1,10 +1,15 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
+from unittest import mock
 
 import torch
 import torch._dynamo.precompile_package as precompile_package
 import torch._inductor.test_case
+from torch._dynamo.aot_compile import AOTCompiledFunction
+from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
+from torch._dynamo.package import load_guards_state
 from torch._dynamo.source import GlobalSource
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import Guard
@@ -36,20 +41,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(precompile_package.default_guard_filter_fn([derived]), [False])
 
     def test_default_guard_filter_keeps_what_the_serializer_accepts(self):
-        class Local:
-            pass
-
-        # The one divergence: TYPE_MATCH marks a class whose __qualname__ is not
-        # its __name__ here and serialize_guards refuses it through this
-        # attribute. The filter keeps it so the refusal stays loud rather than
-        # shipping an artifact that never checks the type.
         g = GlobalSource("g")
-        local_type = _entry(g, None, "TYPE_MATCH")
-        local_type.orig_guard._unserializable = Local
         entries = [
             _entry(g, None, "TENSOR_MATCH"),
             _entry(g, None, "TYPE_MATCH"),
-            local_type,
             # An id_match_unchecked on a builtin records ID_MATCH as its derived
             # type; serialize_guards takes its TYPE_MATCH/BUILTIN_MATCH branch
             # first and never reaches the derived-type refusal, so neither does
@@ -57,7 +52,42 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             _entry(g, None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
         ]
         keep = precompile_package.default_guard_filter_fn(entries)
-        self.assertEqual(keep, [True] * 4)
+        self.assertEqual(keep, [True] * 3)
+
+    def test_default_guard_filter_through_serialize_guards(self):
+        def fn(x):
+            return x + len(x.shape)
+
+        x = torch.randn(3)
+        options = {"guard_filter_fn": precompile_package.default_guard_filter_fn}
+        compiled = torch.compile(fn, fullgraph=True, backend="eager", options=options)
+        compiled = compiled.aot_compile(((x,), {}))
+        state = load_guards_state(compiled._artifacts.guards_state)
+        kept = {guard.create_fn_name() for guard in state.output_graph._guards}
+        self.assertIn("BUILTIN_MATCH", kept)
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data)
+        self.assertEqual(loaded(x), fn(x))
+        # The kept guard is live in the loaded artifact: a swapped builtin trips it.
+        real_len = len
+        with mock.patch.object(builtins, "len", lambda *args: real_len(*args)):
+            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+                loaded(x)
+
+        # A local-scope class passes the filter (the TYPE_MATCH on L['obj']) and
+        # serialization refuses it. The filter keeps the guard so the refusal is
+        # loud rather than an artifact that never checks the type; dropping it
+        # would not avoid the error anyway, since the pickler refuses the
+        # instance wherever it sits in the guard tree.
+        class Local:
+            n = 1
+
+        def fn2(x, obj):
+            return x + obj.n
+
+        compiled = torch.compile(fn2, fullgraph=True, backend="eager", options=options)
+        with self.assertRaisesRegex(PackageError, "defined in local scope"):
+            compiled.aot_compile(((x, Local()), {}))
 
 
 if __name__ == "__main__":
