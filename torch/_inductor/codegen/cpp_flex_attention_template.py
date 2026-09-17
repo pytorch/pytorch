@@ -31,23 +31,54 @@ inline void {{kernel_name}}_exp_reduce_sum_fusion_kernel(
     const int& size,
     T2* out,
     T1& val) {
-  auto vec_size = at::vec::Vectorized<T1>::size();
-  auto vec_max = at::vec::Vectorized<T1>(val);
+  constexpr auto vec_size1 = at::vec::Vectorized<T1>::size();
+  constexpr auto vec_size2 = at::vec::Vectorized<T2>::size();
+  constexpr int64_t T1_n =
+      (vec_size2 == vec_size1 * 2 && c10::is_reduced_floating_point_v<T2>) ? 2 : 1;
+  constexpr int64_t T2_n = 1;
+  using Vec = at::vec::Vectorized<T1>;
+  using VecN = at::vec::VectorizedN<T1, T1_n>;
+
+  auto vec_max = VecN(val);
+  auto vec_max_tail = Vec(val);
   T1 tmp_sum = 0;
-  auto vec_tmp_sum = at::vec::Vectorized<T1>(tmp_sum);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<T1>::loadu(a + i);
+  auto vec_tmp_sum = VecN(tmp_sum);
+  auto vec_tmp_sum_tail = Vec(tmp_sum);
+  const long vec_end_n = vec_size2 * (size / vec_size2);
+  const long vec_end = vec_size1 * (size / vec_size1);
+  auto exp_vec = [](const auto& v) {
+    if constexpr (
+        std::is_same_v<T1, float> &&
+        (std::is_same_v<T2, at::BFloat16> || std::is_same_v<T2, at::Half>)) {
+      return v.fexp_u20();
+    } else {
+      return v.exp_u20();
+    }
+  };
+
+  long i = 0;
+  for (; i < vec_end_n; i += vec_size2) {
+    auto tmp0 = VecN::loadu(a + i);
     auto tmp1 = tmp0 - vec_max;
-    auto tmp2 = tmp1.exp_u20();
-    vec_tmp_sum += tmp2;
+    auto tmp2 = exp_vec(tmp1);
+    vec_tmp_sum = vec_tmp_sum + tmp2;
+    auto out_n = at::vec::convert<T2, T2_n, T1, T1_n, true>(tmp2);
+    out_n.store(out + i);
+  }
+  for (; i < vec_end; i += vec_size1) {
+    auto tmp0 = Vec::loadu(a + i);
+    auto tmp1 = tmp0 - vec_max_tail;
+    auto tmp2 = exp_vec(tmp1);
+    vec_tmp_sum_tail = vec_tmp_sum_tail + tmp2;
     at::native::_store(out + i, tmp2);
   }
+  vec_tmp_sum[0] += vec_tmp_sum_tail;
   tmp_sum = at::vec::vec_reduce_all<T1>(
       [](at::vec::Vectorized<T1>& x, at::vec::Vectorized<T1>& y) {
         return x + y;
       },
       vec_tmp_sum);
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  for (long i = vec_end; i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 - val;
     auto tmp2 = exp(tmp1);
@@ -66,17 +97,31 @@ inline void {{kernel_name}}_mul_reduce_max_fusion_kernel(
     const int& size,
     scalar_t* out,
     scalar_t& max) {
-  auto vec_size = at::vec::Vectorized<scalar_t>::size();
-  auto vec_scale = at::vec::Vectorized<scalar_t>(scale);
+  using Vec = at::vec::Vectorized<scalar_t>;
+  using VecN = at::vec::VectorizedN<scalar_t, 2>;
+  constexpr auto vec_size = Vec::size();
+  constexpr auto vec_size_n = VecN::size();
+  auto vec_scale = VecN(scale);
   scalar_t tmp_max = -std::numeric_limits<scalar_t>::infinity();
-  auto vec_tmp_max = at::vec::Vectorized<scalar_t>(tmp_max);
-  for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
-    auto tmp0 = at::vec::Vectorized<scalar_t>::loadu(a + i);
+  auto vec_tmp_max = VecN(tmp_max);
+  auto vec_tmp_max_tail = Vec(tmp_max);
+  const long vec_end_n = vec_size_n * (size / vec_size_n);
+  const long vec_end = vec_size * (size / vec_size);
+  long i = 0;
+  for (; i < vec_end_n; i += vec_size_n) {
+    auto tmp0 = VecN::loadu(a + i);
     auto tmp1 = tmp0 * vec_scale;
     vec_tmp_max = at::vec::maximum(vec_tmp_max, tmp1);
+    tmp1.store(out + i);
+  }
+  for (; i < vec_end; i += vec_size) {
+    auto tmp0 = Vec::loadu(a + i);
+    auto tmp1 = tmp0 * Vec(scale);
+    vec_tmp_max_tail = at::vec::maximum(vec_tmp_max_tail, tmp1);
     at::native::_store(out + i, tmp1);
   }
-  for (long i = vec_size * (size / vec_size); i < size; i++) {
+  vec_tmp_max[0] = at::vec::maximum(vec_tmp_max[0], vec_tmp_max_tail);
+  for (; i < size; i++) {
     auto tmp0 = a[i];
     auto tmp1 = tmp0 * scale;
     tmp_max = std::max(tmp_max, tmp1);
@@ -312,8 +357,9 @@ extern "C"
 
 FLEX_ATTENTION_TEMPLATE = r"""
   bool need_pack = false;
+{%- if not use_blas_gemm %}
   // Whether pack is needed for BFloat16/Half
-  if (is_reduced_type) {
+  if constexpr (is_reduced_type) {
     // check platform ability
     need_pack = std::is_same_v<scalar_t, at::BFloat16> ? at::native::cpublas::could_pack(at::kBFloat16)
                                                        : at::native::cpublas::could_pack(at::kHalf);
@@ -330,6 +376,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       need_pack = gemm_size_per_thread / pack_size >= 4;
     }
   }
+{%- endif %}
   // Pad is needed for packing when K is not even
   bool headSize_even = headSize % 2 == 0;
   int64_t eheadSize = need_pack && !headSize_even ? headSize + 1: headSize;
@@ -344,9 +391,11 @@ FLEX_ATTENTION_TEMPLATE = r"""
       /* qk_sum */ qSplitSize +
       /* dst    */ qSplitSize * headSize_v;
 
-  // Buffers to store accum results, padding query and transpose/packing key/value
+  // Buffers to store accum results
   {{template.codegen_allocate_buffer("buf_data", "accum_t", "num_thread*_size_per_thread")}}
   {{template.codegen_allocate_buffer("buf_reduced_data", "scalar_t", "num_thread*qSplitSize*ekvSplitSize")}}
+{%- if not use_blas_gemm %}
+  // Buffers for padding query and transpose/packing key/value
   {{template.codegen_allocate_buffer("key_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*eheadSize*kvSize")}}
   {{template.codegen_allocate_buffer("value_reorder_ptr", "scalar_t", "batchSize_k*num_head_k*kv_padding_size*headSize_v")}}
   {{template.codegen_allocate_buffer("transpose_buffer_ptr", "scalar_t", "num_thread*kvSplitSize*headSize")}}
@@ -398,6 +447,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
       }
     });
   }
+{%- endif %}
   // Attention loop below
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
@@ -412,9 +462,13 @@ FLEX_ATTENTION_TEMPLATE = r"""
         is_reduced_type
             ? buf_reduced_data + ompIdx * qSplitSize * ekvSplitSize
             : nullptr;
+{%- if not use_blas_gemm %}
     scalar_t* query_t_padding_ptr = (!headSize_even && need_pack)
             ? query_padding_ptr + ompIdx * qSplitSize * eheadSize
             : nullptr;
+{%- else %}
+    scalar_t* query_t_padding_ptr = nullptr;
+{%- endif %}
 
     for ([[maybe_unused]] auto z : c10::irange(begin, end)) {
       auto i_kvi = is_broadcast_bs_kvi ? i/bs_shards_kvi : i;
@@ -483,10 +537,27 @@ FLEX_ATTENTION_TEMPLATE = r"""
         if (!need_pack) {
           auto k_addr =
               k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+          auto q_addr =
+              q_data + i * qStrideB + j * qStrideH + m * qStrideM;
 
+{%- if use_blas_gemm %}
+          at::native::cpublas::gemm(
+              at::native::TransposeType::Transpose,
+              at::native::TransposeType::NoTranspose,
+              cur_kvSplitSize,
+              cur_qSplitSize,
+              headSize,
+              static_cast<accum_t>(1),
+              k_addr,
+              kStrideN,
+              q_addr,
+              qStrideM,
+              static_cast<accum_t>(0),
+              qk_data,
+              cur_kvSplitSize);
+{%- else %}
           {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<static_cast<bool>(false)>(
-              q_data + i * qStrideB + j * qStrideH +
-                  m * qStrideM,
+              q_addr,
               k_addr,
               qk_data,
               cur_qSplitSize,
@@ -495,24 +566,30 @@ FLEX_ATTENTION_TEMPLATE = r"""
               qStrideM,
               kStrideN,
               cur_kvSplitSize);
+{%- endif %}
 
-        } else {
-          at::native::cpublas::brgemm(
-              cur_qSplitSize,
-              cur_kvSplitSize,
-              eheadSize,
-              headSize_even ? qStrideM : eheadSize,
-              cur_kvSplitSize,
-              cur_kvSplitSize,
-              false,
-              !headSize_even
-                  ? query_t_padding_ptr
-                  : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
-              key_reorder_ptr + i_kv * num_head_k * eheadSize * kvSize +
-                  j_kv * eheadSize * kvSize + n * eheadSize,
-              qk_data,
-              need_pack);
         }
+{%- if not use_blas_gemm %}
+        else {
+          if constexpr (is_reduced_type) {
+            at::native::cpublas::brgemm(
+                cur_qSplitSize,
+                cur_kvSplitSize,
+                eheadSize,
+                headSize_even ? qStrideM : eheadSize,
+                cur_kvSplitSize,
+                cur_kvSplitSize,
+                false,
+                !headSize_even
+                    ? query_t_padding_ptr
+                    : q_data + i * qStrideB + j * qStrideH + m * qStrideM,
+                key_reorder_ptr + i_kv * num_head_k * eheadSize * kvSize +
+                    j_kv * eheadSize * kvSize + n * eheadSize,
+                qk_data,
+                need_pack);
+          }
+        }
+{%- endif %}
 
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(qk_data, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
@@ -604,6 +681,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
               v_data + i_kv * vStrideB + j_kv * vStrideH + n * vStrideN;
           // Fallback Half brgemm is slower than micro gemm
           if (!std::is_same_v<scalar_t, at::Half>) {
+            // On AArch64, brgemm falls back to gemm because the oneDNN ukernel path is x86-only.
             at::native::cpublas::brgemm(
                   cur_qSplitSize,
                   headSize_v,
@@ -641,7 +719,9 @@ FLEX_ATTENTION_TEMPLATE = r"""
                 headSize_v);
             }
           }
-        } else {
+        }
+{%- if not use_blas_gemm %}
+        else {
           int64_t psize = n / kvSplitSize * ekvSplitSize;
           at::native::cpublas::brgemm(
               cur_qSplitSize,
@@ -658,6 +738,7 @@ FLEX_ATTENTION_TEMPLATE = r"""
               dst_data,
               need_pack);
         }
+{%- endif %}
       }
 
       // dst <- dst / sum[row]
@@ -778,7 +859,7 @@ FLEX_DECODING_TEMPLATE = r"""
       // Initialize logits
       {{kernel.kernel_name}}_fill_stub(logits,
             static_cast<accum_t>(0), PARTITION_SIZE);
-      if (is_reduced_type) {
+      if constexpr (is_reduced_type) {
         {{kernel.kernel_name}}_fill_stub(logits_reduced,
             static_cast<scalar_t>(0), PARTITION_SIZE);
       }
@@ -815,9 +896,27 @@ FLEX_DECODING_TEMPLATE = r"""
 
         auto k_addr =
             k_data + i_kv * kStrideB + j_kv * kStrideH + n * kStrideN;
+        auto q_addr =
+            q_data + i * qStrideB + j * qStrideH;
 
+{%- if use_blas_gemm %}
+        at::native::cpublas::gemm(
+            at::native::TransposeType::Transpose,
+            at::native::TransposeType::NoTranspose,
+            cur_kvSplitSize,
+            cur_qSplitSize,
+            headSize,
+            static_cast<accum_t>(1),
+            k_addr,
+            kStrideN,
+            q_addr,
+            qStrideM,
+            static_cast<accum_t>(0),
+            logits + token_num,
+            cur_kvSplitSize);
+{%- else %}
         {{kernel.kernel_name}}_kernel_micro_gemm_transpose_b<false>(
-            q_data + i * qStrideB + j * qStrideH,
+            q_addr,
             k_addr,
             logits + token_num,
             cur_qSplitSize,
@@ -826,6 +925,7 @@ FLEX_DECODING_TEMPLATE = r"""
             qStrideM,
             kStrideN,
             cur_kvSplitSize);
+{%- endif %}
 
         {{kernel.kernel_name}}_mul_scale_kernel<accum_t>(logits + token_num, scaling_factor, cur_qSplitSize*cur_kvSplitSize);
 
@@ -1403,6 +1503,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         value = kernel.permute(self.input_nodes[2], [0, 2, 1, 3])
         self.accumulate_dtype = torch.float
         self.input_dtype = query.layout.dtype
+        use_blas_gemm = torch.cpu._is_aarch64_supported()
 
         num_threads = parallel_num_threads()
         if not isinstance(self.output_node, ir.IRNode):
@@ -1439,6 +1540,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             score_buf_idx=self.score_buf_idx,
             mask_buf_idx=self.mask_buf_idx,
             partition_size=self.partition_size,
+            use_blas_gemm=use_blas_gemm,
         )
         with contextlib.ExitStack() as stack:
             for buf in self.fake_buffers:
@@ -1479,17 +1581,23 @@ class CppFlexAttentionTemplate(CppTemplate):
         from torch._inductor.codegen.cpp_micro_gemm import CppMicroGemmFP32Vec
         from torch._inductor.virtualized import V
 
-        micro_gemm_trans = CppMicroGemmFP32Vec(
-            kernel_name + "_kernel_micro_gemm_transpose_b",
-            self.input_dtype,
-            self.input_dtype,
-            self.accumulate_dtype,
-            self.accumulate_dtype,
-            GemmBlocking(1, 16, 1),
-            1,
-            True,
-            True,
-        )
+        use_blas_gemm = torch.cpu._is_aarch64_supported()
+        emit_transpose_b_micro_gemm = not use_blas_gemm
+
+        micro_gemm_trans: CppMicroGemmFP32Vec | None = None
+        code_trans = ""
+        if emit_transpose_b_micro_gemm:
+            micro_gemm_trans = CppMicroGemmFP32Vec(
+                kernel_name + "_kernel_micro_gemm_transpose_b",
+                self.input_dtype,
+                self.input_dtype,
+                self.accumulate_dtype,
+                self.accumulate_dtype,
+                GemmBlocking(1, 16, 1),
+                1,
+                True,
+                True,
+            )
 
         micro_gemm = CppMicroGemmFP32Vec(
             kernel_name + "_kernel_micro_gemm",
@@ -1505,7 +1613,8 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         with V.set_graph_handler(V.graph):
             kernel = CppTemplateKernel("cpp_micro_gemm", parallel_num_threads())
-            code_trans = micro_gemm_trans.codegen_define(kernel)
+            if micro_gemm_trans is not None:
+                code_trans = micro_gemm_trans.codegen_define(kernel)
             code = micro_gemm.codegen_define(kernel)
         return code + code_trans
 

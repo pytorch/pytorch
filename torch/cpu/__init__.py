@@ -83,6 +83,11 @@ def _is_avx2_supported() -> bool:
     return get_capabilities().get("avx2", False)
 
 
+def _is_aarch64_supported() -> bool:
+    r"""Returns a bool indicating if CPU is AArch64."""
+    return get_capabilities().get("architecture") in ("arm64", "aarch64", "ARM64")
+
+
 def _is_avx512_supported() -> bool:
     r"""Returns a bool indicating if CPU supports AVX512."""
     return get_capabilities().get("avx512_f", False)
