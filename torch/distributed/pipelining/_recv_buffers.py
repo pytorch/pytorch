@@ -107,3 +107,28 @@ def _clear_unlaunched_recv_infos(recv_infos: tuple[_RecvInfo, ...]) -> None:
     """Drop buffers from a receive batch that was never submitted to P2P."""
     for info in recv_infos:
         info.buffer = None
+
+
+def _assign_recv_info_buffers(
+    assignments: tuple[tuple[_RecvInfo, torch.Tensor], ...],
+) -> None:
+    """Assign a complete same-rank receive batch transactionally.
+
+    Callers prepare every tensor before entering this helper. Validating every
+    descriptor before mutation ensures that a failed local handoff leaves no
+    partial ownership behind.
+
+    Args:
+        assignments: Receive descriptors paired with their prepared buffers.
+    """
+    for info, _ in assignments:
+        if info.tensor_meta is None:
+            raise PipeliningMetadataError(
+                f"Receive '{info.input_name}' has no tensor metadata"
+            )
+        if info.buffer is not None:
+            raise PipeliningMetadataError(
+                _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=info.input_name)
+            )
+    for info, buffer in assignments:
+        info.buffer = buffer
