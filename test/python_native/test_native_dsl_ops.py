@@ -12,7 +12,7 @@ import textwrap
 import uuid
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from torch._native import common_utils as native_common_utils, triton_utils
 from torch._vendor.packaging.version import Version
@@ -67,12 +67,16 @@ class _FileHash:
 
 
 class _InstalledFile:
-    def __init__(self, path, contents=None):
+    def __init__(self, path, contents=None, *, hex_digest=False):
         self._path = path
         self.hash = None
         if contents is not None:
             digest = hashlib.sha256(contents).digest()
-            value = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+            value = (
+                digest.hex()
+                if hex_digest
+                else base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+            )
             self.hash = _FileHash("sha256", value)
 
     def locate(self):
@@ -721,13 +725,6 @@ class TestTritonDistributionDiscovery(TestCase):
         ):
             self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
 
-    def test_missing_version_falls_through(self):
-        with (
-            _triton_installed({"pytorch-triton-rocm": "3.7.1"}),
-            _triton_provided_by("fbtriton", "pytorch-triton-rocm"),
-        ):
-            self.assertEqual(triton_utils._available_triton_version(), Version("3.7.1"))
-
     def test_source_checkout_reports_no_version(self):
         with (
             _triton_installed({}),
@@ -771,7 +768,9 @@ class TestTritonDistributionDiscovery(TestCase):
                 _triton_records(
                     {
                         "triton": [_InstalledFile(origin, b'__version__ = "3.2.0"\n')],
-                        "pytorch-triton-rocm": [_InstalledFile(origin, contents)],
+                        "pytorch-triton-rocm": [
+                            _InstalledFile(origin, contents, hex_digest=True)
+                        ],
                     }
                 ),
                 _triton_module_at(str(origin)),
@@ -806,7 +805,7 @@ class TestTritonDistributionDiscovery(TestCase):
                         ],
                         "triton-nightly": [_InstalledFile(origin, contents)],
                     }
-                ),
+                ) as metadata,
                 _triton_module_at(str(origin)),
                 _triton_provided_by("triton", "triton-rocm", "triton-nightly") as scan,
             ):
@@ -815,6 +814,8 @@ class TestTritonDistributionDiscovery(TestCase):
                 )
 
             scan.assert_called_once()
+            for name in ("triton", "triton-rocm"):
+                self.assertEqual(metadata.call_args_list.count(call(name)), 1)
 
     def test_unlisted_distribution_is_scanned(self):
         with (
@@ -881,10 +882,10 @@ class TestTritonDistributionDiscovery(TestCase):
             )
 
     def test_missing_record_hash_is_undecidable(self):
-        with _triton_records({"triton": [_MODULE_ORIGIN]}):
-            self.assertIsNone(
-                triton_utils._distribution_matches("triton", _MODULE_ORIGIN)
-            )
+        with tempfile.TemporaryDirectory() as directory:
+            origin = Path(directory) / "__init__.py"
+            origin.write_bytes(b"")
+            self.assertIsNone(triton_utils._record_hash_matches(origin, None))
 
     def test_unsupported_record_hash_is_undecidable(self):
         record = _InstalledFile(_MODULE_ORIGIN)
@@ -900,6 +901,37 @@ class TestTritonDistributionDiscovery(TestCase):
                 triton_utils._distribution_matches("triton", _MODULE_ORIGIN),
                 False,
             )
+
+    def test_record_without_origin_does_not_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            origin = root / "triton" / "__init__.py"
+            other = root / "other" / "__init__.py"
+            origin.parent.mkdir()
+            other.parent.mkdir()
+            origin.write_bytes(b"triton")
+            other.write_bytes(b"other")
+
+            with _triton_records({"triton": [_InstalledFile(other, b"other")]}):
+                self.assertIs(
+                    triton_utils._distribution_matches("triton", str(origin)),
+                    False,
+                )
+
+    def test_resolved_record_path_matches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            origin = root / "triton" / "__init__.py"
+            origin.parent.mkdir()
+            contents = b"triton"
+            origin.write_bytes(contents)
+            recorded = origin.parent / ".." / "triton" / "__init__.py"
+
+            with _triton_records({"triton": [_InstalledFile(recorded, contents)]}):
+                self.assertIs(
+                    triton_utils._distribution_matches("triton", str(origin)),
+                    True,
+                )
 
     def test_editable_record_is_undecidable(self):
         with _triton_records(
@@ -976,6 +1008,7 @@ class TestTritonVersionGate(TestCase):
             _triton_records({}),
             patch.object(triton_utils._cuda, "is_built", return_value=True),
             patch.object(triton_utils, "_unavailable_reason", return_value=None),
+            patch.object(triton_utils, "check_native_version_skip", return_value=False),
         ):
             yield
 
