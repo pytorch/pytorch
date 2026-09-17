@@ -15112,6 +15112,16 @@ op_db: list[OpInfo] = [
                 "test_nnc_correctness",
                 device_type="cpu",
             ),
+            # N-D linear weights give (N, C, *) logits, so nll_loss dispatches
+            # to nll_loss2d, whose kernel combines per-block fp16 partials with
+            # atomics; two runs of the same op can differ by up to 2.5e-3
+            # relative, so the redispatch comparison needs more than 1 ULP.
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
+                "TestTorchFunctionRedispatchOpsDevice",
+                "test_redispatch",
+                device_type="cuda",
+            ),
         ),
         skips=(
             # RuntimeError: Difference from float64 is larger with
@@ -15177,6 +15187,14 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 toleranceOverride({torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
                 "TestConsistency", "test_output_match", device_type="mps",
+            ),
+            # Same fp16 atomic-order spread as the unchunked variant: N-D
+            # linear weights fall back to the reference nll_loss2d path.
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
+                "TestTorchFunctionRedispatchOpsDevice",
+                "test_redispatch",
+                device_type="cuda",
             ),
         ),
         skips=(
