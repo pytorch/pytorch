@@ -15,20 +15,21 @@ from torch._dynamo.aot_compile import AOTCompiledFunction
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
 from torch._dynamo.package import load_guards_state
-from torch._dynamo.source import GlobalSource
+from torch._dynamo.source import get_global_source_name, GlobalSource
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import Guard
 
 
 def _entry(source, value, guard_type="ID_MATCH", derived=()):
     guard = Guard(source, getattr(GuardBuilder, guard_type))
+    guard.guard_types = list(derived) or None
     return GuardFilterEntry(
         name=strip_local_scope(source.name),
         has_value=True,
         value=value,
         guard_type=guard_type,
         derived_guard_types=tuple(derived),
-        is_global=isinstance(source, GlobalSource),
+        is_global=get_global_source_name(source) is not None,
         orig_guard=guard,
     )
 
@@ -39,7 +40,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         g = GlobalSource("g")
         refused = [_entry(g, None, guard_type=t) for t in unsupported]
         kept = precompile_package.default_guard_filter_fn(refused)
-        self.assertEqual([t for t, keep in zip(unsupported, kept) if keep], [])
+        all_dropped = dict.fromkeys(unsupported, False)
+        self.assertEqual(dict(zip(unsupported, kept)), all_dropped)
         # A CONSTANT_MATCH on a code object runs through ID_MATCH; the
         # serializer refuses the derived type, so the filter drops it too.
         derived = _entry(g, None, "CONSTANT_MATCH", derived=("ID_MATCH",))
@@ -73,17 +75,24 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertEqual(loaded(x), fn(x))
-        # The kept guard is live in the loaded artifact: a swapped builtin trips it.
+        # The kept guard is live in the loaded artifact: a swapped builtin trips
+        # that guard, by name, and the original passes again once restored.
+        builtins_key = state.output_graph.name_of_builtins_dict_key_in_fglobals
+        failed_on_len = rf"___check_obj_id\(G\['{builtins_key}'\]\['len'\]"
         real_len = len
         with mock.patch.object(builtins, "len", lambda *args: real_len(*args)):
-            with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
+            with self.assertRaisesRegex(RuntimeError, failed_on_len):
                 loaded(x)
+        self.assertTrue(loaded.guard_check(x))
 
-        # A local-scope class passes the filter (the TYPE_MATCH on L['obj']) and
-        # serialization refuses it. The filter keeps the guard so the refusal is
-        # loud rather than an artifact that never checks the type; dropping it
-        # would not avoid the error anyway, since the pickler refuses the
-        # instance wherever it sits in the guard tree.
+        # A local-scope class passes the filter (the TYPE_MATCH on L['obj'] is
+        # kept) and serialization refuses it. The filter keeps the guard so the
+        # refusal is loud rather than an artifact that never checks the type.
+        # For a plain instance the pickler refuses anyway, wherever it sits in
+        # the guard tree; for an nn.Module of a local class it does not (the
+        # instance is rebuilt as a plain torch.nn.Module), so there the kept
+        # TYPE_MATCH is the only refusal: drop it and the artifact ships, and
+        # serves a module of another class.
         class Local:
             n = 1
 
@@ -94,7 +103,37 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with self.assertRaisesRegex(PackageError, "defined in local scope"):
             compiled.aot_compile(((x, Local()), {}))
 
+        class LocalModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        def fn3(x, mod):
+            return mod(x)
+
+        compiled = torch.compile(fn3, fullgraph=True, backend="eager", options=options)
+        with self.assertRaisesRegex(PackageError, "defined in local scope"):
+            compiled.aot_compile(((x, LocalModule()), {}))
+
+        def drop_type_match(entries):
+            keep = precompile_package.default_guard_filter_fn(entries)
+            return [k and e.guard_type != "TYPE_MATCH" for k, e in zip(keep, entries)]
+
+        class Other(torch.nn.Module):
+            def forward(self, x):
+                return x - 1
+
+        options = {"guard_filter_fn": drop_type_match}
+        compiled = torch.compile(fn3, fullgraph=True, backend="eager", options=options)
+        compiled = compiled.aot_compile(((x, LocalModule()), {}))
+        data = AOTCompiledFunction.serialize(compiled).serialized_data
+        loaded = AOTCompiledFunction.deserialize(data)
+        self.assertTrue(loaded.guard_check(x, Other()))
+
     def test_roots_locate_the_stdlib_install_and_torch_dirs(self):
+        # The real interpreter's roots, not what a sibling test left cached.
+        precompile_package._stdlib_roots.cache_clear()
+        precompile_package._install_roots.cache_clear()
+        precompile_package._torch_roots.cache_clear()
         stdlib = precompile_package._stdlib_roots()
         install = precompile_package._install_roots()
         torch_roots = precompile_package._torch_roots()
@@ -115,6 +154,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(within(os.path.join(root, "c"), (root,)))
         self.assertFalse(within(root + "c", (root,)))
 
+    def test_stdlib_roots_take_the_windows_dlls_dir(self):
+        # Reachable only on a Windows runner otherwise. sysconfig's first init
+        # imports _sysconfigdata_*_{sys.platform}_*, so prime it unpatched.
+        stdlib_roots, norm = precompile_package._stdlib_roots, precompile_package._norm
+        sysconfig.get_paths()
+        self.addCleanup(stdlib_roots.cache_clear)
+        with mock.patch.object(sys, "platform", "win32"):
+            stdlib_roots.cache_clear()
+            self.assertIn(norm(os.path.join(sys.base_prefix, "DLLs")), stdlib_roots())
+
     def test_install_roots_drop_a_directory_the_stdlib_sits_under(self):
         # On Windows getsitepackages() lists the bare prefix; replay that shape
         # here so the exclusion is pinned on every platform, not just there.
@@ -129,6 +178,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertFalse(within(root, install), root)
         self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
 
+    def test_install_roots_skip_a_site_accessor_that_raises(self):
+        # A site.py that cannot answer is skipped, not propagated: this runs
+        # inside save()'s lint, which must not abort the capture. The other
+        # accessor is still consulted.
+        user_site = os.path.join(os.sep, "elsewhere", "user-site")
+        self.addCleanup(precompile_package._install_roots.cache_clear)
+        with (
+            mock.patch.object(site, "getsitepackages", side_effect=RuntimeError),
+            mock.patch.object(site, "getusersitepackages", return_value=user_site),
+        ):
+            precompile_package._install_roots.cache_clear()
+            install = precompile_package._install_roots()
+        norm = precompile_package._norm
+        self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
+        self.assertIn(norm(user_site), install)
+
     def test_torch_roots_trust_torch_path_only_when_this_file_is_in_it(self):
         torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
         own = norm(os.path.dirname(torch.__file__))
@@ -136,8 +201,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         stub = types.SimpleNamespace(__path__=[bogus])
         self.addCleanup(torch_roots.cache_clear)
         with mock.patch.dict(sys.modules, {"torch": stub}):
-            # A sys.modules['torch'] that is not us cannot nominate its own
-            # roots until its __path__ lists the directory this file runs from.
+            # A substituted torch's __path__ is ignored until it lists the
+            # directory this file runs from; then every entry is adopted, the
+            # bogus one included, which is what an editable build relies on.
             torch_roots.cache_clear()
             self.assertEqual(torch_roots(), (own,))
             stub.__path__.append(os.path.dirname(torch.__file__))
