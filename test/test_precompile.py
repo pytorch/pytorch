@@ -119,27 +119,30 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
             PrecompileSummary(3, 1, 4, 3)
 
-    def test_summary_rejects_inconsistent_guard_slots(self):
+    def test_summary_guard_lists_aggregate_over_frames(self):
         from torch.compiler._precompile_types import PrecompileSummary
 
-        def summary(**kw):
-            base = dict(frames=1, resume_functions=0, guarded_codes=1, backend_graphs=1)
-            return PrecompileSummary(**base, **kw)
-
-        risky = (("ID_MATCH", "self.act"),)
-        # The digest and dropped_guard_types() read dropped_guards alone, so a
-        # risky slot listed nowhere else would be reported as no drop at all.
-        with self.assertRaisesRegex(ValueError, "subset of dropped_guards"):
-            summary(risky_dropped_guards=risky)
-        with self.assertRaisesRegex(ValueError, "disjoint from dropped_guards"):
-            summary(dropped_guards=risky, policy_dropped_guards=risky)
-        policy = (("CONSTANT_MATCH", "flag"),)
-        consistent = summary(
-            dropped_guards=risky,
-            risky_dropped_guards=risky,
-            policy_dropped_guards=policy,
+        # Two frames' L['self'].act are one slot once the scope is stripped. One
+        # frame's caller filter rejected it (and it varied there, so it is
+        # risky), the other frame's invariance policy dropped it: the slot sits
+        # in all three lists. The relations hold per frame and the type checks
+        # nothing, so the report still constructs and counts the slot once.
+        act = ("HASATTR", "self.act")
+        summary = PrecompileSummary(
+            frames=2,
+            resume_functions=0,
+            guarded_codes=2,
+            backend_graphs=2,
+            dropped_guards=(act,),
+            risky_dropped_guards=(act,),
+            policy_dropped_guards=(act,),
+            dropped_guard_code=(act + ("hasattr(L['self'], 'act')",),),
         )
-        self.assertEqual(consistent.dropped_guard_types(), {"ID_MATCH": 1})
+        self.assertEqual(summary.dropped_guard_types(), {"HASATTR": 1})
+        self.assertExpectedInline(
+            str(summary),
+            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1} (0 kept), RISKY drops ['self.act'], 1 policy-dropped guards""",
+        )
 
     def test_summary_complete_requires_every_term(self):
         from torch.compiler._precompile_types import PrecompileSummary
