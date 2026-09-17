@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import sys
 import traceback
 from unittest import mock
 
@@ -41,6 +42,16 @@ def _kept_types(compiled):
     return state, {g.create_fn_name() for g in state.output_graph.guards}
 
 
+def _pre_check_accepts(entry):
+    # The type tests of serialize_guards' pre-check over the entry's own derived
+    # types: the control the filter is compared against, independent of it.
+    unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+    return entry.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH") or (
+        entry.guard_type not in unsupported
+        and not any(d in unsupported for d in entry.derived_guard_types)
+    )
+
+
 def _entry(source, value, guard_type="ID_MATCH", derived=()):
     guard = Guard(source, getattr(GuardBuilder, guard_type))
     guard.guard_types = list(derived) or None
@@ -57,35 +68,47 @@ def _entry(source, value, guard_type="ID_MATCH", derived=()):
 
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_default_guard_filter_drops_the_unserializable_types(self):
+        filter_fn = precompile_package.default_guard_filter_fn
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
+        # Spelled out: the filter reads the same constant, so on a shrunk one the
+        # two would agree on less.
+        identity = {"ID_MATCH", "FUNCTION_MATCH", "CLOSURE_MATCH", "MODULE_MATCH"}
+        refused_types = identity | {
+            "NN_MODULE",
+            "CLASS_MATCH",
+            "DICT_VERSION",
+            "WEAKREF_ALIVE",
+        }
+        self.assertTrue(refused_types <= set(unsupported), unsupported)
         g = GlobalSource("g")
         refused = [_entry(g, None, guard_type=t) for t in unsupported]
-        kept = precompile_package.default_guard_filter_fn(refused)
-        all_dropped = dict.fromkeys(unsupported, False)
-        self.assertEqual(dict(zip(unsupported, kept)), all_dropped)
-        # A CONSTANT_MATCH on a code object runs through ID_MATCH; the
-        # serializer refuses the derived type, so the filter drops it too.
-        derived = _entry(g, None, "CONSTANT_MATCH", derived=("ID_MATCH",))
-        self.assertEqual(precompile_package.default_guard_filter_fn([derived]), [False])
+        verdicts = dict(zip(unsupported, filter_fn(refused)))
+        self.assertEqual(verdicts, dict.fromkeys(unsupported, False))
+        # A refused derived type drops the guard too (a CONSTANT_MATCH on a code
+        # object runs through ID_MATCH); a DICT_KEYS_MATCH is exempt from that
+        # for the unsaved build's DICT_VERSION only.
+        derived = [
+            _entry(g, None, "CONSTANT_MATCH", derived=("ID_MATCH",)),
+            _entry(g, None, "DICT_KEYS_MATCH", derived=("ID_MATCH",)),
+        ]
+        self.assertEqual(filter_fn(derived), [False, False])
 
     def test_default_guard_filter_keeps_what_the_serializer_accepts(self):
-        g = GlobalSource("g")
-        entries = [
-            _entry(g, None, "TENSOR_MATCH"),
-            _entry(g, None, "TYPE_MATCH"),
-            # An id_match_unchecked on a builtin records ID_MATCH as its derived
-            # type; serialize_guards takes its TYPE_MATCH/BUILTIN_MATCH branch
-            # first and never reaches the derived-type refusal, so neither does
-            # the filter.
-            _entry(g, None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
-            _entry(g, None, "TYPE_MATCH", derived=("ID_MATCH",)),
-            # The entry carries the unsaved build's derived types: there a
-            # DICT_KEYS_MATCH on SUPPORTED_NODES is a DICT_VERSION, in the save
-            # build the keys-match the serializer accepts.
-            _entry(g, None, "DICT_KEYS_MATCH", derived=("DICT_VERSION",)),
+        rows = [
+            ("TENSOR_MATCH", ()),
+            ("TYPE_MATCH", ()),
+            # BUILTIN_MATCH is an id_match_unchecked deriving ID_MATCH; the
+            # pre-check accepts TYPE_MATCH and BUILTIN_MATCH before it looks at
+            # derived types, so the filter keeps them whatever they derive.
+            ("BUILTIN_MATCH", ("ID_MATCH",)),
+            ("TYPE_MATCH", ("ID_MATCH",)),
+            # The unsaved build's DICT_VERSION on a DICT_KEYS_MATCH; the save
+            # build serializes the keys-match.
+            ("DICT_KEYS_MATCH", ("DICT_VERSION",)),
         ]
+        entries = [_entry(GlobalSource("g"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
-        self.assertEqual(keep, [True] * 5)
+        self.assertEqual(list(zip(rows, keep)), [(row, True) for row in rows])
 
     def test_default_guard_filter_through_serialize_guards(self):
         def fn(x):
@@ -104,6 +127,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertEqual(loaded(x), fn(x))
+        # What the dropped guard would have noticed: with _user_op rebound the
+        # loaded artifact still passes its guards and serves the old graph.
+        with mock.patch.object(sys.modules[__name__], "_user_op", lambda x: x - 1):
+            self.assertEqual(fn(x), x)
+            self.assertTrue(loaded.guard_check(x))
+            self.assertEqual(loaded(x), x + 2)
         # The kept guard is live in the loaded artifact: a swapped builtin trips
         # that guard, by name, and the original passes again once restored.
         builtins_key = state.output_graph.name_of_builtins_dict_key_in_fglobals
@@ -126,10 +155,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return pytree.tree_flatten({"a": x, "b": x * 2})[0][1]
 
         def dropping(entries):
-            # The predicate before the exemption: drops on the derived DICT_VERSION.
-            keep = precompile_package.default_guard_filter_fn(entries)
-            promoted = ["DICT_VERSION" in e.derived_guard_types for e in entries]
-            return [k and not p for k, p in zip(keep, promoted)]
+            # The control: the pre-check's own verdicts, which drop on the
+            # derived DICT_VERSION.
+            return [_pre_check_accepts(e) for e in entries]
 
         def load(data):
             # Module globals the kept guards read (G['pytree']) resolve against
@@ -141,11 +169,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 pytree._deregister_pytree_node(cls)
 
         def register(cls):
-            # Only a registry key here, so the <locals> in it is harmless; it
-            # must be unique because nameless registrations share one slot of
-            # SERIALIZED_TYPE_TO_PYTHON_TYPE and deregistering the first fails.
+            # The Python registry only, as _deregister_pytree_node is, so the
+            # class does not stay in the optree registry register_pytree_node
+            # also writes. The name is only a registry key here, so the <locals>
+            # in it is harmless; it must be unique because nameless registrations
+            # share one slot of SERIALIZED_TYPE_TO_PYTHON_TYPE and deregistering
+            # the first fails.
             name = f"{__name__}.{cls.__qualname__}"
-            pytree.register_pytree_node(
+            pytree._private_register_pytree_node(
                 cls, lambda n: ([], None), lambda c, _: cls(), serialized_type_name=name
             )
             self.addCleanup(deregister, cls)
@@ -163,16 +194,23 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         seen = []
         x = torch.randn(3)
         compiled = _aot_compile(fn_tree, x, seen=seen)
-        promoted = [keep for e, keep in seen if "DICT_VERSION" in e.derived_guard_types]
-        self.assertEqual(promoted, [True])
-        self.assertIn("DICT_KEYS_MATCH", _kept_types(compiled)[1])
+        promoted = {
+            (e.guard_type, e.name.rpartition(".")[2], keep)
+            for e, keep in seen
+            if "DICT_VERSION" in e.derived_guard_types
+        }
+        self.assertEqual(promoted, {("DICT_KEYS_MATCH", "SUPPORTED_NODES", True)})
+        kept = _kept_types(compiled)[1]
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         control = _aot_compile(fn_tree, x, guard_filter_fn=dropping)
-        self.assertNotIn("DICT_KEYS_MATCH", _kept_types(control)[1])
+        # The kept keys-match is all that tells the two artifacts' guards apart.
+        self.assertIn("DICT_KEYS_MATCH", kept)
+        self.assertEqual(kept ^ _kept_types(control)[1], {"DICT_KEYS_MATCH"})
         control_data = AOTCompiledFunction.serialize(control).serialized_data
-        # A node registered before load is baked into the rebuilt guards.
+        # A node registered before load is baked into either artifact's guards.
         register(Extra)
         self.assertTrue(load(data).guard_check(x))
+        self.assertTrue(load(control_data).guard_check(x))
         deregister(Extra)
         loaded, loaded_control = load(data), load(control_data)
         self.assertEqual(loaded(x), fn_tree(x))
@@ -197,10 +235,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # artifact ships, and serves the local class's graph to a module of
         # another class.
         def drop_type_match(entries):
-            keep = precompile_package.default_guard_filter_fn(entries)
-            return [k and e.guard_type != "TYPE_MATCH" for k, e in zip(keep, entries)]
+            # The control: the pre-check's verdicts minus every TYPE_MATCH.
+            return [
+                e.guard_type != "TYPE_MATCH" and _pre_check_accepts(e) for e in entries
+            ]
 
         # Not assertRaises: it stores the exception with its traceback cleared.
+        # Both paths raise through guards.py's raise_local_type_error with one
+        # message; the frame that called it, serialize_guards' pre-check or
+        # GuardsStatePickler.reducer_override, is what tells them apart.
         def refusal_frames(regex, guard_filter_fn, fn, *args):
             try:
                 _aot_compile(fn, *args, guard_filter_fn=guard_filter_fn)
@@ -231,7 +274,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return mod(x)
 
         refused_module = "LocalModule'> cannot be saved.*defined in local scope"
-        refusal_frames(refused_module, None, fn3, x, LocalModule())
+        frames = refusal_frames(refused_module, None, fn3, x, LocalModule())
+        self.assertIn("raise_local_type_error", frames)
+        self.assertNotIn("reducer_override", frames)
 
         class Other(torch.nn.Module):
             def forward(self, x):
