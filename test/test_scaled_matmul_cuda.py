@@ -926,7 +926,6 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @onlyCUDA
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_scale_result(self, device) -> None:
         torch.manual_seed(0)
@@ -3609,11 +3608,10 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @skipIfRocm
     def test_scaled_mm_v2_fullgraph(self, device) -> None:
         m, n, k = 15, 32, 16
-        a = torch.randn(m, k, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn)
-        b = torch.randn(k, n, device=device, dtype=torch.bfloat16).to(torch.float8_e4m3fn).t().contiguous().t()
+        a = torch.randn(m, k, device=device, dtype=torch.bfloat16).to(e4m3_type)
+        b = torch.randn(k, n, device=device, dtype=torch.bfloat16).to(e4m3_type).t().contiguous().t()
         scale_a = torch.ones(1, device=device)
         scale_b = torch.ones(1, device=device)
 
