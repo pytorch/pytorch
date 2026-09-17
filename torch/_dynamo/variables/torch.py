@@ -2899,7 +2899,44 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # Under compile-on-one-rank the index must stay None so the runtime
                 # resolves it per rank and one artifact serves them all.
                 if not _coor_enabled():
-                    device_index = 0
+                    # Everywhere else it has to be resolved here, at trace time, and
+                    # guarded. Inductor wraps the call in
+                    # `with torch.cuda._DeviceGuard(<graph device>):`, so an index
+                    # deferred to run time would resolve against the graph's device
+                    # rather than the caller's -- synchronizing whichever device the
+                    # graph happens to be laid out for.
+                    torch_source = ImportSource("torch")
+                    install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
+                    current_device_source = CallFunctionNoArgsSource(
+                        AttrSource(
+                            AttrSource(torch_source, "accelerator"),
+                            "current_device_index",
+                        )
+                    )
+                    install_guard(
+                        current_device_source.make_guard(GuardBuilder.EQUALS_MATCH)
+                    )
+                    try:
+                        device_index = torch.accelerator.current_device_index()
+                    except RuntimeError as e:
+                        # No visible accelerator. Break rather than surface this as
+                        # an InternalTorchDynamoError telling the user to file a bug;
+                        # running the call eagerly reproduces the same error eager
+                        # would have raised.
+                        unimplemented(
+                            gb_type="synchronize with no accelerator available",
+                            context=f"device={device}",
+                            explanation=(
+                                "torch.accelerator.current_device_index() failed while "
+                                "resolving an index-less device for synchronize, so the "
+                                "index cannot be baked into the graph."
+                            ),
+                            hints=[
+                                "Pass an explicit device index to synchronize.",
+                                "Make an accelerator visible to the process.",
+                            ],
+                            from_exc=e,
+                        )
 
             tx.output.create_proxy(
                 "call_function",

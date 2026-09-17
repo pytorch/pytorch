@@ -1120,6 +1120,17 @@
       "Hints": []
     }
   ],
+  "GB8974": [
+    {
+      "Gb_type": "synchronize with no accelerator available",
+      "Context": "device={device}",
+      "Explanation": "torch.accelerator.current_device_index() failed while resolving an index-less device for synchronize, so the index cannot be baked into the graph.",
+      "Hints": [
+        "Pass an explicit device index to synchronize.",
+        "Make an accelerator visible to the process."
+      ]
+    }
+  ],
   "GB0072": [
     {
       "Gb_type": "Inplace op on input tensor",
