@@ -4916,7 +4916,7 @@ from user code:
         # value the load merged into its globals.
         global EPS
 
-        (_, x4), reloaded, results = self._load_armed_module(EpsOnlyModule, 3, 4)
+        (x3, x4), reloaded, results = self._load_armed_module(EpsOnlyModule, 3, 4)
         load_time_eps = EPS
         rebound = torch.tensor(2.0)
         self.assertNotEqual(rebound.item(), load_time_eps.item())
@@ -4927,6 +4927,9 @@ from user code:
         # [1] served the call and re-read; [0] refused it and read nothing.
         self.assertIs(results[1].fn.__globals__["EPS"], rebound)
         self.assertIs(results[0].fn.__globals__["EPS"], load_time_eps)
+        # Called directly, AOTCompiledFunction.__call__ re-reads it as well.
+        self.assertEqual(results[0](reloaded.forward.model, x3), x3 * rebound)
+        self.assertIs(results[0].fn.__globals__["EPS"], rebound)
 
     def test_aot_compile_module_second_pass_rebind_is_served(self):
         # Dispatch's re-check pass re-reads the guarded global as well. A check()
