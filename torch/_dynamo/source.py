@@ -884,6 +884,20 @@ class DictGetItemSource(ChainedSource):
             index = repr(self.index)
         return f"{base}[{index}]"
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+    ) -> Any:
+        if isinstance(self.index, Source):
+            return super().get_value(globals, locals, cache)
+        if self in cache:
+            return cache[self]
+        value = self.base.get_value(globals, locals, cache)[self.index]
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         if isinstance(self.index, ConstDictKeySource):
