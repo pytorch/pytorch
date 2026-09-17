@@ -637,7 +637,7 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @runOnRocmArch(MI200_ARCH)
+    @runOnRocmArch(MI200_ARCH + NAVI_ARCH)
     @parametrize("batched", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_fp16_backward_preserves_subnormals_rocm(self, backend, batched):

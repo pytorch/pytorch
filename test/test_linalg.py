@@ -11070,7 +11070,7 @@ class TestLinalgCudaOnly(TestCase):
             fastest_time = min(info["timings"].values())
             self.assertEqual(winner_time, fastest_time, (key, info))
 
-    @runOnRocmArch(MI300_ARCH)
+    @runOnRocmArch(MI300_ARCH + NAVI_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
         with tf32_enabled():
@@ -11124,7 +11124,7 @@ class TestLinalgCudaOnly(TestCase):
                                                      'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
 
-    @runOnRocmArch(MI300_ARCH)
+    @runOnRocmArch(MI300_ARCH + NAVI_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_tf32_tunableop
