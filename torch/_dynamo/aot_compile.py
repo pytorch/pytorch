@@ -693,15 +693,18 @@ class AOTCompiledFunction:
                 if self._bytecode_reads_guard_scope and self._has_global_guards:
                     # The narrow set, because a passing guard is the only thing
                     # that certifies a live value is the one the graph was
-                    # compiled for. The builtins dict key is left out as well: a
-                    # guard rooted at it certifies the live dict itself, which
-                    # the graph's globals never copy. Not intersected with the
-                    # scope: a name it does not bind yet fails the guard rooted
-                    # at it, so with the check on nothing is served on that name
-                    # until a caller who populates the dict after the load binds
-                    # it -- and then the re-read is what the graph gets, not the
-                    # value the artifact was traced with.
-                    certified = _guard_source_globals(output_graph) - {builtins_key}
+                    # compiled for. The builtins dict key needs no subtracting
+                    # here: it can only arrive through a CHAINED source, which
+                    # _guard_source_globals drops already, since
+                    # load_builtin_from_argval is the one site that mints a
+                    # source under that key and mints a DictGetItemSource.
+                    # Not intersected with the scope: a name it does not bind
+                    # yet fails the guard rooted at it, so with the check on
+                    # nothing is served on that name until a caller who
+                    # populates the dict after the load binds it -- and then the
+                    # re-read is what the graph gets, not the value the artifact
+                    # was traced with.
+                    certified = _guard_source_globals(output_graph)
                     self._live_global_names = tuple(sorted(certified))
                     # Bound at load as well as re-taken per call in _serve: a
                     # certified name the bytecode reads but the graph never
