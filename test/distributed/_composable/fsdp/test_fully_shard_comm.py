@@ -101,6 +101,14 @@ device_module = torch.get_device_module(device_type)
 
 
 class TestFSDPCommContext(TestCase):
+    def test_release_all_gather_state_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
     def test_release_all_gather_state_orders_all_gather_streams(self):
         comm_ctx = FSDPCommContext()
         event = MagicMock()
