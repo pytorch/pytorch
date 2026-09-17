@@ -2220,11 +2220,14 @@ class TestPrecompile(TestCase):
         self.assertIs(model.weight.grad, grad)
 
     def test_nested_input_refused(self):
-        # A jagged nested tensor's ragged dim needs a ShapeEnv to fakeify, which a static
-        # capture has none of, so it is refused up front with the same named
-        # PrecompileError rather than the raw internal assertion from_tensor would raise.
-        # The refusal runs ahead of the recorded-shape reads, so the strided layout (whose
-        # .shape read raises inside NestedTensorImpl) takes the same path.
+        # A nested example input is refused up front with a named PrecompileError rather
+        # than the raw internal assertion fakeifying one raises (a static capture has no
+        # ShapeEnv to mint the jagged ragged dim's symbolic nested int). The refusal runs
+        # ahead of the recorded-shape reads, so the strided layout (whose .shape read
+        # raises inside NestedTensorImpl) takes the same path. It is capture-WIDE, so the
+        # unbacked path -- whose ShapeEnv could fakeify a jagged input, but which has no
+        # nested representation downstream either -- gets the same refusal, and its
+        # message claims a restriction rather than that the tensor is unfakeifiable.
         model = torch.nn.Linear(3, 3)
         parts = [torch.randn(2, 3), torch.randn(4, 3)]
         for layout in (torch.jagged, torch.strided):
@@ -2232,11 +2235,69 @@ class TestPrecompile(TestCase):
             with (
                 self.subTest(layout=layout),
                 self.assertRaisesRegex(
-                    PrecompileError,
-                    "user input 0 cannot be represented as a fake tensor",
+                    PrecompileError, "user input 0 is a nested tensor"
                 ),
             ):
                 torch.compiler.precompile(lambda m, t: m(t), model, nt, backend="eager")
+        # Unbacked capture is inductor-only, so this case takes the default backend; the
+        # marked input is the dense one, the nested one is refused before any tracing.
+        x = torch.randn(4, 3)
+        mark_unbacked(x, 0)
+        nt = torch.nested.nested_tensor(parts, layout=torch.jagged)
+        with self.assertRaisesRegex(PrecompileError, "user input 1 is a nested tensor"):
+            torch.compiler.precompile(lambda m, t, u: m(t), model, x, nt)
+
+    def test_unbacked_capture_refuses_an_unfakeifiable_input(self):
+        # Both fakeify paths refuse an input the meta converter cannot represent through
+        # the same helper, so a quantized example input gets the same named
+        # PrecompileError (not the raw converter exception) whether or not some other dim
+        # happens to be marked. Unbacked capture is inductor-only, so no backend override.
+        model = torch.nn.Linear(3, 3)
+        x = torch.randn(4, 3)
+        mark_unbacked(x, 0)
+        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 1 cannot be represented as a fake tensor"
+        ):
+            torch.compiler.precompile(
+                lambda m, t, u: m(t) + m(u.dequantize()).sum(), model, x, q
+            )
+
+    def test_unbacked_capture_refuses_a_data_ptr_read(self):
+        # The unbacked fake mode carries the same two hardenings as the static one, so the
+        # Note's "no op is ever run for real on zero-filled substitutes" holds on both
+        # paths. Here: its mode is also built inside the
+        # fake_tensor_allow_unsafe_data_ptr_access patch, so a .data_ptr() read in fn is
+        # refused instead of returning a meaningless value.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def reads_pointer(mm, t):
+            t.data_ptr()
+            return mm(t)
+
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            torch.compiler.precompile(reads_pointer, m, x)
+
+    def test_unbacked_capture_refuses_a_meta_less_op_in_an_allowlisted_namespace(self):
+        # The other unbacked-mode hardening: allow_fallback_kernels=False. An op with no
+        # meta/fake kernel in an ALLOWLISTED namespace (aten, prims, quantized, ...) would
+        # otherwise have FakeTensorMode's unsafe fallback run its real kernel on
+        # zero-filled substitutes and bake whatever shape that produced. The op is called
+        # on the UNMARKED input on purpose: the fallback declines symbolic-sized arguments
+        # by itself, so only a static one exercises the flag.
+        from torch.library import _scoped_library
+
+        m = torch.nn.Linear(4, 3).eval()
+        x, y = torch.randn(8, 4), torch.randn(2, 3)
+        mark_unbacked(x, 0)
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_unbacked_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_unbacked_no_meta", lambda t: t * 2, "CPU")
+            op = torch.ops.quantized.mlprecompile_unbacked_no_meta
+            with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                torch.compiler.precompile(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
     def test_user_runtime_error_from_fn_propagates_unchanged(self):
         # Capture catches EVERY RuntimeError out of the trace to relabel the two it
