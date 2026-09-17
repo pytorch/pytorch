@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from torch.cuda import _POOL_HANDLE
+    from torch.xpu import _POOL_HANDLE as _XPU_POOL_HANDLE
 
 
 # Address of an allocation owned by the graph-tree memory pool.
@@ -296,6 +297,113 @@ class CUDAGraphTreeAllocatorInterface(GraphTreeAllocatorInterface):
             torch.cuda.memory._record_memory_history(None)
 
 
+class XPUGraphTreeGraphInterface(GraphTreeGraphInterface):
+    def create_graph(self) -> GraphTreeGraph:
+        return torch.xpu.XPUGraph()
+
+    def create_stream(self, device_index: int) -> torch.xpu.Stream:
+        return torch.xpu.Stream(device=device_index)
+
+    def create_pool(self) -> tuple[int, int]:
+        return torch.xpu.graph_pool_handle()
+
+    @contextlib.contextmanager
+    def capture(
+        self,
+        graph: GraphTreeGraph,
+        *,
+        stream: torch.Stream,
+        pool: tuple[int, int],
+        mode: GraphTreeCaptureMode,
+    ) -> Generator[None, None, None]:
+        with torch.xpu.graph(
+            cast(torch.xpu.XPUGraph, graph),
+            stream=cast(torch.xpu.Stream, stream),
+            pool=cast("_XPU_POOL_HANDLE", pool),
+        ):
+            yield
+
+    def warmup_setup_context(
+        self, *, kernel_free: bool
+    ) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def warmup_execution_context(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def capture_setup_context(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+    def capture_execution_context(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
+
+
+class XPUGraphTreeAllocatorInterface(GraphTreeAllocatorInterface):
+    def begin_allocate_to_pool(self, device: int, pool: tuple[int, int]) -> None:
+        torch._C._xpu_beginAllocateCurrentThreadToPool(device, pool)
+
+    def end_allocate_to_pool(self, device: int, pool: tuple[int, int]) -> None:
+        torch._C._xpu_endAllocateToPool(device, pool)
+
+    def release_pool(self, device: int, pool: tuple[int, int]) -> None:
+        torch._C._xpu_releasePool(device, pool)
+
+    def get_checkpoint_state(
+        self, device: int, pool: tuple[int, int]
+    ) -> AllocatorState:
+        return cast(AllocatorState, torch._C._xpu_getCheckpointState(device, pool))
+
+    def set_checkpoint_pool_state(
+        self,
+        device: int,
+        state: AllocatorState,
+        stale_storages: list[StorageImplHandle],
+        storages_to_add_deleters: list[StorageImplHandle],
+    ) -> None:
+        torch._C._xpu_setCheckpointPoolState(
+            device,
+            cast(torch._C._xpu_XPUAllocator_AllocatorState, state),
+            cast(list[int], stale_storages),
+            cast(list[int], storages_to_add_deleters),
+        )
+
+    def raw_delete(self, ptr: DataPtr) -> None:
+        torch._C._xpu_xpuCachingAllocator_raw_delete(ptr)
+
+    def construct_tensor_from_storage_and_metadata(
+        self, metadata: dict[str, Any], storage: torch.types.Storage
+    ) -> torch.Tensor:
+        return torch._C._construct_XPU_Tensor_From_Storage_And_Metadata(
+            metadata, storage
+        )
+
+    def has_standard_deleter(self, storage: StorageImplHandle) -> bool:
+        return torch._C.has_xpu_standard_deleter(storage)
+
+    def free_and_remove_deleter(self, storage: StorageImplHandle) -> None:
+        torch._C.xpu_free_and_remove_deleter(storage)
+
+    def check_pool_live_allocations(
+        self,
+        device: int,
+        pool: tuple[int, int],
+        allocations: set[DataPtr],  # noqa: set_linter
+    ) -> bool:
+        return torch._C._xpu_checkPoolLiveAllocations(device, pool, allocations)
+
+    def memory_snapshot(self) -> list[dict[str, Any]]:
+        return torch.xpu.memory_snapshot()
+
+    def is_history_enabled(self) -> bool:
+        return torch._C._xpu_isHistoryEnabled()
+
+    def record_memory_history(self, enabled: bool) -> None:
+        if enabled:
+            torch.xpu.memory._record_memory_history()
+        else:
+            torch.xpu.memory._record_memory_history(None)
+
+
 _registry_lock = threading.Lock()
 _registered_device_type: str | None = None
 _graph_interface: GraphTreeGraphInterface | None = None
@@ -417,3 +525,12 @@ __all__ = [
     "is_graph_tree_backend_available",
     "register_graph_tree_backend",
 ]
+
+_accelerator = torch.accelerator.current_accelerator()
+if _accelerator is not None and _accelerator.type == "xpu":
+    register_graph_tree_backend(
+        "xpu",
+        XPUGraphTreeGraphInterface(),
+        XPUGraphTreeAllocatorInterface(),
+    )
+del _accelerator
