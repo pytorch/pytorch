@@ -274,6 +274,39 @@ class TestCudagraphDeviceGate(TestCase):
         self.assertIn("multiple devices", msg)
 
 
+class TestCudagraphLoweringGate(TestCase):
+    def test_cuda_checks_cuda_allocator(self):
+        allocator_reason = "CUDA caching allocator is disabled"
+        mapping = {torch.device("cuda:0"): _FakeNode()}
+        with mock.patch.object(
+            cudagraph_utils,
+            "check_caching_allocator_for_cudagraphs",
+            return_value=allocator_reason,
+        ) as check_allocator:
+            reason = cudagraph_utils.check_lowering_disable_cudagraph(mapping, "cuda")
+
+        self.assertEqual(reason, allocator_reason)
+        check_allocator.assert_called_once_with()
+
+    def test_oot_does_not_check_cuda_allocator(self):
+        mapping = {_FakeDevice(OOT_DEVICE): _FakeNode()}
+        with (
+            temporary_device_interface(OOT_DEVICE, _RegisteredInterface),
+            renamed_privateuse1(),
+            mock.patch.object(
+                cudagraph_utils,
+                "check_caching_allocator_for_cudagraphs",
+                return_value="CUDA caching allocator is disabled",
+            ) as check_allocator,
+        ):
+            reason = cudagraph_utils.check_lowering_disable_cudagraph(
+                mapping, OOT_DEVICE
+            )
+
+        self.assertIsNone(reason)
+        check_allocator.assert_not_called()
+
+
 class TestStandaloneCudagraphBackendGate(TestCase):
     def test_renamed_oot_backend_is_skipped(self):
         mapping = {_FakeDevice(OOT_DEVICE): _FakeNode()}
