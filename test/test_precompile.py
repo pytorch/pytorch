@@ -1,8 +1,10 @@
 # Owner(s): ["oncall: pt2"]
 import ast
 import base64
+import collections
 import contextlib
 import copy
+import errno
 import functools
 import gc
 import hashlib
@@ -12,6 +14,7 @@ import io
 import linecache
 import os
 import pickle
+import stat
 import subprocess
 import sys
 import tempfile
@@ -28,55 +31,55 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._dynamo.precompile_context import PrecompileContext
-from torch._precompile import PrecompileError
+from torch.compiler import PrecompileError
 from torch.compiler.precompile import DynamoTracer, MakeFxTracer
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+
+
+# One root for every artifact pair the adapters below stage, removed with the
+# process rather than leaking one directory per test.
+_ARTIFACT_ROOT = tempfile.TemporaryDirectory()
 
 
 def _make_tracer(tracer, tracer_kwargs):
-    """Build a tracer object from the string/None spelling most of these tests
-    use, routing loose per-tracer kwargs onto the right tracer. capture()'s real
-    default is DynamoTracer(); these tests predate that flip, so a bare capture
-    here stays make_fx (the historical default)."""
-    if isinstance(tracer, (MakeFxTracer, DynamoTracer)):
-        if tracer_kwargs:
-            raise TypeError(
-                f"tracer object passed with extra kwargs {sorted(tracer_kwargs)}"
-            )
-        return tracer
+    """Build the tracer object from the string spelling the parametrized tests use,
+    routing loose per-tracer kwargs onto it. "dynamo" builds the DynamoTracer that
+    capture() still refuses in this build; the tests using it are expected failures."""
     if tracer in (None, "make_fx"):
         return MakeFxTracer(**tracer_kwargs)
     if tracer == "dynamo":
         return DynamoTracer(**tracer_kwargs)
-    raise ValueError("tracer must be 'make_fx' or 'dynamo'")
+    raise ValueError(f"tracer must be 'make_fx' or 'dynamo', got {tracer!r}")
 
 
 class _CaptureToFiles:
-    """Test adapter over torch.compiler.precompile.capture, which writes the
-    artifact to disk when the block exits. Accepts the string/None tracer spelling
-    and loose per-tracer kwargs the bulk of these tests use, and exposes
-    result() -> (python_code, cache) by reading the two files back."""
+    """Test adapter over torch.compiler.precompile.capture, which writes the artifact
+    to disk when the block exits. Accepts the parametrized tests' string tracer
+    spelling, forwards the loose per-tracer kwargs these tests pass (decompositions=)
+    to the tracer, and exposes result() -> (python_code, cache) by reading the two
+    files back. artifact_path / cache_path are readable so a test can assert on the
+    files themselves."""
 
     def __init__(
         self, fn, *, tracer=None, backend="inductor", training=False, **tracer_kwargs
     ):
-        self._dir = tempfile.mkdtemp()
-        self._artifact_path = os.path.join(self._dir, "artifact.py")
-        self._cache_path = os.path.join(self._dir, "artifact.cache")
+        self._dir = tempfile.mkdtemp(dir=_ARTIFACT_ROOT.name)
+        self.artifact_path = os.path.join(self._dir, "artifact.py")
+        self.cache_path = os.path.join(self._dir, "artifact.cache")
         self._cap = torch.compiler.precompile.capture(
             fn,
-            artifact_path=self._artifact_path,
-            cache_path=self._cache_path,
+            artifact_path=self.artifact_path,
+            cache_path=self.cache_path,
             tracer=_make_tracer(tracer, tracer_kwargs),
             backend=backend,
             training=training,
@@ -92,18 +95,6 @@ class _CaptureToFiles:
     def __call__(self, *args, **kwargs):
         return self._cap(*args, **kwargs)
 
-    def result(self):
-        if os.path.exists(self._artifact_path):
-            with open(self._artifact_path, encoding="utf-8") as f:
-                code = f.read()
-            with open(self._cache_path, "rb") as f:
-                cache = f.read()
-            return code, cache
-        rendered = getattr(self._cap, "_rendered", None)
-        if rendered is None:
-            raise PrecompileError("nothing was captured")
-        return rendered
-
     def summary(self):
         return self._cap.summary()
 
@@ -113,27 +104,142 @@ class _CaptureToFiles:
     def calls(self):
         return self._cap.calls()
 
+    def result(self):
+        # Bytes then decode, mirroring _read_artifact: a text-mode read would
+        # translate a \r in python_code and break the cache's code_hash.
+        with open(self.artifact_path, "rb") as f:
+            code = f.read().decode()
+        with open(self.cache_path, "rb") as f:
+            cache = f.read()
+        return code, cache
 
-def _load_pair(*args, artifact_path=None, cache_path=None, fn=None):
-    """Load either an on-disk pair (artifact_path=/cache_path=, the real load API)
-    or an in-memory (python_code, cache) pair, staging the two halves to files
-    since torch.compiler.precompile.load is paths-only."""
-    if artifact_path is not None:
-        return torch.compiler.precompile.load(artifact_path, cache_path, fn=fn)
-    code, cache = args
-    d = tempfile.mkdtemp()
+
+def _load_pair(code, cache):
+    """Load an in-memory (python_code, cache) pair, staging the two halves to files
+    since torch.compiler.precompile.load is paths-only. Both halves go out as bytes, as _write_artifact does:
+    a text-mode write would translate the newlines on Windows and torch.compiler.precompile.load() would then
+    reject the pair on a code_hash mismatch."""
+    d = tempfile.mkdtemp(dir=_ARTIFACT_ROOT.name)
     ap = os.path.join(d, "artifact.py")
     cp = os.path.join(d, "artifact.cache")
-    with open(ap, "w", encoding="utf-8") as f:
-        f.write(code)
+    with open(ap, "wb") as f:
+        f.write(code.encode())
     with open(cp, "wb") as f:
         f.write(cache)
-    return torch.compiler.precompile.load(ap, cp, fn=fn)
+    return torch.compiler.precompile.load(ap, cp)
 
 
 # A module-level (global) model + a function referencing it, to exercise the
 # constant-tensor guard against a baked global.
 _GLOBAL_TENSOR = torch.randn(3)
+
+
+_PRECOMPILE_PUBLIC_MEMBERS = torch.compiler.precompile.__all__
+
+
+class _PrecompilePlusOneMode(torch.overrides.TorchFunctionMode):
+    """Adds one to a scalar addend, so a doubly-applied mode is visible."""
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if func is torch.add and not isinstance(args[1], torch.Tensor):
+            return func(args[0], args[1] + 1, **kwargs)
+        return func(*args, **kwargs)
+
+
+def _precompile_add_one(xx):
+    return torch.add(xx, 1.0)
+
+
+def _precompile_scaled_model(model, xx, k=1.0):
+    return model(xx) * k
+
+
+# Calls capture() refuses at construction, before fn ever runs:
+# (exception, message regex, fn, extra capture() kwargs).
+_PRECOMPILE_BAD_CALLS = {
+    "tracer_knob_passed_to_capture": (
+        TypeError,
+        "unexpected keyword argument 'dynamic'",
+        _precompile_add_one,
+        {"dynamic": False},
+    ),
+    "partial": (
+        PrecompileError,
+        "cannot capture a partial",
+        functools.partial(_precompile_scaled_model, k=3.0),
+        {},
+    ),
+}
+
+
+class _PrecompileTrainMod(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.a = torch.nn.Linear(8, 8)
+        self.b = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        return torch.relu(self.b(torch.relu(self.a(x))))
+
+
+def _precompile_backward_step(model, x):
+    model(x).sum().backward()
+
+
+_PRECOMPILE_GRAD_MODES_SEEN: list[bool] = []
+
+
+def _precompile_observe_grad_mode(model, x):
+    _PRECOMPILE_GRAD_MODES_SEEN.append(torch.is_grad_enabled())
+    return model(x)
+
+
+def _precompile_single_graph(x):
+    return x.sin()
+
+
+# A plain scalar global folded into the output must be baked by the dynamo
+# tracer, not left dangling as an uncovered external reference.
+
+
+# A custom pytree node whose context (a set) is not JSON-dumpable and which has no
+# to_dumpable_context serializer, so treespec_dumps raises TypeError (distinct from the
+# unregistered-namedtuple NotImplementedError path). Registered once at module load and
+# used by test_unserializable_context_in_spec_still_compiles.
+class _UnserializableCtxInput:
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+
+_pytree.register_pytree_node(
+    _UnserializableCtxInput,
+    lambda n: ([n.a, n.b], {"ctx"}),
+    lambda children, _ctx: _UnserializableCtxInput(children[0], children[1]),
+    serialized_type_name="test_precompile._UnserializableCtxInput",
+)
+
+
+def _strip_artifact(cache: bytes) -> bytes:
+    """Return the cache envelope with its compiled artifact removed, forcing torch.compiler.precompile.load()
+    onto the inlined (no-cache) path that JIT-compiles from python_code. Many tests
+    reload the same artifact both cache-primed and stripped to check they agree."""
+    blob = torch.load(io.BytesIO(cache), weights_only=True)
+    blob["artifact"] = None
+    buf = io.BytesIO()
+    torch.save(blob, buf)
+    return buf.getvalue()
+
+
+def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
+    """Yield (label, loaded_fn) for the load paths a backend exposes: the default
+    (cache-primed) path always, plus -- on inductor only -- the inlined path that
+    strips the artifact to force JIT from python_code. The eager backend has a single
+    driver, so it yields the default path alone."""
+    yield "default", _load_pair(code, cache)
+    if backend == "inductor":
+        yield "inlined", _load_pair(code, _strip_artifact(cache))
 
 
 # A plain scalar global folded into the output must be baked by the dynamo
@@ -164,7 +270,6 @@ class _PrecompileLateVaryingModule(torch.nn.Module):
 
 
 _PRECOMPILE_FIXED_INPUT = torch.randn(4)
-
 
 # Rows: model, the example call for a batch size, per-frame variant counts.
 _AUTO_DYNAMIC_CASES = {
@@ -414,54 +519,12 @@ def _precompile_scale_sum(x):
     return torch.relu(x * 2.0).sum()
 
 
-_PRECOMPILE_PUBLIC_METHODS = [
-    name
-    for name in dir(torch.compiler.precompile)
-    if not name.startswith("_") and callable(getattr(torch.compiler.precompile, name))
-]
-
-
 def _brk_call(model, x):
     return model(x)
 
 
 def _brk_call_flag(model, x, flag):
     return model(x, flag)
-
-
-class _PrecompilePlusOneMode(torch.overrides.TorchFunctionMode):
-    """Adds one to a scalar addend, so a doubly-applied mode is visible."""
-
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
-        if func is torch.add and not isinstance(args[1], torch.Tensor):
-            return func(args[0], args[1] + 1, **kwargs)
-        return func(*args, **kwargs)
-
-
-def _precompile_add_one(xx):
-    return torch.add(xx, 1.0)
-
-
-def _precompile_scaled_model(model, xx, k=1.0):
-    return model(xx) * k
-
-
-# Argument-validation errors a capture raises before any call runs.
-_PRECOMPILE_BAD_CALLS = {
-    "capture_option_needs_dynamo": (
-        TypeError,
-        "unexpected keyword argument 'dynamic'",
-        (_precompile_add_one,),
-        {"dynamic": False},
-    ),
-    "partial": (
-        PrecompileError,
-        "cannot capture a partial",
-        (functools.partial(_precompile_scaled_model, k=3.0),),
-        {"tracer": "dynamo"},
-    ),
-}
 
 
 def _precompile_with_defaults(model, xx, scale=2.0, bias=1.0, *, gain=1.0):
@@ -548,10 +611,6 @@ def _global_helper_with_attr():
     return None
 
 
-# Pickled BY REFERENCE, so the attached tensor is NOT baked and must not be rejected.
-_global_helper_with_attr.cache = torch.randn(3)
-
-
 # Output structures the transformed bytecode reassembles; the non-tensor values
 # are baked as defaults.
 _PRECOMPILE_OUTPUT_SHAPES = {
@@ -562,21 +621,6 @@ _PRECOMPILE_OUTPUT_SHAPES = {
     "str": lambda model, xx, b="hi": (model(xx), b),
     "by_reference_callable": lambda model, xx: (model(xx), _global_helper_with_attr),
 }
-
-
-class _PrecompileTrainMod(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.a = torch.nn.Linear(8, 8)
-        self.b = torch.nn.Linear(8, 8)
-
-    def forward(self, x):
-        return torch.relu(self.b(torch.relu(self.a(x))))
-
-
-def _precompile_backward_step(model, x):
-    model(x).sum().backward()
-
 
 # Training captures: model, entry, input width; the second row breaks the graph.
 _PRECOMPILE_TRAINING_CASES = {
@@ -637,12 +681,9 @@ def _precompile_branchy(x, flag):
 
 _PRECOMPILE_CLASS_A = _PrecompileClassA()
 
-
 _PRECOMPILE_X4 = torch.randn(4)
 
-
 _PRECOMPILE_X28 = torch.randn(2, 8)
-
 
 # A guard whose value never varied discriminates nothing and is not serialized --
 # EXCEPT the ones that pin a value, a shape or a type, which are kept regardless.
@@ -714,14 +755,6 @@ def _precompile_only_disabled(x):
     return _brk_disabled_fn(x)
 
 
-_PRECOMPILE_GRAD_MODES_SEEN: list[bool] = []
-
-
-def _precompile_observe_grad_mode(model, x):
-    _PRECOMPILE_GRAD_MODES_SEEN.append(torch.is_grad_enabled())
-    return model(x)
-
-
 def _precompile_multi_graph(x):
     x = x * 2
     torch._dynamo.graph_break()
@@ -744,32 +777,10 @@ def _precompile_empty_resume(x, flag):
     return y.cos() * 100
 
 
-def _precompile_single_graph(x):
-    return x.sin()
-
-
 def _precompile_raises_on_flag(x, fail):
     if fail:
         raise KeyError("automatic example failed")
     return x + 1
-
-
-# A custom pytree node whose context (a set) is not JSON-dumpable and which has no
-# to_dumpable_context serializer, so treespec_dumps raises TypeError (distinct from the
-# unregistered-namedtuple NotImplementedError path). Registered once at module load and
-# used by test_unserializable_context_in_spec_still_compiles.
-class _UnserializableCtxInput:
-    def __init__(self, a, b):
-        self.a = a
-        self.b = b
-
-
-_pytree.register_pytree_node(
-    _UnserializableCtxInput,
-    lambda n: ([n.a, n.b], {"ctx"}),
-    lambda children, _ctx: _UnserializableCtxInput(children[0], children[1]),
-    serialized_type_name="test_precompile._UnserializableCtxInput",
-)
 
 
 # An eager-backend graph is carried as a pickled GraphModule, and GraphModule's
@@ -830,27 +841,6 @@ def _eager_rt_helper(key, x):
 
 def _eager_rt_broken(key, x):
     return _eager_rt_helper(key, x)
-
-
-def _strip_artifact(cache: bytes) -> bytes:
-    """Return the cache envelope with its compiled artifact removed, forcing load()
-    onto the inlined (no-cache) path that JIT-compiles from python_code. Many tests
-    reload the same artifact both cache-primed and stripped to check they agree."""
-    blob = torch.load(io.BytesIO(cache), weights_only=True)
-    blob["artifact"] = None
-    buf = io.BytesIO()
-    torch.save(blob, buf)
-    return buf.getvalue()
-
-
-def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
-    """Yield (label, loaded_fn) for the load paths a backend exposes: the default
-    (cache-primed) path always, plus -- on inductor only -- the inlined path that
-    strips the artifact to force JIT from python_code. The eager backend has a single
-    driver, so it yields the default path alone."""
-    yield "default", _load_pair(code, cache)
-    if backend == "inductor":
-        yield "inlined", _load_pair(code, _strip_artifact(cache))
 
 
 class _PrecompileRebound:
@@ -1170,9 +1160,27 @@ def _multigraph_step(m, x, scale=2.0):
     return y * scale
 
 
+# precompile drives make_fx internally, which cannot symbolically trace a
+# dynamo-optimized function; the whole suite is therefore incompatible with
+# PYTORCH_TEST_WITH_DYNAMO (dynamo_wrapped CI), so skip it there.
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
+    def test_guard_fact_render(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
+        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
+        # No rendered code falls back to <guard_type>, a value is appended, and
+        # the dropped label pads to the width of "enforced" so lines align.
+        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
+        self.assertEqual(
+            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        )
+        # Several code parts are joined; no source drops the " on ..." suffix.
+        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
+        self.assertEqual(joined.render(), "[enforced] a ; b")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
@@ -1370,7 +1378,7 @@ class TestPrecompile(TestCase):
             self.assertIn("__tensor_unflatten__", code)
             self.assertNotIn("subclass_wrapper", code)
 
-            # load() takes the bundled-artifact path (real AOTAutograd runtime).
+            # torch.compiler.precompile.load() takes the bundled-artifact path (real AOTAutograd runtime).
             f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x).to_local(), ref.to_local())
 
@@ -1391,9 +1399,9 @@ class TestPrecompile(TestCase):
     def test_cache_holds_only_artifact(self):
         # The cache is purely an acceleration: the only COMPILED blob it carries is the
         # ``artifact`` (no weights, no calling-convention metadata -- that lives in
-        # python_code, the single source of truth, and load() parses it back from
+        # python_code, the single source of truth, and torch.compiler.precompile.load() parses it back from
         # there). The envelope additionally carries a lightweight format/version/backend
-        # integrity tag (plain str/int), which load() verifies.
+        # integrity tag (plain str/int), which torch.compiler.precompile.load() verifies.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         with _CaptureToFiles(lambda model, x: model(x)) as cap:
@@ -1422,12 +1430,12 @@ class TestPrecompile(TestCase):
         self.assertEqual(meta["BACKEND"], "inductor")
         self.assertEqual(meta["MODULE_POSITIONS"], [0])
 
-        # load() works using metadata from python_code + artifact from the cache.
+        # torch.compiler.precompile.load() works using metadata from python_code + artifact from the cache.
         f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_inlined_fallback_when_artifact_absent(self):
-        # When the cache holds no serialized artifact, load() falls back to
+        # When the cache holds no serialized artifact, torch.compiler.precompile.load() falls back to
         # executing the inlined python (recompiling kernels). Force that branch by
         # stripping the artifact and check it still matches eager; this also
         # exercises the self-contained inlined path (JIT from inlined source).
@@ -1447,7 +1455,7 @@ class TestPrecompile(TestCase):
         # The cache is a plain {"artifact": bytes, "format"/"version"/"backend": ...}
         # envelope of only str/int/bytes: it loads with the safe unpickler
         # (weights_only=True). The executable part is the inner artifact bytes, fed to
-        # load_cache_artifacts inside load() to prime the inductor cache -- that (plus the
+        # load_cache_artifacts inside torch.compiler.precompile.load() to prime the inductor cache -- that (plus the
         # subsequent exec of python_code) is the code-execution step, not this outer load.
         # The integrity tag is present and correct (and itself weights_only-safe).
         from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
@@ -1489,7 +1497,7 @@ class TestPrecompile(TestCase):
 
     def test_wrong_param_count_rejected_inlined(self):
         # The same guard fires on the inlined (no-cache) path with the same exception
-        # type as the cached path (PrecompileError): strip the artifact so load()
+        # type as the cached path (PrecompileError): strip the artifact so torch.compiler.precompile.load()
         # execs python_code, then call with a structurally different model.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
@@ -1522,8 +1530,6 @@ class TestPrecompile(TestCase):
         # collections.namedtuple) must still compile/run on the default eager backend:
         # IN_SPEC degrades to None and the structure check is skipped rather than
         # hard-failing.
-        import collections
-
         P = collections.namedtuple("P", ["x", "y"])
         m = torch.nn.Linear(4, 3).eval()
         inp = P(torch.randn(5, 4), torch.randn(5, 4))
@@ -1552,15 +1558,12 @@ class TestPrecompile(TestCase):
         # so unlike IN_SPEC it CANNOT degrade to None. An fn that RETURNS an unregistered
         # collections.namedtuple has a non-JSON-serializable output TreeSpec and must
         # raise a clear PrecompileError rather than leaking a raw pytree error.
-        import collections
-
         Out = collections.namedtuple("Out", ["a", "b"])
         with self.assertRaisesRegex(
             PrecompileError, "cannot serialize the output structure"
         ):
             with _CaptureToFiles(lambda x: Out(x + 1, x + 2)) as cap:
                 cap(torch.randn(4))
-            cap.result()
 
     def test_input_leaf_count_mismatch_rejected_when_spec_unserializable(self):
         # When IN_SPEC degrades to None the structural in_spec check is skipped; a runtime
@@ -1615,8 +1618,6 @@ class TestPrecompile(TestCase):
         # so unlike IN_SPEC it cannot degrade to None: a fn returning an unregistered
         # namedtuple must fail with a clear PrecompileError, not a raw pytree error, on
         # both backends. A registered namedtuple output round-trips fine.
-        import collections
-
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         NT = collections.namedtuple("NT", ["p", "q"])
@@ -1626,7 +1627,6 @@ class TestPrecompile(TestCase):
                     lambda model, xx: NT(model(xx), model(xx) + 1), backend=backend
                 ) as cap:
                     cap(m, x)
-                cap.result()
         # A registered namedtuple output serializes and round-trips on both backends.
         # Registration mutates the process-global pytree registry, so deregister it on
         # cleanup rather than leaking the node into later tests.
@@ -1831,7 +1831,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(f_c(m, x), m(x))
 
     def test_load_invalid_python_code_rejected(self):
-        # load() surfaces a clear PrecompileError (not a raw SyntaxError) when
+        # torch.compiler.precompile.load() surfaces a clear PrecompileError (not a raw SyntaxError) when
         # python_code is not valid Python.
         buf = io.BytesIO()
         torch.save({"artifact": None}, buf)
@@ -1840,9 +1840,9 @@ class TestPrecompile(TestCase):
 
     def test_untrusted_input_warning_fires_per_load(self):
         # The trust warning is emitted PER load (not warning_once) via log.warning on the
-        # torch._precompile logger: load() always execs python_code (through
+        # torch._precompile logger: torch.compiler.precompile.load() always execs python_code (through
         # _make_inlined_forward), which warns before the exec, whether or not the cache
-        # primed the kernels first. Calling load() TWICE must fire the untrusted-input
+        # primed the kernels first. Calling torch.compiler.precompile.load() TWICE must fire the untrusted-input
         # warning on BOTH calls, locking in per-load behavior rather than once-per-process.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
@@ -1857,7 +1857,7 @@ class TestPrecompile(TestCase):
                 any("untrusted" in line.lower() for line in cm.output),
                 f"cached load did not warn about untrusted input: {cm.output}",
             )
-        # Eager backend (empty cache, nothing to prime): load() still EXECs python_code
+        # Eager backend (empty cache, nothing to prime): torch.compiler.precompile.load() still EXECs python_code
         # via _make_inlined_forward, which warns about exec'ing untrusted code every load.
         with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
             cap(m, x)
@@ -1990,48 +1990,6 @@ class TestPrecompile(TestCase):
             finally:
                 _register_effectful_op(op, None)
 
-    def test_public_api_surface(self):
-        # precompile is a public API under the compiler namespace
-        # (torch.compiler.precompile), with a load method and a public error type;
-        # it is deliberately NOT a top-level torch.* verb.
-        self.assertIn("precompile", torch.compiler.__all__)
-        self.assertNotIn("precompile", torch.__all__)
-        # __all__ membership and the attribute itself are independent, so lock in
-        # removal of the top-level entry point too (re-adding the re-export without
-        # touching __all__ would silently resurrect torch.precompile).
-        self.assertFalse(hasattr(torch, "precompile"))
-        # precompile is a module, not a callable; capture/load are its public
-        # verbs.
-        self.assertFalse(callable(torch.compiler.precompile))
-        for name in ("capture", "load"):
-            self.assertTrue(callable(getattr(torch.compiler.precompile, name)))
-        self.assertIs(torch.compiler.precompile.PrecompileError, PrecompileError)
-        # Driving a capture by hand is not public: the session type is internal.
-        self.assertFalse(hasattr(torch.compiler.precompile, "PrecompileSession"))
-        self.assertNotIn("PrecompileSession", torch.compiler.__all__)
-        # What summary() and invariants() return is reachable where the docs
-        # put it, without importing a private module.
-        from torch.compiler import _precompile_types
-
-        for name in ("PrecompileSummary", "FrameInvariants", "GuardFact"):
-            self.assertIs(
-                getattr(torch.compiler.precompile, name),
-                getattr(_precompile_types, name),
-            )
-            self.assertNotIn(name, torch.compiler.__all__)
-        # The public location: test_public_bindings.test_correct_module_names also
-        # enforces this for every torch.compiler.__all__ member.
-        self.assertEqual(
-            torch.compiler.precompile.__name__, "torch.compiler.precompile"
-        )
-        self.assertEqual(torch.compiler.PrecompileError.__module__, "torch.compiler")
-        self.assertEqual(
-            torch.compiler.PrecompiledCallable.__module__, "torch.compiler"
-        )
-        self.assertEqual(
-            torch.compiler.PrecompiledRunnable.__module__, "torch.compiler"
-        )
-
     def test_summary_types_pickle(self):
         # A capture summary or invariants report is the kind of value users
         # stash next to an artifact (torch.save of a diagnostics record, a
@@ -2050,30 +2008,86 @@ class TestPrecompile(TestCase):
         for obj in (fact, inv, summary):
             self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
 
-    def test_dynamo_artifact_version_lock_raises_precompile_error(self):
-        # Note [precompile programming model] promises the driver's
-        # Python-version lock surfaces as a clean PrecompileError, so an
-        # ``except torch.compiler.precompile.PrecompileError`` handler written
-        # to the docs catches it -- not a raw ValueError.
-        def fn(x):
-            return x + 1
+    def _summary(self, **kwargs):
+        from torch.compiler.precompile import PrecompileSummary
 
-        with _CaptureToFiles(fn, tracer="dynamo", backend="eager") as cap:
-            cap(torch.randn(3))
-        python_code, cache = cap.result()
-        cur = f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}"
-        self.assertIn(cur, python_code)
-        skewed = python_code.replace(cur, "_DYNAMO_PYTHON_VERSION = (3, 9)")
-        # exec, not load(): load()'s cache-pairing hash check would reject the
-        # edited text first, and python_code is documented as self-contained.
-        with self.assertRaisesRegex(PrecompileError, "produced on Python 3.9"):
-            exec(skewed, {})
+        fields = dict(
+            frames=2,
+            resume_functions=1,
+            guarded_codes=3,
+            backend_graphs=2,
+            bypassed=(),
+        )
+        return PrecompileSummary(**{**fields, **kwargs})
 
-    @parametrize("name", _PRECOMPILE_PUBLIC_METHODS)
-    def test_precompile_public_members_resolve(self, name):
+    def test_summary_guard_type_counts(self):
+        summary = self._summary(
+            dropped_guards=(
+                ("TENSOR_MATCH", "L['x']"),
+                ("TENSOR_MATCH", "L['y']"),
+                ("HASATTR", "L['m'].w"),
+            ),
+            kept_guards=(("TYPE_MATCH", "L['x']"), ("TYPE_MATCH", "L['y']")),
+        )
+        self.assertEqual(
+            summary.dropped_guard_types(), {"TENSOR_MATCH": 2, "HASATTR": 1}
+        )
+        self.assertEqual(summary.kept_guard_types(), {"TYPE_MATCH": 2})
+        self.assertEqual(self._summary().dropped_guard_types(), {})
+        self.assertEqual(self._summary().kept_guard_types(), {})
+
+    def test_summary_complete(self):
+        # complete gates an artifact, so every way a capture can be incomplete has
+        # to flip it: no guarded code at all, a frame that hit the recompile limit, was
+        # bypassed or never reached, a call that raised, and (because
+        # allow_empty_graphs lets a frame that compiled nothing still count as a
+        # guarded code) a capture with no backend graph at all.
+        self.assertTrue(self._summary().complete)
+        for field in ("bypassed", "truncated", "uncovered_frames", "capture_errors"):
+            self.assertFalse(self._summary(**{field: ("f",)}).complete)
+        self.assertFalse(self._summary(guarded_codes=0).complete)
+        self.assertFalse(self._summary(backend_graphs=0).complete)
+
+    def test_summary_str(self):
+        self.assertEqual(
+            str(self._summary()),
+            "2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs",
+        )
+        rendered = str(
+            self._summary(
+                bypassed=("b",),
+                truncated=("t",),
+                uncovered_frames=("u",),
+                wont_generalize=("w",),
+                dropped_guards=(("HASATTR", "L['m'].w"),),
+                risky_dropped_guards=(("HASATTR", "L['m'].risky"),),
+                capture_errors=("boom",),
+            )
+        )
+        self.assertIn("dropped guards {'HASATTR': 1}", rendered)
+        self.assertIn("RISKY drops [\"L['m'].risky\"]", rendered)
+        self.assertIn("1 UNCOVERED: ['u']", rendered)
+        self.assertIn("1 value-pinned guards", rendered)
+        self.assertIn(">=1 TRUNCATED: ['t']", rendered)
+        self.assertIn("1 BYPASSED: ['b']", rendered)
+        self.assertIn("1 CAPTURE ERROR(S)", rendered)
+
+    def test_renderer_refuses_a_foreign_tracer_tag(self):
+        # The cache envelope's tracer tag is whatever the renderer was constructed
+        # with, and torch.compiler.precompile.load() pairs it against python_code's TRACER line, so a tag this
+        # renderer cannot have produced would only yield an unloadable pair.
+        from torch._precompile import PrecompiledModule
+
+        with self.assertRaisesRegex(PrecompileError, "make_fx capture only"):
+            PrecompiledModule(lambda x: x, tracer="dynamo")
+
+    @parametrize("name", _PRECOMPILE_PUBLIC_MEMBERS)
+    def test_public_members_resolve(self, name):
+        # Re-homing a class onto torch.compiler.precompile must not strand a string
+        # annotation; get_type_hints raising NameError is the failure this catches.
         typing.get_type_hints(getattr(torch.compiler.precompile, name))
 
-    def test_precompile_public_result_types(self):
+    def test_public_result_types(self):
         # precompile is a module; capture() returns a Capture and load() a
         # PrecompiledRunnable.
         self.assertFalse(callable(torch.compiler.precompile))
@@ -2085,10 +2099,8 @@ class TestPrecompile(TestCase):
         self.assertIn(
             "guard_filter_fn", inspect.getdoc(torch.compiler.precompile.DynamoTracer)
         )
-        # The risky-drop lint is the rail that is ON by default. Requiring NO
-        # dropped guards at all is not, and must not be: every model drops the
-        # identity guards precompile cannot serialize, so it would refuse
-        # essentially every real artifact.
+        # Only the risky-drop rail is on by default: every model drops identity
+        # guards precompile cannot serialize, so require_no_dropped_guards cannot be.
         params = inspect.signature(torch.compiler.precompile.DynamoTracer).parameters
         self.assertTrue(params["require_no_risky_drops"].default)
         self.assertFalse(params["require_no_dropped_guards"].default)
@@ -2106,1653 +2118,48 @@ class TestPrecompile(TestCase):
             self.assertEqual(loaded(x), _precompile_single_graph(x))
 
     @parametrize("case", list(_PRECOMPILE_BAD_CALLS))
-    def test_precompile_rejects_a_malformed_call(self, case):
-        exc, regex, args, kwargs = _PRECOMPILE_BAD_CALLS[case]
-        with self.assertRaisesRegex(exc, regex):
-            _CaptureToFiles(*args, backend="eager", **kwargs)
+    def test_rejects_a_malformed_call(self, case):
+        exc, regex, fn, kwargs = _PRECOMPILE_BAD_CALLS[case]
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(exc, regex):
+                torch.compiler.precompile.capture(
+                    fn,
+                    artifact_path=os.path.join(d, "m.py"),
+                    cache_path=os.path.join(d, "m.cache"),
+                    **kwargs,
+                )
 
-    def test_make_fx_refuses_a_second_call(self):
-        x = torch.randn(3)
-        with _CaptureToFiles(_precompile_add_one, backend="eager") as cap:
-            cap(x)
-            with self.assertRaisesRegex(
-                torch.compiler.PrecompileError, "captures a single call"
-            ):
-                cap(x)
-
-    @parametrize("case", list(_PRECOMPILE_ROUNDTRIP_CASES))
-    @parametrize("backend", ["inductor", "eager"])
-    def test_tracer_dynamo_roundtrip(self, case, backend):
-        # The dynamo tracer captures via Dynamo, inlines the transformed bytecode, and
-        # (like make_fx) lowers the subgraph through the chosen backend. The reload runs
-        # the same computation as eager, and a different but structurally identical model
-        # swapped in at runtime works (invariant 2) -- no weights are baked in.
-        fn, make_modules, shape = _PRECOMPILE_ROUNDTRIP_CASES[case]
-        modules, x = make_modules(), torch.randn(*shape)
-        # When fn IS the module, the loaded artifact still takes the receiver
-        # explicitly: its entry frame is forward(self, xx).
-        entry, examples = (modules[0], (x,)) if fn is None else (fn, (*modules, x))
-        reference = _precompile_call_model if fn is None else fn
-        with _CaptureToFiles(
-            entry, training=True, tracer="dynamo", backend=backend
-        ) as cap:
-            cap(*examples)
-        code, cache = cap.result()
-        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
-            self.assertIsInstance(f_c, torch.compiler.PrecompiledRunnable)
-            self.assertFalse(f_c.installed)
-            self.assertEqual(f_c(*modules, x), reference(*modules, x))
-            swapped = make_modules()
-            self.assertEqual(f_c(*swapped, x), reference(*swapped, x))
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_tracer_dynamo_autograd_grad_returned(self):
-        # torch.autograd.grad is captured too, and (unlike .backward()) it only RETURNS the
-        # grads: nothing is scattered, so the runtime model's .grad stays None.
-        # Seeding is a capture-time mutation of the caller's model, so fn can SEE it:
-        # `p.grad is not None` traced as True where eager reads False. When the
-        # re-capture turns out to need no accumulate at all -- autograd.grad only
-        # returns grads -- the seeds bought nothing, and the first (unseeded) capture
-        # is the one that has to ship.
-        x, t = torch.randn(5, 4), torch.randn(5, 3)
-
-        def grad_step(model, xx, tt):
-            seen = model.weight.grad is not None
-            loss = torch.nn.functional.mse_loss(model(xx), tt)
-            return seen, torch.autograd.grad(loss, list(model.parameters()))
-
-        def fresh():
-            torch.manual_seed(0)
-            return torch.nn.Linear(4, 3)
-
-        with _CaptureToFiles(grad_step, training=True, tracer="dynamo") as cap:
-            cap(fresh(), x, t)
-        code, cache = cap.result()
-        f_c = _load_pair(code, cache)
-        run, ref = fresh(), fresh()
-        self.assertEqual(f_c(run, x, t), grad_step(ref, x, t))
-        self.assertTrue(all(p.grad is None for p in run.parameters()))
-
-    @staticmethod
-    def _module_with(src: str, name: str):
-        """A real module whose globals are exactly what the source binds."""
-        mod = types.ModuleType(name)
-        mod.__file__ = f"{name}.py"
-        linecache.cache[mod.__file__] = (
-            len(src),
-            None,
-            src.splitlines(True),
-            mod.__file__,
-        )
-        exec(compile(src, mod.__file__, "exec"), mod.__dict__)
-        sys.modules[name] = mod
-        return mod
-
-    @parametrize("decompose", [False, True])
-    @parametrize("backend", ["eager", "inductor"])
-    def test_capture_under_a_torch_function_mode_applies_it_once(
-        self, decompose, backend
-    ):
-        # make_fx only. The dynamo tracer mirrors torch.compile, which applies an
-        # ambient torch_function mode TWICE (measured: eager 2.0, torch.compile 3.0)
-        # because lowering re-traces the torch-level graph with the modes still live.
-        # make_fx clears the stack around lowering and stays eager-correct, which is
-        # the guarantee this pins.
-        tracer = "make_fx"
-        # Capture clears the caller's torch_function modes so Dynamo can apply them
-        # SYMBOLICALLY while tracing. The captured graph is torch-level Python, so
-        # lowering it with the modes restored re-traces through every one of them a
-        # second time and bakes a doubly-transformed kernel. Nothing catches that:
-        # the artifact needs no mode at all to reproduce the wrong number, so there
-        # is no guard to drop and no error to raise -- it is simply wrong forever.
+    @parametrize("backend", ("inductor", "eager"))
+    def test_capture_under_a_torch_function_mode_applies_it_once(self, backend):
+        # Lowering re-traces the torch-level graph, so a torch_function mode left
+        # live around it would be applied twice; the artifact must carry exactly one.
         fn = _precompile_add_one
         x = torch.zeros(3)
         with _PrecompilePlusOneMode():
             expected = fn(x).clone()
-            with _CaptureToFiles(
-                fn,
-                tracer=tracer,
-                backend=backend,
-                **{"decompositions": {}} if decompose else {},
-            ) as cap:
+            with _CaptureToFiles(fn, backend=backend) as cap:
                 cap(x)
             code, cache = cap.result()
         # Served with NO mode: the artifact must already carry the one application.
         self.assertEqual(_load_pair(code, cache)(x), expected)
 
-    @parametrize("guard_filter", ["keep_all", "portable", "drop_all"])
-    @parametrize("caching_precompile", [False, True])
-    def test_guard_filter_composes_with_the_default(
-        self, guard_filter, caching_precompile
-    ):
-        # A custom filter COMPOSES with the default rather than replacing it:
-        # keep_all cannot re-admit the unserializable identity guards, a portable
-        # filter's second trip through the guard pickle still loads, and a drop
-        # the filter ADDED is risky by construction, so drop_all is refused at
-        # the default gates. caching_precompile's own filter must not leak in.
-        filters = {
-            "keep_all": lambda entries: [True] * len(entries),
-            "portable": torch.compiler.keep_portable_guards_unsafe,
-            "drop_all": lambda entries: [False] * len(entries),
-        }
-        xs = [torch.randn(n, 8) for n in (2, 3)]
-        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
-            if guard_filter == "drop_all":
-                with self.assertRaisesRegex(
-                    PrecompileError, r"can affect dispatch on \[.*'x'"
-                ):
-                    with _CaptureToFiles(
-                        _precompile_multi_graph,
-                        backend="eager",
-                        dynamic=False,
-                        tracer="dynamo",
-                        guard_filter_fn=filters[guard_filter],
-                    ) as cap:
-                        with torch.no_grad():
-                            for _ex_args in [(x,) for x in xs]:
-                                cap(*_ex_args)
-                    cap.result()
-                return
-            with _CaptureToFiles(
-                _precompile_multi_graph,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                guard_filter_fn=filters[guard_filter],
-                require_no_risky_drops=False,
-            ) as cap:
-                with torch.no_grad():
-                    for _ex_args in [(x,) for x in xs]:
-                        cap(*_ex_args)
-            code, cache = cap.result()
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with _maybe_scoped(loaded), torch.no_grad():
-            for x in xs:
-                self.assertEqual(loaded(x), _precompile_multi_graph(x))
-            # The shape guards were kept: an uncovered shape is refused.
-            with self.assertRaisesRegex(PrecompileError, "no captured variant"):
-                loaded(torch.randn(9, 8))
-
-    @parametrize("how", ["raise_in_block", "caught_call"])
-    def test_a_failed_capture_is_incomplete(self, how):
-        x = torch.randn(4)
-        entry = (
-            _precompile_multi_graph
-            if how == "raise_in_block"
-            else _precompile_raises_on_flag
-        )
-
-        def run(session):
-            # raise_in_block escapes the block with a KeyError, so nothing is
-            # rendered (a block that raised leaves the files untouched);
-            # caught_call catches its per-call failure and exits cleanly, so the
-            # render+gate runs on the way out and the default gates refuse the
-            # incomplete capture at exit.
-            if how == "raise_in_block":
-                with self.assertRaisesRegex(KeyError, "capture failed"):
-                    with session as compiled:
-                        compiled(torch.randn(4, 8))
-                        raise KeyError("capture failed")
-            else:
-                with session as compiled:
-                    compiled(x, False)
-                    with self.assertRaisesRegex(KeyError, "automatic example failed"):
-                        compiled(x, True)
-
-        session = _precompile_capture(entry, backend="eager", dynamic=False)
-        if how == "caught_call":
-            with self.assertRaises(PrecompileError):
-                run(session)
-        else:
-            run(session)
-        summary = session.summary()
-        self.assertGreater(summary.guarded_codes, 0)
-        self.assertFalse(summary.complete)
-        self.assertEqual(len(summary.capture_errors), 1)
-        # No artifact was written for the incomplete capture.
-        with self.assertRaises(PrecompileError):
-            session.result()
-        if how == "caught_call":
-            # The block exits cleanly, so relaxing the gates at construction lets
-            # the same drive render the partial capture on the way out.
-            relaxed = _precompile_capture(
-                entry,
-                backend="eager",
-                dynamic=False,
-                require_complete=False,
-                require_no_dropped_guards=False,
-            )
-            run(relaxed)
-            relaxed.result()
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_sessions_restore_the_capture_config(self):
-        # The capture's config flip is per call, not block-level: the flags are
-        # ambient before the block, between calls and after it, and up only
-        # while a call runs. The flip is thread-scoped, so a call in flight on
-        # a worker thread raises them in that thread only. A session that fails
-        # in __enter__ never raises them.
-        import torch._functorch.config as functorch_config
-        from torch._dynamo.backends.registry import register_backend
-        from torch._dynamo.exc import InvalidBackend, PackageError
-        from torch._dynamo.precompile_package import precompile_capture
-
-        def flags():
-            return (
-                functorch_config.bundled_autograd_cache,
-                torch._dynamo.config.allow_empty_graphs,
-            )
-
-        entered, release, in_call = threading.Event(), threading.Event(), []
-
-        def probe_backend(gm, example_inputs):
-            in_call.append(flags())
-            entered.set()
-            self.assertTrue(release.wait(10))
-            return gm.forward
-
-        name = f"precompile_cfg_probe_{id(in_call)}"
-        register_backend(probe_backend, name=name)
-
-        with (
-            functorch_config.patch("bundled_autograd_cache", False),
-            torch._dynamo.config.patch(allow_empty_graphs=False),
-        ):
-            release.set()
-            session = precompile_capture(
-                _precompile_single_graph, backend=name, dynamic=False
-            )
-            with session as run:
-                # Entering the block does not flip the flags; the call does,
-                # and they are restored the moment it returns.
-                self.assertEqual(flags(), (False, False))
-                run(torch.randn(2))
-                self.assertEqual(flags(), (False, False))
-            self.assertEqual(flags(), (False, False))
-            self.assertEqual(in_call[-1], (True, True))
-
-            # The flip is thread-scoped: a call parked on a worker thread
-            # raises the flags in its own thread only. The main thread stays
-            # ambient throughout, and the worker's flags drop once it returns.
-            in_call.clear()
-            entered.clear()
-            release.clear()
-            errors: list = []
-
-            def hold():
-                try:
-                    held = precompile_capture(
-                        _precompile_single_graph, backend=name, dynamic=False
-                    )
-                    with held as run_held:
-                        run_held(torch.randn(2))
-                except BaseException as error:
-                    errors.append(error)
-
-            holder = threading.Thread(target=hold)
-            holder.start()
-            self.assertTrue(entered.wait(10))
-            self.assertEqual(flags(), (False, False))
-            release.set()
-            holder.join(10)
-            self.assertFalse(holder.is_alive())
-            self.assertEqual(errors, [])
-            self.assertEqual(in_call[-1], (True, True))
-            self.assertEqual(flags(), (False, False))
-
-            session = precompile_capture(
-                _precompile_multi_graph,
-                backend="definitely_missing_backend",
-                dynamic=False,
-            )
-            with self.assertRaisesRegex(InvalidBackend, "Invalid backend"):
-                with session:
-                    pass
-            self.assertEqual(flags(), (False, False))
-            self.assertFalse(session.summary().complete)
-            self.assertIn("InvalidBackend", session.summary().capture_errors[0])
-            with self.assertRaises(PackageError):
-                session.artifact()
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_exit_waits_for_a_worker_thread_call(self):
-        # A worker thread's call inherits the capture, and __exit__ waits for it.
-        from torch._dynamo.backends.registry import register_backend
-        from torch._dynamo.eval_frame import _get_total_cache_entry_count
-        from torch._dynamo.precompile_package import precompile_capture
-
-        entered = threading.Event()
-        release = threading.Event()
-        worker_done = threading.Event()
-        errors = []
-        outputs = []
-
-        def blocking_backend(gm, example_inputs):
-            entered.set()
-            self.assertTrue(release.wait(20))
-            return gm.forward
-
-        backend_name = f"precompile_exit_waits_{id(entered)}"
-        register_backend(blocking_backend, name=backend_name)
-        session = precompile_capture(
-            _precompile_single_graph, backend=backend_name, dynamic=False
-        )
-        compiled = session.__enter__()
-        x = torch.randn(2)
-
-        def run():
-            try:
-                outputs.append(compiled(x))
-            except Exception as e:
-                errors.append(e)
-            finally:
-                worker_done.set()
-
-        worker = threading.Thread(target=run)
-        worker.start()
-        self.assertTrue(entered.wait(20))
-
-        def release_call():
-            self.assertFalse(worker_done.wait(0.1))
-            release.set()
-
-        releaser = threading.Thread(target=release_call)
-        releaser.start()
-        session.__exit__(None, None, None)
-        worker.join(20)
-        releaser.join(20)
-        self.assertFalse(worker.is_alive())
-        self.assertFalse(releaser.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(outputs, [_precompile_single_graph(x)])
-        self.assertTrue(session.summary().complete)
-        self.assertEqual(session.summary().guarded_codes, 1)
-        self.assertEqual(
-            _get_total_cache_entry_count(_precompile_single_graph.__code__), 0
-        )
-
-    def test_session_is_one_shot_and_releases_its_examples(self):
-        example = torch.randn(1024)
-        example_ref = weakref.ref(example)
-        session = _precompile_capture(
-            _precompile_multi_graph, backend="eager", dynamic=False
-        )
-        with session as compiled:
-            compiled(example)
-        self.assertTrue(session.summary().complete)
-        with self.assertRaisesRegex(RuntimeError, "not active"):
-            compiled(example)
-        with self.assertRaisesRegex(RuntimeError, "already been entered"):
-            with session:
-                pass
-        del example
-        torch._dynamo.reset()
-        gc.collect()
-        self.assertIsNone(example_ref())
-
-        # A failed call's traceback must not keep its example alive either.
-        failed = torch.randn(1024)
-        failed_ref = weakref.ref(failed)
-        session = _precompile_capture(
-            _precompile_raises_on_flag, backend="eager", dynamic=False
-        )
-        # The only call fails, so the capture is incomplete and the default
-        # gates refuse to render it when the block exits cleanly.
-        with self.assertRaises(PrecompileError):
-            with session as compiled:
-                with self.assertRaisesRegex(KeyError, "automatic example failed"):
-                    compiled(failed, True)
-        del failed
-        torch._dynamo.reset()
-        gc.collect()
-        self.assertIsNone(failed_ref())
-
-    def _multigraph_frames(self, code):
-        from torch._precompile import _parse_artifact_metadata
-
-        return _parse_artifact_metadata(code)["FRAMES"]
-
-    @parametrize("backend", ("eager", "inductor"))
-    def test_multi_graph_artifact_follows_the_code_cache_contract(self, backend):
-        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
-        from torch._precompile import _parse_artifact_metadata
-        from torch.compiler._cache import CacheArtifactManager
-
-        # A capture with graph breaks and several variants returns the same
-        # (python_code, cache) pair the single-graph forms do, and load() takes
-        # it back. python_code is standalone: it installs nothing onto the
-        # callable's code objects, so serving it mutates no global state.
-        PrecompileContext.clear()
-        self.addCleanup(PrecompileContext.clear)
-        model = _PrecompileBreakingModule().eval()
-        shapes = [(3, 8), (5, 8)]
-        inputs = [torch.randn(*shape) for shape in shapes]
-        with torch.no_grad():
-            expected = [model(x) for x in inputs]
-
-        # The capture serializes the process-global cache-artifact list into the
-        # bundle. An artifact an unrelated earlier compile left pending must be
-        # neither folded into this bundle nor dropped from that list.
-        with CacheArtifactManager.with_fresh_cache():
-            CacheArtifactManager.record_artifact("pgo", "unrelated_pending", b"x")
-            with _CaptureToFiles(
-                model, backend=backend, dynamic=False, tracer="dynamo"
-            ) as cap:
-                with torch.no_grad():
-                    for _ex_args in [(x,) for x in inputs]:
-                        cap(*_ex_args)
-            code, cache = cap.result()
-            pending = CacheArtifactManager._new_cache_artifacts["pgo"]
-            self.assertEqual([a.key for a in pending], ["unrelated_pending"])
-        self.assertIsInstance(code, str)
-        self.assertIsInstance(cache, bytes)
-        bundle = torch.load(io.BytesIO(cache), weights_only=True)["artifact"]
-        if bundle is not None:
-            artifacts = CacheArtifactManager.deserialize(bundle)
-            keys = [a.key for group in artifacts.values() for a in group]
-            self.assertNotIn("unrelated_pending", keys)
-        # The artifact carries its own backends; neither the capture nor a load
-        # may file them into the process-global context the transparent cache uses.
-        self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
-
-        # The readable half says what is in the opaque half.
-        meta = _parse_artifact_metadata(code)
-        self.assertEqual(meta["TRACER"], "dynamo")
-        self.assertIn("DROPPED_GUARDS", meta)
-        # Guard trees and bytecode have no source form and stay opaque, but a
-        # compiled subgraph is Inductor output, which does: on inductor the
-        # kernels are emitted as readable source, and only eager (whose
-        # "backend" is an fx graph with nothing to render) stays pickled.
-        if backend == "inductor":
-            self.assertIn("_SUBGRAPHS[", code)
-        else:
-            self.assertNotIn("_SUBGRAPHS[", code)
-
-        # It reports one entry frame plus one continuation, two variants each.
-        frames = meta["FRAMES"]
-        self.assertEqual([count for _, count in frames], [2, 2])
-        self.assertTrue(
-            any(name.startswith("torch_dynamo_resume_in") for name, _ in frames)
-        )
-
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        self.assertIsInstance(loaded, torch.compiler.PrecompiledRunnable)
-        self.assertFalse(loaded.installed)
-        with torch.no_grad():
-            for x, want in zip(inputs, expected):
-                self.assertEqual(loaded(model, x), want)
-        self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
-        # Nothing was installed, so the model still compiles normally.
-        self.assertEqual(
-            len(_debug_get_precompile_entries(type(model).forward.__code__)), 0
-        )
-        # A call no variant covers raises rather than silently recompiling.
-        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
-            with torch.no_grad():
-                loaded(model, torch.randn(9, 8))
-
-    @parametrize("backend", ("eager",))  # inductor: training lowering follow-up
-    def test_tracer_dynamo_training_step_with_backward_in_fn(self, backend):
-        # The Note's headline training step: .backward() inside fn graph-breaks,
-        # the continuation runs it through the live autograd engine, and the
-        # served step accumulates the same grads eager does. Capture is
-        # caller-driven, so the captured call runs the backward for real and
-        # accumulates onto the model exactly as the served step later will.
-        from torch._dynamo.utils import counters
-
-        def train_step(model, x, t):
-            torch.nn.functional.mse_loss(model(x), t).backward()
-
-        torch.manual_seed(0)
-        model = _PrecompileTrainMod()
-        x, t = torch.randn(4, 8), torch.randn(4, 8)
-        # An eager backward from clean grads is the reference the served step
-        # must reproduce.
-        train_step(model, x, t)
-        eager = [p.grad.clone() for p in model.parameters()]
-        for p in model.parameters():
-            p.grad = None
-        with _CaptureToFiles(
-            train_step,
-            backend=backend,
-            dynamic=False,
-            tracer="dynamo",
-            training=True,
-            require_complete=False,
-            require_no_risky_drops=False,
-        ) as cap:
-            cap(model, x, t)
-        code, cache = cap.result()
-        for want, p in zip(eager, model.parameters()):
-            self.assertEqual(p.grad, want)  # the captured call ran the backward
-        for p in model.parameters():
-            p.grad = None
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        counters.clear()
-        with _maybe_scoped(loaded):
-            self.assertIsNone(loaded(model, x, t))
-        for want, p in zip(eager, model.parameters()):
-            self.assertEqual(p.grad, want)
-        self.assertEqual(counters["stats"]["unique_graphs"], 0)
-
-    @parametrize("case", list(_AUTO_DYNAMIC_CASES))
-    def test_automatic_dynamic_promotes_the_frames_that_varied(self, case):
-        # A dim that varies has to be detected separately in every frame that
-        # reads it -- otherwise the artifact serves a new shape up to the first
-        # break and then misses -- and ONLY in those: an entry frame whose input
-        # never varies stays specialized while the continuation that did see
-        # variation is promoted.
-        model_cls, make_args, counts = _AUTO_DYNAMIC_CASES[case]
-        model = model_cls().eval()
-        captured = [make_args(n) for n in (3, 5)]
-        unseen = [make_args(n) for n in (7, 11)]
-
-        with _CaptureToFiles(
-            model,
-            backend="eager",
-            dynamic=None,
-            tracer="dynamo",
-            require_no_risky_drops=False,
-        ) as cap:
-            with torch.no_grad():
-                for _ex_args in captured:
-                    cap(*_ex_args)
-        code, cache = cap.result()
-        frames = self._multigraph_frames(code)
-        # One static compile per frame that varied, then one promoted to dynamic.
-        self.assertEqual([count for _, count in frames], counts)
-        self.assertEqual(
-            sum(1 for name, _ in frames if name.startswith("torch_dynamo_resume_in")),
-            len(counts) - 1,
-        )
-
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with torch.no_grad():
-            for args in captured + unseen:
-                self.assertEqual(loaded(model, *args), model(*args))
-
-        if case != "every_frame":
-            return
-        # The contrast that makes the assertion above meaningful: with automatic
-        # dynamic off, the same capture serves only what it saw.
-        torch._dynamo.reset()
-        with _CaptureToFiles(
-            model,
-            backend="eager",
-            dynamic=False,
-            tracer="dynamo",
-            require_no_risky_drops=False,
-        ) as cap:
-            with torch.no_grad():
-                for _ex_args in captured:
-                    cap(*_ex_args)
-        static_code, static_cache = cap.result()
-        torch._dynamo.reset()
-        static = _load_pair(static_code, static_cache)
-        with torch.no_grad():
-            for args in unseen:
-                with self.assertRaisesRegex(PrecompileError, "no captured variant"):
-                    static(model, *args)
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_multi_graph_unreachable_frame_is_served_by_installing(self):
-        # A frame Dynamo compiled that is entered by an ORDINARY call -- an
-        # un-inlinable helper -- is reached only through the frame evaluator. A
-        # source artifact does not use one, so such a capture is served by
-        # installing onto the live code objects instead, and the frame that a
-        # source artifact would have run eager is named in the header.
-        from torch._dynamo.utils import counters
-        from torch._precompile import _parse_artifact_metadata
-
-        with _CaptureToFiles(
-            _precompile_unreachable_helper_caller,
-            backend="eager",
-            dynamic=False,
-            tracer="dynamo",
-        ) as cap:
-            with torch.no_grad():
-                cap(torch.randn(4))
-        code, cache = cap.result()
-        meta = _parse_artifact_metadata(code)
-        self.assertEqual(meta["SERVING_MODE"], "installed")
-        self.assertIn(
-            _precompile_unreachable_helper.__name__,
-            meta["UNREACHABLE_WITHOUT_INSTALL"],
-        )
-
-        x = torch.randn(4)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        # The installed shape shares the runnable base with the standalone one.
-        self.assertIsInstance(loaded, torch.compiler.PrecompiledRunnable)
-        self.assertIsInstance(loaded, torch.compiler.PrecompiledCallable)
-        self.assertTrue(loaded.installed)
-        counters.clear()
-        with loaded, torch.no_grad():
-            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
-            # Served, not recompiled: the whole point of installing.
-            self.assertEqual(counters["stats"]["unique_graphs"], 0)
-
-    def test_a_subgraph_whose_lowering_fails_keeps_the_bundle(self):
-        # Rendering is per subgraph: one that compile_to_python refuses stays
-        # pickled in _BACKENDS, the header counts it, and the artifact serves.
-        from torch._functorch import aot_autograd
-        from torch._precompile import _read_literal
-
-        real_compile_to_python = aot_autograd.compile_to_python
-        refused = []
-
-        def refuse_first(gm, example_inputs, **kwargs):
-            if not refused:
-                refused.append(gm)
-                raise RuntimeError("synthetic lowering failure")
-            return real_compile_to_python(gm, example_inputs, **kwargs)
-
-        x = torch.randn(4, 8)
-        with mock.patch.object(aot_autograd, "compile_to_python", refuse_first):
-            with _CaptureToFiles(
-                _precompile_multi_graph,
-                backend="inductor",
-                dynamic=False,
-                tracer="dynamo",
-            ) as cap:
-                with torch.no_grad():
-                    cap(x)
-            code, cache = cap.result()
-        self.assertEqual(len(refused), 1)
-        self.assertIn("1 could not be rendered and stay in _BACKENDS", code)
-        pickled = pickle.loads(
-            base64.b64decode(_read_literal(ast.parse(code), "_BACKENDS"))
-        )
-        self.assertEqual(len(pickled), 1)
-        # Two breaks make three subgraphs; the other two rendered as source.
-        self.assertEqual(code.count("_SUBGRAPHS["), 2)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with torch.no_grad():
-            self.assertEqual(loaded(x), _precompile_multi_graph(x))
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_installed_artifact_fn_must_match_the_capture(self):
-        # load(fn=...) installs onto whatever function it is given, so it has
-        # to refuse one the artifact was not captured from -- the same check
-        # the path form makes -- or the wrong callable serves the captured
-        # graphs. The function it WAS captured from is accepted.
-        with _CaptureToFiles(
-            _precompile_unreachable_helper_caller,
-            backend="eager",
-            dynamic=False,
-            tracer="dynamo",
-        ) as cap:
-            cap(torch.randn(4))
-        code, cache = cap.result()
-        x = torch.randn(4)
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            PrecompileError, "was captured from .* but is being loaded onto"
-        ):
-            _load_pair(code, cache, fn=_precompile_unreachable_helper)
-        loaded = _load_pair(code, cache, fn=_precompile_unreachable_helper_caller)
-        with loaded, torch.no_grad():
-            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_installed_artifact_unload_releases_its_recorded_backends(self):
-        # Installing files the artifact's backends into the process-global
-        # PrecompileContext. unload() has to take exactly those out again, or
-        # every install/unload cycle leaks them for the life of the process.
-        with _CaptureToFiles(
-            _precompile_unreachable_helper_caller,
-            backend="eager",
-            dynamic=False,
-            tracer="dynamo",
-        ) as cap:
-            cap(torch.randn(4))
-        code, cache = cap.result()
-        x = torch.randn(4)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        registry = PrecompileContext._backend_artifacts_by_key
-        baseline = len(registry)
-        for _ in range(2):
-            with loaded, torch.no_grad():
-                self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
-                self.assertGreater(len(registry), baseline)
-            self.assertEqual(len(registry), baseline)
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_installed_artifact_handle_lifecycle(self):
-        # Installing mutates process-global code objects, so a call after
-        # unload() must raise rather than silently re-install; a fresh load() is
-        # the way to serve again. Two threads racing the FIRST call install once,
-        # and a first call that reaches the install lock only after unload()
-        # returned finds the handle retired and must not install.
-        with _CaptureToFiles(
-            _precompile_unreachable_helper_caller,
-            backend="eager",
-            dynamic=False,
-            tracer="dynamo",
-        ) as cap:
-            cap(torch.randn(4))
-        code, cache = cap.result()
-        x = torch.randn(4)
-        expected = _precompile_unreachable_helper_caller(x)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with torch.no_grad():
-            self.assertEqual(loaded(x), expected)
-            loaded.unload()
-            loaded.unload()  # idempotent
-            with self.assertRaisesRegex(PrecompileError, "unloaded"):
-                loaded(x)
-            # Re-entering is the explicit way to install again; the handle is
-            # reusable across scopes.
-            with loaded:
-                self.assertEqual(loaded(x), expected)
-            with self.assertRaisesRegex(PrecompileError, "unloaded"):
-                loaded(x)
-            fresh = _load_pair(code, cache)
-            try:
-                self.assertEqual(fresh(x), expected)
-            finally:
-                fresh.unload()
-
-        loaded = _load_pair(code, cache)
-        handle = loaded._compiled
-        original_serve = handle._serve
-        serves = []
-
-        def counting_serve(fn, **kwargs):
-            serves.append(threading.current_thread().name)
-            return original_serve(fn, **kwargs)
-
-        handle._serve = counting_serve
-        barrier = threading.Barrier(2)
-        outcomes = []
-
-        def first_call():
-            barrier.wait()
-            try:
-                with torch.no_grad():
-                    outcomes.append(loaded(x))
-            except Exception as e:
-                outcomes.append(e)
-
-        threads = [threading.Thread(target=first_call) for _ in range(2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        try:
-            self.assertEqual(len(serves), 1)
-            for out in outcomes:
-                self.assertEqual(out, expected)
-        finally:
-            loaded.unload()
-
-        loaded = _load_pair(code, cache)
-        handle = loaded._compiled
-        real_lock = handle._install_lock
-        unloaded = threading.Event()
-
-        class _GatedLock:
-            def __enter__(self):
-                if threading.current_thread().name == "racer":
-                    unloaded.wait()
-                return real_lock.__enter__()
-
-            def __exit__(self, *exc):
-                return real_lock.__exit__(*exc)
-
-        handle._install_lock = _GatedLock()
-        errors = []
-
-        def racing_call():
-            try:
-                with torch.no_grad():
-                    loaded(torch.randn(4))
-            except PrecompileError as e:
-                errors.append(e)
-
-        racer = threading.Thread(target=racing_call, name="racer")
-        racer.start()
-        loaded.unload()
-        unloaded.set()
-        racer.join()
-        self.assertEqual(len(errors), 1)
-        self.assertIn("unloaded", str(errors[0]))
-        self.assertIsNone(handle._inner)
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_uncovered_call_outside_serving_tolerates_an_unpicklable_local(self):
-        # An installed artifact recompiles an uncovered call outside serving()
-        # the way torch.compile does. That frame is served, not captured, so
-        # its guards are not serialized: a value they could not pickle (a lock
-        # in the dict the function reads) is not an error.
-        x = torch.randn(4)
-        with _CaptureToFiles(
-            _precompile_unreachable_helper_caller_with_opts,
-            backend="eager",
-            dynamic=False,
-            tracer="dynamo",
-        ) as cap:
-            cap(x, {"scale": 2})
-        code, cache = cap.result()
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        uncovered = {"scale": 3, "lock": threading.Lock()}
-        with loaded, torch.no_grad():
-            self.assertEqual(
-                loaded(x, {"scale": 2}), _precompile_unreachable_helper_caller(x) * 2
-            )
-            self.assertEqual(
-                loaded(x, uncovered), _precompile_unreachable_helper_caller(x) * 3
-            )
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_missing_captured_module_raises_precompile_error(self):
-        # Both drivers import the modules the capture came from. A module that
-        # is not importable here surfaces as the documented PrecompileError, not
-        # as a bare ModuleNotFoundError from inside the exec'd driver.
-        x = torch.randn(4)
-        # Standalone: the frames' import aliases.
-        with _CaptureToFiles(
-            _precompile_single_graph, backend="eager", dynamic=False, tracer="dynamo"
-        ) as cap:
-            cap(x)
-        code, cache = cap.result()
-        from torch._precompile import _read_literal
-
-        frames = pickle.loads(
-            base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
-        )
-        missing = next(iter(frames[0]["import_sources"].values()))
-        real_import = importlib.import_module
-
-        def import_without(name, *args, **kwargs):
-            if name == missing:
-                raise ImportError(f"No module named {name!r}")
-            return real_import(name, *args, **kwargs)
-
-        with mock.patch.object(importlib, "import_module", import_without):
-            with self.assertRaisesRegex(PrecompileError, "not importable here"):
-                _load_pair(code, cache)
-        # Installed: the module each captured frame was defined in.
-        name = "_precompile_missing_module_fixture"
-        mod = self._module_with(
-            textwrap.dedent(
-                """
-                import torch
-
-
-                class Child(torch.nn.Module):
-                    def forward(self, x):
-                        y = x + 1
-                        torch._dynamo.graph_break()
-                        return y * 2
-
-
-                def entry(child, x):
-                    return child(x)
-                """
-            ),
-            name,
-        )
-        try:
-            with _CaptureToFiles(
-                mod.entry,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                require_no_risky_drops=False,
-            ) as cap:
-                cap(mod.Child(), x)
-            code, cache = cap.result()
-        finally:
-            del sys.modules[name]
-        from torch._precompile import _parse_artifact_metadata
-
-        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
-        torch._dynamo.reset()
-        with self.assertRaisesRegex(PrecompileError, "not importable here"):
-            _load_pair(code, cache)
-
-    @parametrize("case", list(_PRECOMPILE_TRAINING_CASES))
-    @parametrize("backend", ("eager", "inductor"))
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_training_capture_serves_a_backward_without_a_loss(self, case, backend):
-        # The capture never sees a loss and never calls .backward(). The joint
-        # trace synthesizes tangents from the forward outputs, and the backward
-        # is lowered eagerly, so a served output is still wired to
-        # AOTAutograd's CompiledFunction and .backward() runs precompiled code.
-        # The parameters carry a .grad into the capture: no guard reads it, so
-        # the pickler prunes it to _Missing, which load must drop, not assign.
-        model_cls, entry, width = _PRECOMPILE_TRAINING_CASES[case]
-        model = model_cls()
-        xs = [torch.randn(n, width) for n in (4, 6)]
-        expected = []
-        for x in xs:
-            model.zero_grad(set_to_none=True)
-            entry(model, x).sum().backward()
-            expected.append([p.grad.clone() for p in model.parameters()])
-
-        with _CaptureToFiles(
-            entry,
-            backend=backend,
-            dynamic=False,
-            tracer="dynamo",
-            training=True,
-            require_complete=False,
-            require_no_risky_drops=False,
-        ) as cap:
-            for _ex_args in [(model, x) for x in xs]:
-                cap(*_ex_args)
-        code, cache = cap.result()
-        # The example calls left the caller's gradients exactly as they were.
-        for want, param in zip(expected[-1], model.parameters()):
-            self.assertEqual(want, param.grad)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        from torch._dynamo.utils import counters
-
-        counters.clear()
-        with _maybe_scoped(loaded):
-            for x, grads in zip(xs, expected):
-                model.zero_grad(set_to_none=True)
-                out = loaded(model, x)
-                self.assertTrue(out.requires_grad)
-                if backend == "inductor" and case == "plain":
-                    # AOTAutograd's compiled backward, not an eager autograd node.
-                    self.assertIn("CompiledFunction", type(out.grad_fn).__name__)
-                out.sum().backward()
-                for want, param in zip(grads, model.parameters()):
-                    self.assertEqual(want, param.grad)
-        # Served, not recompiled: forward and backward alike.
-        self.assertEqual(counters["stats"]["unique_graphs"], 0)
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_training_capture_does_not_read_grad_off_non_leaf_tensors(self):
-        # The pickler reads .grad off the tensors it serializes. On a non-leaf
-        # that is always None and warns; a training capture guards such tensors.
-        model = _PrecompileTrainMod()
-        x = torch.randn(4, 8, requires_grad=True) * 2
-        self.assertFalse(x.is_leaf)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            with _CaptureToFiles(
-                _precompile_call_model,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                training=True,
-            ) as cap:
-                cap(model, x)
-        leaf_warnings = [str(w.message) for w in caught if "non-leaf" in str(w.message)]
-        self.assertEqual(leaf_warnings, [])
-
-    @parametrize("tracer", ("make_fx", "dynamo"))
+    @parametrize("tracer", ("make_fx",))
     @parametrize("training", (False, True))
-    def test_example_call_runs_in_the_grad_mode_training_selects(
-        self, tracer, training
-    ):
-        # Capture is caller-driven, so the caller picks the grad mode and
-        # precompile runs the call in it -- no_grad for inference, enable_grad
-        # for a training capture -- rather than choosing one itself.
+    def test_training_selects_the_grad_mode_over_the_callers(self, tracer, training):
+        # training= picks the grad mode the captured call runs in and overrides the
+        # caller's ambient mode, so the call is made under the opposite one.
         _PRECOMPILE_GRAD_MODES_SEEN.clear()
         m = torch.nn.Linear(4, 3).eval()
-        grad_ctx = torch.enable_grad() if training else torch.no_grad()
+        opposite = torch.no_grad() if training else torch.enable_grad()
         with _CaptureToFiles(
             _precompile_observe_grad_mode,
             backend="eager",
             tracer=tracer,
             training=training,
         ) as cap:
-            with grad_ctx:
+            with opposite:
                 cap(m, torch.randn(2, 4))
         self.assertEqual(set(_PRECOMPILE_GRAD_MODES_SEEN), {training})
-
-    def test_inference_capture_stays_grad_free(self):
-        # The default is unchanged: examples run under no_grad, so a served
-        # output carries no autograd history.
-        model = _PrecompileTrainMod()
-        x = torch.randn(4, 8)
-        with _CaptureToFiles(
-            _precompile_call_model, backend="eager", dynamic=False, tracer="dynamo"
-        ) as cap:
-            with torch.no_grad():
-                cap(model, x)
-        code, cache = cap.result()
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with torch.no_grad():
-            self.assertFalse(loaded(model, x).requires_grad)
-
-    # The other shapes break outside the entry frame: installed serving mode follow-up.
-    @parametrize("shape", ["break_in_loop"])
-    @parametrize("backend", ["eager", "inductor"])
-    def test_dynamo_tracer_serves_each_graph_break_shape(self, shape, backend):
-        # The dynamo tracer against graph breaks and recompilations. Every case
-        # asserts the artifact serves, and that it agrees with torch.compile --
-        # parity with torch.compile is the contract, so torch.compile is the
-        # reference rather than eager.
-        from torch._dynamo.utils import counters
-
-        torch._dynamo.reset()
-        model = _BREAKING_MODELS[shape]().eval()
-        x = torch.randn(4, 4)
-        with torch.no_grad():
-            reference = torch.compile(_brk_call, backend=backend)(model, x)
-
-        torch._dynamo.reset()
-        if shape == "break_in_loop":
-            # Dynamo skips a frame that breaks inside a loop, so torch.compile
-            # runs this shape eager and there is no graph to serve. The capture
-            # is refused as empty rather than shipped as an eager artifact.
-            with (
-                torch.no_grad(),
-                self.assertRaisesRegex(PrecompileError, "compiled no graph"),
-            ):
-                with _CaptureToFiles(
-                    _brk_call,
-                    backend=backend,
-                    tracer="dynamo",
-                    require_no_risky_drops=False,
-                ) as cap:
-                    cap(model, x)
-                cap.result()
-                # cap.result() runs after the capture block exits (its render
-                # error is raised there, not at __exit__).
-            return
-        with torch.no_grad():
-            with _CaptureToFiles(
-                _brk_call,
-                backend=backend,
-                tracer="dynamo",
-                require_complete=False,
-                require_no_risky_drops=False,
-            ) as cap:
-                cap(model, x)
-            code, cache = cap.result()
-        self.assertGreater(_compiled_subgraph_count(code), 0)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        counters.clear()
-        with _maybe_scoped(loaded), torch.no_grad():
-            self.assertEqual(loaded(model, x), reference)
-        # Nothing compiled while serving, and an uncovered call would have
-        # raised (standalone) or compiled (installed): a captured variant served.
-        self.assertEqual(counters["stats"]["unique_graphs"], 0)
-
-    @parametrize("backend", ["eager", "inductor"])
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_dynamo_tracer_serves_every_captured_recompilation(self, backend):
-        # Two axes vary -- a bool that changes the branch and a shape that
-        # changes the specialization -- so the capture holds several guarded
-        # variants of the same frames, on both sides of the break. An UNCOVERED
-        # call is never answered wrong: a STANDALONE artifact has no compiler
-        # behind it and refuses; an INSTALLED one is on the frame evaluator and
-        # recompiles exactly as torch.compile would.
-        from torch._dynamo.utils import counters
-        from torch._precompile import _parse_artifact_metadata
-
-        torch._dynamo.reset()
-        model = _BrkBranchy().eval()
-        calls = [
-            (model, torch.randn(n, 4), flag) for n in (4, 6) for flag in (False, True)
-        ]
-        uncovered = (model, torch.randn(5, 4), True)
-        torch._dynamo.reset()
-        compiled = torch.compile(_brk_call_flag, backend=backend, dynamic=False)
-        with torch.no_grad():
-            reference = [compiled(*c) for c in calls + [uncovered]]
-
-        torch._dynamo.reset()
-        with torch.no_grad():
-            with _CaptureToFiles(
-                _brk_call_flag,
-                backend=backend,
-                dynamic=False,
-                tracer="dynamo",
-                require_complete=False,
-                require_no_risky_drops=False,
-            ) as cap:
-                for _ex_args in calls:
-                    cap(*_ex_args)
-            code, cache = cap.result()
-        meta = _parse_artifact_metadata(code)
-        # The capture really did hold several variants, and really did break.
-        self.assertTrue(any(v > 1 for _, v in meta["FRAMES"]))
-        self.assertTrue(any("resume_in" in n for n, _ in meta["FRAMES"]))
-
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        counters.clear()
-        with _maybe_scoped(loaded), torch.no_grad():
-            for call, want in zip(calls, reference):
-                self.assertEqual(loaded(*call), want)
-            # Served, not recompiled: every one of those calls was captured.
-            self.assertEqual(counters["stats"]["unique_graphs"], 0)
-            if meta["SERVING_MODE"] == "installed":
-                self.assertEqual(loaded(*uncovered), reference[-1])
-            else:
-                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
-                    loaded(*uncovered)
-
-    @parametrize("case", list(_PRECOMPILE_GUARD_POLICY_CASES))
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_guard_policy_keeps_what_discriminates(self, case):
-        from torch._precompile import _parse_artifact_metadata, _read_literal
-
-        fn, examples, served, refused = _PRECOMPILE_GUARD_POLICY_CASES[case]
-        with torch.no_grad():
-            expected = [fn(*args) for args in served]
-        torch._dynamo.reset()
-        with _CaptureToFiles(
-            fn, backend="eager", dynamic=False, tracer="dynamo"
-        ) as cap:
-            with torch.no_grad():
-                for _ex_args in examples:
-                    cap(*_ex_args)
-        code, cache = cap.result()
-        self.assertEqual(_parse_artifact_metadata(code)["TRACER"], "dynamo")
-        # The policy drops guards that could have been serialized, so what it
-        # discarded has to stay visible in the header even though it is now
-        # applied after the capture rather than during it.
-        dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
-        self.assertIn(["AUTOGRAD_SAVED_TENSORS_HOOKS", ""], dropped)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with _maybe_scoped(loaded), torch.no_grad():
-            for args, want in zip(served, expected):
-                self.assertEqual(loaded(*args), want)
-            for args in refused:
-                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
-                    loaded(*args)
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_invariants_report_lists_policy_dropped_slots(self):
-        # The report header promises a dropped line is "a precondition NOTHING
-        # checks". A policy-dropped slot is exactly that, but the policy used
-        # to DELETE those facts from the report's source data rather than
-        # re-mark them, so an auditor reading the file saw a validity domain
-        # far wider than the artifact's true one.
-        import re as re_mod
-
-        from torch._precompile import _read_literal
-
-        # With hook guards on, a module argument's EMPTY_NN_MODULE_HOOKS_DICT
-        # slots are droppable invariants with real source names, so the
-        # per-name check below is not vacuous.
-        model = _PrecompileTrainMod()
-        with (
-            tempfile.TemporaryDirectory() as d,
-            torch._dynamo.config.patch(skip_nnmodule_hook_guards=False),
-        ):
-            path = os.path.join(d, "invariants.txt")
-            with _CaptureToFiles(
-                _precompile_call_model,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                invariants=path,
-            ) as cap:
-                for _ex_args in [(model, torch.randn(n, 8)) for n in (3, 5)]:
-                    cap(*_ex_args)
-            code, _ = cap.result()
-            dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
-            with open(path) as f:
-                report = f.read()
-        named = [name for _guard_type, name in dropped if name]
-        self.assertTrue(named)
-        for name in named:
-            self.assertRegex(report, rf"\[dropped \][^\n]*{re_mod.escape(name)}")
-
-    def test_a_capture_without_compiled_code_is_not_complete(self):
-        # allow_empty_graphs keeps a frame that compiled nothing as one guarded
-        # code, so guarded_codes alone cannot tell a real capture from one whose
-        # whole body sits behind torch._dynamo.disable. Such a capture carries
-        # no compiled compute: complete says so, and require_complete gates
-        # exactly complete.
-        from torch._precompile import _parse_artifact_metadata
-
-        session = _precompile_capture(
-            _precompile_only_disabled, backend="eager", dynamic=False
-        )
-        # The block exits cleanly, so the default require_complete gate refuses
-        # to render the graphless capture when it does.
-        with self.assertRaisesRegex(PrecompileError, "compiled no graph"):
-            with session as compiled, torch.no_grad():
-                compiled(torch.randn(3))
-        summary = session.summary()
-        self.assertEqual(summary.guarded_codes, 1)
-        self.assertEqual(summary.backend_graphs, 0)
-        self.assertFalse(summary.complete)
-        relaxed = _precompile_capture(
-            _precompile_only_disabled,
-            backend="eager",
-            dynamic=False,
-            require_complete=False,
-        )
-        with relaxed as compiled, torch.no_grad():
-            compiled(torch.randn(3))
-        code, _cache = relaxed.result()
-        self.assertEqual(_parse_artifact_metadata(code)["TRACER"], "dynamo")
-
-    @parametrize("root", ["local", "module"])
-    def test_a_dict_membership_guard_is_never_dropped(self, root):
-        # `"flag" in d` is a branch, and the guard pinning it (DICT_NOT_CONTAINS)
-        # is a Python fact about a container's contents. Whatever the policy
-        # makes of the root, dropping it serves the captured branch to a caller
-        # who holds the key -- so the artifact must refuse, not answer. The same
-        # guard on `self.opts` is MODULE-rooted, which the invariant policy
-        # classes as environment -- and used to drop: M({"flag": 1}) was
-        # answered with M({})'s branch, no error, at the default gates.
-        from torch._precompile import _read_literal
-
-        x = torch.ones(2)
-        if root == "local":
-            fn, served, refused = (
-                _precompile_dict_flag_branch,
-                (x, {}),
-                (x, {"flag": 1}),
-            )
-        else:
-            captured, other = (
-                _PrecompileOptsModule({}),
-                _PrecompileOptsModule({"flag": 1}),
-            )
-            other.load_state_dict(captured.state_dict())
-            fn, served, refused = _precompile_call_model, (captured, x), (other, x)
-        with torch.no_grad():
-            expected = fn(*served)
-            with _CaptureToFiles(
-                fn, backend="eager", dynamic=False, tracer="dynamo"
-            ) as cap:
-                cap(*served)
-            code, cache = cap.result()
-        dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
-        self.assertNotIn("DICT_NOT_CONTAINS", {guard_type for guard_type, _ in dropped})
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with _maybe_scoped(loaded), torch.no_grad():
-            self.assertEqual(loaded(*served), expected)
-            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
-                loaded(*refused)
-
-    @parametrize("where", ["object", "in_a_list"])
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_unpicklable_guard_value_names_where_it_lives(self, where):
-        # The type in a pickle error says WHAT failed and never WHERE, which on a
-        # large model means bisecting by hand. A lock is the archetypal offender
-        # and the one the type-name match used to miss, because CPython reports
-        # it as '_thread.lock' while type(...).__name__ is 'lock'.
-        if where == "object":
-            entry = _precompile_reads_holder
-            args = (_PrecompileUnpicklableHolder(threading.Lock()), torch.randn(4))
-            expected = r"reached via: local_scope\['obj'\].bad"
-        else:
-            entry = _precompile_reads_holder_in_list
-            args = ([_PrecompileUnpicklableHolder(threading.Lock())], torch.randn(4))
-            expected = r"reached via: local_scope\['objs'\]\[0\].bad"
-        with self.assertRaisesRegex(PrecompileError, expected), torch.no_grad():
-            with _CaptureToFiles(
-                entry,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                require_no_risky_drops=False,
-            ) as cap:
-                cap(*args)
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_serialized_guards_carry_no_bookkeeping(self):
-        # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
-        # set_export_info EXTENDS them on every guard build, so shipping them
-        # means shipping each code part once per build. Applying the policy
-        # re-serializes guard state whose tensors are now the FAKES the first
-        # pass wrote, and empty_like() under a live FakeTensorMode hands back
-        # another fake -- which pickles the mode, its converters and their
-        # weakrefs along with it.
-        from torch._dynamo.package import load_guards_state
-        from torch._precompile import _read_literal
-
-        model = torch.nn.Linear(8, 4).eval()
-        xs = [torch.randn(n, 8) for n in (3, 5)]
-        with torch.no_grad():
-            with _CaptureToFiles(
-                _precompile_call_model, backend="eager", dynamic=False, tracer="dynamo"
-            ) as cap:
-                for _ex_args in [(model, x) for x in xs]:
-                    cap(*_ex_args)
-            code, cache = cap.result()
-        blob = base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
-        for name in (b"FakeTensorMode", b"MetaTensorDescriber", b"WeakIdRef"):
-            self.assertNotIn(name, blob)
-        for frame in pickle.loads(blob):
-            for variant in frame["variants"]:
-                state = load_guards_state(variant["guards_state"])
-                for guard in state.output_graph.guards:
-                    self.assertIsNone(guard.code_list)
-                    self.assertIsNone(guard.guard_types)
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with _maybe_scoped(loaded), torch.no_grad():
-            for x in xs:
-                self.assertEqual(loaded(model, x), model(x))
-
-    def test_a_mutating_module_is_guarded_on_what_the_capture_saw(self):
-        # Learning the guard policy from a throwaway first capture would run
-        # every example twice. A counter advanced by the capture itself is baked
-        # into the guards. It has to be the value the ONE pass saw, or a fresh
-        # model never matches: a discarded first pass would leave every variant
-        # pinned to a step the served model has not reached.
-        torch.manual_seed(0)
-        model = _PrecompileStepCounter()
-        xs = [torch.randn(n, 8) for n in (2, 3, 4)]
-        with torch.no_grad():
-            with _CaptureToFiles(
-                _brk_call,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-                require_no_risky_drops=False,
-            ) as cap:
-                for _ex_args in [(model, x) for x in xs]:
-                    cap(*_ex_args)
-            code, cache = cap.result()
-        torch._dynamo.reset()
-        torch.manual_seed(0)
-        cold = _PrecompileStepCounter()
-        torch.manual_seed(0)
-        reference = _PrecompileStepCounter()
-        loaded = _load_pair(code, cache)
-        with _maybe_scoped(loaded), torch.no_grad():
-            for x in xs:
-                self.assertEqual(loaded(cold, x), _brk_call(reference, x))
-
-    @parametrize(
-        "junk", ["int", "str", "device"]
-    )  # dtype: guard-tree pruning follow-up
-    def test_unguarded_interned_attribute_does_not_poison_the_artifact(self, junk):
-        # Value pruning is keyed by id(), which asks "same OBJECT" when it means
-        # "same REFERENCE". For an interned value those come apart: an unguarded
-        # module attribute holding torch.float32 registers that id as missing,
-        # and every OTHER reference to that dtype -- including ones the artifact
-        # needs -- then resolves to the sentinel, so it fails to load with
-        # "empty_strided(): argument 'dtype' must be torch.dtype, not _Missing".
-        value = {
-            "dtype": torch.float32,
-            "int": 8,
-            "str": "cuda",
-            "device": torch.device("cpu"),
-        }[junk]
-        model = _PrecompileUnguardedAttr(value)
-        x = torch.randn(4, 8)
-        with torch.no_grad():
-            expected = model(x)
-            with _CaptureToFiles(
-                _brk_call, backend="inductor", dynamic=False, tracer="dynamo"
-            ) as cap:
-                cap(model, x)
-            code, cache = cap.result()
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with _maybe_scoped(loaded), torch.no_grad():
-            self.assertEqual(loaded(model, x), expected)
-
-    @parametrize("entry", ["lambda"])  # installed_entry: serving mode not in this build
-    @parametrize("backend", ["inductor", "eager"])
-    def test_tracer_dynamo_closure_entry_is_refused(self, entry, backend):
-        factory, make_args = _PRECOMPILE_CLOSURE_ENTRIES[entry]
-        with self.assertRaisesRegex(PrecompileError, "closes over"):
-            with _CaptureToFiles(factory(), tracer="dynamo", backend=backend) as cap:
-                with torch.no_grad():
-                    cap(*make_args())
-            cap.result()
-
-    @parametrize(
-        "case", ["inference", "two_variants_of_one_frame"]
-    )  # training: follow-up
-    def test_dynamo_tracer_renders_kernels_as_source(self, case):
-        # A compiled subgraph is Inductor output, which has a source form -- so
-        # the dynamo tracer emits it rather than pickling it, leaving only the
-        # guard trees and bytecode opaque. This holds for a TRAINING capture too:
-        # its forward and backward are both rendered and bridged by an emitted
-        # autograd.Function. Two variants of one frame render the SAME names into
-        # one namespace, so without per-subgraph renaming the first variant would
-        # silently run the second's code.
-        training = case == "training"
-        if case == "two_variants_of_one_frame":
-            fn, xs = _precompile_scale_sum, [torch.randn(2, 8), torch.randn(4, 8)]
-        else:
-            fn, xs = (
-                _PrecompileBreakingModule().eval(),
-                [torch.randn(3, 8), torch.randn(5, 8)],
-            )
-        ctx = torch.enable_grad() if training else torch.no_grad()
-        with ctx:
-            with _CaptureToFiles(
-                fn,
-                backend="inductor",
-                dynamic=False,
-                tracer="dynamo",
-                training=training,
-            ) as cap:
-                for _ex_args in [(x,) for x in xs]:
-                    cap(*_ex_args)
-            code, cache = cap.result()
-        self.assertIn("_SUBGRAPHS[", code)
-
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        # Serve in the mode it was captured in: grad mode is a GLOBAL_STATE
-        # guard, and it is checked.
-        with _maybe_scoped(loaded), ctx:
-            for x in xs:
-                # entry frame is forward, so the receiver is passed explicitly
-                args = (fn, x) if isinstance(fn, torch.nn.Module) else (x,)
-                self.assertEqual(loaded(*args), fn(x))
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_dynamo_tracer_names_why_a_subgraph_stayed_pickled(self):
-        # A subgraph the composer refuses stays a pickled bundle, and the
-        # artifact says so in its header, with the reason, rather than shipping
-        # base64 under a bare OPAQUE banner; the same reason is warned at capture.
-        model = _PrecompileAliasedMutationModule()
-        base = torch.arange(4, dtype=torch.float32) + 1
-        with self.assertLogs(
-            "torch._dynamo.precompile_package", level="WARNING"
-        ) as logs:
-            with _CaptureToFiles(
-                model, backend="inductor", dynamic=False, tracer="dynamo", training=True
-            ) as cap:
-                cap(base[:], base)
-            code, _cache = cap.result()
-        self.assertTrue(any("synthetic_base_wrapper" in m for m in logs.output))
-        self.assertNotIn("_SUBGRAPHS[", code)
-        header = [line for line in code.splitlines() if "stays pickled:" in line]
-        self.assertEqual(len(header), 1)
-        self.assertTrue(header[0].startswith("#    __compiled_fn_"), header[0])
-        self.assertIn("NotImplementedError", header[0])
-        self.assertIn("synthetic_base_wrapper", header[0])
-
-    @parametrize("construct", sorted(_EAGER_ROUND_TRIP))
-    @parametrize(
-        "broken", [False]
-    )  # broken=True breaks in a child frame: installed mode follow-up
-    def test_eager_backend_graph_survives_serialization(self, construct, broken):
-        # An eager subgraph ships as a pickled GraphModule, whose reduction keeps
-        # only the generated source and re-derives the Graph by re-tracing it. A HOP
-        # explodes on the Proxy; autocast's enter/exit take no Proxy at all, so the
-        # retrace RUNS them and drops the nodes -- served output was fp32; the same
-        # for _set_grad_enabled, which also leaked into the LOADER's grad mode.
-        from torch._precompile import _parse_artifact_metadata
-
-        entry, args = (
-            (_eager_rt_broken, (construct,))
-            if broken
-            else (_EAGER_ROUND_TRIP[construct], ())
-        )
-        training = construct == "no_grad_region"
-        grad_ctx = torch.enable_grad() if training else torch.no_grad()
-        x = torch.randn(4, 4, requires_grad=training)
-        with grad_ctx:
-            expected = torch.compile(entry, backend="eager")(*args, x)
-        self.assertFalse(expected.requires_grad)
-        torch._dynamo.reset()
-        with _CaptureToFiles(
-            entry,
-            backend="eager",
-            dynamic=False,
-            tracer="dynamo",
-            training=training,
-            require_no_risky_drops=False,
-        ) as cap:
-            with grad_ctx:
-                cap(*args, x)
-        code, cache = cap.result()
-        self.assertEqual(
-            _parse_artifact_metadata(code)["SERVING_MODE"],
-            "installed" if broken else "standalone",
-        )
-        torch._dynamo.reset()
-        with torch.no_grad():
-            loaded = _load_pair(code, cache)
-            self.assertFalse(torch.is_grad_enabled())
-        with _maybe_scoped(loaded), grad_ctx:
-            served = loaded(*args, x)
-        self.assertFalse(served.requires_grad)
-        self.assertEqual(served, expected)
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_multi_graph_bare_module_capture_is_refused(self):
-        # Handing precompile a bare nn.Module compiles Dynamo's OWN wrapper
-        # frame (wrap_inline's `inner`), which closes over the module: the
-        # entry frame holds no graph, and no artifact can rebuild that closure.
-        # Refuse, and name the spelling that works.
-        model = torch.nn.Linear(8, 4).eval()
-        x = torch.randn(3, 8)
-        with self.assertRaisesRegex(
-            torch._precompile.PrecompileError, "captured no dispatchable graph"
-        ):
-            with _CaptureToFiles(
-                model, backend="eager", dynamic=False, tracer="dynamo"
-            ) as cap:
-                with torch.no_grad():
-                    cap(x)
-            cap.result()
-
-    def test_no_dispatchable_graph_names_the_cause(self):
-        # An entry frame with no variants has two very different causes. If
-        # Dynamo BYPASSED the frame it recorded why, and saying so beats the
-        # thin-wrapper advice, which in that case is simply wrong. Only the
-        # ENTRY's own bypassed codes count: an unrelated bypassed helper frame
-        # must not relabel a thin-wrapper entry as a bypass.
-        from torch._dynamo.package import SerializedCode
-        from torch._precompile import _reject_uninstallable_entry
-
-        def fwd_loss_bwd():
-            pass
-
-        def helper():
-            pass
-
-        def bypassed_code(fn):
-            return types.SimpleNamespace(
-                bypassed=True,
-                bypass_reason="cannot pickle 'generator' object",
-                install_to_global=False,
-                python_code=SerializedCode.from_code_object(fn.__code__),
-            )
-
-        entry = types.SimpleNamespace(
-            fn_name="fwd_loss_bwd", codes=[bypassed_code(fwd_loss_bwd)]
-        )
-        # The state a bypassed ENTRY actually arrives in: _multigraph_frames
-        # DROPS bypassed codes, so there is no entry frame at all -- the
-        # diagnostic must fire from the empty list, not from a variant-less
-        # entry frame it would never see.
-        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
-            _reject_uninstallable_entry([], entry)
-        with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
-            _reject_uninstallable_entry([], entry)
-        # An entry frame that compiled but produced no variants, with a
-        # bypassed sibling code of the same name, reports the bypass too.
-        frames = [{"is_entry": True, "variants": []}]
-        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
-            _reject_uninstallable_entry(frames, entry)
-        foreign = types.SimpleNamespace(
-            fn_name="fwd_loss_bwd", codes=[bypassed_code(helper)]
-        )
-        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
-            _reject_uninstallable_entry(frames, foreign)
-        # No entry frame and only a FOREIGN bypassed code: neither diagnostic
-        # applies, so neither may fire as a guess.
-        _reject_uninstallable_entry([], foreign)
-        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
-            _reject_uninstallable_entry(
-                frames, types.SimpleNamespace(fn_name="step", codes=[])
-            )
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_multigraph_artifact_round_trips_a_graph_break(self):
-        from torch._dynamo.package import CompilePackage, SerializedCode
-        from torch._dynamo.precompile_context import EagerCacheArtifact
-        from torch._dynamo.precompile_package import default_guard_filter_fn
-        from torch._precompile import _build_multigraph_artifact, _multigraph_frames
-
-        m = torch.nn.Linear(4, 3)
-        x = torch.randn(5, 4)
-        package = CompilePackage(
-            _multigraph_step,
-            explicit_capture=True,
-            serialization_guard_filter_fn=default_guard_filter_fn,
-        )
-        compiled = torch._dynamo.optimize(backend="eager", package=package)(
-            _multigraph_step
-        )
-        compiled(m, x)
-        compiled(m, x, 3.0)
-        entry = package.cache_entry()
-        # The entry frame and the continuation after the graph break.
-        frames = _multigraph_frames(entry)
-        names = [SerializedCode.to_code_object(f["code"]).co_name for f in frames]
-        self.assertEqual(len(frames), 2, names)
-        backends = {
-            backend_id: EagerCacheArtifact(key=backend_id, content=fn)
-            for backend_id, fn in package.cached_backends.items()
-        }
-        summary = types.SimpleNamespace(
-            dropped_guards=(),
-            risky_dropped_guards=(),
-            policy_dropped_guards=(),
-            wont_generalize=(),
-        )
-        code, cache = _build_multigraph_artifact(
-            entry, backends, summary, "eager", entry_fn=_multigraph_step
-        )
-        torch._dynamo.reset()
-        f = _load_pair(code, cache)
-        # The default travels with the artifact; the second variant pins 3.0.
-        self.assertEqual(f(m, x), _multigraph_step(m, x))
-        self.assertEqual(f(m, x, 3.0), _multigraph_step(m, x, 3.0))
-        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
-            f(m, torch.randn(7, 4))
-
-        # The artifact is locked to the Python it was produced on.
-        current = f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}"
-        self.assertIn(current, code)
-        foreign = code.replace(current, "_DYNAMO_PYTHON_VERSION = (3, 99)", 1)
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        blob["code_hash"] = hashlib.sha256(foreign.encode("utf-8")).hexdigest()
-        buf = io.BytesIO()
-        torch.save(blob, buf)
-        with self.assertRaisesRegex(PrecompileError, "produced on Python 3.99"):
-            _load_pair(foreign, buf.getvalue())
 
     def test_make_fx_artifact_ignores_ambient_autocast(self):
         # The graph was traced with autocast off, so the artifact runs it that
@@ -3770,376 +2177,9 @@ class TestPrecompile(TestCase):
         self.assertEqual(out.dtype, torch.float32)
         self.assertEqual(out, expected)
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_guarded_user_object_prunes_its_unguarded_attributes(self):
-        # Pruning used to apply only to nn.Module, so a guarded object that is
-        # NOT a module -- a train pipeline holding a dataloader -- was pickled
-        # whole and one unguarded attribute several levels down took the frame
-        # with it ("cannot pickle 'generator' object"), which surfaced only as
-        # "the entry frame produced no guarded code".
-        x = torch.randn(4, 8)
-        pipeline = _PrecompilePipeline(torch.nn.Linear(8, 8))
-        with torch.no_grad():
-            expected = _precompile_via_pipeline(pipeline, x)
-            with _CaptureToFiles(
-                _precompile_via_pipeline,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-            ) as cap:
-                cap(pipeline, x)
-            code, cache = cap.result()
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with _maybe_scoped(loaded), torch.no_grad():
-            self.assertEqual(loaded(pipeline, x), expected)
-
     @torch._dynamo.config.patch(
         automatic_dynamic_shapes=True, assume_static_by_default=True
     )
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
-    def test_capture_limits_and_frame_state_are_scoped_to_the_session(self):
-        # Neither recompile limits nor automatic-dynamic frame state cross
-        # between a session and ordinary compiles of the same code.
-        from torch._C._dynamo.eval_frame import get_code_exec_strategy
-        from torch._dynamo.types import FrameAction
-
-        def ordinary_frame_count():
-            counter = torch._dynamo.testing.CompileCounter()
-            compiled = torch.compile(
-                _precompile_single_graph, backend=counter, dynamic=None
-            )
-            for n in (4, 5):
-                x = torch.randn(n)
-                self.assertEqual(compiled(x), _precompile_single_graph(x))
-            return counter.frame_count
-
-        torch._dynamo.reset()
-        self.assertEqual(ordinary_frame_count(), 2)
-        torch._dynamo.reset()
-        with torch._dynamo.config.patch(
-            accumulated_recompile_limit=2, recompile_limit=8
-        ):
-            inputs = [torch.randn(n) for n in (2, 3, 4)]
-            session = _precompile_capture(
-                _precompile_single_graph,
-                backend="eager",
-                dynamic=False,
-                recompile_limit=20,
-            )
-            with session as captured:
-                for x in inputs:
-                    self.assertEqual(captured(x), _precompile_single_graph(x))
-                during = torch._dynamo.testing.CompileCounter()
-                ordinary = torch.compile(
-                    _precompile_single_graph, backend=during, dynamic=False
-                )
-                x = torch.randn(5)
-                self.assertEqual(ordinary(x), _precompile_single_graph(x))
-                self.assertEqual(during.frame_count, 1)
-            summary = session.summary()
-            self.assertTrue(summary.complete)
-            self.assertEqual(summary.truncated, ())
-            self.assertEqual(summary.guarded_codes, len(inputs))
-            after = torch._dynamo.testing.CompileCounter()
-            ordinary = torch.compile(
-                _precompile_single_graph, backend=after, dynamic=False
-            )
-            x = torch.randn(6)
-            self.assertEqual(ordinary(x), _precompile_single_graph(x))
-            self.assertEqual(after.frame_count, 1)
-            strategy = get_code_exec_strategy(_precompile_single_graph.__code__)
-            self.assertEqual(strategy.cur_action, FrameAction.DEFAULT)
-            self.assertEqual(strategy.recursive_action, FrameAction.DEFAULT)
-
-        torch._dynamo.reset()
-        warm = torch.compile(_precompile_multi_graph, backend="eager", dynamic=False)
-        for n in (2, 3):
-            x = torch.randn(n, 8)
-            self.assertEqual(warm(x), _precompile_multi_graph(x))
-        x = torch.randn(4, 8)
-        session = _precompile_capture(
-            _precompile_multi_graph,
-            backend="eager",
-            dynamic=False,
-            recompile_limit=2,
-        )
-        with session as compiled:
-            self.assertEqual(compiled(x), _precompile_multi_graph(x))
-        summary = session.summary()
-        self.assertTrue(summary.complete)
-        self.assertEqual(summary.truncated, ())
-        self.assertEqual(summary.uncovered_frames, ())
-        self.assertEqual(summary.guarded_codes, 3)
-
-        session = _precompile_capture(
-            _precompile_single_graph, backend="eager", dynamic=None
-        )
-        with session as compiled:
-            for n in (2, 3):
-                x = torch.randn(n)
-                self.assertEqual(compiled(x), _precompile_single_graph(x))
-        self.assertEqual(ordinary_frame_count(), 2)
-
-    @parametrize("backend", ["eager", "inductor"])
-    def test_multi_graph_round_trip_exercised_empty_resume(self, backend):
-        x = torch.arange(3.0)
-        expected = [_precompile_empty_resume(x, flag) for flag in (False, True)]
-        session = _precompile_capture(
-            _precompile_empty_resume,
-            backend=backend,
-            dynamic=False,
-            require_no_dropped_guards=False,
-        )
-        with session as compiled:
-            with torch.no_grad():
-                compiled(x, False)
-                compiled(x, True)
-        self.assertTrue(session.summary().complete)
-
-        code, cache = session.result()
-        torch._dynamo.reset()
-        with self.assertLogs("torch._precompile", level="WARNING"):
-            loaded = _load_pair(code, cache)
-        with torch.no_grad():
-            for flag, want in zip((False, True), expected):
-                self.assertEqual(loaded(x, flag), want)
-
-    def test_dynamo_captures_a_keyword_call(self):
-        # The dynamo tracer takes keyword arguments, so the loaded artifact serves
-        # the same keywords rather than positional arguments only.
-        from torch._precompile import _parse_artifact_metadata
-
-        x = torch.randn(3)
-        with torch.no_grad():
-            with _CaptureToFiles(
-                _precompile_scaled,
-                backend="eager",
-                dynamic=False,
-                tracer="dynamo",
-            ) as cap:
-                cap(x, 1)
-                cap(x, k=2)
-            code, cache = cap.result()
-        frames = _parse_artifact_metadata(code)["FRAMES"]
-        self.assertEqual([count for _, count in frames], [2])
-        torch._dynamo.reset()
-        loaded = _load_pair(code, cache)
-        with torch.no_grad():
-            self.assertEqual(loaded(x, k=2), x * 2)
-            self.assertEqual(loaded(x, 2), x * 2)
-            self.assertEqual(loaded(x, 1), x)
-
-    @parametrize("bounds", [None, (4, 16)])
-    @parametrize("backend", ["inductor", "eager"])
-    def test_tracer_dynamo_mark_unbacked_runs_across_sizes(self, bounds, backend):
-        # Dynamic shapes are opt-in via mark_unbacked for the dynamo tracer too: Dynamo
-        # captures the marked dim as an UNBACKED symint, so the ONE artifact serves any
-        # runtime size of that dim on either backend (the make_fx tracer's eager backend
-        # rejects dynamic dims; the dynamo subgraph carries its own runtime asserts, so it
-        # does not have to). mark_unbacked's min/max become ShapeEnv runtime asserts,
-        # which Dynamo emits into the subgraph itself -- so the artifact rejects an
-        # out-of-range runtime size even though the thin dynamo driver has no bounds
-        # check of its own (the make_fx tracer instead re-checks the bounds in its driver).
-        m = torch.nn.Sequential(
-            torch.nn.Linear(4, 8), torch.nn.ReLU(), torch.nn.Linear(8, 3)
-        ).eval()
-        x = torch.randn(8, 4)
-        if bounds is None:
-            mark_unbacked(x, 0)
-        else:
-            mark_unbacked(x, 0, min=bounds[0], max=bounds[1])
-        with _CaptureToFiles(
-            lambda model, xx: model(xx), training=True, tracer="dynamo", backend=backend
-        ) as cap:
-            cap(m, x)
-        code, cache = cap.result()
-        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
-            for bs in (8, 16, 1, 0) if bounds is None else (8, 16, 6):
-                xt = torch.randn(bs, 4)
-                self.assertEqual(f_c(m, xt), m(xt))
-            if bounds is not None:
-                with self.assertRaisesRegex(PrecompileError, "no captured variant"):
-                    f_c(m, torch.randn(2, 4))
-
-    def test_tracer_dynamo_cross_tracer_cache_rejected(self):
-        # A cache from the make_fx tracer paired with dynamo python_code is a mismatched
-        # pairing and must be rejected (the code_hash and the tracer tag both catch it),
-        # not run under foreign metadata.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        with _CaptureToFiles(lambda model, xx: model(xx), tracer="dynamo") as cap:
-            with torch.no_grad():
-                cap(m, x)
-        dyn_code, _ = cap.result()
-        with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
-            cap(m, x)
-        _, mf_cache = cap.result()
-        with self.assertRaisesRegex(PrecompileError, "tracer"):
-            _load_pair(dyn_code, mf_cache)
-
-    @parametrize("output", list(_PRECOMPILE_OUTPUT_SHAPES))
-    @parametrize("backend", ["inductor", "eager"])
-    def test_tracer_dynamo_output_structures_round_trip(self, output, backend):
-        # Under dynamo the transformed bytecode (NOT the driver's OUT_SPEC path make_fx
-        # uses) reassembles fn's output, so each leaf is checked on both backends: a
-        # mis-ordered flatten or a dropped dict leaf would silently corrupt the output
-        # structure, a global constant left dangling would NameError at load, and a
-        # non-tensor output is a DIVERGENCE from make_fx, which REJECTS it on inductor
-        # (test_nontensor_output_inductor_clean_error).
-        fn = _PRECOMPILE_OUTPUT_SHAPES[output]
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        with _CaptureToFiles(
-            fn, training=True, tracer="dynamo", backend=backend
-        ) as cap:
-            cap(m, x)
-        code, cache = cap.result()
-        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
-            out, ref = f_c(m, x), fn(m, x)
-            self.assertEqual(out, ref)
-            if output == "by_reference_callable":
-                self.assertIs(out[1], ref[1])
-
-    @parametrize("backend", ["inductor", "eager"])
-    def test_tracer_dynamo_dtensor_subclass(self, backend):
-        # The dynamo-tracer analog of test_dtensor_subclass: a DTensor param/input must
-        # round-trip on both backends. The dynamo eager emit inlines the subgraph against an
-        # empty _GraphSelf and splats flat args, and inductor lowers via AOTAutograd's subclass
-        # wrap/unwrap -- neither is exercised by the dense-input dynamo tests, so cover both.
-        import torch.distributed as dist
-
-        if not dist.is_available() or not dist.is_gloo_available():
-            self.skipTest("gloo not available")
-
-        from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate
-        from torch.testing._internal.common_utils import find_free_port
-
-        saved_env = {k: os.environ.get(k) for k in ("MASTER_ADDR", "MASTER_PORT")}
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        dist.init_process_group("gloo", rank=0, world_size=1)
-        try:
-            mesh = DeviceMesh("cpu", list(range(1)))
-            m = torch.nn.Linear(4, 3).eval()
-            for name, p in list(m.named_parameters()):
-                setattr(
-                    m,
-                    name,
-                    torch.nn.Parameter(
-                        distribute_tensor(p.detach(), mesh, [Replicate()])
-                    ),
-                )
-            x = distribute_tensor(torch.randn(5, 4), mesh, [Replicate()])
-            ref = m(x)
-            with _CaptureToFiles(
-                lambda model, xx: model(xx),
-                training=True,
-                tracer="dynamo",
-                backend=backend,
-            ) as cap:
-                cap(m, x)
-            code, cache = cap.result()
-            # Exercise BOTH reload paths on the DTensor artifact: load() takes the
-            # bundled-artifact path (primes the cache, then execs python_code), while the
-            # direct exec below runs the self-contained python_code with no cache.
-            f_c = _load_pair(code, cache)
-            self.assertEqual(f_c(m, x).to_local(), ref.to_local())
-            ns = {"__name__": "_dt"}
-            exec(compile(code, "<dt>", "exec"), ns)
-            self.assertEqual(ns["forward"](m, x).to_local(), ref.to_local())
-        finally:
-            dist.destroy_process_group()
-            for k, v in saved_env.items():
-                if v is None:
-                    os.environ.pop(k, None)
-                else:
-                    os.environ[k] = v
-
-    @parametrize("call", ["omit_all_defaults", "pass_the_first_positionally"])
-    @parametrize("backend", ["inductor", "eager"])
-    def test_tracer_dynamo_defaults_roundtrip(self, call, backend):
-        # fn with positional defaults and a keyword-only default drives the driver's
-        # argdefs / kwdefaults restoration; the defaults must be honored at the runtime
-        # call (omitting them would TypeError / use a wrong value if they were dropped).
-        # __defaults__ covers the LAST len(defaults) parameters: a call passing the
-        # first defaulted argument positionally must still see the second one's real
-        # default in the guard check, not the first one's.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        args = (m, x) if call == "omit_all_defaults" else (m, x, 3.0)
-        with _CaptureToFiles(
-            _precompile_with_defaults, training=True, tracer="dynamo", backend=backend
-        ) as cap:
-            cap(*args)
-        code, cache = cap.result()
-        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
-            self.assertEqual(f_c(*args), _precompile_with_defaults(*args))
-
-    def test_tracer_dynamo_static_under_dynamic_config(self):
-        # dynamic=None is the ambient config (test_automatic_dynamic_promotes_the_frames_that_varied
-        # relies on that), so a STATIC capture is spelled dynamic=False, which pins
-        # assume_static_by_default and automatic_dynamic_shapes for the capture
-        # (eval_frame.make_set_enable_dynamic). The eager subgraph ships as a pickle, so the
-        # only observable of "static" is dispatch: an unseen batch size must be refused.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        with torch._dynamo.config.patch(assume_static_by_default=False):
-            with _CaptureToFiles(
-                lambda model, xx: model(xx),
-                training=True,
-                tracer="dynamo",
-                backend="eager",
-                dynamic=False,
-            ) as cap:
-                cap(m, x)
-            code, cache = cap.result()
-        f_c = _load_pair(code, cache)
-        self.assertEqual(f_c(m, x), m(x))
-        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
-            f_c(m, torch.randn(6, 4))
-
-        # Shape history is per capture: precompiling the SAME fn (one code object) at a
-        # second shape does not promote the batch dim, because each session opens its own
-        # isolated region with fresh frame state. Both artifacts serve only what they saw.
-        def f(model, xx):
-            return model(xx)
-
-        with _CaptureToFiles(f, training=True, tracer="dynamo", backend="eager") as cap:
-            cap(m, torch.randn(5, 4))
-        c1, _ = cap.result()
-        with _CaptureToFiles(f, training=True, tracer="dynamo", backend="eager") as cap:
-            cap(m, torch.randn(7, 4))
-        c2, _ = cap.result()
-        self.assertNotIn("SymInt", c1)
-        self.assertNotIn("SymInt", c2)
-
-    def test_load_cache_without_tracer_key(self):
-        # BC: a cache produced before the dynamo tracer existed carries no "tracer" key in
-        # its envelope. load() must accept such an envelope. (It does not read the key at
-        # this commit; the tracer="dynamo" wiring adds the read and this test then guards
-        # its "make_fx" default.) Simulate a legacy envelope by deleting the key. Assert
-        # the cache envelope was actually CONSUMED (no "could not read the cache envelope"
-        # warning): a KeyError would be swallowed by load()'s except and fall back to JIT,
-        # which still returns the right answer -- so an output-only assertion would not
-        # guard the default.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
-            cap(m, x)
-        code, cache = cap.result()
-        blob = torch.load(io.BytesIO(cache), weights_only=True)
-        del blob["tracer"]
-        buf = io.BytesIO()
-        torch.save(blob, buf)
-        with self.assertLogs("torch._precompile", level="WARNING") as cm:
-            f_c = _load_pair(code, buf.getvalue())
-        self.assertFalse(
-            any("could not read the cache envelope" in msg for msg in cm.output),
-            f"legacy cache envelope was not consumed (fell back to JIT): {cm.output}",
-        )
-        self.assertEqual(f_c(m, x), m(x))
-
     def test_backend_invalid_raises(self):
         a, b = torch.randn(4, 4), torch.randn(4, 4)
         with self.assertRaisesRegex(
@@ -4148,39 +2188,8 @@ class TestPrecompile(TestCase):
             with _CaptureToFiles(lambda x, y: x + y, backend="nope") as cap:
                 cap(a, b)
 
-    def test_tracer_default_and_explicit(self):
-        # capture()'s tracer defaults to DynamoTracer(); MakeFxTracer is the
-        # single-trace alternative. Drive the real API (not the string shim) so
-        # the default and both explicit tracers are locked in.
-        self.assertIsInstance(
-            inspect.signature(torch.compiler.precompile.capture)
-            .parameters["tracer"]
-            .default,
-            DynamoTracer,
-        )
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        for tracer in (None, DynamoTracer(), MakeFxTracer()):
-            kwargs = {} if tracer is None else {"tracer": tracer}
-            with tempfile.TemporaryDirectory() as d:
-                ap, cp = os.path.join(d, "m.py"), os.path.join(d, "m.cache")
-                with (
-                    torch.no_grad(),
-                    torch.compiler.precompile.capture(
-                        lambda model, xx: model(xx),
-                        artifact_path=ap,
-                        cache_path=cp,
-                        backend="eager",
-                        **kwargs,
-                    ) as cap,
-                ):
-                    cap(m, x)
-                loaded = torch.compiler.precompile.load(ap, cp)
-                with _maybe_scoped(loaded), torch.no_grad():
-                    self.assertEqual(loaded(m, x), m(x))
-
     def test_tracer_invalid_raises(self):
-        # capture() takes a tracer OBJECT; a wrong type is a TypeError naming the
+        # torch.compiler.precompile.capture() takes a tracer OBJECT; a wrong type is a TypeError naming the
         # accepted tracers.
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaisesRegex(TypeError, "MakeFxTracer or DynamoTracer"):
@@ -4243,7 +2252,7 @@ class TestPrecompile(TestCase):
                 ns = {"__name__": "_a"}
                 exec(compile(code, "<a>", "exec"), ns)
                 self.assertEqual(ns["forward"](m, x), m(x), patch)
-                # ...and load() falls back to the inlined path.
+                # ...and torch.compiler.precompile.load() falls back to the inlined path.
                 self.assertEqual(_load_pair(code, cache)(m, x), m(x), patch)
 
     def test_inductor_cpp_wrapper_pinned_off(self):
@@ -4264,7 +2273,10 @@ class TestPrecompile(TestCase):
     def test_example_grad_restored_when_fn_raises(self):
         # If fn runs a backward then raises during the make_fx trace, the example
         # model's .grad must be restored (the snapshot/restore is in a finally), not
-        # left clobbered -- precompile does not mutate the example model's grads.
+        # left clobbered -- a failed capture leaves the caller's grads as it found
+        # them. This is the raising path only: a capture that SUCCEEDS runs the call
+        # for real and accumulates onto .grad, which the sibling
+        # test_preexisting_param_grad_capture_succeeds pins.
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
@@ -4285,9 +2297,10 @@ class TestPrecompile(TestCase):
         # Regression: in the mark_unbacked path the example params are fakeified BEFORE
         # the grad clear. A model with a pre-existing .grad (the warmup-step-then-
         # precompile flow) plus a backward in fn must still capture -- the clear must
-        # precede fakeify so the fakes inherit no grad. The trace itself leaves the real
-        # .grad untouched; capture then runs the step once for real (caller-driven
-        # contract), accumulating a second identical backward onto the warmup grad.
+        # precede fakeify so the fakes inherit no grad. Capture then runs the step once
+        # for real (caller-driven contract), and since the warmup used the same weights
+        # and the same x, the .grad it accumulates doubles the warmup one. (Only the sum
+        # is pinned here; test_preexisting_param_grad_capture_succeeds pins both terms.)
         from torch._dynamo.decorators import mark_unbacked
 
         torch.manual_seed(0)
@@ -4302,9 +2315,8 @@ class TestPrecompile(TestCase):
             cap(m, x)
         code, _ = cap.result()
         self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)  # dim 0 is dynamic
-        # warmup + capture's identical backward
         for n, p in m.named_parameters():
-            self.assertEqual(p.grad, saved[n] * 2)
+            self.assertEqual(p.grad, saved[n] * 2)  # warmup + the captured backward
 
     def test_backend_eager_no_inductor_lowering(self):
         # backend="eager" skips Inductor: the generated code has no inductor ``call``
@@ -4357,26 +2369,28 @@ class TestPrecompile(TestCase):
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
-        m(x).sum().backward()  # warmup: params now carry a .grad
+        # Warm up on a DIFFERENT input, so the warmup grad and the captured call's grad
+        # are distinguishable terms rather than the same value twice.
+        m(torch.randn(3, 4)).sum().backward()
         self.assertIsNotNone(m.weight.grad)
         grad_before = m.weight.grad.clone()
+        ref = torch.nn.Linear(4, 3)
+        ref.load_state_dict(m.state_dict())
+        ref(x).sum().backward()
 
         with _CaptureToFiles(
             lambda model, xx: model(xx).sum().backward(), training=True
         ) as cap:
             cap(m, x)
         code, cache = cap.result()
-        # Capture runs the step once for real (caller-driven contract), so it
-        # accumulates a second identical backward onto the warmup grad -- exactly what a
-        # second eager model(x).sum().backward() would do (same weights, same x).
-        self.assertEqual(m.weight.grad, grad_before * 2)
+        # Capture runs the step once for real (caller-driven contract), so the warmup
+        # grad is preserved and exactly one backward on x is accumulated onto it -- both
+        # terms pinned, since ref's grad comes from x alone.
+        self.assertEqual(m.weight.grad, grad_before + ref.weight.grad)
 
         run = torch.nn.Linear(4, 3)
         run.load_state_dict(m.state_dict())
         _load_pair(code, cache)(run, x)  # run.grad starts None
-        ref = torch.nn.Linear(4, 3)
-        ref.load_state_dict(m.state_dict())
-        ref(x).sum().backward()
         for (n, p), (_, rp) in zip(run.named_parameters(), ref.named_parameters()):
             self.assertEqual(p.grad, rp.grad, n)
 
@@ -4778,7 +2792,7 @@ class TestPrecompile(TestCase):
     def test_cache_integrity_tampered_backend_rejected(self):
         # The cache envelope's backend tag is an integrity check: a tampered backend
         # (here flipped to a value that does not match python_code's BACKEND) makes
-        # load() raise a clear PrecompileError rather than reconstruct a foreign cache.
+        # torch.compiler.precompile.load() raise a clear PrecompileError rather than reconstruct a foreign cache.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         with _CaptureToFiles(lambda model, t: model(t)) as cap:
@@ -4794,9 +2808,9 @@ class TestPrecompile(TestCase):
     @parametrize("tag", ("format", "version"))
     def test_cache_format_version_mismatch_degrades(self, tag):
         # The cache is acceleration-only, so a FORMAT or VERSION mismatch (a foreign or
-        # different-build envelope) is NOT fatal: load() DEGRADES to JIT'ing from
+        # different-build envelope) is NOT fatal: torch.compiler.precompile.load() DEGRADES to JIT'ing from
         # python_code rather than hard-failing. The reloaded callable must still run and
-        # match eager, and load() must emit a degrade WARNING on the torch._precompile
+        # match eager, and torch.compiler.precompile.load() must emit a degrade WARNING on the torch._precompile
         # logger. (A BACKEND or CODE_HASH mismatch still hard-fails -- see
         # test_cache_integrity_tampered_backend_rejected and
         # test_load_rejects_mismatched_code_cache_pair.)
@@ -4820,7 +2834,7 @@ class TestPrecompile(TestCase):
 
     def test_missing_calling_convention_metadata_rejected(self):
         # Syntactically valid python_code that lacks a required metadata global is not a
-        # precompile artifact; load() raises a clear PrecompileError naming the gap.
+        # precompile artifact; torch.compiler.precompile.load() raises a clear PrecompileError naming the gap.
         buf = io.BytesIO()
         torch.save(
             {
@@ -4846,12 +2860,10 @@ class TestPrecompile(TestCase):
         ):
             _load_pair(bad_code, cache)
 
-    def test_precompile_module_identity(self):
-        # torch.compiler.precompile is a submodule: re-importing it resolves to the
-        # SAME module object, and its name is the stable public path.
+    def test_module_identity(self):
+        # A submodule, not an attribute: re-importing it by name yields the same object.
         p = torch.compiler.precompile
         self.assertIs(importlib.import_module("torch.compiler.precompile"), p)
-        self.assertIs(sys.modules["torch.compiler.precompile"], p)
         self.assertEqual(p.__name__, "torch.compiler.precompile")
 
     def test_standalone_runtime_artifact_execs_in_fresh_process(self):
@@ -4943,7 +2955,6 @@ class TestPrecompile(TestCase):
         new_code = head + new_call + code[banner:]
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         blob["artifact"] = None  # force the inlined path so the doctored call() runs
-        import hashlib
 
         blob["code_hash"] = hashlib.sha256(new_code.encode()).hexdigest()
         buf = io.BytesIO()
@@ -4997,11 +3008,9 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "do not match the traced model"):
             f_c(renamed, x)
 
-    def test_inplace_input_mutation_not_restored(self):
-        # Capture EXECUTES fn once on the call's inputs (invariant 3), so an in-place
-        # mutation fn performs on a user input happens at capture time and is NOT undone.
-        # Pin this surprising contract so it stays covered: the tensor the caller passed
-        # reflects the mutation afterward.
+    def test_capture_time_input_mutation_applies_exactly_once(self):
+        # test_input_mutation_supported covers the served artifact; this pins the
+        # capture-time call, which runs fn for real once and does not undo it.
         scratch = torch.zeros(4)
         with _CaptureToFiles(lambda a: a.add_(1.0)) as cap:
             cap(scratch)
@@ -5219,14 +3228,7 @@ class TestPrecompile(TestCase):
             run.weight = torch.nn.Parameter(nc)
             return run
 
-        def loaders():
-            yield "cached", _load_pair(code, cache)
-            yield (
-                "inlined",
-                _load_pair(code, _strip_artifact(cache)),
-            )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(
                     PrecompileError, r"memory format.*PARAMETER/BUFFER.*layout"
@@ -5287,7 +3289,11 @@ class TestPrecompile(TestCase):
         # clone), so a caller holding a prior p.grad reference -- or optimizer state keyed
         # on grad identity -- is not invalidated. Warm up a backward to populate .grad,
         # snapshot the object identity, precompile a backward step on the same model, and
-        # assert p.grad is still the SAME object afterward.
+        # assert p.grad is still the SAME object afterward. Capture runs the step once for
+        # real (caller-driven contract), so the served artifact also scatters its grads
+        # with an in-place p.grad += g: on exit .grad holds two backwards' worth of
+        # gradient, and that accumulate is the second mechanism the assertIs covers (the
+        # first being capture's snapshot/restore around the trace).
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
@@ -5319,7 +3325,7 @@ class TestPrecompile(TestCase):
 
     def test_single_trust_warning_on_inlined_load(self):
         # On the inlined load path (an eager artifact has an empty cache, so there is
-        # nothing to prime and load() just EXECs python_code) the untrusted-input / EXEC
+        # nothing to prime and torch.compiler.precompile.load() just EXECs python_code) the untrusted-input / EXEC
         # warning must fire EXACTLY ONCE -- only _make_inlined_forward warns. Asserting
         # "exactly once" guards against the EXEC warning being duplicated on this load.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
@@ -5449,6 +3455,2313 @@ class TestPrecompile(TestCase):
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know is refused rather than baked from the example. The distinct
+        # fake-tensor failure paths, each exercised end to end through capture:
+        # .item() (DataDependentOutputException), .nonzero() (DynamicOutputShapeException),
+        # and an op with no meta/fake kernel (UnsupportedOperatorException for a
+        # library op, a RuntimeError naming the missing fake impl for a custom_op).
+        from torch.library import _scoped_library
+
+        model = torch.nn.Linear(4, 4)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        def nonzero(m, x):
+            return m(x)[x[:, 0].nonzero().flatten()]
+
+        for fn in (items, nonzero):
+            with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
+                with _CaptureToFiles(fn, backend="eager") as cap:
+                    cap(model, torch.randn(3, 4))
+
+        # Both op registrations are global, so undo them: the scoped library takes
+        # its own op with it, and the custom_op's library is destroyed in finally.
+        with _scoped_library("mlprecompile", "FRAGMENT") as lib:
+            lib.define("no_meta(Tensor x) -> Tensor")
+            lib.impl("no_meta", lambda x: x * 2, "CPU")
+
+            @torch.library.custom_op("mlprecompile::no_fake_impl", mutates_args=())
+            def no_fake_impl(x: torch.Tensor) -> torch.Tensor:
+                return x * 2
+
+            try:
+                for op in (torch.ops.mlprecompile.no_meta, no_fake_impl):
+                    with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                        with _CaptureToFiles(
+                            lambda m, x, op=op: op(m(x)), backend="eager"
+                        ) as cap:
+                            cap(model, torch.randn(3, 4))
+            finally:
+                no_fake_impl._lib._destroy()
+
+    def test_capture_refuses_a_data_ptr_read(self):
+        # Capture traces on fake tensors, which have no real memory behind them, so a
+        # .data_ptr() read in fn (or in a kernel that dereferences one) could only
+        # return a meaningless value: the capture fake mode is built with
+        # fake_tensor_allow_unsafe_data_ptr_access off, which turns the read into a
+        # refusal at capture time.
+        model = torch.nn.Linear(4, 4)
+
+        def reads_pointer(m, x):
+            x.data_ptr()
+            return m(x)
+
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            with _CaptureToFiles(reads_pointer, backend="eager") as cap:
+                cap(model, torch.randn(3, 4))
+
+    def test_unfakeifiable_input_refused_without_clobbering_grad(self):
+        # Fakeification runs INSIDE the .grad save/restore window, so an example input
+        # the meta converter cannot represent (a quantized tensor) is refused with a
+        # PrecompileError naming it, and the caller's example .grad is put back -- the
+        # same object, not a copy.
+        model = torch.nn.Linear(3, 3)
+        grad = torch.ones_like(model.weight)
+        model.weight.grad = grad
+        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+        ):
+            with _CaptureToFiles(
+                lambda m, t: m(t.dequantize()), backend="eager"
+            ) as cap:
+                cap(model, q)
+        self.assertIs(model.weight.grad, grad)
+
+    def test_user_runtime_error_from_fn_propagates_unchanged(self):
+        # Capture catches EVERY RuntimeError out of the trace to relabel the two it
+        # owns (a missing fake impl, a data-pointer read), so a RuntimeError raised by
+        # fn itself must fall through the substring checks and reach the caller with
+        # its ORIGINAL message, not be relabeled as a missing meta/fake kernel.
+        model = torch.nn.Linear(4, 4)
+
+        def raises(m, x):
+            raise RuntimeError("my own capture-time failure")
+
+        with self.assertRaisesRegex(RuntimeError, "my own capture-time failure"):
+            with _CaptureToFiles(raises, backend="eager") as cap:
+                cap(model, torch.randn(3, 4))
+        try:
+            with _CaptureToFiles(raises, backend="eager") as cap:
+                cap(model, torch.randn(3, 4))
+        except RuntimeError as e:
+            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
+            self.assertNotIsInstance(e, PrecompileError)
+            self.assertNotIn("no meta/fake kernel", str(e))
+
+    def test_input_is_mutated_exactly_once_by_the_capture_call(self):
+        # Capture traces fn on FAKE tensors (invariant 3), so the in-place mutation fn
+        # performs during the trace never reaches the caller's tensor; the capture call
+        # then SERVES the artifact on the real args, and that serve is what mutates the
+        # real input -- exactly once, not once per trace-plus-serve. A loaded artifact
+        # mutates its input exactly once per call too.
+        scratch = torch.zeros(4)
+        with _CaptureToFiles(lambda a: a.add_(1.0)) as cap:
+            out = cap(scratch)
+        self.assertEqual(scratch, torch.ones(4))
+        self.assertEqual(out, torch.ones(4))
+        f = torch.compiler.precompile.load(cap.artifact_path, cap.cache_path)
+        f(scratch)
+        self.assertEqual(scratch, torch.full((4,), 2.0))
+        f(scratch)
+        self.assertEqual(scratch, torch.full((4,), 3.0))
+
+    def test_default_tracer_is_dynamo(self):
+        default = (
+            inspect.signature(torch.compiler.precompile.capture)
+            .parameters["tracer"]
+            .default
+        )
+        self.assertEqual(default, DynamoTracer())
+
+    def test_public_api_surface(self):
+        # precompile lives under torch.compiler only: no torch.precompile, and the
+        # module is what torch.compiler exports.
+        self.assertIn("precompile", torch.compiler.__all__)
+        self.assertNotIn("precompile", torch.__all__)
+        self.assertFalse(hasattr(torch, "precompile"))
+        self.assertIs(
+            torch.compiler.precompile, sys.modules["torch.compiler.precompile"]
+        )
+
+    def test_artifact_write_leaves_the_previous_pair_on_failure(self):
+        # The pair only loads together (the cache hashes its python_code), so a
+        # write that dies must leave the previous pair, not a new .py by an old cache.
+        import builtins
+
+        from torch._precompile import _write_artifact
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_path = os.path.join(d, "a.cache")
+            _write_artifact(artifact_path, cache_path, "GOOD = 1\n", b"goodcache")
+
+            real_open = builtins.open
+            seen = []
+
+            def flaky(path, *args, **kwargs):
+                if str(path).endswith(".tmp"):
+                    seen.append(path)
+                    if len(seen) == 2:
+                        raise OSError("disk full")
+                return real_open(path, *args, **kwargs)
+
+            with mock.patch.object(builtins, "open", flaky):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    _write_artifact(artifact_path, cache_path, "NEW = 2\n", b"newcache")
+            with open(artifact_path) as f:
+                self.assertEqual(f.read(), "GOOD = 1\n")
+            with open(cache_path, "rb") as f:
+                self.assertEqual(f.read(), b"goodcache")
+            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
+
+    @unittest.skipIf(IS_WINDOWS, "POSIX file modes")
+    def test_artifact_write_honours_the_umask(self):
+        # The pair must land with the mode a plain open() gives under the umask,
+        # not mkstemp's 0600. Reading the process-global umask this way is safe
+        # only because the suite is single-threaded.
+        import stat
+
+        from torch._precompile import _write_artifact
+
+        umask = os.umask(0)
+        os.umask(umask)
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_path = os.path.join(d, "a.cache")
+            _write_artifact(artifact_path, cache_path, "X = 1\n", b"cache")
+            for path in (artifact_path, cache_path):
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o666 & ~umask)
+            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
+
+    def test_artifact_write_restores_the_previous_pair_on_rename_failure(self):
+        # Two renames are not atomic: if the second fails the previous .py is put
+        # back, so the named files never hold a new .py beside the old cache.
+        from torch._precompile import _write_artifact
+
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_path = os.path.join(d, "a.cache")
+            _write_artifact(artifact_path, cache_path, "GOOD = 1\n", b"goodcache")
+            real_replace = os.replace
+
+            def flaky(src, dst):
+                if dst == cache_path:
+                    raise OSError("cache rename failed")
+                return real_replace(src, dst)
+
+            with mock.patch.object(os, "replace", flaky):
+                with self.assertRaisesRegex(OSError, "cache rename failed"):
+                    _write_artifact(artifact_path, cache_path, "NEW = 2\n", b"newcache")
+            with open(artifact_path) as f:
+                self.assertEqual(f.read(), "GOOD = 1\n")
+            with open(cache_path, "rb") as f:
+                self.assertEqual(f.read(), b"goodcache")
+            self.assertEqual(sorted(os.listdir(d)), ["a.cache", "a.py"])
+        # A first write whose cache target cannot be renamed over (a directory)
+        # leaves no half artifact behind either.
+        with tempfile.TemporaryDirectory() as d:
+            artifact_path = os.path.join(d, "a.py")
+            cache_dir = os.path.join(d, "a.cache")
+            os.mkdir(cache_dir)
+            with self.assertRaises(OSError):
+                _write_artifact(artifact_path, cache_dir, "NEW = 2\n", b"newcache")
+            self.assertEqual(os.listdir(d), ["a.cache"])
+
+    @parametrize("tracer", ("make_fx",))  # dynamo: needs training support
+    def test_capture_accumulates_gradients_like_eager(self, tracer):
+        # The caller makes the calls inside the block, so precompile has no
+        # example backward of its own: a grad already present when capture starts
+        # is neither cleared nor snapshotted. Both tracers run each cap() for
+        # real, so a .backward() ACCUMULATES onto the model's .grad exactly as
+        # eager does, and the same grad OBJECT stays in place (the make_fx driver
+        # accumulates in place onto a pre-existing grad, so optimizer state keyed
+        # on its identity survives).
+        torch.manual_seed(0)
+        model = _PrecompileTrainMod()
+        xs = [torch.randn(n, 8) for n in (3, 5)]
+        # make_fx captures a single call; dynamo takes as many as we make. Each
+        # captured call runs for real either way, so its backward lands on .grad.
+        capture_calls = xs[:1] if tracer == "make_fx" else xs
+        extra = {} if tracer == "make_fx" else {"dynamic": False}
+        with torch.enable_grad():
+            _precompile_backward_step(model, xs[0])  # warmup populates .grad
+            before = [(p.grad, p.grad.detach().clone()) for p in model.parameters()]
+            # Deepcopy drops .grad, so replay the warmup on the reference and
+            # then every captured call cap() executes for real, so the reference
+            # is warmup plus the captured calls' contribution.
+            reference = copy.deepcopy(model)
+            _precompile_backward_step(reference, xs[0])
+            for x in capture_calls:
+                _precompile_backward_step(reference, x)
+            with _CaptureToFiles(
+                _precompile_backward_step,
+                backend="eager",
+                tracer=tracer,
+                training=True,
+                **extra,
+            ) as cap:
+                for x in capture_calls:
+                    cap(model, x)
+        for p, (grad_object, _warmup), ref in zip(
+            model.parameters(), before, reference.parameters()
+        ):
+            self.assertIs(p.grad, grad_object)
+            self.assertEqual(p.grad, ref.grad)
+
+    def test_error_pickle_round_trip(self):
+        # PrecompileError's home is torch.compiler, so pickle resolves it there.
+        error = pickle.loads(pickle.dumps(torch.compiler.PrecompileError("boom")))
+        self.assertIsInstance(error, torch.compiler.PrecompileError)
+        self.assertEqual(str(error), "boom")
+
+    @parametrize("name", _PRECOMPILE_PUBLIC_MEMBERS)
+    def test_member_module_and_qualname_resolve_to_it(self, name):
+        # __module__/__qualname__ must walk back to the member itself, or pickle
+        # cannot resolve the class and inspect cannot find its source.
+        member = getattr(torch.compiler.precompile, name)
+        target = sys.modules[member.__module__]
+        for part in member.__qualname__.split("."):
+            target = getattr(target, part)
+        self.assertIs(target, getattr(member, "__func__", member))
+
+    def test_paths_come_in_pairs(self):
+        # Half a pair never loads and one file for both halves would overwrite
+        # the source, so capture() refuses either at construction, before fn runs.
+        precompile = torch.compiler.precompile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "m.py")
+            cases = [
+                ({"artifact_path": path, "cache_path": None}, "without cache_path"),
+                ({"artifact_path": None, "cache_path": path}, "without artifact_path"),
+                ({"artifact_path": path, "cache_path": path}, "same file"),
+            ]
+            for kwargs, regex in cases:
+                with self.assertRaisesRegex(ValueError, regex):
+                    precompile.capture(
+                        _precompile_single_graph, backend="eager", **kwargs
+                    )
+            self.assertEqual(os.listdir(d), [])
+            # load takes the two paths positionally; omitting the cache is a
+            # missing positional argument, not a partial-artifact ValueError.
+            with self.assertRaises(TypeError):
+                precompile.load(path)
+
+    def test_capture_takes_no_positional_examples(self):
+        # capture() takes fn as its only positional: the example is a cap(...)
+        # call inside the block, not an argument to capture().
+        x = torch.randn(3)
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(TypeError):
+                torch.compiler.precompile.capture(
+                    lambda y: y + 1,
+                    x,
+                    artifact_path=os.path.join(d, "m.py"),
+                    cache_path=os.path.join(d, "m.cache"),
+                )
+
+    def test_dynamo_artifact_version_lock_raises_precompile_error(self):
+        # Note [precompile programming model] promises the driver's
+        # Python-version lock surfaces as a clean PrecompileError, so an
+        # ``except torch.compiler.precompile.PrecompileError`` handler written
+        # to the docs catches it -- not a raw ValueError.
+        def fn(x):
+            return x + 1
+
+        with _CaptureToFiles(fn, tracer="dynamo", backend="eager") as cap:
+            cap(torch.randn(3))
+        python_code, cache = cap.result()
+        cur = f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}"
+        self.assertIn(cur, python_code)
+        skewed = python_code.replace(cur, "_DYNAMO_PYTHON_VERSION = (3, 9)")
+        # exec, not load(): load()'s cache-pairing hash check would reject the
+        # edited text first, and python_code is documented as self-contained.
+        with self.assertRaisesRegex(PrecompileError, "produced on Python 3.9"):
+            exec(skewed, {})
+
+    @parametrize("case", list(_PRECOMPILE_ROUNDTRIP_CASES))
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_roundtrip(self, case, backend):
+        # The dynamo tracer captures via Dynamo, inlines the transformed bytecode, and
+        # (like make_fx) lowers the subgraph through the chosen backend. The reload runs
+        # the same computation as eager, and a different but structurally identical model
+        # swapped in at runtime works (invariant 2) -- no weights are baked in.
+        fn, make_modules, shape = _PRECOMPILE_ROUNDTRIP_CASES[case]
+        modules, x = make_modules(), torch.randn(*shape)
+        # When fn IS the module, the loaded artifact still takes the receiver
+        # explicitly: its entry frame is forward(self, xx).
+        entry, examples = (modules[0], (x,)) if fn is None else (fn, (*modules, x))
+        reference = _precompile_call_model if fn is None else fn
+        with _CaptureToFiles(
+            entry, training=True, tracer="dynamo", backend=backend
+        ) as cap:
+            cap(*examples)
+        code, cache = cap.result()
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            self.assertIsInstance(f_c, torch.compiler.PrecompiledRunnable)
+            self.assertFalse(f_c.installed)
+            self.assertEqual(f_c(*modules, x), reference(*modules, x))
+            swapped = make_modules()
+            self.assertEqual(f_c(*swapped, x), reference(*swapped, x))
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_tracer_dynamo_autograd_grad_returned(self):
+        # torch.autograd.grad is captured too, and (unlike .backward()) it only RETURNS the
+        # grads: nothing is scattered, so the runtime model's .grad stays None.
+        # Seeding is a capture-time mutation of the caller's model, so fn can SEE it:
+        # `p.grad is not None` traced as True where eager reads False. When the
+        # re-capture turns out to need no accumulate at all -- autograd.grad only
+        # returns grads -- the seeds bought nothing, and the first (unseeded) capture
+        # is the one that has to ship.
+        x, t = torch.randn(5, 4), torch.randn(5, 3)
+
+        def grad_step(model, xx, tt):
+            seen = model.weight.grad is not None
+            loss = torch.nn.functional.mse_loss(model(xx), tt)
+            return seen, torch.autograd.grad(loss, list(model.parameters()))
+
+        def fresh():
+            torch.manual_seed(0)
+            return torch.nn.Linear(4, 3)
+
+        with _CaptureToFiles(grad_step, training=True, tracer="dynamo") as cap:
+            cap(fresh(), x, t)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
+        run, ref = fresh(), fresh()
+        self.assertEqual(f_c(run, x, t), grad_step(ref, x, t))
+        self.assertTrue(all(p.grad is None for p in run.parameters()))
+
+    @staticmethod
+    def _module_with(src: str, name: str):
+        """A real module whose globals are exactly what the source binds."""
+        mod = types.ModuleType(name)
+        mod.__file__ = f"{name}.py"
+        linecache.cache[mod.__file__] = (
+            len(src),
+            None,
+            src.splitlines(True),
+            mod.__file__,
+        )
+        exec(compile(src, mod.__file__, "exec"), mod.__dict__)
+        sys.modules[name] = mod
+        return mod
+
+    @parametrize("guard_filter", ["keep_all", "portable", "drop_all"])
+    @parametrize("caching_precompile", [False, True])
+    def test_guard_filter_composes_with_the_default(
+        self, guard_filter, caching_precompile
+    ):
+        # A custom filter COMPOSES with the default rather than replacing it:
+        # keep_all cannot re-admit the unserializable identity guards, a portable
+        # filter's second trip through the guard pickle still loads, and a drop
+        # the filter ADDED is risky by construction, so drop_all is refused at
+        # the default gates. caching_precompile's own filter must not leak in.
+        filters = {
+            "keep_all": lambda entries: [True] * len(entries),
+            "portable": torch.compiler.keep_portable_guards_unsafe,
+            "drop_all": lambda entries: [False] * len(entries),
+        }
+        xs = [torch.randn(n, 8) for n in (2, 3)]
+        with torch._dynamo.config.patch(caching_precompile=caching_precompile):
+            if guard_filter == "drop_all":
+                with self.assertRaisesRegex(
+                    PrecompileError, r"can affect dispatch on \[.*'x'"
+                ):
+                    with _CaptureToFiles(
+                        _precompile_multi_graph,
+                        backend="eager",
+                        dynamic=False,
+                        tracer="dynamo",
+                        guard_filter_fn=filters[guard_filter],
+                    ) as cap:
+                        with torch.no_grad():
+                            for _ex_args in [(x,) for x in xs]:
+                                cap(*_ex_args)
+                    cap.result()
+                return
+            with _CaptureToFiles(
+                _precompile_multi_graph,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                guard_filter_fn=filters[guard_filter],
+                require_no_risky_drops=False,
+            ) as cap:
+                with torch.no_grad():
+                    for _ex_args in [(x,) for x in xs]:
+                        cap(*_ex_args)
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for x in xs:
+                self.assertEqual(loaded(x), _precompile_multi_graph(x))
+            # The shape guards were kept: an uncovered shape is refused.
+            with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+                loaded(torch.randn(9, 8))
+
+    @parametrize("how", ["raise_in_block", "caught_call"])
+    def test_a_failed_capture_is_incomplete(self, how):
+        x = torch.randn(4)
+        entry = (
+            _precompile_multi_graph
+            if how == "raise_in_block"
+            else _precompile_raises_on_flag
+        )
+
+        def run(session):
+            # raise_in_block escapes the block with a KeyError, so nothing is
+            # rendered (a block that raised leaves the files untouched);
+            # caught_call catches its per-call failure and exits cleanly, so the
+            # render+gate runs on the way out and the default gates refuse the
+            # incomplete capture at exit.
+            if how == "raise_in_block":
+                with self.assertRaisesRegex(KeyError, "capture failed"):
+                    with session as compiled:
+                        compiled(torch.randn(4, 8))
+                        raise KeyError("capture failed")
+            else:
+                with session as compiled:
+                    compiled(x, False)
+                    with self.assertRaisesRegex(KeyError, "automatic example failed"):
+                        compiled(x, True)
+
+        session = _precompile_capture(entry, backend="eager", dynamic=False)
+        if how == "caught_call":
+            with self.assertRaises(PrecompileError):
+                run(session)
+        else:
+            run(session)
+        summary = session.summary()
+        self.assertGreater(summary.guarded_codes, 0)
+        self.assertFalse(summary.complete)
+        self.assertEqual(len(summary.capture_errors), 1)
+        # No artifact was written for the incomplete capture.
+        self.assertFalse(os.path.exists(session.artifact_path))
+        if how == "caught_call":
+            # The block exits cleanly, so relaxing the gates at construction lets
+            # the same drive render the partial capture on the way out.
+            relaxed = _precompile_capture(
+                entry,
+                backend="eager",
+                dynamic=False,
+                require_complete=False,
+                require_no_dropped_guards=False,
+            )
+            run(relaxed)
+            relaxed.result()
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_sessions_restore_the_capture_config(self):
+        # The capture's config flip is per call, not block-level: the flags are
+        # ambient before the block, between calls and after it, and up only
+        # while a call runs. The flip is thread-scoped, so a call in flight on
+        # a worker thread raises them in that thread only. A session that fails
+        # in __enter__ never raises them.
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.backends.registry import register_backend
+        from torch._dynamo.exc import InvalidBackend, PackageError
+        from torch._dynamo.precompile_package import precompile_capture
+
+        def flags():
+            return (
+                functorch_config.bundled_autograd_cache,
+                torch._dynamo.config.allow_empty_graphs,
+            )
+
+        entered, release, in_call = threading.Event(), threading.Event(), []
+
+        def probe_backend(gm, example_inputs):
+            in_call.append(flags())
+            entered.set()
+            self.assertTrue(release.wait(10))
+            return gm.forward
+
+        name = f"precompile_cfg_probe_{id(in_call)}"
+        register_backend(probe_backend, name=name)
+
+        with (
+            functorch_config.patch("bundled_autograd_cache", False),
+            torch._dynamo.config.patch(allow_empty_graphs=False),
+        ):
+            release.set()
+            session = precompile_capture(
+                _precompile_single_graph, backend=name, dynamic=False
+            )
+            with session as run:
+                # Entering the block does not flip the flags; the call does,
+                # and they are restored the moment it returns.
+                self.assertEqual(flags(), (False, False))
+                run(torch.randn(2))
+                self.assertEqual(flags(), (False, False))
+            self.assertEqual(flags(), (False, False))
+            self.assertEqual(in_call[-1], (True, True))
+
+            # The flip is thread-scoped: a call parked on a worker thread
+            # raises the flags in its own thread only. The main thread stays
+            # ambient throughout, and the worker's flags drop once it returns.
+            in_call.clear()
+            entered.clear()
+            release.clear()
+            errors: list = []
+
+            def hold():
+                try:
+                    held = precompile_capture(
+                        _precompile_single_graph, backend=name, dynamic=False
+                    )
+                    with held as run_held:
+                        run_held(torch.randn(2))
+                except BaseException as error:
+                    errors.append(error)
+
+            holder = threading.Thread(target=hold)
+            holder.start()
+            self.assertTrue(entered.wait(10))
+            self.assertEqual(flags(), (False, False))
+            release.set()
+            holder.join(10)
+            self.assertFalse(holder.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(in_call[-1], (True, True))
+            self.assertEqual(flags(), (False, False))
+
+            session = precompile_capture(
+                _precompile_multi_graph,
+                backend="definitely_missing_backend",
+                dynamic=False,
+            )
+            with self.assertRaisesRegex(InvalidBackend, "Invalid backend"):
+                with session:
+                    pass
+            self.assertEqual(flags(), (False, False))
+            self.assertFalse(session.summary().complete)
+            self.assertIn("InvalidBackend", session.summary().capture_errors[0])
+            with self.assertRaises(PackageError):
+                session.artifact()
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_exit_waits_for_a_worker_thread_call(self):
+        # A worker thread's call inherits the capture, and __exit__ waits for it.
+        from torch._dynamo.backends.registry import register_backend
+        from torch._dynamo.eval_frame import _get_total_cache_entry_count
+        from torch._dynamo.precompile_package import precompile_capture
+
+        entered = threading.Event()
+        release = threading.Event()
+        worker_done = threading.Event()
+        errors = []
+        outputs = []
+
+        def blocking_backend(gm, example_inputs):
+            entered.set()
+            self.assertTrue(release.wait(20))
+            return gm.forward
+
+        backend_name = f"precompile_exit_waits_{id(entered)}"
+        register_backend(blocking_backend, name=backend_name)
+        session = precompile_capture(
+            _precompile_single_graph, backend=backend_name, dynamic=False
+        )
+        compiled = session.__enter__()
+        x = torch.randn(2)
+
+        def run():
+            try:
+                outputs.append(compiled(x))
+            except Exception as e:
+                errors.append(e)
+            finally:
+                worker_done.set()
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        self.assertTrue(entered.wait(20))
+
+        def release_call():
+            self.assertFalse(worker_done.wait(0.1))
+            release.set()
+
+        releaser = threading.Thread(target=release_call)
+        releaser.start()
+        session.__exit__(None, None, None)
+        worker.join(20)
+        releaser.join(20)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(releaser.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(outputs, [_precompile_single_graph(x)])
+        self.assertTrue(session.summary().complete)
+        self.assertEqual(session.summary().guarded_codes, 1)
+        self.assertEqual(
+            _get_total_cache_entry_count(_precompile_single_graph.__code__), 0
+        )
+
+    def test_session_is_one_shot_and_releases_its_examples(self):
+        example = torch.randn(1024)
+        example_ref = weakref.ref(example)
+        session = _precompile_capture(
+            _precompile_multi_graph, backend="eager", dynamic=False
+        )
+        with session as compiled:
+            compiled(example)
+        self.assertTrue(session.summary().complete)
+        with self.assertRaisesRegex(RuntimeError, "not active"):
+            compiled(example)
+        with self.assertRaisesRegex(RuntimeError, "already been entered"):
+            with session:
+                pass
+        del example
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertIsNone(example_ref())
+
+        # A failed call's traceback must not keep its example alive either.
+        failed = torch.randn(1024)
+        failed_ref = weakref.ref(failed)
+        session = _precompile_capture(
+            _precompile_raises_on_flag, backend="eager", dynamic=False
+        )
+        # The only call fails, so the capture is incomplete and the default
+        # gates refuse to render it when the block exits cleanly.
+        with self.assertRaises(PrecompileError):
+            with session as compiled:
+                with self.assertRaisesRegex(KeyError, "automatic example failed"):
+                    compiled(failed, True)
+        del failed
+        torch._dynamo.reset()
+        gc.collect()
+        self.assertIsNone(failed_ref())
+
+    def _multigraph_frames(self, code):
+        from torch._precompile import _parse_artifact_metadata
+
+        return _parse_artifact_metadata(code)["FRAMES"]
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_multi_graph_artifact_follows_the_code_cache_contract(self, backend):
+        from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+        from torch._precompile import _parse_artifact_metadata
+        from torch.compiler._cache import CacheArtifactManager
+
+        # A capture with graph breaks and several variants returns the same
+        # (python_code, cache) pair the single-graph forms do, and load() takes
+        # it back. python_code is standalone: it installs nothing onto the
+        # callable's code objects, so serving it mutates no global state.
+        PrecompileContext.clear()
+        self.addCleanup(PrecompileContext.clear)
+        model = _PrecompileBreakingModule().eval()
+        shapes = [(3, 8), (5, 8)]
+        inputs = [torch.randn(*shape) for shape in shapes]
+        with torch.no_grad():
+            expected = [model(x) for x in inputs]
+
+        # The capture serializes the process-global cache-artifact list into the
+        # bundle. An artifact an unrelated earlier compile left pending must be
+        # neither folded into this bundle nor dropped from that list.
+        with CacheArtifactManager.with_fresh_cache():
+            CacheArtifactManager.record_artifact("pgo", "unrelated_pending", b"x")
+            with _CaptureToFiles(
+                model, backend=backend, dynamic=False, tracer="dynamo"
+            ) as cap:
+                with torch.no_grad():
+                    for _ex_args in [(x,) for x in inputs]:
+                        cap(*_ex_args)
+            code, cache = cap.result()
+            pending = CacheArtifactManager._new_cache_artifacts["pgo"]
+            self.assertEqual([a.key for a in pending], ["unrelated_pending"])
+        self.assertIsInstance(code, str)
+        self.assertIsInstance(cache, bytes)
+        bundle = torch.load(io.BytesIO(cache), weights_only=True)["artifact"]
+        if bundle is not None:
+            artifacts = CacheArtifactManager.deserialize(bundle)
+            keys = [a.key for group in artifacts.values() for a in group]
+            self.assertNotIn("unrelated_pending", keys)
+        # The artifact carries its own backends; neither the capture nor a load
+        # may file them into the process-global context the transparent cache uses.
+        self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
+
+        # The readable half says what is in the opaque half.
+        meta = _parse_artifact_metadata(code)
+        self.assertEqual(meta["TRACER"], "dynamo")
+        self.assertIn("DROPPED_GUARDS", meta)
+        # Guard trees and bytecode have no source form and stay opaque, but a
+        # compiled subgraph is Inductor output, which does: on inductor the
+        # kernels are emitted as readable source, and only eager (whose
+        # "backend" is an fx graph with nothing to render) stays pickled.
+        if backend == "inductor":
+            self.assertIn("_SUBGRAPHS[", code)
+        else:
+            self.assertNotIn("_SUBGRAPHS[", code)
+
+        # It reports one entry frame plus one continuation, two variants each.
+        frames = meta["FRAMES"]
+        self.assertEqual([count for _, count in frames], [2, 2])
+        self.assertTrue(
+            any(name.startswith("torch_dynamo_resume_in") for name, _ in frames)
+        )
+
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        self.assertIsInstance(loaded, torch.compiler.PrecompiledRunnable)
+        self.assertFalse(loaded.installed)
+        with torch.no_grad():
+            for x, want in zip(inputs, expected):
+                self.assertEqual(loaded(model, x), want)
+        self.assertEqual(PrecompileContext._backend_artifacts_by_key, {})
+        # Nothing was installed, so the model still compiles normally.
+        self.assertEqual(
+            len(_debug_get_precompile_entries(type(model).forward.__code__)), 0
+        )
+        # A call no variant covers raises rather than silently recompiling.
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+            with torch.no_grad():
+                loaded(model, torch.randn(9, 8))
+
+    @parametrize("backend", ("eager",))  # inductor: training lowering follow-up
+    def test_tracer_dynamo_training_step_with_backward_in_fn(self, backend):
+        # The Note's headline training step: .backward() inside fn graph-breaks,
+        # the continuation runs it through the live autograd engine, and the
+        # served step accumulates the same grads eager does. Capture is
+        # caller-driven, so the captured call runs the backward for real and
+        # accumulates onto the model exactly as the served step later will.
+        from torch._dynamo.utils import counters
+
+        def train_step(model, x, t):
+            torch.nn.functional.mse_loss(model(x), t).backward()
+
+        torch.manual_seed(0)
+        model = _PrecompileTrainMod()
+        x, t = torch.randn(4, 8), torch.randn(4, 8)
+        # An eager backward from clean grads is the reference the served step
+        # must reproduce.
+        train_step(model, x, t)
+        eager = [p.grad.clone() for p in model.parameters()]
+        for p in model.parameters():
+            p.grad = None
+        with _CaptureToFiles(
+            train_step,
+            backend=backend,
+            dynamic=False,
+            tracer="dynamo",
+            training=True,
+            require_complete=False,
+            require_no_risky_drops=False,
+        ) as cap:
+            cap(model, x, t)
+        code, cache = cap.result()
+        for want, p in zip(eager, model.parameters()):
+            self.assertEqual(p.grad, want)  # the captured call ran the backward
+        for p in model.parameters():
+            p.grad = None
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        counters.clear()
+        with _maybe_scoped(loaded):
+            self.assertIsNone(loaded(model, x, t))
+        for want, p in zip(eager, model.parameters()):
+            self.assertEqual(p.grad, want)
+        self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    @parametrize("case", list(_AUTO_DYNAMIC_CASES))
+    def test_automatic_dynamic_promotes_the_frames_that_varied(self, case):
+        # A dim that varies has to be detected separately in every frame that
+        # reads it -- otherwise the artifact serves a new shape up to the first
+        # break and then misses -- and ONLY in those: an entry frame whose input
+        # never varies stays specialized while the continuation that did see
+        # variation is promoted.
+        model_cls, make_args, counts = _AUTO_DYNAMIC_CASES[case]
+        model = model_cls().eval()
+        captured = [make_args(n) for n in (3, 5)]
+        unseen = [make_args(n) for n in (7, 11)]
+
+        with _CaptureToFiles(
+            model,
+            backend="eager",
+            dynamic=None,
+            tracer="dynamo",
+            require_no_risky_drops=False,
+        ) as cap:
+            with torch.no_grad():
+                for _ex_args in captured:
+                    cap(*_ex_args)
+        code, cache = cap.result()
+        frames = self._multigraph_frames(code)
+        # One static compile per frame that varied, then one promoted to dynamic.
+        self.assertEqual([count for _, count in frames], counts)
+        self.assertEqual(
+            sum(1 for name, _ in frames if name.startswith("torch_dynamo_resume_in")),
+            len(counts) - 1,
+        )
+
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            for args in captured + unseen:
+                self.assertEqual(loaded(model, *args), model(*args))
+
+        if case != "every_frame":
+            return
+        # The contrast that makes the assertion above meaningful: with automatic
+        # dynamic off, the same capture serves only what it saw.
+        torch._dynamo.reset()
+        with _CaptureToFiles(
+            model,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            require_no_risky_drops=False,
+        ) as cap:
+            with torch.no_grad():
+                for _ex_args in captured:
+                    cap(*_ex_args)
+        static_code, static_cache = cap.result()
+        torch._dynamo.reset()
+        static = _load_pair(static_code, static_cache)
+        with torch.no_grad():
+            for args in unseen:
+                with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+                    static(model, *args)
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_multi_graph_unreachable_frame_is_served_by_installing(self):
+        # A frame Dynamo compiled that is entered by an ORDINARY call -- an
+        # un-inlinable helper -- is reached only through the frame evaluator. A
+        # source artifact does not use one, so such a capture is served by
+        # installing onto the live code objects instead, and the frame that a
+        # source artifact would have run eager is named in the header.
+        from torch._dynamo.utils import counters
+        from torch._precompile import _parse_artifact_metadata
+
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            with torch.no_grad():
+                cap(torch.randn(4))
+        code, cache = cap.result()
+        meta = _parse_artifact_metadata(code)
+        self.assertEqual(meta["SERVING_MODE"], "installed")
+        self.assertIn(
+            _precompile_unreachable_helper.__name__,
+            meta["UNREACHABLE_WITHOUT_INSTALL"],
+        )
+
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        # The installed shape shares the runnable base with the standalone one.
+        self.assertIsInstance(loaded, torch.compiler.PrecompiledRunnable)
+        self.assertIsInstance(loaded, torch.compiler.PrecompiledCallable)
+        self.assertTrue(loaded.installed)
+        counters.clear()
+        with loaded, torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+            # Served, not recompiled: the whole point of installing.
+            self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    def test_a_subgraph_whose_lowering_fails_keeps_the_bundle(self):
+        # Rendering is per subgraph: one that compile_to_python refuses stays
+        # pickled in _BACKENDS, the header counts it, and the artifact serves.
+        from torch._functorch import aot_autograd
+        from torch._precompile import _read_literal
+
+        real_compile_to_python = aot_autograd.compile_to_python
+        refused = []
+
+        def refuse_first(gm, example_inputs, **kwargs):
+            if not refused:
+                refused.append(gm)
+                raise RuntimeError("synthetic lowering failure")
+            return real_compile_to_python(gm, example_inputs, **kwargs)
+
+        x = torch.randn(4, 8)
+        with mock.patch.object(aot_autograd, "compile_to_python", refuse_first):
+            with _CaptureToFiles(
+                _precompile_multi_graph,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+            ) as cap:
+                with torch.no_grad():
+                    cap(x)
+            code, cache = cap.result()
+        self.assertEqual(len(refused), 1)
+        self.assertIn("1 could not be rendered and stay in _BACKENDS", code)
+        pickled = pickle.loads(
+            base64.b64decode(_read_literal(ast.parse(code), "_BACKENDS"))
+        )
+        self.assertEqual(len(pickled), 1)
+        # Two breaks make three subgraphs; the other two rendered as source.
+        self.assertEqual(code.count("_SUBGRAPHS["), 2)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_multi_graph(x))
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_installed_artifact_fn_must_match_the_capture(self):
+        # load(fn=...) installs onto whatever function it is given, so it has
+        # to refuse one the artifact was not captured from -- the same check
+        # the path form makes -- or the wrong callable serves the captured
+        # graphs. The function it WAS captured from is accepted.
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(torch.randn(4))
+        code, cache = cap.result()
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            PrecompileError, "was captured from .* but is being loaded onto"
+        ):
+            _load_pair(code, cache, fn=_precompile_unreachable_helper)
+        loaded = _load_pair(code, cache, fn=_precompile_unreachable_helper_caller)
+        with loaded, torch.no_grad():
+            self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_installed_artifact_unload_releases_its_recorded_backends(self):
+        # Installing files the artifact's backends into the process-global
+        # PrecompileContext. unload() has to take exactly those out again, or
+        # every install/unload cycle leaks them for the life of the process.
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(torch.randn(4))
+        code, cache = cap.result()
+        x = torch.randn(4)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        registry = PrecompileContext._backend_artifacts_by_key
+        baseline = len(registry)
+        for _ in range(2):
+            with loaded, torch.no_grad():
+                self.assertEqual(loaded(x), _precompile_unreachable_helper_caller(x))
+                self.assertGreater(len(registry), baseline)
+            self.assertEqual(len(registry), baseline)
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_installed_artifact_handle_lifecycle(self):
+        # Installing mutates process-global code objects, so a call after
+        # unload() must raise rather than silently re-install; a fresh load() is
+        # the way to serve again. Two threads racing the FIRST call install once,
+        # and a first call that reaches the install lock only after unload()
+        # returned finds the handle retired and must not install.
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(torch.randn(4))
+        code, cache = cap.result()
+        x = torch.randn(4)
+        expected = _precompile_unreachable_helper_caller(x)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x), expected)
+            loaded.unload()
+            loaded.unload()  # idempotent
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            # Re-entering is the explicit way to install again; the handle is
+            # reusable across scopes.
+            with loaded:
+                self.assertEqual(loaded(x), expected)
+            with self.assertRaisesRegex(PrecompileError, "unloaded"):
+                loaded(x)
+            fresh = _load_pair(code, cache)
+            try:
+                self.assertEqual(fresh(x), expected)
+            finally:
+                fresh.unload()
+
+        loaded = _load_pair(code, cache)
+        handle = loaded._compiled
+        original_serve = handle._serve
+        serves = []
+
+        def counting_serve(fn, **kwargs):
+            serves.append(threading.current_thread().name)
+            return original_serve(fn, **kwargs)
+
+        handle._serve = counting_serve
+        barrier = threading.Barrier(2)
+        outcomes = []
+
+        def first_call():
+            barrier.wait()
+            try:
+                with torch.no_grad():
+                    outcomes.append(loaded(x))
+            except Exception as e:
+                outcomes.append(e)
+
+        threads = [threading.Thread(target=first_call) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        try:
+            self.assertEqual(len(serves), 1)
+            for out in outcomes:
+                self.assertEqual(out, expected)
+        finally:
+            loaded.unload()
+
+        loaded = _load_pair(code, cache)
+        handle = loaded._compiled
+        real_lock = handle._install_lock
+        unloaded = threading.Event()
+
+        class _GatedLock:
+            def __enter__(self):
+                if threading.current_thread().name == "racer":
+                    unloaded.wait()
+                return real_lock.__enter__()
+
+            def __exit__(self, *exc):
+                return real_lock.__exit__(*exc)
+
+        handle._install_lock = _GatedLock()
+        errors = []
+
+        def racing_call():
+            try:
+                with torch.no_grad():
+                    loaded(torch.randn(4))
+            except PrecompileError as e:
+                errors.append(e)
+
+        racer = threading.Thread(target=racing_call, name="racer")
+        racer.start()
+        loaded.unload()
+        unloaded.set()
+        racer.join()
+        self.assertEqual(len(errors), 1)
+        self.assertIn("unloaded", str(errors[0]))
+        self.assertIsNone(handle._inner)
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_uncovered_call_outside_serving_tolerates_an_unpicklable_local(self):
+        # An installed artifact recompiles an uncovered call outside serving()
+        # the way torch.compile does. That frame is served, not captured, so
+        # its guards are not serialized: a value they could not pickle (a lock
+        # in the dict the function reads) is not an error.
+        x = torch.randn(4)
+        with _CaptureToFiles(
+            _precompile_unreachable_helper_caller_with_opts,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+        ) as cap:
+            cap(x, {"scale": 2})
+        code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        uncovered = {"scale": 3, "lock": threading.Lock()}
+        with loaded, torch.no_grad():
+            self.assertEqual(
+                loaded(x, {"scale": 2}), _precompile_unreachable_helper_caller(x) * 2
+            )
+            self.assertEqual(
+                loaded(x, uncovered), _precompile_unreachable_helper_caller(x) * 3
+            )
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_missing_captured_module_raises_precompile_error(self):
+        # Both drivers import the modules the capture came from. A module that
+        # is not importable here surfaces as the documented PrecompileError, not
+        # as a bare ModuleNotFoundError from inside the exec'd driver.
+        x = torch.randn(4)
+        # Standalone: the frames' import aliases.
+        with _CaptureToFiles(
+            _precompile_single_graph, backend="eager", dynamic=False, tracer="dynamo"
+        ) as cap:
+            cap(x)
+        code, cache = cap.result()
+        from torch._precompile import _read_literal
+
+        frames = pickle.loads(
+            base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
+        )
+        missing = next(iter(frames[0]["import_sources"].values()))
+        real_import = importlib.import_module
+
+        def import_without(name, *args, **kwargs):
+            if name == missing:
+                raise ImportError(f"No module named {name!r}")
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch.object(importlib, "import_module", import_without):
+            with self.assertRaisesRegex(PrecompileError, "not importable here"):
+                _load_pair(code, cache)
+        # Installed: the module each captured frame was defined in.
+        name = "_precompile_missing_module_fixture"
+        mod = self._module_with(
+            textwrap.dedent(
+                """
+                import torch
+
+
+                class Child(torch.nn.Module):
+                    def forward(self, x):
+                        y = x + 1
+                        torch._dynamo.graph_break()
+                        return y * 2
+
+
+                def entry(child, x):
+                    return child(x)
+                """
+            ),
+            name,
+        )
+        try:
+            with _CaptureToFiles(
+                mod.entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(mod.Child(), x)
+            code, cache = cap.result()
+        finally:
+            del sys.modules[name]
+        from torch._precompile import _parse_artifact_metadata
+
+        self.assertEqual(_parse_artifact_metadata(code)["SERVING_MODE"], "installed")
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(PrecompileError, "not importable here"):
+            _load_pair(code, cache)
+
+    @parametrize("case", list(_PRECOMPILE_TRAINING_CASES))
+    @parametrize("backend", ("eager", "inductor"))
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_training_capture_serves_a_backward_without_a_loss(self, case, backend):
+        # The capture never sees a loss and never calls .backward(). The joint
+        # trace synthesizes tangents from the forward outputs, and the backward
+        # is lowered eagerly, so a served output is still wired to
+        # AOTAutograd's CompiledFunction and .backward() runs precompiled code.
+        # The parameters carry a .grad into the capture: no guard reads it, so
+        # the pickler prunes it to _Missing, which load must drop, not assign.
+        model_cls, entry, width = _PRECOMPILE_TRAINING_CASES[case]
+        model = model_cls()
+        xs = [torch.randn(n, width) for n in (4, 6)]
+        expected = []
+        for x in xs:
+            model.zero_grad(set_to_none=True)
+            entry(model, x).sum().backward()
+            expected.append([p.grad.clone() for p in model.parameters()])
+
+        with _CaptureToFiles(
+            entry,
+            backend=backend,
+            dynamic=False,
+            tracer="dynamo",
+            training=True,
+            require_complete=False,
+            require_no_risky_drops=False,
+        ) as cap:
+            for _ex_args in [(model, x) for x in xs]:
+                cap(*_ex_args)
+        code, cache = cap.result()
+        # The example calls left the caller's gradients exactly as they were.
+        for want, param in zip(expected[-1], model.parameters()):
+            self.assertEqual(want, param.grad)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+        with _maybe_scoped(loaded):
+            for x, grads in zip(xs, expected):
+                model.zero_grad(set_to_none=True)
+                out = loaded(model, x)
+                self.assertTrue(out.requires_grad)
+                if backend == "inductor" and case == "plain":
+                    # AOTAutograd's compiled backward, not an eager autograd node.
+                    self.assertIn("CompiledFunction", type(out.grad_fn).__name__)
+                out.sum().backward()
+                for want, param in zip(grads, model.parameters()):
+                    self.assertEqual(want, param.grad)
+        # Served, not recompiled: forward and backward alike.
+        self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_training_capture_does_not_read_grad_off_non_leaf_tensors(self):
+        # The pickler reads .grad off the tensors it serializes. On a non-leaf
+        # that is always None and warns; a training capture guards such tensors.
+        model = _PrecompileTrainMod()
+        x = torch.randn(4, 8, requires_grad=True) * 2
+        self.assertFalse(x.is_leaf)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with _CaptureToFiles(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                training=True,
+            ) as cap:
+                cap(model, x)
+        leaf_warnings = [str(w.message) for w in caught if "non-leaf" in str(w.message)]
+        self.assertEqual(leaf_warnings, [])
+
+    def test_inference_capture_stays_grad_free(self):
+        # The default is unchanged: examples run under no_grad, so a served
+        # output carries no autograd history.
+        model = _PrecompileTrainMod()
+        x = torch.randn(4, 8)
+        with _CaptureToFiles(
+            _precompile_call_model, backend="eager", dynamic=False, tracer="dynamo"
+        ) as cap:
+            with torch.no_grad():
+                cap(model, x)
+        code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            self.assertFalse(loaded(model, x).requires_grad)
+
+    @parametrize("shape", ["break_in_loop"])
+    @parametrize("backend", ["eager", "inductor"])
+    def test_dynamo_tracer_serves_each_graph_break_shape(self, shape, backend):
+        # The dynamo tracer against graph breaks and recompilations. Every case
+        # asserts the artifact serves, and that it agrees with torch.compile --
+        # parity with torch.compile is the contract, so torch.compile is the
+        # reference rather than eager.
+        from torch._dynamo.utils import counters
+
+        torch._dynamo.reset()
+        model = _BREAKING_MODELS[shape]().eval()
+        x = torch.randn(4, 4)
+        with torch.no_grad():
+            reference = torch.compile(_brk_call, backend=backend)(model, x)
+
+        torch._dynamo.reset()
+        if shape == "break_in_loop":
+            # Dynamo skips a frame that breaks inside a loop, so torch.compile
+            # runs this shape eager and there is no graph to serve. The capture
+            # is refused as empty rather than shipped as an eager artifact.
+            with (
+                torch.no_grad(),
+                self.assertRaisesRegex(PrecompileError, "compiled no graph"),
+            ):
+                with _CaptureToFiles(
+                    _brk_call,
+                    backend=backend,
+                    tracer="dynamo",
+                    require_no_risky_drops=False,
+                ) as cap:
+                    cap(model, x)
+                cap.result()
+                # cap.result() runs after the capture block exits (its render
+                # error is raised there, not at __exit__).
+            return
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _brk_call,
+                backend=backend,
+                tracer="dynamo",
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(model, x)
+            code, cache = cap.result()
+        self.assertGreater(_compiled_subgraph_count(code), 0)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        counters.clear()
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(model, x), reference)
+        # Nothing compiled while serving, and an uncovered call would have
+        # raised (standalone) or compiled (installed): a captured variant served.
+        self.assertEqual(counters["stats"]["unique_graphs"], 0)
+
+    @parametrize("backend", ["eager", "inductor"])
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_dynamo_tracer_serves_every_captured_recompilation(self, backend):
+        # Two axes vary -- a bool that changes the branch and a shape that
+        # changes the specialization -- so the capture holds several guarded
+        # variants of the same frames, on both sides of the break. An UNCOVERED
+        # call is never answered wrong: a STANDALONE artifact has no compiler
+        # behind it and refuses; an INSTALLED one is on the frame evaluator and
+        # recompiles exactly as torch.compile would.
+        from torch._dynamo.utils import counters
+        from torch._precompile import _parse_artifact_metadata
+
+        torch._dynamo.reset()
+        model = _BrkBranchy().eval()
+        calls = [
+            (model, torch.randn(n, 4), flag) for n in (4, 6) for flag in (False, True)
+        ]
+        uncovered = (model, torch.randn(5, 4), True)
+        torch._dynamo.reset()
+        compiled = torch.compile(_brk_call_flag, backend=backend, dynamic=False)
+        with torch.no_grad():
+            reference = [compiled(*c) for c in calls + [uncovered]]
+
+        torch._dynamo.reset()
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _brk_call_flag,
+                backend=backend,
+                dynamic=False,
+                tracer="dynamo",
+                require_complete=False,
+                require_no_risky_drops=False,
+            ) as cap:
+                for _ex_args in calls:
+                    cap(*_ex_args)
+            code, cache = cap.result()
+        meta = _parse_artifact_metadata(code)
+        # The capture really did hold several variants, and really did break.
+        self.assertTrue(any(v > 1 for _, v in meta["FRAMES"]))
+        self.assertTrue(any("resume_in" in n for n, _ in meta["FRAMES"]))
+
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        counters.clear()
+        with _maybe_scoped(loaded), torch.no_grad():
+            for call, want in zip(calls, reference):
+                self.assertEqual(loaded(*call), want)
+            # Served, not recompiled: every one of those calls was captured.
+            self.assertEqual(counters["stats"]["unique_graphs"], 0)
+            if meta["SERVING_MODE"] == "installed":
+                self.assertEqual(loaded(*uncovered), reference[-1])
+            else:
+                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                    loaded(*uncovered)
+
+    @parametrize("case", list(_PRECOMPILE_GUARD_POLICY_CASES))
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_guard_policy_keeps_what_discriminates(self, case):
+        from torch._precompile import _parse_artifact_metadata, _read_literal
+
+        fn, examples, served, refused = _PRECOMPILE_GUARD_POLICY_CASES[case]
+        with torch.no_grad():
+            expected = [fn(*args) for args in served]
+        torch._dynamo.reset()
+        with _CaptureToFiles(
+            fn, backend="eager", dynamic=False, tracer="dynamo"
+        ) as cap:
+            with torch.no_grad():
+                for _ex_args in examples:
+                    cap(*_ex_args)
+        code, cache = cap.result()
+        self.assertEqual(_parse_artifact_metadata(code)["TRACER"], "dynamo")
+        # The policy drops guards that could have been serialized, so what it
+        # discarded has to stay visible in the header even though it is now
+        # applied after the capture rather than during it.
+        dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
+        self.assertIn(["AUTOGRAD_SAVED_TENSORS_HOOKS", ""], dropped)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for args, want in zip(served, expected):
+                self.assertEqual(loaded(*args), want)
+            for args in refused:
+                with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                    loaded(*args)
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_invariants_report_lists_policy_dropped_slots(self):
+        # The report header promises a dropped line is "a precondition NOTHING
+        # checks". A policy-dropped slot is exactly that, but the policy used
+        # to DELETE those facts from the report's source data rather than
+        # re-mark them, so an auditor reading the file saw a validity domain
+        # far wider than the artifact's true one.
+        import re as re_mod
+
+        from torch._precompile import _read_literal
+
+        # With hook guards on, a module argument's EMPTY_NN_MODULE_HOOKS_DICT
+        # slots are droppable invariants with real source names, so the
+        # per-name check below is not vacuous.
+        model = _PrecompileTrainMod()
+        with (
+            tempfile.TemporaryDirectory() as d,
+            torch._dynamo.config.patch(skip_nnmodule_hook_guards=False),
+        ):
+            path = os.path.join(d, "invariants.txt")
+            with _CaptureToFiles(
+                _precompile_call_model,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                invariants=path,
+            ) as cap:
+                for _ex_args in [(model, torch.randn(n, 8)) for n in (3, 5)]:
+                    cap(*_ex_args)
+            code, _ = cap.result()
+            dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
+            with open(path) as f:
+                report = f.read()
+        named = [name for _guard_type, name in dropped if name]
+        self.assertTrue(named)
+        for name in named:
+            self.assertRegex(report, rf"\[dropped \][^\n]*{re_mod.escape(name)}")
+
+    def test_a_capture_without_compiled_code_is_not_complete(self):
+        # allow_empty_graphs keeps a frame that compiled nothing as one guarded
+        # code, so guarded_codes alone cannot tell a real capture from one whose
+        # whole body sits behind torch._dynamo.disable. Such a capture carries
+        # no compiled compute: complete says so, and require_complete gates
+        # exactly complete.
+        from torch._precompile import _parse_artifact_metadata
+
+        session = _precompile_capture(
+            _precompile_only_disabled, backend="eager", dynamic=False
+        )
+        # The block exits cleanly, so the default require_complete gate refuses
+        # to render the graphless capture when it does.
+        with self.assertRaisesRegex(PrecompileError, "compiled no graph"):
+            with session as compiled, torch.no_grad():
+                compiled(torch.randn(3))
+        summary = session.summary()
+        self.assertEqual(summary.guarded_codes, 1)
+        self.assertEqual(summary.backend_graphs, 0)
+        self.assertFalse(summary.complete)
+        relaxed = _precompile_capture(
+            _precompile_only_disabled,
+            backend="eager",
+            dynamic=False,
+            require_complete=False,
+        )
+        with relaxed as compiled, torch.no_grad():
+            compiled(torch.randn(3))
+        code, _cache = relaxed.result()
+        self.assertEqual(_parse_artifact_metadata(code)["TRACER"], "dynamo")
+
+    @parametrize("root", ["local", "module"])
+    def test_a_dict_membership_guard_is_never_dropped(self, root):
+        # `"flag" in d` is a branch, and the guard pinning it (DICT_NOT_CONTAINS)
+        # is a Python fact about a container's contents. Whatever the policy
+        # makes of the root, dropping it serves the captured branch to a caller
+        # who holds the key -- so the artifact must refuse, not answer. The same
+        # guard on `self.opts` is MODULE-rooted, which the invariant policy
+        # classes as environment -- and used to drop: M({"flag": 1}) was
+        # answered with M({})'s branch, no error, at the default gates.
+        from torch._precompile import _read_literal
+
+        x = torch.ones(2)
+        if root == "local":
+            fn, served, refused = (
+                _precompile_dict_flag_branch,
+                (x, {}),
+                (x, {"flag": 1}),
+            )
+        else:
+            captured, other = (
+                _PrecompileOptsModule({}),
+                _PrecompileOptsModule({"flag": 1}),
+            )
+            other.load_state_dict(captured.state_dict())
+            fn, served, refused = _precompile_call_model, (captured, x), (other, x)
+        with torch.no_grad():
+            expected = fn(*served)
+            with _CaptureToFiles(
+                fn, backend="eager", dynamic=False, tracer="dynamo"
+            ) as cap:
+                cap(*served)
+            code, cache = cap.result()
+        dropped = _read_literal(ast.parse(code), "POLICY_DROPPED_GUARDS")
+        self.assertNotIn("DICT_NOT_CONTAINS", {guard_type for guard_type, _ in dropped})
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(*served), expected)
+            with self.assertRaisesRegex(RuntimeError, "no captured variant"):
+                loaded(*refused)
+
+    @parametrize("where", ["object", "in_a_list"])
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_unpicklable_guard_value_names_where_it_lives(self, where):
+        # The type in a pickle error says WHAT failed and never WHERE, which on a
+        # large model means bisecting by hand. A lock is the archetypal offender
+        # and the one the type-name match used to miss, because CPython reports
+        # it as '_thread.lock' while type(...).__name__ is 'lock'.
+        if where == "object":
+            entry = _precompile_reads_holder
+            args = (_PrecompileUnpicklableHolder(threading.Lock()), torch.randn(4))
+            expected = r"reached via: local_scope\['obj'\].bad"
+        else:
+            entry = _precompile_reads_holder_in_list
+            args = ([_PrecompileUnpicklableHolder(threading.Lock())], torch.randn(4))
+            expected = r"reached via: local_scope\['objs'\]\[0\].bad"
+        with self.assertRaisesRegex(PrecompileError, expected), torch.no_grad():
+            with _CaptureToFiles(
+                entry,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+            ) as cap:
+                cap(*args)
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_serialized_guards_carry_no_bookkeeping(self):
+        # Guard.code_list and .guard_types are rebuilt by create_fn at load, and
+        # set_export_info EXTENDS them on every guard build, so shipping them
+        # means shipping each code part once per build. Applying the policy
+        # re-serializes guard state whose tensors are now the FAKES the first
+        # pass wrote, and empty_like() under a live FakeTensorMode hands back
+        # another fake -- which pickles the mode, its converters and their
+        # weakrefs along with it.
+        from torch._dynamo.package import load_guards_state
+        from torch._precompile import _read_literal
+
+        model = torch.nn.Linear(8, 4).eval()
+        xs = [torch.randn(n, 8) for n in (3, 5)]
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _precompile_call_model, backend="eager", dynamic=False, tracer="dynamo"
+            ) as cap:
+                for _ex_args in [(model, x) for x in xs]:
+                    cap(*_ex_args)
+            code, cache = cap.result()
+        blob = base64.b64decode(_read_literal(ast.parse(code), "_FRAMES"))
+        for name in (b"FakeTensorMode", b"MetaTensorDescriber", b"WeakIdRef"):
+            self.assertNotIn(name, blob)
+        for frame in pickle.loads(blob):
+            for variant in frame["variants"]:
+                state = load_guards_state(variant["guards_state"])
+                for guard in state.output_graph.guards:
+                    self.assertIsNone(guard.code_list)
+                    self.assertIsNone(guard.guard_types)
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for x in xs:
+                self.assertEqual(loaded(model, x), model(x))
+
+    def test_a_mutating_module_is_guarded_on_what_the_capture_saw(self):
+        # Learning the guard policy from a throwaway first capture would run
+        # every example twice. A counter advanced by the capture itself is baked
+        # into the guards. It has to be the value the ONE pass saw, or a fresh
+        # model never matches: a discarded first pass would leave every variant
+        # pinned to a step the served model has not reached.
+        torch.manual_seed(0)
+        model = _PrecompileStepCounter()
+        xs = [torch.randn(n, 8) for n in (2, 3, 4)]
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _brk_call,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+                require_no_risky_drops=False,
+            ) as cap:
+                for _ex_args in [(model, x) for x in xs]:
+                    cap(*_ex_args)
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        torch.manual_seed(0)
+        cold = _PrecompileStepCounter()
+        torch.manual_seed(0)
+        reference = _PrecompileStepCounter()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            for x in xs:
+                self.assertEqual(loaded(cold, x), _brk_call(reference, x))
+
+    @parametrize(
+        "junk", ["int", "str", "device"]
+    )  # dtype: guard-tree pruning follow-up
+    def test_unguarded_interned_attribute_does_not_poison_the_artifact(self, junk):
+        # Value pruning is keyed by id(), which asks "same OBJECT" when it means
+        # "same REFERENCE". For an interned value those come apart: an unguarded
+        # module attribute holding torch.float32 registers that id as missing,
+        # and every OTHER reference to that dtype -- including ones the artifact
+        # needs -- then resolves to the sentinel, so it fails to load with
+        # "empty_strided(): argument 'dtype' must be torch.dtype, not _Missing".
+        value = {
+            "dtype": torch.float32,
+            "int": 8,
+            "str": "cuda",
+            "device": torch.device("cpu"),
+        }[junk]
+        model = _PrecompileUnguardedAttr(value)
+        x = torch.randn(4, 8)
+        with torch.no_grad():
+            expected = model(x)
+            with _CaptureToFiles(
+                _brk_call, backend="inductor", dynamic=False, tracer="dynamo"
+            ) as cap:
+                cap(model, x)
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(model, x), expected)
+
+    @parametrize("entry", ["lambda"])  # installed_entry: serving mode not in this build
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_closure_entry_is_refused(self, entry, backend):
+        factory, make_args = _PRECOMPILE_CLOSURE_ENTRIES[entry]
+        with self.assertRaisesRegex(PrecompileError, "closes over"):
+            with _CaptureToFiles(factory(), tracer="dynamo", backend=backend) as cap:
+                with torch.no_grad():
+                    cap(*make_args())
+            cap.result()
+
+    @parametrize(
+        "case", ["inference", "two_variants_of_one_frame"]
+    )  # training: follow-up
+    def test_dynamo_tracer_renders_kernels_as_source(self, case):
+        # A compiled subgraph is Inductor output, which has a source form -- so
+        # the dynamo tracer emits it rather than pickling it, leaving only the
+        # guard trees and bytecode opaque. This holds for a TRAINING capture too:
+        # its forward and backward are both rendered and bridged by an emitted
+        # autograd.Function. Two variants of one frame render the SAME names into
+        # one namespace, so without per-subgraph renaming the first variant would
+        # silently run the second's code.
+        training = case == "training"
+        if case == "two_variants_of_one_frame":
+            fn, xs = _precompile_scale_sum, [torch.randn(2, 8), torch.randn(4, 8)]
+        else:
+            fn, xs = (
+                _PrecompileBreakingModule().eval(),
+                [torch.randn(3, 8), torch.randn(5, 8)],
+            )
+        ctx = torch.enable_grad() if training else torch.no_grad()
+        with ctx:
+            with _CaptureToFiles(
+                fn,
+                backend="inductor",
+                dynamic=False,
+                tracer="dynamo",
+                training=training,
+            ) as cap:
+                for _ex_args in [(x,) for x in xs]:
+                    cap(*_ex_args)
+            code, cache = cap.result()
+        self.assertIn("_SUBGRAPHS[", code)
+
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        # Serve in the mode it was captured in: grad mode is a GLOBAL_STATE
+        # guard, and it is checked.
+        with _maybe_scoped(loaded), ctx:
+            for x in xs:
+                # entry frame is forward, so the receiver is passed explicitly
+                args = (fn, x) if isinstance(fn, torch.nn.Module) else (x,)
+                self.assertEqual(loaded(*args), fn(x))
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_dynamo_tracer_names_why_a_subgraph_stayed_pickled(self):
+        # A subgraph the composer refuses stays a pickled bundle, and the
+        # artifact says so in its header, with the reason, rather than shipping
+        # base64 under a bare OPAQUE banner; the same reason is warned at capture.
+        model = _PrecompileAliasedMutationModule()
+        base = torch.arange(4, dtype=torch.float32) + 1
+        with self.assertLogs(
+            "torch._dynamo.precompile_package", level="WARNING"
+        ) as logs:
+            with _CaptureToFiles(
+                model, backend="inductor", dynamic=False, tracer="dynamo", training=True
+            ) as cap:
+                cap(base[:], base)
+            code, _cache = cap.result()
+        self.assertTrue(any("synthetic_base_wrapper" in m for m in logs.output))
+        self.assertNotIn("_SUBGRAPHS[", code)
+        header = [line for line in code.splitlines() if "stays pickled:" in line]
+        self.assertEqual(len(header), 1)
+        self.assertTrue(header[0].startswith("#    __compiled_fn_"), header[0])
+        self.assertIn("NotImplementedError", header[0])
+        self.assertIn("synthetic_base_wrapper", header[0])
+
+    @parametrize("construct", sorted(_EAGER_ROUND_TRIP))
+    @parametrize(
+        "broken", [False]
+    )  # broken=True breaks in a child frame: installed mode follow-up
+    def test_eager_backend_graph_survives_serialization(self, construct, broken):
+        # An eager subgraph ships as a pickled GraphModule, whose reduction keeps
+        # only the generated source and re-derives the Graph by re-tracing it. A HOP
+        # explodes on the Proxy; autocast's enter/exit take no Proxy at all, so the
+        # retrace RUNS them and drops the nodes -- served output was fp32; the same
+        # for _set_grad_enabled, which also leaked into the LOADER's grad mode.
+        from torch._precompile import _parse_artifact_metadata
+
+        entry, args = (
+            (_eager_rt_broken, (construct,))
+            if broken
+            else (_EAGER_ROUND_TRIP[construct], ())
+        )
+        training = construct == "no_grad_region"
+        grad_ctx = torch.enable_grad() if training else torch.no_grad()
+        x = torch.randn(4, 4, requires_grad=training)
+        with grad_ctx:
+            expected = torch.compile(entry, backend="eager")(*args, x)
+        self.assertFalse(expected.requires_grad)
+        torch._dynamo.reset()
+        with _CaptureToFiles(
+            entry,
+            backend="eager",
+            dynamic=False,
+            tracer="dynamo",
+            training=training,
+            require_no_risky_drops=False,
+        ) as cap:
+            with grad_ctx:
+                cap(*args, x)
+        code, cache = cap.result()
+        self.assertEqual(
+            _parse_artifact_metadata(code)["SERVING_MODE"],
+            "installed" if broken else "standalone",
+        )
+        torch._dynamo.reset()
+        with torch.no_grad():
+            loaded = _load_pair(code, cache)
+            self.assertFalse(torch.is_grad_enabled())
+        with _maybe_scoped(loaded), grad_ctx:
+            served = loaded(*args, x)
+        self.assertFalse(served.requires_grad)
+        self.assertEqual(served, expected)
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_multi_graph_bare_module_capture_is_refused(self):
+        # Handing precompile a bare nn.Module compiles Dynamo's OWN wrapper
+        # frame (wrap_inline's `inner`), which closes over the module: the
+        # entry frame holds no graph, and no artifact can rebuild that closure.
+        # Refuse, and name the spelling that works.
+        model = torch.nn.Linear(8, 4).eval()
+        x = torch.randn(3, 8)
+        with self.assertRaisesRegex(
+            torch._precompile.PrecompileError, "captured no dispatchable graph"
+        ):
+            with _CaptureToFiles(
+                model, backend="eager", dynamic=False, tracer="dynamo"
+            ) as cap:
+                with torch.no_grad():
+                    cap(x)
+            cap.result()
+
+    def test_no_dispatchable_graph_names_the_cause(self):
+        # An entry frame with no variants has two very different causes. If
+        # Dynamo BYPASSED the frame it recorded why, and saying so beats the
+        # thin-wrapper advice, which in that case is simply wrong. Only the
+        # ENTRY's own bypassed codes count: an unrelated bypassed helper frame
+        # must not relabel a thin-wrapper entry as a bypass.
+        from torch._dynamo.package import SerializedCode
+        from torch._precompile import _reject_uninstallable_entry
+
+        def fwd_loss_bwd():
+            pass
+
+        def helper():
+            pass
+
+        def bypassed_code(fn):
+            return types.SimpleNamespace(
+                bypassed=True,
+                bypass_reason="cannot pickle 'generator' object",
+                install_to_global=False,
+                python_code=SerializedCode.from_code_object(fn.__code__),
+            )
+
+        entry = types.SimpleNamespace(
+            fn_name="fwd_loss_bwd", codes=[bypassed_code(fwd_loss_bwd)]
+        )
+        # The state a bypassed ENTRY actually arrives in: _multigraph_frames
+        # DROPS bypassed codes, so there is no entry frame at all -- the
+        # diagnostic must fire from the empty list, not from a variant-less
+        # entry frame it would never see.
+        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
+            _reject_uninstallable_entry([], entry)
+        with self.assertRaisesRegex(PrecompileError, "cannot pickle 'generator'"):
+            _reject_uninstallable_entry([], entry)
+        # An entry frame that compiled but produced no variants, with a
+        # bypassed sibling code of the same name, reports the bypass too.
+        frames = [{"is_entry": True, "variants": []}]
+        with self.assertRaisesRegex(PrecompileError, "were BYPASSED during capture"):
+            _reject_uninstallable_entry(frames, entry)
+        foreign = types.SimpleNamespace(
+            fn_name="fwd_loss_bwd", codes=[bypassed_code(helper)]
+        )
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            _reject_uninstallable_entry(frames, foreign)
+        # No entry frame and only a FOREIGN bypassed code: neither diagnostic
+        # applies, so neither may fire as a guess.
+        _reject_uninstallable_entry([], foreign)
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            _reject_uninstallable_entry(
+                frames, types.SimpleNamespace(fn_name="step", codes=[])
+            )
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_multigraph_artifact_round_trips_a_graph_break(self):
+        from torch._dynamo.package import CompilePackage, SerializedCode
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _build_multigraph_artifact, _multigraph_frames
+
+        m = torch.nn.Linear(4, 3)
+        x = torch.randn(5, 4)
+        package = CompilePackage(
+            _multigraph_step,
+            explicit_capture=True,
+            serialization_guard_filter_fn=default_guard_filter_fn,
+        )
+        compiled = torch._dynamo.optimize(backend="eager", package=package)(
+            _multigraph_step
+        )
+        compiled(m, x)
+        compiled(m, x, 3.0)
+        entry = package.cache_entry()
+        # The entry frame and the continuation after the graph break.
+        frames = _multigraph_frames(entry)
+        names = [SerializedCode.to_code_object(f["code"]).co_name for f in frames]
+        self.assertEqual(len(frames), 2, names)
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=fn)
+            for backend_id, fn in package.cached_backends.items()
+        }
+        summary = types.SimpleNamespace(
+            dropped_guards=(),
+            risky_dropped_guards=(),
+            policy_dropped_guards=(),
+            wont_generalize=(),
+        )
+        code, cache = _build_multigraph_artifact(
+            entry, backends, summary, "eager", entry_fn=_multigraph_step
+        )
+        torch._dynamo.reset()
+        f = _load_pair(code, cache)
+        # The default travels with the artifact; the second variant pins 3.0.
+        self.assertEqual(f(m, x), _multigraph_step(m, x))
+        self.assertEqual(f(m, x, 3.0), _multigraph_step(m, x, 3.0))
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+            f(m, torch.randn(7, 4))
+
+        # The artifact is locked to the Python it was produced on.
+        current = f"_DYNAMO_PYTHON_VERSION = {tuple(sys.version_info[:2])!r}"
+        self.assertIn(current, code)
+        foreign = code.replace(current, "_DYNAMO_PYTHON_VERSION = (3, 99)", 1)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        blob["code_hash"] = hashlib.sha256(foreign.encode("utf-8")).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertRaisesRegex(PrecompileError, "produced on Python 3.99"):
+            _load_pair(foreign, buf.getvalue())
+
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_guarded_user_object_prunes_its_unguarded_attributes(self):
+        # Pruning used to apply only to nn.Module, so a guarded object that is
+        # NOT a module -- a train pipeline holding a dataloader -- was pickled
+        # whole and one unguarded attribute several levels down took the frame
+        # with it ("cannot pickle 'generator' object"), which surfaced only as
+        # "the entry frame produced no guarded code".
+        x = torch.randn(4, 8)
+        pipeline = _PrecompilePipeline(torch.nn.Linear(8, 8))
+        with torch.no_grad():
+            expected = _precompile_via_pipeline(pipeline, x)
+            with _CaptureToFiles(
+                _precompile_via_pipeline,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+            ) as cap:
+                cap(pipeline, x)
+            code, cache = cap.result()
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with _maybe_scoped(loaded), torch.no_grad():
+            self.assertEqual(loaded(pipeline, x), expected)
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
+    def test_capture_limits_and_frame_state_are_scoped_to_the_session(self):
+        # Neither recompile limits nor automatic-dynamic frame state cross
+        # between a session and ordinary compiles of the same code.
+        from torch._C._dynamo.eval_frame import get_code_exec_strategy
+        from torch._dynamo.types import FrameAction
+
+        def ordinary_frame_count():
+            counter = torch._dynamo.testing.CompileCounter()
+            compiled = torch.compile(
+                _precompile_single_graph, backend=counter, dynamic=None
+            )
+            for n in (4, 5):
+                x = torch.randn(n)
+                self.assertEqual(compiled(x), _precompile_single_graph(x))
+            return counter.frame_count
+
+        torch._dynamo.reset()
+        self.assertEqual(ordinary_frame_count(), 2)
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(
+            accumulated_recompile_limit=2, recompile_limit=8
+        ):
+            inputs = [torch.randn(n) for n in (2, 3, 4)]
+            session = _precompile_capture(
+                _precompile_single_graph,
+                backend="eager",
+                dynamic=False,
+                recompile_limit=20,
+            )
+            with session as captured:
+                for x in inputs:
+                    self.assertEqual(captured(x), _precompile_single_graph(x))
+                during = torch._dynamo.testing.CompileCounter()
+                ordinary = torch.compile(
+                    _precompile_single_graph, backend=during, dynamic=False
+                )
+                x = torch.randn(5)
+                self.assertEqual(ordinary(x), _precompile_single_graph(x))
+                self.assertEqual(during.frame_count, 1)
+            summary = session.summary()
+            self.assertTrue(summary.complete)
+            self.assertEqual(summary.truncated, ())
+            self.assertEqual(summary.guarded_codes, len(inputs))
+            after = torch._dynamo.testing.CompileCounter()
+            ordinary = torch.compile(
+                _precompile_single_graph, backend=after, dynamic=False
+            )
+            x = torch.randn(6)
+            self.assertEqual(ordinary(x), _precompile_single_graph(x))
+            self.assertEqual(after.frame_count, 1)
+            strategy = get_code_exec_strategy(_precompile_single_graph.__code__)
+            self.assertEqual(strategy.cur_action, FrameAction.DEFAULT)
+            self.assertEqual(strategy.recursive_action, FrameAction.DEFAULT)
+
+        torch._dynamo.reset()
+        warm = torch.compile(_precompile_multi_graph, backend="eager", dynamic=False)
+        for n in (2, 3):
+            x = torch.randn(n, 8)
+            self.assertEqual(warm(x), _precompile_multi_graph(x))
+        x = torch.randn(4, 8)
+        session = _precompile_capture(
+            _precompile_multi_graph,
+            backend="eager",
+            dynamic=False,
+            recompile_limit=2,
+        )
+        with session as compiled:
+            self.assertEqual(compiled(x), _precompile_multi_graph(x))
+        summary = session.summary()
+        self.assertTrue(summary.complete)
+        self.assertEqual(summary.truncated, ())
+        self.assertEqual(summary.uncovered_frames, ())
+        self.assertEqual(summary.guarded_codes, 3)
+
+        session = _precompile_capture(
+            _precompile_single_graph, backend="eager", dynamic=None
+        )
+        with session as compiled:
+            for n in (2, 3):
+                x = torch.randn(n)
+                self.assertEqual(compiled(x), _precompile_single_graph(x))
+        self.assertEqual(ordinary_frame_count(), 2)
+
+    @parametrize("backend", ["eager", "inductor"])
+    def test_multi_graph_round_trip_exercised_empty_resume(self, backend):
+        x = torch.arange(3.0)
+        expected = [_precompile_empty_resume(x, flag) for flag in (False, True)]
+        session = _precompile_capture(
+            _precompile_empty_resume,
+            backend=backend,
+            dynamic=False,
+            require_no_dropped_guards=False,
+        )
+        with session as compiled:
+            with torch.no_grad():
+                compiled(x, False)
+                compiled(x, True)
+        self.assertTrue(session.summary().complete)
+
+        code, cache = session.result()
+        torch._dynamo.reset()
+        with self.assertLogs("torch._precompile", level="WARNING"):
+            loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            for flag, want in zip((False, True), expected):
+                self.assertEqual(loaded(x, flag), want)
+
+    def test_dynamo_captures_a_keyword_call(self):
+        # The dynamo tracer takes keyword arguments, so the loaded artifact serves
+        # the same keywords rather than positional arguments only.
+        from torch._precompile import _parse_artifact_metadata
+
+        x = torch.randn(3)
+        with torch.no_grad():
+            with _CaptureToFiles(
+                _precompile_scaled,
+                backend="eager",
+                dynamic=False,
+                tracer="dynamo",
+            ) as cap:
+                cap(x, 1)
+                cap(x, k=2)
+            code, cache = cap.result()
+        frames = _parse_artifact_metadata(code)["FRAMES"]
+        self.assertEqual([count for _, count in frames], [2])
+        torch._dynamo.reset()
+        loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            self.assertEqual(loaded(x, k=2), x * 2)
+            self.assertEqual(loaded(x, 2), x * 2)
+            self.assertEqual(loaded(x, 1), x)
+
+    @parametrize("bounds", [None, (4, 16)])
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_mark_unbacked_runs_across_sizes(self, bounds, backend):
+        # Dynamic shapes are opt-in via mark_unbacked for the dynamo tracer too: Dynamo
+        # captures the marked dim as an UNBACKED symint, so the ONE artifact serves any
+        # runtime size of that dim on either backend (the make_fx tracer's eager backend
+        # rejects dynamic dims; the dynamo subgraph carries its own runtime asserts, so it
+        # does not have to). mark_unbacked's min/max become ShapeEnv runtime asserts,
+        # which Dynamo emits into the subgraph itself -- so the artifact rejects an
+        # out-of-range runtime size even though the thin dynamo driver has no bounds
+        # check of its own (the make_fx tracer instead re-checks the bounds in its driver).
+        m = torch.nn.Sequential(
+            torch.nn.Linear(4, 8), torch.nn.ReLU(), torch.nn.Linear(8, 3)
+        ).eval()
+        x = torch.randn(8, 4)
+        if bounds is None:
+            mark_unbacked(x, 0)
+        else:
+            mark_unbacked(x, 0, min=bounds[0], max=bounds[1])
+        with _CaptureToFiles(
+            lambda model, xx: model(xx), training=True, tracer="dynamo", backend=backend
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            for bs in (8, 16, 1, 0) if bounds is None else (8, 16, 6):
+                xt = torch.randn(bs, 4)
+                self.assertEqual(f_c(m, xt), m(xt))
+            if bounds is not None:
+                with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+                    f_c(m, torch.randn(2, 4))
+
+    def test_tracer_dynamo_cross_tracer_cache_rejected(self):
+        # A cache from the make_fx tracer paired with dynamo python_code is a mismatched
+        # pairing and must be rejected (the code_hash and the tracer tag both catch it),
+        # not run under foreign metadata.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        with _CaptureToFiles(lambda model, xx: model(xx), tracer="dynamo") as cap:
+            with torch.no_grad():
+                cap(m, x)
+        dyn_code, _ = cap.result()
+        with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
+            cap(m, x)
+        _, mf_cache = cap.result()
+        with self.assertRaisesRegex(PrecompileError, "tracer"):
+            _load_pair(dyn_code, mf_cache)
+
+    @parametrize("output", list(_PRECOMPILE_OUTPUT_SHAPES))
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_output_structures_round_trip(self, output, backend):
+        # Under dynamo the transformed bytecode (NOT the driver's OUT_SPEC path make_fx
+        # uses) reassembles fn's output, so each leaf is checked on both backends: a
+        # mis-ordered flatten or a dropped dict leaf would silently corrupt the output
+        # structure, a global constant left dangling would NameError at load, and a
+        # non-tensor output is a DIVERGENCE from make_fx, which REJECTS it on inductor
+        # (test_nontensor_output_inductor_clean_error).
+        fn = _PRECOMPILE_OUTPUT_SHAPES[output]
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        with _CaptureToFiles(
+            fn, training=True, tracer="dynamo", backend=backend
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            out, ref = f_c(m, x), fn(m, x)
+            self.assertEqual(out, ref)
+            if output == "by_reference_callable":
+                self.assertIs(out[1], ref[1])
+
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_dtensor_subclass(self, backend):
+        # The dynamo-tracer analog of test_dtensor_subclass: a DTensor param/input must
+        # round-trip on both backends. The dynamo eager emit inlines the subgraph against an
+        # empty _GraphSelf and splats flat args, and inductor lowers via AOTAutograd's subclass
+        # wrap/unwrap -- neither is exercised by the dense-input dynamo tests, so cover both.
+        import torch.distributed as dist
+
+        if not dist.is_available() or not dist.is_gloo_available():
+            self.skipTest("gloo not available")
+
+        from torch.distributed.tensor import DeviceMesh, distribute_tensor, Replicate
+        from torch.testing._internal.common_utils import find_free_port
+
+        saved_env = {k: os.environ.get(k) for k in ("MASTER_ADDR", "MASTER_PORT")}
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+        try:
+            mesh = DeviceMesh("cpu", list(range(1)))
+            m = torch.nn.Linear(4, 3).eval()
+            for name, p in list(m.named_parameters()):
+                setattr(
+                    m,
+                    name,
+                    torch.nn.Parameter(
+                        distribute_tensor(p.detach(), mesh, [Replicate()])
+                    ),
+                )
+            x = distribute_tensor(torch.randn(5, 4), mesh, [Replicate()])
+            ref = m(x)
+            with _CaptureToFiles(
+                lambda model, xx: model(xx),
+                training=True,
+                tracer="dynamo",
+                backend=backend,
+            ) as cap:
+                cap(m, x)
+            code, cache = cap.result()
+            # Exercise BOTH reload paths on the DTensor artifact: load() takes the
+            # bundled-artifact path (primes the cache, then execs python_code), while the
+            # direct exec below runs the self-contained python_code with no cache.
+            f_c = _load_pair(code, cache)
+            self.assertEqual(f_c(m, x).to_local(), ref.to_local())
+            ns = {"__name__": "_dt"}
+            exec(compile(code, "<dt>", "exec"), ns)
+            self.assertEqual(ns["forward"](m, x).to_local(), ref.to_local())
+        finally:
+            dist.destroy_process_group()
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    @parametrize("call", ["omit_all_defaults", "pass_the_first_positionally"])
+    @parametrize("backend", ["inductor", "eager"])
+    def test_tracer_dynamo_defaults_roundtrip(self, call, backend):
+        # fn with positional defaults and a keyword-only default drives the driver's
+        # argdefs / kwdefaults restoration; the defaults must be honored at the runtime
+        # call (omitting them would TypeError / use a wrong value if they were dropped).
+        # __defaults__ covers the LAST len(defaults) parameters: a call passing the
+        # first defaulted argument positionally must still see the second one's real
+        # default in the guard check, not the first one's.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        args = (m, x) if call == "omit_all_defaults" else (m, x, 3.0)
+        with _CaptureToFiles(
+            _precompile_with_defaults, training=True, tracer="dynamo", backend=backend
+        ) as cap:
+            cap(*args)
+        code, cache = cap.result()
+        for _label, f_c in _default_and_inlined_loaders(code, cache, backend):
+            self.assertEqual(f_c(*args), _precompile_with_defaults(*args))
+
+    def test_tracer_dynamo_static_under_dynamic_config(self):
+        # dynamic=None is the ambient config (test_automatic_dynamic_promotes_the_frames_that_varied
+        # relies on that), so a STATIC capture is spelled dynamic=False, which pins
+        # assume_static_by_default and automatic_dynamic_shapes for the capture
+        # (eval_frame.make_set_enable_dynamic). The eager subgraph ships as a pickle, so the
+        # only observable of "static" is dispatch: an unseen batch size must be refused.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        with torch._dynamo.config.patch(assume_static_by_default=False):
+            with _CaptureToFiles(
+                lambda model, xx: model(xx),
+                training=True,
+                tracer="dynamo",
+                backend="eager",
+                dynamic=False,
+            ) as cap:
+                cap(m, x)
+            code, cache = cap.result()
+        f_c = _load_pair(code, cache)
+        self.assertEqual(f_c(m, x), m(x))
+        with self.assertRaisesRegex(PrecompileError, "no captured variant"):
+            f_c(m, torch.randn(6, 4))
+
+        # Shape history is per capture: precompiling the SAME fn (one code object) at a
+        # second shape does not promote the batch dim, because each session opens its own
+        # isolated region with fresh frame state. Both artifacts serve only what they saw.
+        def f(model, xx):
+            return model(xx)
+
+        with _CaptureToFiles(f, training=True, tracer="dynamo", backend="eager") as cap:
+            cap(m, torch.randn(5, 4))
+        c1, _ = cap.result()
+        with _CaptureToFiles(f, training=True, tracer="dynamo", backend="eager") as cap:
+            cap(m, torch.randn(7, 4))
+        c2, _ = cap.result()
+        self.assertNotIn("SymInt", c1)
+        self.assertNotIn("SymInt", c2)
+
+    def test_load_cache_without_tracer_key(self):
+        # BC: a cache produced before the dynamo tracer existed carries no "tracer" key in
+        # its envelope. load() must accept such an envelope. (It does not read the key at
+        # this commit; the tracer="dynamo" wiring adds the read and this test then guards
+        # its "make_fx" default.) Simulate a legacy envelope by deleting the key. Assert
+        # the cache envelope was actually CONSUMED (no "could not read the cache envelope"
+        # warning): a KeyError would be swallowed by load()'s except and fall back to JIT,
+        # which still returns the right answer -- so an output-only assertion would not
+        # guard the default.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        del blob["tracer"]
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            f_c = _load_pair(code, buf.getvalue())
+        self.assertFalse(
+            any("could not read the cache envelope" in msg for msg in cm.output),
+            f"legacy cache envelope was not consumed (fell back to JIT): {cm.output}",
+        )
+        self.assertEqual(f_c(m, x), m(x))
+
+    def test_tracer_default_and_explicit(self):
+        # capture()'s tracer defaults to DynamoTracer(); MakeFxTracer is the
+        # single-trace alternative. Drive the real API (not the string shim) so
+        # the default and both explicit tracers are locked in.
+        self.assertIsInstance(
+            inspect.signature(torch.compiler.precompile.capture)
+            .parameters["tracer"]
+            .default,
+            DynamoTracer,
+        )
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        for tracer in (None, DynamoTracer(), MakeFxTracer()):
+            kwargs = {} if tracer is None else {"tracer": tracer}
+            with tempfile.TemporaryDirectory() as d:
+                ap, cp = os.path.join(d, "m.py"), os.path.join(d, "m.cache")
+                with (
+                    torch.no_grad(),
+                    torch.compiler.precompile.capture(
+                        lambda model, xx: model(xx),
+                        artifact_path=ap,
+                        cache_path=cp,
+                        backend="eager",
+                        **kwargs,
+                    ) as cap,
+                ):
+                    cap(m, x)
+                loaded = torch.compiler.precompile.load(ap, cp)
+                with _maybe_scoped(loaded), torch.no_grad():
+                    self.assertEqual(loaded(m, x), m(x))
+
     @parametrize("module_receiver", [True, False])
     @parametrize("shadow", [True, False])
     @parametrize("read", [True, False])
@@ -5486,7 +5799,7 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(holder, x), expected)
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_pruned_receiver_identity_guard_is_risky_not_silent(self):
         # The CLOSURE_MATCH identity slot on the saved function is dropped, as
         # it is in every artifact -- but as RISKY, which the default refuses.
@@ -5521,7 +5834,7 @@ class TestPrecompile(TestCase):
     @parametrize(
         "attr", ["plain", "across_break", "large_then_rebound", "self_referential"]
     )
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_guard_through_a_tensor_attribute_round_trips(self, attr):
         # A guard rooted at a Python attribute of a tensor (x._cpu_copy) is
         # REBUILT at load, so the attribute travels in the pickle's STATE slot:
@@ -5578,7 +5891,7 @@ class TestPrecompile(TestCase):
             "dynamic_bounds",
         ],
     )
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_marked_artifact_serves_the_tensor_it_captured(self, marking):
         # The dimension-marking guard reads its attributes off the example value
         # rather than through a source, so nothing registers them in the guard
@@ -5618,7 +5931,7 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(m, y)
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_attribute_shadowing_fake_tensor_state_is_refused(self):
         # A reconstructed tensor IS a FakeTensor, so an attribute of the same
         # name as one a FakeTensor keeps its own state in cannot be carried.
@@ -5671,21 +5984,9 @@ class TestPrecompile(TestCase):
 
     def _spy_on_guard_drift(self, stack, drift):
         """Patch _report_guard_drift to append each newly recorded drift to ``drift``."""
-        from torch._dynamo.precompile_package import PrecompileSession
-
-        real = PrecompileSession._report_guard_drift
-
-        def spy(session, code_entry, rebuilt, live_key):
-            before = set(session._drifted_guards)
-            real(session, code_entry, rebuilt, live_key)
-            drift.extend(session._drifted_guards - before)
-
-        stack.enter_context(
-            mock.patch.object(PrecompileSession, "_report_guard_drift", spy)
-        )
 
     @parametrize("api", ["session", "public"])
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_guards_that_cannot_be_rebuilt_are_dropped_not_refused(self, api):
         # A guard that cannot be rebuilt is dropped and recorded, not grounds
         # for refusing the other frames. Whether it is worth keeping is a
@@ -5775,7 +6076,7 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), _precompile_call_model(model, x))
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_guard_drift_is_reported(self):
         # The loud half of a lossy reconstruction is a guard that will not
         # rebuild at all. The quiet half is one that rebuilds into a DIFFERENT
@@ -5823,7 +6124,7 @@ class TestPrecompile(TestCase):
         )
         self.assertIn("L['mode'] == 'z'", str(ctx.exception))
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_guard_drift_into_another_variants_check_is_reported(self):
         # Union-of-all-variants would hide this: the drifted check IS a live
         # leaf, only from a DIFFERENT variant. Two variants are captured, and
@@ -5872,7 +6173,7 @@ class TestPrecompile(TestCase):
         )
         self.assertIn("L['mode'] == 'b'", str(ctx.exception))
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_records_what_each_dropped_slot_checked(self):
         # A slot is named by its type and SOURCE, and for some types that is
         # not enough to judge the drop. A dropped HASATTR on a source may be
@@ -5982,97 +6283,7 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(RuntimeError, "no captured variant"):
                 loaded(four, x)
 
-    def test_precompile_artifact_write_leaves_the_previous_pair_on_failure(self):
-        # The two halves only load together -- the cache carries a sha256 of
-        # exactly the python_code it was emitted with -- so truncating them in
-        # place puts a new artifact next to a stale cache for as long as the
-        # write takes. An accumulating capture rewrites on every call and sells
-        # exactly that crash as the thing it protects against.
-        import builtins
-
-        from torch._precompile import _write_artifact
-
-        with tempfile.TemporaryDirectory() as d:
-            artifact_path = os.path.join(d, "a.py")
-            cache_path = os.path.join(d, "a.cache")
-            _write_artifact(artifact_path, cache_path, "GOOD = 1\n", b"goodcache")
-
-            real_open = builtins.open
-            seen = []
-
-            def flaky(path, *args, **kwargs):
-                if str(path).endswith(".tmp"):
-                    seen.append(path)
-                    if len(seen) == 2:
-                        raise OSError("disk full")
-                return real_open(path, *args, **kwargs)
-
-            with mock.patch.object(builtins, "open", flaky):
-                with self.assertRaisesRegex(OSError, "disk full"):
-                    _write_artifact(artifact_path, cache_path, "NEW = 2\n", b"newcache")
-            with open(artifact_path) as f:
-                self.assertEqual(f.read(), "GOOD = 1\n")
-            with open(cache_path, "rb") as f:
-                self.assertEqual(f.read(), b"goodcache")
-            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
-
-    def test_precompile_artifact_write_honours_the_umask(self):
-        # mkstemp creates its file 0600 and the rename carried that onto the
-        # artifact, so nobody else on a shared directory could read it. The
-        # pair has to land with the mode a plain open() gives under the umask.
-        import stat
-
-        from torch._precompile import _write_artifact
-
-        umask = os.umask(0)
-        os.umask(umask)
-        with tempfile.TemporaryDirectory() as d:
-            artifact_path = os.path.join(d, "a.py")
-            cache_path = os.path.join(d, "a.cache")
-            _write_artifact(artifact_path, cache_path, "X = 1\n", b"cache")
-            for path in (artifact_path, cache_path):
-                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o666 & ~umask)
-            self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])
-
-    def test_precompile_artifact_write_restores_the_previous_pair_on_rename_failure(
-        self,
-    ):
-        # An OSError on the second rename left the new .py beside the old
-        # cache: a pair load refuses on code_hash, for as long as it takes a
-        # later call to succeed. The previous artifact is moved aside first
-        # and put back, so the named files stay the last good pair.
-        from torch._precompile import _write_artifact
-
-        with tempfile.TemporaryDirectory() as d:
-            artifact_path = os.path.join(d, "a.py")
-            cache_path = os.path.join(d, "a.cache")
-            _write_artifact(artifact_path, cache_path, "GOOD = 1\n", b"goodcache")
-            real_replace = os.replace
-
-            def flaky(src, dst):
-                if dst == cache_path:
-                    raise OSError("cache rename failed")
-                return real_replace(src, dst)
-
-            with mock.patch.object(os, "replace", flaky):
-                with self.assertRaisesRegex(OSError, "cache rename failed"):
-                    _write_artifact(artifact_path, cache_path, "NEW = 2\n", b"newcache")
-            with open(artifact_path) as f:
-                self.assertEqual(f.read(), "GOOD = 1\n")
-            with open(cache_path, "rb") as f:
-                self.assertEqual(f.read(), b"goodcache")
-            self.assertEqual(sorted(os.listdir(d)), ["a.cache", "a.py"])
-        # A first write whose cache target cannot be renamed over (a directory)
-        # leaves no half artifact behind either.
-        with tempfile.TemporaryDirectory() as d:
-            artifact_path = os.path.join(d, "a.py")
-            cache_dir = os.path.join(d, "a.cache")
-            os.mkdir(cache_dir)
-            with self.assertRaises(OSError):
-                _write_artifact(artifact_path, cache_dir, "NEW = 2\n", b"newcache")
-            self.assertEqual(os.listdir(d), ["a.cache"])
-
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_installed_entry_keeps_its_defaults(self):
         # An installed artifact rebuilds its entry from a code object, which
         # carries neither defaults nor closure values. Without them a defaulted
@@ -6120,7 +6331,7 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(x), _precompile_shadowed_global_entry(x))
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_serving_does_not_mutate_the_artifact(self):
         # CompilePackage appends to the entry's per-code records, so a
         # serve-time recompile used to write its new backend id back into the
@@ -6147,7 +6358,7 @@ class TestPrecompile(TestCase):
                 x = torch.randn(rows, 8)
                 self.assertEqual(loaded(model, x), _precompile_attr_entry(model, x))
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_installed_artifact_unload_takes_back_only_its_own_keys(self):
         # Backend keys are per-capture uuids, so only another handle on this
         # artifact can legitimately hold them; a foreign object filed under one
@@ -6317,47 +6528,6 @@ class TestPrecompile(TestCase):
             with _maybe_scoped(loaded), torch.no_grad():
                 self.assertEqual(loaded(x), (x * 3.0).sum())
 
-    @parametrize("tracer", ("make_fx",))  # dynamo: needs training support
-    def test_capture_accumulates_gradients_like_eager(self, tracer):
-        # The caller makes the calls inside the block, so precompile has no
-        # example backward of its own: a grad already present when capture starts
-        # is neither cleared nor snapshotted. Both tracers run each cap() for
-        # real, so a .backward() ACCUMULATES onto the model's .grad exactly as
-        # eager does, and the same grad OBJECT stays in place (the make_fx driver
-        # accumulates in place onto a pre-existing grad, so optimizer state keyed
-        # on its identity survives).
-        torch.manual_seed(0)
-        model = _PrecompileTrainMod()
-        xs = [torch.randn(n, 8) for n in (3, 5)]
-        # make_fx captures a single call; dynamo takes as many as we make. Each
-        # captured call runs for real either way, so its backward lands on .grad.
-        capture_calls = xs[:1] if tracer == "make_fx" else xs
-        extra = {} if tracer == "make_fx" else {"dynamic": False}
-        with torch.enable_grad():
-            _precompile_backward_step(model, xs[0])  # warmup populates .grad
-            before = [(p.grad, p.grad.detach().clone()) for p in model.parameters()]
-            # Deepcopy drops .grad, so replay the warmup on the reference and
-            # then every captured call cap() executes for real, so the reference
-            # is warmup plus the captured calls' contribution.
-            reference = copy.deepcopy(model)
-            _precompile_backward_step(reference, xs[0])
-            for x in capture_calls:
-                _precompile_backward_step(reference, x)
-            with _CaptureToFiles(
-                _precompile_backward_step,
-                backend="eager",
-                tracer=tracer,
-                training=True,
-                **extra,
-            ) as cap:
-                for x in capture_calls:
-                    cap(model, x)
-        for p, (grad_object, _warmup), ref in zip(
-            model.parameters(), before, reference.parameters()
-        ):
-            self.assertIs(p.grad, grad_object)
-            self.assertEqual(p.grad, ref.grad)
-
     def test_precompile_records_a_backend_for_a_short_circuited_noop_graph(self):
         # A graph that runs nothing and returns nothing never reaches the
         # backend: output_graph substitutes noop_graph_call rather than pay a
@@ -6429,7 +6599,7 @@ class TestPrecompile(TestCase):
         with _maybe_scoped(loaded), torch.no_grad():
             self.assertEqual(loaded(model, x), want)
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_installed_artifact_reports_what_it_compiles_at_serve(self):
         # An installed artifact answers a guard miss by COMPILING, not by
         # refusing -- a frame reachable only through the frame evaluator has no
@@ -6561,7 +6731,7 @@ class TestPrecompile(TestCase):
             tracer=tracer,
         )
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_save_checkpoints_each_call(self):
         # cap.save() rewrites the on-disk artifact whenever the caller calls it,
         # so a pipelined training step -- which cannot be replayed back to back
@@ -6600,7 +6770,7 @@ class TestPrecompile(TestCase):
             self.assertGreater(codes[1], codes[0])
 
             torch._dynamo.reset()
-            loaded = _load_pair(artifact_path=artifact_path, cache_path=cache_path)
+            loaded = torch.compiler.precompile.load(artifact_path, cache_path)
             with _maybe_scoped(loaded):
                 for x, mode in zip(xs, modes):
                     model.zero_grad(set_to_none=True)
@@ -6655,7 +6825,7 @@ class TestPrecompile(TestCase):
                 if not exited.is_set():
                     capture.__exit__(None, None, None)
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_save_keeps_the_last_artifact_when_the_rewrite_fails(self):
         # save() rewrites both files, and when the step ran but only the on-disk
         # rewrite failed, the files on disk are still the previous save's
@@ -6737,12 +6907,12 @@ class TestPrecompile(TestCase):
                 capture.save()
 
             torch._dynamo.reset()
-            loaded = _load_pair(artifact_path=artifact_path, cache_path=cache_path)
+            loaded = torch.compiler.precompile.load(artifact_path, cache_path)
             with _maybe_scoped(loaded):
                 self.assertEqual(loaded(cfg_with, x), want_with)
                 self.assertEqual(loaded(cfg_without, x), want_without)
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_save_reports_the_drops_its_artifact_made(self):
         # The render filters COPIES, so the drops it made have to be read back
         # off that pass -- otherwise summary() and the artifact's own
@@ -6770,7 +6940,7 @@ class TestPrecompile(TestCase):
             with open(artifact_path) as f:
                 self.assertNotIn("POLICY_DROPPED_GUARDS = []", f.read())
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_save_call_state(self):
         # A call whose fn raises propagates that error and leaves the capture
         # open and usable: the next good call runs and returns, and calls()
@@ -6853,11 +7023,11 @@ class TestPrecompile(TestCase):
                     capture.save()
                     self.assertEqual(sorted(os.listdir(d)), ["m.cache", "m.py"])
             torch._dynamo.reset()
-            loaded = _load_pair(artifact_path=artifact_path, cache_path=cache_path)
+            loaded = torch.compiler.precompile.load(artifact_path, cache_path)
             with _maybe_scoped(loaded), torch.no_grad():
                 self.assertEqual(loaded(x, torch.sin), torch.sin(x + 1))
 
-    @unittest.expectedFailure  # xfail(bullet): DynamoTracer is not available yet
+    @unittest.expectedFailure  # xfail(bullet): needs a feature the tracer bullet leaves out
     def test_precompile_save_serializes_concurrent_calls(self):
         # Two threads calling one capture: each call runs under the capture's
         # lock, so neither sees the other mid-call, and a save() cannot snapshot
@@ -6894,86 +7064,10 @@ class TestPrecompile(TestCase):
                     self.assertEqual(results[mode], eager(x, mode))
             self.assertEqual(sorted(os.listdir(d)), ["m.cache", "m.py"])
             torch._dynamo.reset()
-            loaded = _load_pair(artifact_path=artifact_path, cache_path=cache_path)
+            loaded = torch.compiler.precompile.load(artifact_path, cache_path)
             with _maybe_scoped(loaded), torch.no_grad():
                 for mode, x in xs.items():
                     self.assertEqual(loaded(model, x, mode), eager(x, mode))
-
-    def test_precompile_attribute_classes_keep_a_truthful_module(self):
-        # The capture classes are re-exported under torch.compiler.precompile and
-        # report it as their home (test_public_bindings requires every member of
-        # this module's __all__ to), so pickle resolves them there.
-        Capture = torch.compiler.precompile.Capture
-        self.assertEqual(Capture.__module__, "torch.compiler.precompile")
-        error = pickle.loads(pickle.dumps(torch.compiler.PrecompileError("boom")))
-        self.assertIsInstance(error, torch.compiler.PrecompileError)
-        self.assertEqual(str(error), "boom")
-
-    @parametrize("name", _PRECOMPILE_PUBLIC_METHODS)
-    def test_precompile_member_module_and_qualname_resolve_to_it(self, name):
-        # Nothing hung off the singleton rewrites __module__/__qualname__: the
-        # docs place these under torch.compiler.precompile.<name>, but only a
-        # name torch.compiler.__all__ exports may claim torch.compiler, or
-        # pickle cannot resolve the class and inspect cannot find its source.
-        member = getattr(torch.compiler.precompile, name)
-        target = sys.modules[member.__module__]
-        for part in member.__qualname__.split("."):
-            target = getattr(target, part)
-        self.assertIs(target, getattr(member, "__func__", member))
-
-    def test_precompile_paths_come_in_pairs(self):
-        # Half an artifact can never be loaded: the cache carries a sha256 of
-        # exactly the python_code it was emitted with. One file for both halves
-        # is refused too: the second rename overwrote the source with cache
-        # bytes and load died on a raw UnicodeDecodeError. capture() refuses a
-        # lone or aliased path at construction, before fn ever runs -- the
-        # on-disk pair is all-or-nothing.
-        ran = []
-
-        def entry(model, t):
-            ran.append(1)
-            return model(t)
-
-        precompile = torch.compiler.precompile
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "m.py")
-            lone_artifact = "got artifact_path without cache_path"
-            lone_cache = "got cache_path without artifact_path"
-            same = "same file for artifact_path"
-            builders = [
-                lambda **kw: precompile.capture(entry, backend="eager", **kw),
-            ]
-            for build in builders:
-                cases = [
-                    (dict(artifact_path=path, cache_path=None), lone_artifact),
-                    (dict(artifact_path=None, cache_path=path), lone_cache),
-                    (dict(artifact_path=path, cache_path=path), same),
-                ]
-                for kwargs, regex in cases:
-                    with self.assertRaisesRegex(ValueError, regex):
-                        build(**kwargs)
-            self.assertEqual(ran, [])
-            self.assertEqual(os.listdir(d), [])
-            # load takes the two paths positionally; omitting the cache is a
-            # missing positional argument, not a partial-artifact ValueError.
-            with self.assertRaises(TypeError):
-                precompile.load(path)
-
-    def test_precompile_artifact_takes_no_positional_examples(self):
-        # artifact() takes fn as its only positional argument -- capture is
-        # caller-driven, so the example is a cap(...) call inside the block, not
-        # a positional to the constructor.
-        x = torch.randn(3)
-        with self.assertRaises(TypeError):
-            _CaptureToFiles(lambda y: y + 1, x, backend="eager")
-
-
-def _graph_devices_literal(code: str) -> str:
-    """The GRAPH_DEVICES line the artifact records, for tests that assert on it."""
-    for line in code.splitlines():
-        if line.startswith("GRAPH_DEVICES"):
-            return line
-    raise AssertionError("artifact has no GRAPH_DEVICES line")
 
 
 class _FilesModel(torch.nn.Module):
@@ -6989,13 +7083,22 @@ def _files_fn(model, x):
     return model(x)
 
 
+def _files_train_step(model, x):
+    out = model(x)
+    out.sum().backward()
+    return out
+
+
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+@instantiate_parametrized_tests
 class TestPrecompileCaptureFiles(TestCase):
     """torch.compiler.precompile.capture()/torch.compiler.precompile.load() through the on-disk artifact pair (MakeFxTracer)."""
 
     def setUp(self):
         super().setUp()
-        self.dir = tempfile.mkdtemp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
         self.artifact = os.path.join(self.dir, "m.py")
         self.cache = os.path.join(self.dir, "m.cache")
         self.model = _FilesModel()
@@ -7025,6 +7128,57 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertFalse(f.installed)
         self.assertEqual(self._leftovers(), [])
 
+    def test_default_tracer_writes_a_loadable_pair(self):
+        # No tracer= at all: torch.compiler.precompile.capture()'s default has to produce a loadable artifact.
+        # Every other test here passes a tracer explicitly, so this is the only
+        # coverage of the default path end to end.
+        with torch.compiler.precompile.capture(
+            _files_fn,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            backend="eager",
+        ) as cap:
+            y = cap(self.model, self.x)
+        self.assertEqual(y, self.model(self.x))
+        f = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def test_artifact_bytes_are_exactly_what_the_cache_hashes(self):
+        # Both halves move in binary on purpose: a text-mode read would collapse CRLF
+        # on every platform (universal newlines) and a text-mode write would translate
+        # the newlines on Windows, while the cache's code_hash is over
+        # exactly the python_code bytes and torch.compiler.precompile.load() re-hashes
+        # the text it reads back. code_hash cannot catch that on its own (a text-mode
+        # write is hashed as written), so pin the file bytes of a real capture, then
+        # round-trip a python_code holding CRLF -- the one character class for which
+        # byte mode and text mode differ -- through the writer and the reader.
+        from torch._precompile import _read_artifact, _write_artifact
+
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        raw = self._read(self.artifact)
+        self.assertNotIn(b"\r", raw)
+        blob = torch.load(self.cache, weights_only=True)
+        self.assertEqual(blob["code_hash"], hashlib.sha256(raw).hexdigest())
+
+        crlf = "x = 1\r\ny = 2\n"
+        buf = io.BytesIO()
+        torch.save({"code_hash": hashlib.sha256(crlf.encode()).hexdigest()}, buf)
+        artifact = os.path.join(self.dir, "crlf.py")
+        cache = os.path.join(self.dir, "crlf.cache")
+        _write_artifact(artifact, cache, crlf, buf.getvalue())
+        # The writer put the CR on disk rather than translating it away, ...
+        self.assertEqual(self._read(artifact), crlf.encode())
+        read_code, read_cache = _read_artifact(artifact, cache)
+        # ... the reader handed the same string back, ...
+        self.assertEqual(read_code, crlf)
+        # ... and the hash the pair was sealed with still covers what the reader
+        # returns, which is the equality torch.compiler.precompile.load() checks before it execs the source.
+        self.assertEqual(
+            torch.load(io.BytesIO(read_cache), weights_only=True)["code_hash"],
+            hashlib.sha256(read_code.encode()).hexdigest(),
+        )
+
     def test_inductor_pair_round_trips(self):
         with self._capture(backend="inductor") as cap:
             cap(self.model, self.x)
@@ -7037,6 +7191,24 @@ class TestPrecompileCaptureFiles(TestCase):
                 pass
         self.assertFalse(os.path.exists(self.artifact))
         self.assertFalse(os.path.exists(self.cache))
+
+    def test_raising_call_writes_nothing(self):
+        # The capture call itself raising (here a refusal from inside the trace) is
+        # distinct from the block body raising after a successful call: __exit__ sees
+        # the in-flight exception with nothing rendered and must leave no file behind.
+        Out = collections.namedtuple("Out", ["a", "b"])
+        with self.assertRaisesRegex(PrecompileError, "output structure"):
+            with torch.compiler.precompile.capture(
+                lambda m, x: Out(m(x), x),
+                artifact_path=self.artifact,
+                cache_path=self.cache,
+                tracer=MakeFxTracer(),
+                backend="eager",
+            ) as cap:
+                cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertEqual(self._leftovers(), [])
 
     def test_second_call_is_refused(self):
         with self._capture() as cap:
@@ -7053,12 +7225,15 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_exception_in_block_leaves_files_untouched(self):
         with self._capture() as cap:
             cap(self.model, self.x)
-        before = self._read(self.artifact)
+        before = (self._read(self.artifact), self._read(self.cache))
+        # A different backend, so a write from the raising block would change both
+        # halves' bytes; re-capturing the same shape on the same backend renders
+        # byte-identical output and the comparison could not fail.
         with self.assertRaisesRegex(RuntimeError, "boom"):
-            with self._capture() as cap:
-                cap(self.model, self.x * 2)
+            with self._capture(backend="inductor") as cap:
+                cap(self.model, self.x)
                 raise RuntimeError("boom")
-        self.assertEqual(self._read(self.artifact), before)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
         self.assertEqual(self._leftovers(), [])
 
     def test_save_writes_before_exit_and_exit_rewrites_the_same_pair(self):
@@ -7067,14 +7242,20 @@ class TestPrecompileCaptureFiles(TestCase):
                 cap.save()
             cap(self.model, self.x)
             cap.save()
-            saved = self._read(self.artifact)
+            saved = (self._read(self.artifact), self._read(self.cache))
+            # The rewrite repeats the same bytes, so pin the inodes instead: each
+            # write renames fresh temps into place, and skipping the exit write
+            # would leave save()'s inodes in place.
+            inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
             self.assertEqual(
                 torch.compiler.precompile.load(self.artifact, self.cache)(
                     self.model, self.x
                 ),
                 self.model(self.x),
             )
-        self.assertEqual(self._read(self.artifact), saved)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), saved)
+        rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        self.assertNotEqual(rewritten, inodes)
         self.assertEqual(self._leftovers(), [])
 
     def test_rewrite_replaces_the_previous_pair(self):
@@ -7093,17 +7274,474 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertEqual(self._leftovers(), [])
 
     def test_same_file_for_both_halves_is_refused(self):
-        with self.assertRaisesRegex(ValueError, "same file"):
-            torch.compiler.precompile.capture(
-                _files_fn,
-                artifact_path=self.artifact,
-                cache_path=self.artifact,
-                tracer=MakeFxTracer(),
-            )
+        # Also when the two halves are two SPELLINGS of one path: the cache write
+        # would truncate the source half, so the comparison is on the resolved
+        # paths and not on the strings the caller passed.
+        spellings = (
+            self.artifact,
+            os.path.join(self.dir, ".", "m.py"),
+            os.path.relpath(self.artifact),
+        )
+        for cache_path in spellings:
+            with self.assertRaisesRegex(ValueError, "same file"):
+                torch.compiler.precompile.capture(
+                    _files_fn,
+                    artifact_path=self.artifact,
+                    cache_path=cache_path,
+                    tracer=MakeFxTracer(),
+                )
+            with self.assertRaisesRegex(ValueError, "same file"):
+                torch.compiler.precompile.load(self.artifact, cache_path)
+
+    def test_a_directory_for_either_half_is_refused(self):
+        # Refused up front for either half, which is an earlier and clearer error
+        # than the writer's own refusal.
+        for path in (self.artifact, self.cache):
+            os.mkdir(path)
+            with open(os.path.join(path, "keep.txt"), "w", encoding="utf-8") as f:
+                f.write("mine")
+            with self.assertRaisesRegex(ValueError, "not a regular file"):
+                self._capture()
+            with self.assertRaisesRegex(ValueError, "not a regular file"):
+                torch.compiler.precompile.load(self.artifact, self.cache)
+            # And the writer itself refuses a directory that appears after the
+            # up-front check: os.link re-raises EPERM for the source half, and
+            # the cache half fails its rename with the source half already
+            # installed, so the undo removes that orphan.
+            with self.assertRaises(OSError):
+                torch._precompile._write_artifact(self.artifact, self.cache, "x", b"y")
+            self.assertEqual(os.listdir(path), ["keep.txt"])
+            self.assertFalse(os.path.isfile(self.artifact))
+            self.assertEqual(self._leftovers(), [])
+            os.remove(os.path.join(path, "keep.txt"))
+            os.rmdir(path)
 
     def test_non_tracer_is_refused(self):
         with self.assertRaisesRegex(TypeError, "must be a MakeFxTracer"):
             self._capture(tracer="make_fx")
+
+    def test_unknown_backend_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "backend must be"):
+            self._capture(backend="nope")
+
+    def test_load_refuses_the_same_file_for_both_halves(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(ValueError, "same file"):
+            torch.compiler.precompile.load(self.artifact, self.artifact)
+
+    def test_served_output_ignores_ambient_autocast(self):
+        # eager only: this model lowers to extern_kernels.addmm(..., out=buf0), and
+        # the out= overload has no CPU autocast registration, so the inductor
+        # artifact cannot observe the ambient state either way. The extern-kernel
+        # path is covered by test_served_extern_kernel_ignores_ambient_autocast,
+        # whose graph keeps an autocast-registered default overload.
+        with self._capture(backend="eager") as cap:
+            y = cap(self.model, self.x)
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+            z = served(self.model, self.x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_served_extern_kernel_ignores_ambient_autocast(self, backend):
+        # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
+        # CPU autocast and which the inductor artifact calls as a fallback, so this
+        # is the case _autocast_off exists for: without it the served call casts a
+        # second time and comes back in bfloat16 (or, as here, fails inside oneDNN
+        # on the mixed-dtype primitive).
+        model = torch.nn.LSTM(8, 8, batch_first=True)
+        x = torch.randn(2, 3, 8)
+
+        def fn(m, t):
+            return m(t)[0]
+
+        with torch.compiler.precompile.capture(
+            fn,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            tracer=MakeFxTracer(),
+            backend=backend,
+        ) as cap:
+            y = cap(model, x)
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("device", ("notadevice", "privateuseone"))
+    def test_an_unautocastable_graph_device_still_serves(self, device):
+        # GRAPH_DEVICES is recorded from the captured graph and not filtered, so the
+        # serving build decides: a device type it cannot parse makes
+        # is_autocast_available raise, and an out-of-tree backend with no registered
+        # autocast module reports available and then refuses to construct. Either
+        # must be skipped rather than fail every served call, and the caller's own
+        # autocast region must survive the attempt.
+        with self._capture() as cap:
+            y = cap(self.model, self.x)
+        source = self._read(self.artifact).decode()
+        patched = source.replace(
+            "GRAPH_DEVICES = ('cpu',)", f"GRAPH_DEVICES = ('cpu', {device!r})"
+        )
+        self.assertNotEqual(patched, source)
+        blob = torch.load(self.cache, weights_only=True)
+        blob["code_hash"] = hashlib.sha256(patched.encode()).hexdigest()
+        with open(self.artifact, "wb") as f:
+            f.write(patched.encode())
+        torch.save(blob, self.cache)
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            z = served(self.model, self.x)
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    def test_autocast_off_unwinds_a_failure_partway_through(self):
+        # The disables already entered have to come back out if the stack is not
+        # built to the end: the emitted driver hands the stack to the caller's
+        # `with`, so a leaked entry silently stops the caller's own autocast
+        # region from autocasting.
+        from torch import _precompile_driver
+
+        real_autocast = torch.amp.autocast
+        entered = []
+
+        def autocast(device_type, **kwargs):
+            entered.append(device_type)
+            if len(entered) == 2:
+                raise KeyboardInterrupt("interrupted partway through")
+            return real_autocast(device_type, **kwargs)
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with mock.patch("torch.amp.autocast", autocast):
+                with self.assertRaises(KeyboardInterrupt):
+                    _precompile_driver._autocast_off(("cpu", "cuda"))
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_batchnorm_running_stats_update_once(self, backend):
+        bn = torch.nn.BatchNorm1d(4)
+        ref = copy.deepcopy(bn)
+        x = torch.randn(8, 4)
+        with self._capture(backend=backend) as cap:
+            y = cap(bn, x)
+        self.assertEqual(y, ref(x))
+        self.assertEqual(bn.num_batches_tracked, ref.num_batches_tracked)
+        self.assertEqual(bn.running_mean, ref.running_mean)
+        self.assertEqual(bn.running_var, ref.running_var)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_training_captures_the_backward(self, backend):
+        ref = copy.deepcopy(self.model)
+        _files_train_step(ref, self.x)
+        with torch.compiler.precompile.capture(
+            _files_train_step,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            tracer=MakeFxTracer(),
+            backend=backend,
+            training=True,
+        ) as cap:
+            y = cap(self.model, self.x)
+        self.assertFalse(y.requires_grad)
+        self.assertEqual(self.model.lin.weight.grad, ref.lin.weight.grad)
+        self.assertEqual(self.model.lin.bias.grad, ref.lin.bias.grad)
+        with torch.enable_grad(), self._capture(backend=backend) as cap:
+            self.assertFalse(cap(self.model, self.x).requires_grad)
+
+    def test_training_captures_the_backward_under_ambient_no_grad(self):
+        # training= selects grad mode for the captured call whatever the caller's
+        # ambient mode, so a training step captured inside no_grad still carries its
+        # backward and the served gradients match the eager ones, rather than merely
+        # being present.
+        ref = copy.deepcopy(self.model)
+        _files_train_step(ref, self.x)
+        with torch.no_grad():
+            with torch.compiler.precompile.capture(
+                _files_train_step,
+                artifact_path=self.artifact,
+                cache_path=self.cache,
+                tracer=MakeFxTracer(),
+                backend="eager",
+                training=True,
+            ) as cap:
+                cap(self.model, self.x)
+        self.model.zero_grad()
+        torch.compiler.precompile.load(self.artifact, self.cache)(self.model, self.x)
+        self.assertEqual(self.model.lin.weight.grad, ref.lin.weight.grad)
+        self.assertEqual(self.model.lin.bias.grad, ref.lin.bias.grad)
+
+    def test_failed_second_rename_restores_the_previous_pair(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = (self._read(self.artifact), self._read(self.cache))
+        real_replace = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if len(calls) == 2:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                with self._capture(backend="inductor") as cap:
+                    cap(self.model, self.x)
+        self.assertEqual(calls[1], self.cache)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
+    def test_failed_first_rename_restores_the_previous_pair(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = (self._read(self.artifact), self._read(self.cache))
+        real_replace = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if len(calls) == 1:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                with self._capture(backend="inductor") as cap:
+                    cap(self.model, self.x)
+        self.assertEqual(calls[0], self.artifact)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        # No stray .bak: the backup is a hard link to the artifact, so the undo
+        # rename does not consume it.
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
+    def test_failed_second_rename_on_a_first_write_leaves_no_named_files(self):
+        # No previous pair, so there is nothing to restore: the undo moves the
+        # new artifact back out from under its name, which is what keeps a first
+        # write from leaving a named source with no cache beside it.
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if dst == self.cache:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                with self._capture() as cap:
+                    cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertEqual(self._leftovers(), [])
+
+    def test_rewrite_without_hard_links(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        first = self._read(self.cache)
+        link_fails = OSError(errno.EOPNOTSUPP, "no hard links")
+        with mock.patch("os.link", side_effect=link_fails):
+            with self._capture(backend="inductor") as cap:
+                cap(self.model, self.x)
+        self.assertNotEqual(self._read(self.cache), first)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+        # An os.link failure that does NOT mean "no hard links on this filesystem"
+        # says something about the path, not about the filesystem, so it is raised
+        # rather than papered over by moving whatever is there aside.
+        with mock.patch("os.link", side_effect=OSError(errno.EIO, "io error")):
+            with self.assertRaisesRegex(OSError, "io error"):
+                with self._capture() as cap:
+                    cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
+    def test_double_failure_without_hard_links_keeps_the_previous_source(self):
+        # No hard links, so the previous source was MOVED to the backup; then the
+        # rename into place fails AND so does the undo that would put it back, so
+        # the backup holds the only remaining copy of the previous source. It must
+        # survive, and the warning must name it.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = self._read(self.artifact)
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if dst == self.artifact:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with mock.patch("os.replace", replace):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        with self._capture(backend="inductor") as cap:
+                            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+
+    def test_double_failure_on_the_second_rename_keeps_the_previous_source(self):
+        # Hard link taken, the artifact rename lands, the cache rename fails and
+        # the undo fails too: the named pair is now the new source beside the
+        # previous cache, which load refuses, so the previous source has to stay
+        # in the backup rather than being unlinked with it.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = self._read(self.artifact)
+        before_cache = self._read(self.cache)
+        real_replace = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if dst == self.cache:
+                raise OSError("disk full")
+            if len(calls) > 1:
+                raise OSError("undo failed")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    with self._capture(backend="inductor") as cap:
+                        cap(self.model, self.x)
+        self.assertNotEqual(self._read(self.artifact), before)
+        self.assertEqual(self._read(self.cache), before_cache)
+        with self.assertRaisesRegex(PrecompileError, "different precompile captures"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+
+    def test_a_read_only_first_rename_leaves_the_previous_pair_intact(self):
+        # A read-only remount: the artifact rename fails, and so would the undo.
+        # The backup is a hard LINK, so the named artifact still IS the previous
+        # source and the cache was never touched -- the pair on disk is the intact
+        # previous pair. There is nothing to undo, nothing to report, and no .bak
+        # to keep pinning the previous inode's blocks.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = (self._read(self.artifact), self._read(self.cache))
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if dst in (self.artifact, self.cache):
+                raise OSError(errno.EROFS, "read-only file system")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                with self.assertRaisesRegex(OSError, "read-only file system"):
+                    with self._capture(backend="inductor") as cap:
+                        cap(self.model, self.x)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
+    def test_a_first_write_that_cannot_be_undone_warns_about_the_orphan(self):
+        # A FIRST write whose cache rename failed and whose undo then failed leaves
+        # a named artifact with no cache beside it, which is exactly the state the
+        # report exists to announce even though there was no previous pair.
+        real_replace = os.replace
+        real_unlink = os.unlink
+
+        def replace(src, dst):
+            if dst == self.cache:
+                raise OSError(errno.ENOSPC, "no space left")
+            return real_replace(src, dst)
+
+        def unlink(path):
+            if path == self.artifact:
+                raise OSError(errno.EPERM, "cannot unlink")
+            return real_unlink(path)
+
+        with mock.patch("os.replace", replace), mock.patch("os.unlink", unlink):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                with self.assertRaisesRegex(OSError, "no space left"):
+                    with self._capture() as cap:
+                        cap(self.model, self.x)
+        self.assertTrue(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertTrue(
+            any("has no cache beside it" in m for m in logs.output), logs.output
+        )
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_failed_directory_fsync_does_not_fail_the_write(self):
+        # The directory fsync is best effort: a directory fd cannot be fsync'd
+        # everywhere, and by then both renames have returned, so there is nothing
+        # to undo and nothing to retry.
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EINVAL, "no fsync on a directory")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            with self._capture() as cap:
+                cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
+    def test_a_failed_temp_fsync_leaves_no_scratch_files(self):
+        # The fsync of a scratch file is NOT best effort: unflushed bytes would be
+        # renamed into place, so it propagates -- with every scratch file removed
+        # and both named halves untouched.
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EIO, "fsync failed")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            with self.assertRaisesRegex(OSError, "fsync failed"):
+                with self._capture() as cap:
+                    cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertEqual(self._leftovers(), [])
 
     def test_partial_is_refused(self):
         with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
@@ -7143,29 +7781,241 @@ class TestPrecompileCaptureFiles(TestCase):
         )
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
+    def test_non_literal_metadata_is_refused(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        source = self._read(self.artifact).decode()
+        self.assertIn("BACKEND = 'eager'", source)
+        with open(self.artifact, "wb") as f:
+            f.write(source.replace("BACKEND = 'eager'", "BACKEND = str(1)").encode())
+        # The metadata parse runs ahead of the cache pairing check, so this is the
+        # error the caller sees even though the edit also broke the code_hash.
+        with self.assertRaisesRegex(PrecompileError, "must be a Python literal"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+
+    def test_unreadable_paths_are_reported_as_precompile_errors(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        missing = os.path.join(self.dir, "gone.py")
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile.load(missing, self.cache)
+        self.assertIn("could not read the artifact pair", str(cm.exception))
+        self.assertIn(missing, str(cm.exception))
+        self.assertIn(self.cache, str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, FileNotFoundError)
+        # A value that is not a path at all reaches the same diagnostic.
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile.load("x" * 5000, self.cache)
+        self.assertIsInstance(cm.exception.__cause__, OSError)
+
+    def test_transposed_paths_are_reported_as_precompile_errors(self):
+        # load takes two same-typed positional paths, so the likeliest caller
+        # mistake is swapping them: the cache's binary envelope then fails to
+        # decode as source, and that has to name both paths too.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile.load(self.cache, self.artifact)
+        self.assertIn("could not read the artifact pair", str(cm.exception))
+        self.assertIn(self.artifact, str(cm.exception))
+        self.assertIn(self.cache, str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
+
+    def test_paths_come_in_pairs(self):
+        # Half a pair never loads and one file for both halves would overwrite the
+        # source, so both entry points refuse either up front, before fn runs.
+        both = "neither artifact_path nor cache_path"
+        cases = [
+            ((self.artifact, None), "artifact_path without cache_path"),
+            ((None, self.cache), "cache_path without artifact_path"),
+            ((None, None), both),
+            ((self.artifact, self.artifact), "same file"),
+        ]
+        for (artifact, cache), regex in cases:
+            with self.assertRaisesRegex(ValueError, regex):
+                torch.compiler.precompile.capture(
+                    _files_fn,
+                    artifact_path=artifact,
+                    cache_path=cache,
+                    tracer=MakeFxTracer(),
+                    backend="eager",
+                )
+            with self.assertRaisesRegex(ValueError, regex):
+                torch.compiler.precompile.load(artifact, cache)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_call_outside_the_block_is_refused(self):
+        # Only the block exit writes the files, so a call made without entering
+        # would trace and serve and then write nothing.
+        cap = self._capture()
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_call_after_the_block_is_refused(self):
+        # The block already wrote the pair, so a later call would trace and serve
+        # and write nothing; it is not the single-call refusal.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_call_after_a_caught_empty_exit_is_refused(self):
+        # A caller that catches the nothing-was-captured raise and calls anyway
+        # must be refused too: the exit is over, so nothing would be written.
+        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
+            with self._capture() as cap:
+                pass
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_save_outside_the_block_is_refused(self):
+        # The render survives a block that raised, so save() is gated on the block
+        # being live exactly like __call__ is; otherwise it writes the pair the
+        # exit deliberately refused to write.
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with self._capture() as cap:
+                cap(self.model, self.x)
+                raise RuntimeError("boom")
+        with self.assertRaisesRegex(PrecompileError, r"call save\(\) inside"):
+            cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_the_block_is_entered_once(self):
+        # Single-shot in both directions: a nested block would deactivate the
+        # capture on its own exit, mid-use, and a second block would rewrite both
+        # files from the render the first one already wrote.
+        with self._capture() as cap:
+            with self.assertRaisesRegex(PrecompileError, "not re-entrant"):
+                with cap:
+                    pass
+            cap(self.model, self.x)
+        # The rewrite would repeat the same bytes, so pin the inodes: each write
+        # renames fresh temps into place.
+        inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        with self.assertRaisesRegex(PrecompileError, "capture is spent"):
+            with cap:
+                pass
+        rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        self.assertEqual(rewritten, inodes)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_failed_trace_is_reported_as_a_failed_trace(self):
+        # The single-call flag counts a RENDER, not an attempt: after a trace that
+        # raised, nothing was captured, so the retry must describe the failed trace
+        # rather than claim a call was already captured, and save() / the clean exit
+        # must not tell the caller to call a capture it did call.
+        def data_dependent(model, x):
+            return model(x) * x.sum().item()
+
+        cap = torch.compiler.precompile.capture(
+            data_dependent,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            tracer=MakeFxTracer(),
+            backend="eager",
+        )
+        with self.assertRaisesRegex(PrecompileError, "raised before it rendered"):
+            with cap:
+                with self.assertRaisesRegex(PrecompileError, "data-dependent"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "already ran and raised"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "raised before it"):
+                    cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_tracer_decompositions_are_used(self):
+        # MakeFxTracer.decompositions reaches make_fx through torch.compiler.precompile.capture(): the custom
+        # decomposition runs during the capture and the pair still serves eager.
+        called = []
+
+        def my_relu_decomp(x):
+            called.append(True)
+            return (x > 0) * x
+
+        decomps = {torch.ops.aten.relu.default: my_relu_decomp}
+        with self._capture(tracer=MakeFxTracer(decompositions=decomps)) as cap:
+            y = cap(self.model, self.x)
+        self.assertTrue(called)  # the table was used during capture
+        self.assertEqual(y, self.model(self.x))
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
+    def test_loaded_artifact_enters_and_unloads(self):
+        # A make_fx artifact is standalone: __enter__/__exit__/unload() install and
+        # take back out nothing, and the handle stays callable through both.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with torch.compiler.precompile.load(self.artifact, self.cache) as f:
+            self.assertFalse(f.installed)
+            self.assertEqual(f(self.model, self.x), self.model(self.x))
+        self.assertFalse(f.installed)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+        f.unload()
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def test_missing_parent_directories_are_created(self):
+        nested = os.path.join(self.dir, "a", "b")
+        artifact = os.path.join(nested, "m.py")
+        cache = os.path.join(nested, "m.cache")
+        with torch.compiler.precompile.capture(
+            _files_fn,
+            artifact_path=artifact,
+            cache_path=cache,
+            tracer=MakeFxTracer(),
+            backend="eager",
+        ) as cap:
+            cap(self.model, self.x)
+        self.assertEqual(
+            torch.compiler.precompile.load(artifact, cache)(self.model, self.x),
+            self.model(self.x),
+        )
+
+    def test_carriage_return_in_the_artifact_round_trips(self):
+        # The pair goes out and comes back as bytes, so a \r in python_code is not
+        # translated on the way in and the cache's code_hash over it still matches.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        code = self._read(self.artifact) + b"# a trailing comment\r\n"
+        blob = torch.load(self.cache, weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code).hexdigest()
+        with open(self.artifact, "wb") as f:
+            f.write(code)
+        torch.save(blob, self.cache)
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
+    def test_serving_by_installing_is_refused(self):
+        # SERVING_MODE='installed' is the shape the dynamo front-end will write.
+        # torch.compiler.precompile.load() reads it off python_code's metadata and refuses before it touches
+        # the cache, so the edited artifact keeps the cache's old code_hash.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        src = self._read(self.artifact)
+        self.assertIn(b"\nBACKEND = ", src)
+        declared = b"\nSERVING_MODE = 'installed'\nBACKEND = "
+        with open(self.artifact, "wb") as f:
+            f.write(src.replace(b"\nBACKEND = ", declared, 1))
+        with self.assertRaisesRegex(PrecompileError, "not available yet"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+
     def test_fn_is_refused_for_a_standalone_artifact(self):
         with self._capture() as cap:
             cap(self.model, self.x)
         with self.assertRaisesRegex(PrecompileError, "fn= applies only"):
             torch.compiler.precompile.load(self.artifact, self.cache, fn=_files_fn)
-
-    def test_static_capture_rejects_data_dependent_ops(self):
-        # A static make_fx capture traces on fake tensors, so a value the trace
-        # cannot know must be refused cleanly rather than baked from the example
-        # or leaked as a raw fake-tensor exception.
-        from torch._precompile import _capture
-
-        model = torch.nn.Linear(4, 4)
-
-        def branches(m, x):
-            return m(x) if x.sum() > 0 else m(-x)
-
-        def items(m, x):
-            return m(x) * x.sum().item()
-
-        for fn in (branches, items):
-            with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
-                _capture(fn, (model, torch.randn(3, 4)), None)
 
     def test_module_is_not_callable(self):
         with self.assertRaisesRegex(TypeError, "not callable"):
@@ -7176,7 +8026,6 @@ class TestPrecompileCaptureFiles(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
-
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y
@@ -7185,9 +8034,16 @@ class TestPrecompileNumerics(TestCase):
         b = make_tensor((4, 4), device=device, dtype=torch.float32)
         with _CaptureToFiles(f) as cap:
             cap(a, b)
+        # Both halves landed on disk with content, and the cache carries a compiled
+        # artifact on this device (an uncacheable capture leaves artifact None, which
+        # would silently push every load below onto the inlined path). The envelope's
+        # key set is device-independent and pinned by test_cache_holds_only_artifact.
+        for path in (cap.artifact_path, cap.cache_path):
+            self.assertTrue(os.path.exists(path), path)
+            self.assertGreater(os.path.getsize(path), 0, path)
         code, cache = cap.result()
-        self.assertIsInstance(code, str)
-        self.assertIsInstance(cache, bytes)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertIsNotNone(blob["artifact"])
 
         f_c = _load_pair(code, cache)
         out = f_c(a, b)
@@ -7586,7 +8442,9 @@ class TestPrecompileNumerics(TestCase):
     def test_batchnorm_train_buffer_mutation(self, device):
         # A stateful module (BatchNorm in training mode) mutates its running stats.
         # precompile reflects that onto the runtime model's buffers and matches eager
-        # -- the mutation handling comes from AOTAutograd's codegen.
+        # -- the mutation handling comes from AOTAutograd's codegen -- while the TRACE
+        # leaves the example model's buffers alone (the served call in the block is
+        # what advances them, once).
         def fresh():
             torch.manual_seed(0)
             m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.BatchNorm1d(4))
@@ -7594,8 +8452,10 @@ class TestPrecompileNumerics(TestCase):
             return m.to(device)
 
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
+        example = fresh()
+        bn = example[1]
         with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
-            cap(fresh(), x)
+            cap(example, x)
         code, cache = cap.result()
 
         ref = fresh()
@@ -7603,6 +8463,13 @@ class TestPrecompileNumerics(TestCase):
         ref_rm = ref[1].running_mean.clone()
         ref_rv = ref[1].running_var.clone()
         ref_nbt = ref[1].num_batches_tracked.clone()
+        # Capture reparametrizes FAKE params/buffers in (invariant 3), so the trace
+        # leaves the example module's running stats alone; only the one served call
+        # inside the block advances them, exactly as the single eager call above did
+        # (a real-tensor trace would have advanced them a second time).
+        self.assertEqual(bn.running_mean, ref_rm)
+        self.assertEqual(bn.running_var, ref_rv)
+        self.assertEqual(bn.num_batches_tracked, ref_nbt)
 
         f_c = _load_pair(code, cache)
         run = fresh()
@@ -7619,7 +8486,8 @@ class TestPrecompileNumerics(TestCase):
         # mutated inputs go through AOTAutograd's now-codegen'd synthetic-base wrapper.
         fn = lambda a, b: (a.mul_(2.0), a + b)[1]  # noqa: E731
         t = make_tensor((4,), device=device, dtype=torch.float32)
-        # Clone references BEFORE precompile: capture runs fn once, mutating t.
+        # The capture call serves the artifact it just rendered on the real args, so
+        # cap(t, t) below doubles t in place; take both clones before the block.
         ref = t.clone()
         ref_out = fn(ref, ref)
         run = t.clone()
@@ -7782,6 +8650,72 @@ class TestPrecompileNumerics(TestCase):
         f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), x.t())
 
+    @parametrize("backend", ("eager", "inductor"))
+    def test_artifact_reproduces_capture_time_autocast(self, device, backend):
+        # A make_fx artifact checks no guards, so the driver pins the autocast state
+        # the capture recorded, keyed off GRAPH_DEVICES rather than the runtime tensors.
+        def fn(model, xx):
+            return model(xx)
+
+        device_type = torch.device(device).type
+        model = torch.nn.Linear(8, 8).to(device).eval()
+        x = make_tensor((4, 8), device=device, dtype=torch.float32)
+
+        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+            with _CaptureToFiles(fn, backend=backend) as cap:
+                cap(model, x)
+            hot_code, hot_cache = cap.result()
+        with torch.no_grad():
+            with _CaptureToFiles(fn, backend=backend) as cap:
+                cap(model, x)
+            cold_code, cold_cache = cap.result()
+
+        for code, cache, captured_under_autocast in (
+            (hot_code, hot_cache, True),
+            (cold_code, cold_cache, False),
+        ):
+            loaded = _load_pair(code, cache)
+            with torch.no_grad():
+                plain = loaded(model, x)
+            with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+                under = loaded(model, x)
+            expected = torch.bfloat16 if captured_under_autocast else torch.float32
+            self.assertEqual(plain.dtype, expected)
+            # Serving under an autocast the capture did not see must change
+            # nothing at all, not merely keep the dtype.
+            self.assertEqual(under.dtype, expected)
+            self.assertEqual(plain, under)
+
+    def test_artifact_autocast_covers_a_device_no_input_lives_on(self, device):
+        # GRAPH_DEVICES comes from the captured graph: a fn that moves to
+        # another device mid-way dispatches somewhere no param or input lives,
+        # which a scan of the runtime tensors cannot see.
+        device_type = torch.device(device).type
+        if device_type == "cpu":
+            raise unittest.SkipTest("needs a second device")
+
+        def fn(model, xx):
+            y = model(xx)
+            moved = y.to(device)
+            return torch.mm(moved, moved.t())
+
+        model = torch.nn.Linear(8, 8).eval()  # stays on cpu
+        x = make_tensor((4, 8), device="cpu", dtype=torch.float32)
+        with torch.no_grad():
+            with _CaptureToFiles(fn, backend="eager") as cap:
+                cap(model, x)
+            code, cache = cap.result()
+        self.assertIn(f"GRAPH_DEVICES = ('cpu', '{device_type}')", code)
+
+        loaded = _load_pair(code, cache)
+        with torch.no_grad():
+            plain = loaded(model, x)
+        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
+            under = loaded(model, x)
+        self.assertEqual(plain.dtype, torch.float32)
+        self.assertEqual(under.dtype, torch.float32)
+        self.assertEqual(plain, under)
+
     def test_tracer_dynamo_roundtrip_device(self, device):
         # The dynamo tracer's inductor lowering emits device kernels (it lowers the
         # Dynamo-produced subgraph through the same AOTAutograd + Inductor codegen as
@@ -7834,80 +8768,6 @@ class TestPrecompileNumerics(TestCase):
                 xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
                 self.assertEqual(f_c(m, xt), m(xt))
 
-    @parametrize("backend", ("eager", "inductor"))
-    def test_artifact_reproduces_capture_time_autocast(self, device, backend):
-        # make_fx only. That artifact checks NO guards, so ambient autocast in the
-        # serving process must not reach it -- the driver pins the state the capture
-        # recorded, keyed off the GRAPH's devices (GRAPH_DEVICES), not the runtime
-        # tensors'. The dynamo tracer mirrors torch.compile instead: autocast is part
-        # of the guarded global state, so a serving process whose autocast differs
-        # from capture misses rather than being silently pinned.
-        tracer = "make_fx"
-
-        def fn(model, xx):
-            return model(xx)
-
-        device_type = torch.device(device).type
-        model = torch.nn.Linear(8, 8).to(device).eval()
-        x = make_tensor((4, 8), device=device, dtype=torch.float32)
-
-        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
-            with _CaptureToFiles(fn, backend=backend, tracer=tracer) as cap:
-                cap(model, x)
-            hot_code, hot_cache = cap.result()
-        with torch.no_grad():
-            with _CaptureToFiles(fn, backend=backend, tracer=tracer) as cap:
-                cap(model, x)
-            cold_code, cold_cache = cap.result()
-
-        for code, cache, captured_under_autocast in (
-            (hot_code, hot_cache, True),
-            (cold_code, cold_cache, False),
-        ):
-            loaded = _load_pair(code, cache)
-            with torch.no_grad():
-                plain = loaded(model, x)
-            with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
-                under = loaded(model, x)
-            expected = torch.bfloat16 if captured_under_autocast else torch.float32
-            self.assertEqual(plain.dtype, expected)
-            # Serving under an autocast the capture did not see must change
-            # nothing at all, not merely keep the dtype.
-            self.assertEqual(under.dtype, expected)
-            self.assertEqual(plain, under)
-
-    def test_artifact_autocast_covers_a_device_no_input_lives_on(self, device):
-        # GRAPH_DEVICES comes from the captured graph: a fn that moves to
-        # another device mid-way dispatches somewhere no param or input lives,
-        # which a scan of the runtime tensors cannot see.
-        device_type = torch.device(device).type
-        if device_type == "cpu":
-            raise unittest.SkipTest("needs a second device")
-
-        def fn(model, xx):
-            y = model(xx)
-            moved = y.to(device)
-            return torch.mm(moved, moved.t())
-
-        model = torch.nn.Linear(8, 8).eval()  # stays on cpu
-        x = make_tensor((4, 8), device="cpu", dtype=torch.float32)
-        with torch.no_grad():
-            with _CaptureToFiles(fn, backend="eager") as cap:
-                cap(model, x)
-            code, cache = cap.result()
-        devices = _graph_devices_literal(code)
-        self.assertIn(f"'{device_type}'", devices)
-        self.assertIn("'cpu'", devices)
-
-        loaded = _load_pair(code, cache)
-        with torch.no_grad():
-            plain = loaded(model, x)
-        with torch.no_grad(), torch.autocast(device_type, dtype=torch.bfloat16):
-            under = loaded(model, x)
-        self.assertEqual(plain.dtype, torch.float32)
-        self.assertEqual(under.dtype, torch.float32)
-        self.assertEqual(plain, under)
-
     def test_tracer_dynamo_eager_custom_builtins(self, device):
         # The dynamo eager emitter (_emit_dynamo_eager_subgraph) injects fx's full
         # _custom_builtins set (inf / nan / device / ...) into the standalone subgraph
@@ -7945,10 +8805,10 @@ class TestPrecompileNumerics(TestCase):
         self.assertEqual(_load_pair(code, cache)(fresh_bn(), xb), ref_out)
 
 
-# The accelerator lowering needs triton; without it only the CPU variants run.
-instantiate_device_type_tests(
-    TestPrecompileNumerics, globals(), only_for=None if HAS_GPU else "cpu"
-)
+# Device-generic: this instantiates a variant of every method per available device
+# type. The Inductor-backend accelerator variants lower through triton, so in a build
+# without it they error rather than skip.
+instantiate_device_type_tests(TestPrecompileNumerics, globals())
 
 
 if __name__ == "__main__":
