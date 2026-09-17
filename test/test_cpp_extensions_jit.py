@@ -1544,6 +1544,40 @@ class TestCppExtensionJITCUDA(_TestCppExtensionJITBase):
             y_incorrect = torch.zeros(20, device="cuda", dtype=torch.float32)
             module.cudnn_relu(x, y_incorrect)
 
+    @unittest.skipIf(CUDA_HOME is None, "CUDA not found")
+    def test_cudnn_cuda_versioned_layout_paths(self):
+        # cuDNN 9 Windows CUDA 13+ packages nest headers and libs under
+        # include/<cuda>/ and lib/<cuda>/<arch>/. Flat include/cudnn.h is absent.
+        with tempfile.TemporaryDirectory() as root:
+            ver = "13.4"
+            if IS_WINDOWS:
+                arch = (
+                    "arm64"
+                    if sysconfig.get_platform().lower() == "win-arm64"
+                    else "x64"
+                )
+                lib = os.path.join(root, "lib", ver, arch)
+                libname = "cudnn.lib"
+            else:
+                lib = os.path.join(root, "lib", ver)
+                libname = "libcudnn.so"
+            inc = os.path.join(root, "include", ver)
+            os.makedirs(inc)
+            os.makedirs(lib)
+            with open(os.path.join(inc, "cudnn.h"), "w"):
+                pass
+            with open(os.path.join(lib, libname), "w"):
+                pass
+            with (
+                mock.patch.object(torch.utils.cpp_extension, "CUDNN_HOME", root),
+                mock.patch("torch.version.cuda", ver),
+            ):
+                includes = torch.utils.cpp_extension.include_paths(device_type="cuda")
+                libs = torch.utils.cpp_extension.library_paths(device_type="cuda")
+                self.assertIn(inc, includes)
+                self.assertNotIn(os.path.join(root, "include"), includes)
+                self.assertIn(lib, libs)
+
     @unittest.skip("Temporarily disabled")
     def test_inline_jit_compile_extension_cuda(self):
         cuda_source = """
