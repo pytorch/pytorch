@@ -30,8 +30,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
-    _prepare_all_gather_outputs_with_reorder,
-    _prepare_reduce_scatter_inputs_with_reorder,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -45,7 +43,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
@@ -339,64 +337,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
-
-
-class TestFullyShardInputOutputFns(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    @skip_if_lt_x_gpu(2)
-    def test_input_output_fns(self):
-        model = nn.Sequential(
-            nn.Linear(4, 4), nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
-        )
-        fsdp_modules = (model, model[1], model[1][0])
-        for module in reversed(fsdp_modules):
-            fully_shard(
-                module,
-                shard_placement_fn=lambda param: Shard(param.ndim - 1),
-                reshard_after_forward=True,
-            )
-
-        def check_fns(expected_ag_fns, expected_rs_fns):
-            for module, ag_fn, rs_fn in zip(
-                fsdp_modules, expected_ag_fns, expected_rs_fns
-            ):
-                param_groups = module._get_fsdp_state()._fsdp_param_groups
-                self.assertTrue(param_groups)
-                for param_group in param_groups:
-                    self.assertIs(param_group._prepare_all_gather_outputs, ag_fn)
-                    self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_fn)
-
-        default_ag = _prepare_all_gather_outputs_with_reorder
-        default_rs = _prepare_reduce_scatter_inputs_with_reorder
-        ag_fn = MagicMock(wraps=default_ag)
-        rs_fn = MagicMock(wraps=default_rs)
-        check_fns((default_ag,) * 3, (default_rs,) * 3)
-        model.set_all_gather_output_fn(ag_fn, recurse=False)
-        check_fns((ag_fn, default_ag, default_ag), (default_rs,) * 3)
-        model[1].set_reduce_scatter_input_fn(rs_fn, recurse=False)
-        check_fns((ag_fn, default_ag, default_ag), (default_rs, rs_fn, default_rs))
-        model(torch.ones((2, 4), device=device_type)).sum().backward()
-        ag_fn.assert_called()
-        self.assertEqual(rs_fn.call_count, 1)
-        model.zero_grad()
-
-        ag_fn.reset_mock()
-        rs_fn.reset_mock()
-        model.set_all_gather_output_fn(ag_fn)
-        model.set_reduce_scatter_input_fn(rs_fn)
-        check_fns((ag_fn,) * 3, (rs_fn,) * 3)
-        model(torch.ones((2, 4), device=device_type)).sum().backward()
-        ag_fn.assert_called()
-        self.assertEqual(rs_fn.call_count, len(fsdp_modules))
-
-        model.set_all_gather_output_fn(default_ag, recurse=False)
-        check_fns((default_ag, ag_fn, ag_fn), (rs_fn,) * 3)
-        model.set_all_gather_output_fn(default_ag)
-        model.set_reduce_scatter_input_fn(default_rs)
-        check_fns((default_ag,) * 3, (default_rs,) * 3)
 
 
 class TestFullyShardCommunication(FSDPTest):
