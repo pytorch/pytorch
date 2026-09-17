@@ -1515,7 +1515,8 @@ class DeviceCachingAllocator {
              alloc_block(params, true, context))));
     }
     if (!block_found) {
-      const auto [device_free, device_total] = getMemoryInfo();
+      const auto [device_free, device_total] =
+          allocator.load()->getMemoryInfo(device_index);
 
       std::string allowed_info;
       if (set_fraction) {
@@ -1823,46 +1824,6 @@ class DeviceCachingAllocator {
   void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     trace_trackers_.emplace_back(std::move(tracker));
-  }
-
-  std::pair<size_t, size_t> getMemoryInfo() {
-    const auto& device = c10::xpu::get_raw_device(device_index);
-    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
-    TORCH_CHECK(
-        device.has(sycl::aspect::ext_intel_free_memory),
-        "The device (",
-        device.get_info<sycl::info::device::name>(),
-        ") doesn't support querying the available free memory. ",
-        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
-        "to help us prioritize its implementation.");
-    const size_t free =
-        device.get_info<sycl::ext::intel::info::device::free_memory>();
-
-#if SYCL_COMPILER_VERSION >= 20260200
-    const auto arch = device.get_info<sycl::info::device::architecture>();
-    if (arch <
-        sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21) {
-      return {free, total};
-    }
-    // See
-    // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
-    constexpr double kIntegratedGpuUsableFraction = 0.94;
-#ifdef _WIN32
-    constexpr double kDiscreteGpuUsableFraction = 0.98;
-#else
-    constexpr double kDiscreteGpuUsableFraction = 0.95;
-#endif
-    const double usable_fraction =
-        device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)
-        ? kIntegratedGpuUsableFraction
-        : kDiscreteGpuUsableFraction;
-    const size_t free_adjust = free + (1 - usable_fraction) * total;
-    TORCH_CHECK(
-        free_adjust <= total, "Calculated free memory exceeds total memory.");
-    return {free_adjust, total};
-#else
-    return {free, total};
-#endif
   }
 
   double getMemoryFraction() {
@@ -2287,11 +2248,6 @@ class NativeCachingAllocator : public XPUAllocator {
     assertValidDevice(dev_to_access);
     c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
         c10::xpu::get_raw_device(dev_to_access));
-  }
-
-  std::pair<size_t, size_t> getMemoryInfo(DeviceIndex device) override {
-    assertValidDevice(device);
-    return device_allocators[device]->getMemoryInfo();
   }
 
   double getMemoryFraction(DeviceIndex device) {
