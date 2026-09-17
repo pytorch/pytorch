@@ -2612,6 +2612,18 @@ class TestFullyShardShareCommContext(FSDPTest):
         check_sharded_parity(self, ref_model, model)
 
 
+class TestFullyShardInference(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_inference(self):
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda _: Shard(1))
+        with torch.inference_mode():
+            model(torch.ones((2, 8), device=device_type))
+
+
 class TestFullyShardWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:

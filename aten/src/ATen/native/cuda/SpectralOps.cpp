@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
@@ -167,6 +166,13 @@ bool has_large_prime_factor(int64_t n) {
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
 const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
+  // cuFFT rejects zero-element batches with CUFFT_INVALID_SIZE. An empty batch
+  // has nothing to transform, so skip planning/execution and return the output
+  // in its expected (empty) shape.
+  if (out.numel() == 0) {
+    out.resize_(out_sizes, MemoryFormat::Contiguous);
+    return out;
+  }
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();
   const auto batch_dims = ndim - signal_ndim;

@@ -843,8 +843,7 @@ void launch_grid_sampler_2d_backward_kernel(
     bool align_corners, std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_common(input, grid);
-  check_grid_sampler_2d(input, grid);
+  check_grid_sampler_2d_backward(input, grid, grad_output);
 
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
@@ -906,8 +905,7 @@ void launch_grid_sampler_3d_backward_kernel(
     bool align_corners, std::array<bool,2> output_mask) {
   // See NOTE [ grid_sampler Native Functions ].
   // Add checks here in case this is called instead of grid_sampler.
-  check_grid_sampler_common(input, grid);
-  check_grid_sampler_3d(input, grid, interpolation_mode);
+  check_grid_sampler_3d_backward(input, grid, grad_output, interpolation_mode);
 
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

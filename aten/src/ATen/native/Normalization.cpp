@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
@@ -27,7 +26,6 @@
 #include <ATen/ops/_batch_norm_impl_index_backward_native.h>
 #include <ATen/ops/_batch_norm_impl_index_native.h>
 #include <ATen/ops/_native_batch_norm_legit_native.h>
-#include <ATen/ops/_native_batch_norm_legit_no_training.h>
 #include <ATen/ops/_native_batch_norm_legit_no_training_native.h>
 #include <ATen/ops/_batch_norm_with_update.h>
 #include <ATen/ops/_batch_norm_with_update_native.h>
@@ -182,11 +180,11 @@ static std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   auto iter = TensorIteratorConfig()
     .add_output(output)
-    .add_input(input)
-    .add_input(mean)
-    .add_input(invstd)
-    .add_input(w)
-    .add_input(b)
+    .add_const_input(input)
+    .add_const_input(mean)
+    .add_const_input(invstd)
+    .add_const_input(w)
+    .add_const_input(b)
     .check_all_same_dtype(false)
     .promote_inputs_to_common_dtype(false)
     .build();
@@ -254,7 +252,7 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   auto channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto reduce_iter = TensorIteratorConfig()
-      .add_input(input)
+      .add_const_input(input)
       .resize_outputs(false)
       .declare_static_shape(input.sizes(), /*squash_dims=*/1)
       .check_all_same_dtype(false)
@@ -394,7 +392,7 @@ static std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
       binary_iter.build(
           TensorIteratorConfig()
           .add_output(grad_input)
-          .add_input(grad_input)
+          .add_const_input(grad_input)
           .add_const_input(grad_out_)
           .resize_outputs(false)
           .declare_static_shape(input.sizes(), /*squash_dims=*/1));
@@ -864,6 +862,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
   const Tensor& running_mean = running_mean_opt.value_or(Tensor());
   const Tensor& running_var = running_var_opt.value_or(Tensor());
 
+  // Eval mode normalizes with the running statistics; without them the kernel
+  // dereferences undefined tensors below. Reject here with the same message
+  // the impl-index wrapper uses rather than crashing (#194014).
+  if (!train) {
+    TORCH_CHECK_VALUE(
+        running_mean.defined(),
+        "running_mean must be defined in evaluation mode");
+    TORCH_CHECK_VALUE(
+        running_var.defined(),
+        "running_var must be defined in evaluation mode");
+  }
+
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
   // Prepare output tensor
@@ -1018,7 +1028,7 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
       norm : at::empty(norm.sizes(), self.options());
   auto iter = TensorIteratorConfig()
       .add_output(factor)
-      .add_input(norm)
+      .add_const_input(norm)
       .set_check_mem_overlap(false)
       .cast_common_dtype_to_outputs(true)
       .build();

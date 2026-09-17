@@ -56,6 +56,7 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_pycodecache_kernel,
     _worker_compile_triton,
+    _worker_compile_triton_thread,
 )
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
@@ -195,6 +196,7 @@ def after_fork():
     _pool_set.clear()
     AsyncCompile._ready_future = None
     AsyncCompile.process_pool.cache_clear()
+    AsyncCompile.thread_pool.cache_clear()
 
 
 try:
@@ -335,6 +337,7 @@ class AsyncCompile:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
                 os.environ["TORCH_WARM_POOL"] = "0"
+            # Only need pre-fork setup for process pools, not thread pools
             pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
             pool = TrackedProcessPoolExecutor(
@@ -352,6 +355,54 @@ class AsyncCompile:
         _pool_set.add(pool)
         return pool
 
+    @staticmethod
+    @functools.lru_cache(1)
+    def thread_pool() -> ThreadPoolExecutor:
+        """
+        Thread pool for Triton compilation in nogil mode.
+
+        Separate from pool() to allow different sizing/configuration
+        for CPU-intensive Triton compilation workloads.
+        """
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
+        log.info(
+            "Creating thread pool with %d workers for nogil Triton compilation",
+            get_compile_threads(),
+        )
+        pool = ThreadPoolExecutor(
+            get_compile_threads(),
+            thread_name_prefix="triton_compile_",
+        )
+        _pool_set.add(pool)
+        return pool
+
+    @classmethod
+    def should_use_thread_workers(cls) -> bool:
+        """
+        Determine if thread workers should be used instead of process workers.
+
+        Returns True when running free-threaded Python or when explicitly
+        configured via compile_worker_mode.
+        """
+        from torch._inductor.utils import should_use_thread_workers
+
+        return should_use_thread_workers()
+
+    @classmethod
+    def get_worker_pool(cls) -> ThreadPoolExecutor | AnyPool:
+        """
+        Get the appropriate worker pool based on configuration.
+
+        Returns thread pool for nogil mode, process pool otherwise.
+        """
+        if cls.should_use_thread_workers():
+            return cls.thread_pool()
+        else:
+            return cls.process_pool()
+
     @classmethod
     def warm_pool(cls) -> None:
         if get_compile_threads() <= 1 or not _process_pool_allowed():
@@ -360,7 +411,11 @@ class AsyncCompile:
         # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
         # but its ProcessPoolExecutor does not initialize until a wakeup() call or the first
         # job is submitted.
-        cls.process_pool()
+        # For thread pools, this is a no-op since thread pool creation is very cheap.
+        if cls.should_use_thread_workers():
+            cls.thread_pool()
+        else:
+            cls.process_pool()
         _compile_end()
 
     @classmethod
@@ -459,7 +514,7 @@ class AsyncCompile:
           cases, like coordesc tuning and dynamic_scale_rblock, require us to reload the function
           in the parent lazily when we require it.
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
-          and pickled by to us via `CachingAutotuner.save_cache_hook`.
+          and pickled to us via `CachingAutotuner.save_cache_hook`.
         """
         load_kernel = functools.partial(
             _load_triton_kernel_from_source, kernel_name, source_code
@@ -535,8 +590,16 @@ class AsyncCompile:
                         fn_hash: torch._inductor.config.autotune_lookup_table[fn_hash]
                     }
 
-            task = self.process_pool().submit(
-                _worker_compile_triton,
+            # Select appropriate pool and worker function based on mode
+            pool = self.get_worker_pool()
+            worker_fn = (
+                _worker_compile_triton_thread
+                if self.should_use_thread_workers()
+                else _worker_compile_triton
+            )
+
+            task = pool.submit(
+                worker_fn,
                 load_kernel,
                 extra_env,
                 extra_config,
@@ -553,7 +616,10 @@ class AsyncCompile:
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
-                kernel.restore_after_unpickle(old_values=None)
+                # Only restore after unpickle in process mode
+                # Thread mode doesn't pickle, so kernel is already in correct state
+                if not self.should_use_thread_workers():
+                    kernel.restore_after_unpickle(old_values=None)
 
                 kernel.precompile(
                     warm_cache_only=False,
@@ -739,6 +805,72 @@ class AsyncCompile:
                 )
 
             return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+    def flydsl(self, kernel_name: str, source_code: str, precompile_metadata=None):
+        """
+        Compile FlyDSL kernels.
+
+        FlyDSL generated source is written through PyCodeCache and its
+        `{kernel_name}_main` entry point is exposed through the standard
+        kernel ``.run()`` interface.
+        """
+        from torch._inductor.codegen.flydsl import flydsl_utils
+        from torch._inductor.codegen.flydsl.flydsl_kernel import (
+            FlyDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
+
+        if not flydsl_utils.runtime_available():
+            raise RuntimeError("FlyDSL runtime is unavailable")
+
+        kernel_code_log.info("FlyDSL Kernel:\n%s", source_code)
+        _compile_start()
+
+        is_parallel = self.use_process_pool()
+
+        if is_parallel:
+            extra_env = _pycodecache_kernel_compile_env()
+            extra_env["FLYDSL_RUNTIME_CACHE_DIR"] = os.environ.get(
+                "FLYDSL_RUNTIME_CACHE_DIR"
+            )
+
+            subprocess_task = self.process_pool().submit(
+                _worker_compile_pycodecache_kernel,
+                kernel_name,
+                source_code,
+                MAIN_SUFFIX,
+                extra_env,
+                precompile_metadata,
+            )
+
+            def get_result() -> FlyDSLKernelWrapper:
+                try:
+                    key, path, elapsed_us = subprocess_task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+                log.debug(
+                    "FlyDSL kernel %s compiled in subprocess in %dus",
+                    kernel_name,
+                    elapsed_us,
+                )
+                return self._load_kernel_wrapper(
+                    kernel_name,
+                    MAIN_SUFFIX,
+                    FlyDSLKernelWrapper,
+                    key,
+                    path,
+                )
+
+            return LambdaFuture(get_result, future=subprocess_task)
+        else:
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            return self._load_kernel_wrapper(
+                kernel_name,
+                MAIN_SUFFIX,
+                FlyDSLKernelWrapper,
+                key,
+                path,
+            )
 
     def pallas(self, kernel_name: str, source_code: str):
         """

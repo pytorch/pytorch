@@ -101,15 +101,30 @@ def main() -> int:
     libomp_dir_real = libomp_path.parent.resolve()
     for rp in rpaths:
         if Path(rp).resolve() == libomp_dir_real:
-            subprocess.check_call(
-                [
-                    "install_name_tool",
-                    "-rpath",
-                    rp,
-                    "@loader_path",
-                    str(libtorch_cpu),
-                ]
-            )
+            if "@loader_path" in rpaths:
+                # @loader_path is already an rpath (CMAKE_INSTALL_RPATH adds
+                # it to every torch library). Renaming would write a second,
+                # identical LC_RPATH, which dyld rejects at load time on
+                # macOS 15.4+ ("duplicate LC_RPATH"). Drop the build-time
+                # rpath instead.
+                subprocess.check_call(
+                    [
+                        "install_name_tool",
+                        "-delete_rpath",
+                        rp,
+                        str(libtorch_cpu),
+                    ]
+                )
+            else:
+                subprocess.check_call(
+                    [
+                        "install_name_tool",
+                        "-rpath",
+                        rp,
+                        "@loader_path",
+                        str(libtorch_cpu),
+                    ]
+                )
             return 0
 
     # No matching rpath -- add @loader_path if not already present.
