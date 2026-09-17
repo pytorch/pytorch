@@ -216,20 +216,21 @@ The frontend API is `fully_shard` that can be called on a `module`:
 .. automodule:: torch.distributed.fsdp.experimental
 ```
 
-After applying `fully_shard`, register either or both callbacks to use contiguous
-dim-0 views for copying nonzero-dimension shards where the layout supports them:
+After applying `fully_shard`, register either or both callbacks to copy `Shard(1)`
+and higher-dimension shards through contiguous views where supported. Groups may
+also contain `Shard(0)` parameters:
 
 ```python
 from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_dim0_views,
-    reduce_scatter_input_fn_with_dim0_views,
+    all_gather_output_fn_for_nonzero_dim_shards,
+    reduce_scatter_input_fn_for_nonzero_dim_shards,
 )
 
-model.set_all_gather_output_fn(all_gather_output_fn_with_dim0_views)
-model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_dim0_views)
+model.set_all_gather_output_fn(all_gather_output_fn_for_nonzero_dim_shards)
+model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_for_nonzero_dim_shards)
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.distributed.fsdp.experimental.all_gather_output_fn_with_dim0_views
-.. autofunction:: torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_dim0_views
+.. autofunction:: torch.distributed.fsdp.experimental.all_gather_output_fn_for_nonzero_dim_shards
+.. autofunction:: torch.distributed.fsdp.experimental.reduce_scatter_input_fn_for_nonzero_dim_shards
 ```

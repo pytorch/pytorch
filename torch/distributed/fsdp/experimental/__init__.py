@@ -18,17 +18,23 @@ from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedSt
 
 
 __all__ = [
-    "all_gather_output_fn_with_dim0_views",
-    "reduce_scatter_input_fn_with_dim0_views",
+    "all_gather_output_fn_for_nonzero_dim_shards",
+    "reduce_scatter_input_fn_for_nonzero_dim_shards",
 ]
 
 
-def all_gather_output_fn_with_dim0_views(
+def all_gather_output_fn_for_nonzero_dim_shards(
     fsdp_params: list[FSDPParam],
     all_gather_result: AllGatherResult,
     world_size: int,
 ) -> None:
-    """Copy all-gather outputs through dim-0 views when the shard layout supports them.
+    """Optimize all-gather output copies for ``Shard(1)`` and higher shard dimensions.
+
+    For supported layouts, copy gathered rank shards directly into contiguous
+    views of the final outputs, avoiding temporary buffers and a separate
+    reassembly. All-gather extensions, post-forward shards, and other unsupported
+    layouts use temporary outputs followed by reassembly. ``Shard(0)`` parameters
+    use the usual copy path, so groups may mix shard dimensions.
 
     Register with :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`,
     which documents the callback contract.
@@ -87,12 +93,18 @@ def all_gather_output_fn_with_dim0_views(
     _reassemble_all_gather_outputs(reorder_infos, world_size)
 
 
-def reduce_scatter_input_fn_with_dim0_views(
+def reduce_scatter_input_fn_for_nonzero_dim_shards(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
 ) -> list[torch.Size]:
-    """Prepare reduce-scatter inputs through dim-0 views when the layout supports them.
+    """Optimize reduce-scatter inputs for ``Shard(1)`` and higher shard dimensions.
+
+    Pass contiguous unsharded gradients to the dimension-0 copy operation through
+    contiguous views, avoiding an intermediate chunk-and-concatenate reorder.
+    Noncontiguous gradients use the usual chunk-and-concatenate path.
+    Nonzero-dimension sharding must be even. ``Shard(0)`` gradients and groups of
+    size one use the usual preparation, so groups may mix shard dimensions.
 
     Register with :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`,
     which documents the callback contract.

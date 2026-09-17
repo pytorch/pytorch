@@ -39,8 +39,8 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     ShardPlacementResult,
 )
 from torch.distributed.fsdp.experimental import (
-    all_gather_output_fn_with_dim0_views,
-    reduce_scatter_input_fn_with_dim0_views,
+    all_gather_output_fn_for_nonzero_dim_shards,
+    reduce_scatter_input_fn_for_nonzero_dim_shards,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -413,9 +413,11 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
         if use_all_gather_output_fn:
-            model.set_all_gather_output_fn(all_gather_output_fn_with_dim0_views)
+            model.set_all_gather_output_fn(all_gather_output_fn_for_nonzero_dim_shards)
         if use_reduce_scatter_input_fn:
-            model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_dim0_views)
+            model.set_reduce_scatter_input_fn(
+                reduce_scatter_input_fn_for_nonzero_dim_shards
+            )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
