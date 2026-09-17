@@ -465,9 +465,28 @@ test_cpuset_num_threads() {
   assert_git_not_dirty
 }
 
+# H100 needs a targeted list; B200 discovers all python_native suites below. Install
+# CuTeDSL before either run. H100 reproduced all 112 B200-generated hashes.
+PYTHON_NATIVE_CUTEDSL_SUITES=(
+  python_native/test_cutedsl_smoketest
+  python_native/test_sum_cutedsl
+  python_native/test_sum_inner_tree_plan
+  python_native/test_inner_tree_order
+  python_native/test_kernel_coltile
+  python_native/test_kernel_xcta
+  python_native/test_kernel_rowtile
+  python_native/test_kernel_general
+  python_native/test_hw_caps
+  python_native/test_traits
+  python_native/test_instrumentation
+  python_native/test_tile_datapath
+)
+
 test_python_smoke() {
   # Smoke tests for H100/B200
   install_nvmath
+  install_flash_attn_cute
+  time python test/run_test.py --include "${PYTHON_NATIVE_CUTEDSL_SUITES[@]}" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_cuda -k test_graph_capture_cublas_workspace $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
