@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable, Sequence
+from functools import partial
 from itertools import chain
 from typing import Any, cast, Literal, NamedTuple
 
@@ -20,7 +21,9 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-_PrepareAllGatherOutputs = Callable[[FSDPParam], tuple[list[torch.Tensor], bool]]
+_PrepareAllGatherOutputs = Callable[
+    [FSDPParam], tuple[list[torch.Tensor], tuple[Callable[[int], None], ...]]
+]
 _PrepareReduceScatterInputs = Callable[
     [list[FSDPParam], list[torch.Tensor], int],
     tuple[list[torch.Tensor], Sequence[torch.Size]],
@@ -436,22 +439,23 @@ def _get_param_all_gather_inputs(
 
 def _default_all_gather_output_fn(
     fsdp_param: FSDPParam,
-) -> tuple[list[torch.Tensor], bool]:
-    """Return copy destinations and whether they need a separate reorder."""
+) -> tuple[list[torch.Tensor], tuple[Callable[[int], None], ...]]:
+    """Return copy destinations and functions to run after the copy."""
     outputs = fsdp_param.all_gather_outputs
     if fsdp_param.fsdp_placement.dim == 0:
-        return outputs, False
-    return [torch.empty_like(t) for t in outputs], True
+        return outputs, ()
+    outputs = [torch.empty_like(t) for t in outputs]
+    return outputs, (partial(_foreach_all_gather_reorder, [(fsdp_param, outputs)]),)
 
 
 def _prepare_all_gather_outputs_with_dim0_views(
     fsdp_param: FSDPParam,
-) -> tuple[list[torch.Tensor], bool]:
+) -> tuple[list[torch.Tensor], tuple[Callable[[int], None], ...]]:
     """Use views of the final outputs when the shard layout supports them."""
     outputs = fsdp_param.all_gather_outputs
     shard_dim = fsdp_param.fsdp_placement.dim
     if shard_dim == 0:
-        return outputs, False
+        return outputs, ()
 
     num_leading_elements = math.prod(fsdp_param.padded_sharded_param_size[:shard_dim])
     if (
@@ -465,7 +469,7 @@ def _prepare_all_gather_outputs_with_dim0_views(
             view
             for tensor in outputs
             for view in tensor.view(num_leading_elements, -1).unbind(0)
-        ], False
+        ], ()
 
     # Extension and post-forward shard layouts may require a separate reorder.
     return _default_all_gather_output_fn(fsdp_param)
@@ -496,7 +500,7 @@ def foreach_all_gather_copy_out(
     world_size, device = group.size(), all_gather_output.device
 
     split_with_sizes_out: list[torch.Tensor] = []
-    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
+    post_copy_fns: list[Callable[[int], None]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -507,11 +511,10 @@ def foreach_all_gather_copy_out(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs, needs_separate_reorder = prepare_all_gather_outputs(
+        param_all_gather_outputs, param_post_copy_fns = prepare_all_gather_outputs(
             fsdp_param
         )
-        if needs_separate_reorder:
-            shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
+        post_copy_fns.extend(param_post_copy_fns)
         split_with_sizes_out.extend(param_all_gather_outputs)
 
     all_gather_output = all_gather_output.view(world_size, -1)
@@ -536,7 +539,8 @@ def foreach_all_gather_copy_out(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
 
-    _foreach_all_gather_reorder(shard_i_copy_infos, world_size)
+    for post_copy_fn in post_copy_fns:
+        post_copy_fn(world_size)
 
 
 def _foreach_all_gather_reorder(
@@ -573,28 +577,25 @@ def _foreach_all_gather_reorder(
 def _default_reduce_scatter_input_fn(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
-    reduce_scatter_world_size: int,
+    world_size: int,
 ) -> tuple[list[torch.Tensor], tuple[torch.Size, ...]]:
     """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
-    if reduce_scatter_world_size > 1:
+    if world_size > 1:
         for i, (fsdp_param, unsharded_grad) in enumerate(
             zip(fsdp_params, unsharded_grads)
         ):
             if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
                 continue
-            if unsharded_grad.size(shard_dim) % reduce_scatter_world_size != 0:
+            if unsharded_grad.size(shard_dim) % world_size != 0:
                 raise AssertionError(
                     f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} "
-                    f"{reduce_scatter_world_size=}"
+                    f"{world_size=}"
                 )
-            chunks = torch.chunk(
-                unsharded_grad, reduce_scatter_world_size, dim=shard_dim
-            )
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
 
     padded_unsharded_sizes = tuple(
-        _get_dim0_padded_size(grad.size(), reduce_scatter_world_size)
-        for grad in unsharded_grads
+        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
     )
     return unsharded_grads, padded_unsharded_sizes
 
@@ -602,18 +603,18 @@ def _default_reduce_scatter_input_fn(
 def _prepare_reduce_scatter_inputs_with_dim0_views(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
-    reduce_scatter_world_size: int,
+    world_size: int,
 ) -> tuple[list[torch.Tensor], list[torch.Size]]:
     """Prepare copy inputs while keeping one padded size per original parameter."""
     copy_in_grads: list[torch.Tensor] = []
     padded_unsharded_sizes: list[torch.Size] = []
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         shard_dim = fsdp_param.fsdp_placement.dim
-        if reduce_scatter_world_size > 1 and shard_dim != 0:
-            if unsharded_grad.size(shard_dim) % reduce_scatter_world_size != 0:
+        if world_size > 1 and shard_dim != 0:
+            if unsharded_grad.size(shard_dim) % world_size != 0:
                 raise AssertionError(
                     f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} "
-                    f"{reduce_scatter_world_size=}"
+                    f"{world_size=}"
                 )
             if unsharded_grad.is_contiguous():
                 copy_in_grads.extend(unsharded_grad.flatten(0, shard_dim - 1).unbind(0))
@@ -621,13 +622,13 @@ def _prepare_reduce_scatter_inputs_with_dim0_views(
                 padded_unsharded_sizes.append(unsharded_grad.size())
                 continue
             unsharded_grad = torch.cat(
-                torch.chunk(unsharded_grad, reduce_scatter_world_size, dim=shard_dim),
+                torch.chunk(unsharded_grad, world_size, dim=shard_dim),
                 dim=0,
             )
             unsharded_grads[i] = unsharded_grad
         copy_in_grads.append(unsharded_grad)
         padded_unsharded_sizes.append(
-            _get_dim0_padded_size(unsharded_grad.size(), reduce_scatter_world_size)
+            _get_dim0_padded_size(unsharded_grad.size(), world_size)
         )
     return copy_in_grads, padded_unsharded_sizes
 

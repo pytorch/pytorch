@@ -684,11 +684,13 @@ class FSDPModule:
         """Set the function that prepares each parameter's all-gather outputs.
 
         The function takes an ``fsdp_param`` with allocated final outputs and returns
-        copy destinations and whether a separate reorder is needed. Destinations
-        must preserve dtype and device. Direct views must split each final output
-        in order; reordering requires one matching temporary per final output.
-        The function runs on the current compute stream. FSDP owns the native copy
-        and any requested reorder. Reduce-scatter input preparation is unaffected.
+        copy destinations and a tuple of post-copy functions. Destinations must
+        preserve dtype and device. Direct views must split each final output in
+        order. Each post-copy function takes the all-gather group size and runs
+        after the native copy, in the order returned. Use an empty tuple when no
+        post-copy work is needed. All functions run on the current compute stream.
+        Post-copy functions must populate the final outputs and preserve their
+        version counters. Reduce-scatter input preparation is unaffected.
 
         Args:
             fn (Callable): Function that prepares all-gather output destinations.
@@ -708,9 +710,9 @@ class FSDPModule:
     ) -> None:
         """Set the function that prepares reduce-scatter inputs.
 
-        The function takes ``(fsdp_params, unsharded_grads, reduce_scatter_world_size)``
+        The function takes ``(fsdp_params, unsharded_grads, world_size)``
         and returns copy inputs and one padded unsharded size per entry in
-        ``fsdp_params``, in the same order. ``reduce_scatter_world_size`` is the
+        ``fsdp_params``, in the same order. ``world_size`` is the
         reduce-scatter group size, or 1 when no reduce-scatter is needed.
         Only parameters participating in this reduction are passed.
         The function may replace entries in ``unsharded_grads`` to release
