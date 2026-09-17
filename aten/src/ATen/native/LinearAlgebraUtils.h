@@ -327,10 +327,10 @@ inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, const ch
 
 inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name, const bool allow_low_precision_dtypes=true) {
   auto dtype = t.scalar_type();
-  TORCH_CHECK((at::isFloatingType(dtype) || at::isComplexType(dtype)),
+  TORCH_CHECK_NOT_IMPLEMENTED((at::isFloatingType(dtype) || at::isComplexType(dtype)),
               f_name, ": Expected a floating point or complex tensor as input. Got ", dtype);
   if (!allow_low_precision_dtypes) {
-    TORCH_CHECK(dtype == kFloat || dtype == kDouble || dtype == kComplexFloat || dtype == kComplexDouble,
+    TORCH_CHECK_NOT_IMPLEMENTED(dtype == kFloat || dtype == kDouble || dtype == kComplexFloat || dtype == kComplexDouble,
                 f_name, ": Low precision dtypes not supported. Got ", dtype);
   }
 }
