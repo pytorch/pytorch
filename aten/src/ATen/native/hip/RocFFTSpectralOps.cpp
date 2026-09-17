@@ -152,7 +152,9 @@ void exec_fft_rocfft(const Tensor& out, const Tensor& self, int64_t signal_size,
 // element, and saves writing and re-reading the framed tensor. The two break
 // even around 2^24 framed elements on gfx1030: below that stft runs in well
 // under a millisecond and the unfused path is quicker, above it the fused one
-// reaches 2.3x. The balance is bandwidth dependent, hence the override.
+// reaches 2.3x. The balance is bandwidth dependent, hence the override. istft
+// has no matching floor: its store callback leaves the access pattern alone, so
+// it wins at every size.
 int64_t rocfft_stft_min_elements() {
   static const int64_t value = [] {
     const auto override = c10::utils::get_env("TORCH_ROCM_ROCFFT_STFT_MIN_ELEMENTS");
@@ -341,6 +343,63 @@ Tensor stft_r2c_rocfft(const Tensor& self, int64_t n_fft, int64_t hop_length, in
   if (!onesided) {
     at::native::_fft_fill_with_conjugate_symmetry_(output, {2});
   }
+  return output;
+}
+
+Tensor istft_c2r_rocfft(const Tensor& self, int64_t n_fft, const Tensor& window,
+                        int64_t normalization) {
+  static const bool enabled = c10::utils::check_env("TORCH_ROCM_PREFER_ROCFFT") == true;
+  // Single precision only, for the same reason as the stft side: the SPIR-V
+  // module only defines the float entry points.
+  if (!enabled || self.dim() != 3 || self.scalar_type() != ScalarType::ComplexFloat ||
+      window.scalar_type() != ScalarType::Float || window.dim() != 1 ||
+      window.numel() != n_fft) {
+    return {};
+  }
+
+  // _istft_c2r has no derivative. istft keeps graph-recording calls away from
+  // here; this only catches direct callers.
+  if (at::GradMode::is_enabled() && (self.requires_grad() || window.requires_grad())) {
+    return {};
+  }
+
+  const int64_t channels = self.size(0);
+  const int64_t n_frames = self.size(1);
+  if (channels <= 0 || n_frames <= 0 || self.size(2) != n_fft / 2 + 1) {
+    return {};
+  }
+
+  // The callback does its index arithmetic in 32 bits.
+  if (channels * n_frames * n_fft > std::numeric_limits<uint32_t>::max()) {
+    return {};
+  }
+
+  lazy_init_rocfft();
+  if (!rocfft_callbacks_available()) {
+    return {};
+  }
+
+  auto output = at::empty({channels, n_frames, n_fft},
+                          self.options().dtype(c10::toRealValueType(self.scalar_type())));
+  // Complex to real transforms may overwrite their input even when they are not
+  // in-place (gh-34551), so always hand rocFFT a private copy. The copy also
+  // settles the layout, since istft arrives here on a transpose.
+  const auto input = self.clone(MemoryFormat::Contiguous);
+  const auto window_ = window.contiguous();
+
+  RocFFTCallbackData cb_data = {};
+  cb_data.window = window_.const_data_ptr<float>();
+  cb_data.n_fft = static_cast<uint32_t>(n_fft);
+  const auto cb_dev = upload_callback_data(cb_data, self.device());
+
+  RocFFTParams params(n_fft, channels * n_frames, /*in_stride=*/1,
+      /*in_distance=*/input.stride(1), /*out_stride=*/1, /*out_distance=*/n_fft,
+      RocFFTTransformType::C2R, /*forward=*/false, ScalarType::Float,
+      RocFFTCallbackKind::StoreWindow,
+      fft_normalization_scale(normalization, {n_fft}, {0}));
+
+  run_rocfft_plan(params, input.const_data_ptr(), output.data_ptr(), cb_dev.data_ptr(),
+                  self.device().index());
   return output;
 }
 

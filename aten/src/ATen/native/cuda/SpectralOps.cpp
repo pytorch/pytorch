@@ -19,6 +19,7 @@
 #include <ATen/ops/_fft_c2c_native.h>
 #include <ATen/ops/_fft_c2r_native.h>
 #include <ATen/ops/_fft_r2c_native.h>
+#include <ATen/ops/_istft_c2r_native.h>
 #include <ATen/ops/_stft_r2c_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/mul.h>
@@ -613,5 +614,17 @@ Tensor _stft_r2c_cuda(const Tensor& self, int64_t n_fft, int64_t hop_length, int
   return at::native::_stft_r2c(self, n_fft, hop_length, n_frames, window_opt, onesided,
                                normalization);
 }
+
+Tensor _istft_c2r_cuda(const Tensor& self, int64_t n_fft, const Tensor& window,
+                       int64_t normalization) {
+#if defined(USE_ROCM)
+  auto fused = istft_c2r_rocfft(self, n_fft, window, normalization);
+  if (fused.defined()) {
+    return fused;
+  }
+#endif
+  return at::native::_istft_c2r(self, n_fft, window, normalization);
+}
+
 
 } // at::native

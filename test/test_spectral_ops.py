@@ -1834,13 +1834,33 @@ torch.cuda.synchronize()
 print(torch.cuda.max_memory_allocated() - base)
 """
 
+# Both istft paths hold the same two buffers at their peak, so allocation says
+# nothing here. What the store callback removes is every elementwise pass over
+# the frames: the synthesis window and the normalization both ride along in the
+# transform, leaving no mul behind for the profiler to see.
+_ROCFFT_ISTFT_MULS = """
+import torch
+from torch.profiler import ProfilerActivity, profile
+n_fft, n_frames, channels = 512, 1024, 2
+spec = torch.randn(channels, n_frames, n_fft // 2 + 1, dtype=torch.complex64, device='cuda')
+w = torch.hann_window(n_fft, device='cuda')
+istft = lambda: torch.ops.aten._istft_c2r(spec, n_fft, w, 2)
+istft()  # plan creation and any lazy allocation
+torch.cuda.synchronize()
+with profile(activities=[ProfilerActivity.CPU]) as prof:
+    istft()
+print(sum(e.name.startswith('aten::mul') for e in prof.events()))
+"""
+
+
 def _run_with_rocfft(script, *args, callbacks=True, fuse_stft_always=False):
     env = {**os.environ, "TORCH_ROCM_PREFER_ROCFFT": "1"}
     if not callbacks:
         env["TORCH_ROCM_DISABLE_ROCFFT_CALLBACKS"] = "1"
     if fuse_stft_always:
         # The fused stft only pays for itself on inputs far larger than anything
-        # worth running a correctness sweep over, so drop its size floor.
+        # worth running a correctness sweep over, so drop its size floor. The
+        # fused istft has no floor, so the sweep covers it as it stands.
         env["TORCH_ROCM_ROCFFT_STFT_MIN_ELEMENTS"] = "0"
     done = subprocess.run([sys.executable, "-c", script, *args], env=env,
                           capture_output=True, text=True, check=False)
@@ -1931,6 +1951,14 @@ class TestRocFFT(TestCase):
 
     def test_istft(self):
         self._compare("istft/")
+
+    def test_istft_fuses_synthesis_window(self):
+        fused = int(_run_with_rocfft(_ROCFFT_ISTFT_MULS))
+        unfused = int(_run_with_rocfft(_ROCFFT_ISTFT_MULS, callbacks=False))
+        self.assertGreater(unfused, 0, "the unfused istft should still multiply by the window")
+        if fused == unfused:
+            raise unittest.SkipTest("rocFFT on this runtime cannot JIT the istft callbacks")
+        self.assertEqual(fused, 0)
 
     def test_input_not_clobbered(self):
         self._compare("preserved/")

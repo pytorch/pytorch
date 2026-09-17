@@ -403,6 +403,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.index_fill.int_Tensor_out,
             aten.index_fill_,
             aten.isin,
+            aten._istft_c2r,
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,

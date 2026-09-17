@@ -8,8 +8,9 @@ import torch
 On ROCm these run on hipFFT by default and on rocFFT when
 TORCH_ROCM_PREFER_ROCFFT=1 is set, so run the benchmark once per setting to
 compare the two backends. On a runtime whose rocFFT can JIT them, stft also
-gathers and windows its frames inside the transform; set
-TORCH_ROCM_DISABLE_ROCFFT_CALLBACKS=1 to measure that separately.
+gathers and windows its frames inside the transform and istft applies its
+synthesis window there; set TORCH_ROCM_DISABLE_ROCFFT_CALLBACKS=1 to measure
+those separately.
 """
 
 

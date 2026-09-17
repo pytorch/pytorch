@@ -20,4 +20,11 @@ Tensor _fft_c2c_rocfft(const Tensor& self, IntArrayRef dim, int64_t normalizatio
 Tensor stft_r2c_rocfft(const Tensor& self, int64_t n_fft, int64_t hop_length, int64_t n_frames,
                        const Tensor& window, bool onesided, int64_t normalization);
 
+// Fused istft core: applies the synthesis `window` inside the transform's store,
+// so the windowed frames land in the C2R output rather than in a second tensor
+// built by a separate pass. Returns an undefined tensor when the fused path does
+// not apply, leaving the caller to run the unfused version.
+Tensor istft_c2r_rocfft(const Tensor& self, int64_t n_fft, const Tensor& window,
+                        int64_t normalization);
+
 } // namespace at::native

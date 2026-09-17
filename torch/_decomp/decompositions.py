@@ -1159,6 +1159,17 @@ def _stft_r2c(
     return torch.ops.aten._fft_r2c(frames, [frames.dim() - 1], normalization, onesided)
 
 
+@register_decomposition(aten._istft_c2r)
+def _istft_c2r(
+    self: Tensor,
+    n_fft: int,
+    window: Tensor,
+    normalization: int,
+) -> Tensor:
+    frames = torch.ops.aten._fft_c2r(self, [self.dim() - 1], normalization, n_fft)
+    return frames * window
+
+
 @register_decomposition(aten.unfold_backward)
 @out_wrapper()
 def unfold_backward(
