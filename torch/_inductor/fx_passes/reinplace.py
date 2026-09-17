@@ -21,6 +21,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor import config, inductor_prims
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
+    fallback_node_due_to_unsupported_type,
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch._inductor.virtualized import V
@@ -533,7 +534,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     src.args[0].target == triton_kernel_wrapper_functional
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
-                or (src.args[0].target in inplaceable_foreach_ops)
+                or (
+                    src.args[0].target in inplaceable_foreach_ops
+                    and not fallback_node_due_to_unsupported_type(src.args[0])
+                )
                 or (src.args[0].target is torch.ops.higher_order.auto_functionalized)
             ):
                 src = src.args[0]
@@ -1042,6 +1046,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 new_kwargs = immutable_dict(new_kwargs)
                 node.meta["eager_input_vals"] = (args, new_kwargs)
         elif (inplaceable_op := inplaceable_foreach_ops.get(node.target)) is not None:
+            if fallback_node_due_to_unsupported_type(node):
+                continue
+
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
             if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
@@ -1051,6 +1058,17 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 for arg in mutated_args:
                     copy_node = copy_args_to_copy_nodes[(arg, node)]
                     replace_dict[copy_node] = copy_node.args[0]
+
+                for user in list(node.users):
+                    if (
+                        user.target is operator.getitem
+                        and len(user.args) >= 2
+                        and user.args[0] is node
+                        and isinstance(user.args[1], int)
+                    ):
+                        idx = user.args[1]
+                        if 0 <= idx < len(mutated_args):
+                            replace_dict[user] = mutated_args[idx]
 
                 node.target = inplaceable_op.inplace_op
     for node, replacement in replace_dict.items():
