@@ -1502,13 +1502,16 @@ class CheckpointPolicy(enum.Enum):
         save additional tensors not limited to ones that are actually needed for
         gradient computation.
 
-        Selective checkpointing saves non-aliasing ordered effects that are valid
-        SAC cache boundaries instead of replaying them under preferred recompute
-        or CPU-offload policies. Mandatory policies remain authoritative. Effects
-        may be registered explicitly through
-        ``torch.library._register_effectful_op`` or inferred from TorchBind
-        arguments. Raw c10d launches are not valid cache boundaries and remain
-        unsupported in recomputed SAC regions.
+        Eager selective checkpointing overrides policies that would replay an
+        operator to save the outputs of non-aliasing operators with an ordered
+        effect. An operator may be explicitly registered with an ordered effect
+        through ``torch.library`` or inferred to have one from non-whitelisted
+        TorchBind arguments. This override does not apply to ``MUST_RECOMPUTE`` or
+        operators in the ``c10d`` namespace. CPU-offload policies use this fallback
+        because eager SAC does not yet implement CPU offload and would otherwise
+        replay the operator. AOTAutograd rejects ``MUST_RECOMPUTE`` for an ordered
+        effect because a forward effect cannot join the backward effect-token chain
+        after partitioning.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1
@@ -1521,10 +1524,6 @@ class CheckpointPolicy(enum.Enum):
 # Policies for which eager SAC actually caches the output. CPU offload policies
 # currently fall through to recomputation, so they are deliberately absent.
 _SAVE_POLICIES = (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE)
-_EFFECT_OVERRIDE_POLICIES = (
-    CheckpointPolicy.PREFER_RECOMPUTE,
-    CheckpointPolicy.PREFER_CPU_OFFLOAD,
-)
 
 
 def _policy_from_bool(b):
@@ -1620,7 +1619,14 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
-        if policy in _EFFECT_OVERRIDE_POLICIES and _is_cacheable_effect(func):
+        # An ordered effect cannot be replayed safely. MUST_RECOMPUTE is the
+        # sole explicit request to replay; CPU-offload policies are save
+        # policies even though eager SAC does not yet implement their offload.
+        if (
+            policy not in _SAVE_POLICIES
+            and policy is not CheckpointPolicy.MUST_RECOMPUTE
+            and _is_cacheable_effect(func)
+        ):
             policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:

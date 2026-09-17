@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -1360,19 +1361,25 @@ class TestFlopCounter(TestCase):
     @parametrize(
         "backward_flop,q_shape,k_shape,v_shape,grad_shape",
         [
-            (
-                _varlen_attn_backward_flop,
-                (16, 4, 192),
-                (16, 2, 192),
-                (16, 2, 128),
-                (16, 4, 128),
+            subtest(
+                (
+                    _varlen_attn_backward_flop,
+                    (16, 4, 192),
+                    (16, 2, 192),
+                    (16, 2, 128),
+                    (16, 4, 128),
+                ),
+                name="flash",
             ),
-            (
-                _efficient_attention_backward_flop,
-                (1, 16, 4, 192),
-                (1, 16, 2, 192),
-                (1, 16, 2, 128),
-                (1, 16, 4, 128),
+            subtest(
+                (
+                    _efficient_attention_backward_flop,
+                    (1, 16, 4, 192),
+                    (1, 16, 2, 192),
+                    (1, 16, 2, 128),
+                    (1, 16, 4, 128),
+                ),
+                name="efficient",
             ),
         ],
     )

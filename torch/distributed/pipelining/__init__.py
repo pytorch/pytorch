@@ -2,6 +2,8 @@
 from ._IR import Pipe, pipe_split, pipeline, SplitPoint
 from .schedules import (
     _ScheduleForwardOnly,
+    analyze_pipeline_activation_liveness,
+    PipelineActivationLiveness,
     Schedule1F1B,
     ScheduleDualPipeV,
     ScheduleGPipe,
@@ -10,15 +12,24 @@ from .schedules import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from .stage import build_stage, PipelineStage
+from .stage import (
+    build_stage,
+    PIPELINE_MICROBATCH_INDEX_KEY,
+    PIPELINE_STAGE_INDEX_KEY,
+    PipelineStage,
+)
 
 
 __all__ = [
+    "analyze_pipeline_activation_liveness",
     "Pipe",
     "pipe_split",
     "SplitPoint",
     "pipeline",
+    "PIPELINE_MICROBATCH_INDEX_KEY",
+    "PIPELINE_STAGE_INDEX_KEY",
     "PipelineStage",
+    "PipelineActivationLiveness",
     "build_stage",
     "Schedule1F1B",
     "ScheduleGPipe",
