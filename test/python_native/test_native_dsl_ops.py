@@ -67,16 +67,19 @@ class _FileHash:
 
 
 class _InstalledFile:
-    def __init__(self, path, contents=None, *, hex_digest=False):
+    def __init__(self, path, contents=None, *, hash_encoding="base64"):
         self._path = path
         self.hash = None
         if contents is not None:
             digest = hashlib.sha256(contents).digest()
-            value = (
-                digest.hex()
-                if hex_digest
-                else base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-            )
+            if hash_encoding == "hex":
+                value = digest.hex()
+            elif hash_encoding == "uppercase_hex":
+                value = digest.hex().upper()
+            else:
+                value = base64.urlsafe_b64encode(digest).decode()
+                if hash_encoding == "base64":
+                    value = value.rstrip("=")
             self.hash = _FileHash("sha256", value)
 
     def locate(self):
@@ -756,7 +759,8 @@ class TestTritonDistributionDiscovery(TestCase):
         scan.assert_called_once()
         self.assertIn("will not register", "\n".join(logs.output))
 
-    def test_record_hash_selects_live_distribution(self):
+    @parametrize("hash_encoding", ("base64", "padded_base64", "hex", "uppercase_hex"))
+    def test_record_hash_selects_live_distribution(self, hash_encoding):
         with tempfile.TemporaryDirectory() as directory:
             origin = Path(directory) / "triton" / "__init__.py"
             origin.parent.mkdir()
@@ -769,7 +773,9 @@ class TestTritonDistributionDiscovery(TestCase):
                     {
                         "triton": [_InstalledFile(origin, b'__version__ = "3.2.0"\n')],
                         "pytorch-triton-rocm": [
-                            _InstalledFile(origin, contents, hex_digest=True)
+                            _InstalledFile(
+                                origin, contents, hash_encoding=hash_encoding
+                            )
                         ],
                     }
                 ),

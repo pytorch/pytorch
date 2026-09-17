@@ -86,8 +86,12 @@ def _record_hash_matches(path: _Path, file_hash: _Any) -> bool | None:
         with path.open("rb") as file:
             for chunk in iter(lambda: file.read(1024 * 1024), b""):
                 digest.update(chunk)
-        value = _base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode()
-        return file_hash.value in (value, digest.hexdigest())
+        recorded = file_hash.value
+        if len(recorded) == digest.digest_size * 2:
+            expected = bytes.fromhex(recorded)
+        else:
+            expected = _base64.urlsafe_b64decode(recorded + "=" * (-len(recorded) % 4))
+        return expected == digest.digest()
     except (OSError, TypeError, ValueError):
         return None
 
