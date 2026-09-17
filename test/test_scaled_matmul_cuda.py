@@ -2168,7 +2168,7 @@ class TestFP8Matmul(TestCase):
         def _run_test(x_hp, x_recipe, x_fp8, x_scales, x_scales_original,
                       y_hp, y_recipe, y_fp8, y_scales, y_scales_original):
 
-            # Calculate actual F8 mm (scales are descales -- pass directly)
+            # Calculate actual F8 mm
             out_scaled_mm = scaled_mm_wrap(
                 x_fp8,
                 y_fp8.t(),
