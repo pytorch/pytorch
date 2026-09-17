@@ -47,6 +47,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
+    TRITON_HAS_CPU,
 )
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -1361,7 +1362,7 @@ def helper(x):
         self.assertNotIn("tt.pointer_range", code_str)
 
     @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
     def test_user_defined_triton_kernel_non_builtin_constexpr(self):
@@ -1406,7 +1407,7 @@ def helper(x):
         self.assertEqual(actual, x + 2)
 
     @unittest.skipUnless(
-        HAS_GPU_AND_TRITON or (HAS_CPU and has_triton_package()),
+        HAS_GPU_AND_TRITON or (HAS_CPU and TRITON_HAS_CPU),
         "requires CPU or GPU Triton",
     )
     def test_user_defined_triton_kernel_python_float_arg_signature_matches_triton(self):
