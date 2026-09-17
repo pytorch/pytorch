@@ -5173,10 +5173,17 @@ class TestTheRubricIsAWrapperOverPrReview(unittest.TestCase):
     # withdrawing the instruction. Editing this is deliberate; the diff is where
     # it gets reviewed.
     EXPECTED_DELEGATION = (
-        "Read and apply [pr-review/SKILL.md](../pr-review/SKILL.md), all nine "
+        # `lint-xrefs` resolves a markdown link against the DIRECTORY OF THE
+        # FILE IT SITS IN, and it greps every file, not only markdown. These
+        # links are correct where the rubric lives and nowhere else: from
+        # `scripts/pr_review/` they resolve to `scripts/pr-review/...`, which
+        # does not exist, so quoting the rubric verbatim here reds the linter.
+        # Per-line markers rather than a rewrite, because the point of this
+        # constant is that it is VERBATIM.
+        "Read and apply [pr-review/SKILL.md](../pr-review/SKILL.md), all nine "  # @lint-ignore
         "Review Philosophy points, and its full "
-        "[review-checklist.md](../pr-review/review-checklist.md) and "
-        "[bc-guidelines.md](../pr-review/bc-guidelines.md)."
+        "[review-checklist.md](../pr-review/review-checklist.md) and "  # @lint-ignore
+        "[bc-guidelines.md](../pr-review/bc-guidelines.md)."  # @lint-ignore
     )
 
     def test_the_rubric_tells_the_model_to_apply_what_it_links(self):
