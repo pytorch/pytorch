@@ -177,24 +177,19 @@ dispatches on the buffer's device; the backend is responsible for honoring the
 allocator and memory pool that own its storage.
 
 For example, a `PrivateUse1` backend with a working `Tensor.record_stream`
-implementation can register the following after importing FSDP:
+implementation can register the following during backend initialization, even
+before FSDP is imported:
 
 ```python
 import torch
-import torch.distributed.fsdp
-
-# Keep the library alive for the lifetime of the backend registration.
-_fsdp_stream_lib = torch.library.Library("fsdp", "IMPL", "PrivateUse1")
 
 
+@torch.library.impl("fsdp::record_gradient_stream", "privateuseone")
 def _record_gradient_stream(buffer, stream_id, device_index, device_type):
     stream = torch.Stream(
         stream_id=stream_id, device_index=device_index, device_type=device_type
     )
     buffer.record_stream(stream)
-
-
-_fsdp_stream_lib.impl("record_gradient_stream", _record_gradient_stream)
 ```
 
 The implementation must register the original storage without copying or
