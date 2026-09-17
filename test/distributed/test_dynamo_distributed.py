@@ -5,6 +5,7 @@ import functools
 import logging
 import random
 import re
+import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import timedelta
@@ -655,6 +656,56 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             ddp_optimizer_activated,
             "DDPOptimizer should activate for compiled regions inside nested DDP",
         )
+
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_float_output_from_graph_split(self):
+        # Float module attrs (e.g. drop probability) can become partition outputs
+        # when DDPOptimizer splits the graph. Real DDP required because FakeDDP
+        # constant-folds the float and hides the bug.
+
+        class DropPath(nn.Module):
+            def __init__(self, p: float):
+                super().__init__()
+                self.p = p
+
+            def forward(self, x):
+                if not self.training or self.p == 0.0:
+                    return x
+                keep = 1.0 - self.p
+                mask = x.new_empty(x.shape[0], 1, 1).bernoulli_(keep)
+                return x * mask / keep
+
+        class Block(nn.Module):
+            def __init__(self, p):
+                super().__init__()
+                self.fc1 = nn.Linear(512, 512)
+                self.fc2 = nn.Linear(512, 512)
+                self.drop_path = DropPath(p)
+
+            def forward(self, x):
+                x = x + self.drop_path(self.fc1(x))
+                return x + self.drop_path(self.fc2(x))
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = nn.ModuleList([Block(0.0), Block(0.1)])
+
+            def forward(self, x):
+                for block in self.blocks:
+                    torch._dynamo.graph_break()
+                    x = block(x)
+                return x
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dist.init_process_group(
+                "gloo", init_method=f"file://{tmp}/store", rank=0, world_size=1
+            )
+            try:
+                model = DDP(torch.compile(Model()))
+                model(torch.randn(2, 3, 512)).sum().backward()
+            finally:
+                dist.destroy_process_group()
 
 
 # These tests aren't really distributed, but need multiple GPUs to run
