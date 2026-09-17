@@ -389,14 +389,16 @@ class TestPrecompile(TestCase):
 
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         # The artifact is the only compiled blob; the rest is the integrity tag (the
-        # format/version/backend tag plus a code_hash binding the cache to its
+        # format/version/backend/tracer tag plus a code_hash binding the cache to its
         # python_code).
         self.assertEqual(
-            set(blob), {"artifact", "format", "version", "backend", "code_hash"}
+            set(blob),
+            {"artifact", "format", "version", "backend", "tracer", "code_hash"},
         )
         self.assertEqual(blob["format"], _CACHE_FORMAT)
         self.assertEqual(blob["version"], _CACHE_VERSION)
         self.assertEqual(blob["backend"], "inductor")
+        self.assertEqual(blob["tracer"], "make_fx")
         self.assertIsInstance(blob["artifact"], bytes)
         # The calling convention is recoverable from python_code alone.
         from torch._precompile import _parse_artifact_metadata
@@ -444,7 +446,8 @@ class TestPrecompile(TestCase):
         _code, cache = cap.result()
         blob = torch.load(io.BytesIO(cache), weights_only=True)  # must not raise
         self.assertEqual(
-            set(blob), {"artifact", "format", "version", "backend", "code_hash"}
+            set(blob),
+            {"artifact", "format", "version", "backend", "tracer", "code_hash"},
         )
         self.assertEqual(blob["format"], _CACHE_FORMAT)
         self.assertEqual(blob["version"], _CACHE_VERSION)
@@ -1242,7 +1245,8 @@ class TestPrecompile(TestCase):
 
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         self.assertEqual(
-            set(blob), {"artifact", "format", "version", "backend", "code_hash"}
+            set(blob),
+            {"artifact", "format", "version", "backend", "tracer", "code_hash"},
         )
         self.assertIsNone(blob["artifact"])  # eager has no compiled blob to bundle
         self.assertEqual(blob["format"], _CACHE_FORMAT)
@@ -2938,7 +2942,9 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_same_file_for_both_halves_is_refused(self):
         # Also when the two halves are two SPELLINGS of one path, one of them bytes:
         # the cache write would truncate the source half, so the comparison is on the
-        # fsdecoded resolved paths, not the strings the caller passed.
+        # fsdecoded resolved paths, not the strings the caller passed. The pair on disk
+        # is what lets a bytes spelling reach this check instead of reading as contents.
+        self._write_pair()
         pairs = (
             (self.artifact, self.artifact),
             (self.artifact, os.path.join(self.dir, ".", "m.py")),
@@ -3602,6 +3608,47 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertRaisesRegex(PrecompileError, "code_hash"):
             torch.compiler.precompile.load(self.artifact, self.cache)
 
+    def test_cache_with_a_different_tracer_tag_is_refused(self):
+        # The pair carries the tag on both halves -- python_code's TRACER line and the
+        # cache envelope's tracer key -- so flipping either one alone is a mismatched
+        # pairing. The tracer check runs before the code_hash one, so editing the
+        # source reports the tracer even though the edit also broke the hash.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        blob = torch.load(self.cache, weights_only=True)
+        blob["tracer"] = "dynamo"
+        torch.save(blob, self.cache)
+        with self.assertRaisesRegex(PrecompileError, "cache tracer 'dynamo'"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+        blob["tracer"] = "make_fx"
+        torch.save(blob, self.cache)
+        source = self._read(self.artifact).decode()
+        self.assertIn("TRACER = 'make_fx'", source)
+        with open(self.artifact, "w", encoding="utf-8") as f:
+            f.write(source.replace("TRACER = 'make_fx'", "TRACER = 'dynamo'"))
+        with self.assertRaisesRegex(PrecompileError, "python_code tracer 'dynamo'"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+
+    def test_a_pair_without_a_tracer_tag_still_loads(self):
+        # BC: artifacts predating the tag carry it on neither half, and both sides read
+        # an absent tag as make_fx, so such a pair still pairs and serves. Stripping the
+        # line changes python_code, so re-hash the envelope to keep the pairing honest.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        code = self._read(self.artifact).replace(b"TRACER = 'make_fx'\n", b"")
+        blob = torch.load(self.cache, weights_only=True)
+        del blob["tracer"]
+        blob["code_hash"] = hashlib.sha256(code).hexdigest()
+        with open(self.artifact, "wb") as f:
+            f.write(code)
+        torch.save(blob, self.cache)
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            self.model(self.x),
+        )
+
     def test_unreadable_cache_falls_back_to_python_code(self):
         self._write_pair()
         with open(self.cache, "wb") as f:
@@ -3806,6 +3853,51 @@ class TestPrecompileCaptureFiles(TestCase):
         )
         self.assertIn(b"\r\n", self._read(self.artifact))
         self._assert_serves()
+
+    def test_serving_by_installing_is_refused(self):
+        # A capture here renders SERVING_MODE='standalone'; 'installed' is the shape the
+        # dynamo front-end will write. precompile.load() reads the line off
+        # python_code's metadata and refuses before it touches the cache, so the
+        # edited artifact keeps the cache's old code_hash.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        src = self._read(self.artifact)
+        self.assertIn(b"\nSERVING_MODE = 'standalone'\n", src)
+        installed = b"SERVING_MODE = 'installed'"
+        with open(self.artifact, "wb") as f:
+            f.write(src.replace(b"SERVING_MODE = 'standalone'", installed, 1))
+        with self.assertRaisesRegex(PrecompileError, "not available yet"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+
+    def test_fn_is_refused_for_a_standalone_artifact(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(PrecompileError, "fn= applies only"):
+            torch.compiler.precompile.load(self.artifact, self.cache, fn=_files_fn)
+
+    def test_the_in_memory_pair_is_refused_by_the_path_api(self):
+        # This entry point took the in-memory (python_code, cache) pair under the
+        # same name one release ago, so a caller still passing it gets the API
+        # change named rather than a multi-kilobyte source string reported as an
+        # unreadable path.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        python_code = self._read(self.artifact).decode()
+        cache = self._read(self.cache)
+        for args in (
+            (python_code, cache),
+            (python_code, self.cache),
+            (self.artifact, cache),
+        ):
+            with self.assertRaisesRegex(PrecompileError, "takes two file PATHS"):
+                torch.compiler.precompile.load(*args)
+        # Narrow on purpose, since both halves have legitimate path spellings: bytes
+        # is a real path type, so a bytes pair that names the two files is loaded
+        # rather than diagnosed as the in-memory pair.
+        f = torch.compiler.precompile.load(
+            os.fsencode(self.artifact), os.fsencode(self.cache)
+        )
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
 
     def test_module_is_not_callable(self):
         with self.assertRaisesRegex(TypeError, "not callable"):
