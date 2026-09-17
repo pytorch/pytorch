@@ -470,7 +470,6 @@ def can_use_gluon_kernel(
     offs: TensorBox | None,
     bias: TensorBox | None,
     scale_result: TensorBox | None,
-    layout: Layout,
 ) -> bool:
     if not torch.cuda.is_available() or torch.version.hip:
         return False
@@ -489,11 +488,6 @@ def can_use_gluon_kernel(
         return False
 
     if bias is not None or scale_result is not None:
-        return False
-
-    # A and B always load via TMA, and USE_TMA_STORE lets any output
-    # shape store via TMA, so every operand must satisfy it.
-    if not can_use_tma(mat_a, mat_b, output_layout=layout):
         return False
 
     # FIXME: Reconsider rejecting dynamic shapes here, as CuTeDSL does.
@@ -748,7 +742,7 @@ def _tuned_grouped_mm_common(
     if (
         is_nonzero
         and use_gluon_template(layout)
-        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result, layout)
+        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result)
         and not scaled
     ):
         kwargs = {
@@ -757,10 +751,13 @@ def _tuned_grouped_mm_common(
             "A_IS_K_MAJOR": a_is_k_major,
             "B_IS_K_MAJOR": b_is_k_major,
         }
+        can_use_tma_store = can_use_tma(output_layout=layout)
         for config in gluon_grouped_mm_configs(
             dtype_AB=mat_a.get_dtype(),
             k_is_varying=a_is_2d and b_is_2d,
         ):
+            if config.kwargs["USE_TMA_STORE"] and not can_use_tma_store:
+                continue
             gluon_grouped_mm_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
