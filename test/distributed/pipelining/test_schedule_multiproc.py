@@ -1,8 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+import gc
 import logging
 import os
+import weakref
 from dataclasses import dataclass
 
 from model_registry import (
@@ -23,9 +25,13 @@ from schedule_registry import (
 import torch
 import torch.distributed as dist
 import torch.distributed.config as dist_config
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import fully_shard
 from torch.distributed.pipelining import (
     _ScheduleForwardOnly,
     pipeline,
+    PIPELINE_MICROBATCH_INDEX_KEY,
+    PIPELINE_STAGE_INDEX_KEY,
     PipelineStage,
     Schedule1F1B,
     ScheduleDualPipeV,
@@ -35,6 +41,7 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
+from torch.distributed.pipelining._p2p import _build_p2p_edge_groups
 from torch.distributed.pipelining._utils import PipeliningMetadataError
 from torch.distributed.pipelining.microbatch import split_args_kwargs_into_chunks
 from torch.distributed.pipelining.schedules import (
@@ -44,13 +51,16 @@ from torch.distributed.pipelining.schedules import (
     _wait_batch_p2p,
     FORWARD,
     OVERLAP_F_B,
+    UNSHARD,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.nn.attention.flex_attention import BlockMask, create_block_mask
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
+    MultiProcessTestCase,
     requires_accelerator_dist_backend,
+    requires_gloo,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -373,6 +383,72 @@ class ScheduleTest(MultiProcContinuousTest):
                 schedule.step(x)
             else:
                 schedule.step()
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_interleaved_pipeline_metadata_uses_global_indices(self):
+        stages_per_rank = 2
+        num_stages = stages_per_rank * self.world_size
+        num_microbatches = 2 * self.world_size
+        mod, _, x, target, loss_fn = setup_models_and_data(
+            self.config, n_layers=num_stages
+        )
+        stage_indices = [
+            self.rank + local_index * self.world_size
+            for local_index in range(stages_per_rank)
+        ]
+        sample = x.chunk(num_microbatches)[0].detach().requires_grad_(True)
+        stages = []
+        received: dict[int, list[tuple[int, int]]] = {
+            stage_index: [] for stage_index in stage_indices
+        }
+
+        for stage_index in stage_indices:
+            stage_module = mod.get_submodule(f"layers.{stage_index}")
+            output = stage_module(sample)
+            stage = PipelineStage(
+                stage_module,
+                stage_index,
+                num_stages,
+                self.device,
+                input_args=sample,
+                output_args=output,
+                pass_pipeline_metadata=True,
+            )
+
+            def consume_metadata(module, args, kwargs, *, index=stage_index):
+                received[index].append(
+                    (
+                        kwargs.pop(PIPELINE_STAGE_INDEX_KEY),
+                        kwargs.pop(PIPELINE_MICROBATCH_INDEX_KEY),
+                    )
+                )
+                return args, kwargs
+
+            stage_module.register_forward_pre_hook(consume_metadata, with_kwargs=True)
+            stages.append(stage)
+
+        schedule = ScheduleInterleaved1F1B(
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+        step_with_optional_pre_split(
+            schedule,
+            num_microbatches,
+            args=(x,) if any(stage.is_first for stage in stages) else (),
+            target=target if any(stage.is_last for stage in stages) else None,
+        )
+
+        for stage_index in stage_indices:
+            self.assertEqual(
+                set(received[stage_index]),
+                {(stage_index, mb_index) for mb_index in range(num_microbatches)},
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -1446,6 +1522,95 @@ class ScheduleTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
+    @skip_if_lt_x_gpu(4)
+    def test_unshard_lookahead_fsdp_parity(self):
+        # Bind each worker before the 2D mesh creates its NCCL process groups.
+        torch.accelerator.set_device_index(self.rank)
+        mesh = init_device_mesh(device_type, (2, 2), mesh_dim_names=("dp", "pp"))
+        pp_mesh = mesh["pp"]
+        dp_mesh = mesh["dp"]
+        pp_group = pp_mesh.get_group()
+        pp_rank = pp_mesh.get_local_rank()
+        pp_size = pp_mesh.size()
+        config = PipelineTestConfig(pp_size, self.device, pp_rank)
+        num_stages = 2 * pp_size
+        base_mod, _, x, target, loss_fn = setup_models_and_data(
+            config, n_layers=num_stages
+        )
+        # Static receive metadata must preserve activation gradients across PP
+        # boundaries, so its input exemplar must require gradients.
+        x.requires_grad_(True)
+        results = []
+
+        for lookahead in ("full", (1,) * pp_size):
+            mod = copy.deepcopy(base_mod)
+            stage_indices = [pp_rank + i * pp_size for i in range(2)]
+            stage_modules = [mod.layers[index] for index in stage_indices]
+            microbatch = x.chunk(2 * pp_size)[0]
+            stages = []
+            for module, stage_index in zip(stage_modules, stage_indices, strict=True):
+                example_output = module(microbatch)
+                stages.append(
+                    PipelineStage(
+                        module,
+                        stage_index,
+                        num_stages,
+                        self.device,
+                        group=pp_group,
+                        input_args=microbatch,
+                        output_args=example_output,
+                    )
+                )
+            for stage_module in stage_modules:
+                fully_shard(stage_module, mesh=dp_mesh)
+            schedule = ScheduleInterleaved1F1B(
+                stages,
+                2 * pp_size,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                max_active_stages=2,
+                unshard_lookahead=lookahead,
+            )
+            unshard_positions = tuple(
+                index
+                for index, action in enumerate(
+                    schedule.pipeline_order_with_comms[pp_rank]
+                )
+                if action.computation_type == UNSHARD
+            )
+
+            losses = []
+            if pp_rank == 0:
+                output = schedule.step(x)
+            elif pp_rank == pp_size - 1:
+                output = schedule.step(target=target, losses=losses)
+            else:
+                output = schedule.step()
+            grads = []
+            for module in stage_modules:
+                for parameter in module.parameters():
+                    grad = parameter.grad
+                    if grad is None:
+                        raise AssertionError("FSDP parameter gradient is missing")
+                    grads.append(grad.to_local().clone())
+            results.append((output, list(losses), grads, unshard_positions))
+
+        full_output, full_losses, full_grads, full_unshards = results[0]
+        limited_output, limited_losses, limited_grads, limited_unshards = results[1]
+        self.assertNotEqual(limited_unshards, full_unshards)
+        self.assertTrue(any(torch.count_nonzero(grad).item() for grad in full_grads))
+        if pp_rank == pp_size - 1:
+            torch.testing.assert_close(limited_output, full_output)
+            torch.testing.assert_close(
+                torch.stack(limited_losses), torch.stack(full_losses)
+            )
+        for limited_grad, full_grad in zip(limited_grads, full_grads, strict=True):
+            torch.testing.assert_close(limited_grad, full_grad)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
     @parametrize(
         "ScheduleClass",
         [ScheduleGPipe, ScheduleInterleaved1F1B, ScheduleZBVZeroBubble],
@@ -1659,15 +1824,61 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 instantiate_parametrized_tests(CustomSchedulesTest)
 
 
-class PerDirectionScheduleTest(MultiProcContinuousTest):
-    """Per-direction PP communicators (``config.pipeline_per_direction_p2p``).
+class GlooPerEdgeScheduleTest(MultiProcessTestCase):
+    """Exercise topology-derived child groups without an accelerator backend."""
 
-    A single PP communicator serializes all send/recv in one FIFO; splitting
-    downstream (r -> r+1 activations) and upstream (r -> r-1 gradients) onto two
-    communicators removes the cross-batch deadlock hazard. PipelineStage builds
-    the two subgroups with ``split_group``, which requires a device-bound default
-    PG -- so this class binds ``device_id`` in ``_init_pg`` (see below) rather
-    than relying on the shared MultiProcContinuousTest path.
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    @requires_gloo()
+    def test_edge_groups_split_and_reuse_cpu_parent(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        mapping = {0: 0, 1: 1}
+
+        def run_world(generation: int) -> weakref.ReferenceType[dist.ProcessGroup]:
+            dist.init_process_group(
+                "gloo",
+                store=dist.PrefixStore(f"world-{generation}", store),
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+            try:
+                parent = dist.distributed_c10d._get_default_group()
+                dist.all_reduce(torch.ones(1))
+                groups, rounds = _build_p2p_edge_groups(
+                    parent, mapping, torch.device("cpu")
+                )
+                cached_groups, cached_rounds = _build_p2p_edge_groups(
+                    parent, mapping, torch.device("cpu")
+                )
+
+                self.assertEqual(rounds, (((0, 1),), ((1, 0),)))
+                self.assertIs(groups, cached_groups)
+                self.assertIs(rounds, cached_rounds)
+                for edge, group in groups.items():
+                    self.assertEqual(dist.get_process_group_ranks(group), list(edge))
+                    value = torch.tensor(float(self.rank + 1))
+                    dist.all_reduce(value, group=group)
+                    self.assertEqual(value, torch.tensor(3.0))
+                return weakref.ref(parent)
+            finally:
+                dist.destroy_process_group()
+
+        for generation in range(2):
+            parent_ref = run_world(generation)
+            gc.collect()
+            self.assertIsNone(parent_ref())
+
+
+class PerEdgeScheduleTest(MultiProcContinuousTest):
+    """Per-edge PP communicators (``config.pipeline_per_edge_p2p``).
+
+    A single PP communicator serializes all send/recv in one FIFO. The schedule
+    initializes the PP parent and derives directed children from its final
+    logical-stage placement.
     """
 
     world_size = 4
@@ -1678,21 +1889,11 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Bind device_id so PipelineStage can split the default PG into
-        # downstream/upstream subgroups. We override here instead of changing
-        # MultiProcContinuousTest._init_pg, which also serves CPU/Gloo callers
-        # where device_id would alter PG initialization semantics.
+        """Initialize a lazy default PG to exercise parent-local initialization."""
         if rdvz_file is None:
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
         store = dist.FileStore(rdvz_file, world_size)
-        # _init_pg runs at class spawn, before the per-test skip_if_lt_x_gpu(4).
-        # Only bind device_id when every rank maps to a real accelerator;
-        # otherwise the tests are skipped anyway and an out-of-range device_id
-        # would make init_process_group raise instead of skip.
-        device_id = None
-        if torch.accelerator.device_count() >= world_size:
-            device_id = torch.device(cls.device_type(), rank)
         dist.init_process_group(
             backend=cls.backend_str(),
             world_size=world_size,
@@ -1700,7 +1901,6 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             store=store,
             pg_options=cls.opts(),
             timeout=cls.timeout,
-            device_id=device_id,
         )
         cls.pg = dist.distributed_c10d._get_default_group()
 
@@ -1714,48 +1914,187 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             world_size=self.world_size, device=self.device, rank=self.rank
         )
 
+    def _run_gpipe_on_group(
+        self, group: dist.ProcessGroup, device: torch.device
+    ) -> PipelineStage:
+        """Run two training steps and check numerics on an arbitrary PP group."""
+        group_rank = dist.get_rank(group)
+        group_size = dist.get_world_size(group)
+        config = PipelineTestConfig(group_size, device, group_rank)
+        torch.manual_seed(0)
+        mod, ref_mod, x, target, loss_fn = setup_models_and_data(config)
+        x.requires_grad_(True)
+        ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
+        stage_module = mod.get_submodule(f"layers.{group_rank}")
+        microbatch = x.chunk(2 * group_size)[0]
+        stage = PipelineStage(
+            stage_module,
+            group_rank,
+            group_size,
+            device,
+            group=group,
+            input_args=microbatch,
+            output_args=stage_module(microbatch),
+        )
+        schedule = ScheduleGPipe(
+            stage, 2 * group_size, loss_fn=loss_fn, scale_grads=False
+        )
+
+        out = None
+        losses = []
+        for _ in range(2):
+            zero_gradients(stage_module)
+            if group_rank == 0:
+                schedule.step(x)
+            elif group_rank == group_size - 1:
+                out = schedule.step(target=target, losses=losses)
+            else:
+                schedule.step()
+
+        if group_rank == group_size - 1:
+            torch.testing.assert_close(out, ref_out)
+            torch.testing.assert_close(sum(losses), ref_loss)
+        check_gradients(config, stage_module, ref_mod)
+        return stage
+
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @skip_if_lt_x_gpu(4)
-    def test_creates_distinct_direction_groups(self):
-        """PipelineStage builds two distinct, non-WORLD direction groups when the
-        config flag is set (no constructor arg)."""
-        with dist_config.patch(pipeline_per_direction_p2p=True):
+    def test_homogeneous_gloo_parent(self):
+        """A homogeneous Gloo parent is split without a backend filter."""
+        group = dist.new_group(ranks=list(range(self.world_size)), backend="gloo")
+        with dist_config.patch(pipeline_per_edge_p2p=True):
+            stage = self._run_gpipe_on_group(group, torch.device("cpu"))
+        self.assertTrue(stage._p2p_edge_groups)
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_mixed_parent_filters_to_stage_backend(self):
+        """A mixed parent retains only its accelerator backend in PP children."""
+        group = dist.new_group(
+            ranks=list(range(self.world_size)),
+            backend=f"cpu:gloo,{device_type}:{backend}",
+            device_id=self.device,
+        )
+        with dist_config.patch(pipeline_per_edge_p2p=True):
+            stage = self._run_gpipe_on_group(group, self.device)
+        self.assertTrue(stage._p2p_edge_groups)
+        self.assertTrue(
+            all(
+                {group_device.type for group_device in child._device_types}
+                == {device_type}
+                for child in stage._p2p_edge_groups.values()
+            )
+        )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_mixed_parent_cpu_stage_initializes_retained_backends(self):
+        """A CPU stage initializes every backend retained by mixed children."""
+        group = dist.new_group(
+            ranks=list(range(self.world_size)),
+            backend=f"cpu:gloo,{device_type}:{backend}",
+            device_id=self.device,
+        )
+        with dist_config.patch(pipeline_per_edge_p2p=True):
+            stage = self._run_gpipe_on_group(group, torch.device("cpu"))
+        self.assertTrue(stage._p2p_edge_groups)
+        self.assertTrue(
+            all(
+                {group_device.type for group_device in child._device_types}
+                == {"cpu", device_type}
+                for child in stage._p2p_edge_groups.values()
+            )
+        )
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_non_world_pipeline_subgroups(self):
+        """Directed children preserve non-contiguous parent-rank mappings."""
+        rank_pairs = ((0, 2), (1, 3))
+        groups = [dist.new_group(ranks=list(ranks)) for ranks in rank_pairs]
+        pair_index = self.rank % 2
+        group = groups[pair_index]
+        self.assertIsInstance(group, dist.ProcessGroup)
+        with dist_config.patch(pipeline_per_edge_p2p=True):
+            stage = self._run_gpipe_on_group(group, self.device)
+        self.assertEqual(set(stage._p2p_edge_groups), {(0, 1), (1, 0)})
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_creates_distinct_edge_groups(self):
+        """Schedule warm-up builds only the directed edges in its topology."""
+        with dist_config.patch(pipeline_per_edge_p2p=True):
             mod, _, x, _, _ = setup_models_and_data(self.config)
             chunks = 2 * self.world_size
             stage, _, _ = create_single_stage_pipeline(
                 self.config, mod, x, chunks, use_tracer=False
             )
-            self.assertTrue(stage.p2p_per_direction)
-            self.assertIsNot(stage._downstream_group, dist.group.WORLD)
-            self.assertIsNot(stage._upstream_group, dist.group.WORLD)
-            self.assertIsNot(stage._downstream_group, stage._upstream_group)
+            self.assertTrue(stage.p2p_per_edge)
+            self.assertFalse(stage._p2p_edge_groups)
+
+            schedule = ScheduleGPipe(stage, chunks, scale_grads=False)
+            if self.rank == 0:
+                schedule.step(x)
+            else:
+                schedule.step()
+
+            directed_edges = {
+                edge
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
+            }
+            self.assertEqual(
+                set(stage._p2p_edge_groups),
+                {edge for edge in directed_edges if self.rank in edge},
+            )
+            groups = list(stage._p2p_edge_groups.values())
+            self.assertEqual(len({id(group) for group in groups}), len(groups))
+            self.assertTrue(all(group is not dist.group.WORLD for group in groups))
+            self.assertTrue(
+                all(
+                    {group_device.type for group_device in group._device_types}
+                    == {self.device.type}
+                    for group in groups
+                )
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @parametrize("use_tracer", [False, True])
     @skip_if_lt_x_gpu(4)
-    def test_grad_with_manual_per_direction(self, ScheduleClass):
-        """Per-direction P2P only changes which communicator carries the bytes,
+    def test_grad_with_per_edge(self, ScheduleClass, use_tracer):
+        """Per-edge P2P only changes which communicator carries the bytes,
         not the math: gradients/outputs must still match the reference model."""
-        with dist_config.patch(pipeline_per_direction_p2p=True):
+        with dist_config.patch(pipeline_per_edge_p2p=True):
             mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
             # Run reference
             ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
 
-            # Create manual pipeline stage; the per-direction groups are built
-            # inside PipelineStage from the config flag set above.
             chunks = 2 * self.world_size
             stage, stage_module, _ = create_single_stage_pipeline(
-                self.config, mod, x, chunks, use_tracer=False
+                self.config, mod, x, chunks, use_tracer=use_tracer
             )
-            self.assertTrue(stage.p2p_per_direction)
-            self.assertIsNot(stage._downstream_group, stage._upstream_group)
+            self.assertTrue(stage.p2p_per_edge)
+            self.assertFalse(stage._p2p_edge_groups)
 
             schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn, scale_grads=False)
 
@@ -1771,6 +2110,16 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
                 else:
                     schedule.step()
 
+            directed_edges = {
+                edge
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
+            }
+            self.assertEqual(
+                set(stage._p2p_edge_groups),
+                {edge for edge in directed_edges if self.rank in edge},
+            )
+
             dist.barrier(device_ids=[self.rank])
 
             # Last rank checks result
@@ -1782,8 +2131,73 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
             # Check gradients using helper method
             check_gradients(self.config, stage_module, ref_mod)
 
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_grad_with_v_schedule(self):
+        """A V schedule uses local transfer at its turn and P2P elsewhere."""
+        with dist_config.patch(pipeline_per_edge_p2p=True):
+            num_stages = 2 * self.world_size
+            rank_stages = {
+                0: [0, 7],
+                1: [1, 6],
+                2: [2, 5],
+                3: [3, 4],
+            }
+            mod, ref_mod, x, target, loss_fn = setup_models_and_data(
+                self.config, n_layers=num_stages
+            )
+            ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
+            stage_indices = rank_stages[self.rank]
+            stages, stage_modules, submod_names = create_multi_stage_pipeline(
+                self.config, mod, len(stage_indices), num_stages, stage_indices
+            )
+            schedule = ScheduleDualPipeV(
+                stages,
+                2 * self.world_size,
+                loss_fn=loss_fn,
+                scale_grads=False,
+                reuse_recv_buffers=True,
+            )
 
-instantiate_parametrized_tests(PerDirectionScheduleTest)
+            out = None
+            losses = []
+            group_ids = None
+            for step in range(2):
+                zero_gradients(stage_modules)
+                if self.rank == 0:
+                    out = schedule.step(x, target=target, losses=losses)
+                else:
+                    schedule.step()
+                current_group_ids = {
+                    edge: id(group)
+                    for edge, group in stages[0]._p2p_edge_groups.items()
+                }
+                if step == 0:
+                    group_ids = current_group_ids
+                else:
+                    self.assertEqual(current_group_ids, group_ids)
+
+            expected_edges = {
+                edge
+                for rank in range(self.world_size - 1)
+                for edge in ((rank, rank + 1), (rank + 1, rank))
+            }
+            self.assertEqual(
+                set(stages[0]._p2p_edge_groups),
+                {edge for edge in expected_edges if self.rank in edge},
+            )
+
+            dist.barrier(device_ids=[self.rank])
+            if self.rank == 0:
+                torch.testing.assert_close(out, ref_out)
+                torch.testing.assert_close(sum(losses), ref_loss)
+            check_gradients(self.config, stage_modules, ref_mod, submod_names)
+
+
+instantiate_parametrized_tests(PerEdgeScheduleTest)
 
 
 if __name__ == "__main__":
