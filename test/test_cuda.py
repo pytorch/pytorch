@@ -12480,7 +12480,10 @@ class TestCudaGreenContexts(TestCase):
         callback_streams = []
         caller_stream = torch.cuda.current_stream()
 
-        def work(index, context):
+        def work(index):
+            context = green_contexts.get_green_context_from_stream(
+                torch.cuda.current_stream()
+            )
             self.assertIsNotNone(context)
             callback_streams.append(torch.cuda.current_stream().cuda_stream)
             outputs[index].fill_(index + 1)
@@ -12502,7 +12505,7 @@ class TestCudaGreenContexts(TestCase):
         streams = [context.Stream() for context in contexts]
         caller_stream = torch.cuda.current_stream()
 
-        def fail(index, context):
+        def fail(index):
             raise RuntimeError("callback failure")
 
         with self.assertRaisesRegex(RuntimeError, "callback failure"):

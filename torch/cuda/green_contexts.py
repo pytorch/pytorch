@@ -794,19 +794,23 @@ def get_green_context_from_stream(stream: torch.cuda.Stream) -> GreenContext | N
 
 def execute_in_green_contexts(
     green_ctx_streams: list[torch.cuda.Stream],
-    fn: Callable[[int, GreenContext | None], None],
+    fn: Callable[[int], None],
 ) -> None:
-    r"""Execute a function in a list of green context streams in parallel."""
+    r"""Execute a function in a list of green context streams in parallel.
+
+    ``fn`` is invoked for each stream with its index in ``green_ctx_streams``.
+    During the invocation, that stream is the default stream for CUDA work,
+    activating execution in its green context. The associated green context can
+    be obtained with :func:`get_green_context_from_stream`, using either the
+    default stream inside ``fn`` or ``green_ctx_streams[index]``.
+    """
     if not green_ctx_streams:
         raise ValueError("Need at least one green context to execute in!")
     if len(green_ctx_streams) == 1:
         with torch.cuda.stream(green_ctx_streams[0]):
-            fn(0, get_green_context_from_stream(green_ctx_streams[0]))
+            fn(0)
         return
 
-    green_contexts = [
-        get_green_context_from_stream(stream) for stream in green_ctx_streams
-    ]
     green_events = [torch.cuda.Event() for _ in green_ctx_streams]
     main_event = torch.cuda.Event()
     main_stream = torch.cuda.current_stream()
@@ -817,24 +821,24 @@ def execute_in_green_contexts(
         # main -> green[0] -> main -> green[1] -> main adds enough host latency
         # to prevent short kernels from overlapping.
         try:
-            for i, (green_ctx_stream, green_context, green_event) in enumerate(
-                zip(green_ctx_streams, green_contexts, green_events)
+            for i, (green_ctx_stream, green_event) in enumerate(
+                zip(green_ctx_streams, green_events)
             ):
                 torch.cuda.set_stream(green_ctx_stream)
                 green_ctx_stream.wait_event(main_event)
-                fn(i, green_context)
+                fn(i)
                 green_event.record(green_ctx_stream)
         finally:
             torch.cuda.set_stream(main_stream)
     else:
         # Preserve StreamContext device-switching behavior when a stream is on
         # a device other than the caller's current device.
-        for i, (green_ctx_stream, green_context, green_event) in enumerate(
-            zip(green_ctx_streams, green_contexts, green_events)
+        for i, (green_ctx_stream, green_event) in enumerate(
+            zip(green_ctx_streams, green_events)
         ):
             with torch.cuda.stream(green_ctx_stream):
                 green_ctx_stream.wait_event(main_event)
-                fn(i, green_context)
+                fn(i)
                 green_event.record(green_ctx_stream)
 
     for green_event in green_events:
