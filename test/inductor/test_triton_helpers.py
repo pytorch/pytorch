@@ -14,11 +14,18 @@ Covers:
 import torch
 from torch._inductor.runtime.triton_helpers import (
     exclusive_scan_decoupled_lookback_64,
+    max2,
+    max2_strict,
+    maximum,
+    min2,
+    min2_strict,
+    minimum,
     rand4x,
     randn4x,
     select_one,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -112,6 +119,38 @@ if HAS_GPU:
         else:
             result = rand4x(seed, offsets, BLOCK_SIZE)
         tl.store(result_ptr + offsets, result)
+
+    @triton.jit
+    def test_kernel_minimum_maximum(
+        a_ptr,
+        b_ptr,
+        min_ptr,
+        max_ptr,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        a = tl.load(a_ptr + offsets)
+        b = tl.load(b_ptr + offsets)
+        tl.store(min_ptr + offsets, minimum(a, b))
+        tl.store(max_ptr + offsets, maximum(a, b))
+
+    @triton.jit
+    def test_kernel_minmax_reduction(
+        x_ptr,
+        min_ptr,
+        max_ptr,
+        BLOCK_SIZE: tl.constexpr,
+        STRICT: tl.constexpr,
+    ):
+        row = tl.program_id(0)
+        offsets = row * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        x = tl.load(x_ptr + offsets)
+        if STRICT:
+            tl.store(min_ptr + row, min2_strict(x, 0))
+            tl.store(max_ptr + row, max2_strict(x, 0))
+        else:
+            tl.store(min_ptr + row, min2(x, 0))
+            tl.store(max_ptr + row, max2(x, 0))
 
 
 class ExclusiveScanDecoupledLookback64Test(TestCase):
@@ -332,6 +371,129 @@ class Random4xTest(TestCase):
         self.assertLess(abs(mean), 0.02)
         self.assertLess(abs(variance - 1.0), 0.05)
         self.assertLess(abs(skewness), 0.05)
+
+
+class MinimumMaximumTest(TestCase):
+    def test_elementwise_nan_and_signed_zero(self, device: str) -> None:
+        a = torch.tensor(
+            [
+                -0.0,
+                0.0,
+                float("nan"),
+                1.0,
+                float("nan"),
+                float("inf"),
+                -float("inf"),
+                2.0,
+            ],
+            device=device,
+        )
+        b = torch.tensor(
+            [
+                0.0,
+                -0.0,
+                1.0,
+                float("nan"),
+                float("nan"),
+                -float("inf"),
+                float("inf"),
+                -2.0,
+            ],
+            device=device,
+        )
+        actual_min = torch.empty_like(a)
+        actual_max = torch.empty_like(a)
+        test_kernel_minimum_maximum[(1,)](
+            a,
+            b,
+            actual_min,
+            actual_max,
+            BLOCK_SIZE=a.numel(),
+        )
+
+        expected_min = torch.minimum(a, b)
+        expected_max = torch.maximum(a, b)
+        self.assertEqual(actual_min, expected_min)
+        self.assertEqual(actual_max, expected_max)
+        self.assertEqual(
+            actual_min[:2].view(torch.int32), expected_min[:2].view(torch.int32)
+        )
+        self.assertEqual(
+            actual_max[:2].view(torch.int32), expected_max[:2].view(torch.int32)
+        )
+
+    def test_reduction_nan(self, device: str) -> None:
+        x = torch.tensor(
+            [
+                [1.0, -2.0, 3.0, float("nan")],
+                [float("inf"), 2.0, -float("inf"), 1.0],
+            ],
+            device=device,
+        )
+        actual_min = torch.empty(x.shape[0], device=device)
+        actual_max = torch.empty(x.shape[0], device=device)
+        test_kernel_minmax_reduction[(x.shape[0],)](
+            x,
+            actual_min,
+            actual_max,
+            BLOCK_SIZE=x.shape[1],
+            STRICT=False,
+        )
+
+        self.assertEqual(actual_min, torch.amin(x, dim=1))
+        self.assertEqual(actual_max, torch.amax(x, dim=1))
+
+    def test_reduction_signed_zero(self, device: str) -> None:
+        x = torch.tensor(
+            [
+                [-0.0, 0.0, 0.0, 0.0],
+                [0.0, -0.0, -0.0, -0.0],
+                [-0.0, 0.0, -0.0, 0.0],
+                [0.0, -0.0, 0.0, -0.0],
+            ],
+            device=device,
+        )
+        actual_min = torch.empty(x.shape[0], device=device)
+        actual_max = torch.empty(x.shape[0], device=device)
+        test_kernel_minmax_reduction[(x.shape[0],)](
+            x,
+            actual_min,
+            actual_max,
+            BLOCK_SIZE=x.shape[1],
+            STRICT=True,
+        )
+
+        expected_min = torch.amin(x, dim=1)
+        expected_max = torch.amax(x, dim=1)
+        self.assertEqual(actual_min.view(torch.int32), expected_min.view(torch.int32))
+        self.assertEqual(actual_max.view(torch.int32), expected_max.view(torch.int32))
+
+    def test_reduction_relaxed_signed_zero(self, device: str) -> None:
+        x = torch.tensor(
+            [
+                [-0.0, 0.0, 0.0, 0.0],
+                [0.0, -0.0, -0.0, -0.0],
+            ],
+            device=device,
+        )
+        actual_min = torch.empty(x.shape[0], device=device)
+        actual_max = torch.empty(x.shape[0], device=device)
+        test_kernel_minmax_reduction[(x.shape[0],)](
+            x,
+            actual_min,
+            actual_max,
+            BLOCK_SIZE=x.shape[1],
+            STRICT=False,
+        )
+
+        actual_min_bits = actual_min.view(torch.int32)
+        actual_max_bits = actual_max.view(torch.int32)
+        self.assertEqual(actual_min_bits, torch.full_like(actual_min_bits, -(1 << 31)))
+        self.assertEqual(actual_max_bits, torch.zeros_like(actual_max_bits))
+
+
+if HAS_GPU:
+    instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
 
 
 if __name__ == "__main__":
