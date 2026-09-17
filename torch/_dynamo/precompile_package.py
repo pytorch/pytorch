@@ -210,22 +210,32 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     (a CONSTANT_MATCH on a code object runs through ID_MATCH), except that
     TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the chain
     takes their branch first: BUILTIN_MATCH is an ``id_match_unchecked`` that
-    records ID_MATCH, but the builtin pickles by name and the builtins dict
-    travels as a reference resolved in the loading process
-    (``GuardsStatePickler._globals_snapshot``), so the guard rebuilt at load
-    catches a builtin swapped afterwards (``test_guard_serialization.py``
-    ``test_builtin_match``). Past the chain the filter mirrors nothing, and the
-    refusal that matters there is of local-scope types, which cannot be
-    pickled. It has more than one path: the chain's TYPE_MATCH/BUILTIN_MATCH
-    branch raises when ``guard._unserializable`` is set, FAKE_SCRIPT_TYPE_MATCH
-    sets the same flag but takes no branch of the chain, and
-    ``GuardsStatePickler.reducer_override`` refuses any non-tuple object of
-    such a type wherever it sits in the guard tree, so a kept guard whose source
-    walks through an instance of one fails there. Passing this filter therefore
-    does not mean the artifact serializes. The filter keeps all of these on
-    purpose: ``orig_guard._unserializable`` would tell for the first two, but
-    dropping a guard on a type the artifact cannot pickle ships an artifact that
-    never checks the type, whereas keeping it makes serialization refuse loudly.
+    records ID_MATCH, but the builtin pickles by name, the artifact carries only
+    a save-time copy of the builtins dict pruned to the names guards read
+    (``serialize_guards``), and both loaders bind the LIVE ``builtins.__dict__``
+    under the guard's key instead (``CompilePackage.install``,
+    ``AOTCompiledFunction._seed_guard_scope``), so the guard rebuilt at load
+    catches a builtin swapped afterwards (``test_aot_compile.py``
+    ``test_kept_builtin_match_guard_reads_the_seeded_builtins_dict`` pins the
+    live dict). Past the chain the filter mirrors nothing, and the refusal that
+    matters there is of local-scope types, which cannot be pickled by name. It
+    has more than one path: the chain's TYPE_MATCH/BUILTIN_MATCH branch raises
+    when ``guard._unserializable`` is set, FAKE_SCRIPT_TYPE_MATCH sets the same
+    flag but takes no branch of the chain, and
+    ``GuardsStatePickler.reducer_override`` refuses a plain instance of such a
+    type wherever it sits in the guard tree, so a kept guard whose source walks
+    through one fails there. That last refusal is not universal: the branches
+    before it rebuild a local function by value, a local namedtuple type from
+    its fields, and an ``nn.Module`` of a local class with the default
+    ``__getstate__`` as a plain ``torch.nn.Module``, so for a module argument of
+    a local class the kept TYPE_MATCH is the only refusal; drop it and the
+    artifact serializes, then serves a differently typed module whose guarded
+    attributes match, with no error. That is why the filter keeps every
+    local-type guard on purpose although ``orig_guard._unserializable`` would
+    tell for the first two paths: dropping a guard on a type the artifact
+    cannot pickle ships an artifact that never checks the type, whereas keeping
+    it makes serialization refuse loudly. Passing this filter therefore does
+    not mean the artifact serializes.
     ``CheckFunctionManager.__init__`` applies a different policy inline under
     ``torch._dynamo.config.caching_precompile`` (drop ID_MATCH, CLOSURE_MATCH,
     WEAKREF_ALIVE, DICT_VERSION and anything deriving ID_MATCH or
@@ -279,6 +289,10 @@ _INSTALL_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
 
 
 def _norm(path: str) -> str:
+    """
+    realpath then normcase. A relative path resolves against the process cwd,
+    so a recorded ``__file__`` is gated with isabs before it gets here.
+    """
     return os.path.normcase(os.path.realpath(path))
 
 
@@ -336,9 +350,10 @@ def _torch_roots() -> tuple[str, ...]:
     """
     Every directory torch's own submodules come from. An editable build splits
     them -- torch/__init__.py out of the source tree, _C.so and version.py out
-    of site-packages -- and torch.__path__ is exactly that set. It is only
-    trusted if the directory this file is running from is in it, so a
-    sys.modules['torch'] that is not us cannot nominate its own roots.
+    of site-packages -- and torch.__path__ is exactly that set. The gate rules
+    out a substituted sys.modules['torch'] only: its __path__ is ignored unless
+    the directory this file runs from is among the entries, and then every
+    entry is adopted, one a third party appended to the real torch's included.
     """
     own_file = globals().get("__file__")
     if not own_file:
@@ -390,16 +405,17 @@ def _located(module: types.ModuleType, name: str, stdlib: bool) -> bool | None:
         verdict = _classify_file(file, stdlib)
         if verdict is not None:
             return verdict
-    spec = attrs.get("__spec__")
-    origin = getattr(spec, "origin", None)
-    loader = attrs.get("__loader__") or getattr(spec, "loader", None)
-    if origin == "built-in" or loader is importlib.machinery.BuiltinImporter:
+    # The loader rather than spec.origin: both importers build the spec as
+    # spec_from_loader(name, cls, origin=cls._ORIGIN), so the two never
+    # disagree, and the class is the stronger signal.
+    loader = attrs.get("__loader__") or getattr(attrs.get("__spec__"), "loader", None)
+    if loader is importlib.machinery.BuiltinImporter:
         # Statically linked, and BuiltinImporter precedes PathFinder on
         # sys.meta_path, so on import no file on sys.path is reachable under
         # this name; a spec assigned straight into sys.modules is taken at its
         # word. The inittab is keyed on the full dotted name.
         return name in sys.builtin_module_names
-    if origin == "frozen" or loader is importlib.machinery.FrozenImporter:
+    if loader is importlib.machinery.FrozenImporter:
         # frozen also precedes the path finder
         return importlib.machinery.FrozenImporter.find_spec(name) is not None
     return None  # namespace package, exec'd in memory, REPL __main__
@@ -470,9 +486,9 @@ def _defined_where_read(
     it. The reading file is the OUTERMOST frame of the guard's ``user_stack``:
     a bare GlobalSource denotes the root frame's globals (an inlined frame with
     other globals reads through an ``__import_`` alias or an
-    ``___unnamed_scope`` dict entry instead), while the
-    stack is stamped at first use, so its innermost frame can be a helper
-    inlined from another file. A def bound under its own name in the reading
+    ``___unnamed_scope`` dict entry instead), while the stack is stamped at
+    first use, so its innermost frame can be a helper inlined from another
+    file. A def bound under its own name in the reading
     file is the one binding the inlined-source checksum of that file covers.
     ``from impl_a import op`` takes only a conditional import in the reader,
     which no checksum sees, and ``act = _impl_a if cfg.fast else _impl_b`` is a
@@ -484,20 +500,24 @@ def _defined_where_read(
     reader's module while its code lives in eval_frame.py. The object does not
     tell that shape from an unconditional cross-file decorator, so
     ``@torch.no_grad()`` on a same-file def is not waived either. A class has
-    no code object, and its ``__module__`` is no better: namedtuple,
-    make_dataclass and ``type()`` all stamp it from the calling frame under a
-    BARE ``__qualname__`` (only a nested def gets ``factory.<locals>.``), so
-    ``Point = lib.make_point()`` in the reader looks exactly like a class
+    no code object, and its ``__module__`` is no better: namedtuple and
+    ``type()`` stamp it from the calling frame (make_dataclass does from 3.12)
+    under a BARE ``__qualname__`` (only a nested def gets ``factory.<locals>.``),
+    so ``Point = lib.make_point()`` in the reader looks exactly like a class
     statement. Its methods can tell: a class written here compiled its defs
     here, so a class is waived when at least one function in its own
     ``__dict__`` was compiled in the reading file, and ``class Marker: pass``
     fails closed. So does a class statement whose only functions are generated
     -- a fields-only ``@dataclass``, a ``NamedTuple``, an ``Enum`` -- because
     those methods compile in ``<string>`` or the stdlib, so a plain config
-    dataclass read as a global is reported. Nothing else without a code object
-    is waived, because a
-    C-implemented wrapper such as functools.lru_cache claims the reader's
-    module the same way. What this cannot see is a same-name fork inside the
+    dataclass read as a global is reported. The one function the compiler
+    itself puts in a class ``__dict__``, the PEP 649 annotate function 3.14
+    stores under ``__annotate_func__`` for an annotated class body, compiles in
+    the reading file but is not a def the author wrote, so it is skipped and
+    the verdict is the same on every version. Nothing else without a code
+    object is waived, because a C-implemented wrapper such as
+    functools.lru_cache claims the reader's module the same way. What this
+    cannot see is a same-name fork inside the
     reading file -- ``try: from x import impl as op`` / ``except ImportError:
     def op`` -- which binds a different def per machine under one checksum,
     and its class analogue, a factory fed same-file methods
@@ -509,7 +529,10 @@ def _defined_where_read(
         return False
     here = _norm(user_stack[0].filename)
     if isinstance(value, type):
-        attrs = vars(value).values()
+        # The PEP 649 annotate function (3.14) is the compiler's, not a method;
+        # type() keeps the namespace's key, the class statement renames it.
+        skip = ("__annotate__", "__annotate_func__")
+        attrs = [m for k, m in vars(value).items() if k not in skip]
         members = [getattr(m, "__func__", getattr(m, "fget", m)) for m in attrs]
         codes = [getattr(m, "__code__", None) for m in members]
         files = [c.co_filename for c in codes if isinstance(c, types.CodeType)]
