@@ -93,8 +93,6 @@ class TestCommonPass(TestCase):
     def test_correctness(self, common_pass, f, device):
         inp = torch.randn(10, device=device)
 
-        # f may mutate its input in place; trace on a clone so later calls to
-        # f still see the original, un-mutated inp.
         traced_m = make_fx(f)(inp.clone())
         P = common_pass()
 
