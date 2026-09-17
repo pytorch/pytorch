@@ -273,6 +273,48 @@ class TestFullyShardGradientDtype(FSDPTest):
         model(inp).backward(torch.full_like(inp, 1.0078125))
         self.assertEqual(param.grad.to_local(), expected_grad * 2, atol=0, rtol=0)
 
+    @skip_if_lt_x_gpu(2)
+    @skipIfTorchDynamo("Parameter conversion is tested in eager mode")
+    @parametrize("storage_dtype", [torch.bfloat16, torch.float32])
+    def test_partial_parameter_conversion_failure(self, device, storage_dtype):
+        device = torch.device(torch.device(device).type, self.rank)
+        model = nn.Sequential(
+            _Linear(device, storage_dtype), _Linear(device, storage_dtype)
+        )
+        model[0].register_buffer("conversion_sentinel", torch.ones(1, device=device))
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, grad_dtype=torch.float32
+            ),
+        )
+        inp = torch.full((3, 32), 1.0078125, device=device, dtype=torch.bfloat16)
+        model(inp).backward(torch.full_like(inp, 1.0078125))
+        params = list(model.parameters())
+        expected_grads = [param.grad.to_local().clone() for param in params]
+
+        def fail_on_buffer(tensor):
+            if tensor.numel() == 1:
+                raise RuntimeError("buffer conversion failed")
+            return tensor.cpu()
+
+        with self.assertRaisesRegex(RuntimeError, "buffer conversion failed"):
+            model._apply(fail_on_buffer)
+        self.assertEqual(params[0].device.type, "cpu")
+        self.assertEqual(params[1].device, device)
+        for param, expected in zip(params, expected_grads):
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.device, param.device)
+            self.assertEqual(param.grad.dtype, torch.float32)
+            self.assertEqual(
+                param.grad.to_local(), expected.to(param.device), atol=0, rtol=0
+            )
+
+        model.to(device=device)
+        model(inp).backward(torch.full_like(inp, 1.0078125))
+        for param, expected in zip(params, expected_grads):
+            self.assertEqual(param.grad.to_local(), expected * 2, atol=0, rtol=0)
+
 
 instantiate_device_type_tests(TestFullyShardGradientDtype, globals(), only_for="cuda")
 
