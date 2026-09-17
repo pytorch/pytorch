@@ -45,7 +45,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     getRocmVersion,
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
+    TEST_ACL, TEST_WITH_ROCM, IS_FBCODE, IS_LINUX, IS_WINDOWS, IS_MACOS, MACOS_VERSION, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
@@ -12408,6 +12408,10 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
@@ -12437,6 +12441,10 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71784
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.float16,)),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )),
     OpInfo('addmv',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -13070,8 +13078,13 @@ op_db: list[OpInfo] = [
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.complex64,)
-               ),),
+               ),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            ),
+    ),
     OpInfo('cholesky_solve',
            op=torch.cholesky_solve,
            dtypes=floating_and_complex_types(),
@@ -13092,6 +13105,10 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/164194
                # https://github.com/pytorch/pytorch/issues/164235
                DecorateInfo(skipIfRocm, "TestFwdGradients", "test_forward_mode_AD", dtypes=(torch.float64, torch.complex128)),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )
     ),
     OpInfo('chunk',
@@ -18571,6 +18588,10 @@ op_db: list[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
+               # COW input materializes in the oneDNN/ACL matmul path (addmm_impl_cpu_ -> mkldnn_matmul)
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance',
+                            'test_cow_input', device_type='cpu',
+                            dtypes=(torch.float32,), active_if=TEST_ACL),
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,
