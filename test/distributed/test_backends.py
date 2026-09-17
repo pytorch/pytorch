@@ -37,6 +37,11 @@ class TestMiscCollectiveUtils(TestCase):
                 raise AssertionError(
                     f"Expected xccl, got {dist.get_default_backend_for_device(device)}"
                 )
+        elif "xpu" in device:
+            if dist.get_default_backend_for_device(device) != "xccl":
+                raise AssertionError(
+                    f"Expected xccl, got {dist.get_default_backend_for_device(device)}"
+                )
         else:
             with self.assertRaises(ValueError):
                 dist.get_default_backend_for_device(device)
