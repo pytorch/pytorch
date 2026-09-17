@@ -71,6 +71,26 @@ class TestGradDtype(torch._dynamo.test_case.TestCase):
         fn(base * 1).sum().backward()
         self.assertEqual(base.grad, torch.ones_like(base), atol=0, rtol=0)
 
+    @parametrize("backend", ["aot_eager", "inductor"])
+    def test_nonleaf_to_leaf(self, device, backend):
+        counter = CompileCounterWithBackend(backend)
+        fn = torch.compile(_projection, backend=counter, fullgraph=True)
+        base = torch.ones(32, device=device, dtype=torch.bfloat16, requires_grad=True)
+        fn(base * 1).sum().backward()
+        self.assertEqual(base.grad, torch.ones_like(base), atol=0, rtol=0)
+
+        leaf = torch.ones_like(base, requires_grad=True)
+        leaf.grad_dtype = torch.float32
+        fn(leaf).sum().backward()
+        self.assertEqual(leaf.grad.dtype, torch.float32)
+        self.assertEqual(
+            leaf.grad,
+            torch.full_like(leaf, 1.00390625, dtype=torch.float32),
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual(counter.frame_count, 2)
+
     def test_aot_cache_key(self, device):
         x = torch.ones(32, device=device, dtype=torch.bfloat16, requires_grad=True)
         gm = torch.fx.symbolic_trace(lambda x: x.sin())

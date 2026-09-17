@@ -5139,10 +5139,14 @@ def _wrap_to_fake_tensor_and_record_impl(
     ):
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
-        if e.requires_grad and e.is_leaf:
+        if e.requires_grad:
             install_guard(
-                AttrSource(source, "grad_dtype").make_guard(GuardBuilder.CONSTANT_MATCH)
+                AttrSource(source, "is_leaf").make_guard(GuardBuilder.CONSTANT_MATCH)
             )
+            if e.is_leaf:
+                install_guard(
+                    AttrSource(source, "grad_dtype").make_guard(GuardBuilder.CONSTANT_MATCH)
+                )
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
