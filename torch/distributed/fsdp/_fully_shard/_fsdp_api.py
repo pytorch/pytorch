@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 
 
 _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
@@ -12,33 +13,40 @@ _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
 @dataclass(frozen=True)
 class MixedPrecisionPolicy:
-    """
-    This configures FSDP's mixed precision. Unlike autocast, this applies mixed
-    precision at the module level, not op level, which means low-precision
-    activations are saved for backward and high-to-low-precision casts are
-    incurred only at module boundaries.
+    r"""
+    This configures FSDP's mixed precision. Unlike autocast, parameter casting
+    happens when parameters are all-gathered, while optional input and output
+    casting happens at module boundaries. This means low-precision activations
+    are saved for backward and high-to-low-precision casts are incurred only at
+    those boundaries.
 
     FSDP works well with module-level mixed precision since it keeps the
     high-precision sharded parameters in memory anyway. In other words, FSDP
     does not require any extra memory to keep a high-precision copy of the
     parameters for the optimizer step.
 
+    .. warning::
+        ``param_dtype_override_fn`` must return the same result for each logical parameter
+        on every rank. Rank-dependent results may cause ranks to build incompatible
+        collective buffers, which can fail or hang.
+
     Attributes:
-        param_dtype (Optional[torch.dtype]): This specifies the dtype for
-            the unsharded parameter and hence the dtype for forward/backward
-            computation and the parameter all-gather. If this is ``None``, then
-            the unsharded parameter uses the original dtype. The optimizer step
-            uses the sharded parameter in the original dtype. (Default:
+        param_dtype (Optional[torch.dtype]): This specifies the default dtype
+            for the unsharded parameters and hence the dtype for
+            forward/backward computation and the parameter all-gather. Forward
+            input casting also uses this dtype. If this is ``None``, then the
+            unsharded parameters use their original dtype. The optimizer step
+            uses the sharded parameters in the original dtype. (Default:
             ``None``)
         reduce_dtype (Optional[torch.dtype]): The dtype for unsharded gradients
-            and gradient reduction (reduce-scatter or all-reduce). FSDP sets
-            the unsharded parameter's ``grad_dtype`` to this dtype, so autograd
-            produces and accumulates gradients in this dtype regardless of
-            whether gradient synchronization is enabled. FSDP packs these
+            and gradient reduction (reduce-scatter or all-reduce).
+            FSDP sets the unsharded parameter's ``grad_dtype`` to this dtype, so
+            autograd produces and accumulates gradients in this dtype regardless
+            of whether gradient synchronization is enabled. FSDP packs these
             gradients without casting before reduction. If ``None``, this uses
             the compute dtype. Reduced sharded gradients use each parameter's
-            ``grad_dtype`` as specified before calling
-            :func:`fully_shard`. (Default: ``None``)
+            ``grad_dtype`` as specified before calling :func:`fully_shard`.
+            (Default: ``None``)
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed
@@ -47,12 +55,51 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
+        param_dtype_override_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
+            Optional per-parameter override for ``param_dtype``. The callable
+            is evaluated once for each managed parameter when FSDP is applied.
+            Returning the parameter's original dtype preserves that parameter
+            in its original dtype; returning ``None`` or ``param_dtype`` uses
+            the default ``param_dtype``. Other dtypes are not supported.
+            Forward input casting continues to use ``param_dtype``. If
+            parameters within one group resolve to multiple compute dtypes,
+            configure one common effective reduction dtype for the group.
+            (Default: ``None``)
     """
 
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
+    param_dtype_override_fn: Callable[[nn.Parameter], torch.dtype | None] | None = (
+        field(default=None, kw_only=True)
+    )
+
+    def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
+        if self.param_dtype_override_fn is None:
+            return self
+        param_dtype = self.param_dtype
+        if self.param_dtype_override_fn is not None:
+            param_dtype_override = self.param_dtype_override_fn(param)
+            if param_dtype_override is not None:
+                if not isinstance(param_dtype_override, torch.dtype):
+                    raise ValueError(
+                        "param_dtype_override_fn must return a torch.dtype or None but got "
+                        f"{type(param_dtype_override)}"
+                    )
+                if param_dtype_override not in (self.param_dtype, param.dtype):
+                    raise ValueError(
+                        "param_dtype_override_fn must return None, param_dtype, or the "
+                        "parameter's original dtype but got "
+                        f"{param_dtype_override} for a parameter with dtype "
+                        f"{param.dtype} and param_dtype {self.param_dtype}"
+                    )
+                param_dtype = param_dtype_override
+        return replace(
+            self,
+            param_dtype=param_dtype,
+            param_dtype_override_fn=None,
+        )
 
 
 class Comm(ABC):
