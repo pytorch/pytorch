@@ -1,5 +1,6 @@
 import math
 from collections.abc import Callable, Sequence
+from functools import partial
 from itertools import chain
 from typing import Any, cast, Literal, NamedTuple
 
@@ -429,12 +430,13 @@ def _get_param_all_gather_inputs(
 
 def _default_all_gather_output_fn(
     fsdp_param: FSDPParam,
-) -> tuple[list[torch.Tensor], bool]:
-    """Return copy destinations and whether they need a separate reorder."""
+) -> tuple[list[torch.Tensor], tuple[Callable[[int], None], ...]]:
+    """Return copy destinations and functions to run after the copy."""
     outputs = fsdp_param.all_gather_outputs
     if fsdp_param.fsdp_placement.dim == 0:
-        return outputs, False
-    return [torch.empty_like(t) for t in outputs], True
+        return outputs, ()
+    outputs = [torch.empty_like(t) for t in outputs]
+    return outputs, (partial(_foreach_all_gather_reorder, [(fsdp_param, outputs)]),)
 
 
 @torch.no_grad()
@@ -460,7 +462,7 @@ def foreach_all_gather_copy_out(
     world_size, device = group.size(), all_gather_output.device
 
     split_with_sizes_out: list[torch.Tensor] = []
-    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
+    post_copy_fns: list[Callable[[int], None]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -471,11 +473,10 @@ def foreach_all_gather_copy_out(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs, needs_separate_reorder = (
-            _default_all_gather_output_fn(fsdp_param)
+        param_all_gather_outputs, param_post_copy_fns = _default_all_gather_output_fn(
+            fsdp_param
         )
-        if needs_separate_reorder:
-            shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
+        post_copy_fns.extend(param_post_copy_fns)
         split_with_sizes_out.extend(param_all_gather_outputs)
 
     all_gather_output = all_gather_output.view(world_size, -1)
@@ -497,7 +498,14 @@ def foreach_all_gather_copy_out(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
 
-    for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
+    for post_copy_fn in post_copy_fns:
+        post_copy_fn(world_size)
+
+
+def _foreach_all_gather_reorder(
+    copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]], world_size: int
+) -> None:
+    for fsdp_param, param_all_gather_outputs in copy_infos:
         # Chunk-cat from the temporary to the final all-gather output tensors
         shard_dim = fsdp_param.fsdp_placement.dim
 
@@ -528,28 +536,25 @@ def foreach_all_gather_copy_out(
 def _default_reduce_scatter_input_fn(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
-    reduce_scatter_world_size: int,
+    world_size: int,
 ) -> tuple[list[torch.Tensor], tuple[torch.Size, ...]]:
     """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
-    if reduce_scatter_world_size > 1:
+    if world_size > 1:
         for i, (fsdp_param, unsharded_grad) in enumerate(
             zip(fsdp_params, unsharded_grads)
         ):
             if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
                 continue
-            if unsharded_grad.size(shard_dim) % reduce_scatter_world_size != 0:
+            if unsharded_grad.size(shard_dim) % world_size != 0:
                 raise AssertionError(
                     f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} "
-                    f"{reduce_scatter_world_size=}"
+                    f"{world_size=}"
                 )
-            chunks = torch.chunk(
-                unsharded_grad, reduce_scatter_world_size, dim=shard_dim
-            )
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
 
     padded_unsharded_sizes = tuple(
-        _get_dim0_padded_size(grad.size(), reduce_scatter_world_size)
-        for grad in unsharded_grads
+        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
     )
     return unsharded_grads, padded_unsharded_sizes
 
