@@ -215,7 +215,13 @@ class SACEstimator(TorchDispatchMode):
                 sac_estimator.display_modulewise_sac_stats(depth=4, print_tabular=True)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, gpu_type: str | None = None) -> None:
+        """
+        Args:
+            gpu_type (str | None): Optional datasheet device name (e.g.
+                ``"NVIDIA H100"``) to pin the roofline estimates to instead of
+                querying the current device. See ``RuntimeEstimator``.
+        """
         self.sac_mod_stats: dict[str, SACStats] = {}
         self.sac_mod_tradeoff_stats: dict[str, SACTradeOffStats] = {}
         self.sac_mod_greedy_order_meta: dict[str, SACGreedyOrderMeta] = {}
@@ -227,6 +233,7 @@ class SACEstimator(TorchDispatchMode):
             self._pack_hook, lambda x: x
         )
         self._saved_tensor_ids: set[int] = set()
+        self._gpu_type = gpu_type
         self._estimate_runtime = RuntimeEstimator._roofline_estimate
 
     def _pack_hook(self, x: torch.Tensor) -> torch.Tensor:
@@ -951,6 +958,7 @@ class SACEstimator(TorchDispatchMode):
         if not isinstance(fake_mode, FakeTensorMode):
             raise AssertionError("SAC Estimator should be called in FakeTensorMode")
         RuntimeEstimator.fake_mode = fake_mode
+        RuntimeEstimator.gpu_type = self._gpu_type
         self._mod_tracker.register_user_hooks(
             pre_fw_hook=self._pre_fw_hook,
             post_fw_hook=self._post_fw_hook,

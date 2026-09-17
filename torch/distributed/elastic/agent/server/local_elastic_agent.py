@@ -156,8 +156,13 @@ class LocalElasticAgent(SimpleElasticAgent):
     <https://docs.python.org/3/library/string.html#template-strings>`_ as the
     ``log_line_prefix_template`` argument.
     The following macros (identifiers) are substituted at runtime:
-    ``${role_name}, ${local_rank}, ${rank}``. For example, to prefix each log line with
+    ``${role_name}, ${local_rank}, ${rank}, ${hostname}``.
+    For example, to prefix each log line with
     global rank instead of the local rank, set ``log_line_prefix_template = "[${rank}]:``.
+    ``${hostname}`` expands to the name of the node the agent runs on, which
+    identifies the offending node in a multi-node job; for example
+    ``log_line_prefix_template = "${hostname}:${rank}: "`` renders as
+    ``r12i0n8:3: foobar``.
 
 
     Example launching function
@@ -410,6 +415,10 @@ class LocalElasticAgent(SimpleElasticAgent):
         log_line_prefixes: dict[int, str] | None = (
             {} if self._log_line_prefix_template else None
         )
+        # Short name (e.g. "r12i0n8") rather than _get_fq_hostname(): the fq name
+        # eats horizontal space in every log line, and degrades to an unhelpful
+        # reverse-DNS record (e.g. "...ip6.arpa") when the node has no PTR entry.
+        hostname = socket.gethostname() if self._log_line_prefix_template else ""
         for worker in worker_group.workers:
             local_rank = worker.local_rank
             worker_env = {
@@ -442,6 +451,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                     role_name=spec.role,
                     rank=worker.global_rank,
                     local_rank=local_rank,
+                    hostname=hostname,
                 )
                 # pyrefly: ignore [unsupported-operation]
                 log_line_prefixes[local_rank] = log_line_prefix

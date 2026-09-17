@@ -10,6 +10,7 @@ from io import StringIO
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 # Because we don't support free variables in comptime at the moment,
@@ -21,6 +22,8 @@ SELF = None
 
 
 class ComptimeTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_print_single(self):
         global FILE
         FILE = StringIO()
@@ -133,14 +136,6 @@ def forward(self, L_x_ : torch.Tensor):
             comptime.print_disas()
 
             return y + 3
-
-        def munge_disas(s):
-            re.sub(
-                r"^(?: +\d+)?(?: +(-->)) \+\d+ ([A-Za-z0-9_]+)",
-                "\1 \3",
-                s,
-                flags=re.MULTILINE,
-            )
 
         f(torch.randn(2))
         self.assertEqual(cnt.frame_count, 1)
@@ -449,6 +444,31 @@ def forward(self, L_x_ : torch.Tensor):
     y = l_x_ * 2;  l_x_ = None
     add = y + 4;  y = add = None""",
         )
+
+    def test_comptime_bound_method(self):
+        # A bound method must be called with its receiver bound. Calling the
+        # underlying function instead would pass the ComptimeContext as `self`.
+        class Probe:
+            def __init__(self):
+                self.calls = 0
+                self.ctx_type = None
+
+            def cb(self, ctx):
+                self.calls += 1
+                self.ctx_type = type(ctx).__name__
+
+        probe = Probe()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            comptime(probe.cb)
+            return x + 1
+
+        f(torch.randn(3))
+        # The mutation landed on `probe`, so `self` was bound correctly, and
+        # the context arrived as the argument rather than as `self`.
+        self.assertEqual(probe.calls, 1)
+        self.assertEqual(probe.ctx_type, "ComptimeContext")
 
 
 if __name__ == "__main__":

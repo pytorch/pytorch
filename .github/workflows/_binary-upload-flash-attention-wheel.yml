@@ -17,7 +17,7 @@ jobs:
   upload-wheel-linux:
     name: "Upload FA3 ${{ matrix.build_cuda_short }} ${{ matrix.arch }}"
     if: ${{ inputs.linux_run_id != '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -74,7 +74,7 @@ jobs:
   upload-wheel-windows:
     name: "Upload FA3 ${{ matrix.build_cuda_short }} windows_amd64"
     if: ${{ inputs.windows_run_id != '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

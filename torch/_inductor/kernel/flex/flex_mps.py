@@ -9,6 +9,7 @@ from torch._inductor.virtualized import V
 from ...ir import FixedLayout, ShapeAsConstantBuffer, TensorBox
 from ...lowering import empty_strided
 from ...select_algorithm import realize_inputs
+from ...utils import expr_fits_within_32bit
 from .common import infer_dense_strides, maybe_realize
 
 
@@ -153,6 +154,13 @@ def lower_mps(
     score_meta, score_tensors, score_scalars = _capture_meta(score_mod_other_buffers)
     mask_meta, mask_tensors, mask_scalars = _capture_meta(mask_mod_other_buffers)
 
+    int32_max = torch.iinfo(torch.int32).max
+    all_scalars = [sympy.sympify(cap) for cap in (*score_scalars, *mask_scalars)]
+    captures_fit_int32 = all(expr_fits_within_32bit(cap) for cap in all_scalars)
+    if captures_fit_int32:
+        for cap in all_scalars:
+            sizevars.check_leq(cap, int32_max)
+
     shader_source = _generate_metal_shader(
         dtype=dtype,
         d_qk=d_qk,
@@ -166,6 +174,7 @@ def lower_mps(
         mask_captured=mask_meta,
         write_lse=write_lse,
         write_max=write_max,
+        captures_fit_int32=captures_fit_int32,
     )
 
     out_size = [B, Hq, seq_len_q, v_head_dim]

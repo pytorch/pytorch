@@ -91,7 +91,6 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-inductor-benchmarks
       runner: l-x86iavx512-48-384
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      use-arc: true
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_xpu", shard: 1, num_shards: 5, runner: "linux.idc.xpu" },

@@ -170,7 +170,7 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
     // TODO: This is awful code.  Also it doesn't work on Windows.
     std::ostringstream tensor_ss;
     tensor_ss << tensor;
-    std::string tensor_s{tensor_ss.str()};
+    std::string tensor_s{std::move(tensor_ss).str()};
     // Remove newlines
     std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
     out << tensor_s;
@@ -526,10 +526,10 @@ void Graph::lint() const {
     LintScope() = default;
     LintScope(std::unique_ptr<LintScope> parent) : parent(std::move(parent)) {}
     bool contains(const Value* v) {
-      return values.count(v) > 0 || (parent && parent->contains(v));
+      return values.contains(v) || (parent && parent->contains(v));
     }
     bool contains(const Node* n) {
-      return nodes.count(n) > 0 || (parent && parent->contains(n));
+      return nodes.contains(n) || (parent && parent->contains(n));
     }
     void insert(const Value* v) {
       AT_ASSERT(!contains(v));
@@ -887,7 +887,7 @@ Value* Value::setDebugName(const std::string& name) {
 #endif
       ss << name_base << '.' << suffix++;
       replacement_name = std::move(ss).str();
-    } while (names.count(replacement_name) > 0);
+    } while (names.contains(replacement_name));
 
     names_suffixes[name_base] = suffix;
 
@@ -1975,7 +1975,7 @@ Value* Graph::insertConstant(
 std::string Graph::toString(bool print_source_locations) const {
   std::ostringstream oss;
   print(oss, print_source_locations);
-  return oss.str();
+  return std::move(oss).str();
 }
 
 Graph::~Graph() {
@@ -2049,7 +2049,7 @@ void inlineCallStackOfNode(
   InlinedCallStack* raw_callstack_ptr =
       new_node_cs ? new_node_cs->get() : nullptr;
 
-  if (!new_cs_entries.count(raw_callstack_ptr)) {
+  if (!new_cs_entries.contains(raw_callstack_ptr)) {
     if (new_node_cs) {
       new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
           *new_node_cs, callee, to_replace->sourceRange(), m_info);

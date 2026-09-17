@@ -165,6 +165,11 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   void graphsafe_set_state(
       const c10::intrusive_ptr<GeneratorImpl>& state) override;
   c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const override;
+  void philox_state(
+      uint64_t increment,
+      at::Tensor& seed,
+      at::Tensor& offset,
+      at::Tensor& intragraph_offset) override;
 
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;

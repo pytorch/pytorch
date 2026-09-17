@@ -176,9 +176,7 @@ Node* preRecordPythonTrace(
     at::ArrayRef<Variable> inputs,
     pyobj_list scalar_args) {
   THPObjectPtr apply(PyObject_GetAttrString(pyobj.get(), "apply"));
-  if (!apply) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(apply);
 
   auto& graph = getTracingState()->graph;
 
@@ -218,14 +216,14 @@ void initPythonTracerBindings(PyObject* module) {
           [](const TracingState& s) {
             std::ostringstream ss;
             ss << "<TracingState " << (const void*)&s << '>';
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "__str__",
           [](const TracingState& s) -> std::string {
             std::ostringstream ss;
             ss << *s.graph;
-            return ss.str();
+            return std::move(ss).str();
           })
       .def(
           "push_scope",

@@ -4,6 +4,7 @@ r"""This package adds support for device memory management implemented in CUDA."
 import collections
 import contextlib
 import ctypes
+import json
 import pickle
 import sys
 import threading
@@ -229,6 +230,16 @@ def empty_cache() -> None:
         torch._C._cuda_emptyCache()
 
 
+def _recurse_add_to_result(result, prefix, obj, format_key):
+    if isinstance(obj, dict):
+        if prefix:
+            prefix += "."
+        for key, value in obj.items():
+            _recurse_add_to_result(result, prefix + format_key(key), value, format_key)
+    else:
+        result.append((prefix, obj))
+
+
 def memory_stats(device: "Device" = None) -> dict[str, Any]:
     r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
@@ -333,18 +344,8 @@ def memory_stats(device: "Device" = None) -> dict[str, Any]:
             return "_".join(str(part) for part in key)
         return str(key)
 
-    def _recurse_add_to_result(prefix, obj):
-        if isinstance(obj, dict):
-            if len(prefix) > 0:
-                prefix += "."
-            for k, v in obj.items():
-                key = _format_key(k)
-                _recurse_add_to_result(prefix + key, v)
-        else:
-            result.append((prefix, obj))
-
     stats = memory_stats_as_nested_dict(device=device)
-    _recurse_add_to_result("", stats)
+    _recurse_add_to_result(result, "", stats, _format_key)
     result.sort()
 
     return collections.OrderedDict(result)
@@ -436,17 +437,8 @@ def host_memory_stats() -> dict[str, Any]:
     """
     result = []
 
-    def _recurse_add_to_result(prefix, obj):
-        if isinstance(obj, dict):
-            if len(prefix) > 0:
-                prefix += "."
-            for k, v in obj.items():
-                _recurse_add_to_result(prefix + k, v)
-        else:
-            result.append((prefix, obj))
-
     stats = host_memory_stats_as_nested_dict()
-    _recurse_add_to_result("", stats)
+    _recurse_add_to_result(result, "", stats, str)
     result.sort()
 
     return collections.OrderedDict(result)
@@ -601,6 +593,15 @@ def max_memory_reserved(device: "Device" = None) -> int:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        Under ``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``, the peak is
+        computed by summing the high-water marks of the default mempool and the
+        device graph-memory pool (CUDA graph captures reserve backing in the
+        latter). Because those two high-water marks need not occur at the same
+        instant, the reported peak is a conservative *upper bound* on the true
+        simultaneous peak. The current value
+        (:func:`~torch.cuda.memory_reserved`) is exact.
     """
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
@@ -874,6 +875,8 @@ def _record_memory_history_legacy(
     compile_context=False,
     global_record_annotations=False,
     skip_actions=None,
+    record_pinned_host_memory=False,
+    record_cuda=True,
 ):
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
@@ -887,6 +890,8 @@ def _record_memory_history_legacy(
         global_record_annotations,
         # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
+        record_pinned_host_memory,
+        record_cuda,
     )
 
 
@@ -975,6 +980,14 @@ def _record_memory_history(
             `skip_actions=["free_requested"]`
 
             Defaults to None (record all actions).
+        record_pinned_host_memory (bool, optional): If True, also record memory history for
+            the CPU pinned memory (host) allocator. Host allocator traces will
+            appear in the ``host_segments`` and ``host_traces`` keys of the
+            snapshot returned by :func:`_snapshot`. Defaults to False.
+        record_cuda (bool, optional): If True, record memory history for the
+            CUDA device allocator. Set to False (together with
+            ``record_pinned_host_memory=True``) to record only host pinned memory.
+            Defaults to True.
 
     """
     if isinstance(enabled, bool):
@@ -993,6 +1006,8 @@ def _record_memory_history_impl(
     compile_context: bool = False,
     global_record_annotations: bool = False,
     skip_actions: list[str] | None = None,
+    record_pinned_host_memory: bool = False,
+    record_cuda: bool = True,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled,
@@ -1004,6 +1019,8 @@ def _record_memory_history_impl(
         global_record_annotations,
         # pyrefly: ignore [bad-argument-count]
         skip_actions if skip_actions is not None else [],
+        record_pinned_host_memory,
+        record_cuda,
     )
 
 
@@ -1102,11 +1119,20 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
                 "snapshot",  # the allocator generated a memory snapshot
                 # useful to correlate a previously taken
                 # snapshot with this trace
+                "annotate",  # metadata was attached to a live allocation
+                # via _annotate_tensor. 'addr' is the allocation's base
+                # address and 'user_metadata' holds the annotation
             ]
             addr: int  # not present for OOM
             frames: List[Frame]
             size: int
             stream: int
+            user_metadata: str  # the calling thread's metadata at the time of
+            # the event, as set via _set_memory_metadata (dicts appear as
+            # their JSON serialization)
+            internal_metadata: str  # only present when allocator internals
+            # tagged the event (e.g. "mallocWithAddress" on the synthetic
+            # prefix-block malloc/free pair)
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
             pool_id: Tuple[int, int]  # id of the memory pool for this entry
@@ -1149,30 +1175,111 @@ def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False
         pickle.dump(s, f)
 
 
-def _set_memory_metadata(metadata: str):
+def _memory_metadata_supported() -> bool:
     """
-    Set custom metadata that will be attached to all subsequent CUDA memory allocations.
+    Return whether the active CUDA allocator backend records memory metadata.
 
-    This metadata will be recorded in the memory snapshot for all allocations made
-    after this call until the metadata is cleared or changed.
+    Only the native caching allocator supports :func:`_set_memory_metadata`.
+    With other backends (e.g. ``cudaMallocAsync`` or a pluggable allocator),
+    :func:`_set_memory_metadata` is a no-op and :func:`_get_memory_metadata`
+    always returns the empty string. Callers doing best-effort labeling can
+    check this before setting metadata to avoid the one-time warning emitted on
+    unsupported backends.
+    """
+    # pyrefly: ignore [missing-attribute]
+    return torch._C._cuda_memoryMetadataSupported()
+
+
+def _set_memory_metadata(metadata: str | dict[str, Any]):
+    """
+    Set custom metadata to be recorded on memory history trace entries.
+
+    While memory history recording is enabled (see :func:`_record_memory_history`),
+    every allocator trace event generated by the calling thread carries the
+    current metadata string; it appears as the ``user_metadata`` key of trace
+    entries in the snapshot returned by :func:`_snapshot` and is displayed by
+    the pytorch.org/memory_viz visualizer. If memory history recording is not
+    enabled, this setting has no observable effect. The metadata does not
+    appear in the snapshot's segments/blocks view, in :func:`memory_stats`, or
+    on pinned host-memory allocations.
+
+    The metadata is thread-local: allocations made by other threads (including
+    autograd's backward threads) are not affected. It applies to allocations
+    on all devices used by the calling thread.
+
+    This is only supported by the native caching allocator; with other
+    backends (e.g. ``cudaMallocAsync`` or a pluggable allocator) it is
+    silently ignored.
+
+    A dict is accepted as a convenience and is serialized to a compact JSON
+    string; trace entries always carry the string form (the allocator stores a
+    single string, which is what :func:`_snapshot` and the visualizer show).
+    Consequently :func:`_get_memory_metadata` returns the JSON string, not the
+    original dict, and serialization errors (e.g. non-JSON-serializable
+    values) raise at call time.
 
     Args:
-        metadata (str): Custom metadata string to attach to allocations.
-                       Pass an empty string to clear the metadata.
+        metadata (str or dict): Custom metadata to record on trace entries.
+                               Pass an empty string to clear the metadata.
     """
+    if isinstance(metadata, dict):
+        metadata = json.dumps(metadata, separators=(",", ":"))
     # pyrefly: ignore [missing-attribute]
     torch._C._cuda_setMemoryMetadata(metadata)
 
 
 def _get_memory_metadata() -> str:
     """
-    Get the current custom metadata that is being attached to CUDA memory allocations.
+    Get the calling thread's current memory history metadata.
+
+    See :func:`_set_memory_metadata`. Note that with allocator backends that
+    do not support metadata this always returns the empty string, which is
+    indistinguishable from no metadata being set. Metadata set as a dict is
+    returned as its JSON serialization; passing the returned string back to
+    :func:`_set_memory_metadata` restores the same metadata, which makes
+    save/set/restore patterns work without special-casing.
 
     Returns:
         str: The current metadata string, or empty string if no metadata is set.
     """
     # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getMemoryMetadata()
+
+
+def _annotate_tensor(tensor: torch.Tensor, metadata: str):
+    """
+    Attach metadata to the allocation backing ``tensor``, post facto.
+
+    Unlike :func:`_set_memory_metadata`, which stamps metadata onto trace
+    events as they are generated, this records a dedicated ``annotate`` trace
+    event for an allocation that already exists. This is useful when the
+    information only becomes available after the allocation happened, e.g.
+    noting that a tensor was packed into the autograd graph. Metadata recorded
+    at allocation time is not modified; annotations accumulate as separate
+    trace entries keyed to the allocation's address, each carrying the
+    annotation string as its ``user_metadata`` and a stack trace of the
+    annotation site (subject to the ``context`` setting of
+    :func:`_record_memory_history`). The pytorch.org/memory_viz visualizer
+    shows annotations alongside the allocation's own metadata.
+
+    The annotation is keyed to the base address of the tensor's untyped
+    storage, so it works for views and tensors with a nonzero
+    ``storage_offset``.
+
+    If memory history recording is not enabled (see
+    :func:`_record_memory_history`), this has no observable effect. It is only
+    supported by the native caching allocator; with other backends (e.g.
+    ``cudaMallocAsync`` or a pluggable allocator) it is silently ignored.
+
+    Args:
+        tensor (torch.Tensor): CUDA tensor whose backing allocation to
+                               annotate.
+        metadata (str): Annotation string to record.
+    """
+    if not tensor.is_cuda:
+        raise ValueError(f"expected a CUDA tensor, got device {tensor.device}")
+    # pyrefly: ignore [missing-attribute]
+    torch._C._cuda_annotateMemory(tensor.untyped_storage().data_ptr(), metadata)
 
 
 def _save_segment_usage(filename="output.svg", snapshot=None):

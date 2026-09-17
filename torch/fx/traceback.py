@@ -126,11 +126,9 @@ class NodeSource:
             self.node_info = self.NodeInfo(
                 name=node.name, target=str(node.target), graph_id=id(node.graph)
             )
-            self.from_node = (
-                copy.deepcopy(node.meta["from_node"])
-                if "from_node" in node.meta
-                else []
-            )
+            # NodeSource records are immutable after construction, so share them
+            # while copying the outer list to preserve its snapshot semantics.
+            self.from_node = list(node.meta.get("from_node", ()))
         else:
             self.node_info = None
             self.from_node = []
@@ -304,7 +302,7 @@ def set_stack_trace(stack: list[str]) -> None:
             current_meta["stack_trace"] = "".join(stack)
         else:
             # when the stack is empty, we explicitly clear the stack_trace to avoid
-            # propagating it to future node.˙
+            # propagating it to future node.
             current_meta.pop("stack_trace", None)
 
 
@@ -368,6 +366,15 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
 # writer and the reader below so the partitioner / AOTAutograd cache read it the
 # same way.
 MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
+
+
+@contextmanager
+def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
+    with (
+        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
+        preserve_node_meta(),
+    ):
+        yield
 
 
 def _get_memory_budget_annotation(node: Node) -> float | None:
@@ -544,7 +551,7 @@ def get_current_meta() -> dict[str, Any]:
 @contextmanager
 def set_current_replay_node(node: Node | None) -> Iterator[None]:
     """
-    Set the currently replay node. If `current_replay_node` is not None,
+    Set the current replay node. If `current_replay_node` is not None,
     then we're re-generating the `current_replay_node` in FunctionalTensorMode.
     """
     # See [Note] annotation for more details.
@@ -560,7 +567,7 @@ def set_current_replay_node(node: Node | None) -> Iterator[None]:
 @compatibility(is_backward_compatible=False)
 def get_current_replay_node() -> Node | None:
     """
-    Get the currently replay node
+    Get the current replay node
     """
     return current_replay_node
 

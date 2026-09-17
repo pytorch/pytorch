@@ -16,6 +16,19 @@ AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
           cubin_dir,
           run_single_threaded) {}
 
+AOTIModelContainerRunnerCuda::AOTIModelContainerRunnerCuda(
+    const std::string& model_so_path,
+    size_t num_models,
+    const std::string& device_str,
+    const std::string& cubin_dir,
+    std::unordered_map<std::string, at::Tensor>& constants)
+    : AOTIModelContainerRunner(
+          model_so_path,
+          num_models,
+          device_str,
+          cubin_dir,
+          constants) {}
+
 AOTIModelContainerRunnerCuda::~AOTIModelContainerRunnerCuda() = default;
 
 std::vector<at::Tensor> AOTIModelContainerRunnerCuda::run_impl(
