@@ -1109,6 +1109,34 @@ print(torch.xpu.is_initialized())
         self.assertGreaterEqual(before_free_bytes, after_free_bytes)
         self.assertEqual(before_total_bytes, after_total_bytes)
 
+    @unittest.skipIf(not HAS_PYZES, "requires pyzes")
+    @unittest.skipIf(not Xe2_Or_Later, "not available")
+    @serialTest()
+    def test_mem_get_info_with_pyzes(self):
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        free_bytes, total_bytes = torch.xpu.mem_get_info()
+        memory_handle = torch.xpu._zes_get_memory_handle()
+
+        from ctypes import byref
+
+        import pyzes
+
+        mem_state = pyzes.zes_mem_state_t()
+        rc = pyzes.zesMemoryGetState(memory_handle, byref(mem_state))
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            self.fail("Failed to get memory state from Level Zero Sysman")
+
+        mem_props = pyzes.zes_mem_properties_t()
+        mem_props.stype = pyzes.ZES_STRUCTURE_TYPE_MEM_PROPERTIES
+
+        rc = pyzes.zesMemoryGetProperties(memory_handle, byref(mem_props))
+        if rc != pyzes.ZE_RESULT_SUCCESS:
+            self.fail("Failed to get memory properties from Level Zero Sysman")
+
+        self.assertEqual(free_bytes, mem_state.free)
+        self.assertEqual(total_bytes, mem_props.physicalSize)
+
     def test_get_arch_list(self):
         arch_list = torch.xpu.get_arch_list()
         if not arch_list:
