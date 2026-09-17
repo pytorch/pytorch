@@ -58,11 +58,15 @@ def reduce_col_tile(
         )
     R, C = x.shape
     vec = min(tile.vec_size(C, x.element_size()), _VEC_MAX) if vec is None else vec
+    if vec <= 0:
+        raise ValueError(f"vec must be positive, got {vec}")
     if C % vec:
         # An explicit nondivisor vec would leave trailing outputs uninitialized.
         raise AssertionError(f"vec must divide the column count: {C=} {vec=}")
     if npar is None:
         npar = _split_p(R)
+    elif npar <= 0:
+        raise ValueError(f"npar must be positive, got {npar}")
     out = torch.empty(C, device=x.device, dtype=out_dtype)
     align = tile.align_bytes(C, x.element_size())
     nchunks, q, nrows = Int32(C // vec), Int32(-(-R // npar)), Int32(R)
