@@ -123,12 +123,24 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_default_guard_filter_keeps_the_pytree_registry_keys_match(self):
         # The DICT_KEYS_MATCH on SUPPORTED_NODES reaches the filter as the
         # unsaved build's DICT_VERSION and is kept; the save build serializes it
-        # as a keys-match. The registry's other kept guards put a
-        # DictGuardManager over it whose length check notices a node registered
-        # after capture with or without the keys-match; a same-count change of
-        # keys is what only the keys-match notices.
+        # as a keys-match. A load rebuilds the guards against the live registry,
+        # so no filter notices a change made before it; after load, the
+        # DictGuardManager the registry's other kept guards build notices a
+        # registration by length with or without the keys-match, and a
+        # same-count change of keys is what only the keys-match notices.
         def fn_tree(x):
             return pytree.tree_flatten({"a": x, "b": x * 2})[0][1]
+
+        def dropping(entries):
+            # The predicate before the exemption: drops on the derived DICT_VERSION.
+            keep = precompile_package.default_guard_filter_fn(entries)
+            promoted = ["DICT_VERSION" in e.derived_guard_types for e in entries]
+            return [k and not p for k, p in zip(keep, promoted)]
+
+        def load(data):
+            # Module globals the kept guards read (G['pytree']) resolve against
+            # the live scope, as in test_aot_compile.py's f_globals=globals() loads.
+            return AOTCompiledFunction.deserialize(data, f_globals=globals())
 
         def deregister(cls):
             if cls in pytree.SUPPORTED_NODES:
@@ -150,6 +162,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         class Other:
             pass
 
+        class Extra:
+            pass
+
         register(Node)
         seen = []
         x = torch.randn(3)
@@ -158,13 +173,23 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(promoted, [True])
         self.assertIn("DICT_KEYS_MATCH", _kept_types(compiled)[1])
         data = AOTCompiledFunction.serialize(compiled).serialized_data
-        # Module globals the kept guards read (G['pytree']) resolve against the
-        # live scope, as in test_aot_compile.py's f_globals=globals() loads.
-        loaded = AOTCompiledFunction.deserialize(data, f_globals=globals())
+        control = _aot_compile(fn_tree, x, guard_filter_fn=dropping)
+        self.assertNotIn("DICT_KEYS_MATCH", _kept_types(control)[1])
+        control_data = AOTCompiledFunction.serialize(control).serialized_data
+        # A node registered before load is baked into the rebuilt guards.
+        register(Extra)
+        self.assertTrue(load(data).guard_check(x))
+        deregister(Extra)
+        loaded, loaded_control = load(data), load(control_data)
         self.assertEqual(loaded(x), fn_tree(x))
+        register(Extra)
+        self.assertFalse(loaded.guard_check(x))
+        self.assertFalse(loaded_control.guard_check(x))
+        deregister(Extra)
         deregister(Node)
         register(Other)
         self.assertFalse(loaded.guard_check(x))
+        self.assertTrue(loaded_control.guard_check(x))
 
     def test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal(self):
         # A local-scope class passes the filter (the TYPE_MATCH on L['obj'] is
@@ -224,11 +249,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(loaded.guard_check(x, Other()))
         self.assertEqual(loaded(x, Other()), x + 1)
 
+    def _clear_root_caches(self):
+        # The roots are cached for the process: clear them now, so a test sees
+        # its own interpreter or patches rather than what a sibling left, and
+        # again at exit, so a patched answer outlives no test.
+        for name in ("_stdlib_roots", "_install_roots", "_torch_roots"):
+            roots = getattr(precompile_package, name)
+            roots.cache_clear()
+            self.addCleanup(roots.cache_clear)
+
     def test_roots_locate_the_stdlib_install_and_torch_dirs(self):
-        # The real interpreter's roots, not what a sibling test left cached.
-        precompile_package._stdlib_roots.cache_clear()
-        precompile_package._install_roots.cache_clear()
-        precompile_package._torch_roots.cache_clear()
+        self._clear_root_caches()
         stdlib = precompile_package._stdlib_roots()
         install = precompile_package._install_roots()
         torch_roots = precompile_package._torch_roots()
@@ -268,15 +299,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def test_stdlib_roots_follow_a_symlink_farm_into_the_store(self):
         # The other symlink shape: the stdlib directory is real and each file in
-        # it is a link into a per-package store (a venv over a Nix, Guix or Spack
-        # profile). realpath of the directory stays on the farm while realpath
-        # of any file lands in the store, so the roots need both.
-        stdlib_roots = precompile_package._stdlib_roots
+        # it is a link into a per-package store, which is what python -m venv
+        # makes of a Nix, Guix or Spack profile (venv records the unresolved
+        # sys._base_executable as home, so the child's base_prefix, sysconfig's
+        # stdlib and sys._stdlib_dir all stay on the farm). realpath of any file
+        # lands in the store, which none of those sources name.
         norm, within = precompile_package._norm, precompile_package._within
-        self.addCleanup(stdlib_roots.cache_clear)
         with tempfile.TemporaryDirectory() as tmp:
             store = os.path.join(tmp, "store", "lib", "python3.12")
             farm = os.path.join(tmp, "profile", "lib", "python3.12")
+            venv = os.path.join(tmp, "venv", "lib", "python3.12")
             os.makedirs(store)
             os.makedirs(farm)
             open(os.path.join(store, "os.py"), "w").close()
@@ -285,9 +317,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 os.symlink(os.path.join(store, "os.py"), farm_os)
             except (OSError, NotImplementedError):
                 self.skipTest("symlinks unavailable")
-            with mock.patch.object(os, "__file__", farm_os):
-                stdlib_roots.cache_clear()
-                stdlib = stdlib_roots()
+            paths = dict(sysconfig.get_paths())
+            paths.update(stdlib=farm, platstdlib=venv)
+            with (
+                mock.patch.object(os, "__file__", farm_os),
+                mock.patch.object(sys, "_stdlib_dir", farm, create=True),
+                mock.patch.object(sysconfig, "get_paths", return_value=paths),
+            ):
+                self._clear_root_caches()
+                stdlib = precompile_package._stdlib_roots()
             self.assertIn(norm(farm), stdlib)
             self.assertIn(norm(store), stdlib)
             self.assertTrue(within(norm(farm_os), stdlib))
@@ -297,9 +335,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # imports _sysconfigdata_*_{sys.platform}_*, so prime it unpatched.
         stdlib_roots, norm = precompile_package._stdlib_roots, precompile_package._norm
         sysconfig.get_paths()
-        self.addCleanup(stdlib_roots.cache_clear)
         with mock.patch.object(sys, "platform", "win32"):
-            stdlib_roots.cache_clear()
+            self._clear_root_caches()
             self.assertIn(norm(os.path.join(sys.base_prefix, "DLLs")), stdlib_roots())
 
     def test_stdlib_roots_take_each_source_in_a_venv_layout(self):
@@ -317,58 +354,71 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         stdlib_roots = precompile_package._stdlib_roots
         install_roots = precompile_package._install_roots
         norm, within = precompile_package._norm, precompile_package._within
-        self.addCleanup(stdlib_roots.cache_clear)
-        self.addCleanup(install_roots.cache_clear)
         with (
             mock.patch.object(sysconfig, "get_paths", return_value=paths),
             mock.patch.object(sys, "_stdlib_dir", frozen, create=True),
         ):
-            stdlib_roots.cache_clear()
-            install_roots.cache_clear()
+            self._clear_root_caches()
             stdlib, install = stdlib_roots(), install_roots()
-        for root in (base, venv, frozen, os.path.dirname(os.__file__)):
+            # A frozen os has no __file__ (None stands in for the missing
+            # attribute): the other three sources are then all there is, in
+            # sorted order, which _classify_file reads as outermost first.
+            with mock.patch.object(os, "__file__", None):
+                stdlib_roots.cache_clear()
+                no_os = stdlib_roots()
+        for root in (base, venv, frozen, os.path.dirname(norm(os.__file__))):
             self.assertIn(norm(root), stdlib)
+        self.assertEqual(no_os, tuple(sorted(norm(r) for r in (base, venv, frozen))))
         # The nesting the exclusion exists for: purelib is under a stdlib root
         # and is an install root all the same.
         self.assertTrue(within(norm(purelib), stdlib))
         self.assertIn(norm(purelib), install)
 
     def test_install_roots_take_purelib_and_platlib_on_a_lib64_build(self):
-        # sysconfig's posix schemes hard-code lib in purelib but interpolate
-        # platlibdir into platlib and the stdlib keys, so on a system
+        # sysconfig's prefix and venv schemes hard-code lib in purelib but
+        # interpolate platlibdir into platlib and the stdlib keys, so on a system
         # interpreter built --with-platlibdir=lib64 (Fedora, RHEL, openSUSE) it
         # is platlib that nests inside the stdlib root and purelib that does
-        # not; each key is a root of its own. A venv links lib64 -> lib.
-        stdlib = os.path.join(os.sep, "usr", "lib64", "python3.12")
-        purelib = os.path.join(os.sep, "usr", "lib", "python3.12", "site-packages")
+        # not; each key is a root of its own. A venv links lib64 -> lib. Every
+        # stdlib source is patched onto a made-up prefix: a Debian os.py lives
+        # at /usr/lib/python3.12, the parent of a /usr/lib purelib, and a
+        # merged-lib host resolves /usr/lib64 onto /usr/lib.
+        prefix = os.path.join(os.sep, "lib64build")
+        stdlib = os.path.join(prefix, "lib64", "python3.12")
+        purelib = os.path.join(prefix, "lib", "python3.12", "site-packages")
         platlib = os.path.join(stdlib, "site-packages")
+        # site lists a string prefix of the stdlib directory that is not its
+        # parent, which the exclusion must keep.
+        sibling = os.path.join(prefix, "lib64", "python3")
         paths = dict(sysconfig.get_paths())
         paths.update(stdlib=stdlib, platstdlib=stdlib, purelib=purelib, platlib=platlib)
-        stdlib_roots = precompile_package._stdlib_roots
-        install_roots = precompile_package._install_roots
         norm, within = precompile_package._norm, precompile_package._within
-        self.addCleanup(stdlib_roots.cache_clear)
-        self.addCleanup(install_roots.cache_clear)
-        with mock.patch.object(sysconfig, "get_paths", return_value=paths):
-            stdlib_roots.cache_clear()
-            install_roots.cache_clear()
-            stdlib_found, install = stdlib_roots(), install_roots()
+        with (
+            mock.patch.object(sysconfig, "get_paths", return_value=paths),
+            mock.patch.object(os, "__file__", os.path.join(stdlib, "os.py")),
+            mock.patch.object(sys, "_stdlib_dir", stdlib, create=True),
+            mock.patch.object(site, "getsitepackages", return_value=[sibling]),
+        ):
+            self._clear_root_caches()
+            stdlib_found = precompile_package._stdlib_roots()
+            install = precompile_package._install_roots()
+        self.assertEqual(stdlib_found, (norm(stdlib),))
         self.assertTrue(within(norm(platlib), stdlib_found))
         self.assertFalse(within(norm(purelib), stdlib_found))
-        self.assertIn(norm(platlib), install)
-        self.assertIn(norm(purelib), install)
+        for root in (platlib, purelib, sibling):
+            self.assertIn(norm(root), install)
 
     def test_install_roots_drop_a_directory_the_stdlib_sits_under(self):
         # On Windows getsitepackages() lists the bare prefix; replay that shape
         # here so the exclusion is pinned on every platform, not just there.
         listed = [sys.prefix, *site.getsitepackages()]
-        self.addCleanup(precompile_package._install_roots.cache_clear)
         with mock.patch.object(site, "getsitepackages", return_value=listed):
-            precompile_package._install_roots.cache_clear()
+            self._clear_root_caches()
+            stdlib = precompile_package._stdlib_roots()
             install = precompile_package._install_roots()
         norm, within = precompile_package._norm, precompile_package._within
         self.assertNotIn(norm(sys.prefix), install)
-        for root in precompile_package._stdlib_roots():
+        for root in stdlib:
             self.assertFalse(within(root, install), root)
         self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
         # posix_home puts purelib AT the stdlib directory rather than under it;
@@ -377,10 +427,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         home = os.path.join(os.sep, "home", "lib", "python")
         paths = dict(sysconfig.get_paths())
         paths.update(stdlib=home, platstdlib=home, purelib=home, platlib=home)
-        self.addCleanup(precompile_package._stdlib_roots.cache_clear)
         with mock.patch.object(sysconfig, "get_paths", return_value=paths):
-            precompile_package._stdlib_roots.cache_clear()
-            precompile_package._install_roots.cache_clear()
+            self._clear_root_caches()
             install = precompile_package._install_roots()
         self.assertNotIn(norm(home), install)
 
@@ -390,12 +438,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # purelib is read outside the try and the other accessor is still
         # consulted, so what a failing accessor loses is only its own extras.
         user_site = os.path.join(os.sep, "elsewhere", "user-site")
-        self.addCleanup(precompile_package._install_roots.cache_clear)
         with (
             mock.patch.object(site, "getsitepackages", side_effect=RuntimeError),
             mock.patch.object(site, "getusersitepackages", return_value=user_site),
         ):
-            precompile_package._install_roots.cache_clear()
+            self._clear_root_caches()
             install = precompile_package._install_roots()
         norm = precompile_package._norm
         self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
@@ -406,12 +453,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # the try, and the None getusersitepackages returns where there is no
         # home directory (WASI) is skipped like a raise.
         extra = os.path.join(os.sep, "elsewhere", "site")
-        self.addCleanup(precompile_package._install_roots.cache_clear)
         with (
             mock.patch.object(site, "getsitepackages", return_value=[None, extra]),
             mock.patch.object(site, "getusersitepackages", return_value=None),
         ):
-            precompile_package._install_roots.cache_clear()
+            self._clear_root_caches()
             install = precompile_package._install_roots()
         norm = precompile_package._norm
         self.assertIn(norm(extra), install)
@@ -421,17 +467,20 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
         own = norm(os.path.dirname(torch.__file__))
         bogus = os.path.join(os.sep, "elsewhere", "torch")
-        stub = types.SimpleNamespace(__path__=[bogus])
-        self.addCleanup(torch_roots.cache_clear)
+        stub = types.SimpleNamespace(__path__=[None, bogus])
+        self._clear_root_caches()
         with mock.patch.dict(sys.modules, {"torch": stub}):
             # A substituted torch's __path__ is ignored until it lists the torch
-            # package directory this file sits under; then every entry is
-            # adopted, the bogus one included, which an editable build relies on.
-            torch_roots.cache_clear()
+            # package directory this file sits under; then every string entry is
+            # adopted, the bogus one included, which an editable build relies
+            # on. A __path__ that is no sequence at all is ignored as well.
             self.assertEqual(torch_roots(), (own,))
             stub.__path__.append(os.path.dirname(torch.__file__))
             torch_roots.cache_clear()
             self.assertEqual(set(torch_roots()), {own, norm(bogus)})
+            stub.__path__ = None
+            torch_roots.cache_clear()
+            self.assertEqual(torch_roots(), (own,))
         with mock.patch.object(precompile_package, "__file__", None):
             torch_roots.cache_clear()
             self.assertEqual(torch_roots(), ())  # frozen: no directory to anchor to
