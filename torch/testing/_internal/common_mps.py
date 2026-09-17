@@ -40,7 +40,6 @@ if torch.backends.mps.is_available():
             "log_softmaxwith_dtype",
             "nn.functional.channel_shuffle",
             "nn.functional.conv3d",
-            "nn.functional.padreplicate_negative",
             "ormqr",
             "renorm",
             "sparse.sampled_addmm",
@@ -245,7 +244,6 @@ if torch.backends.mps.is_available():
                 torch.bool,
                 torch.int8,
             ],
-            "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
