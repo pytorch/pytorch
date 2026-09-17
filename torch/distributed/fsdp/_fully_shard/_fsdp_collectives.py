@@ -20,10 +20,9 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-_AllGatherOutputFn = Callable[[list[FSDPParam], torch.Tensor, list[int], int], None]
 _PrepareReduceScatterInputs = Callable[
     [list[FSDPParam], list[torch.Tensor], int],
-    tuple[list[torch.Tensor], Sequence[torch.Size]],
+    Sequence[torch.Size],
 ]
 
 
@@ -38,6 +37,9 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
+
+
+_AllGatherOutputFn = Callable[[list[FSDPParam], AllGatherResult, int], None]
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -436,35 +438,56 @@ def _get_param_all_gather_inputs(
 
 def _default_all_gather_output_fn(
     fsdp_params: list[FSDPParam],
-    all_gather_output: torch.Tensor,
-    all_gather_input_split_sizes: list[int],
+    all_gather_result: AllGatherResult,
     world_size: int,
 ) -> None:
     """Copy all-gather outputs and reorder nonzero-dimension shards."""
+    all_gather_output = all_gather_result.all_gather_output
+    device = all_gather_output.device
     copy_outputs: list[torch.Tensor] = []
     reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
-    for fsdp_param in fsdp_params:
+    for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
+        all_gather_result.param_all_gather_input_numels,
+        all_gather_result.param_all_gather_input_dtypes,
+        fsdp_params,
+    ):
+        fsdp_param.init_all_gather_outputs(
+            all_gather_input_numels, all_gather_input_dtypes, world_size, device
+        )
+        fsdp_param.alloc_all_gather_outputs()
         outputs = fsdp_param.all_gather_outputs
         if fsdp_param.fsdp_placement.dim != 0:
             outputs = [torch.empty_like(t) for t in outputs]
             reorder_infos.append((fsdp_param, outputs))
         copy_outputs.extend(outputs)
     _copy_all_gather_outputs(
-        all_gather_output, all_gather_input_split_sizes, copy_outputs, world_size
+        all_gather_output,
+        all_gather_result.all_gather_input_split_sizes,
+        copy_outputs,
+        world_size,
     )
     _foreach_all_gather_reorder(reorder_infos, world_size)
 
 
 def _all_gather_output_fn_with_dim0_views(
     fsdp_params: list[FSDPParam],
-    all_gather_output: torch.Tensor,
-    all_gather_input_split_sizes: list[int],
+    all_gather_result: AllGatherResult,
     world_size: int,
 ) -> None:
     """Use views of the final outputs when the shard layout supports them."""
+    all_gather_output = all_gather_result.all_gather_output
+    device = all_gather_output.device
     copy_outputs: list[torch.Tensor] = []
     reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
-    for fsdp_param in fsdp_params:
+    for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
+        all_gather_result.param_all_gather_input_numels,
+        all_gather_result.param_all_gather_input_dtypes,
+        fsdp_params,
+    ):
+        fsdp_param.init_all_gather_outputs(
+            all_gather_input_numels, all_gather_input_dtypes, world_size, device
+        )
+        fsdp_param.alloc_all_gather_outputs()
         outputs = fsdp_param.all_gather_outputs
         shard_dim = fsdp_param.fsdp_placement.dim
         if shard_dim == 0:
@@ -493,7 +516,10 @@ def _all_gather_output_fn_with_dim0_views(
         copy_outputs.extend(outputs)
         reorder_infos.append((fsdp_param, outputs))
     _copy_all_gather_outputs(
-        all_gather_output, all_gather_input_split_sizes, copy_outputs, world_size
+        all_gather_output,
+        all_gather_result.all_gather_input_split_sizes,
+        copy_outputs,
+        world_size,
     )
     _foreach_all_gather_reorder(reorder_infos, world_size)
 
@@ -506,35 +532,15 @@ def foreach_all_gather_copy_out(
     *,
     all_gather_output_fn: _AllGatherOutputFn = _default_all_gather_output_fn,
 ) -> None:
-    (
-        all_gather_output,
-        all_gather_event,
-        all_gather_work,
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        all_gather_input_split_sizes,
-    ) = all_gather_result
-    _dtype, device = all_gather_output.dtype, all_gather_output.device
+    all_gather_event = all_gather_result.all_gather_event
+    all_gather_work = all_gather_result.all_gather_work
+    device = all_gather_result.all_gather_output.device
     device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
         device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
-    world_size, device = group.size(), all_gather_output.device
-
-    for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
-        param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
-    ):
-        fsdp_param.init_all_gather_outputs(
-            all_gather_input_numels,
-            all_gather_input_dtypes,
-            world_size,
-            device,
-        )
-        fsdp_param.alloc_all_gather_outputs()
-    all_gather_output_fn(
-        fsdp_params, all_gather_output, all_gather_input_split_sizes, world_size
-    )
+    all_gather_output_fn(fsdp_params, all_gather_result, group.size())
 
 
 def _copy_all_gather_outputs(
@@ -601,7 +607,7 @@ def _default_reduce_scatter_input_fn(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> tuple[list[torch.Tensor], tuple[torch.Size, ...]]:
+) -> tuple[torch.Size, ...]:
     """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
     if world_size > 1:
         for i, (fsdp_param, unsharded_grad) in enumerate(
@@ -620,14 +626,14 @@ def _default_reduce_scatter_input_fn(
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
     )
-    return unsharded_grads, padded_unsharded_sizes
+    return padded_unsharded_sizes
 
 
 def _prepare_reduce_scatter_inputs_with_dim0_views(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> tuple[list[torch.Tensor], list[torch.Size]]:
+) -> list[torch.Size]:
     """Prepare copy inputs while keeping one padded size per original parameter."""
     copy_in_grads: list[torch.Tensor] = []
     padded_unsharded_sizes: list[torch.Size] = []
@@ -653,7 +659,8 @@ def _prepare_reduce_scatter_inputs_with_dim0_views(
         padded_unsharded_sizes.append(
             _get_dim0_padded_size(unsharded_grad.size(), world_size)
         )
-    return copy_in_grads, padded_unsharded_sizes
+    unsharded_grads[:] = copy_in_grads
+    return padded_unsharded_sizes
 
 
 @torch.no_grad()
@@ -718,7 +725,7 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    copy_in_grads, padded_unsharded_sizes = prepare_reduce_scatter_inputs(
+    padded_unsharded_sizes = prepare_reduce_scatter_inputs(
         fsdp_params, unsharded_grads, world_size
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
@@ -729,10 +736,9 @@ def foreach_reduce(
         device=device,
     )
 
-    foreach_reduce_scatter_copy_in(copy_in_grads, reduce_scatter_input, world_size)
+    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
 
     # Only after the copy-in finishes can we free the gradients
-    copy_in_grads.clear()
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None

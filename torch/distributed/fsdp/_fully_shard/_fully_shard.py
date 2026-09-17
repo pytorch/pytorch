@@ -683,19 +683,19 @@ class FSDPModule:
     ) -> None:
         """Set the function that copies a parameter group's all-gather outputs.
 
-        The function takes ``(fsdp_params, all_gather_output,
-        all_gather_input_split_sizes, world_size)`` and returns ``None``.
-        ``all_gather_output`` is the flat rank-major collective buffer, and
-        ``all_gather_input_split_sizes`` gives the per-rank input sizes in buffer
-        elements (bytes for mixed-dtype buffers). ``world_size`` is the all-gather
-        group size. Each parameter's final ``all_gather_outputs`` is allocated.
-        The function owns copying and any reordering into these final outputs,
+        The function takes ``(fsdp_params, all_gather_result, world_size)`` and
+        returns ``None``. ``all_gather_result`` is an ``AllGatherResult`` with the
+        flat rank-major collective buffer, per-parameter input element counts
+        and dtypes, and per-rank input split sizes in buffer elements (bytes for
+        mixed-dtype buffers). ``world_size`` is the all-gather group size.
+        The function initializes and allocates each parameter's final
+        ``all_gather_outputs`` and owns copying and any reordering into them,
         preserving their dtype, device, and version counters. It runs on the
-        current compute stream after waiting for the collective to complete.
+        current compute stream after FSDP waits for the collective to complete.
         Reduce-scatter input preparation is unaffected.
 
         Args:
-            fn (Callable): Function that copies and reorders all-gather outputs.
+            fn (Callable): Function that initializes and copies all-gather outputs.
             recurse (bool): Whether to also set the function for all nested FSDP
                 modules. Defaults to ``True``.
         """
@@ -713,16 +713,17 @@ class FSDPModule:
         """Set the function that prepares reduce-scatter inputs.
 
         The function takes ``(fsdp_params, unsharded_grads, world_size)``
-        and returns copy inputs and one padded unsharded size per entry in
-        ``fsdp_params``, in the same order. ``world_size`` is the
+        and returns a sequence of padded unsharded ``torch.Size`` values, one per
+        entry in ``fsdp_params`` in the same order. ``world_size`` is the
         reduce-scatter group size, or 1 when no reduce-scatter is needed.
         Only parameters participating in this reduction are passed.
-        The function may replace entries in ``unsharded_grads`` to release
-        gradients that it reorders. Inputs are kept alive through copy submission.
-        Returned tensors must preserve dtype and device and be ready for dim-0
-        ``chunk_cat``. FSDP consumes and clears the returned input list.
-        The function runs on the current compute stream; FSDP owns buffer allocation,
-        the native copy, and communication. All-gather copy-out is unaffected.
+        The function prepares copy inputs by modifying ``unsharded_grads`` in
+        place and may replace or expand its entries. These inputs must preserve
+        dtype and device and be ready for dim-0 ``chunk_cat``. FSDP keeps them
+        alive through copy submission, then clears the same list.
+        The function runs on the current compute stream; FSDP owns collective
+        buffer allocation, the native copy, and communication. All-gather
+        copy-out is unaffected.
 
         Args:
             fn (Callable): Function that prepares reduce-scatter inputs.
