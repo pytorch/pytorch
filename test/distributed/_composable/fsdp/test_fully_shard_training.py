@@ -964,6 +964,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # backward boundary to release.
         self.assertIsNotNone(comm_ctx.all_gather_state)
 
+        # Pipeline schedules use non-final backwards while accumulating grads.
+        model.set_is_last_backward(False)
         hidden.backward(chunk.grad)
 
         self.assertIsNone(comm_ctx.all_gather_state)
