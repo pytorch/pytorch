@@ -122,6 +122,7 @@ jobs:
     secrets: inherit
 
   windows-xpu-n-1-build:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: win-vs2022-xpu-n-1-py3
     uses: ./.github/workflows/_win-build.yml
@@ -134,6 +135,7 @@ jobs:
     secrets: inherit
 
   windows-xpu-n-build:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: win-vs2022-xpu-n-py3
     uses: ./.github/workflows/_win-build.yml
