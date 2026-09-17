@@ -3409,17 +3409,17 @@ def forward(self, arg0_1):
             gm_with.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    mm = torch.ops.aten.mm.default(arg2_1, arg0_1)
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
-    mm_recomputed = torch.ops.aten.mm.default(arg2_1, arg0_1)
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
     cos = torch.ops.aten.cos.default(mm_recomputed);  mm_recomputed = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
-    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    t = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
     mm_2 = torch.ops.aten.mm.default(mul, t);  mul = t = None
-    mm_3 = torch.ops.aten.mm.default(arg2_1, arg1_1);  arg2_1 = None
+    mm_3 = torch.ops.aten.mm.default(arg0_1, arg2_1);  arg0_1 = None
     sigmoid = torch.ops.aten.sigmoid.default(mm_3);  mm_3 = None
     detach_4 = torch.ops.aten.detach.default(sigmoid)
     sum_2 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
@@ -3427,7 +3427,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     expand_1 = torch.ops.aten.expand.default(ones_like_1, [4, 4]);  ones_like_1 = None
     detach_5 = torch.ops.aten.detach.default(detach_4);  detach_4 = None
     sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand_1, detach_5);  expand_1 = detach_5 = None
-    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    t_1 = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
     mm_4 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
     add = torch.ops.aten.add.Tensor(mm_2, mm_4);  mm_2 = mm_4 = None
     detach_6 = torch.ops.aten.detach.default(add);  add = None

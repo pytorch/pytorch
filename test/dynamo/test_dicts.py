@@ -2332,9 +2332,13 @@ class DictTests(torch._dynamo.test_case.TestCase):
         )
 
     def _get_graph_node_names(self, model, inp):
+        # Exclude placeholders: their order is the graph's positional calling
+        # convention and is preserved (not canonicalized), so it legitimately
+        # varies with dict iteration order. Canonicalization only makes the
+        # interior computation deterministic.
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
         torch.compile(model, backend=backend)(inp)
-        return [n.name for n in backend.graphs[0].graph.nodes]
+        return [n.name for n in backend.graphs[0].graph.nodes if n.op != "placeholder"]
 
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph(self):
@@ -2361,10 +2365,61 @@ class DictTests(torch._dynamo.test_case.TestCase):
         d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
         d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
 
+        # Different dict iteration orders feed inputs in different orders, so the
+        # placeholder layout differs, but canonicalization gives the interior
+        # computation identical node names.
         names1 = self._get_graph_node_names(model, d1)
         torch._dynamo.reset()
         names2 = self._get_graph_node_names(model, d2)
         self.assertEqual(names1, names2)
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_placeholders_are_out_of_scope(self):
+        # Pins the documented scope limit: canonicalization normalizes interior
+        # nodes only. Placeholders keep their trace-order position and names
+        # (that layout is the positional calling convention), so graphs that
+        # differ only in input discovery order are NOT identical overall.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
+
+            def forward(self, d):
+                results = []
+                for key, val in d.items():
+                    if key == "a":
+                        results.append(self.deep(val))
+                    else:
+                        results.append(self.shallow(val))
+                return torch.cat(results, dim=-1)
+
+        def placeholders(model, inp):
+            backend = torch._dynamo.testing.EagerAndRecordGraphs()
+            torch.compile(model, backend=backend)(inp)
+            graph = backend.graphs[0].graph
+            return [n.name for n in graph.nodes if n.op == "placeholder"]
+
+        model = Model()
+        d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
+        d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
+
+        ph1 = placeholders(model, d1)
+        torch._dynamo.reset()
+        ph2 = placeholders(model, d2)
+
+        # Names are preserved verbatim (never rewritten to canonical names), so
+        # they still carry their source-derived form.
+        self.assertTrue(all(n.startswith("l_") for n in ph1), ph1)
+        self.assertEqual(sorted(ph1), sorted(ph2))
+        # ...and order follows trace order, so the two layouts differ. If this
+        # ever starts passing, placeholders became order-canonical and the
+        # docstring in output_graph._canonicalize_graph must be updated.
+        self.assertNotEqual(ph1, ph2)
 
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_correctness(self):
@@ -2532,19 +2587,28 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(len(mul_after) >= 1)
 
     def test_canonical_graph_config_gating(self):
+        # With canonicalization off, differing dict orders yield differently
+        # named interior nodes; with it on, the interior names match. (Compares
+        # interior nodes only -- placeholder order is the calling convention and
+        # is preserved regardless.) The branches must be asymmetric (deep vs
+        # shallow) so the interior naming actually differs by trace order.
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear_a = torch.nn.Linear(8, 16)
-                self.linear_b = torch.nn.Linear(8, 16)
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
 
             def forward(self, d):
                 results = []
                 for key, val in d.items():
                     if key == "a":
-                        results.append(self.linear_a(val))
+                        results.append(self.deep(val))
                     else:
-                        results.append(self.linear_b(val))
+                        results.append(self.shallow(val))
                 return torch.cat(results, dim=-1)
 
         model = Model()
