@@ -1137,11 +1137,22 @@ class CellVariable(VariableTracker):
     def _current_contents(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
-        """Cell contents, or None if the cell is empty (PyCell_GET == NULL)."""
+        """Cell contents, or None if the cell is empty (PyCell_GET == NULL).
+
+        An empty cell is represented by the DeletedVariable marker, both for a
+        cell that was never assigned (pre_existing_contents) and for one
+        emptied by `del` (the pending cell_contents mutation).
+        """
         side_effects = tx.output.side_effects
         if side_effects.has_pending_mutation_of_attr(self, "cell_contents"):
-            return side_effects.load_attr(self, "cell_contents", check=False)
-        return self.pre_existing_contents
+            contents = side_effects.load_attr(
+                self, "cell_contents", deleted_ok=True, check=False
+            )
+        else:
+            contents = self.pre_existing_contents
+        if contents is None or isinstance(contents, DeletedVariable):
+            return None
+        return contents
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
