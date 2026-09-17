@@ -3138,6 +3138,10 @@ def adaptive_max_pool2d(
         ndim in (3, 4),
         lambda: f"adaptive_max_pool2d(): Expected 3D or 4D tensor, but got {ndim}D",
     )
+    torch._check_not_implemented(
+        input.is_floating_point(),
+        lambda: f"\"adaptive_max_pool2d\" not implemented for '{input.dtype}'",
+    )
     for i in range(1, ndim):
         torch._check(
             input.size(i) > 0,
@@ -3186,6 +3190,10 @@ def adaptive_max_pool3d(
     torch._check(
         ndim in (4, 5),
         lambda: f"adaptive_max_pool3d(): Expected 4D or 5D tensor, but got {ndim}D",
+    )
+    torch._check_not_implemented(
+        input.is_floating_point(),
+        lambda: f"\"adaptive_max_pool3d\" not implemented for '{input.dtype}'",
     )
     for i in range(1, ndim):
         torch._check(
