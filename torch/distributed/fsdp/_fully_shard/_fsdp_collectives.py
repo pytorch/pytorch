@@ -20,6 +20,12 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
+_ReduceScatterInputFn = Callable[
+    [list[FSDPParam], list[torch.Tensor], int],
+    Sequence[torch.Size],
+]
+
+
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
@@ -31,6 +37,9 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
+
+
+_AllGatherOutputFn = Callable[[list[FSDPParam], AllGatherResult, int], None]
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -478,6 +487,8 @@ def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
+    *,
+    all_gather_output_fn: _AllGatherOutputFn = _default_all_gather_output_fn,
 ) -> None:
     all_gather_event = all_gather_result.all_gather_event
     all_gather_work = all_gather_result.all_gather_work
@@ -487,7 +498,7 @@ def foreach_all_gather_copy_out(
         device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
-    _default_all_gather_output_fn(fsdp_params, all_gather_result, group.size())
+    all_gather_output_fn(fsdp_params, all_gather_result, group.size())
 
 
 def _copy_all_gather_outputs(
@@ -589,6 +600,10 @@ def foreach_reduce(
     partial_reduce_output: torch.Tensor | None,  # only used for HSDP
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
+    *,
+    prepare_reduce_scatter_inputs: _ReduceScatterInputFn = (
+        _default_reduce_scatter_input_fn
+    ),
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -630,7 +645,7 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    padded_unsharded_sizes = _default_reduce_scatter_input_fn(
+    padded_unsharded_sizes = prepare_reduce_scatter_inputs(
         fsdp_params, unsharded_grads, world_size
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
