@@ -12,6 +12,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import warnings
 from unittest import mock
 
 import torch
@@ -2566,6 +2567,150 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_unknown_backend_is_refused(self):
         with self.assertRaisesRegex(ValueError, "backend must be"):
             self._capture(backend="nope")
+
+    def test_graph_devices_come_from_the_graph_not_the_inputs(self):
+        # GRAPH_DEVICES is scanned from the graph: fn here takes no tensor at all, so a
+        # scan of the runtime arguments would find no device to neutralize autocast on.
+        def fn(n):
+            return torch.ones(4) * n
+
+        with self._capture(fn) as cap:
+            cap(3)
+        self.assertIn("GRAPH_DEVICES = ('cpu',)", self._read(self.artifact).decode())
+
+    def test_served_output_ignores_ambient_autocast(self):
+        # eager only: this model lowers to extern_kernels.addmm(..., out=buf0), whose
+        # out= overload has no CPU autocast registration, so the inductor artifact
+        # cannot observe the ambient state (the extern-kernel test below covers it).
+        with self._capture(backend="eager") as cap:
+            y = cap(self.model, self.x)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+            z = served(self.model, self.x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_served_extern_kernel_ignores_ambient_autocast(self, backend):
+        # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
+        # CPU autocast and which the inductor artifact calls as a fallback: without
+        # _autocast_off the served call casts a second time and comes back in
+        # bfloat16 (or, as here, fails inside oneDNN on the mixed-dtype primitive).
+        model = torch.nn.LSTM(8, 8, batch_first=True)
+        x = torch.randn(2, 3, 8)
+
+        def fn(m, t):
+            return m(t)[0]
+
+        with self._capture(fn, backend=backend) as cap:
+            y = cap(model, x)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("device", ("notadevice", "privateuseone", "mkldnn"))
+    def test_an_unautocastable_graph_device_still_serves(self, device):
+        # GRAPH_DEVICES is unfiltered, so the serving build decides: a device type it
+        # cannot parse makes is_autocast_available raise, a deprecated spelling it does
+        # parse makes it emit a UserWarning, and an out-of-tree backend with no autocast
+        # module reports available then refuses to construct. Each is skipped, not failed
+        # on. mkldnn's warning is TORCH_WARN_ONCE, so it reaches the Warning arm of the
+        # catch only on the first parse in the process and takes the not-available route
+        # to the same skip after that; the test below covers that arm every run.
+        with self._capture() as cap:
+            y = cap(self.model, self.x)
+        source = self._read(self.artifact).decode()
+        patched = source.replace(
+            "GRAPH_DEVICES = ('cpu',)", f"GRAPH_DEVICES = ('cpu', {device!r})"
+        )
+        self.assertNotEqual(patched, source)
+        blob = torch.load(self.cache, weights_only=True)
+        blob["code_hash"] = hashlib.sha256(patched.encode()).hexdigest()
+        with open(self.artifact, "wb") as f:
+            f.write(patched.encode())
+        torch.save(blob, self.cache)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            # Announced rather than silent: on a device the build DOES know, the same
+            # skip would mean the served call casts twice. Through logging, not warnings,
+            # so no served call can raise under an error filter.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
+                    z = served(self.model, self.x)
+                self.assertIn("cannot autocast the captured", "".join(logs.output))
+                # Not once per served call.
+                with self.assertNoLogs("torch._precompile_driver", "WARNING"):
+                    self.assertEqual(served(self.model, self.x), z)
+            # ...and not once per PROCESS either: the report-once set is emitted into
+            # the artifact, so a second load of the same pair reports again.
+            with self.assertLogs("torch._precompile_driver", "WARNING"):
+                load(self.artifact, self.cache)(self.model, self.x)
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    def test_a_warning_from_the_device_probe_is_a_skip(self):
+        # The Warning arm of _autocast_off's catch, which the mkldnn case above reaches
+        # only on the first parse in the process (TORCH_WARN_ONCE). Raise the warning
+        # from the probe instead, so the arm runs whatever else touched that device.
+        from torch import _precompile_driver
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with mock.patch.object(
+                _precompile_driver, "_AUTOCAST_SKIPS_REPORTED", set()
+            ):
+                with mock.patch(
+                    "torch.amp.is_autocast_available",
+                    side_effect=UserWarning("no longer used as device type"),
+                ):
+                    with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
+                        with _precompile_driver._autocast_off(("cpu", "notreal")):
+                            # Skipped, so the caller's region is still casting.
+                            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+        self.assertIn("'cpu', 'notreal'", "".join(logs.output))
+
+    def test_autocast_off_unwinds_a_failure_partway_through(self):
+        # The disables already entered have to come back out if the stack is not
+        # built to the end: the emitted driver hands the stack to the caller's
+        # `with`, so a leaked entry silently stops the caller autocasting.
+        from torch import _precompile_driver
+
+        real_autocast = torch.amp.autocast
+        entered = []
+
+        def autocast(device_type, **kwargs):
+            entered.append(device_type)
+            if len(entered) == 2:
+                raise KeyboardInterrupt("interrupted partway through")
+            return real_autocast(device_type, **kwargs)
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with mock.patch("torch.amp.autocast", autocast):
+                with self.assertRaises(KeyboardInterrupt):
+                    _precompile_driver._autocast_off(("cpu", "cuda"))
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+
+    @parametrize("backend", ("eager", "inductor"))
+    @unittest.skipUnless(TEST_CUDA, "CUDA has its own autocast policy and dtype")
+    def test_served_output_ignores_ambient_cuda_autocast(self, backend):
+        # Autocast is per device -- CUDA picks float16 and has its own op allowlist --
+        # so the neutralization is covered there too, on both drivers. The graph's
+        # aten.addmm.default IS registered for CUDA autocast, so without it the
+        # served call would come back in float16.
+        model = _FilesModel().cuda()
+        x = torch.randn(2, 4, device="cuda")
+        with self._capture(backend=backend) as cap:
+            y = cap(model, x)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cuda", dtype=torch.float16):
+            self.assertEqual(model(x).dtype, torch.float16)
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
 
     @parametrize("backend", ("eager", "inductor"))
     def test_batchnorm_running_stats_update_once(self, backend):

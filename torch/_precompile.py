@@ -225,6 +225,15 @@ it.
 # (artifact=None) but is still a full integrity-tagged envelope (python_code is the
 # whole runnable artifact).
 #
+# autocast: a served call IGNORES the serving process's ambient autocast on the devices
+# the captured graph uses -- the emitted drivers disable it there (the artifact's
+# GRAPH_DEVICES) because whatever the capture ran under is already baked in (ATen casts
+# for make_fx, compiled kernels for inductor), so re-dispatching under an ambient
+# autocast would cast a second time. A served call returns the capture's dtypes, not the
+# dtypes the same eager call returns inside that region, so capture under the autocast
+# you want baked in; a device the SERVING build cannot autocast at all is skipped, with
+# one logged warning per device per loaded artifact.
+#
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
 # non-strict trace and is the only tracer implemented today -- everything above (the
 # invariants, the contract) describes its behavior. "dynamo" is planned (a Dynamo-based
@@ -385,8 +394,8 @@ class Capture:
     without a deprecation cycle. Enter it as a context manager to arm the
     capture, call it with the positional arguments ``fn`` takes inside the block
     (keyword arguments are refused) -- each call runs for real, is folded into the
-    capture, and returns what serving the artifact produces (:func:`capture` has the
-    ``requires_grad`` contract of that served value) -- and the
+    capture, and returns what serving the artifact produces (:func:`capture` has
+    the ``requires_grad`` and autocast contracts of that served value) -- and the
     artifact is written to the ``artifact_path`` / ``cache_path`` files when the
     block exits. Call :meth:`save` inside the block to checkpoint everything
     captured so far to those same files without ending the capture. The object is
@@ -1606,6 +1615,13 @@ def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -
     # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
     # Memory-format mismatches are caught by the inductor artifact's own
     # assert_size_stride (pinned on at capture).
+    # Every device type the captured graph dispatches on, from the GRAPH rather than
+    # from the runtime tensors: the drivers neutralize ambient autocast on these, and a
+    # graph can have no tensor inputs at all. Artifacts written before this field carry
+    # their own, older driver, which never reads it.
+    buf.writeline(
+        f"GRAPH_DEVICES = {_graph_device_types(compiled._gm) if compiled._gm is not None else ()!r}"
+    )
     buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
     buf.writeline(f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}")
     buf.writeline(f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}")
@@ -1647,6 +1663,9 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         "USER_INPUT_DEVICES",
         "USER_INPUT_BOUNDS",
     }
+    # Read when present, never required: GRAPH_DEVICES is absent on artifacts written
+    # before the drivers neutralized autocast (they carry their own, older driver).
+    optional = {"GRAPH_DEVICES"}
     found: dict[str, object] = {}
     try:
         tree = ast.parse(python_code)
@@ -1661,7 +1680,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         target = node.targets[0]
         if not isinstance(target, ast.Name):
             continue
-        if target.id in wanted:
+        if target.id in wanted or target.id in optional:
             try:
                 found[target.id] = ast.literal_eval(node.value)
             except (ValueError, TypeError) as e:
@@ -1670,10 +1689,10 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
                     f"malformed; it must be a Python literal."
                 ) from e
         else:
-            # Not a metadata name we consume (the driver section emits only function
-            # defs today, but a future artifact revision could add a driver-internal
-            # top-level assignment). Skipped by design, but logged at debug so a
-            # malformed / renamed artifact is diagnosable rather than silently lost.
+            # Not a metadata name we consume: the driver section's own state
+            # (_AUTOCAST_SKIPS_REPORTED, the one top-level assignment it emits beside
+            # its function defs) lands here. Skipped by design, but logged at debug so
+            # a malformed / renamed artifact is diagnosable rather than silently lost.
             log.debug(
                 "precompile: ignoring unrecognized top-level assignment %r while "
                 "parsing artifact calling-convention metadata",
@@ -1802,15 +1821,33 @@ def _emit_driver_source(forward_fn_name: str) -> str:
 
     forward_fn = getattr(driver, forward_fn_name)
     blocks = [
+        # _autocast_off's report-once state: module level, so out of getsource's
+        # reach. The name must match the one the driver declares.
+        "_AUTOCAST_SKIPS_REPORTED = set()",
         inspect.getsource(driver._extract_param_buffers),
         inspect.getsource(driver._fail),
         inspect.getsource(driver._check_structure),
+        inspect.getsource(driver._autocast_off),
         inspect.getsource(forward_fn).replace(
             f"def {forward_fn_name}(", "def forward(", 1
         ),
     ]
     body = "\n\n".join(block.rstrip() for block in blocks)
     return "\n" + body + "\n\n\n" + _DRIVER_MAIN
+
+
+def _graph_device_types(gm: torch.fx.GraphModule) -> tuple[str, ...]:
+    """Every device type the graph dispatches on, from its node metadata.
+
+    Derived from the GRAPH, not from the runtime params and inputs: a graph built only
+    from factory ops has no input device at all, leaving a runtime scan blind exactly
+    where an ambient-state leak needs closing. Unfiltered: ``_autocast_off`` in the
+    emitted driver decides per device in the SERVING build, whose autocast state is the
+    one to neutralize, and skips every device that build cannot autocast at all.
+    """
+    from torch._dynamo.graph_utils import _graph_device_types as _scan
+
+    return tuple(sorted(_scan(gm.graph)))
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
@@ -2565,7 +2602,10 @@ def capture(
     is outside the contract. ``backend`` picks
     ``"inductor"`` (lower through AOTAutograd + Inductor into self-contained source
     plus an acceleration cache) or ``"eager"`` (inline the captured ATen graph as
-    readable source). Call ``cap.save()`` inside the block to write the files before it exits (and to retry a
+    readable source). A call served from the artifact IGNORES the serving process's
+    ambient autocast on the captured graph's devices, since the casts the capture ran
+    under are already baked in, so capture under the autocast you want baked in. Call
+    ``cap.save()`` inside the block to write the files before it exits (and to retry a
     write that failed as the block exited). The contract is Note [precompile
     programming model] in this module; see :func:`load` for reading the pair back.
     """
@@ -2797,6 +2837,17 @@ class _PrecompileApi:
         (a quantized tensor), a nested example input, which capture does not support on
         either path (invariant 3), and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
+
+        A call served from the artifact IGNORES the serving process's ambient autocast
+        on the devices the captured graph uses: whatever the capture ran under is
+        already baked in (ATen casts for ``"eager"``, compiled kernels for
+        ``"inductor"``), so re-dispatching under an ambient ``autocast`` region would
+        cast a second time. The reloaded callable therefore returns the capture's
+        dtypes, NOT the dtypes the same eager call returns inside that region -- so
+        capture under the autocast you want baked in. A device this build cannot
+        autocast at all is skipped rather than failed on, with one logged warning per
+        device per loaded artifact; a call served inside an autocast region for such a
+        device can cast a second time and come back in a different dtype.
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
         if backend not in ("inductor", "eager"):
@@ -2845,6 +2896,10 @@ class _PrecompileApi:
         ``precompile()`` calls. A cache whose ``format``/``version`` does not match (a
         foreign or different-build envelope) is NOT fatal: the cache is acceleration
         only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
+
+        Calling the result IGNORES this process's ambient autocast on the captured
+        graph's devices, so it returns the capture's dtypes; see
+        ``torch.compiler.precompile``'s docstring for the full contract.
         """
         return _runnable_from_pair(
             python_code, cache, who="torch.compiler.precompile.load"
