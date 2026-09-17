@@ -11,6 +11,8 @@ from cutlass.cute.nvgpu import cpasync
 
 
 WARP = 32
+# Wide loads and TMA use the same byte-alignment contract.
+TRANSFER_ALIGNMENT = 16
 
 # Static unroll compiles superlinearly past ~1300 operations.
 MAX_UNROLL = 512
@@ -18,7 +20,7 @@ MAX_UNROLL = 512
 
 def vec_size(N: int, itemsize: int) -> int:
     """Elements/load; gcd makes vec divide N and preserves alignment at every chunk."""
-    return math.gcd(N, max(1, 16 // itemsize))
+    return math.gcd(N, max(1, TRANSFER_ALIGNMENT // itemsize))
 
 
 def align_bytes(N: int, itemsize: int) -> int:
@@ -418,7 +420,7 @@ class TileReduce:
         sX = smem.allocate_tensor(
             self.dtype,
             smem_box_layout(self.N, self.threads_per_block),
-            byte_alignment=16,
+            byte_alignment=TRANSFER_ALIGNMENT,
         )
         mbar = smem.allocate_array(cutlass.Int64, num_elems=2)
         gX = cute.local_tile(mX, self.tiler, (cutlass.Int64(bx), 0))

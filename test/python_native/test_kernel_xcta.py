@@ -1,34 +1,39 @@
 # Owner(s): ["module: dsl-native-ops"]
 # Smoke tests for few-row, large-N cross-CTA reduction; OpInfo covers numerics.
 
+import sys
 import unittest
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+
+
+if not TEST_CUTEDSL:
+    sys.stderr.write("CuTeDSL not available\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("CuTeDSL not available")
+
+import cutlass
+
+from torch._native.ops.reductions import kernel_xcta, traits as T
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
-@skipIfNoCuteDSL
 class TestKernelXcta(TestCase):
     def test_reduce_row_xcta(self):
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_xcta, traits as T
-
         x = torch.randn(1, 1 << 20, device="cuda")
         out = kernel_xcta.reduce_row_xcta(
             T.SumOps(acc=cutlass.Float32), "smoke", x, torch.float32
         )
-        self.assertEqual(out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4)
+        torch.testing.assert_close(
+            out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4
+        )
 
     def test_two_output_split(self):
         # Stage 2 projects both outputs from one accumulator; this path rejects index traits.
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_xcta, traits as T
-
         x = torch.randn(2, 1 << 20, device="cuda")
         res = kernel_xcta.reduce_row_xcta_2out(
             T.AMinMaxOps(acc=cutlass.Float32),
@@ -44,10 +49,6 @@ class TestKernelXcta(TestCase):
 
     def test_one_kernel_per_vec_class(self):
         # Runtime sub-row geometry lets one kernel serve every M and N in a vector class.
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_xcta, traits as T
-
         key = "vecclass"
         trait = T.SumOps(acc=cutlass.Float32)
 
@@ -59,7 +60,9 @@ class TestKernelXcta(TestCase):
             x = torch.randn(m, n, device="cuda")
             out = kernel_xcta.reduce_row_xcta(trait, key, x, torch.float32)
             self.assertIsNotNone(out, f"declined ({m}, {n})")
-            self.assertEqual(out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4)
+            torch.testing.assert_close(
+                out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4
+            )
 
         kernel_xcta._PLAN.clear()
         for m, n in ((1, 1 << 20), (3, 1 << 20), (2, 1 << 21)):
@@ -74,10 +77,6 @@ class TestKernelXcta(TestCase):
 
     def test_declines_are_deliberate(self):
         # Return None for unsplittable rows so the dispatcher can choose a faster path.
-        import cutlass
-
-        from torch._native.ops.reductions import kernel_xcta, traits as T
-
         trait = T.SumOps(acc=cutlass.Float32)
         # Below the sub-row floor, no C > 1 is legal.
         self.assertIsNone(

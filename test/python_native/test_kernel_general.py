@@ -2,6 +2,8 @@
 # Smoke-test K0 compilation and dispatch on a middle-dimension reduction, which forces
 # the general path. Override OpInfo suites provide full numerical coverage.
 
+import pathlib
+import re
 import sys
 import unittest
 
@@ -19,6 +21,7 @@ if not TEST_CUTEDSL:
 
 import cutlass
 
+from torch._native.ops import reductions
 from torch._native.ops.reductions import (
     kernel_general as kg,
     kernel_xcta as xc,
@@ -34,7 +37,7 @@ class TestKernelGeneral(TestCase):
         out = kg.reduce_dim(
             T.SumOps(acc=cutlass.Float32), "smoke", x, [1], torch.float32
         )
-        self.assertEqual(out, x.sum(dim=1), atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(out, x.sum(dim=1), atol=1e-2, rtol=1e-2)
 
     def test_two_stage_row_ragged_split(self):
         # A prime row requires ragged stage-1 chunks that stop at row boundaries.
@@ -42,7 +45,7 @@ class TestKernelGeneral(TestCase):
         (out,) = kg._two_stage_row(
             T.SumOps(acc=cutlass.Float32), "smoke_rag", x, [torch.float32], 1
         )
-        self.assertEqual(out, x.sum(dim=1), atol=1e-1, rtol=1e-3)
+        torch.testing.assert_close(out, x.sum(dim=1), atol=1e-1, rtol=1e-3)
 
     def test_two_stage_row_index_is_global(self):
         # Chunk-local reductions must report global columns and preserve first-wins ties.
@@ -58,11 +61,6 @@ class TestKernelGeneral(TestCase):
         # Assert every axis still shares one kernel. Glob files and match qualified or
         # annotated decorators so new drivers and spellings cannot evade the check.
         # Runtime introspection cannot distinguish @cute.kernel from @cute.jit wrappers.
-        import pathlib
-        import re
-
-        from torch._native.ops import reductions
-
         root = pathlib.Path(reductions.__file__).parent
         deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
         found = [
@@ -103,10 +101,6 @@ class TestKernelGeneral(TestCase):
 
     def test_no_suppressed_asserts_survive(self):
         # Reject suppressed asserts directly because lint itself can be silenced.
-        import pathlib
-
-        from torch._native.ops import reductions
-
         root = pathlib.Path(reductions.__file__).parent
         offenders = [
             f"{path.name}:{i}"
