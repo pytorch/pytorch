@@ -1856,6 +1856,12 @@ def call_random_fn(
 ) -> VariableTracker:
     from .builder import VariableBuilder
 
+    random_obj = getattr(fn, "__self__", None)
+    if random_obj in tx.output.side_effects:
+        random_var = tx.output.side_effects[random_obj]
+        if isinstance(random_var, variables.RandomVariable):
+            return random_var.call_method(tx, fn.__name__, args, kwargs)
+
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
     random_call_index = len(tx.output.random_calls)
