@@ -113,8 +113,15 @@ from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import (
+    has_triton_cuda_tma_device,
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
+)
+
+
+requires_cuda_tma = unittest.skipIf(
+    GPU_TYPE == "cuda" and not has_triton_cuda_tma_device(),
+    "requires CUDA TMA device support",
 )
 
 
@@ -1086,6 +1093,7 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
@@ -4175,6 +4183,30 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @parametrize("op", ["max", "topk", "frexp"])
+    @parametrize("strict", [False, True])
+    def test_structseq_output(self, op, strict):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                if op == "max":
+                    return torch.max(x, dim=0)
+                if op == "topk":
+                    return torch.topk(x, 2)
+                return torch.frexp(x)
+
+        model = Model()
+        x = torch.randn(4, 5, device=self.device)
+        expected = model(x)
+        ep = torch.export.export(model, (x,), strict=strict)
+        with tempfile.TemporaryDirectory() as directory:
+            package = torch._inductor.aoti_compile_and_package(
+                ep, package_path=os.path.join(directory, "model.pt2")
+            )
+            loaded = torch._inductor.aoti_load_package(package)
+            actual = loaded(x)
+        self.assertIs(type(actual), type(expected))
+        self.assertEqual(actual, expected)
+
     @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
         if self.device != "cuda":
@@ -4439,6 +4471,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_1d(self, dynamic, tma_version):
@@ -4501,6 +4534,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
@@ -10539,6 +10573,9 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
+    # MPS Inductor does not implement frexp.
+    "test_structseq_output_op_frexp_strict_False": fail_mps(is_skip=True),
+    "test_structseq_output_op_frexp_strict_True": fail_mps(is_skip=True),
     # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
     "test_scaled_dot_product_efficient_attention": fail_mps(),
     # MPS doesn't support float64
