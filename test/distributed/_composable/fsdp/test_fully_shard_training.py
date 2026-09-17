@@ -29,6 +29,8 @@ from torch.distributed.fsdp import (
     share_comm_ctx,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _prepare_reduce_scatter_inputs_with_reorder,
+    _PrepareReduceScatterInputs,
     foreach_all_gather,
     foreach_reduce,
 )
@@ -2576,7 +2578,9 @@ class TestFullyShardShareCommContext(FSDPTest):
             all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
             *,
-            use_dim0_views_for_copy: bool = False,
+            prepare_reduce_scatter_inputs: _PrepareReduceScatterInputs = (
+                _prepare_reduce_scatter_inputs_with_reorder
+            ),
         ):
             nonlocal reduce_scatter_streams
             reduce_scatter_streams.add(reduce_scatter_stream)
@@ -2596,7 +2600,7 @@ class TestFullyShardShareCommContext(FSDPTest):
                 partial_reduce_output,
                 all_reduce_hook,
                 force_sum_reduction_for_comms,
-                use_dim0_views_for_copy=use_dim0_views_for_copy,
+                prepare_reduce_scatter_inputs=prepare_reduce_scatter_inputs,
             )
 
         with (

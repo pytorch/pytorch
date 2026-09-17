@@ -30,6 +30,8 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
+    _prepare_reduce_scatter_inputs_with_dim0_views,
+    _prepare_reduce_scatter_inputs_with_reorder,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -378,14 +380,29 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
                 reshard_after_forward=True,
             )
 
-        def check_options(expected_options):
+        def check_options(expected_options, expected_hooks=None):
+            if expected_hooks is None:
+                expected_hooks = tuple(
+                    _prepare_reduce_scatter_inputs_with_dim0_views
+                    if enabled
+                    else _prepare_reduce_scatter_inputs_with_reorder
+                    for enabled in expected_options
+                )
             expected_by_param = {}
-            for module, expected in zip(fsdp_modules, expected_options):
+            for module, expected, expected_hook in zip(
+                fsdp_modules, expected_options, expected_hooks
+            ):
                 param_groups = module._get_fsdp_state()._fsdp_param_groups
                 self.assertTrue(param_groups)
                 for param_group in param_groups:
-                    self.assertEqual(param_group.use_dim0_views_for_copy, expected)
-                    expected_by_param[id(param_group.fsdp_params[0])] = expected
+                    self.assertEqual(param_group._use_dim0_views_for_copy, expected)
+                    self.assertIs(
+                        param_group._prepare_reduce_scatter_inputs, expected_hook
+                    )
+                    expected_by_param[id(param_group.fsdp_params[0])] = (
+                        expected,
+                        expected_hook,
+                    )
 
             with (
                 patch(
@@ -401,13 +418,15 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
                 model(inp).sum().backward()
                 model.zero_grad()
 
-            for collective, params_arg in ((all_gather_copy_out, 1), (reduce, 0)):
+            for collective, params_arg, keyword, option in (
+                (all_gather_copy_out, 1, "use_dim0_views_for_copy", 0),
+                (reduce, 0, "prepare_reduce_scatter_inputs", 1),
+            ):
                 seen_params = set()
                 for call in collective.call_args_list:
                     param_id = id(call.args[params_arg][0])
-                    self.assertEqual(
-                        call.kwargs["use_dim0_views_for_copy"],
-                        expected_by_param[param_id],
+                    self.assertIs(
+                        call.kwargs[keyword], expected_by_param[param_id][option]
                     )
                     seen_params.add(param_id)
                 self.assertEqual(seen_params, set(expected_by_param))
@@ -419,6 +438,22 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
         check_options((True, True, True))
         model[1].set_use_dim0_views_for_copy(False, recurse=False)
         check_options((True, False, True))
+
+        hook = MagicMock(wraps=_prepare_reduce_scatter_inputs_with_dim0_views)
+        model._set_reduce_scatter_copy_in_hook(hook, recurse=False)
+        check_options(
+            (True, False, True),
+            (
+                hook,
+                _prepare_reduce_scatter_inputs_with_reorder,
+                _prepare_reduce_scatter_inputs_with_dim0_views,
+            ),
+        )
+        self.assertEqual(hook.call_count, 1)
+        hook.reset_mock()
+        model._set_reduce_scatter_copy_in_hook(hook)
+        check_options((True, False, True), (hook,) * len(fsdp_modules))
+        self.assertEqual(hook.call_count, len(fsdp_modules))
         model.set_use_dim0_views_for_copy(False)
         check_options((False, False, False))
 
@@ -471,6 +506,10 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
         )
         if use_dim0_views_for_copy:
             model.set_use_dim0_views_for_copy(True)
+            copy_in_hook = MagicMock(
+                wraps=_prepare_reduce_scatter_inputs_with_dim0_views
+            )
+            model._set_reduce_scatter_copy_in_hook(copy_in_hook)
         torch.manual_seed(42 + self.rank)
         if inference_mode:
             with torch.inference_mode():
@@ -498,6 +537,8 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
             check_sharded_parity(self, ref_model, model)
             optim.zero_grad()
             ref_optim.zero_grad()
+        if use_dim0_views_for_copy:
+            self.assertEqual(copy_in_hook.call_count, 2)
 
 
 class TestFullyShardCommunication(FSDPTest):

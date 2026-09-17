@@ -21,6 +21,7 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    _prepare_reduce_scatter_inputs_with_reorder,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -50,6 +51,8 @@ from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from ._fsdp_collectives import _PrepareReduceScatterInputs
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -209,7 +212,10 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        self.use_dim0_views_for_copy: bool = False
+        self._use_dim0_views_for_copy: bool = False
+        self._prepare_reduce_scatter_inputs: _PrepareReduceScatterInputs = (
+            _prepare_reduce_scatter_inputs_with_reorder
+        )
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -475,7 +481,7 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
-                    use_dim0_views_for_copy=self.use_dim0_views_for_copy,
+                    use_dim0_views_for_copy=self._use_dim0_views_for_copy,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -736,7 +742,7 @@ class FSDPParamGroup:
                     self._partial_reduce_output,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
-                    use_dim0_views_for_copy=self.use_dim0_views_for_copy,
+                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event

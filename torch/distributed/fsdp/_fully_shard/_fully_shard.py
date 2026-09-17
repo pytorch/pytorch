@@ -19,6 +19,10 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
+from ._fsdp_collectives import (
+    _prepare_reduce_scatter_inputs_with_dim0_views,
+    _prepare_reduce_scatter_inputs_with_reorder,
+)
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -39,6 +43,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
+    from ._fsdp_collectives import _PrepareReduceScatterInputs
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -703,7 +708,36 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group.use_dim0_views_for_copy = enable
+                    fsdp_param_group._use_dim0_views_for_copy = enable
+                    fsdp_param_group._prepare_reduce_scatter_inputs = (
+                        _prepare_reduce_scatter_inputs_with_dim0_views
+                        if enable
+                        else _prepare_reduce_scatter_inputs_with_reorder
+                    )
+
+    def _set_reduce_scatter_copy_in_hook(
+        self, hook: _PrepareReduceScatterInputs, *, recurse: bool = True
+    ) -> None:
+        """Set the hook that prepares inputs before reduce-scatter copy-in.
+
+        The hook takes ``(fsdp_params, unsharded_grads, world_size)`` and returns
+        copy inputs and one padded unsharded size per entry in ``fsdp_params``,
+        in the same order. Only parameters participating in this reduction are
+        passed. The hook may replace entries in ``unsharded_grads`` to release
+        gradients that it reorders. Inputs are kept alive through copy submission.
+        Returned tensors must preserve dtype and device and be ready for dim-0
+        ``chunk_cat``. FSDP consumes and clears the returned input list.
+        The hook runs on the current compute stream; FSDP owns buffer allocation,
+        the native copy, and communication. All-gather copy-out is unaffected.
+        Calling ``set_use_dim0_views_for_copy`` selects a built-in hook again.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._prepare_reduce_scatter_inputs = hook
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
