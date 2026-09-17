@@ -46,6 +46,14 @@ class MyException(OSError):
     pass
 
 
+class NoteSubclass(str):
+    pass
+
+
+class NotesSubclass(list):
+    pass
+
+
 # The writable BaseException attributes live on the wrapped ExceptionVariable
 # rather than in the instance __dict__, so both the in-region read and the
 # object escaping the compiled region need explicit handling.
@@ -1796,6 +1804,181 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         e = RuntimeError("boom")
         e.foo = 42
         assert e.foo == 42  # noqa: S101
+
+    @parametrize("exc_type", [BaseException, Exception, ValueError])
+    def test_exception_add_note(self, exc_type):
+        def fn():
+            e = exc_type("example")
+            initially_absent = not hasattr(e, "__notes__")
+            result = e.add_note("first")
+            first = tuple(e.__notes__)
+
+            try:
+                e.add_note(42)
+            except TypeError as error:
+                invalid_note_error = str(error)
+            else:
+                invalid_note_error = "no error"
+            after_invalid_note = tuple(e.__notes__)
+
+            e.add_note("second")
+            repeated = tuple(e.__notes__)
+            alias = e.__notes__
+            alias.append("third")
+            aliased = tuple(e.__notes__)
+
+            del e.__notes__
+            absent_after_delete = not hasattr(e, "__notes__")
+            e.add_note("fresh")
+            recreated = tuple(e.__notes__)
+            del e.__notes__
+            absent_after_recreated_delete = not hasattr(e, "__notes__")
+
+            e.__notes__ = 42
+            try:
+                e.add_note("will not work")
+            except TypeError as error:
+                invalid_notes_error = str(error)
+            else:
+                invalid_notes_error = "no error"
+
+            return (
+                initially_absent,
+                result,
+                first,
+                invalid_note_error,
+                after_invalid_note,
+                repeated,
+                aliased,
+                absent_after_delete,
+                recreated,
+                absent_after_recreated_delete,
+                invalid_notes_error,
+                e.__notes__,
+            )
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), fn()
+        )
+
+    @parametrize("call", ["no_args", "two_args", "keyword"])
+    def test_exception_add_note_invalid_call(self, call):
+        def fn():
+            e = ValueError("example")
+            try:
+                if call == "no_args":
+                    e.add_note()
+                elif call == "two_args":
+                    e.add_note("first", "second")
+                else:
+                    e.add_note(note="first")
+            except TypeError as error:
+                return str(error)
+            return "no error"
+
+        actual = torch.compile(fn, backend="eager", fullgraph=True)()
+        expected = fn()
+        self.assertNotEqual(actual, "no error")
+        self.assertEqual(actual.split(".", 1)[1], expected.split(".", 1)[1])
+
+    def test_exception_add_note_invalid_first_note(self):
+        def fn():
+            e = ValueError("example")
+            try:
+                e.add_note(42)
+            except TypeError as error:
+                return str(error), hasattr(e, "__notes__")
+            return "no error", hasattr(e, "__notes__")
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), fn()
+        )
+
+    def test_exception_add_note_subclasses(self):
+        def fn():
+            e = ValueError("example")
+            note = NoteSubclass("first")
+            e.add_note(note)
+            first = e.__notes__[0]
+
+            notes = NotesSubclass(["existing"])
+            e.__notes__ = notes
+            e.add_note("second")
+            return (
+                first,
+                isinstance(first, NoteSubclass),
+                tuple(e.__notes__),
+                isinstance(e.__notes__, NotesSubclass),
+                e.__notes__ is notes,
+            )
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), fn()
+        )
+
+    def test_exception_delattr_errors(self):
+        def fn():
+            errors = []
+            e = ValueError("example")
+            e.custom = 1
+            del e.custom
+            errors.append(("custom_absent", str(not hasattr(e, "custom"))))
+            try:
+                del e.custom
+            except AttributeError as error:
+                errors.append((type(error).__name__, str(error)))
+            else:
+                errors.append(("", "no error"))
+
+            e = ValueError("example")
+            e.custom = 1
+            del e.custom
+            e.custom = 2
+            del e.custom
+            errors.append(("custom_redeleted", str(not hasattr(e, "custom"))))
+
+            for attr in ("__notes__", "args", "__traceback__", "__suppress_context__"):
+                e = ValueError("example")
+                try:
+                    delattr(e, attr)
+                except (AttributeError, TypeError) as error:
+                    errors.append((type(error).__name__, str(error)))
+                else:
+                    errors.append(("", "no error"))
+            return errors
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), fn()
+        )
+
+    def test_exception_delattr_tensor_attribute(self):
+        def fn(x):
+            e = ValueError("example")
+            e.custom = x.sin()
+            result = e.custom + 1
+            del e.custom
+            return result, hasattr(e, "custom")
+
+        x = torch.randn(4)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
+        )
+
+    @parametrize("exc_type", [BaseException, Exception, ValueError])
+    def test_exception_add_note_side_effect_replayed(self, exc_type):
+        def fn(x):
+            e = exc_type("example")
+            result = e.add_note("first")
+            notes = e.__notes__
+            notes.append("second")
+            return e, notes, result, x + 1
+
+        x = torch.randn(4)
+        e, notes, result, y = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(e.__notes__, ["first", "second"])
+        self.assertIs(e.__notes__, notes)
+        self.assertIsNone(result)
+        self.assertEqual(y, x + 1)
 
     @make_dynamo_test
     def test_exception_set_args_from_iterable(self):
