@@ -80,4 +80,12 @@ jobs:
       build-environment: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.test-matrix }}
+      # The default config picks these up by discovery; the inductor config in
+      # this same job already runs them. Only affects default (see EXCLUDE_CLAUSE
+      # in .ci/pytorch/test.sh).
+      tests-to-exclude: >-
+        inductor/test_torchinductor
+        inductor/test_torchinductor_opinfo
+        inductor/test_aot_inductor
+        inductor/test_cpu_select_algorithm
     secrets: inherit
