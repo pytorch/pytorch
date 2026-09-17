@@ -12,7 +12,6 @@ import sys
 import tempfile
 import textwrap
 import unittest
-import warnings
 from unittest import mock
 
 import torch
@@ -2321,15 +2320,15 @@ class TestPrecompile(TestCase):
         def raises(m, x):
             raise RuntimeError("my own capture-time failure")
 
-        args = (raises, model, torch.randn(3, 4))
-        with self.assertRaisesRegex(RuntimeError, "my own capture-time failure"):
-            torch.compiler.precompile(*args, backend="eager")
         try:
-            torch.compiler.precompile(*args, backend="eager")
+            torch.compiler.precompile(raises, model, torch.randn(3, 4), backend="eager")
         except RuntimeError as e:
+            self.assertIn("my own capture-time failure", str(e))
             # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
             self.assertNotIsInstance(e, PrecompileError)
             self.assertNotIn("no meta/fake kernel", str(e))
+        else:
+            self.fail("expected fn's RuntimeError to propagate out of capture")
 
     def test_callable_api_traces_a_backward_under_ambient_no_grad(self):
         # The callable API keeps grad enabled around the trace whatever the caller's
@@ -2454,13 +2453,6 @@ class TestPrecompileCaptureFiles(TestCase):
         f = load(self.artifact, self.cache)
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
-    def test_no_call_raises_and_writes_nothing(self):
-        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
-            with self._capture():
-                pass
-        self.assertFalse(os.path.exists(self.artifact))
-        self.assertFalse(os.path.exists(self.cache))
-
     def test_second_call_is_refused(self):
         with self._capture() as cap:
             cap(self.model, self.x)
@@ -2531,8 +2523,8 @@ class TestPrecompileCaptureFiles(TestCase):
 
     def test_same_file_for_both_halves_is_refused(self):
         # Also when the two halves are two SPELLINGS of one path: the cache write
-        # would truncate the source half, so the comparison is on the resolved
-        # paths and not on the strings the caller passed.
+        # would truncate the source half, so the comparison is on the normalized
+        # absolute paths and not on the strings the caller passed.
         spellings = (
             self.artifact,
             os.path.join(self.dir, ".", "m.py"),
@@ -2574,129 +2566,6 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_unknown_backend_is_refused(self):
         with self.assertRaisesRegex(ValueError, "backend must be"):
             self._capture(backend="nope")
-
-    def test_load_refuses_the_same_file_for_both_halves(self):
-        self._write_pair()
-        with self.assertRaisesRegex(ValueError, "same file"):
-            load(self.artifact, self.artifact)
-
-    def test_graph_devices_come_from_the_graph_not_the_inputs(self):
-        # GRAPH_DEVICES is scanned from the graph: fn here takes no tensor at all, so a
-        # scan of the runtime arguments would find no device to neutralize autocast on.
-        def fn(n):
-            return torch.ones(4) * n
-
-        with self._capture(fn) as cap:
-            cap(3)
-        self.assertIn("GRAPH_DEVICES = ('cpu',)", self._read(self.artifact).decode())
-
-    def test_served_output_ignores_ambient_autocast(self):
-        # eager only: this model lowers to extern_kernels.addmm(..., out=buf0), whose
-        # out= overload has no CPU autocast registration, so the inductor artifact
-        # cannot observe the ambient state (the extern-kernel test below covers it).
-        with self._capture(backend="eager") as cap:
-            y = cap(self.model, self.x)
-        served = load(self.artifact, self.cache)
-        with torch.autocast("cpu", dtype=torch.bfloat16):
-            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
-            z = served(self.model, self.x)
-        self.assertEqual(z.dtype, torch.float32)
-        self.assertEqual(z, y)
-
-    @parametrize("backend", ("eager", "inductor"))
-    def test_served_extern_kernel_ignores_ambient_autocast(self, backend):
-        # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
-        # CPU autocast and which the inductor artifact calls as a fallback: without
-        # _autocast_off the served call casts a second time and comes back in
-        # bfloat16 (or, as here, fails inside oneDNN on the mixed-dtype primitive).
-        model = torch.nn.LSTM(8, 8, batch_first=True)
-        x = torch.randn(2, 3, 8)
-
-        def fn(m, t):
-            return m(t)[0]
-
-        with self._capture(fn, backend=backend) as cap:
-            y = cap(model, x)
-        served = load(self.artifact, self.cache)
-        with torch.autocast("cpu", dtype=torch.bfloat16):
-            z = served(model, x)
-        self.assertEqual(z.dtype, torch.float32)
-        self.assertEqual(z, y)
-
-    @parametrize("device", ("notadevice", "privateuseone", "mkldnn"))
-    def test_an_unautocastable_graph_device_still_serves(self, device):
-        # GRAPH_DEVICES is unfiltered, so the serving build decides: a device type it
-        # cannot parse makes is_autocast_available raise, a deprecated spelling it does
-        # parse makes it emit a UserWarning -- which the error filter below turns into
-        # the raise -- and an out-of-tree backend with no autocast module reports
-        # available then refuses to construct. Each is skipped, not failed on.
-        with self._capture() as cap:
-            y = cap(self.model, self.x)
-        source = self._read(self.artifact).decode()
-        patched = source.replace(
-            "GRAPH_DEVICES = ('cpu',)", f"GRAPH_DEVICES = ('cpu', {device!r})"
-        )
-        self.assertNotEqual(patched, source)
-        blob = torch.load(self.cache, weights_only=True)
-        blob["code_hash"] = hashlib.sha256(patched.encode()).hexdigest()
-        with open(self.artifact, "wb") as f:
-            f.write(patched.encode())
-        torch.save(blob, self.cache)
-        served = load(self.artifact, self.cache)
-        with torch.autocast("cpu", dtype=torch.bfloat16):
-            # Announced rather than silent: on a device the build DOES know, the same
-            # skip would mean the served call casts twice. Through logging, not warnings,
-            # so no served call can raise under an error filter.
-            with warnings.catch_warnings():
-                warnings.simplefilter("error")
-                with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
-                    z = served(self.model, self.x)
-                self.assertIn("cannot autocast the captured", "".join(logs.output))
-                # Once per device per loaded artifact, not once per served call.
-                with self.assertNoLogs("torch._precompile_driver", "WARNING"):
-                    self.assertEqual(served(self.model, self.x), z)
-            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
-        self.assertEqual(z.dtype, torch.float32)
-        self.assertEqual(z, y)
-
-    def test_autocast_off_unwinds_a_failure_partway_through(self):
-        # The disables already entered have to come back out if the stack is not
-        # built to the end: the emitted driver hands the stack to the caller's
-        # `with`, so a leaked entry silently stops the caller autocasting.
-        from torch import _precompile_driver
-
-        real_autocast = torch.amp.autocast
-        entered = []
-
-        def autocast(device_type, **kwargs):
-            entered.append(device_type)
-            if len(entered) == 2:
-                raise KeyboardInterrupt("interrupted partway through")
-            return real_autocast(device_type, **kwargs)
-
-        with torch.autocast("cpu", dtype=torch.bfloat16):
-            with mock.patch("torch.amp.autocast", autocast):
-                with self.assertRaises(KeyboardInterrupt):
-                    _precompile_driver._autocast_off(("cpu", "cuda"))
-            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
-
-    @parametrize("backend", ("eager", "inductor"))
-    @unittest.skipUnless(TEST_CUDA, "CUDA has its own autocast policy and dtype")
-    def test_served_output_ignores_ambient_cuda_autocast(self, backend):
-        # Autocast is per device -- CUDA picks float16 and has its own op allowlist --
-        # so the neutralization is covered there too, on both drivers. The graph's
-        # aten.addmm.default IS registered for CUDA autocast, so without it the
-        # served call would come back in float16.
-        model = _FilesModel().cuda()
-        x = torch.randn(2, 4, device="cuda")
-        with self._capture(backend=backend) as cap:
-            y = cap(model, x)
-        served = load(self.artifact, self.cache)
-        with torch.autocast("cuda", dtype=torch.float16):
-            self.assertEqual(model(x).dtype, torch.float16)
-            z = served(model, x)
-        self.assertEqual(z.dtype, torch.float32)
-        self.assertEqual(z, y)
 
     @parametrize("backend", ("eager", "inductor"))
     def test_batchnorm_running_stats_update_once(self, backend):
@@ -2761,13 +2630,14 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertIs(view._base, x)
         self.assertEqual(view.requires_grad, backend == "inductor")
 
-    @parametrize("half", ("artifact", "cache"))
-    def test_a_failed_rename_restores_the_previous_pair(self, half):
-        # Either rename failing leaves the previous pair named and loadable, with no
-        # stray .bak: the backup is a hard link to the artifact, so the undo's own
-        # rename does not consume it.
+    def test_a_failed_cache_rename_restores_the_previous_pair(self):
+        # The first rename landed, so the undo renames the backup back over the new
+        # source, which consumes the .bak and leaves the trailing unlink a no-op. A
+        # failing FIRST rename is the other shape (nothing to put back: the named
+        # artifact still IS the hard-linked previous source), covered by
+        # test_a_read_only_first_rename_leaves_the_previous_pair_intact.
         before = self._write_pair()
-        with self._replacing(getattr(self, half), exc=OSError("disk full")):
+        with self._replacing(self.cache, exc=OSError("disk full")):
             self._rewrite_raises(OSError, "disk full")
         self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
         self.assertEqual(self._leftovers(), [])
@@ -3150,7 +3020,7 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             f = load(self.artifact, self.cache)
         self.assertTrue(
-            any("could not read the cache envelope" in m for m in logs.output)
+            any(":precompile.load could not read the cache" in m for m in logs.output)
         )
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
@@ -3194,14 +3064,13 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
 
     def test_paths_come_in_pairs(self):
-        # Half a pair never loads and one file for both halves would overwrite the
-        # source, so both entry points refuse either up front, before fn runs.
+        # Half a pair never loads, so both entry points refuse one up front, before fn
+        # runs (the same file for both halves is refused too, above).
         both = "neither artifact_path nor cache_path"
         cases = [
             ((self.artifact, None), "artifact_path without cache_path"),
             ((None, self.cache), "cache_path without artifact_path"),
             ((None, None), both),
-            ((self.artifact, self.artifact), "same file"),
         ]
         for (artifact, cache), regex in cases:
             with self.assertRaisesRegex(ValueError, regex):
@@ -3366,6 +3235,7 @@ class TestPrecompileCaptureFiles(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
+
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y

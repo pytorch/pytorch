@@ -53,9 +53,6 @@ if TYPE_CHECKING:
     USER_INPUT_DTYPES: list[str | None] = []
     USER_INPUT_DEVICES: list[str | None] = []
     USER_INPUT_BOUNDS: list[dict[int, tuple[int | None, int | None]] | None] = []
-    # Device types the captured graph dispatches on. The drivers neutralize
-    # ambient autocast on these; see _autocast_off.
-    GRAPH_DEVICES: tuple[str, ...] = ()
 
     # The compiled/captured graph's entry point, emitted before the driver.
     def call(flat_inputs: list[object]) -> list[object]: ...
@@ -135,70 +132,6 @@ def _check_structure(pb, names):
             )
 
 
-# Device names _autocast_off has already reported: reporting on every served call
-# would make a documented caveat a line of log noise per call. Not in a function
-# body, so _emit_driver_source emits the artifact's own copy -- which is what makes
-# the scope per LOADED ARTIFACT: load() execs python_code into a fresh namespace, so
-# each loaded handle starts with this set empty.
-_AUTOCAST_SKIPS_REPORTED: set[str] = set()
-
-
-def _autocast_off(devices):
-    """Neutralize ambient autocast on the devices the captured graph uses.
-
-    Whatever the capture ran under is already baked into the artifact -- ATen
-    casts for make_fx, generated kernels for inductor -- but the graph still
-    re-dispatches (an inductor artifact calls extern_kernels, which hit the
-    autocast key), so a serving process with autocast on would cast a second
-    time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
-    than from the runtime tensors: a graph built from factory ops has no input
-    device at all.
-
-    A device this build cannot autocast at all is SKIPPED with a logged warning,
-    not an error, since a device this process cannot enter has no ambient autocast
-    to neutralize. The three ways that shows up are all caught: an unknown device
-    type raises ``RuntimeError``, a deprecated-but-parseable spelling (``mkldnn``)
-    emits a ``UserWarning`` -- which under ``-W error`` IS the raise, hence
-    ``Warning`` in the catch -- and an out-of-tree backend with no registered
-    autocast module reports available and then fails an ``assert`` in the
-    constructor (``privateuseone``). Nothing else is swallowed. The skip is still
-    announced, because on a device this build DOES know it means the served call
-    casts twice; through ``logging`` rather than ``warnings`` (a ``UserWarning``
-    would fail the very call this skip keeps working under ``-W error``) and once
-    per device per LOADED artifact (_AUTOCAST_SKIPS_REPORTED is the artifact's own
-    copy, so a second ``load`` reports again). The stack is built inside a ``with``
-    and handed back with ``pop_all`` so a propagating failure unwinds the disables
-    already entered, not leaving the caller's autocast off.
-    """
-    import contextlib as _contextlib
-    import logging as _logging
-
-    with _contextlib.ExitStack() as stack:
-        _skipped = []
-        for _dev in devices:
-            try:
-                if _torch.amp.is_autocast_available(_dev):
-                    stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
-                    continue
-            except (RuntimeError, AssertionError, Warning):
-                pass
-            if _dev not in _AUTOCAST_SKIPS_REPORTED:
-                _AUTOCAST_SKIPS_REPORTED.add(_dev)
-                _skipped.append(_dev)
-        if _skipped:
-            # The logger named literally, not from __name__: this body is inlined
-            # into the artifact, which is not this module.
-            _logging.getLogger("torch._precompile_driver").warning(
-                "precompile: this build cannot autocast the captured graph's "
-                "device(s) %s, so any ambient autocast is left on for them. A "
-                "call served inside an autocast region for one of those devices "
-                "can cast a second time on top of the casts already baked into the "
-                "artifact and return a different dtype than the capture did.",
-                _skipped,
-            )
-        return stack.pop_all()
-
-
 def _eager_forward(*args):
     """Run the captured ATen graph eagerly. Pass the same args the traced fn took --
     the module(s) in the same positions plus the runtime inputs. The module(s) must
@@ -268,7 +201,7 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    with _autocast_off(GRAPH_DEVICES), _torch.no_grad():
+    with _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -379,11 +312,7 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        # The generated code re-dispatches through extern_kernels for anything
-        # inductor did not fuse, so ambient autocast reaches it even though the
-        # casts the capture ran under are already baked into the kernels.
-        with _autocast_off(GRAPH_DEVICES):
-            out = list(call([*pb, *user_flat]))
+        out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
         # mismatch, or a size mismatch on an unbacked dim the static check above cannot
