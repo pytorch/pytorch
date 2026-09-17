@@ -64,7 +64,8 @@ class PrecompileSummary:
 
     ``str(summary)`` renders a one-line digest: the counts, the dropped guards
     tallied by type, the risky slots and frame lists cut to their first five
-    entries (``+N more``), and the first line of the first capture error.
+    entries (``+N more``), and the first non-empty line of the first capture
+    error.
     Everything here describes the calls that ran, not every possible input or
     unexecuted branch, and once ``truncated`` is non-empty every count and
     frame list is a lower bound: the frames called beneath a truncated one ran
@@ -105,9 +106,10 @@ class PrecompileSummary:
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
         bypassed: ``co_name``s of frames the package refused to record: every compile
-            of the frame was bypassed because its guards could not be
-            serialized, or a backend artifact was missing when the package was
-            saved. Not an eager fallback: the frame ran compiled during capture
+            of the frame was bypassed (``OutputGraph.bypass_package``: its
+            guards could not be serialized, or its graph held parameters by
+            static address), or a backend artifact was missing when the package
+            was saved. Not an eager fallback: the frame ran compiled during capture
             (Dynamo installed its guarded code, it just went unrecorded), the
             artifact carries no variant of it, and an install re-traces it
             rather than skipping it as trivial.
@@ -121,12 +123,18 @@ class PrecompileSummary:
             whose graphs all landed in an inner frame, or a frame Dynamo gave up
             on. The remainder after ``bypassed``, which also holds no guarded
             code but has a different cause and remedy.
-        wont_generalize: Guard *sources* (not frame names) that every captured
-            variant pins to one value, so no variant will serve another value.
+        wont_generalize: Guard *sources* (not frame names) a kept guard pins to
+            one value in some variant while no other variant of the same frame
+            guards the source without pinning it, so as captured no variant
+            served another value. Observed, not proven: a variant that never
+            guarded the source does not count as serving other values of it.
         dropped_guards: Slots the serialized copy's guard filter rejected: the
-            guards the serializer refuses (the identity guards, plus
-            ``DICT_VERSION`` and ``WEAKREF_ALIVE``), plus whatever a
-            caller-supplied filter dropped.
+            guards of a type the serializer refuses (the identity guards, plus
+            ``DICT_VERSION`` and ``WEAKREF_ALIVE``), and the guards of another
+            type whose check derives one, listed under their own type (a
+            ``TENSOR_MATCH`` that checks identity is a dropped ``TENSOR_MATCH``;
+            ``TYPE_MATCH`` and ``BUILTIN_MATCH`` are kept whatever they derive);
+            plus whatever a caller-supplied filter dropped.
         kept_guards: Slots the artifact still checks.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
             captured variants apart, or flagged by the risky-drop lint as a
@@ -152,7 +160,9 @@ class PrecompileSummary:
             check tells them apart. Kept beside the slot lists so the slots stay
             the identity the policy compares on; for programmatic consumers,
             not the digest.
-        capture_errors: Messages from capture calls that raised.
+        capture_errors: One message per capture call that raised, the exception
+            type first (``"RuntimeError: boom"``), so the digest's first line
+            is never empty however the exception was raised.
     """
 
     frames: int
@@ -239,7 +249,8 @@ class PrecompileSummary:
             base += f", {len(self.bypassed)} BYPASSED: {some(self.bypassed)}"
         if self.capture_errors:
             errors = len(self.capture_errors)
-            first = self.capture_errors[0].partition("\n")[0]
+            lines = self.capture_errors[0].splitlines()
+            first = next((line for line in lines if line.strip()), "")
             base += f", {errors} CAPTURE ERROR{'' if errors == 1 else 'S'}: {first!r}"
             if errors > 1:
                 base += f" +{errors - 1} more"
