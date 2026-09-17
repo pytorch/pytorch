@@ -463,35 +463,49 @@ class TCPStoreTest(TestCase, StoreTestBase):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
 
-        os.environ["MASTER_ADDR"] = addr
-        os.environ["MASTER_PORT"] = str(port)
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["MASTER_ADDR"] = addr
+            os.environ["MASTER_PORT"] = str(port)
 
-        # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
-        # initialize even when using the same socket address.
+            # We internally use a multi-tenant TCP store. Both PG and RPC should successfully
+            # initialize even when using the same socket address.
 
-        os.environ["USE_LIBUV"] = "1" if self._use_libuv else "0"
-        dist.init_process_group(
-            backend="gloo",
-            init_method="env://",
-            rank=0,
-            world_size=1,
-        )
+            os.environ["USE_LIBUV"] = "1" if self._use_libuv else "0"
+            dist.init_process_group(
+                backend="gloo",
+                init_method="env://",
+                rank=0,
+                world_size=1,
+            )
 
-        backend_opts = rpc.TensorPipeRpcBackendOptions(
-            init_method=f"tcp://{addr}:{port}", _transports=tp_transports()
-        )
-        rpc.init_rpc(
-            name="worker0",
-            rank=0,
-            world_size=1,
-            rpc_backend_options=backend_opts,
-        )
+            backend_opts = rpc.TensorPipeRpcBackendOptions(
+                init_method=f"tcp://{addr}:{port}", _transports=tp_transports()
+            )
+            rpc.init_rpc(
+                name="worker0",
+                rank=0,
+                world_size=1,
+                rpc_backend_options=backend_opts,
+            )
 
-        del os.environ["USE_LIBUV"]
-        if "USE_LIBUV" in os.environ:
-            raise AssertionError("Expected USE_LIBUV to not be in os.environ")
-        rpc.shutdown()
-        dist.destroy_process_group()
+            del os.environ["USE_LIBUV"]
+            if "USE_LIBUV" in os.environ:
+                raise AssertionError("Expected USE_LIBUV to not be in os.environ")
+            rpc.shutdown()
+            dist.destroy_process_group()
+        finally:
+            # A failure can land inside init_rpc, so do not wait on a possibly
+            # half-initialized agent, and tear the group down even if this raises.
+            try:
+                if rpc.api._is_current_rpc_agent_set():
+                    rpc.shutdown(graceful=False)
+            finally:
+                if dist.is_initialized():
+                    dist.destroy_process_group()
+                for var in ("USE_LIBUV", "MASTER_ADDR", "MASTER_PORT"):
+                    os.environ.pop(var, None)
 
     @skip_if_win32()
     def test_take_over_listen_socket(self):
@@ -656,15 +670,17 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
         os.environ[USE_AGENT_STORE] = "1"
         os.environ[MASTER_PORT] = str(store.port)
-        second_server = dist.TCPStore(
-            host_name="localhost",
-            port=store.port,
-            world_size=1,
-            is_master=True,
-            use_libuv=self._use_libuv,
-        )
-        del os.environ[USE_AGENT_STORE]
-        del os.environ[MASTER_PORT]
+        try:
+            second_server = dist.TCPStore(
+                host_name="localhost",
+                port=store.port,
+                world_size=1,
+                is_master=True,
+                use_libuv=self._use_libuv,
+            )
+        finally:
+            os.environ.pop(USE_AGENT_STORE, None)
+            os.environ.pop(MASTER_PORT, None)
 
         self.assertEqual(second_server.port, store.port)
 
@@ -818,21 +834,27 @@ class RendezvousEnvTest(TestCase):
 
     @retry_on_connect_failures
     def test_nominal(self):
-        os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
-        os.environ["MASTER_PORT"] = str(common.find_free_port())
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
 
-        # Single rank
-        os.environ["RANK"] = "0"
-        gen0 = dist.rendezvous("env://")
-        store0, rank0, size0 = next(gen0)
-        self.assertEqual(0, rank0)
-        self.assertEqual(1, size0)
+            # Single rank
+            os.environ["RANK"] = "0"
+            gen0 = dist.rendezvous("env://")
+            store0, rank0, size0 = next(gen0)
+            self.assertEqual(0, rank0)
+            self.assertEqual(1, size0)
 
-        store0.set("key0", "value0")
+            store0.set("key0", "value0")
 
-        # check with get
-        self.assertEqual(b"value0", store0.get("key0"))
+            # check with get
+            self.assertEqual(b"value0", store0.get("key0"))
+        finally:
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
 
 
 class RendezvousFileTest(TestCase):

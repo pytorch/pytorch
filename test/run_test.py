@@ -1419,7 +1419,6 @@ CUSTOM_HANDLERS = {
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
     "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
-    "distributed/test_store": run_test_with_subprocess,
     "distributed/test_pg_wrapper": run_test_with_subprocess,
     "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
