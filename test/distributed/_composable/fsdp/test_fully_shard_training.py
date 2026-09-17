@@ -1725,7 +1725,6 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         inputs = [torch.randn(4, 8, device=device_type.type) for _ in range(3)]
         model.set_is_last_backward(False)
         model.set_reshard_after_backward(False)
-        model.set_reduce_scatter_unused_params(True)
         # Defer all gradient reduction until finalization.
         with CommDebugMode() as comm_mode:
             model.set_requires_gradient_sync(False)
