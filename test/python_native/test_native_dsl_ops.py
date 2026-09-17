@@ -967,12 +967,14 @@ class TestTritonDistributionDiscovery(TestCase):
                 ),
                 _triton_records({"triton": [record], "pytorch-triton-rocm": [record]}),
                 _triton_module_at(str(origin)),
-                _triton_provided_by("triton", "pytorch-triton-rocm"),
+                _triton_provided_by("triton", "pytorch-triton-rocm") as scan,
                 self.assertLogs("torch._native.triton_utils", level="WARNING"),
             ):
                 self.assertEqual(
                     triton_utils._available_triton_version(), Version("3.7.1")
                 )
+
+            scan.assert_not_called()
 
     def test_nameless_provider_is_skipped(self):
         with (

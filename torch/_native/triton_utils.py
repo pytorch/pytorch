@@ -174,9 +174,7 @@ def _resolve_ambiguous_version(
         elif result is None:
             undecidable.append(candidate)
 
-    if not fallback:
-        if matched and len({version for _, version in matched}) == 1:
-            return matched[0][1]
+    if not fallback and not matched:
         return None
 
     choices = matched or undecidable or candidates
