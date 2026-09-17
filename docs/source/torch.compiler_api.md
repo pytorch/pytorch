@@ -170,7 +170,10 @@ deprecation cycle.
    :raises ValueError: for an unknown ``backend``, for one file named as both halves, or
        for a path that exists but is not a regular file.
    :raises TypeError: if ``tracer`` is not a :class:`precompile.MakeFxTracer` or
-       :class:`precompile.DynamoTracer`.
+       :class:`precompile.DynamoTracer`, or if a ``MakeFxTracer`` capture is called with
+       keyword arguments.
+   :raises NotImplementedError: for ``backend="eager"`` with a ``mark_unbacked`` input
+       (dynamic shapes need the inductor backend).
 
    Example::
 
@@ -352,12 +355,13 @@ deprecation cycle.
    .. py:method:: save()
 
       Write everything captured so far to the two files without ending the capture. Call
-      it as often as you like inside the block. With :class:`precompile.DynamoTracer` each
-      call re-renders and rewrites both files, so a job that dies between saves leaves the
-      last checkpoint loadable; a :class:`precompile.MakeFxTracer` capture records a single
-      call, so ``save()`` and block exit write the same files. A gate
-      refusal (the ``DynamoTracer`` ``require_*`` fields) or a write failure raises but
-      writes nothing partial: the previous files stay intact and the capture stays open.
+      it as often as you like inside the block once at least one call has been captured (an
+      earlier ``save()`` raises ``PrecompileError``). With :class:`precompile.DynamoTracer`
+      each call re-renders and rewrites both files, so a job that dies between saves leaves
+      the last checkpoint loadable; a :class:`precompile.MakeFxTracer` capture records a
+      single call, so ``save()`` and block exit write the same files. A gate refusal (the
+      ``DynamoTracer`` ``require_*`` fields) or a write failure raises but writes nothing
+      partial: the previous files stay intact and the capture stays open.
 
    .. py:method:: summary()
 
@@ -438,8 +442,8 @@ deprecation cycle.
 .. py:class:: precompile.FrameInvariants
 
    Per-frame guard classification, reported by :meth:`precompile.Capture.invariants` for a
-   ``DynamoTracer`` capture. Frozen dataclass with the frame's name, ``filename``, ``lineno``,
-   the number of ``variants`` seen, and three tuples
+   ``DynamoTracer`` capture. Frozen dataclass with the frame's code name in ``frame``, plus
+   ``filename``, ``lineno``, the number of ``variants`` seen, and three tuples
    of :class:`precompile.GuardFact`: ``invariant`` (held identically across every variant), ``varying``
    (differed between variants), and ``undetermined`` (a single variant could not decide).
 
