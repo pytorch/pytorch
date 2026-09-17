@@ -484,6 +484,7 @@
   - test/cpp/profiler/**
   - test/profiler/**
   - third_party/kineto
+  - torch/_C/_profiler.pyi
   - torch/autograd/profiler*
   - torch/csrc/autograd/profiler*
   - torch/csrc/profiler/**
