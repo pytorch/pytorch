@@ -678,17 +678,22 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
-    def _set_all_gather_copy_out_hook(
-        self, hook: _PrepareAllGatherOutputs, *, recurse: bool = True
+    def set_all_gather_output_fn(
+        self, fn: _PrepareAllGatherOutputs, *, recurse: bool = True
     ) -> None:
-        """Set the hook that prepares each parameter's all-gather copy outputs.
+        """Set the function that prepares each parameter's all-gather outputs.
 
-        The hook takes an ``fsdp_param`` with allocated final outputs and returns
+        The function takes an ``fsdp_param`` with allocated final outputs and returns
         copy destinations and whether a separate reorder is needed. Destinations
         must preserve dtype and device. Direct views must split each final output
         in order; reordering requires one matching temporary per final output.
-        The hook runs on the current compute stream. FSDP owns the native copy
+        The function runs on the current compute stream. FSDP owns the native copy
         and any requested reorder. Reduce-scatter input preparation is unaffected.
+
+        Args:
+            fn (Callable): Function that prepares all-gather output destinations.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
@@ -696,22 +701,27 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._prepare_all_gather_outputs = hook
+                    fsdp_param_group._prepare_all_gather_outputs = fn
 
-    def _set_reduce_scatter_copy_in_hook(
-        self, hook: _PrepareReduceScatterInputs, *, recurse: bool = True
+    def set_reduce_scatter_input_fn(
+        self, fn: _PrepareReduceScatterInputs, *, recurse: bool = True
     ) -> None:
-        """Set the hook that prepares inputs before reduce-scatter copy-in.
+        """Set the function that prepares reduce-scatter inputs.
 
-        The hook takes ``(fsdp_params, unsharded_grads, world_size)`` and returns
+        The function takes ``(fsdp_params, unsharded_grads, world_size)`` and returns
         copy inputs and one padded unsharded size per entry in ``fsdp_params``,
         in the same order. Only parameters participating in this reduction are
-        passed. The hook may replace entries in ``unsharded_grads`` to release
+        passed. The function may replace entries in ``unsharded_grads`` to release
         gradients that it reorders. Inputs are kept alive through copy submission.
         Returned tensors must preserve dtype and device and be ready for dim-0
         ``chunk_cat``. FSDP consumes and clears the returned input list.
-        The hook runs on the current compute stream; FSDP owns buffer allocation,
+        The function runs on the current compute stream; FSDP owns buffer allocation,
         the native copy, and communication. All-gather copy-out is unaffected.
+
+        Args:
+            fn (Callable): Function that prepares reduce-scatter inputs.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
@@ -719,7 +729,7 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._prepare_reduce_scatter_inputs = hook
+                    fsdp_param_group._prepare_reduce_scatter_inputs = fn
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
