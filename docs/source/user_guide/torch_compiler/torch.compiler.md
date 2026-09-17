@@ -37,7 +37,8 @@ might be used interchangeably in this documentation.
 `torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. Capture
 is caller-driven: enter `precompile.capture(fn, artifact_path=..., cache_path=...)` as a
 context manager and call it exactly as you would `fn` -- with the model(s) passed among the
-arguments, e.g.
+arguments, positionally (the default `MakeFxTracer` takes positional arguments only;
+`DynamoTracer` will also accept keyword arguments), e.g.
 
 ```python
 with torch.compiler.precompile.capture(
@@ -50,8 +51,10 @@ f = torch.compiler.precompile.load("m.py", "m.cache")
 -- and it writes a self-contained, runnable Python source artifact plus an acceleration
 cache when the block exits. The default `MakeFxTracer` captures a single call;
 `DynamoTracer`, which captures several calls with the graph breaks and recompilations
-between them, is landing in follow-up changes. Call `cap.save()` inside the block to checkpoint the on-disk
-artifact partway through a training loop without ending the capture. Reload the artifact with
+between them, is landing in follow-up changes. Call `cap.save()` inside the block to write
+the on-disk artifact without ending the capture; with `DynamoTracer` that checkpoints the
+loop partway through, while a `MakeFxTracer` capture records a single call, so `save()` and
+block exit write the same files. Reload the artifact with
 `torch.compiler.precompile.load`; since no weights are baked in, you pass the model again at
 runtime. See the {ref}`API reference <torch.compiler_api>` for details.
 
