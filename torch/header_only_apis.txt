@@ -231,6 +231,12 @@ HeaderOnlyGenericPackedTensorAccessor
 # HeaderOnlyGenericPackedTensorAccessorBase are tested through
 # HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor
 
+# torch/headeronly/core/AccumulateType.h
+AccumulateTypeDevice
+AccumulateType
+acc_type_device
+acc_type
+
 # torch/headeronly/util/Deprecated.h
 # C10_DEPRECATED, C10_DEPRECATED_MESSAGE, and
 # C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
