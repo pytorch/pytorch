@@ -21,6 +21,8 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -209,6 +211,8 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -477,6 +481,7 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
+                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -737,6 +742,7 @@ class FSDPParamGroup:
                     self._partial_reduce_output,
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
+                    prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
