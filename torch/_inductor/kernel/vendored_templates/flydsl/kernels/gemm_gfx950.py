@@ -218,12 +218,12 @@ def make_gemm_gfx950_param(
                 f"block_m={block_m}, block_n={block_n}, "
                 f"block_threads={block_threads}"
             )
-        use_scale_chunk = (
-            dtype_id == GEMM_DTYPE_MXFP8 and use_half_tile_interleaved and block_k == 128
+        use_scale_chunk = use_half_tile_interleaved and (
+            block_k == 128 or (dtype_id == GEMM_DTYPE_MXFP4 and block_k == 256)
         )
         scale_block_k = block_k
         if use_scale_chunk:
-            scale_block_k *= MXFP8_HTI_SCALE_CHUNK_TILES
+            scale_block_k = 128 * MXFP8_HTI_SCALE_CHUNK_TILES
             scale_stages = MXFP8_HTI_SCALE_BUFFERS
         scale_row_bytes = scale_block_k // MXFP_SCALE_BLOCK_K
         scale_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
@@ -288,6 +288,8 @@ def make_gemm_gfx950_param(
         )
     ldg_x_threads = block_k_bytes // GFX950_DMA_BYTES
     load_elems_per_iter = block_threads * GFX950_DMA_BYTES // in_dbytes
+    if dtype_id == GEMM_DTYPE_MXFP4:
+        load_elems_per_iter *= 2
     if use_half_tile_interleaved:
         half_ldg_a_iters = ((block_m // 2) * block_k) // load_elems_per_iter
         half_ldg_b_iters = ((block_n // 2) * block_k) // load_elems_per_iter
@@ -597,9 +599,13 @@ def async_load_operand(
     async_load_bytes = param.async_load_bytes
     async_load_vec_size = async_load_bytes // param.in_data_bytes
     ldg_x_threads = param.ldg_x_threads
-    block_k = param.block_k
-    k = context.k
-    fence_loads = param.dtype_id == GEMM_DTYPE_MXFP8 and param.use_half_tile_interleaved
+    elements_per_byte = 2 if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4) else 1
+    block_k = param.block_k // elements_per_byte
+    k = context.k // elements_per_byte
+    fence_loads = (
+        param.dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
+        and param.use_half_tile_interleaved
+    )
     lds_ptr = make_wave_lds_ptr(lds_base, context.wave_offset)
     for i in range_constexpr(operand.load_iters):
         global_tid = block_threads * i + tid
@@ -1351,6 +1357,8 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
         if m <= 0 or n <= 0 or k <= 0:
             return None
         if k % result.mma_k or k > 2**31 - 1:
+            return None
+        if n % (GFX950_DMA_BYTES // result.out_data_bytes):
             return None
         async_load_vec_size = GFX950_DMA_BYTES // result.in_data_bytes
         if result.a_is_transposed and m % async_load_vec_size != 0:

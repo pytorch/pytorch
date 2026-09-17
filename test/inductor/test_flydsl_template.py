@@ -1308,12 +1308,14 @@ def _run_mxfp_tile(
         k,
         kwargs,
     )
-    assert param is not None
+    if param is None:
+        raise AssertionError("unsupported MXFP shape/config")
+    stream = torch.cuda.current_stream().cuda_stream
     compile_args = tuple(
         flyc.from_torch_tensor(tensor).mark_layout_dynamic() for tensor in tensors
-    ) + (param, 0)
+    ) + (param, stream)
     compiled = flyc.compile(gemm_mxfp_gfx950, *compile_args)
-    compiled(*tensors, param, 0)
+    compiled(*tensors, param, stream)
     torch.cuda.synchronize()
     return out
 
@@ -1395,7 +1397,7 @@ class TestFlyDSLMXFPMetadata(TestCase):
         for k, tile_k in ((384, 256), (640, 512)):
             config_ = asdict(FlyDSLGemmConfig(32, 32, tile_k, 2, 1, 1, 0))
             param = make_gemm_param_and_validate(
-                65, 97, k, _mxfp_param_kwargs(mxfp_format, config_, k=k)
+                65, 104, k, _mxfp_param_kwargs(mxfp_format, config_, k=k)
             )
             self.assertIsNotNone(param)
             self.assertTrue(param.has_k_tail)
@@ -1494,12 +1496,15 @@ class TestFlyDSLMXFPMetadata(TestCase):
         ),
     )
     @unittest.skipUnless(flydsl_utils.runtime_available(), "FlyDSL unavailable")
-    def test_mxfp8_scale_chunk_metadata(self, tile, scale_shape, scale_iters):
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    def test_mxfp_scale_chunk_metadata(self, mxfp_format, tile, scale_shape, scale_iters):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
             make_gemm_gfx950_param,
         )
 
-        kwargs = _mxfp_param_kwargs("mxfp8", asdict(FlyDSLGemmConfig(*tile)), k=2048)
+        if mxfp_format == "mxfp4" and tile[2] == 256:
+            scale_shape, scale_iters = (16, 1024, 1024), (0, 0)
+        kwargs = _mxfp_param_kwargs(mxfp_format, asdict(FlyDSLGemmConfig(*tile)), k=2048)
         param = make_gemm_gfx950_param(**kwargs)
         self.assertEqual(
             (param.scale_row_bytes, param.scale_a_bytes, param.scale_b_bytes),
@@ -1539,7 +1544,8 @@ class TestFlyDSLMXFPMetadata(TestCase):
             (80, 112, 384, False, True, True),
             (80, 112, 384, True, False, True),
             (80, 112, 384, True, True, True),
-            (65, 97, 384, False, True, True),
+            (65, 97, 384, False, True, False),
+            (65, 104, 384, False, True, True),
             (64, 96, 160, False, True, False),
             (65, 96, 256, True, True, False),
             (64, 97, 256, False, False, False),
@@ -1648,12 +1654,12 @@ class TestFlyDSLMXFPDevice(TestCase):
                 (128, 128, 128, 2, 2, 2, 0, True),
                 torch.bfloat16,
             ),
-            ("mxfp4", (32, 32, 256), (16, 16, 128, 2, 1, 1, 0), torch.bfloat16),
+            ("mxfp4", (32, 32, 256), (32, 32, 128, 2, 1, 1, 0), torch.bfloat16),
             ("mxfp4", (128, 128, 512), (128, 128, 256, 2, 2, 2, 0), torch.bfloat16),
             ("mxfp4", (256, 256, 1024), (64, 64, 128, 4, 2, 2, 4), torch.bfloat16),
             ("mxfp4", (256, 256, 512), (256, 256, 256, 2, 4, 2, 0), torch.float16),
-            ("mxfp8", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0), torch.bfloat16),
-            ("mxfp4", (65, 97, 384), (32, 32, 256, 2, 1, 1, 0), torch.bfloat16),
+            ("mxfp8", (65, 104, 384), (32, 32, 256, 2, 1, 1, 0), torch.bfloat16),
+            ("mxfp4", (65, 104, 384), (32, 32, 256, 2, 1, 1, 0), torch.bfloat16),
             ("mxfp8", *_MXFP_LAYOUT_CASE, False, False),
             ("mxfp8", *_MXFP_LAYOUT_CASE, True, False),
             ("mxfp8", *_MXFP_LAYOUT_CASE, True, True),
@@ -1680,24 +1686,29 @@ class TestFlyDSLMXFPDevice(TestCase):
         (
             (128, 256), (128, 384), (128, 512), (128, 640),
             (128, 896), (128, 1024), (128, 1152), (128, 2048),
-            (256, 640), (256, 2048),
+            (256, 512), (256, 640), (256, 768), (256, 1024),
+            (256, 1152), (256, 2048),
         ),
     )
     @parametrize("out_dtype", (torch.bfloat16, torch.float16))
     @parametrize("operand_layout", ((False, True), (False, False), (True, True), (True, False)))
-    def test_mxfp8_hti_scale_stage_reuse(self, device, tile_k, k, out_dtype, operand_layout):
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    def test_mxfp_hti_scale_stage_reuse(self, device, tile_k, k, out_dtype, operand_layout, mxfp_format):
         self._skip_unless_supported(device)
         torch.manual_seed(0)
         m = n = 256
         operands, scales, references = [], [], []
         for rows in (m, n):
-            values = torch.randn(rows, k, device=device).to(torch.float8_e4m3fn)
+            if mxfp_format == "mxfp4":
+                values, scale, reference = _make_mxfp_operand(mxfp_format, rows, k, device)
+            else:
+                values = torch.randn(rows, k, device=device).to(torch.float8_e4m3fn)
+                scale = torch.full((rows, k // 32), 127, device=device, dtype=torch.uint8)
+                reference = values.float()
             # Vary scales along K so overwriting a live stage cannot go unnoticed.
             exponents = torch.randint(-2, 3, (rows, k // 32), device=device)
-            scale = (exponents + 127).to(torch.uint8).view(torch.float8_e8m0fnu)
-            reference = values.float() * torch.exp2(exponents.float()).repeat_interleave(
-                32, dim=1
-            )
+            scale = (scale.view(torch.uint8).int() + exponents).to(torch.uint8).view(torch.float8_e8m0fnu)
+            reference *= torch.exp2(exponents.float()).repeat_interleave(32, dim=1)
             operands.append(values)
             scales.append(scale)
             references.append(reference)
@@ -1710,15 +1721,16 @@ class TestFlyDSLMXFPDevice(TestCase):
         for use_hti in (False, True):
             with self.subTest(use_hti=use_hti):
                 actual = _run_mxfp_tile(
-                    "mxfp8", (m, n, k), (128, 128, tile_k, 2, 2, 2, 0, use_hti),
+                    mxfp_format, (m, n, k), (128, 128, tile_k, 2, 2, 2, 0, use_hti),
                     out_dtype, inputs, operand_layout,
                 )
                 self.assertEqual(actual, reference, atol=3e-2, rtol=3e-2)
 
-    def test_mxfp8_bias_and_hti_match_reference(self, device):
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    def test_mxfp_bias_and_hti_match_reference(self, device, mxfp_format):
         self._skip_unless_supported(device)
         shape = (128, 128, 512)
-        inputs, reference = _mxfp_case("mxfp8", shape, device)
+        inputs, reference = _mxfp_case(mxfp_format, shape, device)
         bias = torch.randn(shape[1], device=device, dtype=torch.float32)
         for tile in (
             (128, 128, 128, 2, 2, 2, 0),
@@ -1726,7 +1738,7 @@ class TestFlyDSLMXFPDevice(TestCase):
         ):
             with self.subTest(tile=tile):
                 actual = _run_mxfp_tile(
-                    "mxfp8",
+                    mxfp_format,
                     shape,
                     tile,
                     torch.bfloat16,
