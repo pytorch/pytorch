@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCUDA,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoLinalgsolver, onlyNativeDeviceTypes, dtypesIfCPU, dtypesIfCUDA,
      onlyAccelerator, onlyOn, skipMeta, skipCUDAIfNotRocm, skipCUDAIfRocm, dtypesIfMPS, largeTensorTest,
      e4m3_type, e5m2_type, largeMPSBufferTest)
 from torch.testing import make_tensor
@@ -3419,6 +3419,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("Device check tests interact poorly with Dynamo's tracing")
     @dtypes(*floating_and_complex_types())
     def test_pinv_errors_and_warnings(self, device, dtype):
         # pinv requires at least 2D tensor
@@ -5489,6 +5490,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @skipIfTorchDynamo("numpy.linalg.qr(mode='raw') is not supported by FakeTensor meta dispatcher")
     @dtypes(*floating_and_complex_types())
     def test_householder_product(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -5550,6 +5552,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
             run_test(shape)
 
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("Device check tests interact poorly with Dynamo's tracing")
     def test_householder_product_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
@@ -5916,6 +5919,44 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
             self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                              atol=prec, rtol=0)
 
+    def _group_quantize_tensor_int4_mm(self, w, n_bit=4, q_group_size=16):
+        if self.device_type != 'xpu':
+            return _group_quantize_tensor(w, n_bit=n_bit, q_group_size=q_group_size)
+
+        if w.dim() != 2:
+            raise AssertionError(f"expected a 2D tensor, got {w.dim()}D")
+
+        w = w.transpose(0, 1).contiguous()
+        if q_group_size <= 1:
+            raise AssertionError(f"expected q_group_size > 1, got {q_group_size}")
+        if w.shape[-1] % q_group_size != 0:
+            raise AssertionError(
+                f"expected {w.shape[-1]} to be divisible by {q_group_size}"
+            )
+
+        to_quant = w.reshape(-1, q_group_size)
+        max_val = to_quant.amax(dim=1, keepdim=True)
+        min_val = to_quant.amin(dim=1, keepdim=True)
+        max_int = 2**n_bit - 1
+        min_int = 0
+        scales = (max_val - min_val).clamp(min=1e-6) / max_int
+        zeros = min_val + scales * (2 ** (n_bit - 1))
+
+        out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
+        out = out.to(dtype=torch.uint8).reshape(w.shape)
+        out = (out[:, 1::2] << 4 | out[:, ::2]).to(torch.uint8)
+
+        scales = scales.view(w.shape[0], -1)
+        zeros = zeros.view(w.shape[0], -1)
+        scales_and_zeros = torch.cat(
+            [
+                scales.reshape(scales.size(0), scales.size(1), 1),
+                zeros.reshape(zeros.size(0), zeros.size(1), 1),
+            ],
+            2,
+        )
+        return out, scales_and_zeros.transpose(0, 1).contiguous()
+
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_torchscript(self, device, dtype):
@@ -6246,10 +6287,12 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
+    @dtypes(torch.bfloat16, torch.float16)
+    @dtypesIfCPU(torch.float32)
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
-    def test__int4_mm(self, device, m, k, n):
+    def test__int4_mm(self, device, dtype, m, k, n):
         if self.device_type == 'cuda' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
@@ -6267,7 +6310,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         b_bf16 = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
         def convert_weight_to_int4pack(b):
-            b_tmp, b_scales_and_zeros = _group_quantize_tensor(
+            b_tmp, b_scales_and_zeros = self._group_quantize_tensor_int4_mm(
                 b, n_bit=4, q_group_size=q_group
             )
             if self.device_type == 'cpu':
@@ -6296,24 +6339,29 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
                 if not torch.equal(c, c_2):
                     raise AssertionError("c and c_2 should be equal")
                 return c
-            else:
+            if self.device_type == 'xpu':
                 self.assertTrue(b_int4pack.dtype is torch.int32)
-                self.assertTrue(b_int4pack.dim() == 4)
+                self.assertTrue(b_int4pack.dim() == 2)
                 return torch._weight_int4pack_mm(
                     a, b_int4pack, q_group, b_scales_and_zeros
                 )
 
+            self.assertTrue(b_int4pack.dtype is torch.int32)
+            self.assertTrue(b_int4pack.dim() == 4)
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
+
         b_int4pack, b_scales_and_zeros_bf16 = convert_weight_to_int4pack(b_bf16)
 
-        for dtype in [torch.bfloat16] + ([torch.float16, torch.float32] if device == "cpu" else []):
-            a = a_bf16.to(dtype=dtype)
-            b = b_bf16.to(dtype=dtype)
-            b_scales_and_zeros = b_scales_and_zeros_bf16.to(dtype=dtype)
-            ref = torch.mm(a, b)
-            res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+        a = a_bf16.to(dtype=dtype)
+        b = b_bf16.to(dtype=dtype)
+        b_scales_and_zeros = b_scales_and_zeros_bf16.to(dtype=dtype)
+        ref = torch.mm(a, b)
+        res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
 
-            mean_err = ((res - ref).abs() / ref).mean()
-            self.assertTrue(mean_err < 0.05)
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
@@ -6338,7 +6386,7 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
         a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
         b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
 
-        b_tmp, b_scales_and_zeros = _group_quantize_tensor(
+        b_tmp, b_scales_and_zeros = self._group_quantize_tensor_int4_mm(
             b, n_bit=4, q_group_size=q_group
         )
 
@@ -6353,15 +6401,22 @@ class TestLinalgDevice(TestCase, _TestLinalgMixin):
                 return torch._weight_int4pack_mm_for_cpu(
                     a, b_int4pack, q_group, b_scales_and_zeros
                 )
-            else:
-                b_int4pack = torch._convert_weight_to_int4pack(
-                    b_tmp, inner_k_tiles
-                )
+            if self.device_type == 'xpu':
+                b_int4pack = b_tmp.view(torch.int32)
                 self.assertTrue(b_int4pack.dtype is torch.int32)
-                self.assertTrue(b_int4pack.dim() == 4)
+                self.assertTrue(b_int4pack.dim() == 2)
                 return torch._weight_int4pack_mm(
                     a, b_int4pack, q_group, b_scales_and_zeros
                 )
+
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_tmp, inner_k_tiles
+            )
+            self.assertTrue(b_int4pack.dtype is torch.int32)
+            self.assertTrue(b_int4pack.dim() == 4)
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
 
         res = int4_mm(a, b_tmp, b_scales_and_zeros)
         ref = torch.mm(a, b)
@@ -11647,9 +11702,10 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-instantiate_device_type_tests(TestLinalgDevice, globals())
-instantiate_device_type_tests(TestLinalgCuda, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestLinalg, globals())
+instantiate_device_type_tests(TestLinalgDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestLinalgCpu, globals(), only_for=("cpu"))
+instantiate_device_type_tests(TestLinalgCuda, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
 if __name__ == '__main__':
