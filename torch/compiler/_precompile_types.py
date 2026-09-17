@@ -81,10 +81,14 @@ class PrecompileSummary:
     below: a report that raised on its own bookkeeping would lose the coverage
     it exists to describe.
 
-    The frame lists (``bypassed``, ``truncated``, ``uncovered_frames``) hold
-    bare ``co_name``s, which are not unique: every ``nn.Module`` has a
-    ``forward``, so ``['forward', 'forward']`` is two frames, not a repeat, and
-    the lists can neither identify a frame nor be checked disjoint.
+    The frame lists differ in what an entry is. ``bypassed`` and
+    ``uncovered_frames`` hold one bare ``co_name`` per frame, read off the
+    package's entries, so a name can repeat (every ``nn.Module`` has a
+    ``forward``: ``['forward', 'forward']`` is two frames, not a repeat) and
+    their lengths count frames. ``truncated`` holds ``co_name
+    (filename:firstlineno)``, recorded once per code object that hit the limit,
+    so its entries do identify a frame. A bare name identifies none, so the two
+    bare lists cannot be checked disjoint.
 
     Attributes:
         frames: Captured frames: every frame the package holds an entry for, the
@@ -99,14 +103,16 @@ class PrecompileSummary:
             guards could not be serialized, or its graph held parameters by
             static address), or a backend artifact was missing when the package
             was saved. Not an eager fallback: the frame ran compiled during capture
-            (Dynamo installed its guarded code, it just went unrecorded), the
-            artifact carries no variant of it, and an install re-traces it
-            rather than skipping it as trivial.
-        truncated: ``co_name``s of frames that hit the recompile limit. A lower bound,
-            which is why the digest prints it as ``>=``: Dynamo runs a frame
-            that hit the limit, and every frame called beneath it, without
-            tracing (its ``FrameExecStrategy`` is ``RUN_ONLY`` for the frame and
-            its callees alike), so a limit hit below the first one is never seen.
+            (Dynamo installed its guarded code, it just went unrecorded), no
+            variant of it survives a load (a save-time bypass leaves the stale
+            guarded codes in the artifact and the load drops them), and an
+            install re-traces it rather than skipping it as trivial.
+        truncated: ``co_name (filename:firstlineno)`` of each frame that hit the
+            recompile limit. A lower bound, which is why the digest prints it
+            as ``>=``: Dynamo runs a frame that hit the limit, and every frame
+            called beneath it, without tracing (its ``FrameExecStrategy`` is
+            ``RUN_ONLY`` for the frame and its callees alike), so a limit hit
+            below the first one is never seen.
         uncovered_frames: ``co_name``s of frames that ended with no guarded code and
             were not bypassed, so the artifact cannot serve them: a thin wrapper
             whose graphs all landed in an inner frame, or a frame Dynamo gave up
@@ -225,7 +231,7 @@ class PrecompileSummary:
             base += f", dropped guards {self.dropped_guard_types} ({kept} kept)"
         if self.risky_dropped_guards:
             # Both halves of the slot: two risky slots can share a source (a
-            # dropped ID_MATCH and its HASATTR companion).
+            # dropped ID_MATCH on self.act and a HASATTR checked on it).
             risky = tuple(f"{t} {src}" for t, src in self.risky_dropped_guards)
             base += f", RISKY drops {some(risky)}"
         if self.policy_dropped_guards:
