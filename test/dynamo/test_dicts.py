@@ -2667,7 +2667,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            "___dict_contains",
+            "Dynamo specialized the compiled code on this key being absent",
             munge_exc(record.getMessage()),
         )
 
@@ -2692,8 +2692,35 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            "___dict_contains",
+            "Dynamo specialized the compiled code on this key being absent",
             munge_exc(record.getMessage()),
+        )
+
+    @parametrize("present_during_tracing", [True, False])
+    def test_contains_recompilation_message(self, present_during_tracing):
+        failures = []
+
+        def fn(x, d):
+            if "scale" in d:
+                return x.sin()
+            return x.cos()
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.tensor(1.0)
+        initial = {"scale": 1} if present_during_tracing else {}
+        changed = {} if present_during_tracing else {"scale": 1}
+        compiled_fn(x, initial)
+        compiled_fn(x, changed)
+
+        self.assertEqual(len(failures), 1)
+        expectation = "present" if present_during_tracing else "absent"
+        requirement = "contain" if present_during_tracing else "not contain"
+        self.assertIn(
+            f"Dictionary d must {requirement} key 'scale'; "
+            f"Dynamo specialized the compiled code on this key being {expectation}.",
+            failures[0],
         )
 
     @make_logging_test(recompiles=True)
@@ -3680,6 +3707,9 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         got, d = fn()
         self.assertEqual(got, (10, 20, 30))
         self.assertEqual(d, {1: 10, (3, 4): 30})
+
+
+instantiate_parametrized_tests(DictGuardTests)
 
 
 if __name__ == "__main__":
