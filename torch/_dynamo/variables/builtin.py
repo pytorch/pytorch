@@ -2039,6 +2039,23 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
+        if not args and not kwargs:
+            return variables.ConstantVariable.create(b"")
+        if all(a.is_python_constant() for a in args) and all(
+            v.is_python_constant() for v in kwargs.values()
+        ):
+            try:
+                res = bytes(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+                return VariableTracker.build(tx, res)
+            except Exception as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
         no_positional(tx, "bytes", list(args))
         no_keywords(tx, "bytes", kwargs)
         return variables.ConstantVariable.create(b"")
