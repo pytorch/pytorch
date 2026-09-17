@@ -84,7 +84,10 @@ def vt_identity_compare(
     # Objects created during tracing: VT identity = Python identity. Exception
     # instances are mutable objects built during tracing, so two distinct VTs
     # (already known not to be `left is right`) are distinct Python objects.
+    # A bound method is materialized afresh by every attribute access, so it
+    # behaves the same way: `obj.m is obj.m` is False in CPython.
     from .dicts import ConstDictVariable
+    from .functions import UserMethodVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
     from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
@@ -99,6 +102,7 @@ def vt_identity_compare(
             DictKeySetVariable,
             TracebackVariable,
             ExceptionVariable,
+            UserMethodVariable,
         ),
     ):
         return ConstantVariable.create(False)
@@ -806,6 +810,49 @@ def pynumber_float(
     )
 
 
+def pyfloat_as_double_macro(obj: VariableTracker) -> float:
+    """Mirrors PyFloat_AS_DOUBLE without redispatching __float__.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/cpython/floatobject.h#L15-L18
+    """
+    return float.__float__(obj.as_python_constant())
+
+
+def pyfloat_as_double(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
+    """Mirrors PyFloat_AsDouble.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/floatobject.c#L282-L339
+
+    CPython warns when __float__ returns a strict float subclass; Dynamo
+    currently accepts the value without modeling that warning.
+    """
+    if issubclass(obj.python_type(), float):
+        result = obj
+    elif obj.tp_as_number.nb_float is not None:
+        result = obj.nb_float_impl(tx)
+        if result.python_type() is not float:
+            # Outer gate mirrors PyFloat_CheckExact; strict subclasses still fall through.
+            if not issubclass(result.python_type(), float):
+                raise_type_error(
+                    tx,
+                    f"{obj.python_type_name()}.__float__ returned non-float "
+                    f"(type {result.python_type_name()})",
+                )
+    elif obj.tp_as_number.nb_index is not None:
+        index = pynumber_index(tx, obj)
+        if index.is_python_constant():
+            return ConstantVariable.create(pylong_as_double(tx, index))
+        return index.nb_float_impl(tx)
+    else:
+        raise_type_error(tx, f"must be real number, not {obj.python_type_name()}")
+
+    if result.is_python_constant():
+        return ConstantVariable.create(pyfloat_as_double_macro(result))
+    return result
+
+
 def getindex(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -820,6 +867,20 @@ def getindex(
             length = obj.sq_length_impl(tx)
             i = pynumber_add(tx, i, length)
     return i
+
+
+def pylong_as_double(tx: "InstructionTranslatorBase", obj: VariableTracker) -> float:
+    """Mirrors PyLong_AsDouble.
+
+    https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Objects/longobject.c#L3512-L3543
+    """
+    if not issubclass(obj.python_type(), int):
+        raise_type_error(tx, "an integer is required")
+    try:
+        # Read the int payload without dispatching subclass overrides.
+        return int.__float__(obj.as_python_constant())
+    except OverflowError as exc:
+        raise_observed_exception(OverflowError, tx, args=list(exc.args))
 
 
 def pylong_as_ssize_t(tx: "InstructionTranslatorBase", obj: VariableTracker) -> int:
@@ -2167,7 +2228,13 @@ def _resolve_descriptor_get(
         )
         return md_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.FunctionType):
-        return variables.UserMethodVariable(type_attr, obj, source=source)
+        return variables.UserMethodVariable(
+            variables.UserFunctionVariable(
+                type_attr, source=source and AttrSource(source, "__func__")
+            ),
+            obj,
+            source=source,
+        )
 
     return None
 
