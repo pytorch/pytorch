@@ -28,7 +28,7 @@ __global__ void weight_int8pack_mm_kernel(
   out[b * N + n] = acc * scale[n];
 }
 
-void launch_weight_int8pack_mm_cuda_kernel(
+static void launch_weight_int8pack_mm_cuda_kernel(
     const Tensor& x,
     const Tensor& w_int8,
     const Tensor& scale,

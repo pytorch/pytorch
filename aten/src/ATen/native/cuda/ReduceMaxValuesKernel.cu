@@ -23,14 +23,14 @@ struct MaxNanFunctor {
 };
 
 template <typename scalar_t, typename acc_t = scalar_t>
-void max_values_kernel_cuda_impl(TensorIterator& iter) {
+static void max_values_kernel_cuda_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       func_wrapper<acc_t>(MaxNanFunctor<acc_t>()),
       at::numeric_limits<acc_t>::lower_bound());
 }
 
-void max_values_kernel_cuda(TensorIterator& iter) {
+static void max_values_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(
       kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cuda", [&]() {
         max_values_kernel_cuda_impl<scalar_t>(iter);
