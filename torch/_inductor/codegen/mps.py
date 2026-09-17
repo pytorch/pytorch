@@ -46,6 +46,9 @@ DTYPE_TO_METAL = {
     torch.int32: "int",
     torch.int64: "long",
     torch.uint8: "uchar",
+    torch.uint16: "ushort",
+    torch.uint32: "uint",
+    torch.uint64: "ulong",
     torch.float: "float",
     torch.half: "half",
     torch.bfloat16: "bfloat",
@@ -530,6 +533,7 @@ class MetalOverrides(OpOverrides):
             "chebyshev_polynomial_w",
             "hermite_polynomial_h",
             "hermite_polynomial_he",
+            "laguerre_polynomial_l",
             "shifted_chebyshev_polynomial_t",
             "shifted_chebyshev_polynomial_u",
             "shifted_chebyshev_polynomial_v",
@@ -554,6 +558,13 @@ class MetalKernel(SIMDKernel):
     newvar_prefix = "auto "
     max_threadgroup_size = 1024
     simd_group_size = 32
+    # Device that generated kernels are launched on. Subclasses reusing the
+    # Metal-style call plumbing for another device can override this instead of
+    # copying call_kernel(). A retarget is not usable on its own yet: the
+    # non-triton branch of PythonWrapperCodegen._generate_kernel_call_helper()
+    # raises "device ... nyi" for device types other than cpu/cuda/xpu/mps, so
+    # subclasses need the wrapper-side follow-up noted in the PR description.
+    device_type = "mps"
     pexpr = PythonPrinter().doprint
     cexpr = CppPrinter().doprint
     sexpr = MetalExprPrinter().doprint
@@ -1154,7 +1165,7 @@ class MetalKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             args,
-            device=torch.device("mps"),
+            device=torch.device(self.device_type),
             triton=False,
             arg_types=arg_types,
         )

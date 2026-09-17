@@ -193,6 +193,14 @@ uint64_t Work::getSequencenumber() const {
   TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
 }
 
+std::chrono::milliseconds Work::getTimeout() const {
+  TORCH_CHECK(false, "This Backend doesn't support getTimeout.");
+}
+
+uint64_t Work::getCompletionKey() const {
+  return reinterpret_cast<uintptr_t>(this);
+}
+
 class FutureWrappingWork : public Work {
  public:
   FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
