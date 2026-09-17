@@ -28,11 +28,11 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _all_gather_output_fn_with_dim0_views,
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
-    _prepare_all_gather_outputs_with_dim0_views,
     _prepare_reduce_scatter_inputs_with_dim0_views,
     DefaultAllGather,
     DefaultReduceScatter,
@@ -368,7 +368,7 @@ class TestFullyShardInputOutputFns(FSDPTest):
                 param_groups = module._get_fsdp_state()._fsdp_param_groups
                 self.assertTrue(param_groups)
                 for param_group in param_groups:
-                    self.assertIs(param_group._prepare_all_gather_outputs, ag_fn)
+                    self.assertIs(param_group._all_gather_output_fn, ag_fn)
                     self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_fn)
 
         default_ag = _default_all_gather_output_fn
@@ -403,7 +403,7 @@ class TestFullyShardInputOutputFns(FSDPTest):
 
 class TestFullyShardNonzeroDimCopy(FSDPTest):
     _dim0_view_fns = (
-        _prepare_all_gather_outputs_with_dim0_views,
+        _all_gather_output_fn_with_dim0_views,
         _prepare_reduce_scatter_inputs_with_dim0_views,
     )
 

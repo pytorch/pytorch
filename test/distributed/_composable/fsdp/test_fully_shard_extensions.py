@@ -6,6 +6,7 @@ import functools
 import math
 import threading
 from typing import Any
+from unittest.mock import MagicMock
 
 import torch
 import torch.distributed as dist
@@ -14,6 +15,11 @@ import torch.utils._pytree as pytree
 from torch.autograd.grad_mode import _unsafe_preserve_version_counter
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _all_gather_output_fn_with_dim0_views,
+    _AllGatherOutputFn,
+)
+from torch.distributed.tensor import Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -235,17 +241,45 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
                 self._test_all_gather_extensions_train_parity,
             )
 
-    def _test_all_gather_extensions_train_parity(self, reshard_after_forward: bool):
+    @skip_if_lt_x_gpu(2)
+    def test_all_gather_extensions_nonzero_dim_copy(self):
+        with self._patch_two_tensor_fsdp_all_gather(pre_all_gather_version=2):
+            self.run_subtests(
+                {
+                    "all_gather_output_fn": [
+                        None,
+                        _all_gather_output_fn_with_dim0_views,
+                    ],
+                },
+                functools.partial(
+                    self._test_all_gather_extensions_train_parity,
+                    reshard_after_forward=True,
+                    shard_dim=1,
+                ),
+            )
+
+    def _test_all_gather_extensions_train_parity(
+        self,
+        reshard_after_forward: bool,
+        *,
+        shard_dim: int = 0,
+        all_gather_output_fn: _AllGatherOutputFn | None = None,
+    ):
         torch.manual_seed(42)
         model = self._init_two_tensor_mlp()
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=True)
         fully_shard_fn = functools.partial(
-            fully_shard, reshard_after_forward=reshard_after_forward
+            fully_shard,
+            reshard_after_forward=reshard_after_forward,
+            shard_placement_fn=(lambda _: Shard(shard_dim)) if shard_dim else None,
         )
         for mlp in model:
             fully_shard_fn(mlp)
         fully_shard_fn(model)
+        if all_gather_output_fn is not None:
+            output_fn = MagicMock(wraps=all_gather_output_fn)
+            model.set_all_gather_output_fn(output_fn)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
         check_sharded_parity(self, ref_model, model)
 
@@ -266,6 +300,9 @@ class TestFullyShardAllGatherExtensionsMultiProcess(
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
+
+        if all_gather_output_fn is not None:
+            output_fn.assert_called()
 
 
 class TestFullyShardAllGatherExtensionsMultiThread(

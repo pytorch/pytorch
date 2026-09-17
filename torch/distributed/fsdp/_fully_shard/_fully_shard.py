@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
-    from ._fsdp_collectives import _PrepareAllGatherOutputs, _PrepareReduceScatterInputs
+    from ._fsdp_collectives import _AllGatherOutputFn, _PrepareReduceScatterInputs
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -679,21 +679,23 @@ class FSDPModule:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_all_gather_output_fn(
-        self, fn: _PrepareAllGatherOutputs, *, recurse: bool = True
+        self, fn: _AllGatherOutputFn, *, recurse: bool = True
     ) -> None:
-        """Set the function that prepares each parameter's all-gather outputs.
+        """Set the function that copies a parameter group's all-gather outputs.
 
-        The function takes an ``fsdp_param`` with allocated final outputs and returns
-        copy destinations and a tuple of post-copy functions. Destinations must
-        preserve dtype and device. Direct views must split each final output in
-        order. Each post-copy function takes the all-gather group size and runs
-        after the native copy, in the order returned. Use an empty tuple when no
-        post-copy work is needed. All functions run on the current compute stream.
-        Post-copy functions must populate the final outputs and preserve their
-        version counters. Reduce-scatter input preparation is unaffected.
+        The function takes ``(fsdp_params, all_gather_output,
+        all_gather_input_split_sizes, world_size)`` and returns ``None``.
+        ``all_gather_output`` is the flat rank-major collective buffer, and
+        ``all_gather_input_split_sizes`` gives the per-rank input sizes in buffer
+        elements (bytes for mixed-dtype buffers). ``world_size`` is the all-gather
+        group size. Each parameter's final ``all_gather_outputs`` is allocated.
+        The function owns copying and any reordering into these final outputs,
+        preserving their dtype, device, and version counters. It runs on the
+        current compute stream after waiting for the collective to complete.
+        Reduce-scatter input preparation is unaffected.
 
         Args:
-            fn (Callable): Function that prepares all-gather output destinations.
+            fn (Callable): Function that copies and reorders all-gather outputs.
             recurse (bool): Whether to also set the function for all nested FSDP
                 modules. Defaults to ``True``.
         """
@@ -703,7 +705,7 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._prepare_all_gather_outputs = fn
+                    fsdp_param_group._all_gather_output_fn = fn
 
     def set_reduce_scatter_input_fn(
         self, fn: _PrepareReduceScatterInputs, *, recurse: bool = True

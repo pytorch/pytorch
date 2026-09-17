@@ -1,6 +1,5 @@
 import math
 from collections.abc import Callable, Sequence
-from functools import partial
 from itertools import chain
 from typing import Any, cast, Literal, NamedTuple
 
@@ -21,9 +20,7 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-_PrepareAllGatherOutputs = Callable[
-    [FSDPParam], tuple[list[torch.Tensor], tuple[Callable[[int], None], ...]]
-]
+_AllGatherOutputFn = Callable[[list[FSDPParam], torch.Tensor, list[int], int], None]
 _PrepareReduceScatterInputs = Callable[
     [list[FSDPParam], list[torch.Tensor], int],
     tuple[list[torch.Tensor], Sequence[torch.Size]],
@@ -438,41 +435,67 @@ def _get_param_all_gather_inputs(
 
 
 def _default_all_gather_output_fn(
-    fsdp_param: FSDPParam,
-) -> tuple[list[torch.Tensor], tuple[Callable[[int], None], ...]]:
-    """Return copy destinations and functions to run after the copy."""
-    outputs = fsdp_param.all_gather_outputs
-    if fsdp_param.fsdp_placement.dim == 0:
-        return outputs, ()
-    outputs = [torch.empty_like(t) for t in outputs]
-    return outputs, (partial(_foreach_all_gather_reorder, [(fsdp_param, outputs)]),)
+    fsdp_params: list[FSDPParam],
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: list[int],
+    world_size: int,
+) -> None:
+    """Copy all-gather outputs and reorder nonzero-dimension shards."""
+    copy_outputs: list[torch.Tensor] = []
+    reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
+    for fsdp_param in fsdp_params:
+        outputs = fsdp_param.all_gather_outputs
+        if fsdp_param.fsdp_placement.dim != 0:
+            outputs = [torch.empty_like(t) for t in outputs]
+            reorder_infos.append((fsdp_param, outputs))
+        copy_outputs.extend(outputs)
+    _copy_all_gather_outputs(
+        all_gather_output, all_gather_input_split_sizes, copy_outputs, world_size
+    )
+    _foreach_all_gather_reorder(reorder_infos, world_size)
 
 
-def _prepare_all_gather_outputs_with_dim0_views(
-    fsdp_param: FSDPParam,
-) -> tuple[list[torch.Tensor], tuple[Callable[[int], None], ...]]:
+def _all_gather_output_fn_with_dim0_views(
+    fsdp_params: list[FSDPParam],
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: list[int],
+    world_size: int,
+) -> None:
     """Use views of the final outputs when the shard layout supports them."""
-    outputs = fsdp_param.all_gather_outputs
-    shard_dim = fsdp_param.fsdp_placement.dim
-    if shard_dim == 0:
-        return outputs, ()
+    copy_outputs: list[torch.Tensor] = []
+    reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
+    for fsdp_param in fsdp_params:
+        outputs = fsdp_param.all_gather_outputs
+        shard_dim = fsdp_param.fsdp_placement.dim
+        if shard_dim == 0:
+            copy_outputs.extend(outputs)
+            continue
 
-    num_leading_elements = math.prod(fsdp_param.padded_sharded_param_size[:shard_dim])
-    if (
-        fsdp_param.sharded_state == ShardedState.SHARDED
-        and num_leading_elements > 0
-        and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
-    ):
-        # Each prefix indexes a contiguous suffix sharded on its dim 0.
-        # Copy rank chunks directly into these views of the final buffer.
-        return [
-            view
-            for tensor in outputs
-            for view in tensor.view(num_leading_elements, -1).unbind(0)
-        ], ()
+        num_leading_elements = math.prod(
+            fsdp_param.padded_sharded_param_size[:shard_dim]
+        )
+        if (
+            fsdp_param.sharded_state == ShardedState.SHARDED
+            and num_leading_elements > 0
+            and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+        ):
+            # Each prefix indexes a contiguous suffix sharded on its dim 0.
+            # Copy rank chunks directly into these views of the final buffer.
+            copy_outputs.extend(
+                view
+                for tensor in outputs
+                for view in tensor.view(num_leading_elements, -1).unbind(0)
+            )
+            continue
 
-    # Extension and post-forward shard layouts may require a separate reorder.
-    return _default_all_gather_output_fn(fsdp_param)
+        # Extension and post-forward shard layouts may require a separate reorder.
+        outputs = [torch.empty_like(t) for t in outputs]
+        copy_outputs.extend(outputs)
+        reorder_infos.append((fsdp_param, outputs))
+    _copy_all_gather_outputs(
+        all_gather_output, all_gather_input_split_sizes, copy_outputs, world_size
+    )
+    _foreach_all_gather_reorder(reorder_infos, world_size)
 
 
 @torch.no_grad()
@@ -481,7 +504,7 @@ def foreach_all_gather_copy_out(
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
     *,
-    prepare_all_gather_outputs: _PrepareAllGatherOutputs = _default_all_gather_output_fn,
+    all_gather_output_fn: _AllGatherOutputFn = _default_all_gather_output_fn,
 ) -> None:
     (
         all_gather_output,
@@ -499,8 +522,6 @@ def foreach_all_gather_copy_out(
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
 
-    split_with_sizes_out: list[torch.Tensor] = []
-    post_copy_fns: list[Callable[[int], None]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -511,17 +532,22 @@ def foreach_all_gather_copy_out(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs, param_post_copy_fns = prepare_all_gather_outputs(
-            fsdp_param
-        )
-        post_copy_fns.extend(param_post_copy_fns)
-        split_with_sizes_out.extend(param_all_gather_outputs)
+    all_gather_output_fn(
+        fsdp_params, all_gather_output, all_gather_input_split_sizes, world_size
+    )
 
+
+def _copy_all_gather_outputs(
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: list[int],
+    copy_outputs: list[torch.Tensor],
+    world_size: int,
+) -> None:
     all_gather_output = all_gather_output.view(world_size, -1)
     if all_gather_output.dtype == torch.uint8:
-        out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
+        out = [t.view(world_size, -1).view(torch.uint8) for t in copy_outputs]
     else:
-        out = [t.view(world_size, -1) for t in split_with_sizes_out]
+        out = [t.view(world_size, -1) for t in copy_outputs]
     # Expanding a parameter adds outputs; a single prefix leaves sizes unchanged.
     if len(out) != len(all_gather_input_split_sizes):
         all_gather_input_split_sizes = [t.size(1) for t in out]
@@ -538,9 +564,6 @@ def foreach_all_gather_copy_out(
         torch.ops.fsdp.split_with_sizes_copy(
             all_gather_output, all_gather_input_split_sizes, dim=1, out=out
         )
-
-    for post_copy_fn in post_copy_fns:
-        post_copy_fn(world_size)
 
 
 def _foreach_all_gather_reorder(

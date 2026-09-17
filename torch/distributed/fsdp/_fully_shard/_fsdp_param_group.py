@@ -53,7 +53,7 @@ from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ._fsdp_collectives import _PrepareAllGatherOutputs, _PrepareReduceScatterInputs
+    from ._fsdp_collectives import _AllGatherOutputFn, _PrepareReduceScatterInputs
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -213,9 +213,7 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        self._prepare_all_gather_outputs: _PrepareAllGatherOutputs = (
-            _default_all_gather_output_fn
-        )
+        self._all_gather_output_fn: _AllGatherOutputFn = _default_all_gather_output_fn
         self._prepare_reduce_scatter_inputs: _PrepareReduceScatterInputs = (
             _default_reduce_scatter_input_fn
         )
@@ -484,7 +482,7 @@ class FSDPParamGroup:
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
-                    prepare_all_gather_outputs=self._prepare_all_gather_outputs,
+                    all_gather_output_fn=self._all_gather_output_fn,
                 )
 
         for fsdp_param in self.fsdp_params:
