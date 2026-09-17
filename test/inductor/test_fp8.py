@@ -732,6 +732,76 @@ class TestScaledMMLayoutConstraint(TestCase):
             self.assertEqual(len(new_args), num_positional)
             self.assertEqual(new_kwargs.keys(), kwargs.keys())
 
+    @parametrize("scale_side", ["a", "b"])
+    @parametrize("strides", [(4, 1), (1, 4)])
+    @parametrize("keyword_args", [False, True])
+    @parametrize("list_node", [False, True])
+    def test_ambiguous_scale_metadata(
+        self, scale_side, strides, keyword_args, list_node
+    ):
+        graph = torch.fx.Graph()
+        graph.output(())
+        lowering = GraphLowering(torch.fx.GraphModule({}, graph))
+
+        def tensor(name, size, stride):
+            value = ir.TensorBox.create(
+                ir.InputBuffer(
+                    name=name,
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"), torch.float32, size, stride
+                    ),
+                )
+            )
+            node = graph.placeholder(name)
+            node.meta["val"] = torch.empty_strided(size, stride, device="meta")
+            return value, node
+
+        m, n = (512, 80) if scale_side == "a" else (80, 512)
+        a, fx_a = tensor("a", [m, 512], [512, 1])
+        b, fx_b = tensor("b", [512, n], [1, 512])
+        scale, fx_scale = tensor("scale", [4, 4], strides)
+        other, fx_other = tensor("other", [80, 4], [1, 80])
+        fx_scales: torch.fx.Node | list[torch.fx.Node] = [fx_scale]
+        if list_node:
+            fx_scales = graph.placeholder("scales")
+            fx_scales.meta["val"] = [fx_scale.meta["val"]]
+
+        op = torch.ops.aten._scaled_mm_v2.default
+        with V.set_graph_handler(lowering):
+            scale = lowering_clone(scale)
+            self.assertIsNone(scale.maybe_get_stride())
+            sa, sb = (scale, other) if scale_side == "a" else (other, scale)
+            fx_sa, fx_sb = (
+                (fx_scales, [fx_other])
+                if scale_side == "a"
+                else ([fx_other], fx_scales)
+            )
+            ra, rb = (5, 4) if scale_side == "a" else (4, 5)
+            args = (a, b, [sa], [ra], [0], [sb], [rb], [0], None, torch.float32)
+            fx_args = (
+                fx_a,
+                fx_b,
+                fx_sa,
+                [ra],
+                [0],
+                fx_sb,
+                [rb],
+                [0],
+                None,
+                torch.float32,
+            )
+            names = [arg.name for arg in op._schema.arguments][: len(args)]
+            if keyword_args:
+                node = graph.call_function(op, kwargs=dict(zip(names, fx_args)))
+                _, result = scaled_mm_v2_constraint(node, **dict(zip(names, args)))
+            else:
+                node = graph.call_function(op, fx_args)
+                result_args, _ = scaled_mm_v2_constraint(node, *args)
+                result = dict(zip(names, result_args))
+            self.assertEqual(
+                result[f"scale_{scale_side}"][0].get_stride(), list(strides)
+            )
+
     def test_compatible_leading_dimensions(self):
         graph = torch.fx.Graph()
         graph.output(())
@@ -2341,6 +2411,8 @@ class TestFP8Lowering(TestCase):
             (N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu
         )
         if "cuda" in device:
+            # v1 `torch._scaled_mm` below has no swizzle argument, so it only
+            # accepts the default layout.
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
         elif "xpu" in device:

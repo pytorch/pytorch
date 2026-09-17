@@ -28,6 +28,7 @@ from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..codegen.wrapper import PythonWrapperCodegen
+from ..fx_utils import get_fake_args_kwargs
 from ..ir import (
     Buffer,
     ChoiceCaller,
@@ -1326,10 +1327,13 @@ def scaled_mm_v2_constraint(
                 ):
                     # Ambiguous scale shapes encode their orientation in strides.
                     # Use FX metadata even when a producer's IR layout is flexible.
-                    fx_operands = dict(zip(names, fx_node.args))
-                    fx_operands.update(fx_node.kwargs)
-                    fx_scale = fx_operands[f"scale_{side}"][index]
-                    scale = L.constrain_to_fake_tensor(scale, fx_scale.meta["val"])
+                    _, fake_args, fake_kwargs = get_fake_args_kwargs(fx_node)
+                    fake_operands = dict(zip(names, fake_args))
+                    fake_operands.update(fake_kwargs)
+                    fake_scale = fake_operands[f"scale_{side}"][index]
+                    if not isinstance(fake_scale, torch.Tensor):
+                        raise AssertionError("expected scale tensor metadata")
+                    scale = L.constrain_to_fake_tensor(scale, fake_scale)
                 else:
                     scale = ExternKernel.require_exact_strides(
                         scale, (1, scale.get_size()[0])
