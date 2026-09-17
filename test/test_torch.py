@@ -1942,7 +1942,7 @@ class TestTorchDeviceType(TestCase):
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'grid_sampler_2d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            False)
 
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
@@ -1958,7 +1958,8 @@ class TestTorchDeviceType(TestCase):
 
         self.check_nondeterministic_alert(
             fn,
-            'cudnn_grid_sampler_backward')
+            'cudnn_grid_sampler_backward',
+            False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
@@ -1970,7 +1971,7 @@ class TestTorchDeviceType(TestCase):
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'grid_sampler_3d_backward_cuda',
-            torch.device(device).type == 'cuda')
+            False)
 
     def test_invalid_shapes_grid_sampler(self, device):
         make_arg = partial(
