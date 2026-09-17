@@ -136,12 +136,21 @@ class PrecompileSummary:
         dropped_guard_code: ``(guard_type, source, rendered_check)``, one per slot
             of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
             rendered a check, i.e. whose ``GuardBuilder`` method set
-            ``Guard.code_list``. A guard renders none when its check lives only
-            in a C++ leaf or a lambda (``GLOBAL_STATE``, ``DISPATCH_KEY_SET_MATCH``,
-            ``TENSOR_SUBCLASS_METADATA_MATCH``, ...) or when it delegated to a
-            guard on a derived source (``CLOSURE_MATCH`` on a function guards
-            its ``__code__`` through a separate guard); such a slot has no entry
-            here.
+            ``Guard.code_list``. How the check is installed does not predict
+            that (``AUTOGRAD_SAVED_TENSORS_HOOKS`` checks through a lambda and
+            ``DEFAULT_DEVICE`` through a C++ leaf, and both export code); the
+            methods that render none today include ``GLOBAL_STATE``,
+            ``TORCH_FUNCTION_STATE``, ``DISPATCH_KEY_SET_MATCH`` and
+            ``TENSOR_SUBCLASS_METADATA_MATCH``, and ``CLOSURE_MATCH`` on a plain
+            function, which guards its ``__code__`` through a separate guard
+            (on any other callable it falls through to ``ID_MATCH`` and renders
+            that check). Such a slot has no entry here. The entry holds one
+            rendering however many variants dropped the slot: a check that
+            embeds the guarded value (``EQUALS_MATCH`` renders ``L['n'] == 3``)
+            differs between variants that differ in the value, and the entry
+            then shows one variant's, the producer's pick rather than a merge,
+            so it tells the form of the check and not the value; that the slot
+            varied at all is what ``risky_dropped_guards`` records.
             A slot alone can be ambiguous: a dropped ``('HASATTR', "counts['pixel']")``
             is either the benign companion of a kept ``TENSOR_MATCH`` on the same
             source or the only guard on an optional attribute, and only the
