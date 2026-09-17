@@ -945,6 +945,63 @@ class TestFP8Lowering(TestCase):
 
     @onlyCUDA
     @skipIfRocm
+    @unittest.skipIf(not has_triton_tma_device(), "Requires device-side TMA")
+    @parametrize("use_out", [False, True])
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.enable_persistent_tma_matmul": True,
+            "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma_main_loop_scaling",
+            "test_configs.max_mm_configs": 1,
+            "force_disable_caches": True,
+        }
+    )
+    def test_deepseek_v2_single_k_block(self, device, use_out):
+        m, n, k = 80, 112, 128
+        a = (torch.randint(-4, 5, (m, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        b = (torch.randint(-4, 5, (n, k), device=device).float() / 8).to(
+            torch.float8_e4m3fn
+        )
+        sa = torch.randint(1, 5, (m, 1), device=device).float()
+        sb = torch.full((1, 1), 3.0, device=device)
+        # Dyadic values keep FP32 accumulation exact against this FP64 reference.
+        reference = ((a.double() * sa.double()) @ (b.double() * sb.double()).t()) * 6
+        out = torch.empty(m, n, device=device, dtype=torch.float32)
+        op = (
+            torch.ops.aten._scaled_mm_v2.out
+            if use_out
+            else torch.ops.aten._scaled_mm_v2.default
+        )
+
+        def fn(a, b, sa, sb, out):
+            sa, sb = sa * 2, sb * 3
+            return op(
+                a,
+                b,
+                [sa],
+                [ScalingType.BlockWise1x128.value],
+                [0],
+                [sb],
+                [ScalingType.BlockWise128x128.value],
+                [0],
+                None,
+                torch.float32,
+                **({"out": out} if use_out else {}),
+            )
+
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), a, b.t(), sa, sb, out
+        )
+        self.assertEqual(actual.double(), reference, atol=0, rtol=0)
+        if use_out:
+            self.assertIs(actual, out)
+        self.assertIn("def blockwise128x128_scaling", code[0])
+
+    @onlyCUDA
+    @skipIfRocm
     @unittest.skipIf(not IS_SM90, "cuBLAS DeepSeek scaling requires SM90")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
