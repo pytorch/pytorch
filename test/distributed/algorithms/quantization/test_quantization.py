@@ -59,6 +59,7 @@ if not dist.is_available():
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+use_accelerator = device_type != "cpu"
 
 
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
