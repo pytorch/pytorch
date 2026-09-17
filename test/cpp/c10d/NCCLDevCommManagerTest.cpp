@@ -9,6 +9,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
 using namespace c10d::symmetric_memory;
@@ -184,8 +185,8 @@ void test_example_pattern() {
       ncclDevComm devcomm = {}; // In real code: ncclDevCommCreate(...)
       devcomm_opt = manager.register_devcomm(group_name, devcomm);
     }
-    ncclDevComm& devcomm_ref = devcomm_opt->get();
-    (void)devcomm_ref; // In real code, used for NCCL operations
+    ncclDevComm devcomm_copy = *devcomm_opt;
+    (void)devcomm_copy; // In real code, used for NCCL operations
     EXPECT_TRUE(devcomm_opt.has_value());
   };
 
@@ -273,7 +274,8 @@ TEST(NCCLDevCommManagerTest, ExamplePattern) {
 // devcomm under that name is tied to the predecessor and must not survive, or
 // a later kernel launch would be handed a devcomm this registry no longer owns.
 // Re-publishing the same comm pointer is not a replacement and must keep the
-// cache intact.
+// cache intact, and neither the eviction nor the identity-checked retirement
+// may reach past the group name they were asked about.
 TEST(NCCLDevCommManagerTest, ReplacementRegistrationEvictsDevComms) {
   if (!at::cuda::is_available()) {
     GTEST_SKIP() << "CUDA not available, skipping test";
@@ -291,14 +293,31 @@ TEST(NCCLDevCommManagerTest, ReplacementRegistrationEvictsDevComms) {
   ASSERT_EQ(ncclCommInitRank(&successor_comm, 1, successor_id, 0), ncclSuccess);
 
   const std::string group_name = "replacement_evicts_devcomms";
+  const std::string bystander_name = "replacement_evicts_devcomms_bystander";
   const std::string key = "evict_key";
   c10::Device device(c10::DeviceType::CUDA, 0);
   auto& manager = NCCLDevCommManager::get(device);
+
+  // The manager is a process-wide singleton and its destructor runs
+  // ncclDevCommDestroy on whatever it still holds, so a failed expectation
+  // below must not leave entries behind pointing at comms this test destroys.
+  auto cleanup = c10::make_scope_exit([&]() {
+    manager.unregister_comm(group_name);
+    manager.unregister_comm(bystander_name);
+    EXPECT_EQ(ncclCommDestroy(first_comm), ncclSuccess);
+    EXPECT_EQ(ncclCommDestroy(successor_comm), ncclSuccess);
+  });
 
   ncclDevComm devcomm = {};
   manager.register_comm(group_name, first_comm);
   ASSERT_TRUE(manager.register_devcomm(group_name, devcomm, key).has_value());
   ASSERT_TRUE(manager.get_devcomm(group_name, key).has_value());
+
+  // Eviction is scoped to the replaced group name; an unrelated group built
+  // from the same comm keeps its cache.
+  manager.register_comm(bystander_name, first_comm);
+  ASSERT_TRUE(
+      manager.register_devcomm(bystander_name, devcomm, key).has_value());
 
   // Re-publishing the same comm is not a replacement.
   manager.register_comm(group_name, first_comm);
@@ -306,13 +325,15 @@ TEST(NCCLDevCommManagerTest, ReplacementRegistrationEvictsDevComms) {
 
   manager.register_comm(group_name, successor_comm);
   EXPECT_FALSE(manager.get_devcomm(group_name, key).has_value());
+  EXPECT_TRUE(manager.get_devcomm(bystander_name, key).has_value());
 
   // The evicted key is free again, so the successor can rebuild its own.
   EXPECT_TRUE(manager.register_devcomm(group_name, devcomm, key).has_value());
 
-  manager.unregister_comm(group_name, successor_comm);
-  EXPECT_EQ(ncclCommDestroy(first_comm), ncclSuccess);
-  EXPECT_EQ(ncclCommDestroy(successor_comm), ncclSuccess);
+  // Retirement is identity-checked, so the predecessor's delayed teardown
+  // cannot unpublish the successor that replaced it.
+  manager.unregister_comm(group_name, first_comm);
+  EXPECT_EQ(manager.get_comm(group_name), successor_comm);
 }
 
 #ifdef USE_ROCM

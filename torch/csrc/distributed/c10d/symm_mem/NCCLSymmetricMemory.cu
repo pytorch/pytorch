@@ -3,7 +3,6 @@
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 
 #include <algorithm>
-#include <vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
@@ -428,6 +427,32 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         manager.comm_registration_is_live(
                group_name_, comm_, comm_generation_);
   }
+
+  // Some registration other than this one is live for this group, so this
+  // handle can be rebuilt against it. Strictly narrower than `!is_live()`,
+  // which also covers the group having no communicator at all: that case has
+  // nothing to rebuild against and every rank observes it identically, so it is
+  // left to the staleness check to report rather than triggering a rebuild that
+  // would enter a collective window registration on only some ranks.
+  //
+  // "Other than this one" has to be decided the same way `is_live` decides it,
+  // on the pointer and the generation together. A successor handed a recycled
+  // `ncclComm_t` address compares equal on the pointer alone and would look
+  // like no successor at all, which would turn recovery into an error.
+  bool has_successor_comm() const {
+    auto& manager = NCCLDevCommManager::get(
+        c10::Device(c10::DeviceType::CUDA, device_idx_));
+    return manager.find_comm(group_name_).has_value() && !is_live();
+  }
+
+  void check_liveness() const {
+    TORCH_CHECK(
+        is_live(),
+        "NCCL symmetric-memory handle for group '",
+        group_name_,
+        "' is stale because its RCCL communicator was destroyed or replaced. "
+        "Rendezvous again after initializing the successor process group.");
+  }
 #endif
 
  private:
@@ -474,17 +499,12 @@ NCCLSymmetricMemory::NCCLSymmetricMemory(
 // HSA_STATUS_ERROR_MEMORY_FAULT from a barrier kernel launched through a
 // destroyed communicator. Extending the same gating to CUDA is left as a
 // follow-up so this change cannot alter CUDA behavior.
-bool NCCLSymmetricMemory::is_live() const {
-  return pai_->is_live();
+bool NCCLSymmetricMemory::has_successor_comm() const {
+  return pai_->has_successor_comm();
 }
 
 void NCCLSymmetricMemory::check_liveness() const {
-  TORCH_CHECK(
-      is_live(),
-      "NCCL symmetric-memory handle for group '",
-      pai_->group_name_,
-      "' is stale because its RCCL communicator was destroyed or replaced. "
-      "Rendezvous again after initializing the successor process group.");
+  pai_->check_liveness();
 }
 #endif
 
@@ -716,6 +736,12 @@ NCCLCftHandle NCCLSymmetricMemory::get_multimem_cft_handle() {
 }
 
 std::string NCCLSymmetricMemory::get_group_name() {
+#ifdef USE_ROCM
+  // Callers resolve a communicator from this name, so the staleness check
+  // belongs here rather than in each of them: a name that outlived its
+  // communicator would otherwise resolve to a successor's.
+  check_liveness();
+#endif
   return pai_->group_name_;
 }
 
@@ -874,15 +900,25 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       std::lock_guard<std::mutex> lock(mutex_);
       auto it = symm_mems_.find(key);
 #ifdef USE_ROCM
-      // A cached handle whose communicator was destroyed or replaced cannot be
-      // revived, but the caller can be. Drop it and fall through to rebuild
-      // against whatever is registered for this group now. Raising here instead
-      // would make restart-after-error unrecoverable for any tensor that had
-      // already rendezvoused, since nothing else evicts this entry while the
-      // allocation is alive.
-      if (it != symm_mems_.end() && !it->second->is_live()) {
-        symm_mems_.erase(it);
-        it = symm_mems_.end();
+      // A cached handle whose communicator was replaced cannot be revived, but
+      // the caller can be. Drop it and fall through to rebuild against the
+      // successor. Raising here instead would make restart-after-error
+      // unrecoverable for any tensor that had already rendezvoused, since
+      // nothing else evicts this entry while the allocation is alive.
+      //
+      // Recovery is per-rendezvous and the rebuild below is collective, so it
+      // is only safe when every rank re-rendezvouses the same tensors in the
+      // same order. Gating on a successor rather than on staleness is what
+      // keeps that true: a group whose communicator was retired with nothing
+      // put in its place has no rebuild to enter, and every rank sees that
+      // identically, so it reports staleness here instead.
+      if (it != symm_mems_.end()) {
+        if (it->second->has_successor_comm()) {
+          symm_mems_.erase(it);
+          it = symm_mems_.end();
+        } else {
+          it->second->check_liveness();
+        }
       }
 #endif
       if (it != symm_mems_.end()) {
@@ -908,12 +944,16 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto& peer_alloc_infos = allocation->peer_alloc_infos_;
     auto& pai = peer_alloc_infos[*group_name];
 #ifdef USE_ROCM
-    // The window this holds was registered against the retired communicator, so
-    // it has to be rebuilt too. Releasing it here is what makes the dropped
-    // handle above replaceable rather than merely absent. Its destructor skips
+    // The window this holds was registered against the predecessor, so it has
+    // to be rebuilt too. Releasing it here is what makes the dropped handle
+    // above replaceable rather than merely absent. Its destructor skips
     // deregistration precisely because the registration is no longer live.
-    if (pai && !pai->is_live()) {
-      pai.reset();
+    if (pai) {
+      if (pai->has_successor_comm()) {
+        pai.reset();
+      } else {
+        pai->check_liveness();
+      }
     }
 #endif
     if (!pai) {
