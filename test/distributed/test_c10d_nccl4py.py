@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 try:
     import nccl.core  # noqa: F401
 
-    from torch.distributed.nccl4py import _create_nccl4py_backend, NCCL4PyBackend
+    from torch.distributed._nccl4py import _create_nccl4py_backend, NCCL4PyBackend
 
     HAS_NCCL4PY = True
 except ImportError:
