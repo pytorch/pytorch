@@ -67,22 +67,18 @@ class PrecompileSummary:
 
     The guard fields hold ``(guard_type, source)`` slots, the source spelled as
     ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
-    (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged).
-    ``dropped_guards`` is every
-    slot the serialized copy's guard filter rejected: the guards the serializer
-    refuses (the identity guards, plus ``DICT_VERSION`` and ``WEAKREF_ALIVE``),
-    plus whatever a caller-supplied filter dropped.
-    ``risky_dropped_guards`` is the subset of it that was observed to tell
-    captured variants apart or that the risky-drop lint flags as a
-    configuration-chosen binding. ``policy_dropped_guards`` is disjoint from
-    both: slots that could have been serialized and were dropped because they
-    held identically across every captured variant. Construction raises
-    ``ValueError`` when either relation fails: the digest and
-    ``dropped_guard_types()`` read ``dropped_guards`` alone, so a risky slot
-    listed nowhere else would be reported as no drop at all. The reason and the
-    remedy differ, so they are reported apart, but reported, because a capture
-    that discards a precondition should not look like one that had none.
-    ``kept_guards`` is what the artifact still checks.
+    (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged). Each list
+    holds a slot once, however many frames or variants carried it, so
+    ``dropped_guard_types()`` counts distinct slots, not occurrences. The lists
+    aggregate every captured frame and a slot names no frame, so the relations
+    between them hold per frame, where the producer decides them, and are
+    stated here rather than checked: within one frame ``risky_dropped_guards``
+    is drawn from ``dropped_guards`` and ``policy_dropped_guards`` is disjoint
+    from it, but two frames' ``self.act`` are one slot, and a slot one frame's
+    filter rejected and another frame's invariance policy dropped is listed in
+    both; ``dropped_guard_code`` draws its slots from those two lists the same
+    way. Nothing is enforced, as for the frame lists below: a report that
+    raised on its own bookkeeping would lose the coverage it exists to describe.
 
     The frame lists (``bypassed``, ``truncated``, ``uncovered_frames``) hold
     bare ``co_name``s, which are not unique: every ``nn.Module`` has a
@@ -122,8 +118,11 @@ class PrecompileSummary:
             captured variants apart, or flagged by the risky-drop lint as a
             configuration-chosen binding.
         policy_dropped_guards: Serializable slots dropped because they held
-            identically across every variant.
-        dropped_guard_code: ``(guard_type, source, rendered_check)`` for each slot
+            identically across every variant. Reported apart from
+            ``dropped_guards`` because the remedy differs, and reported at all
+            because a capture that discards a precondition should not look like
+            one that had none.
+        dropped_guard_code: ``(guard_type, source, rendered_check)``, one per slot
             of ``dropped_guards`` or ``policy_dropped_guards`` that renders a
             check. Every guard type dropped as unserializable or by the
             invariance policy renders one; a slot is missing here only when a
@@ -153,21 +152,6 @@ class PrecompileSummary:
     dropped_guard_code: tuple[tuple[str, str, str], ...] = ()
     capture_errors: tuple[str, ...] = ()
 
-    def __post_init__(self) -> None:
-        dropped = set(self.dropped_guards)
-        stray = set(self.risky_dropped_guards) - dropped
-        if stray:
-            raise ValueError(
-                f"risky_dropped_guards must be a subset of dropped_guards; not "
-                f"dropped: {sorted(stray)}"
-            )
-        both = set(self.policy_dropped_guards) & dropped
-        if both:
-            raise ValueError(
-                f"policy_dropped_guards must be disjoint from dropped_guards; in "
-                f"both: {sorted(both)}"
-            )
-
     @property
     def complete(self) -> bool:
         """Whether the capture covers everything it exercised.
@@ -194,11 +178,11 @@ class PrecompileSummary:
         )
 
     def dropped_guard_types(self) -> dict[str, int]:
-        """Count omitted guards by guard type."""
+        """Count the distinct dropped slots by guard type."""
         return dict(collections.Counter(t for t, _ in self.dropped_guards))
 
     def kept_guard_types(self) -> dict[str, int]:
-        """Count serialized guards by guard type."""
+        """Count the distinct kept slots by guard type."""
         return dict(collections.Counter(t for t, _ in self.kept_guards))
 
     def __str__(self) -> str:
