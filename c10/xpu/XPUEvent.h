@@ -254,8 +254,8 @@ struct XPUEvent {
           syclex::properties{
               syclex::enable_ipc{enable_ipc_},
               syclex::enable_profiling{enable_timing_}}));
-#endif
     }
+#endif
   }
 
   bool enable_timing_ = false;
