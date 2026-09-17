@@ -708,6 +708,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of split.");
   }
 
+  // Merge implementations receive a Store owned by their caller. They must
+  // retain or clone it as required by their initialization and connection-state
+  // semantics.
   virtual c10::intrusive_ptr<Backend> merge(
       const c10::intrusive_ptr<Store>& store,
       const c10::intrusive_ptr<Options>& opts,
