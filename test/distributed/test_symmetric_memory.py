@@ -839,6 +839,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # locally on gfx950 at world sizes 2/4/8 and on the mi300 CI shard with the same
 # ROCm image; skipped on that arch until it can be investigated on those runners.
 @skip_if_rocm_arch_multiprocess(MI350_ARCH)
+@skip_if_rocm_ver_lessthan_multiprocess((10, 2))
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
