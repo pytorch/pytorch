@@ -1849,7 +1849,8 @@ class DeviceCachingAllocator {
       free = device.get_info<sycl::ext::intel::info::device::free_memory>();
       return {free, total};
     }
-    ze_device_handle_t ze_device = device.get_native();
+    ze_device_handle_t ze_device =
+        sycl::get_native<sycl::backend::ext_oneapi_level_zero>(device);
     ze_device_usablemem_size_ext_properties_t usable_mem = {
         ZE_STRUCTURE_TYPE_DEVICE_USABLEMEM_SIZE_EXT_PROPERTIES};
     usable_mem.pNext = nullptr;
