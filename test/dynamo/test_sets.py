@@ -255,11 +255,34 @@ class TestSetGuards(LoggingTestCase):
         self.assertEqual(y, x.cos())
         self.assertEqual(cnts.frame_count, 2)
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "set.__contains__")
-        self.assertIn(
-            """set.__contains__(s, 'PyTorch')""",
-            munge_exc(record.getMessage()),
+        record = self.getRecord(records, "Set s must contain")
+        expected = (
+            "Set s must contain item 'PyTorch'; Dynamo specialized the "
+            "compiled code on this item being present."
         )
+        self.assertIn(expected, munge_exc(record.getMessage()))
+
+    def test_not_in_guard_message(self):
+        failures = []
+
+        def fn(x, s):
+            if "PyTorch" not in s:
+                return x.sin()
+            return x.cos()
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.randn(2)
+        compiled_fn(x, set())
+        compiled_fn(x, {"PyTorch"})
+
+        self.assertEqual(len(failures), 1)
+        expected = (
+            "Set s must not contain item 'PyTorch'; Dynamo specialized the "
+            "compiled code on this item being absent."
+        )
+        self.assertIn(expected, failures[0])
 
     def test_set_with_tensors(self):
         s = {
