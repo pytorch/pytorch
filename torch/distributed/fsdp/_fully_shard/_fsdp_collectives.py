@@ -433,22 +433,34 @@ def foreach_all_gather_copy_out(
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
 ) -> None:
-    (
-        all_gather_output,
-        all_gather_event,
-        all_gather_work,
-        param_all_gather_input_dtypes,
-        param_all_gather_input_numels,
-        all_gather_input_split_sizes,
-    ) = all_gather_result
-    _dtype, device = all_gather_output.dtype, all_gather_output.device
+    all_gather_event = all_gather_result.all_gather_event
+    all_gather_work = all_gather_result.all_gather_work
+    device = all_gather_result.all_gather_output.device
     device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
         device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
-    world_size, device = group.size(), all_gather_output.device
+    _default_all_gather_output_fn(fsdp_params, all_gather_result, group.size())
 
+
+def _default_all_gather_output_fn(
+    fsdp_params: list[FSDPParam],
+    all_gather_result: AllGatherResult,
+    world_size: int,
+) -> None:
+    """Copy all-gather outputs and reorder nonzero-dimension shards."""
+    (
+        all_gather_output,
+        _,
+        _,
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        all_gather_input_split_sizes,
+    ) = all_gather_result
+    device = all_gather_output.device
+    split_with_sizes_out: list[torch.Tensor] = []
+    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
@@ -459,21 +471,6 @@ def foreach_all_gather_copy_out(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-    _default_all_gather_output_fn(
-        fsdp_params, all_gather_output, all_gather_input_split_sizes, world_size
-    )
-
-
-def _default_all_gather_output_fn(
-    fsdp_params: list[FSDPParam],
-    all_gather_output: torch.Tensor,
-    all_gather_input_split_sizes: list[int],
-    world_size: int,
-) -> None:
-    """Copy all-gather outputs and reorder nonzero-dimension shards."""
-    split_with_sizes_out: list[torch.Tensor] = []
-    shard_i_copy_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
-    for fsdp_param in fsdp_params:
         param_all_gather_outputs = fsdp_param.all_gather_outputs
         if fsdp_param.fsdp_placement.dim != 0:
             # Copy to a temporary and then chunk-cat into the final all-gather
@@ -535,7 +532,7 @@ def _default_reduce_scatter_input_fn(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> tuple[list[torch.Tensor], tuple[torch.Size, ...]]:
+) -> tuple[torch.Size, ...]:
     """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
     if world_size > 1:
         for i, (fsdp_param, unsharded_grad) in enumerate(
@@ -553,7 +550,7 @@ def _default_reduce_scatter_input_fn(
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
     )
-    return unsharded_grads, padded_unsharded_sizes
+    return padded_unsharded_sizes
 
 
 @torch.no_grad()
@@ -614,7 +611,7 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    unsharded_grads, padded_unsharded_sizes = _default_reduce_scatter_input_fn(
+    padded_unsharded_sizes = _default_reduce_scatter_input_fn(
         fsdp_params, unsharded_grads, world_size
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
