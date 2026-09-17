@@ -102,7 +102,8 @@ def _names_a_missing_global(text: str) -> bool:
 
 
 def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
-    """What a guard tree meant to raise, as ``(type name, exception)``."""
+    """What a guard tree meant to raise, as ``(type name, exception)``. The
+    report line and the warning both read it, so the two cannot drift."""
     # A tree returning to pybind with an exception still set arrives as a
     # SystemError whose str() is the bound method's repr, so report what
     # _PyErr_FormatFromCause chained behind it. __cause__, not __context__: that
@@ -115,7 +116,7 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
 
 def _quoted(reason: BaseException) -> str:
     # The exception is the tree's, so its __str__ is user code: one that raises
-    # must not take the report with it.
+    # must not take the report or the warning with it.
     try:
         return str(reason)
     except Exception as exc:
@@ -1600,6 +1601,13 @@ def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
     )
 
 
+def _same_results(
+    prior: tuple[weakref.ref[AOTCompiledFunction], ...],
+    results: tuple[AOTCompiledFunction, ...],
+) -> bool:
+    return len(prior) == len(results) and all(w() is r for w, r in zip(prior, results))
+
+
 @dataclass
 class AOTCompiledModel:
     """A module's forward compiled for several calls, with dispatch over them.
@@ -1638,7 +1646,11 @@ class AOTCompiledModel:
     ``RuntimeError`` with the last raise of the first input that raised in
     dispatch chained as its ``__cause__`` and the report naming the first
     checked input that raised. A raise beside an input whose guards did match
-    is served over: the matching graph runs. A ``KeyboardInterrupt`` or
+    -- the raiser's own second-pass accept included -- or from an opted-out
+    input when the last resort serves one, is served over: the graph runs, and
+    the raise is logged once per ``(input index, exception type name)`` per
+    model on the ``torch._dynamo.aot_compile`` logger, starting over when
+    ``compiled_results`` changes. A ``KeyboardInterrupt`` or
     ``SystemExit`` out of a guard tree is never read as an answer and
     propagates -- as itself from a Python-level guard manager, or as the
     ``SystemError`` the pybind boundary wrapped it in when a leaf left it set.
@@ -1680,10 +1692,22 @@ class AOTCompiledModel:
     _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
         dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
+    # The results _warn_swallowed last logged about and the (index, exception type
+    # name) pairs it logged, so a hot loop over a broken artifact logs once per
+    # defect. Per model, not torch._logging.warning_once, whose cache is
+    # process-global. Kept beside the results because a changed compiled_results
+    # can put another artifact at a warned-about index; judged where the warning
+    # is logged, since a one-result model never re-decides the binding verdict.
+    # One field, as above; a race here repeats a warning, never loses one.
+    _warned: tuple[
+        tuple[weakref.ref[AOTCompiledFunction], ...], set[tuple[int, str]]
+    ] = dataclasses.field(
+        default_factory=lambda: ((), set()), init=False, compare=False, repr=False
+    )
 
     def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
         prior, shared = self._binding_verdict
-        if len(results) == len(prior) and all(w() is r for w, r in zip(prior, results)):
+        if _same_results(prior, results):
             return shared
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
@@ -1691,6 +1715,59 @@ class AOTCompiledModel:
         )
         self._binding_verdict = (tuple(weakref.ref(r) for r in results), shared)
         return shared
+
+    def _warn_swallowed(
+        self,
+        results: tuple[AOTCompiledFunction, ...],
+        raised: dict[int, Exception],
+        served: int,
+    ) -> None:
+        # A raise is not a rejection, so it says nothing about the result that
+        # did answer -- but no report is built on a serving path, so nothing else
+        # records it. Also where the result that answered IS the one that raised:
+        # its accept is the only answer about this call, and vetoing it would not
+        # contain the stale relational state below, which a scan raise leaves for
+        # the NEXT call, with no raise on record at all.
+        over, warned = self._warned
+        if not _same_results(over, results):
+            warned = set()
+            self._warned = (tuple(weakref.ref(r) for r in results), warned)
+        for i, e in raised.items():
+            kind, reason = _unwrapped_raise(e)
+            if (i, kind) in warned:
+                continue
+            warned.add((i, kind))
+            if results[i]._guard_check_enabled:
+                advice = (
+                    f"Fix or drop input [{i}]: a tree that raises rejects "
+                    "nothing, and a C++ throw out of it leaves its own "
+                    "relational guard state stale, so its next check can "
+                    "reject a call it fits or accept one it does not."
+                )
+            else:
+                # The last resort serves an opted-out result whatever its guards
+                # say, so a stale rejection costs it nothing there; but check()
+                # ignores the opt-out, so a stale accept is served in index
+                # order like any other's, ahead of a later result that fits.
+                advice = (
+                    f"Input [{i}] opted out of guard checks, but a tree that "
+                    "raises matches nothing in the pass it raised in, so short "
+                    "of its own later accept its graph is reachable only "
+                    "through the last resort, which a raise from any enabled "
+                    "tree withholds; and a C++ throw out of it leaves its "
+                    "relational guard state stale, so its next check can "
+                    "accept a call it does not fit ahead of a later match -- "
+                    "fix or drop it for that."
+                )
+            log.warning(
+                "AOT compiled input [%d]'s guard check raised %s: %s; "
+                "dispatch served [%d] rather than propagating it. %s",
+                i,
+                kind,
+                _quoted(reason),
+                served,
+                advice,
+            )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         # compiled_results is public, so read it once: every stage below judges
@@ -1771,6 +1848,8 @@ class AOTCompiledModel:
 
         for i, result in enumerate(results[1:], 1):
             if accepts(i, result):
+                if raised:
+                    self._warn_swallowed(results, raised, i)
                 return result._serve(self.model, *args, **kwargs)
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
@@ -1781,16 +1860,20 @@ class AOTCompiledModel:
         # 1us per result, accepted.
         for i, result in enumerate(results):
             if accepts(i, result):
+                if raised:
+                    self._warn_swallowed(results, raised, i)
                 return result._serve(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
         # only after both passes failed to find a real match and no tree whose
         # guards someone did ask about raised -- even if a later pass answered: a
         # rejection after a throw can be about the relational guard state the
-        # throw left stale, not about this call. A raise from the opted-out
-        # result itself withholds nothing: nobody wanted its answer.
+        # throw left stale (see _warn_swallowed), not about this call. A raise from
+        # the opted-out result itself withholds nothing: nobody wanted its answer.
         if not any(results[i]._guard_check_enabled for i in raised):
-            for result in results:
+            for i, result in enumerate(results):
                 if not result._guard_check_enabled:
+                    if raised:
+                        self._warn_swallowed(results, raised, i)
                     return result._serve(self.model, *args, **kwargs)
         report = self._no_match_report(
             results, raised=raised, unanswered=unanswered, bound=bound
