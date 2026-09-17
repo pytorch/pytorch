@@ -714,6 +714,7 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     kwargs['mxfp4'] = kwargs['mxfp8']
     return kwargs[format]
 
+
 class TestFP8Matmul(TestCase):
 
     def _test_tautological_mm(self, device: str,
@@ -739,34 +740,6 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
-        """Check the identity, storage, version, and value contract."""
-        data_ptr = input.data_ptr()
-        version = input._version
-        returned = scaled_addmm_(input, *args, **kwargs)
-        self.assertIs(returned, input)
-        self.assertEqual(input.data_ptr(), data_ptr)
-        self.assertEqual(input._version, version + 1)
-        self.assertEqual(input, expected, atol=5e-2, rtol=5e-2)
-
-    def assert_scaled_addmm_cudagraph(self, input, expected, args, **kwargs):
-        """Check in-place scaled-addmm capture and replay."""
-        for _ in range(3):
-            scaled_addmm_(input.clone(), *args, **kwargs)
-        torch.cuda.synchronize()
-
-        captured_input = input.clone()
-        data_ptr = captured_input.data_ptr()
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            captured_output = scaled_addmm_(captured_input, *args, **kwargs)
-        captured_input.copy_(input)
-        graph.replay()
-        torch.cuda.synchronize()
-
-        self.assertIs(captured_output, captured_input)
-        self.assertEqual(captured_input.data_ptr(), data_ptr)
-        self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize(
@@ -1265,81 +1238,6 @@ class TestFP8Matmul(TestCase):
     @onlyCUDA
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
-    @parametrize("m", [1, 64])
-    def test_scaled_addmm_tensorwise(self, device, output_dtype, m):
-        torch.manual_seed(42)
-        alpha, beta = 1.25, -0.5
-        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
-            m, 48, 32, device, output_dtype
-        )
-        input_before = input.clone()
-        reference = (
-            beta * input.float()
-            + alpha * ((mat1.float() * scale_a) @ (mat2.float() * scale_b))
-        ).to(output_dtype)
-
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
-        kwargs = {"beta": beta, "alpha": alpha}
-        actual = scaled_addmm(input, *args, **kwargs)
-        self.assertEqual(input, input_before)
-        self.assertEqual(actual, reference, atol=5e-2, rtol=5e-2)
-
-        self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_scaled_addmm_inplace_tunableop(self, device):
-        # The tunable scaled-gemm path only computes the plain product, so an
-        # in-place scaled_addmm_ with TunableOp enabled must bypass it and still
-        # accumulate beta * input rather than overwriting it with the product.
-        torch.manual_seed(42)
-        alpha, beta = 1.25, -0.5
-        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
-            64, 48, 32, device, torch.bfloat16
-        )
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
-        kwargs = {"beta": beta, "alpha": alpha}
-        reference = (
-            beta * input.float()
-            + alpha * ((mat1.float() * scale_a) @ (mat2.float() * scale_b))
-        ).to(input.dtype)
-
-        prev_enabled = torch.cuda.tunable.is_enabled()
-        prev_tuning = torch.cuda.tunable.tuning_is_enabled()
-        torch.cuda.tunable.enable(True)
-        # Default selection (no tuning), matching the reviewer's repro.
-        torch.cuda.tunable.tuning_enable(False)
-        try:
-            self.assert_scaled_addmm_inplace(input.clone(), reference, args, **kwargs)
-        finally:
-            torch.cuda.tunable.tuning_enable(prev_tuning)
-            torch.cuda.tunable.enable(prev_enabled)
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_scaled_addmm_wgrad_accumulation(self, device):
-        torch.manual_seed(42)
-        _, mat1_a, mat2_a, scale_a_a, scale_b_a = make_tensorwise_scaled_addmm_inputs(
-            64, 48, 32, device, torch.bfloat16
-        )
-        _, mat1_b, mat2_b, scale_a_b, scale_b_b = make_tensorwise_scaled_addmm_inputs(
-            64, 48, 32, device, torch.bfloat16
-        )
-        args_a = tensorwise_scaled_mm_args(mat1_a, mat2_a, scale_a_a, scale_b_a)
-        args_b = tensorwise_scaled_mm_args(mat1_b, mat2_b, scale_a_b, scale_b_b)
-        grad = scaled_mm(*args_a, output_dtype=torch.bfloat16)
-        reference = (
-            grad.float()
-            + (mat1_b.float() * scale_a_b) @ (mat2_b.float() * scale_b_b)
-        )
-        self.assert_scaled_addmm_inplace(grad, reference.to(grad.dtype), args_b)
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("inplace", [False, True])
     def test_scaled_addmm_scalar_semantics(self, device, inplace):
         op = scaled_addmm_ if inplace else scaled_addmm
@@ -1442,79 +1340,6 @@ class TestFP8Matmul(TestCase):
                     self.assertIs(result, kwargs["out"])
                 if not fake:
                     self.assertEqual(result, torch.ops.aten._scaled_mm_v2.default(*args))
-
-    @onlyCUDA
-    @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_scaled_addmm_validation(self, device):
-        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
-            32, 32, 32, device, torch.bfloat16
-        )
-        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
-
-        with self.assertRaisesRegex(ValueError, "input must have shape"):
-            scaled_addmm(input[:1], *args)
-        with self.assertRaisesRegex(ValueError, "canonical contiguous"):
-            scaled_addmm(input.t(), *args)
-        with self.assertRaisesRegex(ValueError, "real alpha and beta"):
-            scaled_addmm(input, *args, alpha=1j)
-
-        padded_out = input.new_empty_strided(input.shape, (48, 1))
-        with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
-            torch.ops.aten._scaled_addmm.out(
-                input,
-                mat1,
-                mat2,
-                [scale_a],
-                [ScalingType.TensorWise.value],
-                [],
-                [scale_b],
-                [ScalingType.TensorWise.value],
-                [],
-                out=padded_out,
-            )
-
-        expected = scaled_addmm(input, *args)
-        misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
-        with self.assertRaisesRegex(ValueError, "16-byte aligned"):
-            scaled_addmm_(misaligned, *args)
-
-        alignment_offset = 16 // input.element_size()
-        aligned_16 = input.new_empty(input.numel() + alignment_offset)[
-            alignment_offset:
-        ].view_as(input)
-        self.assertEqual(aligned_16.data_ptr() % 32, 16)
-        aligned_16.copy_(input)
-        self.assertIs(scaled_addmm_(aligned_16, *args), aligned_16)
-        self.assertEqual(aligned_16, expected, atol=5e-2, rtol=5e-2)
-
-        aligned_16.fill_(float("nan"))
-        self.assert_scaled_addmm_inplace(
-            aligned_16,
-            scaled_mm(*args, output_dtype=input.dtype),
-            args,
-            beta=0,
-        )
-
-        invalid_ld = input.new_empty_strided((1, 32), (1, 1))
-        with self.assertRaisesRegex(ValueError, "canonical contiguous"):
-            scaled_addmm_(invalid_ld, mat1[:1], *args[1:])
-
-        if not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
-            row_scale_a = torch.ones(32, 1, device=device)
-            row_scale_b = torch.ones(1, 32, device=device)
-            with self.assertRaisesRegex(
-                NotImplementedError, "row-wise CUTLASS fallback"
-            ):
-                scaled_addmm(
-                    input,
-                    mat1,
-                    mat2,
-                    row_scale_a,
-                    ScalingType.RowWise,
-                    row_scale_b,
-                    ScalingType.RowWise,
-                )
 
     @onlyCUDA
     @skipIfRocm
@@ -3314,6 +3139,35 @@ class TestFP8Matmul(TestCase):
 
 class TestFP8MatmulCuda(TestCase):
 
+    def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
+        """Check the identity, storage, version, and value contract."""
+        data_ptr = input.data_ptr()
+        version = input._version
+        returned = scaled_addmm_(input, *args, **kwargs)
+        self.assertIs(returned, input)
+        self.assertEqual(input.data_ptr(), data_ptr)
+        self.assertEqual(input._version, version + 1)
+        self.assertEqual(input, expected, atol=5e-2, rtol=5e-2)
+
+    def assert_scaled_addmm_cudagraph(self, input, expected, args, **kwargs):
+        """Check in-place scaled-addmm capture and replay."""
+        for _ in range(3):
+            scaled_addmm_(input.clone(), *args, **kwargs)
+        torch.cuda.synchronize()
+
+        captured_input = input.clone()
+        data_ptr = captured_input.data_ptr()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            captured_output = scaled_addmm_(captured_input, *args, **kwargs)
+        captured_input.copy_(input)
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertIs(captured_output, captured_input)
+        self.assertEqual(captured_input.data_ptr(), data_ptr)
+        self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
+
     @onlyCUDA
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
@@ -3662,6 +3516,153 @@ class TestFP8MatmulCuda(TestCase):
                     self.assertNotEqual(no_carveout, carveout_66)
                     self.assertNotEqual(carveout_66, carveout_0)
 
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("output_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    @parametrize("m", [1, 64])
+    def test_scaled_addmm_tensorwise(self, device, output_dtype, m):
+        torch.manual_seed(42)
+        alpha, beta = 1.25, -0.5
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            m, 48, 32, device, output_dtype
+        )
+        input_before = input.clone()
+        reference = (
+            beta * input.float()
+            + alpha * ((mat1.float() * scale_a) @ (mat2.float() * scale_b))
+        ).to(output_dtype)
+
+        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        kwargs = {"beta": beta, "alpha": alpha}
+        actual = scaled_addmm(input, *args, **kwargs)
+        self.assertEqual(input, input_before)
+        self.assertEqual(actual, reference, atol=5e-2, rtol=5e-2)
+
+        self.assert_scaled_addmm_inplace(input.clone(), actual, args, **kwargs)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_inplace_tunableop(self, device):
+        # The tunable scaled-gemm path only computes the plain product, so an
+        # in-place scaled_addmm_ with TunableOp enabled must bypass it and still
+        # accumulate beta * input rather than overwriting it with the product.
+        torch.manual_seed(42)
+        alpha, beta = 1.25, -0.5
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            64, 48, 32, device, torch.bfloat16
+        )
+        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+        kwargs = {"beta": beta, "alpha": alpha}
+        reference = (
+            beta * input.float()
+            + alpha * ((mat1.float() * scale_a) @ (mat2.float() * scale_b))
+        ).to(input.dtype)
+
+        prev_enabled = torch.cuda.tunable.is_enabled()
+        prev_tuning = torch.cuda.tunable.tuning_is_enabled()
+        torch.cuda.tunable.enable(True)
+        # Default selection (no tuning), matching the reviewer's repro.
+        torch.cuda.tunable.tuning_enable(False)
+        try:
+            self.assert_scaled_addmm_inplace(input.clone(), reference, args, **kwargs)
+        finally:
+            torch.cuda.tunable.tuning_enable(prev_tuning)
+            torch.cuda.tunable.enable(prev_enabled)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_wgrad_accumulation(self, device):
+        torch.manual_seed(42)
+        _, mat1_a, mat2_a, scale_a_a, scale_b_a = make_tensorwise_scaled_addmm_inputs(
+            64, 48, 32, device, torch.bfloat16
+        )
+        _, mat1_b, mat2_b, scale_a_b, scale_b_b = make_tensorwise_scaled_addmm_inputs(
+            64, 48, 32, device, torch.bfloat16
+        )
+        args_a = tensorwise_scaled_mm_args(mat1_a, mat2_a, scale_a_a, scale_b_a)
+        args_b = tensorwise_scaled_mm_args(mat1_b, mat2_b, scale_a_b, scale_b_b)
+        grad = scaled_mm(*args_a, output_dtype=torch.bfloat16)
+        reference = (
+            grad.float()
+            + (mat1_b.float() * scale_a_b) @ (mat2_b.float() * scale_b_b)
+        )
+        self.assert_scaled_addmm_inplace(grad, reference.to(grad.dtype), args_b)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_addmm_validation(self, device):
+        input, mat1, mat2, scale_a, scale_b = make_tensorwise_scaled_addmm_inputs(
+            32, 32, 32, device, torch.bfloat16
+        )
+        args = tensorwise_scaled_mm_args(mat1, mat2, scale_a, scale_b)
+
+        with self.assertRaisesRegex(ValueError, "input must have shape"):
+            scaled_addmm(input[:1], *args)
+        with self.assertRaisesRegex(ValueError, "canonical contiguous"):
+            scaled_addmm(input.t(), *args)
+        with self.assertRaisesRegex(ValueError, "real alpha and beta"):
+            scaled_addmm(input, *args, alpha=1j)
+
+        padded_out = input.new_empty_strided(input.shape, (48, 1))
+        with self.assertRaisesRegex(RuntimeError, "same dtype and leading dimension"):
+            torch.ops.aten._scaled_addmm.out(
+                input,
+                mat1,
+                mat2,
+                [scale_a],
+                [ScalingType.TensorWise.value],
+                [],
+                [scale_b],
+                [ScalingType.TensorWise.value],
+                [],
+                out=padded_out,
+            )
+
+        expected = scaled_addmm(input, *args)
+        misaligned = input.new_empty(input.numel() + 1)[1:].view_as(input)
+        with self.assertRaisesRegex(ValueError, "16-byte aligned"):
+            scaled_addmm_(misaligned, *args)
+
+        alignment_offset = 16 // input.element_size()
+        aligned_16 = input.new_empty(input.numel() + alignment_offset)[
+            alignment_offset:
+        ].view_as(input)
+        self.assertEqual(aligned_16.data_ptr() % 32, 16)
+        aligned_16.copy_(input)
+        self.assertIs(scaled_addmm_(aligned_16, *args), aligned_16)
+        self.assertEqual(aligned_16, expected, atol=5e-2, rtol=5e-2)
+
+        aligned_16.fill_(float("nan"))
+        self.assert_scaled_addmm_inplace(
+            aligned_16,
+            scaled_mm(*args, output_dtype=input.dtype),
+            args,
+            beta=0,
+        )
+
+        invalid_ld = input.new_empty_strided((1, 32), (1, 1))
+        with self.assertRaisesRegex(ValueError, "canonical contiguous"):
+            scaled_addmm_(invalid_ld, mat1[:1], *args[1:])
+
+        if not (IS_SM90 and _get_torch_cuda_version() >= (12, 9)):
+            row_scale_a = torch.ones(32, 1, device=device)
+            row_scale_b = torch.ones(1, 32, device=device)
+            with self.assertRaisesRegex(
+                NotImplementedError, "row-wise CUTLASS fallback"
+            ):
+                scaled_addmm(
+                    input,
+                    mat1,
+                    mat2,
+                    row_scale_a,
+                    ScalingType.RowWise,
+                    row_scale_b,
+                    ScalingType.RowWise,
+                )
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), only_for=('cuda'))
