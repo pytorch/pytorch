@@ -1243,7 +1243,7 @@ void aoti_torch_save_tensor_handle(
     const char* tensor_name,
     const char* launch_prefix,
     const char* kernel_name) {
-  at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+  const at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later.
   // Defaults to <cwd>/tmp/aoti_torch so schedulers that collect a job's working
@@ -1286,7 +1286,7 @@ void aoti_torch_save_tensor_handle(
 }
 
 void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
-  at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+  const at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 
   // Display message
   std::cout << '[';
