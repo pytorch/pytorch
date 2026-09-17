@@ -441,10 +441,11 @@ CUDAGraph::~CUDAGraph() {
 #if defined(USE_ROCM)
   if (capture_dev_ != UNDEFINED_DEVICE) // check if capture_dev_ contains the real device id
   {
-    // Guarded: the destructor runs at garbage-collection time on whatever thread
-    // drops the last reference, so it must restore that thread's current device.
+    // Guarded, and warning instead of throwing, for the reason reset() gives above:
+    // this runs from the destructor, on whatever thread drops the last reference, so
+    // it must restore that thread's current device and must not throw.
     c10::cuda::CUDAGuard device_guard(capture_dev_);
-    AT_CUDA_CHECK(cudaDeviceSynchronize());
+    C10_CUDA_CHECK_WARN(cudaDeviceSynchronize());
   }
 #endif
 }
