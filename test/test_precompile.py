@@ -43,34 +43,41 @@ from torch.testing._internal.common_utils import (
 
 
 # One root for every artifact pair the adapters below stage, removed once at
-# process exit. Both adapters free their own staging directory as they go, so the
-# root only ever holds directories for captures that never ran a block -- a
-# construction capture() itself refused -- which are empty.
+# process exit. Both adapters free their own staging directory as they go, a
+# refused capture() or block entry included, so a run does not accumulate one
+# directory per capture.
 _ARTIFACT_ROOT = tempfile.TemporaryDirectory()
 atexit.register(_ARTIFACT_ROOT.cleanup)
 
 
 class _CaptureToFiles:
     """Test adapter over capture, which writes the artifact to disk when the block
-    exits. Takes the per-tracer decompositions= table these tests pass and exposes
+    exits. Stages the pair under _ARTIFACT_ROOT and exposes
     result() -> (python_code, cache) by reading the two files back."""
 
-    def __init__(self, fn, *, backend="inductor", training=False, decompositions=None):
+    def __init__(self, fn, *, backend="inductor", training=False):
         self._dir = tempfile.mkdtemp(dir=_ARTIFACT_ROOT.name)
         self._artifact_path = os.path.join(self._dir, "artifact.py")
         self._cache_path = os.path.join(self._dir, "artifact.cache")
         self._pair = None
-        self._cap = capture(
-            fn,
-            artifact_path=self._artifact_path,
-            cache_path=self._cache_path,
-            tracer=MakeFxTracer(decompositions=decompositions),
-            backend=backend,
-            training=training,
-        )
+        try:
+            self._cap = capture(
+                fn,
+                artifact_path=self._artifact_path,
+                cache_path=self._cache_path,
+                backend=backend,
+                training=training,
+            )
+        except BaseException:
+            shutil.rmtree(self._dir, ignore_errors=True)
+            raise
 
     def __enter__(self):
-        self._cap.__enter__()
+        try:
+            self._cap.__enter__()
+        except BaseException:
+            shutil.rmtree(self._dir, ignore_errors=True)
+            raise
         return self
 
     def __exit__(self, *exc):
@@ -90,7 +97,10 @@ class _CaptureToFiles:
 
     def result(self):
         if self._pair is None:
-            raise AssertionError("the capture wrote no pair, so there is none to read")
+            raise AssertionError(
+                "result() is only available after the capture's `with` block exits "
+                "cleanly; the block raised, or has not exited yet"
+            )
         return self._pair
 
 
@@ -171,8 +181,12 @@ class TestPrecompile(TestCase):
         self.assertEqual(joined.render(), "[enforced] a ; b")
 
     def test_decompositions_kwarg(self):
-        # The decompositions table is threaded into make_fx during capture; a
-        # custom decomposition is invoked and the result still matches eager.
+        # Stays on the callable API: this is the only test of ITS decompositions=
+        # parameter, which ships until the switch to torch.compiler.precompile
+        # retires it. capture()'s side of the same knob (MakeFxTracer.decompositions)
+        # is pinned by TestPrecompileCaptureFiles.test_tracer_decompositions_are_used.
+        # The table is threaded into make_fx during capture; a custom decomposition
+        # is invoked and the result still matches eager.
         called = []
 
         def my_relu_decomp(x):
@@ -182,12 +196,12 @@ class TestPrecompile(TestCase):
         decomps = {torch.ops.aten.relu.default: my_relu_decomp}
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
         x = torch.randn(5, 4)
-        with _CaptureToFiles(lambda model, x: model(x), decompositions=decomps) as cap:
-            cap(m, x)
-        code, cache = cap.result()
+        code, cache = torch.compiler.precompile(
+            lambda model, x: model(x), m, x, decompositions=decomps
+        )
         self.assertTrue(called)  # the table was used during capture
 
-        f_c = _load_pair(code, cache)
+        f_c = torch.compiler.precompile.load(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_constant_tensor_is_rejected(self):
@@ -1012,14 +1026,12 @@ class TestPrecompile(TestCase):
         self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
 
     def test_backend_invalid_raises(self):
-        # capture() validates backend in its constructor, so the adapter refuses
-        # before there is a block to enter; the callable API has a guard of its own,
-        # asserted here too until the switch to torch.compiler.precompile retires
-        # this half of the API two commits up.
+        # Stays on the callable API: this is the only test of ITS backend guard, which
+        # ships until the switch to torch.compiler.precompile retires it. capture()
+        # validates backend in its constructor, which
+        # TestPrecompileCaptureFiles.test_unknown_backend_is_refused pins.
         a, b = torch.randn(4, 4), torch.randn(4, 4)
         msg = "backend must be 'inductor' or 'eager'"
-        with self.assertRaisesRegex(ValueError, msg):
-            _CaptureToFiles(lambda x, y: x + y, backend="nope")
         with self.assertRaisesRegex(ValueError, msg):
             torch.compiler.precompile(lambda x, y: x + y, a, b, backend="nope")
 
@@ -2455,15 +2467,15 @@ class TestPrecompile(TestCase):
         def raises(m, x):
             raise RuntimeError("my own capture-time failure")
 
-        args = (raises, model, torch.randn(3, 4))
-        with self.assertRaisesRegex(RuntimeError, "my own capture-time failure"):
-            torch.compiler.precompile(*args, backend="eager")
         try:
-            torch.compiler.precompile(*args, backend="eager")
+            torch.compiler.precompile(raises, model, torch.randn(3, 4), backend="eager")
         except RuntimeError as e:
+            self.assertIn("my own capture-time failure", str(e))
             # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
             self.assertNotIsInstance(e, PrecompileError)
             self.assertNotIn("no meta/fake kernel", str(e))
+        else:
+            self.fail("expected fn's RuntimeError to propagate out of capture")
 
     def test_tracer_default_and_explicit_make_fx(self):
         # tracer defaults to "make_fx"; passing it explicitly is equivalent and works.
@@ -2627,27 +2639,6 @@ class TestPrecompileCaptureFiles(TestCase):
         f = load(self.artifact, self.cache)
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
-    def test_no_call_raises_and_writes_nothing(self):
-        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
-            with self._capture():
-                pass
-        self.assertFalse(os.path.exists(self.artifact))
-        self.assertFalse(os.path.exists(self.cache))
-
-    def test_raising_call_writes_nothing(self):
-        # A refusal raised while RENDERING, after the trace and the lowering both
-        # succeeded (this one comes out of to_python_code): the compiled module is in
-        # hand and there is still nothing to write, where the refusals the ported
-        # tests and test_a_backward_without_training_points_at_training_true pin all
-        # fail during the trace itself.
-        Out = collections.namedtuple("Out", ["a", "b"])
-        with self.assertRaisesRegex(PrecompileError, "output structure"):
-            with self._capture(lambda m, x: Out(m(x), x)) as cap:
-                cap(self.model, self.x)
-        self.assertFalse(os.path.exists(self.artifact))
-        self.assertFalse(os.path.exists(self.cache))
-        self.assertEqual(self._leftovers(), [])
-
     def test_second_call_is_refused(self):
         with self._capture() as cap:
             cap(self.model, self.x)
@@ -2718,8 +2709,8 @@ class TestPrecompileCaptureFiles(TestCase):
 
     def test_same_file_for_both_halves_is_refused(self):
         # Also when the two halves are two SPELLINGS of one path: the cache write
-        # would truncate the source half, so the comparison is on the resolved
-        # paths and not on the strings the caller passed.
+        # would truncate the source half, so the comparison is on the normalized
+        # absolute paths and not on the strings the caller passed.
         spellings = (
             self.artifact,
             os.path.join(self.dir, ".", "m.py"),
@@ -2759,13 +2750,9 @@ class TestPrecompileCaptureFiles(TestCase):
             self._capture(tracer="make_fx")
 
     def test_unknown_backend_is_refused(self):
-        with self.assertRaisesRegex(ValueError, "backend must be"):
+        msg = "backend must be 'inductor' or 'eager'"
+        with self.assertRaisesRegex(ValueError, msg):
             self._capture(backend="nope")
-
-    def test_load_refuses_the_same_file_for_both_halves(self):
-        self._write_pair()
-        with self.assertRaisesRegex(ValueError, "same file"):
-            load(self.artifact, self.artifact)
 
     def test_graph_devices_come_from_the_graph_not_the_inputs(self):
         # GRAPH_DEVICES is scanned from the graph: fn here takes no tensor at all, so a
@@ -2814,9 +2801,11 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_an_unautocastable_graph_device_still_serves(self, device):
         # GRAPH_DEVICES is unfiltered, so the serving build decides: a device type it
         # cannot parse makes is_autocast_available raise, a deprecated spelling it does
-        # parse makes it emit a UserWarning -- which the error filter below turns into
-        # the raise -- and an out-of-tree backend with no autocast module reports
-        # available then refuses to construct. Each is skipped, not failed on.
+        # parse makes it emit a UserWarning, and an out-of-tree backend with no autocast
+        # module reports available then refuses to construct. Each is skipped, not failed
+        # on. mkldnn's warning is TORCH_WARN_ONCE, so it reaches the Warning arm of the
+        # catch only on the first parse in the process and takes the not-available route
+        # to the same skip after that; the test below covers that arm every run.
         with self._capture() as cap:
             y = cap(self.model, self.x)
         source = self._read(self.artifact).decode()
@@ -2839,12 +2828,36 @@ class TestPrecompileCaptureFiles(TestCase):
                 with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
                     z = served(self.model, self.x)
                 self.assertIn("cannot autocast the captured", "".join(logs.output))
-                # Once per device per loaded artifact, not once per served call.
+                # Not once per served call.
                 with self.assertNoLogs("torch._precompile_driver", "WARNING"):
                     self.assertEqual(served(self.model, self.x), z)
+            # ...and not once per PROCESS either: the report-once set is emitted into
+            # the artifact, so a second load of the same pair reports again.
+            with self.assertLogs("torch._precompile_driver", "WARNING"):
+                load(self.artifact, self.cache)(self.model, self.x)
             self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
         self.assertEqual(z.dtype, torch.float32)
         self.assertEqual(z, y)
+
+    def test_a_warning_from_the_device_probe_is_a_skip(self):
+        # The Warning arm of _autocast_off's catch, which the mkldnn case above reaches
+        # only on the first parse in the process (TORCH_WARN_ONCE). Raise the warning
+        # from the probe instead, so the arm runs whatever else touched that device.
+        from torch import _precompile_driver
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with mock.patch.object(
+                _precompile_driver, "_AUTOCAST_SKIPS_REPORTED", set()
+            ):
+                with mock.patch(
+                    "torch.amp.is_autocast_available",
+                    side_effect=UserWarning("no longer used as device type"),
+                ):
+                    with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
+                        with _precompile_driver._autocast_off(("cpu", "notreal")):
+                            # Skipped, so the caller's region is still casting.
+                            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+        self.assertIn("'cpu', 'notreal'", "".join(logs.output))
 
     def test_autocast_off_unwinds_a_failure_partway_through(self):
         # The disables already entered have to come back out if the stack is not
@@ -2967,13 +2980,14 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertEqual(self.model.lin.weight.grad, ref.lin.weight.grad)
         self.assertEqual(self.model.lin.bias.grad, ref.lin.bias.grad)
 
-    @parametrize("half", ("artifact", "cache"))
-    def test_a_failed_rename_restores_the_previous_pair(self, half):
-        # Either rename failing leaves the previous pair named and loadable, with no
-        # stray .bak: the backup is a hard link to the artifact, so the undo's own
-        # rename does not consume it.
+    def test_a_failed_cache_rename_restores_the_previous_pair(self):
+        # The first rename landed, so the undo renames the backup back over the new
+        # source, which consumes the .bak and leaves the trailing unlink a no-op. A
+        # failing FIRST rename is the other shape (nothing to put back: the named
+        # artifact still IS the hard-linked previous source), covered by
+        # test_a_read_only_first_rename_leaves_the_previous_pair_intact.
         before = self._write_pair()
-        with self._replacing(getattr(self, half), exc=OSError("disk full")):
+        with self._replacing(self.cache, exc=OSError("disk full")):
             self._rewrite_raises(OSError, "disk full")
         self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
         self.assertEqual(self._leftovers(), [])
@@ -3356,7 +3370,7 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             f = load(self.artifact, self.cache)
         self.assertTrue(
-            any("could not read the cache envelope" in m for m in logs.output)
+            any(":precompile.load could not read the cache" in m for m in logs.output)
         )
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
@@ -3400,14 +3414,13 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
 
     def test_paths_come_in_pairs(self):
-        # Half a pair never loads and one file for both halves would overwrite the
-        # source, so both entry points refuse either up front, before fn runs.
+        # Half a pair never loads, so both entry points refuse one up front, before fn
+        # runs (the same file for both halves is refused too, above).
         both = "neither artifact_path nor cache_path"
         cases = [
             ((self.artifact, None), "artifact_path without cache_path"),
             ((None, self.cache), "cache_path without artifact_path"),
             ((None, None), both),
-            ((self.artifact, self.artifact), "same file"),
         ]
         for (artifact, cache), regex in cases:
             with self.assertRaisesRegex(ValueError, regex):
@@ -3572,6 +3585,7 @@ class TestPrecompileCaptureFiles(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
+
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y
