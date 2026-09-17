@@ -106,7 +106,6 @@ class FSDPCommContext:
         # All-gather/reduce-scatter states keep references to collective
         # tensors produced in one stream and used in another and accompanying
         # CUDA events for synchronization
-        self.all_gather_state: AllGatherState | None = None
         self.reduce_scatter_states: list[ReduceScatterState] = []
         # Effective cap on retained reduce_scatter_states, resolved from the
         # per-group reduce_scatter_max_input_buffers in
