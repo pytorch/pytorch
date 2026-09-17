@@ -178,10 +178,11 @@ def _autocast_off():
     already off.
 
     A device that passes the guard, REPORTS autocast enabled and then still refuses to
-    construct the disable is SKIPPED with a logged warning rather than failed on: a
-    registered device module missing ``get_amp_supported_dtype`` raises
-    ``AssertionError`` out of the ``autocast`` constructor (an explicit ``raise``, not a
-    bare assert, so ``python -O`` cannot strip it out from under the catch). That is the
+    construct the disable is SKIPPED with a logged warning rather than failed on: a module
+    registered under the privateuse1 backend name and missing ``get_amp_supported_dtype``
+    raises ``AssertionError`` out of the ``autocast`` constructor (an explicit ``raise``,
+    not a bare assert, so ``python -O`` cannot strip it out from under the catch), and
+    that name is the only device whose module the constructor consults. That is the
     one case where a served call really does cast a second time on top of the casts
     already baked in, which is what the report is for. Only the probe and the construct
     are inside the catch: a failure to ENTER propagates instead, since a swallowed
@@ -207,17 +208,20 @@ def _autocast_off():
                 _cm = _torch.amp.autocast(_dev, enabled=False)
             except AssertionError:
                 if _dev not in _AUTOCAST_SKIPS_REPORTED:
-                    _AUTOCAST_SKIPS_REPORTED.add(_dev)
                     _skipped.append(_dev)
                 continue
             stack.enter_context(_cm)
         if _skipped:
+            # Marked reported only where the report is actually emitted, so a later
+            # iteration's propagating __enter__ leaves nothing recorded as reported
+            # that never was (which would silence it for this artifact for good).
+            _AUTOCAST_SKIPS_REPORTED.update(_skipped)
             # The logger named literally, not from __name__: this body is inlined
             # into the artifact, which is not this module.
             _logging.getLogger("torch._precompile_driver").warning(
                 "precompile: this build reports autocast enabled on device(s) %s but "
-                "cannot construct the disable for them (a device module with no "
-                "registered autocast support), so their autocast is left ON for this "
+                "cannot construct the disable for them (a device module registered "
+                "without get_amp_supported_dtype), so their autocast is left ON for this "
                 "served call: it casts a second time on top of the casts already "
                 "baked into the artifact and returns a different dtype than the "
                 "capture did.",
