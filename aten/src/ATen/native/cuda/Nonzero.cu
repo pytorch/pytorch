@@ -122,7 +122,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, const int64_t * agg,
     if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
       BlockLoadT(temp_storage.load).Load(t_input_itr, data);
     } else {
-      BlockLoadT(temp_storage.load).Load(t_input_itr, data, remaining, int(0));
+      BlockLoadT(temp_storage.load).Load(t_input_itr, data, remaining, 0);
     }
 
     // Barrier for smem reuse

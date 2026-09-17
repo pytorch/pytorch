@@ -24,20 +24,22 @@ class Info:
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
+    schema = op._schema
+    is_out_op = utils.is_out(op)
     has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
+    num_positional_args = sum(not a.kwarg_only for a in schema.arguments)
+    has_tensorlist_like_args = any(
+        utils.is_tensorlist_like_type(a.type)
+        for a in (*schema.arguments, *schema.returns)
+    )
 
     @dataclass
     class Metadata:
         keyset: _C.DispatchKeySet
         keyword_only_args: dict[str, Any]
 
-    def forward_no_grad(*args):
-        metadata = args[-1]
-        args = args[:-1]
-
+    def redispatch_no_grad(keyset, args, kwargs):
         with _C._AutoDispatchBelowAutograd():
-            keyset = metadata.keyset
-            kwargs = metadata.keyword_only_args
             result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
             return result
 
@@ -74,11 +76,37 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         if info._backward_fn:
             try:
                 prev_needs_input_grad = ctx.needs_input_grad
-                ctx.needs_input_grad = ctx.needs_input_grad[:-1]
+                ctx.needs_input_grad = prev_needs_input_grad[:-1]
                 result = info._backward_fn(ctx, *grads)
             finally:
                 ctx.needs_input_grad = prev_needs_input_grad
+            num_actual_inputs = len(prev_needs_input_grad) - 1
+            valid_return_counts = {num_actual_inputs, num_positional_args}
+            actual = len(result) if isinstance(result, tuple) else 1
+            if actual not in valid_return_counts:
+                expected = (
+                    str(num_actual_inputs)
+                    if num_actual_inputs == num_positional_args
+                    else f"{num_actual_inputs} or {num_positional_args}"
+                )
+                raise RuntimeError(
+                    f"The backward formula for {op} returned an incorrect "
+                    f"number of gradients (expected {expected}, got {actual}). "
+                    f"Expected one gradient for each forward input, or for "
+                    f"each positional input to the operator. Use None for "
+                    f"inputs that do not require a gradient."
+                )
             if isinstance(result, tuple):
+                extra_grads = result[num_actual_inputs:]
+                if any(grad is not None for grad in extra_grads):
+                    raise RuntimeError(
+                        f"The backward formula for {op} returned a non-None "
+                        f"gradient for an input that was not passed to the "
+                        f"operator. Defaulted inputs that were not passed "
+                        f"through autograd must return None."
+                    )
+                if has_tensorlist_like_args:
+                    result = result[:num_actual_inputs]
                 return (*result, None)
             return result, None
         raise RuntimeError(
@@ -96,17 +124,13 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         },
     )
 
-    schema = op._schema
-    if any(
-        utils.is_tensorlist_like_type(a.type)
-        for a in (*schema.arguments, *schema.returns)
-    ):
+    if has_tensorlist_like_args:
         Generated = supports_tensorlist(Generated)
 
     # The dispatcher passes any keyword-only-args as kwargs and the
     # rest of the args (even if specified as kwargs) as args.
     def autograd_impl(keyset, *args, **keyword_only_args):
-        if utils.is_out(op):
+        if is_out_op:
             if _C.is_grad_enabled() and _C._any_requires_grad(
                 *args, **keyword_only_args
             ):
@@ -115,12 +139,12 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
                     "support automatic differentiation, but one of the arguments "
                     "requires grad."
                 )
-            return forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+            return redispatch_no_grad(keyset, args, keyword_only_args)
 
         if _C.is_grad_enabled() and _C._any_requires_grad(*args):
             result = Generated.apply(*args, Metadata(keyset, keyword_only_args))  # type: ignore[attr-defined]
         else:
-            result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+            result = redispatch_no_grad(keyset, args, keyword_only_args)
         return result
 
     return autograd_impl

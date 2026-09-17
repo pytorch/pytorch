@@ -48,6 +48,11 @@ template <>
 struct radix_bits<bool> {
   using type = uchar;
 };
+// 64-bit keys: used by median radix selection only
+template <>
+struct radix_bits<long> {
+  using type = ulong;
+};
 
 // Map key to uint where uint-order matches sort-order, handles floats,
 // signed/unsigned ints and descending.
@@ -94,6 +99,49 @@ to_radix_key(T val, bool desc) {
   if (desc)
     result = U(~result);
   return uint(result);
+}
+
+// Non-template overload wins over the signed template for exact long args.
+inline ulong to_radix_key(long val, bool desc) {
+  ulong result = as_type<ulong>(val) ^ (ulong(1) << 63);
+  if (desc)
+    result = ~result;
+  return result;
+}
+
+// Inverse of to_radix_key (same `desc`): recovers the value at the keyed
+// merge's final store and the median selection's final pick. Exact for
+// non-NaN; NaN maps to a canonical NaN.
+template <typename T>
+inline ::metal::enable_if_t<::metal::is_floating_point_v<T>, T> from_radix_key(
+    typename radix_bits<T>::type key,
+    bool desc) {
+  using U = typename radix_bits<T>::type;
+  constexpr uint nbits = sizeof(T) * 8;
+  constexpr U sign_bit = U(1) << (nbits - 1);
+  U r = desc ? U(~key) : key;
+  // top bit set => original non-negative (only sign flipped); clear => all
+  // flipped.
+  U mask = (r & sign_bit) ? sign_bit : U(~U(0));
+  return as_type<T>(U(r ^ mask));
+}
+
+template <typename T>
+inline ::metal::
+    enable_if_t<!::metal::is_floating_point_v<T> && ::metal::is_signed_v<T>, T>
+    from_radix_key(typename radix_bits<T>::type key, bool desc) {
+  using U = typename radix_bits<T>::type;
+  constexpr U sign_bit = U(1) << (sizeof(T) * 8 - 1);
+  U r = desc ? U(~key) : key;
+  return as_type<T>(U(r ^ sign_bit));
+}
+
+template <typename T>
+inline ::metal::
+    enable_if_t<!::metal::is_floating_point_v<T> && !::metal::is_signed_v<T>, T>
+    from_radix_key(typename radix_bits<T>::type key, bool desc) {
+  using U = typename radix_bits<T>::type;
+  return T(desc ? U(~key) : key);
 }
 
 template <typename T, short RTPTG, short EPT, short RBITS>
@@ -301,48 +349,38 @@ constexpr constant int kMaxFusedBlocks = 4;
 template <
     typename T,
     typename InIdxT,
-    typename OutIdxT,
     short RTPTG,
     short EPT,
     short RBITS,
-    bool FUSED_SCAN = false>
-kernel void radix_scatter(
-    const device T* keys_in [[buffer(0)]],
-    const device InIdxT* vals_in [[buffer(1)]],
-    device T* keys_out [[buffer(2)]],
-    device OutIdxT* vals_out [[buffer(3)]],
-    const device uint* offsets [[buffer(4)]],
-    constant int3& dims [[buffer(5)]],
-    constant bool2& flags [[buffer(6)]],
-    uint3 tid [[threadgroup_position_in_grid]],
-    uint3 lid3 [[thread_position_in_threadgroup]]) {
-  const int sort_size = dims.x;
-  const int n_blocks = dims.y;
-  const int shift = dims.z;
-  const bool desc = flags.x;
-  const bool first_pass = flags.y;
+    bool FUSED_SCAN>
+inline void radix_scatter_body(
+    const device T* keys_in,
+    const device InIdxT* vals_in,
+    const device uint* offsets,
+    threadgroup T* stage_keys,
+    threadgroup InIdxT* stage_idxs,
+    threadgroup uint* simd_sum_buf,
+    threadgroup uint* tg_total_zeros,
+    threadgroup uint* block_offsets,
+    threadgroup uint* digit_start,
+    threadgroup uint* fused_buf,
+    int sort_size,
+    int n_blocks,
+    int shift,
+    bool desc,
+    bool first_pass,
+    int row,
+    int block_idx,
+    int items_this_block,
+    uint lid,
+    uint simd_id,
+    uint lane) {
   constexpr int RSIZE = 1 << RBITS;
   constexpr uint RMASK = RSIZE - 1;
   constexpr int ELEMS_PER_TG = RTPTG * EPT;
   constexpr int SIMD_W = 32;
   constexpr int MAX_SIMD_GROUPS = RTPTG / SIMD_W;
-  constexpr int FUSED_BUF_SIZE = FUSED_SCAN ? RSIZE * kMaxFusedBlocks : 1;
-  uint lid = lid3.x;
-  uint simd_id = lid / SIMD_W;
-  uint lane = lid & (SIMD_W - 1);
-  int row = tid.y;
-  int block_idx = tid.x;
   int block_start = block_idx * ELEMS_PER_TG;
-  int items_this_block = min(ELEMS_PER_TG, sort_size - block_start);
-
-  threadgroup T stage_keys[ELEMS_PER_TG];
-  threadgroup InIdxT stage_idxs[ELEMS_PER_TG];
-  threadgroup uint simd_sum_buf[MAX_SIMD_GROUPS];
-  threadgroup uint tg_total_zeros;
-  threadgroup uint block_offsets[RSIZE];
-  threadgroup uint digit_start[RSIZE];
-
-  threadgroup uint fused_buf[FUSED_BUF_SIZE];
 
 #pragma unroll
   for (int i = 0; i < EPT; ++i) {
@@ -399,12 +437,12 @@ kernel void radix_scatter(
       if (lane < uint(MAX_SIMD_GROUPS))
         simd_sum_buf[lane] = p;
       if (lane == uint(MAX_SIMD_GROUPS - 1))
-        tg_total_zeros = p + t;
+        *tg_total_zeros = p + t;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     uint my_zero_prefix = simd_sum_buf[simd_id] + simd_prefix_val;
-    uint total_zeros = tg_total_zeros;
+    uint total_zeros = *tg_total_zeros;
     uint my_one_prefix = my_active_start - my_zero_prefix;
 
     uint next_zero = my_zero_prefix;
@@ -491,6 +529,75 @@ kernel void radix_scatter(
           offsets[row * RSIZE * n_blocks + d * n_blocks + block_idx];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
+}
+
+template <
+    typename T,
+    typename InIdxT,
+    typename OutIdxT,
+    short RTPTG,
+    short EPT,
+    short RBITS,
+    bool FUSED_SCAN = false>
+kernel void radix_scatter(
+    const device T* keys_in [[buffer(0)]],
+    const device InIdxT* vals_in [[buffer(1)]],
+    device T* keys_out [[buffer(2)]],
+    device OutIdxT* vals_out [[buffer(3)]],
+    const device uint* offsets [[buffer(4)]],
+    constant int3& dims [[buffer(5)]],
+    constant bool2& flags [[buffer(6)]],
+    uint3 tid [[threadgroup_position_in_grid]],
+    uint3 lid3 [[thread_position_in_threadgroup]]) {
+  const int sort_size = dims.x;
+  const int n_blocks = dims.y;
+  const int shift = dims.z;
+  const bool desc = flags.x;
+  const bool first_pass = flags.y;
+  constexpr int RSIZE = 1 << RBITS;
+  constexpr uint RMASK = RSIZE - 1;
+  constexpr int ELEMS_PER_TG = RTPTG * EPT;
+  constexpr int SIMD_W = 32;
+  constexpr int MAX_SIMD_GROUPS = RTPTG / SIMD_W;
+  constexpr int FUSED_BUF_SIZE = FUSED_SCAN ? RSIZE * kMaxFusedBlocks : 1;
+  uint lid = lid3.x;
+  uint simd_id = lid / SIMD_W;
+  uint lane = lid & (SIMD_W - 1);
+  int row = tid.y;
+  int block_idx = tid.x;
+  int block_start = block_idx * ELEMS_PER_TG;
+  int items_this_block = min(ELEMS_PER_TG, sort_size - block_start);
+
+  threadgroup T stage_keys[ELEMS_PER_TG];
+  threadgroup InIdxT stage_idxs[ELEMS_PER_TG];
+  threadgroup uint simd_sum_buf[MAX_SIMD_GROUPS];
+  threadgroup uint tg_total_zeros;
+  threadgroup uint block_offsets[RSIZE];
+  threadgroup uint digit_start[RSIZE];
+  threadgroup uint fused_buf[FUSED_BUF_SIZE];
+
+  radix_scatter_body<T, InIdxT, RTPTG, EPT, RBITS, FUSED_SCAN>(
+      keys_in,
+      vals_in,
+      offsets,
+      stage_keys,
+      stage_idxs,
+      simd_sum_buf,
+      &tg_total_zeros,
+      block_offsets,
+      digit_start,
+      fused_buf,
+      sort_size,
+      n_blocks,
+      shift,
+      desc,
+      first_pass,
+      row,
+      block_idx,
+      items_this_block,
+      lid,
+      simd_id,
+      lane);
 
 #pragma unroll
   for (int i = 0; i < EPT; ++i) {
@@ -507,6 +614,26 @@ kernel void radix_scatter(
   }
 }
 
+#define _SCATTER_SIG(T, InIdxT, OutIdxT)                             \
+  const device T*, const device InIdxT*, device T*, device OutIdxT*, \
+      const device uint*, constant int3&, constant bool2&, uint3, uint3
+
+#define INSTANTIATE_RADIX_FOR(T, InIdxT, OutIdxT, RTPTG, EPT, RBITS, NAME) \
+  template [[host_name("radix_scatter_" NAME)]]                            \
+  kernel void radix_scatter<T, InIdxT, OutIdxT, RTPTG, EPT, RBITS, false>( \
+      _SCATTER_SIG(T, InIdxT, OutIdxT));                                   \
+  template [[host_name("radix_scatter_fused_" NAME)]]                      \
+  kernel void radix_scatter<T, InIdxT, OutIdxT, RTPTG, EPT, RBITS, true>(  \
+      _SCATTER_SIG(T, InIdxT, OutIdxT));
+
+#define INSTANTIATE_RADIX_FINAL_FOR(T, InIdxT, RTPTG, EPT, RBITS, NAME) \
+  template [[host_name("radix_scatter_final_" NAME)]]                   \
+  kernel void radix_scatter<T, InIdxT, long, RTPTG, EPT, RBITS, false>( \
+      _SCATTER_SIG(T, InIdxT, long));                                   \
+  template [[host_name("radix_scatter_fused_final_" NAME)]]             \
+  kernel void radix_scatter<T, InIdxT, long, RTPTG, EPT, RBITS, true>(  \
+      _SCATTER_SIG(T, InIdxT, long));
+
 #define INSTANTIATE_RADIX(T, RTPTG, EPT, RBITS)                                \
   template [[host_name("radix_count_" #T "_" #RBITS "bit")]]                   \
   kernel void radix_count<T, RTPTG, EPT, RBITS>(                               \
@@ -516,96 +643,12 @@ kernel void radix_scatter(
       constant bool&,                                                          \
       uint3,                                                                   \
       uint3);                                                                  \
-  template [[host_name("radix_scatter_" #T "_" #RBITS "bit")]]                 \
-  kernel void radix_scatter<T, uint, uint, RTPTG, EPT, RBITS, false>(          \
-      const device T*,                                                         \
-      const device uint*,                                                      \
-      device T*,                                                               \
-      device uint*,                                                            \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-  template [[host_name("radix_scatter_final_" #T "_" #RBITS "bit")]]           \
-  kernel void radix_scatter<T, uint, long, RTPTG, EPT, RBITS, false>(          \
-      const device T*,                                                         \
-      const device uint*,                                                      \
-      device T*,                                                               \
-      device long*,                                                            \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-  template [[host_name("radix_scatter_fused_" #T "_" #RBITS "bit")]]           \
-  kernel void radix_scatter<T, uint, uint, RTPTG, EPT, RBITS, true>(           \
-      const device T*,                                                         \
-      const device uint*,                                                      \
-      device T*,                                                               \
-      device uint*,                                                            \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-  template [[host_name("radix_scatter_fused_final_" #T "_" #RBITS "bit")]]     \
-  kernel void radix_scatter<T, uint, long, RTPTG, EPT, RBITS, true>(           \
-      const device T*,                                                         \
-      const device uint*,                                                      \
-      device T*,                                                               \
-      device long*,                                                            \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-                                                                               \
-  template [[host_name("radix_scatter_" #T "_" #RBITS "bit_u16")]]             \
-  kernel void radix_scatter<T, ushort, ushort, RTPTG, EPT, RBITS, false>(      \
-      const device T*,                                                         \
-      const device ushort*,                                                    \
-      device T*,                                                               \
-      device ushort*,                                                          \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-  template [[host_name("radix_scatter_final_" #T "_" #RBITS "bit_u16")]]       \
-  kernel void radix_scatter<T, ushort, long, RTPTG, EPT, RBITS, false>(        \
-      const device T*,                                                         \
-      const device ushort*,                                                    \
-      device T*,                                                               \
-      device long*,                                                            \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-  template [[host_name("radix_scatter_fused_" #T "_" #RBITS "bit_u16")]]       \
-  kernel void radix_scatter<T, ushort, ushort, RTPTG, EPT, RBITS, true>(       \
-      const device T*,                                                         \
-      const device ushort*,                                                    \
-      device T*,                                                               \
-      device ushort*,                                                          \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-  template [[host_name("radix_scatter_fused_final_" #T "_" #RBITS "bit_u16")]] \
-  kernel void radix_scatter<T, ushort, long, RTPTG, EPT, RBITS, true>(         \
-      const device T*,                                                         \
-      const device ushort*,                                                    \
-      device T*,                                                               \
-      device long*,                                                            \
-      const device uint*,                                                      \
-      constant int3&,                                                          \
-      constant bool2&,                                                         \
-      uint3,                                                                   \
-      uint3);                                                                  \
-                                                                               \
+  INSTANTIATE_RADIX_FOR(T, uint, uint, RTPTG, EPT, RBITS, #T "_" #RBITS "bit") \
+  INSTANTIATE_RADIX_FINAL_FOR(T, uint, RTPTG, EPT, RBITS, #T "_" #RBITS "bit") \
+  INSTANTIATE_RADIX_FOR(                                                       \
+      T, ushort, ushort, RTPTG, EPT, RBITS, #T "_" #RBITS "bit_u16")           \
+  INSTANTIATE_RADIX_FINAL_FOR(                                                 \
+      T, ushort, RTPTG, EPT, RBITS, #T "_" #RBITS "bit_u16")                   \
   template [[host_name("radix_count_scan_" #T "_" #RBITS "bit_mb4")]]          \
   kernel void radix_count_scan<T, RTPTG, EPT, RBITS, 4>(                       \
       const device T*,                                                         \
@@ -635,95 +678,10 @@ INSTANTIATE_RADIX(uint, 512, 4, 8);
       constant bool&,                                                         \
       uint3,                                                                  \
       uint3);                                                                 \
-  template [[host_name("radix_scatter_" #T "_8bit_tptg512")]]                 \
-  kernel void radix_scatter<T, uint, uint, 512, 4, 8, false>(                 \
-      const device T*,                                                        \
-      const device uint*,                                                     \
-      device T*,                                                              \
-      device uint*,                                                           \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);                                                                 \
-  template [[host_name("radix_scatter_final_" #T "_8bit_tptg512")]]           \
-  kernel void radix_scatter<T, uint, long, 512, 4, 8, false>(                 \
-      const device T*,                                                        \
-      const device uint*,                                                     \
-      device T*,                                                              \
-      device long*,                                                           \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);                                                                 \
-  template [[host_name("radix_scatter_fused_" #T "_8bit_tptg512")]]           \
-  kernel void radix_scatter<T, uint, uint, 512, 4, 8, true>(                  \
-      const device T*,                                                        \
-      const device uint*,                                                     \
-      device T*,                                                              \
-      device uint*,                                                           \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);                                                                 \
-  template [[host_name("radix_scatter_fused_final_" #T "_8bit_tptg512")]]     \
-  kernel void radix_scatter<T, uint, long, 512, 4, 8, true>(                  \
-      const device T*,                                                        \
-      const device uint*,                                                     \
-      device T*,                                                              \
-      device long*,                                                           \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);                                                                 \
-                                                                              \
-  template [[host_name("radix_scatter_" #T "_8bit_tptg512_u16")]]             \
-  kernel void radix_scatter<T, ushort, ushort, 512, 4, 8, false>(             \
-      const device T*,                                                        \
-      const device ushort*,                                                   \
-      device T*,                                                              \
-      device ushort*,                                                         \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);                                                                 \
-  template [[host_name("radix_scatter_final_" #T "_8bit_tptg512_u16")]]       \
-  kernel void radix_scatter<T, ushort, long, 512, 4, 8, false>(               \
-      const device T*,                                                        \
-      const device ushort*,                                                   \
-      device T*,                                                              \
-      device long*,                                                           \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);                                                                 \
-  template [[host_name("radix_scatter_fused_" #T "_8bit_tptg512_u16")]]       \
-  kernel void radix_scatter<T, ushort, ushort, 512, 4, 8, true>(              \
-      const device T*,                                                        \
-      const device ushort*,                                                   \
-      device T*,                                                              \
-      device ushort*,                                                         \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);                                                                 \
-  template [[host_name("radix_scatter_fused_final_" #T "_8bit_tptg512_u16")]] \
-  kernel void radix_scatter<T, ushort, long, 512, 4, 8, true>(                \
-      const device T*,                                                        \
-      const device ushort*,                                                   \
-      device T*,                                                              \
-      device long*,                                                           \
-      const device uint*,                                                     \
-      constant int3&,                                                         \
-      constant bool2&,                                                        \
-      uint3,                                                                  \
-      uint3);
+  INSTANTIATE_RADIX_FOR(T, uint, uint, 512, 4, 8, #T "_8bit_tptg512")         \
+  INSTANTIATE_RADIX_FINAL_FOR(T, uint, 512, 4, 8, #T "_8bit_tptg512")         \
+  INSTANTIATE_RADIX_FOR(T, ushort, ushort, 512, 4, 8, #T "_8bit_tptg512_u16") \
+  INSTANTIATE_RADIX_FINAL_FOR(T, ushort, 512, 4, 8, #T "_8bit_tptg512_u16")
 
 INSTANTIATE_RADIX_TPTG512(half);
 INSTANTIATE_RADIX_TPTG512(bfloat);

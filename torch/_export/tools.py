@@ -22,7 +22,7 @@ def _generate_inputs_for_submodules(
     kwargs: dict[str, Any] | None = None,
 ) -> dict[str, tuple[Any, Any]]:
     """
-    Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
+    Generate inputs for targeting submodules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
 
     Args:

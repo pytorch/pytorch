@@ -43,7 +43,7 @@ class HealthCheckServer:
 
     def start(self) -> None:
         """
-        Unsupported functionality for Pytorch, doesn't start any health check server
+        Unsupported functionality for PyTorch, doesn't start any health check server
         """
         log.warning("No health check server started")
 

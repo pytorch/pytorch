@@ -1,10 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
-import shutil
-import tempfile
-from collections.abc import Callable
-from functools import wraps
-from typing import Any
+from unittest.mock import patch
+
+import fsspec
+import fsspec.implementations.memory
 
 import torch
 import torch.distributed as dist
@@ -28,43 +27,11 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 BACKEND = torch.distributed.get_default_backend_for_device(device_type)
-
-
-def with_temp_dir(
-    func: Callable | None = None,
-) -> Callable | None:
-    """
-    Wrapper to initialize temp directory for distributed checkpoint.
-    """
-    if func is None:
-        raise AssertionError("Expected func to not be None")
-
-    @wraps(func)
-    def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
-        # Only create temp_dir when rank is 0 (or no pg)
-        if not dist.is_initialized() or dist.get_rank() == 0:
-            temp_dir = tempfile.mkdtemp()
-            print(f"Using temp directory: {temp_dir}")
-        else:
-            temp_dir = ""
-        object_list = [temp_dir]
-
-        # Broadcast temp_dir to all the other ranks
-        if dist.is_initialized():
-            dist.broadcast_object_list(object_list)
-        self.temp_dir = object_list[0]
-
-        try:
-            func(self, *args, **kwargs)
-        finally:
-            if not dist.is_initialized() or dist.get_rank() == 0:
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    return wrapper
 
 
 class MyTestModule(torch.nn.Module):
@@ -207,6 +174,49 @@ class TestFileSystem(TestCase):
             with fs.create_stream(read_file, "r") as s:
                 raise OSError("fail")
         self.assertTrue(fs.exists(read_file))
+
+    @patch("os.sync")
+    def test_fsspec_without_fileno_support(self, mock_os_sync):
+        """
+        fsspec's "memory://" protocol simulates cloud storage
+        by not supporting .fileno() and raising io.UnsupportedOperation.
+        This tests that the stream is flushed and fsync degrades gracefully.
+        """
+        checkpoint_dir = "memory://test_checkpoint_with_no_file_no"
+
+        # Create a dummy state dict
+        state_dict = {"tensor": torch.randn(10)}
+
+        # Spy on the MemoryFile flush method to ensure it gets called
+        with patch.object(
+            fsspec.implementations.memory.MemoryFile, "flush", autospec=True
+        ) as mock_flush:
+            # Save using FsspecWriter
+            dcp.save(
+                state_dict=state_dict,
+                storage_writer=FsspecWriter(checkpoint_dir),
+                planner=dcp.DefaultSavePlanner(),
+                no_dist=True,
+            )
+
+            # Assert that flush() was explicitly called on the stream
+            self.assertTrue(
+                mock_flush.called, "Expected stream.flush() to be called explicitly."
+            )
+
+        # Verify it saved properly and can be loaded
+        load_dict = {"tensor": torch.zeros(10)}
+        dcp.load(
+            state_dict=load_dict,
+            storage_reader=FsspecReader(checkpoint_dir),
+            planner=dcp.DefaultLoadPlanner(),
+            no_dist=True,
+        )
+
+        self.assertTrue(torch.allclose(state_dict["tensor"], load_dict["tensor"]))
+
+        # os.sync() may be called on backends that don't support per-file fsync
+        self.assertLessEqual(mock_os_sync.call_count, 2)
 
 
 if __name__ == "__main__":

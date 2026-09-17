@@ -35,7 +35,7 @@ constexpr inline integer get_log_num_threads_x_inner_scan(integer num_rows, inte
   // but detrimental in another case, so just keep the lower bound to be log2(16) == 4 to make it
   // similar to the previous implementation
   // Keeping the upper bound to be log2(512) == 9 as the maximum number of threads in a block.
-  log_num_threads_x = std::min(std::max((integer)4, log_num_threads_x), (integer)9);
+  log_num_threads_x = std::clamp(log_num_threads_x, (integer)4, (integer)9);
   return log_num_threads_x;
 }
 

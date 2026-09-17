@@ -5,8 +5,8 @@
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
-#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCCUtils.hpp>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -188,24 +188,22 @@ void read_config() {
 }
 
 void check_device(c10::Device dev1, c10::Device dev2) {
-  if (dev1.is_cuda() && dev2.is_cuda() && dev1 != dev2) {
-    throw std::invalid_argument("ProcessGroupUCC multidevice is not supported");
-  }
+  TORCH_CHECK_VALUE(
+      !(dev1.is_cuda() && dev2.is_cuda() && dev1 != dev2),
+      "ProcessGroupUCC multidevice is not supported");
 }
 
 void check_tensor(const std::vector<at::Tensor>& tensors) {
-  if (tensors.size() != 1) {
-    throw std::invalid_argument(
-        "ProcessGroupUCC takes 1 tensor. Got " +
-        std::to_string(tensors.size()) + ". ");
-  }
-  if (!tensors[0].is_contiguous()) {
-    throw std::invalid_argument(
-        "ProcessGroupUCC input tensor has to be contiguous");
-  }
-  if (tensors[0].is_sparse()) {
-    throw std::invalid_argument("ProcessGroupUCC input tensor has to be dense");
-  }
+  TORCH_CHECK_VALUE(
+      tensors.size() == 1,
+      "ProcessGroupUCC takes 1 tensor. Got ",
+      tensors.size(),
+      ". ");
+  TORCH_CHECK_VALUE(
+      tensors[0].is_contiguous(),
+      "ProcessGroupUCC input tensor has to be contiguous");
+  TORCH_CHECK_VALUE(
+      !tensors[0].is_sparse(), "ProcessGroupUCC input tensor has to be dense");
   // TODO: check cuda case
 }
 
@@ -409,7 +407,7 @@ std::shared_ptr<Comm> Comm::get_comm(
               is_health_check ? TORCH_UCC_HEALTH_CHECK : TORCH_UCC_INIT,
               "ucc communicator was initialized with different cuda device,"
               "multi device is not supported");
-          throw std::invalid_argument(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
+          TORCH_CHECK_VALUE(false, ucc_status_string(UCC_ERR_NOT_SUPPORTED));
         }
         shared_comm->cuda_device_index = dev.index();
       }
@@ -605,7 +603,7 @@ ProcessGroupUCC::ProcessGroupUCC(
   TORCH_UCC_LOG_INFO(
       TORCH_UCC_INIT,
       c10::str(
-          "Successfully read and set ProcessGroupUCC env. variables as followings",
+          "Successfully read and set ProcessGroupUCC env. variables as follows",
           envs));
 
   if (torch_ucc_config.enable_health_check) {
@@ -855,7 +853,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     default: {
       TORCH_UCC_LOG_ERROR(
           TORCH_UCC_COLL_POST, c10::str("unsupported device type ", dev.str()));
-      throw std::invalid_argument(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
+      TORCH_CHECK_VALUE(false, ucc_status_string(UCC_ERR_NOT_SUPPORTED));
     }
   }
 }
@@ -962,7 +960,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
   }
 }
 
-c10::intrusive_ptr<Work> ProcessGroupUCC::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::all_gather_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const AllgatherOptions& opts) {
@@ -1039,8 +1037,8 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce(
 c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce_coalesced(
     std::vector<at::Tensor>& /* unused */,
     const AllreduceCoalescedOptions& /* unused */) {
-  throw std::invalid_argument(
-      "ProcessGroupUCC does not support allreduce_coalesced");
+  TORCH_CHECK_VALUE(
+      false, "ProcessGroupUCC does not support allreduce_coalesced");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall(
@@ -1107,7 +1105,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall(
       "ucc:alltoall");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::all_to_all_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -1330,7 +1328,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::gather(
           TORCH_UCC_COLL_POST, "requires empty output on non-root");
     }
     outputs = {};
-    // append a empty tensor to the list to be used by future mark
+    // append an empty tensor to the list to be used by future mark
     outputs.emplace_back();
   }
 
@@ -1457,7 +1455,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
       "ucc:reduce_scatter");
 }
 
-c10::intrusive_ptr<Work> ProcessGroupUCC::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
@@ -1648,8 +1646,6 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
       "ucc:recv");
 }
 
-void ProcessGroupUCC::setSequenceNumberForGroup() {}
-
 uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
   return seq_;
 }
@@ -1682,7 +1678,7 @@ void ProcessGroupUCC::initComm(c10::Device dev) {
             TORCH_UCC_INIT,
             "ucc communicator was initialized with different cuda device,"
             "multi device is not supported");
-        throw std::invalid_argument(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
+        TORCH_CHECK_VALUE(false, ucc_status_string(UCC_ERR_NOT_SUPPORTED));
       }
       comm->cuda_device_index = dev.index();
     }

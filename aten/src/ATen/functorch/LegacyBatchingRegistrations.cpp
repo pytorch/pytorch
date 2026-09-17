@@ -12,6 +12,7 @@
 #include <ATen/functorch/LegacyVmapTransforms.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/WrapDimUtils.h>
 
 #include <utility>
 
@@ -713,8 +714,8 @@ Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   for (auto i : c10::irange(num_components)) {
     std::vector<Tensor> arg_list;
     arg_list.reserve(unbound.size());
-    for (auto j : c10::irange(unbound.size())) {
-      arg_list.push_back(unbound[j][i]);
+    for (const auto& unbound_elem : unbound) {
+      arg_list.push_back(unbound_elem[i]);
     }
     outputs.push_back(at::cat(arg_list, dim));
   }

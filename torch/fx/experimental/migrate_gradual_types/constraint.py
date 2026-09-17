@@ -198,7 +198,7 @@ class TGreatestUpperBound(Constraint):
         """
         :param res: tensor variable that stores the result of the output
         :param rhs1: tensor or tensor variable
-        :param rhs2: tensor or tensor variabke
+        :param rhs2: tensor or tensor variable
         """
         self.res = res
         self.rhs1 = rhs1

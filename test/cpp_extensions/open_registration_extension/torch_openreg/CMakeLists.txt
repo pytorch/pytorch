@@ -39,6 +39,8 @@ endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include(${PROJECT_SOURCE_DIR}/cmake/TorchPythonTargets.cmake)
 
+option(USE_TEST "Build unit tests" ON)
+
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/openreg)
 add_subdirectory(${PROJECT_SOURCE_DIR}/csrc)
 add_subdirectory(${PROJECT_SOURCE_DIR}/torch_openreg/csrc)

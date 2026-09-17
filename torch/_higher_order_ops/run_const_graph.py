@@ -2,9 +2,8 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._higher_order_ops.utils import autograd_not_implemented, register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 
 if TYPE_CHECKING:
@@ -62,16 +61,15 @@ run_const_graph.py_autograd_impl(
 )
 
 
-@run_const_graph.py_impl(FakeTensorMode)
+@register_fake(run_const_graph, skip_cache=True)
 def run_const_graph_fake_tensor_mode(
-    mode: FakeTensorMode, graph: torch.fx.GraphModule, args: tuple[object, ...]
+    graph: torch.fx.GraphModule, args: tuple[object, ...]
 ) -> object:
     if not isinstance(graph, torch.fx.GraphModule):
         raise AssertionError(
             f"expected graph to be torch.fx.GraphModule, got {type(graph)}"
         )
-    with mode:
-        return graph(*args)
+    return graph(*args)
 
 
 @run_const_graph.py_impl(DispatchKey.CPU)
