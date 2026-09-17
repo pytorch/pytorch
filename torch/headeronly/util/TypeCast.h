@@ -1,17 +1,19 @@
 #pragma once
-#include <c10/macros/Macros.h>
-#include <c10/util/BFloat16.h>
-#include <c10/util/Float8_e4m3fn.h>
-#include <c10/util/Float8_e4m3fnuz.h>
-#include <c10/util/Float8_e5m2.h>
-#include <c10/util/Float8_e5m2fnuz.h>
-#include <c10/util/Float8_e8m0fnu.h>
-#include <c10/util/Half.h>
-#include <c10/util/complex.h>
-#include <c10/util/overflows.h>
-#include <c10/util/safe_conv.h>
+#include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Float8_e4m3fn.h>
+#include <torch/headeronly/util/Float8_e4m3fnuz.h>
+#include <torch/headeronly/util/Float8_e5m2.h>
+#include <torch/headeronly/util/Float8_e5m2fnuz.h>
+#include <torch/headeronly/util/Float8_e8m0fnu.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/complex.h>
+#include <torch/headeronly/util/overflows.h>
 
+#include <sstream>
+#include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
@@ -26,7 +28,8 @@ namespace c10 {
 template <typename dest_t, typename src_t>
 struct needs_real {
   constexpr static bool value =
-      (is_complex<src_t>::value && !is_complex<dest_t>::value);
+      (torch::headeronly::is_complex<src_t>::value &&
+       !torch::headeronly::is_complex<dest_t>::value);
 };
 
 template <bool, typename src_t>
@@ -324,8 +327,14 @@ C10_HOST_DEVICE To convert(From f) {
   return static_cast_with_inter_type<To, From>::apply(f);
 }
 
-// Define separately to avoid being inlined and prevent code-size bloat
-[[noreturn]] C10_API void report_overflow(const char* name);
+// Define with C10_NOINLINE to prevent code-size bloat.
+[[noreturn]] C10_NOINLINE inline void report_overflow(const char* name) {
+  std::ostringstream oss{};
+  oss << "value cannot be converted to type " << name << " without overflow";
+  // @allow-raw-throw: plain message required; STD_TORCH_CHECK adds prefix
+  throw std::runtime_error(
+      std::move(oss).str()); // runtime_error rather than domain_error (#33562)
+}
 
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
@@ -351,6 +360,18 @@ To unsafe_wrapping_convert(From f, const char* name) {
 }
 
 } // namespace c10
+
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+using c10::checked_convert;
+using c10::convert;
+using c10::maybe_bool;
+using c10::maybe_real;
+using c10::needs_real;
+using c10::report_overflow;
+using c10::static_cast_with_inter_type;
+using c10::unchecked_cast_to_int;
+using c10::unsafe_wrapping_convert;
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
 
