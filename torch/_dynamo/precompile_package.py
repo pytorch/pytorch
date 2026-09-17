@@ -27,21 +27,35 @@ artifacts transparently without an explicit capture.
 
 Capture is by execution, and the caller drives it: the session hands back a
 callable, the caller invokes it with real inputs inside their own loop, and
-every frame Dynamo produces is recorded. Runtime guards stay intact during
-capture, so later calls trigger the same recompilations as ordinary
-``torch.compile``: the session's ``guard_filter_fn`` applies only to the
-serialized copy, unlike ``torch.compile``'s option of the same name, which
-removes a rejected guard from the runtime check as well
-(``CheckFunctionManager.__init__`` builds the runtime guards from the filtered
-list). Every dropped guard is reported in ``PrecompileSummary.dropped_guards``.
+every frame Dynamo produces is recorded. The session keeps the runtime guards
+intact during capture, so later calls trigger the same recompilations as
+ordinary ``torch.compile``, and applies its ``guard_filter_fn`` to the
+serialized copy only; that needs a serialization-only filter in
+``CheckFunctionManager`` (a ``serialization_guard_filter_fn`` beside the
+runtime ``guard_filter_fn``), which arrives with the session. Nothing in this
+stack has it: ``torch.compile``'s ``guard_filter_fn``, the only hook here and
+the one this stack's tests pass ``default_guard_filter_fn`` through, removes a
+rejected guard from the runtime check as well (``CheckFunctionManager.__init__``
+builds the runtime guards from the filtered list), so a capture run that way
+does not recompile when a guarded global function is rebound, serves the stale
+graph, and records fewer variants than plain ``torch.compile`` would. Every
+dropped guard is reported in ``PrecompileSummary.dropped_guards``.
 
-If serialization drops a configuration-dependent guard, the artifact is refused
-by default rather than written with variants whose dispatch would be ambiguous
-after load. Which drops those are is decided per frame, by comparing the guards
-of every captured variant of one frame: a guard that held identically in every
-variant is a precondition the artifact is only valid under, one that differed
-is what tells its graphs apart. Guards from different frames are not
-comparable -- an entry frame guards its arguments, a resume frame guards
+If serialization drops a guard that looks configuration-dependent, the artifact
+is refused by default rather than written with variants whose dispatch would be
+ambiguous after load. Two tests feed that decision, and their union is
+``PrecompileSummary.risky_dropped_guards``. One is the risky-drop lint over the
+dropped guard's binding site (``_is_risky_drop``); it waives a builtin read, a
+read off a torch- or stdlib-owned namespace and a global bound to a same-name
+``def``, so a config-selected binding read off a trusted namespace passes it,
+and it is a lint, not a proof. The other is decided per frame, by comparing the
+guards of every captured variant of one frame: a guard that held identically
+in every variant is a precondition the artifact is only valid under, one that
+differed is what tells its graphs apart, and a dropped guard of the second kind
+is what makes dispatch ambiguous. A serializable guard the session drops
+because it held identically is reported apart, in
+``PrecompileSummary.policy_dropped_guards``. Guards from different frames are
+not comparable -- an entry frame guards its arguments, a resume frame guards
 whatever crossed the break -- so the comparison never crosses frames.
 
 Because capture is by execution, a resume function only exists once the frame
@@ -93,11 +107,18 @@ Know these before relying on an artifact in production:
 * The model must live in an importable module. Source is checksummed, so a
   class defined in ``__main__`` or a REPL cannot be loaded elsewhere.
 * ``CompilePackage.install()`` writes compiled and resume functions into module
-  globals, but guarded dispatch is scoped to the isolated compile region owned
-  by the runnable ``load`` returns. Call that runnable rather than another
-  instance of the same class. Multiple loaded artifacts can share entry, inner,
-  and resume code objects without taking each other's entries; the runnable's
-  ``unload()`` removes only its own region and the globals it still owns.
+  globals and pushes the guarded entries onto the captured code objects, where
+  every caller of those code objects dispatches through them. In this stack it
+  begins with ``CompilePackage.uninstall()``, which clears the entry code
+  object's entries and nothing pushed onto shared inner or resume code
+  objects, so a second artifact installed on the same entry code takes the
+  first's place. The follow-up scopes each entry to the isolated compile
+  region owned by the runnable ``load`` returns (an ``isolate_recompiles_id``
+  on the entry that the frame lookup matches against its own region only), so
+  that loaded artifacts can share entry, inner and resume code objects without
+  taking each other's entries, and the runnable's ``unload()`` removes only its
+  own region and the globals it still owns; call that runnable rather than
+  another instance of the same class.
 """
 
 from __future__ import annotations
@@ -130,35 +151,48 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     ``PrecompileSummary.dropped_guards``, and the only rail on by default is
     the module's risky-drop lint over them; a lint is not a proof.
 
-    This mirrors the three branches of the serializer's pre-check, the if/elif
-    chain at the top of ``serialize_guards``, and nothing past it. A guard of a
-    refused type is dropped, and so is a guard of another type that DERIVES one
-    (a CONSTANT_MATCH on a code object runs through ID_MATCH), except that
-    TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the chain
-    takes their branch first: BUILTIN_MATCH is an ``id_match_unchecked`` that
-    records ID_MATCH, but the builtin pickles by name, the artifact carries only
-    a save-time copy of the builtins dict pruned to the names guards read
-    (``serialize_guards``), and both loaders bind the LIVE ``builtins.__dict__``
-    under the guard's key instead (``CompilePackage.install``,
+    This mirrors the type tests of the three branches of the serializer's
+    pre-check, the if/elif chain at the top of ``serialize_guards``, and
+    nothing past it: not the raise inside the first branch, which is the
+    local-scope refusal below. A guard of a refused type is dropped, and so is
+    a guard of another type that DERIVES one (a CONSTANT_MATCH on a code object
+    runs through ID_MATCH), except that TYPE_MATCH and BUILTIN_MATCH are kept
+    whatever they derive, as the chain takes their branch first: BUILTIN_MATCH
+    is an ``id_match_unchecked`` that records ID_MATCH, but the builtin pickles
+    by name, the artifact carries only save-time copies of the builtins dict
+    (the guards' copy ``serialize_guards`` prunes to the names guards read, and
+    the pickle-filtered copy ``get_runtime_env`` records for the bytecode), and
+    both loaders bind the LIVE ``builtins.__dict__`` under the guard's key
+    instead (``CompilePackage.install``,
     ``AOTCompiledFunction._seed_guard_scope``), so the guard rebuilt at load
     catches a builtin swapped afterwards (``test_aot_compile.py``
     ``test_kept_builtin_match_guard_reads_the_seeded_builtins_dict`` pins the
-    live dict). Past the chain the filter mirrors nothing, and the refusal that
-    matters there is of local-scope types, which cannot be pickled by name. It
-    has more than one path: the chain's TYPE_MATCH/BUILTIN_MATCH branch raises
-    when ``guard._unserializable`` is set, FAKE_SCRIPT_TYPE_MATCH sets the same
-    flag but takes no branch of the chain, and
-    ``GuardsStatePickler.reducer_override`` refuses a plain instance of such a
-    type wherever it sits in the guard tree, so a kept guard whose source walks
-    through one fails there. That last refusal is not universal: the branches
-    before it rebuild a local function by value, a local namedtuple type from
-    its fields, and an ``nn.Module`` of a local class with the default
-    ``__getstate__`` as a plain ``torch.nn.Module``, so for a module argument of
-    a local class the kept TYPE_MATCH is the only refusal; drop it and the
-    artifact serializes, then serves a differently typed module whose guarded
-    attributes match, with no error. That is why the filter keeps every
-    local-type guard on purpose although ``orig_guard._unserializable`` would
-    tell for the first two paths: dropping a guard on a type the artifact
+    live dict). DICT_KEYS_MATCH is kept by type for another reason. The derived
+    types an entry carries are the UNSAVED build's: ``CheckFunctionManager``
+    runs the pre-filter build with ``save_guards=False``, and a DICT_KEYS_MATCH
+    on ``torch.utils._pytree.SUPPORTED_NODES`` promotes itself to DICT_VERSION
+    in exactly that build, whereas the save build pins it to a keys-match
+    (``guard._force_dict_keys_match``) that the pre-check accepts; dropping it
+    on the unsaved build's DICT_VERSION would discard the one guard that
+    notices a pytree node registered between capture and load. Check any new
+    refused derived type against the save build before dropping on it. Past
+    the chain the filter mirrors nothing, and the refusal that matters there
+    is of local-scope types, which cannot be pickled by name. It has two paths:
+    the chain's TYPE_MATCH/BUILTIN_MATCH branch raises when
+    ``guard._unserializable`` is set, and ``GuardsStatePickler.reducer_override``
+    refuses a plain instance of such a type wherever it sits in the guard tree,
+    so a kept guard whose source walks through one fails there.
+    (FAKE_SCRIPT_TYPE_MATCH sets the same flag, but nothing outside that branch
+    reads it, so a local-scope script-object type is the known hole: kept here
+    and not refused by the pre-check.) The pickler's refusal is not universal:
+    the branches before it rebuild a local function by value, a local
+    namedtuple type from its fields, and an ``nn.Module`` of a local class with
+    the default ``__getstate__`` as a plain ``torch.nn.Module``, so for a
+    module argument of a local class the kept TYPE_MATCH is the only refusal;
+    drop it and the artifact serializes, then serves a differently typed module
+    whose guarded attributes match, with no error. That is why the filter keeps
+    every local-type guard on purpose although ``orig_guard._unserializable``
+    would tell for the chain's path: dropping a guard on a type the artifact
     cannot pickle ships an artifact that never checks the type, whereas keeping
     it makes serialization refuse loudly. Passing this filter therefore does
     not mean the artifact serializes.
@@ -166,15 +200,19 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     ``torch._dynamo.config.caching_precompile`` (drop ID_MATCH, CLOSURE_MATCH,
     WEAKREF_ALIVE, DICT_VERSION and anything deriving ID_MATCH or
     DICT_VERSION). The two agree on every refused type, since NN_MODULE,
-    FUNCTION_MATCH, CLASS_MATCH and MODULE_MATCH all run through ID_MATCH and
-    derive it; they differ on BUILTIN_MATCH, which that policy drops through
-    its derived ID_MATCH and this keeps, and on one of those four rooted at a
-    TypeSource, which ``id_match_unchecked`` turns into a TYPE_MATCH on a fresh
-    guard so the original derives nothing: dropped here by type, kept there.
+    FUNCTION_MATCH, CLASS_MATCH and MODULE_MATCH all derive ID_MATCH (the first
+    two through ID_MATCH, the other two through ``id_match_unchecked`` directly,
+    which records the name ID_MATCH); they differ on BUILTIN_MATCH, which that
+    policy drops through its derived ID_MATCH and this keeps, on
+    DICT_KEYS_MATCH over SUPPORTED_NODES, which that policy drops through the
+    unsaved build's DICT_VERSION and this keeps, and on one of those four
+    rooted at a TypeSource, which ``id_match_unchecked`` turns into a
+    TYPE_MATCH on a fresh guard so the original derives nothing: dropped here
+    by type, kept there.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
-        g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
+        g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH", "DICT_KEYS_MATCH")
         or (
             g.guard_type not in unsupported
             and not any(d in unsupported for d in g.derived_guard_types)
