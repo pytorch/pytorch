@@ -33,7 +33,7 @@ def skip_unless_symmem(func):
 @unittest.skipUnless(HAS_SYMM_MEM, "SymmetricMemory required")
 class TestSymmemWork(TestCase):
     def test_wait(self):
-        from torch.distributed.pysymmem.backend import _SymmemWork
+        from torch.distributed._pysymmem.backend import _SymmemWork
 
         event = Mock()
         work = _SymmemWork(event)
@@ -43,13 +43,13 @@ class TestSymmemWork(TestCase):
         self.assertIsNone(work._event)
 
     def test_wait_timeout(self):
-        from torch.distributed.pysymmem.backend import _SymmemWork
+        from torch.distributed._pysymmem.backend import _SymmemWork
 
         event = Mock()
         event.query.return_value = False
         work = _SymmemWork(event)
         with patch(
-            "torch.distributed.pysymmem.backend.time.monotonic",
+            "torch.distributed._pysymmem.backend.time.monotonic",
             side_effect=[0.0, 0.01],
         ):
             with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
@@ -66,18 +66,18 @@ class TestSymmemBackendUnit(TestCase):
     """Single-process smoke tests (no real communication)."""
 
     def test_registration(self):
-        import torch.distributed.pysymmem  # noqa: F401
+        import torch.distributed._pysymmem  # noqa: F401
 
         self.assertIn("symmem", dist.Backend.backend_list)
 
     def test_backend_class_import(self):
         from torch._C._distributed_c10d import Backend as C10DBackend
-        from torch.distributed.pysymmem import SymmemBackend
+        from torch.distributed._pysymmem import SymmemBackend
 
         self.assertTrue(issubclass(SymmemBackend, C10DBackend))
 
     def test_helpers(self):
-        from torch.distributed.pysymmem import cast_buffer, nbytes_of, reduce_op_name
+        from torch.distributed._pysymmem import cast_buffer, nbytes_of, reduce_op_name
 
         t = torch.zeros(10, dtype=torch.float32)
         self.assertEqual(nbytes_of(t), 40)
@@ -94,7 +94,7 @@ class TestSymmemBackendUnit(TestCase):
         self.assertEqual(reduce_op_name(dist.ReduceOp.AVG), "avg")
 
     def test_group_barrier_timeout(self):
-        from torch.distributed.pysymmem import SymmemBackend
+        from torch.distributed._pysymmem import SymmemBackend
 
         backend = SymmemBackend.__new__(SymmemBackend)
         backend._resources = Mock()
@@ -107,7 +107,7 @@ class TestSymmemBackendUnit(TestCase):
         backend._resources.symm_mem.barrier.assert_called_once_with(timeout_ms=1)
 
     def test_set_timeout(self):
-        from torch.distributed.pysymmem import SymmemBackend
+        from torch.distributed._pysymmem import SymmemBackend
 
         backend = SymmemBackend.__new__(SymmemBackend)
         backend._options = Mock()
@@ -139,7 +139,7 @@ class TestSymmemBackendCollectives(MultiProcessTestCase):
         return 2
 
     def _init_pg(self):
-        import torch.distributed.pysymmem  # noqa: F401
+        import torch.distributed._pysymmem  # noqa: F401
 
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(

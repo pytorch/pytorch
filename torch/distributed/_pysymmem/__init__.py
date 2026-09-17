@@ -1,4 +1,4 @@
-from torch.distributed.pysymmem.backend import (
+from torch.distributed._pysymmem.backend import (
     cast_buffer,
     nbytes_of,
     reduce_op_name,

@@ -19,8 +19,10 @@ Or use
 
 import atexit
 import hashlib
+import logging
 import os
 import time
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 import torch
@@ -38,6 +40,8 @@ from torch.distributed import PrefixStore, Store
 
 
 __all__ = ["SymmemBackend", "cast_buffer", "nbytes_of", "reduce_op_name"]
+
+logger = logging.getLogger(__name__)
 
 
 def nbytes_of(tensor: torch.Tensor) -> int:
@@ -98,33 +102,15 @@ _DEFAULT_WORKSPACE_BYTES: int = 128 * 1024 * 1024
 _SEND_SLOT_BYTES: int = 64 * 1024
 
 
+@dataclass(slots=True)
 class _GroupResources:
-    __slots__ = (
-        "group_name",
-        "store",
-        "pg",
-        "workspace_tensor",
-        "symm_mem",
-        "workspace_bytes",
-        "_pointer_cache",
-    )
-
-    def __init__(
-        self,
-        group_name: str,
-        store,
-        pg,
-        workspace_tensor,
-        symm_mem,
-        workspace_bytes: int,
-    ) -> None:
-        self.group_name = group_name
-        self.store = store
-        self.pg = pg
-        self.workspace_tensor = workspace_tensor
-        self.symm_mem = symm_mem
-        self.workspace_bytes = workspace_bytes
-        self._pointer_cache = None
+    group_name: str
+    store: Store | None
+    pg: ProcessGroup | None
+    workspace_tensor: torch.Tensor | None
+    symm_mem: _SymmetricMemory | None
+    workspace_bytes: int
+    _pointer_cache: object | None = field(default=None, init=False, repr=False)
 
 
 _GROUP_RESOURCES: dict[tuple, _GroupResources] = {}
@@ -136,12 +122,16 @@ def _shutdown_all_resources() -> None:
             if res.pg is not None:
                 res.pg.shutdown()
         except Exception:
-            pass
+            logger.warning(
+                "Failed to shut down process group %s", res.group_name, exc_info=True
+            )
         try:
             # pyrefly: ignore [bad-argument-type]
             _unregister_process_group(res.group_name)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to unregister process group %s", res.group_name, exc_info=True
+            )
         res.workspace_tensor = None
         res.symm_mem = None
         res.pg = None
@@ -938,7 +928,7 @@ class SymmemBackend(C10DBackend):
     def set_timeout(self, timeout: timedelta) -> None:
         self._timeout = timeout
         self._options._timeout = timeout
-        if self._resources is not None:
+        if self._resources is not None and self._resources.pg is not None:
             self._resources.pg.set_timeout(timeout)
 
     def abort(self):
