@@ -6,6 +6,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -19,6 +20,8 @@
 #include <ATen/ops/_fft_c2c.h>
 #include <ATen/ops/_fft_c2r.h>
 #include <ATen/ops/_fft_r2c.h>
+#include <ATen/ops/_stft_r2c.h>
+#include <ATen/ops/_stft_r2c_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/conj.h>
@@ -837,6 +840,25 @@ static Stream& write_opt(Stream& SS, const std::optional<T>& value) {
   return SS;
 }
 
+// The frames stft transforms: an overlapping (batch, n_frames, n_fft) view of
+// the signal, windowed. The view itself is free; the multiply is what
+// materializes it, and at typical hop lengths that is several times the size of
+// the signal.
+static Tensor stft_window_frames(const Tensor& input, int64_t n_fft, int64_t hop_length,
+                                 int64_t n_frames, const Tensor& window) {
+  auto frames = input.as_strided(
+      {input.size(0), n_frames, n_fft},
+      {input.stride(0), hop_length * input.stride(1), input.stride(1)});
+  return window.defined() ? frames.mul(window) : frames;
+}
+
+Tensor _stft_r2c(const Tensor& self, int64_t n_fft, int64_t hop_length, int64_t n_frames,
+                 const std::optional<Tensor>& window_opt, bool onesided, int64_t normalization) {
+  c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
+  auto frames = stft_window_frames(self, n_fft, hop_length, n_frames, *window_maybe_owned);
+  return at::_fft_r2c(frames, frames.dim() - 1, normalization, onesided);
+}
+
 /* Short-time Fourier Transform, for signal analysis.
  *
  * This is modeled after librosa but with support for complex time-domain
@@ -926,7 +948,6 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     input = input.view(IntArrayRef(input.sizes()).slice(extra_dims));
   }
 
-  int64_t batch = input.size(0);
   int64_t len = input.size(1);
   if (n_fft <= 0 || n_fft > len) {
     std::ostringstream ss;
@@ -975,26 +996,29 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   } else {
     n_frames = 1 + (len - n_fft) / hop_length;
   }
-  // time2col
-  input = input.as_strided(
-    {batch, n_frames, n_fft},
-    {input.stride(0), hop_length * input.stride(1), input.stride(1)}
-  );
-  if (window_.defined()) {
-    input = input.mul(window_);
-  }
-
   // FFT and transpose to get (batch x fft_size x num_frames)
-  const bool complex_fft = input.is_complex();
+  const bool complex_fft = input.is_complex() || (window_.defined() && window_.is_complex());
   const auto onesided = onesidedOpt.value_or(!complex_fft);
 
   const fft_norm_mode norm = normalized ? fft_norm_mode::by_root_n : fft_norm_mode::none;
+  // _stft_r2c lets a backend fuse the framing and the window into the transform,
+  // but it is not differentiable, so anything recording a graph has to take the
+  // decomposition instead.
+  const bool recording = at::GradMode::is_enabled() &&
+      (input.requires_grad() || (window_.defined() && window_.requires_grad()));
+  TORCH_CHECK(!complex_fft || !onesided,
+              "Cannot have onesided output if window or input is complex");
   Tensor out;
-  if (complex_fft) {
-    TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
-    out = at::_fft_c2c(input, input.dim() - 1, static_cast<int64_t>(norm), /*forward=*/true);
+  if (!complex_fft && !recording) {
+    out = at::_stft_r2c(input, n_fft, hop_length, n_frames, window_, onesided,
+                        static_cast<int64_t>(norm));
   } else {
-    out = at::_fft_r2c(input, input.dim() - 1, static_cast<int64_t>(norm), onesided);
+    auto frames = stft_window_frames(input, n_fft, hop_length, n_frames, window_);
+    if (complex_fft) {
+      out = at::_fft_c2c(frames, frames.dim() - 1, static_cast<int64_t>(norm), /*forward=*/true);
+    } else {
+      out = at::_fft_r2c(frames, frames.dim() - 1, static_cast<int64_t>(norm), onesided);
+    }
   }
   out.transpose_(1, 2);
 

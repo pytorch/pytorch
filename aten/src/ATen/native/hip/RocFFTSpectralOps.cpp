@@ -19,6 +19,7 @@
 #include <ATen/hip/HIPContext.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/hip/RocFFTPlanCache.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/env.h>
 
@@ -26,12 +27,16 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/ones.h>
 #endif
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace at::native {
@@ -82,6 +87,36 @@ const Tensor& apply_normalization(const Tensor& self, int64_t normalization, Int
   return (scale == 1.0) ? self : self.mul_(scale);
 }
 
+// Looks the plan up and runs it. cb_data is the device pointer the plan's
+// callback receives, and must be null exactly when the plan has no callback.
+void run_rocfft_plan(const RocFFTParams& params, const void* in, void* out, void* cb_data,
+                     DeviceIndex device_index) {
+  auto& plan_cache = rocfft_get_plan_cache(device_index);
+  std::lock_guard<std::mutex> guard(plan_cache.mutex);
+  const auto& config = plan_cache.lookup(params);
+
+  rocfft_execution_info info = nullptr;
+  ROCFFT_CHECK(rocfft_execution_info_create(&info));
+  auto info_guard = c10::make_scope_exit([&] { rocfft_execution_info_destroy(info); });
+  ROCFFT_CHECK(rocfft_execution_info_set_stream(info, at::cuda::getCurrentCUDAStream().stream()));
+
+  Tensor workspace;
+  if (config.workspace_size() > 0) {
+    workspace = at::empty({static_cast<int64_t>(config.workspace_size())},
+                          at::device(at::kCUDA).dtype(at::kByte));
+    ROCFFT_CHECK(rocfft_execution_info_set_work_buffer(
+        info, workspace.mutable_data_ptr(), config.workspace_size()));
+  }
+
+  if (cb_data != nullptr) {
+    rocfft_set_callback_data(info, params.callback_kind_, cb_data);
+  }
+
+  void* in_buffers[1] = {const_cast<void*>(in)};
+  void* out_buffers[1] = {out};
+  ROCFFT_CHECK(rocfft_execute(config.plan(), in_buffers, out_buffers, info));
+}
+
 // signal_size is the length of the full signal: for R2C and C2R that is the
 // real side, not the hermitian one.
 void exec_fft_rocfft(const Tensor& out, const Tensor& self, int64_t signal_size,
@@ -109,26 +144,33 @@ void exec_fft_rocfft(const Tensor& out, const Tensor& self, int64_t signal_size,
       output.stride(1), batch_distance(output),
       fft_type, forward, c10::toRealValueType(input.scalar_type()));
 
-  auto& plan_cache = rocfft_get_plan_cache(input.device().index());
-  std::lock_guard<std::mutex> guard(plan_cache.mutex);
-  const auto& config = plan_cache.lookup(params);
+  run_rocfft_plan(params, input.const_data_ptr(), output.data_ptr(), /*cb_data=*/nullptr,
+                  input.device().index());
+}
 
-  rocfft_execution_info info = nullptr;
-  ROCFFT_CHECK(rocfft_execution_info_create(&info));
-  auto info_guard = c10::make_scope_exit([&] { rocfft_execution_info_destroy(info); });
-  ROCFFT_CHECK(rocfft_execution_info_set_stream(info, at::cuda::getCurrentCUDAStream().stream()));
+// Gathering inside the transform costs a fixed setup per call and a little per
+// element, and saves writing and re-reading the framed tensor. The two break
+// even around 2^24 framed elements on gfx1030: below that stft runs in well
+// under a millisecond and the unfused path is quicker, above it the fused one
+// reaches 2.3x. The balance is bandwidth dependent, hence the override.
+int64_t rocfft_stft_min_elements() {
+  static const int64_t value = [] {
+    const auto override = c10::utils::get_env("TORCH_ROCM_ROCFFT_STFT_MIN_ELEMENTS");
+    return override.has_value() ? std::stoll(*override) : int64_t{1} << 24;
+  }();
+  return value;
+}
 
-  Tensor workspace;
-  if (config.workspace_size() > 0) {
-    workspace = at::empty({static_cast<int64_t>(config.workspace_size())},
-                          at::device(at::kCUDA).dtype(at::kByte));
-    ROCFFT_CHECK(rocfft_execution_info_set_work_buffer(
-        info, workspace.mutable_data_ptr(), config.workspace_size()));
-  }
-
-  void* in_buffers[1] = {const_cast<void*>(input.const_data_ptr())};
-  void* out_buffers[1] = {output.data_ptr()};
-  ROCFFT_CHECK(rocfft_execute(config.plan(), in_buffers, out_buffers, info));
+// The gather callback reads its parameters from device memory. Stage through
+// pinned memory so the upload is asynchronous; a pageable source would
+// serialize the copy against the stream and undo the fusion's savings.
+Tensor upload_callback_data(const RocFFTCallbackData& data, Device device) {
+  constexpr int64_t nbytes = sizeof(RocFFTCallbackData);
+  auto host = at::empty({nbytes}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+  std::memcpy(host.mutable_data_ptr(), &data, nbytes);
+  auto result = at::empty({nbytes}, at::device(device).dtype(at::kByte));
+  result.copy_(host, /*non_blocking=*/true);
+  return result;
 }
 
 } // namespace (anonymous)
@@ -200,6 +242,106 @@ Tensor _fft_c2c_rocfft(const Tensor& self, IntArrayRef dim, int64_t normalizatio
   exec_fft_rocfft(output, self, out_sizes[dim.back()], RocFFTTransformType::C2C, forward);
 
   return apply_normalization(output, normalization, out_sizes, dim);
+}
+
+Tensor stft_r2c_rocfft(const Tensor& self, int64_t n_fft, int64_t hop_length, int64_t n_frames,
+                       const Tensor& window, bool onesided, int64_t normalization) {
+  static const bool enabled = c10::utils::check_env("TORCH_ROCM_PREFER_ROCFFT") == true;
+  // Single precision only: rocFFT takes the callback's element type from the
+  // plan, and the SPIR-V module only defines the float entry points.
+  if (!enabled || self.dim() != 2 || hop_length <= 0 ||
+      self.scalar_type() != ScalarType::Float) {
+    return {};
+  }
+  // The callback indexes the window out to n_fft, so nothing shorter can be
+  // broadcast the way the unfused multiply would.
+  if (window.defined() &&
+      (window.scalar_type() != ScalarType::Float || window.dim() != 1 || window.numel() != n_fft)) {
+    return {};
+  }
+
+  // _stft_r2c has no derivative; the unfused decomposition is differentiable
+  // only because autograd sees through to the mul and the transform. stft
+  // already keeps graph-recording calls away from here, so this only catches
+  // direct callers, for which silently dropping the graph would be worse.
+  if (at::GradMode::is_enabled() &&
+      (self.requires_grad() || (window.defined() && window.requires_grad()))) {
+    return {};
+  }
+
+  const int64_t batch = self.size(0);
+  if (batch <= 0 || n_frames <= 0) {
+    return {};
+  }
+
+  const int64_t framed_elements = batch * n_frames * n_fft;
+  if (framed_elements < rocfft_stft_min_elements()) {
+    return {};
+  }
+
+  lazy_init_rocfft();
+  if (!rocfft_callbacks_available()) {
+    return {};
+  }
+
+  auto signal = self;
+  // The callback walks the signal with unit stride, stepping between channels by
+  // a single positive offset.
+  if (signal.stride(1) != 1 || (batch > 1 && signal.stride(0) <= 0)) {
+    signal = signal.contiguous();
+  }
+  // Same over-alignment requirement as the unfused R2C path: the real input is
+  // read as if it were complex.
+  const int64_t complex_size = 2 * self.element_size();
+  if (reinterpret_cast<std::uintptr_t>(signal.const_data_ptr()) % complex_size != 0) {
+    signal = signal.clone(MemoryFormat::Contiguous);
+  }
+
+  // The callbacks do their index arithmetic in 32 bits: both the offset rocFFT
+  // hands out and the signal index it is mapped to have to fit.
+  const int64_t max_index = (batch - 1) * signal.stride(0) + (n_frames - 1) * hop_length + n_fft;
+  const int64_t index_limit = std::numeric_limits<uint32_t>::max();
+  if (framed_elements > index_limit || max_index > index_limit) {
+    return {};
+  }
+
+  // Folding an all-ones window in is exact, and keeps this to one code path.
+  const auto window_ = window.defined() ? window.contiguous() : at::ones({n_fft}, self.options());
+
+  const int64_t out_last = onesided ? n_fft / 2 + 1 : n_fft;
+  auto output = at::empty({batch, n_frames, out_last},
+                          self.options().dtype(c10::toComplexType(self.scalar_type())));
+
+  uint32_t n_fft_log2 = 0;
+  while ((int64_t{1} << n_fft_log2) < n_fft) {
+    ++n_fft_log2;
+  }
+  const bool pow2 = (int64_t{1} << n_fft_log2) == n_fft;
+
+  RocFFTCallbackData cb_data = {};
+  cb_data.window = window_.const_data_ptr<float>();
+  cb_data.n_fft = static_cast<uint32_t>(n_fft);
+  cb_data.n_frames = static_cast<uint32_t>(n_frames);
+  cb_data.hop = static_cast<uint32_t>(hop_length);
+  cb_data.signal_stride = static_cast<uint32_t>(signal.stride(0));
+  cb_data.n_fft_log2 = n_fft_log2;
+  const auto cb_dev = upload_callback_data(cb_data, self.device());
+
+  // Normalization rides along in the plan rather than as a second pass over the
+  // output, which for stft is as much data as the transform itself writes.
+  RocFFTParams params(n_fft, batch * n_frames, /*in_stride=*/1, /*in_distance=*/n_fft,
+      /*out_stride=*/1, /*out_distance=*/output.stride(1), RocFFTTransformType::R2C,
+      /*forward=*/true, ScalarType::Float,
+      pow2 ? RocFFTCallbackKind::LoadGatherPow2 : RocFFTCallbackKind::LoadGather,
+      fft_normalization_scale(normalization, {n_fft}, {0}));
+
+  run_rocfft_plan(params, signal.const_data_ptr(), output.data_ptr(), cb_dev.data_ptr(),
+                  self.device().index());
+
+  if (!onesided) {
+    at::native::_fft_fill_with_conjugate_symmetry_(output, {2});
+  }
+  return output;
 }
 
 } // namespace at::native

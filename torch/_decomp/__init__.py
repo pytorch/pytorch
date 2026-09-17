@@ -527,6 +527,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.std_mean.correction,
             aten.std_mean.correction_out,
             aten.stack,
+            aten._stft_r2c,
             aten.sum.default,
             aten.sum.out,
             aten.t,

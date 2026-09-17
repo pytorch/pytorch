@@ -19,6 +19,7 @@
 #include <ATen/ops/_fft_c2c_native.h>
 #include <ATen/ops/_fft_c2r_native.h>
 #include <ATen/ops/_fft_r2c_native.h>
+#include <ATen/ops/_stft_r2c_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/view_as_complex.h>
@@ -598,5 +599,19 @@ Tensor& _fft_c2c_cufft_out(const Tensor& self, IntArrayRef dim,
   return _fft_apply_normalization_out(out, result, normalization, result.sizes(), dim);
 }
 
+Tensor _stft_r2c_cuda(const Tensor& self, int64_t n_fft, int64_t hop_length, int64_t n_frames,
+                      const std::optional<Tensor>& window_opt, bool onesided,
+                      int64_t normalization) {
+#if defined(USE_ROCM)
+  c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
+  auto fused = stft_r2c_rocfft(self, n_fft, hop_length, n_frames, *window_maybe_owned, onesided,
+                               normalization);
+  if (fused.defined()) {
+    return fused;
+  }
+#endif
+  return at::native::_stft_r2c(self, n_fft, hop_length, n_frames, window_opt, onesided,
+                               normalization);
+}
 
 } // at::native

@@ -1699,6 +1699,28 @@ def _rocfft_sweep(device):
                                                  window=w, center=center, onesided=onesided,
                                                  return_complex=return_complex), signal, window)
 
+    # What the fused stft path keys on beyond the cases above: a power-of-two
+    # n_fft takes a different gather, normalization folds into the transform
+    # instead of running as a separate pass over the output, and the gather
+    # reads the signal in place, so its layout is no longer normalized by the
+    # framing copy. center is off throughout because the pad it inserts would
+    # hand every case the same fresh contiguous tensor.
+    for n_fft in [16, 512, 400]:
+        signal = randn(3, n_fft * 8, dtype=torch.float32)
+        window = torch.hann_window(n_fft)
+
+        def fused_stft(t, w=None, n_fft=n_fft, **kwargs):
+            return torch.stft(t, n_fft=n_fft, hop_length=n_fft // 4, window=w, center=False,
+                              return_complex=True, **kwargs)
+
+        record(f"stft/normalized n_fft={n_fft}", lambda t, w: fused_stft(t, w, normalized=True), signal, window)
+        record(f"stft/no-window n_fft={n_fft}", fused_stft, signal)
+        record(f"stft/strided n_fft={n_fft}", lambda t, w: fused_stft(t[:, ::2], w), signal, window)
+        record(f"stft/offset n_fft={n_fft}", lambda t, w: fused_stft(t[:, 1:], w), signal, window)
+        record(f"stft/1d n_fft={n_fft}", lambda t, w: fused_stft(t[0], w), signal, window)
+        record(f"stft/expanded n_fft={n_fft}",
+               lambda t, w: fused_stft(t[:1].expand(4, t.size(1)), w), signal, window)
+
     # Complex input takes stft through C2C instead of R2C.
     for n_fft, dtype in itertools.product([16, 101, 400], [torch.complex64, torch.complex128]):
         signal = randn(2, n_fft * 8, dtype=dtype)
@@ -1797,8 +1819,29 @@ torch.save(_rocfft_sweep("cuda"), sys.argv[2])
 """
 
 
-def _run_with_rocfft(script, *args):
+_ROCFFT_STFT_PEAK = """
+import torch
+n_fft, hop = 512, 128
+x = torch.randn(4, 1 << 21, device='cuda')
+w = torch.hann_window(n_fft, device='cuda')
+stft = lambda: torch.stft(x, n_fft=n_fft, hop_length=hop, window=w, center=False, return_complex=True)
+stft()  # plan creation and any lazy allocation
+torch.cuda.synchronize()
+torch.cuda.reset_peak_memory_stats()
+base = torch.cuda.memory_allocated()
+out = stft()
+torch.cuda.synchronize()
+print(torch.cuda.max_memory_allocated() - base)
+"""
+
+def _run_with_rocfft(script, *args, callbacks=True, fuse_stft_always=False):
     env = {**os.environ, "TORCH_ROCM_PREFER_ROCFFT": "1"}
+    if not callbacks:
+        env["TORCH_ROCM_DISABLE_ROCFFT_CALLBACKS"] = "1"
+    if fuse_stft_always:
+        # The fused stft only pays for itself on inputs far larger than anything
+        # worth running a correctness sweep over, so drop its size floor.
+        env["TORCH_ROCM_ROCFFT_STFT_MIN_ELEMENTS"] = "0"
     done = subprocess.run([sys.executable, "-c", script, *args], env=env,
                           capture_output=True, text=True, check=False)
     if done.returncode != 0:
@@ -1837,7 +1880,8 @@ class TestRocFFT(TestCase):
         cls.expected = _rocfft_sweep("cpu")
         with tempfile.TemporaryDirectory() as tmpdir:
             saved = os.path.join(tmpdir, "rocfft_sweep.pt")
-            _run_with_rocfft(_ROCFFT_WORKER, os.path.dirname(os.path.abspath(__file__)), saved)
+            _run_with_rocfft(_ROCFFT_WORKER, os.path.dirname(os.path.abspath(__file__)), saved,
+                             fuse_stft_always=True)
             cls.actual = torch.load(saved, weights_only=True)
 
     def _compare(self, group):
@@ -1870,6 +1914,20 @@ class TestRocFFT(TestCase):
 
     def test_stft(self):
         self._compare("stft/")
+
+    def test_stft_skips_framed_copy(self):
+        # The point of the load callback is that the (batch, n_frames, n_fft)
+        # framed tensor is never built, and at hop = n_fft / 4 that tensor is
+        # the same size as the output. Peak allocation is the only handle we
+        # have on whether rocFFT actually JIT'd the callback, since a runtime
+        # that cannot compile it falls back without saying so. Unlike the
+        # correctness sweep this leaves the size floor alone, so it also covers
+        # the shape of input the fused path is meant to trigger on.
+        fused = int(_run_with_rocfft(_ROCFFT_STFT_PEAK))
+        unfused = int(_run_with_rocfft(_ROCFFT_STFT_PEAK, callbacks=False))
+        if fused == unfused:
+            raise unittest.SkipTest("rocFFT on this runtime cannot JIT the stft callbacks")
+        self.assertLess(fused, 0.6 * unfused)
 
     def test_istft(self):
         self._compare("istft/")

@@ -13,4 +13,11 @@ Tensor _fft_r2c_rocfft(const Tensor& self, IntArrayRef dim, int64_t normalizatio
 Tensor _fft_c2r_rocfft(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t lastdim);
 Tensor _fft_c2c_rocfft(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward);
 
+// Fused stft core: gathers the frames out of `self` (batch, signal) and applies
+// `window` inside the transform's load, so the framed tensor stft would
+// otherwise build is never materialized. Returns an undefined tensor when the
+// fused path does not apply, leaving the caller to run the unfused version.
+Tensor stft_r2c_rocfft(const Tensor& self, int64_t n_fft, int64_t hop_length, int64_t n_frames,
+                       const Tensor& window, bool onesided, int64_t normalization);
+
 } // namespace at::native
