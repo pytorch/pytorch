@@ -455,22 +455,18 @@ class FSDPModule:
                 "with all-reduce disabled. Enable all-reduce on the final backward pass"
             )
         is_last_backward = state._state_ctx.is_last_backward
-        try:
-            self.set_requires_gradient_sync(True)
-            self.set_reshard_after_backward(True)
-            self.set_is_last_backward(True)
-            state._root_post_backward_final_callback(
-                finalize_gradient_accumulation=True
-            )
-            state._join_comm_streams()
-        finally:
-            for group, group_settings in zip(param_groups, settings):
-                (
-                    group.reduce_grads,
-                    group.all_reduce_grads,
-                    group.reshard_after_backward,
-                ) = group_settings
-            self.set_is_last_backward(is_last_backward)
+        self.set_requires_gradient_sync(True)
+        self.set_reshard_after_backward(True)
+        self.set_is_last_backward(True)
+        state._root_post_backward_final_callback(finalize_gradient_accumulation=True)
+        state._join_comm_streams()
+        for group, group_settings in zip(param_groups, settings):
+            (
+                group.reduce_grads,
+                group.all_reduce_grads,
+                group.reshard_after_backward,
+            ) = group_settings
+        self.set_is_last_backward(is_last_backward)
 
     def set_requires_gradient_sync(
         self, requires_gradient_sync: bool, *, recurse: bool = True
