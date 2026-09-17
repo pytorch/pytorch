@@ -18,7 +18,7 @@ from torch._precompile import (
     DynamoTracer,
     load,
     MakeFxTracer,
-    PrecompileError,  # noqa: F401
+    PrecompileError as PrecompileError,  # noqa: PLC0414
 )
 from torch.compiler._precompile_types import (
     FrameInvariants,
@@ -62,7 +62,8 @@ del typing  # not part of the public surface
 # PrecompileError is intentionally NOT in __all__: its home is torch.compiler
 # (torch.compiler.PrecompileError, for the conventional ``except`` spelling), so
 # its __module__ is "torch.compiler". It is re-exported here only so
-# ``torch.compiler.precompile.PrecompileError`` also resolves.
+# ``torch.compiler.precompile.PrecompileError`` also resolves, spelled as an
+# explicit ``as`` alias so a type checker under no_implicit_reexport sees it.
 __all__ = [
     "capture",
     "load",
