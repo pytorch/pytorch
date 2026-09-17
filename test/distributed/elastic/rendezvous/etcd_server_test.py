@@ -6,12 +6,14 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import os
+import socket
 import sys
 import unittest
+from unittest import mock
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -20,6 +22,49 @@ if os.getenv("CIRCLECI"):
 
 
 class EtcdServerTest(unittest.TestCase):
+    def test_find_free_port_continues_after_socket_creation_failure(self):
+        addrs = [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", None),
+            (socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", None),
+        ]
+        successful_socket = mock.MagicMock()
+
+        with (
+            mock.patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo",
+                return_value=addrs,
+            ),
+            mock.patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.socket",
+                side_effect=[OSError("socket failed"), successful_socket],
+            ) as socket_mock,
+        ):
+            result = find_free_port()
+
+        self.assertIs(result, successful_socket)
+        self.assertEqual(socket_mock.call_count, 2)
+        successful_socket.bind.assert_called_once_with(("localhost", 0))
+        successful_socket.listen.assert_called_once_with(0)
+
+    def test_find_free_port_socket_creation_failures_raise_runtime_error(self):
+        addrs = [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", None),
+            (socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", None),
+        ]
+
+        with (
+            mock.patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo",
+                return_value=addrs,
+            ),
+            mock.patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.socket",
+                side_effect=OSError("socket failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "Failed to create a socket"),
+        ):
+            find_free_port()
+
     def test_etcd_server_start_stop(self):
         server = EtcdServer()
         server.start()
