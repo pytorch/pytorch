@@ -63,22 +63,33 @@ class PrecompileSummary:
     """Coverage and guard information from an observed precompile capture.
 
     ``str(summary)`` renders a one-line digest. Everything here describes the
-    calls that ran, not every possible input or unexecuted branch.
+    calls that ran, not every possible input or unexecuted branch, and once
+    ``truncated`` is non-empty every count and frame list is a lower bound: the
+    frames called beneath a truncated one ran untraced, so nothing here saw them.
 
     The guard fields hold ``(guard_type, source)`` slots, the source spelled as
     ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
     (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged). Each list
     holds a slot once, however many frames or variants carried it, so
-    ``dropped_guard_types()`` counts distinct slots, not occurrences. The lists
-    aggregate every captured frame and a slot names no frame, so the relations
-    between them hold per frame, where the producer decides them, and are
-    stated here rather than checked: within one frame ``risky_dropped_guards``
-    is drawn from ``dropped_guards`` and ``policy_dropped_guards`` is disjoint
-    from it, but two frames' ``self.act`` are one slot, and a slot one frame's
-    filter rejected and another frame's invariance policy dropped is listed in
-    both; ``dropped_guard_code`` draws its slots from those two lists the same
-    way. Nothing is enforced, as for the frame lists below: a report that
-    raised on its own bookkeeping would lose the coverage it exists to describe.
+    ``dropped_guard_types`` counts distinct slots, not occurrences. The relations
+    between the lists hold within one frame variant, where the producer decides
+    them, and are stated here rather than checked:
+
+    * ``kept_guards`` and ``dropped_guards`` are disjoint: a guard is
+      serialized or it is not.
+    * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
+    * ``policy_dropped_guards`` is disjoint from ``dropped_guards``.
+    * ``dropped_guard_code`` draws its slots from ``dropped_guards`` and
+      ``policy_dropped_guards``.
+
+    The lists aggregate every captured frame and a slot names no frame, so two
+    frames' ``self.act`` are one slot: a slot one frame kept and another dropped
+    is in both ``kept_guards`` and ``dropped_guards`` (the digest's ``(N kept)``
+    is the kept count beside the drops, not the other half of a total), and a
+    slot one frame's filter rejected and another frame's invariance policy
+    dropped is in both drop lists. Nothing is enforced, as for the frame lists
+    below: a report that raised on its own bookkeeping would lose the coverage
+    it exists to describe.
 
     The frame lists (``bypassed``, ``truncated``, ``uncovered_frames``) hold
     bare ``co_name``s, which are not unique: every ``nn.Module`` has a
@@ -123,11 +134,14 @@ class PrecompileSummary:
             because a capture that discards a precondition should not look like
             one that had none.
         dropped_guard_code: ``(guard_type, source, rendered_check)``, one per slot
-            of ``dropped_guards`` or ``policy_dropped_guards`` that renders a
-            check. Every guard type dropped as unserializable or by the
-            invariance policy renders one; a slot is missing here only when a
-            caller-supplied filter dropped a guard whose check lives in a C++
-            leaf and renders no code (``GLOBAL_STATE``, ``TORCH_FUNCTION_STATE``).
+            of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
+            rendered a check, i.e. whose ``GuardBuilder`` method set
+            ``Guard.code_list``. A guard renders none when its check lives only
+            in a C++ leaf or a lambda (``GLOBAL_STATE``, ``DISPATCH_KEY_SET_MATCH``,
+            ``TENSOR_SUBCLASS_METADATA_MATCH``, ...) or when it delegated to a
+            guard on a derived source (``CLOSURE_MATCH`` on a function guards
+            its ``__code__`` through a separate guard); such a slot has no entry
+            here.
             A slot alone can be ambiguous: a dropped ``('HASATTR', "counts['pixel']")``
             is either the benign companion of a kept ``TENSOR_MATCH`` on the same
             source or the only guard on an optional attribute, and only the
@@ -177,29 +191,35 @@ class PrecompileSummary:
             and self.backend_graphs > 0
         )
 
+    @property
     def dropped_guard_types(self) -> dict[str, int]:
-        """Count the distinct dropped slots by guard type."""
+        """The distinct dropped slots counted by guard type."""
         return dict(collections.Counter(t for t, _ in self.dropped_guards))
 
+    @property
     def kept_guard_types(self) -> dict[str, int]:
-        """Count the distinct kept slots by guard type."""
+        """The distinct kept slots counted by guard type."""
         return dict(collections.Counter(t for t, _ in self.kept_guards))
 
     def __str__(self) -> str:
+        def count(k: int, noun: str) -> str:
+            return f"{k} {noun}" if k == 1 else f"{k} {noun}s"
+
         base = (
-            f"{self.frames} frames ({self.resume_functions} from graph breaks), "
-            f"{self.guarded_codes} guarded codes, "
-            f"{self.backend_graphs} backend graphs"
+            f"{count(self.frames, 'frame')} ({self.resume_functions} from graph breaks), "
+            f"{count(self.guarded_codes, 'guarded code')}, "
+            f"{count(self.backend_graphs, 'backend graph')}"
         )
         if self.dropped_guards:
             kept = len(self.kept_guards)
-            base += f", dropped guards {self.dropped_guard_types()} ({kept} kept)"
+            base += f", dropped guards {self.dropped_guard_types} ({kept} kept)"
         if self.risky_dropped_guards:
             base += f", RISKY drops {[src for _, src in self.risky_dropped_guards]}"
         if self.policy_dropped_guards:
-            base += f", {len(self.policy_dropped_guards)} policy-dropped guards"
+            policy = len(self.policy_dropped_guards)
+            base += f", {count(policy, 'policy-dropped guard')}"
         if self.wont_generalize:
-            base += f", {len(self.wont_generalize)} value-pinned sources"
+            base += f", {count(len(self.wont_generalize), 'value-pinned source')}"
         if self.uncovered_frames:
             base += (
                 f", {len(self.uncovered_frames)} UNCOVERED: "
@@ -210,5 +230,6 @@ class PrecompileSummary:
         if self.bypassed:
             base += f", {len(self.bypassed)} BYPASSED: {list(self.bypassed)}"
         if self.capture_errors:
-            base += f", {len(self.capture_errors)} CAPTURE ERROR(S)"
+            errors = len(self.capture_errors)
+            base += f", {errors} CAPTURE ERROR{'' if errors == 1 else 'S'}"
         return base

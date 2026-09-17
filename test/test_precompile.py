@@ -138,10 +138,10 @@ class TestPrecompile(TestCase):
             policy_dropped_guards=(act,),
             dropped_guard_code=(act + ("hasattr(L['self'], 'act')",),),
         )
-        self.assertEqual(summary.dropped_guard_types(), {"HASATTR": 1})
+        self.assertEqual(summary.dropped_guard_types, {"HASATTR": 1})
         self.assertExpectedInline(
             str(summary),
-            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1} (0 kept), RISKY drops ['self.act'], 1 policy-dropped guards""",
+            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1} (0 kept), RISKY drops ['self.act'], 1 policy-dropped guard""",
         )
 
     def test_summary_complete_requires_every_term(self):
@@ -184,11 +184,11 @@ class TestPrecompile(TestCase):
             dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
             wont_generalize=("scale",),
         )
-        self.assertEqual(plain.dropped_guard_types(), {"ID_MATCH": 2, "HASATTR": 1})
-        self.assertEqual(plain.kept_guard_types(), {"TYPE_MATCH": 1, "TENSOR_MATCH": 1})
+        self.assertEqual(plain.dropped_guard_types, {"ID_MATCH": 2, "HASATTR": 1})
+        self.assertEqual(plain.kept_guard_types, {"TYPE_MATCH": 1, "TENSOR_MATCH": 1})
         self.assertExpectedInline(
             str(plain),
-            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'ID_MATCH': 2, 'HASATTR': 1} (2 kept), 1 policy-dropped guards, 1 value-pinned sources""",
+            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'ID_MATCH': 2, 'HASATTR': 1} (2 kept), 1 policy-dropped guard, 1 value-pinned source""",
         )
         # The risky slot is a dropped slot too; the digest names its source.
         risky = (("ID_MATCH", "self.act"),)
@@ -206,7 +206,7 @@ class TestPrecompile(TestCase):
         )
         self.assertExpectedInline(
             str(bad),
-            """3 frames (0 from graph breaks), 1 guarded codes, 1 backend graphs, dropped guards {'ID_MATCH': 1} (0 kept), RISKY drops ['self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR(S)""",
+            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'ID_MATCH': 1} (0 kept), RISKY drops ['self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR""",
         )
 
     def test_decompositions_kwarg(self):
