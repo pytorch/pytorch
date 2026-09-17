@@ -4,13 +4,14 @@ import contextlib
 from unittest import mock
 
 import torch
+import torch._inductor.cudagraph_utils as cudagraph_utils
+from torch._dynamo.backends import cudagraphs as cudagraphs_backend
 from torch._dynamo.device_interface import (
     CudaInterface,
     device_interfaces,
     DeviceInterface,
     register_interface_for_device,
 )
-import torch._inductor.cudagraph_utils as cudagraph_utils
 from torch._inductor.cudagraph_utils import (
     _graph_capture_compatible_device_type,
     is_graph_capture_runtime_ready,
@@ -22,6 +23,7 @@ from torch._inductor.output_code import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import BoxedBool, GraphPartitionMap
 from torch.utils._ordered_set import OrderedSet
+
 
 # Synthetic renamed PrivateUse1 backend; not tied to any real OOT device.
 OOT_DEVICE = "fakeoot"
@@ -58,9 +60,7 @@ class _CaptureInterface(DeviceInterface):
 
 @contextlib.contextmanager
 def renamed_privateuse1(device_type: str = OOT_DEVICE):
-    with mock.patch(
-        "torch._C._get_privateuse1_backend_name", return_value=device_type
-    ):
+    with mock.patch("torch._C._get_privateuse1_backend_name", return_value=device_type):
         yield
 
 
@@ -272,6 +272,34 @@ class TestCudagraphDeviceGate(TestCase):
             msg = cudagraph_utils.check_multiple_devices_or_any_cpu_nodes(mapping)
         self.assertIsNotNone(msg)
         self.assertIn("multiple devices", msg)
+
+
+class TestStandaloneCudagraphBackendGate(TestCase):
+    def test_renamed_oot_backend_is_skipped(self):
+        mapping = {_FakeDevice(OOT_DEVICE): _FakeNode()}
+        with (
+            temporary_device_interface(OOT_DEVICE, _CaptureInterface),
+            renamed_privateuse1(),
+            mock.patch.object(
+                cudagraphs_backend,
+                "get_device_node_mapping",
+                return_value=mapping,
+            ),
+            mock.patch.object(
+                cudagraphs_backend,
+                "check_for_mutation_ignore_cuda_graph_managed_tensor",
+                return_value=None,
+            ),
+            mock.patch.object(
+                cudagraphs_backend,
+                "get_first_incompatible_cudagraph_node",
+                return_value=None,
+            ),
+        ):
+            reason = cudagraphs_backend.check_for_skip(mock.Mock(), 0)
+
+        self.assertIsNotNone(reason)
+        self.assertIn("not supported by the cudagraphs backend", reason)
 
 
 if __name__ == "__main__":
