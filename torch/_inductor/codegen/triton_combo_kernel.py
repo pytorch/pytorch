@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     import triton
 
 from .. import config, metrics
-from ..runtime.hints import DeviceProperties, TritonMeta
+from ..runtime.hints import TritonMeta
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import (
     RoundRobinComboKernelGrid,
@@ -34,6 +34,7 @@ from ..stream_utils import (
     get_raw_stream_name,
 )
 from ..utils import (
+    _IntLike,
     clear_on_fresh_cache,
     DeferredLineBase,
     Placeholder,
@@ -60,6 +61,7 @@ from .triton_utils import (
     equal_1_arg_indices,
     is_unaligned_buffer,
     signature_to_meta,
+    triton_meta_device_props,
 )
 
 
@@ -74,7 +76,7 @@ LARGE_NUMELS = 51_200_000
 BLOCK_UTILIZATION = 0.8
 
 
-def _size_hint(expr: Any) -> int:
+def _size_hint(expr: _IntLike) -> int:
     return V.graph.sizevars.optimization_hint(expr, fallback=1)
 
 
@@ -917,7 +919,7 @@ class ComboKernel(Kernel):
                 "signature": signature_to_meta(
                     signature, size_dtype=size_dtype, argdefs=argdefs
                 ),
-                "device": DeviceProperties.create(
+                "device": triton_meta_device_props(
                     V.graph.get_current_device_or_throw()
                 ),
                 "constants": {},
@@ -931,7 +933,18 @@ class ComboKernel(Kernel):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         triton_meta["configs"] = [
-            config_of(signature, skip_cpp_wrapper_input_tensor_alignment=True)
+            config_of(
+                signature,
+                # sub-kernel bodies are spliced into this kernel, so their
+                # atomics are this kernel's atomics
+                pointer_range_override=(
+                    ()
+                    if torch.version.hip is not None
+                    and any(k.atomic_add_found for k in self.sub_kernels)
+                    else None
+                ),
+                skip_cpp_wrapper_input_tensor_alignment=True,
+            )
         ]
 
         mutated_args = self.get_mutated_args_sub_kernels()

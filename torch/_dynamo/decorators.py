@@ -995,7 +995,7 @@ def substitute_in_graph(
                 f"already handled by {polyfill_handlers[original_fn]}"
             )
 
-        # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
+        # Need to wrap the function because we may not be able to assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(traceable_fn)
         def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -1287,6 +1287,13 @@ def mark_dynamic(
     marked takes over, and a later maybe_mark_dynamic on that dim is ignored, so the dim
     is always enforced with the stronger mark_dynamic semantics.
     """
+    if isinstance(t, torch.fx.Proxy):
+        # FX tracers ignore @forbid_in_graph and pass a Proxy in place of the tensor.
+        # Proxy.__getattr__ answers every name with an Attribute, so the marking
+        # attributes can neither be read (getattr defaults and hasattr are both useless)
+        # nor usefully written: the Proxy is discarded once tracing ends.
+        return
+
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
@@ -1367,6 +1374,10 @@ def maybe_mark_dynamic(
     already marked with mark_dynamic, this call is ignored: that marking has stronger
     semantics and a weak one cannot weaken it.
     """
+    if isinstance(t, torch.fx.Proxy):
+        # See the matching guard in mark_dynamic: a Proxy cannot carry dim marking.
+        return
+
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror maybe_mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API

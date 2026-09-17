@@ -303,7 +303,6 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     def test_cutlass_mm_functionalization_decomp(self):
         """Test that semi_structured::cutlass_mm decomposes under FunctionalTensorMode.
 
@@ -1890,6 +1889,20 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
             "Unsupported out_dtype passed, must be float32 for fp8 inputs on ROCm",
         ):
             torch._cslt_sparse_mm(compressed, B_fp8, out_dtype=out_dtype)
+
+class TestComputeCompressedSwizzledBitmaskDevice(TestCase):
+    """
+    This contains a device-agnostic regression test for
+        _compute_compressed_swizzled_bitmask
+    """
+
+    def test_compute_compressed_swizzled_bitmask_matches_input_device_cpu(self):
+        """Ensure _compute_compressed_swizzled_bitmask output device matches input device on CPU."""
+        dense = rand_sparse_semi_structured_mask(
+            128, 128, dtype=torch.float32, device="cpu"
+        )
+        compressed_swizzled_bitmask = _compute_compressed_swizzled_bitmask(dense)
+        self.assertEqual(compressed_swizzled_bitmask.device, dense.device)
 
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
