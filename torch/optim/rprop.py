@@ -265,12 +265,15 @@ def _single_tensor_rprop(
         if differentiable:
             sign = grad.mul(prev.clone()).sign()
         else:
-            sign = grad.mul(prev).sign()
+            sign = grad.mul(prev)
+            sign.sign_()
 
         if capturable:
-            sign.copy_(torch.where(sign.gt(0), etaplus, sign))
-            sign.copy_(torch.where(sign.lt(0), etaminus, sign))
-            sign.copy_(torch.where(sign.eq(0), 1, sign))
+            sign = torch.where(
+                sign.gt(0),
+                etaplus,
+                torch.where(sign.lt(0), etaminus, 1.0),
+            )
         else:
             sign[sign.gt(0)] = etaplus
             sign[sign.lt(0)] = etaminus
@@ -282,8 +285,8 @@ def _single_tensor_rprop(
         # for dir<0, dfdx=0
         # for dir>=0 dfdx=dfdx
         grad = grad.clone(memory_format=torch.preserve_format)
-        if capturable:
-            grad.copy_(torch.where(sign.eq(etaminus), 0, grad))
+        if capturable and not differentiable:
+            grad.masked_fill_(sign.eq(etaminus), 0)
         else:
             grad[sign.eq(etaminus)] = 0
 
