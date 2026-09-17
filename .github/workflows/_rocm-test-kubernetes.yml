@@ -60,18 +60,61 @@ permissions:
   contents: read
 
 jobs:
+  # kubelet pulls the job image before any step runs, so the in-job ECR login
+  # _rocm-test.yml performs is too late here. docker-builds copies each image it
+  # pushes to ECR onto the public GHCR mirror under the same tag, server-side,
+  # so the mirror carries the same digest. Resolve it on a CPU runner: a hash
+  # that was never mirrored fails here in seconds instead of holding a GPU
+  # until the hook's prepare_job timeout expires.
+  resolve-image:
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    runs-on: ubuntu-24.04
+    outputs:
+      docker-image: ${{ steps.mirror.outputs.docker-image }}
+    steps:
+      - name: Resolve GHCR mirror
+        id: mirror
+        shell: bash
+        env:
+          ECR_IMAGE: ${{ inputs.docker-image }}
+        run: |
+          set -euo pipefail
+
+          repository="pytorch/ci-image"
+          tag="${ECR_IMAGE##*:}"
+          image="ghcr.io/${repository}:${tag}"
+          echo "docker-image=${image}" >> "${GITHUB_OUTPUT}"
+
+          for attempt in $(seq 1 5); do
+            token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repository}:pull" | jq -r .token)"
+            status="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
+              "https://ghcr.io/v2/${repository}/manifests/${tag}")"
+            if [[ "${status}" == "200" ]]; then
+              echo "Resolved ${image}"
+              exit 0
+            fi
+            echo "attempt ${attempt}: HTTP ${status}"
+            sleep 30
+          done
+
+          echo "::error::${image} is absent from the GHCR mirror. docker-builds only mirrors pushes to main/release, so a .ci/docker tree hash that has not landed yet lives only in ECR; run these shards on the DinD runner until the docker change merges."
+          exit 1
+
   test:
     # Keep the production guard from _rocm-test.yml.
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    needs: resolve-image
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    # _linux-build returns the exact ECR image it used, including ci-docker-hash.
-    # ARC's Kubernetes hook turns this container block into the GPU job pod.
+    # The GHCR mirror of the image _linux-build selected. kubelet authenticates
+    # with the ghcr-pytorch pull secret the scale set puts on the job pod.
     container:
-      image: ${{ inputs.docker-image }}
+      image: ${{ needs.resolve-image.outputs.docker-image }}
     steps:
       # Use a remote action reference: in kubernetes-novolume mode the checkout
       # exists only in the job pod, while the runner resolves action.yml files.
