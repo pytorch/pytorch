@@ -714,31 +714,8 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
     kwargs['mxfp4'] = kwargs['mxfp8']
     return kwargs[format]
 
-class TestFP8Matmul(TestCase):
 
-    def _test_tautological_mm(self, device: str,
-                              x_dtype: torch.dtype = e4m3_type,
-                              y_dtype: torch.dtype = e4m3_type,
-                              out_dtype: torch.dtype | None = None,
-                              x_cm: bool = True,
-                              y_cm: bool = False,
-                              size: int = 16) -> None:
-        if not PLATFORM_SUPPORTS_FP8:
-            raise unittest.SkipTest(f8_msg)
-        x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
-        y_fp8 = torch.eye(size, device=device, dtype=y_dtype)
-        if not x_cm:
-            x_fp8 = x_fp8.t()
-        if not y_cm:
-            y_fp8 = y_fp8.t()
-        out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
-        scale_a = torch.tensor(1.0, device=device)
-        scale_b = torch.tensor(1.0, device=device)
-        out_fp8 = scaled_mm_wrap(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
-        if out_dtype is not None:
-            self.assertEqual(out_dtype, out_fp8.dtype)
-        self.assertEqual(out_fp32, out_fp8.to(torch.float))
-
+class _TestFP8MatmulMixin:
     def assert_scaled_addmm_inplace(self, input, expected, args, **kwargs):
         """Check the identity, storage, version, and value contract."""
         data_ptr = input.data_ptr()
@@ -767,6 +744,33 @@ class TestFP8Matmul(TestCase):
         self.assertIs(captured_output, captured_input)
         self.assertEqual(captured_input.data_ptr(), data_ptr)
         self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
+
+
+class TestFP8Matmul(TestCase, _TestFP8MatmulMixin):
+
+    def _test_tautological_mm(self, device: str,
+                              x_dtype: torch.dtype = e4m3_type,
+                              y_dtype: torch.dtype = e4m3_type,
+                              out_dtype: torch.dtype | None = None,
+                              x_cm: bool = True,
+                              y_cm: bool = False,
+                              size: int = 16) -> None:
+        if not PLATFORM_SUPPORTS_FP8:
+            raise unittest.SkipTest(f8_msg)
+        x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
+        y_fp8 = torch.eye(size, device=device, dtype=y_dtype)
+        if not x_cm:
+            x_fp8 = x_fp8.t()
+        if not y_cm:
+            y_fp8 = y_fp8.t()
+        out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        out_fp8 = scaled_mm_wrap(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
+        if out_dtype is not None:
+            self.assertEqual(out_dtype, out_fp8.dtype)
+        self.assertEqual(out_fp32, out_fp8.to(torch.float))
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize(
@@ -3312,7 +3316,7 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(actual, expected)
 
 
-class TestFP8MatmulCuda(TestCase):
+class TestFP8MatmulCuda(TestCase, _TestFP8MatmulMixin):
 
     @onlyCUDA
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
