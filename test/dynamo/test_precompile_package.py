@@ -48,6 +48,26 @@ def _user_op(x):
     return x + 1
 
 
+def _aot_compile(fn, *args, guard_filter_fn=None, seen=None):
+    """aot_compile fn on args through guard_filter_fn (the default filter when
+    None), appending every (entry, verdict) pair to seen."""
+
+    def recording(entries):
+        keep = (guard_filter_fn or precompile_package.default_guard_filter_fn)(entries)
+        if seen is not None:
+            seen.extend(zip(entries, keep))
+        return keep
+
+    opts = {"guard_filter_fn": recording}
+    fn_c = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
+    return fn_c.aot_compile((args, {}))
+
+
+def _kept_types(compiled):
+    state = load_guards_state(compiled._artifacts.guards_state)
+    return state, {g.create_fn_name() for g in state.output_graph.guards}
+
+
 _OWN = GlobalSource(__name__)
 _BUILTINS_DICT = GlobalSource("__builtins_dict___0")
 _HERE = traceback.StackSummary.from_list([(__file__, 1, "forward", "")])
@@ -195,29 +215,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(keep, [True] * 5)
 
     def test_default_guard_filter_through_serialize_guards(self):
-        seen = []
-
-        def recording(entries):
-            keep = precompile_package.default_guard_filter_fn(entries)
-            seen.extend(zip(entries, keep))
-            return keep
-
-        def aot_compile(fn, *args, guard_filter_fn=recording):
-            seen.clear()
-            opts = {"guard_filter_fn": guard_filter_fn}
-            fn_c = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
-            return fn_c.aot_compile((args, {}))
-
-        def kept_types(compiled):
-            state = load_guards_state(compiled._artifacts.guards_state)
-            return state, {g.create_fn_name() for g in state.output_graph.guards}
-
         def fn(x):
             return _user_op(x) + len(x.shape)
 
+        seen = []
         x = torch.randn(3)
-        compiled = aot_compile(fn, x)
-        state, kept = kept_types(compiled)
+        compiled = _aot_compile(fn, x, seen=seen)
+        state, kept = _kept_types(compiled)
         # The refused guard on the global function is dropped and gone from the
         # serialized set; the builtin's BUILTIN_MATCH is kept.
         dropped = {(e.guard_type, e.name) for e, keep in seen if not keep}
@@ -237,58 +241,89 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 loaded(x)
         self.assertTrue(loaded.guard_check(x))
 
+    def test_default_guard_filter_keeps_the_pytree_registry_keys_match(self):
         # The DICT_KEYS_MATCH on SUPPORTED_NODES reaches the filter as the
         # unsaved build's DICT_VERSION and is kept; the save build serializes it
-        # as a keys-match, which trips on a node registered after capture.
+        # as a keys-match. The registry's other kept guards put a
+        # DictGuardManager over it whose length check notices a node registered
+        # after capture with or without the keys-match; a same-count change of
+        # keys is what only the keys-match notices.
         def fn_tree(x):
             return pytree.tree_flatten({"a": x, "b": x * 2})[0][1]
 
-        compiled = aot_compile(fn_tree, x)
+        def deregister(cls):
+            if cls in pytree.SUPPORTED_NODES:
+                pytree._deregister_pytree_node(cls)
+
+        def register(cls):
+            # Only a registry key here, so the <locals> in it is harmless; it
+            # must be unique because nameless registrations share one slot of
+            # SERIALIZED_TYPE_TO_PYTHON_TYPE and deregistering the first fails.
+            name = f"{__name__}.{cls.__qualname__}"
+            pytree.register_pytree_node(
+                cls, lambda n: ([], None), lambda c, _: cls(), serialized_type_name=name
+            )
+            self.addCleanup(deregister, cls)
+
+        class Node:
+            pass
+
+        class Other:
+            pass
+
+        register(Node)
+        seen = []
+        x = torch.randn(3)
+        compiled = _aot_compile(fn_tree, x, seen=seen)
         promoted = [keep for e, keep in seen if "DICT_VERSION" in e.derived_guard_types]
         self.assertEqual(promoted, [True])
-        self.assertIn("DICT_KEYS_MATCH", kept_types(compiled)[1])
+        self.assertIn("DICT_KEYS_MATCH", _kept_types(compiled)[1])
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         # Module globals the kept guards read (G['pytree']) resolve against the
         # live scope, as in test_aot_compile.py's f_globals=globals() loads.
         loaded = AOTCompiledFunction.deserialize(data, f_globals=globals())
         self.assertEqual(loaded(x), fn_tree(x))
-
-        class Node:
-            pass
-
-        pytree.register_pytree_node(
-            Node,
-            lambda n: ([], None),
-            lambda c, _: Node(),
-            serialized_type_name=f"{__name__}.{Node.__qualname__}",
-        )
-        self.addCleanup(pytree._deregister_pytree_node, Node)
+        deregister(Node)
+        register(Other)
         self.assertFalse(loaded.guard_check(x))
 
+    def test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal(self):
         # A local-scope class passes the filter (the TYPE_MATCH on L['obj'] is
         # kept) and serialization refuses it, naming the class. The filter keeps
         # the guard so the refusal is loud rather than an artifact that never
-        # checks the type. For a plain instance the pickler refuses anyway,
-        # wherever it sits in the guard tree, so dropping the TYPE_MATCH changes
-        # nothing; for an nn.Module of a local class it does not (the instance
-        # is rebuilt as a plain torch.nn.Module), so there the kept TYPE_MATCH
-        # is the only refusal: drop it and the artifact ships, and serves the
-        # local class's graph to a module of another class.
+        # checks the type. For a plain instance the pickler refuses anyway, so
+        # dropping the TYPE_MATCH only moves the refusal from serialize_guards'
+        # pre-check to reducer_override; for an nn.Module of a local class it
+        # does not (the instance is rebuilt as a plain torch.nn.Module), so
+        # there the kept TYPE_MATCH is the only refusal: drop it and the
+        # artifact ships, and serves the local class's graph to a module of
+        # another class.
+        def drop_type_match(entries):
+            keep = precompile_package.default_guard_filter_fn(entries)
+            return [k and e.guard_type != "TYPE_MATCH" for k, e in zip(keep, entries)]
+
+        # Not assertRaises: it stores the exception with its traceback cleared.
+        def refusal_frames(regex, guard_filter_fn, fn, *args):
+            try:
+                _aot_compile(fn, *args, guard_filter_fn=guard_filter_fn)
+            except PackageError as e:
+                self.assertRegex(str(e), regex)
+                return {f.name for f in traceback.extract_tb(e.__traceback__)}
+            self.fail("serialized")
+
         class Local:
             n = 1
 
         def fn2(x, obj):
             return x + obj.n
 
-        def drop_type_match(entries):
-            keep = precompile_package.default_guard_filter_fn(entries)
-            return [k and e.guard_type != "TYPE_MATCH" for k, e in zip(keep, entries)]
-
-        refused_local = "Local'> cannot be saved.*defined in local scope"
-        with self.assertRaisesRegex(PackageError, refused_local):
-            aot_compile(fn2, x, Local())
-        with self.assertRaisesRegex(PackageError, refused_local):
-            aot_compile(fn2, x, Local(), guard_filter_fn=drop_type_match)
+        x = torch.randn(3)
+        refused = "Local'> cannot be saved.*defined in local scope"
+        frames = refusal_frames(refused, None, fn2, x, Local())
+        self.assertIn("raise_local_type_error", frames)
+        self.assertNotIn("reducer_override", frames)
+        frames = refusal_frames(refused, drop_type_match, fn2, x, Local())
+        self.assertIn("reducer_override", frames)
 
         class LocalModule(torch.nn.Module):
             def forward(self, x):
@@ -298,14 +333,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return mod(x)
 
         refused_module = "LocalModule'> cannot be saved.*defined in local scope"
-        with self.assertRaisesRegex(PackageError, refused_module):
-            aot_compile(fn3, x, LocalModule())
+        refusal_frames(refused_module, None, fn3, x, LocalModule())
 
         class Other(torch.nn.Module):
             def forward(self, x):
                 return x - 1
 
-        compiled = aot_compile(fn3, x, LocalModule(), guard_filter_fn=drop_type_match)
+        compiled = _aot_compile(fn3, x, LocalModule(), guard_filter_fn=drop_type_match)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertTrue(loaded.guard_check(x, Other()))
@@ -322,7 +356,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(stdlib and install and torch_roots)
         norm, within = precompile_package._norm, precompile_package._within
         # The sets nest one way only: purelib sits inside a stdlib root (conda)
-        # or platstdlib (venv) and must survive the exclusion, while on Windows
+        # or platstdlib (venv; platlib on a lib64 build) and must survive the
+        # exclusion, while on Windows
         # getsitepackages() names the prefix the stdlib sits under, which must
         # not; the install-root-wins rule only works if no stdlib root is under
         # an install root.
@@ -351,6 +386,32 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             file = os.path.join(link, "mod.py")
             self.assertEqual(norm(file), os.path.join(norm(real), "mod.py"))
             self.assertTrue(within(norm(file), (norm(real),)))
+
+    def test_stdlib_roots_follow_a_symlink_farm_into_the_store(self):
+        # The other symlink shape: the stdlib directory is real and each file in
+        # it is a link into a per-package store (a venv over a Nix, Guix or Spack
+        # profile). realpath of the directory stays on the farm while realpath
+        # of any file lands in the store, so the roots need both.
+        stdlib_roots = precompile_package._stdlib_roots
+        norm, within = precompile_package._norm, precompile_package._within
+        self.addCleanup(stdlib_roots.cache_clear)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "store", "lib", "python3.12")
+            farm = os.path.join(tmp, "profile", "lib", "python3.12")
+            os.makedirs(store)
+            os.makedirs(farm)
+            open(os.path.join(store, "os.py"), "w").close()
+            farm_os = os.path.join(farm, "os.py")
+            try:
+                os.symlink(os.path.join(store, "os.py"), farm_os)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+            with mock.patch.object(os, "__file__", farm_os):
+                stdlib_roots.cache_clear()
+                stdlib = stdlib_roots()
+            self.assertIn(norm(farm), stdlib)
+            self.assertIn(norm(store), stdlib)
+            self.assertTrue(within(norm(farm_os), stdlib))
 
     def test_stdlib_roots_take_the_windows_dlls_dir(self):
         # Reachable only on a Windows runner otherwise. sysconfig's first init
@@ -393,6 +454,31 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(within(norm(purelib), stdlib))
         self.assertIn(norm(purelib), install)
 
+    def test_install_roots_take_purelib_and_platlib_on_a_lib64_build(self):
+        # sysconfig's posix schemes hard-code lib in purelib but interpolate
+        # platlibdir into platlib and the stdlib keys, so on a system
+        # interpreter built --with-platlibdir=lib64 (Fedora, RHEL, openSUSE) it
+        # is platlib that nests inside the stdlib root and purelib that does
+        # not; each key is a root of its own. A venv links lib64 -> lib.
+        stdlib = os.path.join(os.sep, "usr", "lib64", "python3.12")
+        purelib = os.path.join(os.sep, "usr", "lib", "python3.12", "site-packages")
+        platlib = os.path.join(stdlib, "site-packages")
+        paths = dict(sysconfig.get_paths())
+        paths.update(stdlib=stdlib, platstdlib=stdlib, purelib=purelib, platlib=platlib)
+        stdlib_roots = precompile_package._stdlib_roots
+        install_roots = precompile_package._install_roots
+        norm, within = precompile_package._norm, precompile_package._within
+        self.addCleanup(stdlib_roots.cache_clear)
+        self.addCleanup(install_roots.cache_clear)
+        with mock.patch.object(sysconfig, "get_paths", return_value=paths):
+            stdlib_roots.cache_clear()
+            install_roots.cache_clear()
+            stdlib_found, install = stdlib_roots(), install_roots()
+        self.assertTrue(within(norm(platlib), stdlib_found))
+        self.assertFalse(within(norm(purelib), stdlib_found))
+        self.assertIn(norm(platlib), install)
+        self.assertIn(norm(purelib), install)
+
     def test_install_roots_drop_a_directory_the_stdlib_sits_under(self):
         # On Windows getsitepackages() lists the bare prefix; replay that shape
         # here so the exclusion is pinned on every platform, not just there.
@@ -406,6 +492,18 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         for root in precompile_package._stdlib_roots():
             self.assertFalse(within(root, install), root)
         self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
+        # posix_home puts purelib AT the stdlib directory rather than under it;
+        # a candidate a stdlib root equals is not an install root either, or the
+        # install-wins rule would read the whole stdlib as third party.
+        home = os.path.join(os.sep, "home", "lib", "python")
+        paths = dict(sysconfig.get_paths())
+        paths.update(stdlib=home, platstdlib=home, purelib=home, platlib=home)
+        self.addCleanup(precompile_package._stdlib_roots.cache_clear)
+        with mock.patch.object(sysconfig, "get_paths", return_value=paths):
+            precompile_package._stdlib_roots.cache_clear()
+            precompile_package._install_roots.cache_clear()
+            install = precompile_package._install_roots()
+        self.assertNotIn(norm(home), install)
 
     def test_install_roots_skip_a_site_accessor_that_raises(self):
         # A site.py that cannot answer is skipped, not propagated: this runs
@@ -423,6 +521,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         norm = precompile_package._norm
         self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
         self.assertIn(norm(user_site), install)
+
+    def test_install_roots_take_only_the_strings_a_site_accessor_lists(self):
+        # A non-string entry is dropped rather than handed to realpath outside
+        # the try, and the None getusersitepackages returns where there is no
+        # home directory (WASI) is skipped like a raise.
+        extra = os.path.join(os.sep, "elsewhere", "site")
+        self.addCleanup(precompile_package._install_roots.cache_clear)
+        with (
+            mock.patch.object(site, "getsitepackages", return_value=[None, extra]),
+            mock.patch.object(site, "getusersitepackages", return_value=None),
+        ):
+            precompile_package._install_roots.cache_clear()
+            install = precompile_package._install_roots()
+        norm = precompile_package._norm
+        self.assertIn(norm(extra), install)
+        self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
 
     def test_torch_roots_trust_torch_path_only_when_this_file_is_in_it(self):
         torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
@@ -499,6 +613,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ):
             self.assertIs(classify(os.path.join(bundled, "graphlib.py"), True), True)
             self.assertIs(classify(below, True), False)
+        # Of nested stdlib roots the outermost is matched, so the part below it
+        # is the longest and the check the strictest.
+        classify.cache_clear()
+        with (
+            patch("_install_roots", return_value=()),
+            patch("_stdlib_roots", return_value=(norm(stdlib_root), norm(bundled))),
+        ):
+            self.assertIs(classify(os.path.join(bundled, "graphlib.py"), True), False)
 
     def test_located_reads_the_file_from_the_module_dict(self):
         located, machinery = precompile_package._located, importlib.machinery
@@ -539,7 +661,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             def __getattr__(self, attr):
                 raise RuntimeError(attr)
 
-        self.assertIsNone(located(Proxy(), "graphlib", True))  # type: ignore[arg-type]
+        self.assertIsNone(located(Proxy(), "graphlib", True))
         odd.__spec__ = Proxy()
         self.assertIsNone(located(odd, "graphlib", True))
         odd.__file__ = os.path.join(stdlib_root, "graphlib.py")
@@ -558,6 +680,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         shadow_sys.__file__ = installed
         shadow_sys.__loader__ = builtin
         self.assertIs(located(shadow_sys, "sys", True), False)
+        # A __file__ that cannot be placed (not a string, or relative) is no
+        # evidence, so the loader is still read.
+        unplaced = (("sys", 42, builtin), ("zipimport", "zipimport.py", frozen))
+        for name, file, loader in unplaced:
+            module = types.ModuleType(name)
+            module.__file__ = file
+            module.__loader__ = loader
+            self.assertIs(located(module, name, True), True, name)
         # Built in or frozen, the table is keyed on the full dotted name.
         self.assertIs(located(sys, "sys", True), True)
         sub = types.ModuleType("sys.sub")
@@ -567,11 +697,20 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             module = types.ModuleType(name)
             module.__spec__ = machinery.ModuleSpec(name, frozen, origin="frozen")
             self.assertIs(located(module, name, True), expected, name)
-        # __loader__ alone in the dict, with no spec, is the same evidence.
+        # __loader__ alone in the dict, with no spec, is the same evidence, and
+        # both arms answer under either flag: the torch shape is an embedding
+        # that registers torch._C through PyImport_AppendInittab.
         for name, loader in (("sys", builtin), ("zipimport", frozen)):
             module = types.ModuleType(name)
             module.__loader__ = loader
-            self.assertIs(located(module, name, True), True, name)
+            for stdlib in (True, False):
+                self.assertIs(located(module, name, stdlib), True, (name, stdlib))
+        self.assertNotIn("torch._C", sys.builtin_module_names)
+        inittab = (*sys.builtin_module_names, "torch._C")
+        with mock.patch.object(sys, "builtin_module_names", inittab):
+            embedded = types.ModuleType("torch._C")
+            embedded.__loader__ = builtin
+            self.assertIs(located(embedded, "torch._C", False), True)
 
     @parametrize("shape", sorted(_NOT_LIBRARY_MODULES))
     def test_library_module_requires_the_name_to_resolve_to_the_library(self, shape):
@@ -712,6 +851,31 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         self.assertTrue(defined_where_read(_user_op, "_user_op", two_frame))
         self.assertFalse(defined_where_read(F.silu, "silu", two_frame))
+
+        # A method extracted under its own name and a def returned by a factory
+        # are assignments, not a def under its own name: __qualname__ tells.
+        class Ops:
+            @staticmethod
+            def op(x):
+                return x
+
+        def availability_fork():
+            def _user_op(x):
+                return x + 2
+
+            return _user_op
+
+        self.assertFalse(defined_where_read(Ops.op, "op", _HERE))
+        self.assertFalse(defined_where_read(availability_fork(), "_user_op", _HERE))
+        # A module-level same-name fork inside this file binds a different def
+        # per machine under one checksum and cannot be told from the real one:
+        # the conditional-bind KNOWN GAP of _is_risky_drop, pinned as such.
+        forked = {}
+        exec(compile("def _user_op(x):\n    return x + 2\n", __file__, "exec"), forked)
+        self.assertTrue(defined_where_read(forked["_user_op"], "_user_op", _HERE))
+
+    def test_defined_where_read_takes_the_file_off_the_code_object(self):
+        defined_where_read = precompile_package._defined_where_read
         # functools.wraps copies __module__ along with __name__ and __qualname__,
         # so a wrapper minted in another file claims this one; its code object
         # does not. A C-implemented wrapper has no code object and is not
@@ -728,48 +892,55 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(defined_where_read(cached, "_user_op", _HERE))
         decorated = torch.no_grad()(_user_op)
         self.assertFalse(defined_where_read(decorated, "_user_op", _HERE))
-        # A class has no code object, and namedtuple and type() (make_dataclass
-        # from 3.12) stamp __module__ from the calling frame under a BARE
-        # __qualname__, so a class a library mints for this file claims it
-        # exactly like a class statement written here. The methods tell: a
-        # class statement compiled its defs in this file under its own qualname
-        # prefix, and a class with no such def fails closed, including a
-        # factory fed a same-file def (bare qualname) and, below, an imported
-        # class the reader attaches one to.
+
+    def test_defined_where_read_refuses_a_pseudo_filename(self):
+        defined_where_read = precompile_package._defined_where_read
+
+        # A co_filename is not always a path: an exec-generated frame records
+        # <string>, which realpath would resolve against the cwd, so it would
+        # compare equal to the <string> a fields-only dataclass compiles its
+        # methods in and waive the one class the lint must report. Only
+        # absolute filenames compare; a relative one and an embedded NUL on
+        # either side fail closed instead of raising.
+        @dataclasses.dataclass
+        class Cfg:
+            x: int
+
+        pseudo = traceback.StackSummary.from_list([("<string>", 1, "forward", "")])
+        self.assertEqual(Cfg.__init__.__code__.co_filename, "<string>")
+        self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, pseudo))
+        exec_ns = {}
+        exec(compile("def op(x):\n    return x\n", "<string>", "exec"), exec_ns)
+        self.assertFalse(defined_where_read(exec_ns["op"], "op", pseudo))
+        relative = os.path.basename(__file__)
+        stack = traceback.StackSummary.from_list([(relative, 1, "forward", "")])
+        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
+        stack = traceback.StackSummary.from_list(
+            [(__file__ + "\x00", 1, "forward", "")]
+        )
+        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
+        code = _user_op.__code__.replace(co_filename=__file__ + "\x00")
+        nul_op = types.FunctionType(code, globals(), "_user_op")
+        self.assertFalse(defined_where_read(nul_op, "_user_op", _HERE))
+
+    def test_defined_where_read_judges_a_class_by_its_own_methods(self):
+        defined_where_read = precompile_package._defined_where_read
+        # A class has no code object; its methods tell. A class statement
+        # compiled its defs in this file under its own qualname prefix, and a
+        # class with no such def fails closed.
         cls = type(self)
         self.assertTrue(defined_where_read(cls, cls.__name__, _HERE))
         self.assertFalse(defined_where_read(cls, cls.__name__, _ELSEWHERE))
         self.assertFalse(defined_where_read(torch.nn.Linear, "Linear", _HERE))
-        point = collections.namedtuple("Point", "x")
-        self.assertEqual((point.__module__, point.__qualname__), (__name__, "Point"))
-        self.assertFalse(defined_where_read(point, "Point", _HERE))
-        point = dataclasses.make_dataclass("Point", [("x", int)])
-        # 3.12+ stamps the caller's module on the class; 3.10/3.11 leave "types".
-        # Either way the bare qualname and library-compiled methods refuse it.
-        self.assertEqual(point.__qualname__, "Point")
-        self.assertFalse(defined_where_read(point, "Point", _HERE))
-        self.assertFalse(defined_where_read(type("Point", (), {}), "Point", _HERE))
-        point = type("Point", (), {"area": _user_op})
-        self.assertFalse(defined_where_read(point, "Point", _HERE))
-        # A class imported from another file is not written here however many
-        # same-file functions the reader attaches to it.
-        imported = {"__name__": "mypkg.impl"}
-        source = "class Point:\n    def norm(self):\n        return 0\n"
-        exec(compile(source, F.__file__, "exec"), imported)
-        imported["Point"].extra = _user_op
-        self.assertFalse(defined_where_read(imported["Point"], "Point", _HERE))
 
-        # A method extracted under its own name and a def returned by a factory
-        # are assignments, not a def under its own name: __qualname__ tells.
-        # Ops itself, a same-file class statement with a method, is waived, so
-        # is one whose only def is a property (the fget arm); a cached_property
-        # keeps its function under .func and is not unwrapped, so a class with
+        # Ops, a same-file class statement with a method, is waived, so is one
+        # whose only def is a property (the fget arm); a cached_property keeps
+        # its function under .func and is not unwrapped, so a class with
         # nothing else fails closed, as does a class with no method of its own
         # and one whose only methods are generated (a fields-only dataclass
-        # compiles them in <string>). On 3.14 the compiler also stores the PEP
-        # 649 annotate function of an annotated class body in its __dict__,
-        # compiled in this file under the class's prefix; the predicate skips
-        # it, replayed under both keys since only 3.14 mints it.
+        # compiles them in <string>). Members are unwrapped by type, never
+        # probed with getattr: a torch.classes proxy answers any attribute
+        # read by raising RuntimeError, and a class holding one is still judged.
         class Ops:
             @staticmethod
             def op(x):
@@ -792,52 +963,84 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         class Cfg:
             x: int
 
-        def availability_fork():
-            def _user_op(x):
-                return x + 2
+        class Model(torch.nn.Module):
+            ns = torch.classes.precompile_package_test
 
-            return _user_op
+            def forward(self, x):
+                return x
 
         self.assertTrue(defined_where_read(Ops, Ops.__qualname__, _HERE))
         self.assertTrue(defined_where_read(Prop, Prop.__qualname__, _HERE))
         self.assertFalse(defined_where_read(Cached, Cached.__qualname__, _HERE))
         self.assertFalse(defined_where_read(Marker, Marker.__qualname__, _HERE))
         self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, _HERE))
+        with self.assertRaises(RuntimeError):
+            Model.ns.__func__
+        self.assertTrue(defined_where_read(Model, Model.__qualname__, _HERE))
+        self.assertFalse(defined_where_read(Model, Model.__qualname__, _ELSEWHERE))
+
+    def test_defined_where_read_refuses_a_class_minted_for_the_file(self):
+        defined_where_read = precompile_package._defined_where_read
+        # namedtuple and type() (make_dataclass from 3.12) stamp __module__
+        # from the calling frame under a BARE __qualname__, so a class a
+        # library mints for this file claims it exactly like a class statement
+        # written here. None of its functions compiled under its qualname
+        # prefix, so it fails closed, including a factory fed a same-file def
+        # (bare qualname) and an imported class the reader attaches one to.
+        point = collections.namedtuple("Point", "x")
+        self.assertEqual((point.__module__, point.__qualname__), (__name__, "Point"))
+        self.assertFalse(defined_where_read(point, "Point", _HERE))
+        point = dataclasses.make_dataclass("Point", [("x", int)])
+        # 3.12+ stamps the caller's module on the class; 3.10/3.11 leave "types".
+        # Either way the bare qualname and library-compiled methods refuse it.
+        self.assertEqual(point.__qualname__, "Point")
+        self.assertFalse(defined_where_read(point, "Point", _HERE))
+        self.assertFalse(defined_where_read(type("Point", (), {}), "Point", _HERE))
+        point = type("Point", (), {"area": _user_op})
+        self.assertFalse(defined_where_read(point, "Point", _HERE))
+        # A class imported from another file is not written here however many
+        # same-file functions the reader attaches to it.
+        imported = {"__name__": "mypkg.impl"}
+        source = "class Point:\n    def norm(self):\n        return 0\n"
+        exec(compile(source, F.__file__, "exec"), imported)
+        imported["Point"].extra = _user_op
+        self.assertFalse(defined_where_read(imported["Point"], "Point", _HERE))
+
+    def test_defined_where_read_skips_the_compiler_annotate_function(self):
+        defined_where_read = precompile_package._defined_where_read
+
+        # On 3.14 the compiler stores the PEP 649 annotate function of an
+        # annotated class body in its __dict__, compiled in this file, under
+        # key __annotate_func__ with qualname Cfg.__annotate__; the key rule
+        # refuses it, so a fields-only dataclass is reported on every version.
+        @dataclasses.dataclass
+        class Cfg:
+            x: int
+
+        if sys.version_info >= (3, 14):
+            annotate = vars(Cfg)["__annotate_func__"]
+            self.assertEqual(
+                (annotate.__qualname__, annotate.__code__.co_filename),
+                (f"{Cfg.__qualname__}.__annotate__", __file__),
+            )
+        self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, _HERE))
+
+        # Replayed on every version with a type() class handed a same-file
+        # function under that key and qualname. The control row, the same
+        # function under an ordinary key, shows the replay is what a class
+        # statement produces; the skip of both keys, against a version that
+        # stores the function under its own name, is pinned last.
+        def minted(key, qualname):
+            fn = types.FunctionType(_user_op.__code__, globals(), "__annotate__")
+            fn.__qualname__ = qualname
+            return type("Cfg", (), {key: fn})
+
+        self.assertTrue(defined_where_read(minted("op", "Cfg.op"), "Cfg", _HERE))
+        real = minted("__annotate_func__", "Cfg.__annotate__")
+        self.assertFalse(defined_where_read(real, "Cfg", _HERE))
         for key in ("__annotate__", "__annotate_func__"):
-            annotate = types.FunctionType(_user_op.__code__, globals(), "__annotate__")
-            annotate.__qualname__ = f"Cfg.{key}"
-            annotated = type("Cfg", (), {key: annotate})
-            self.assertFalse(defined_where_read(annotated, "Cfg", _HERE), key)
-        self.assertFalse(defined_where_read(Ops.op, "op", _HERE))
-        self.assertFalse(defined_where_read(availability_fork(), "_user_op", _HERE))
-        # A co_filename is not always a path: an exec-generated frame records
-        # <string>, which realpath would resolve against the cwd, so it would
-        # compare equal to the <string> a fields-only dataclass compiles its
-        # methods in and waive the one class the lint must report. Only
-        # absolute filenames compare; a relative one and an embedded NUL on
-        # either side fail closed instead of raising.
-        pseudo = traceback.StackSummary.from_list([("<string>", 1, "forward", "")])
-        self.assertEqual(Cfg.__init__.__code__.co_filename, "<string>")
-        self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, pseudo))
-        exec_ns = {}
-        exec(compile("def op(x):\n    return x\n", "<string>", "exec"), exec_ns)
-        self.assertFalse(defined_where_read(exec_ns["op"], "op", pseudo))
-        relative = os.path.basename(__file__)
-        stack = traceback.StackSummary.from_list([(relative, 1, "forward", "")])
-        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
-        stack = traceback.StackSummary.from_list(
-            [(__file__ + "\x00", 1, "forward", "")]
-        )
-        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
-        code = _user_op.__code__.replace(co_filename=__file__ + "\x00")
-        nul_op = types.FunctionType(code, globals(), "_user_op")
-        self.assertFalse(defined_where_read(nul_op, "_user_op", _HERE))
-        # A module-level same-name fork inside this file binds a different def
-        # per machine under one checksum and cannot be told from the real one:
-        # the conditional-bind KNOWN GAP of _is_risky_drop, pinned as such.
-        forked = {}
-        exec(compile("def _user_op(x):\n    return x + 2\n", __file__, "exec"), forked)
-        self.assertTrue(defined_where_read(forked["_user_op"], "_user_op", _HERE))
+            own_key = minted(key, f"Cfg.{key}")
+            self.assertFalse(defined_where_read(own_key, "Cfg", _HERE), key)
 
     def test_minted_global_names_match_dynamo(self):
         # The predicates restate names Dynamo mints inline, in
@@ -1284,6 +1487,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             resume_b: [frozenset({fact("CONSTANT_MATCH", "___stack0")})],
         }
         self.assertEqual(_wont_generalize(kept, guard_sets), ("___stack0", "mode"))
+        # A frame that pins scale in its only variant is a real pin; the entry
+        # frame's generic variant cancels the entry's pin, not this one.
+        guard_sets[("helper", "m.py", 20)] = [frozenset({pinned_scale})]
+        self.assertEqual(
+            _wont_generalize(kept, guard_sets), ("___stack0", "mode", "scale")
+        )
         # Nothing pinned: nothing to report, whatever the frames say.
         self.assertEqual(_wont_generalize({("TENSOR_MATCH", "x")}, guard_sets), ())
 

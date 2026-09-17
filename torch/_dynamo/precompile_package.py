@@ -41,11 +41,13 @@ does not recompile when a guarded global function is rebound, serves the stale
 graph, and records fewer variants than plain ``torch.compile`` would. Every
 dropped guard is reported in ``PrecompileSummary.dropped_guards``.
 
-If serialization drops a guard that looks configuration-dependent, the artifact
-is refused by default rather than written with variants whose dispatch would be
-ambiguous after load. Two tests feed that decision, and their union is
-``PrecompileSummary.risky_dropped_guards``. One is the risky-drop lint over the
-dropped guard's binding site (``_is_risky_drop``); it waives a builtin read, a
+The follow-up's session refuses an artifact by default when serialization
+dropped a guard that looks configuration-dependent, rather than writing one
+with variants whose dispatch would be ambiguous after load; nothing in this
+stack refuses, it computes the inputs to that decision. Two tests feed it, and
+their union is ``PrecompileSummary.risky_dropped_guards``. One is the
+risky-drop lint over the dropped guard's binding site (``_is_risky_drop``,
+later in this stack); it waives a builtin read, a
 read off a torch- or stdlib-owned namespace and a global bound to a same-name
 ``def``, so a config-selected binding read off a trusted namespace passes it,
 and it is a lint, not a proof. The other is decided per frame, by comparing the
@@ -142,6 +144,7 @@ from torch._guards import ChainedSource, Source
 from torch.compiler._precompile_types import PrecompileSummary
 from torch.utils._config_module import ConfigModule
 
+from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .exc import PackageError
 from .guards import CheckFunctionManager
 from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
@@ -236,10 +239,11 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     by name, the artifact carries only save-time copies of the builtins dict
     (the guards' copy ``serialize_guards`` prunes to the names guards read, and
     the pickle-filtered copy ``get_runtime_env`` records for the bytecode), and
-    both loaders bind the LIVE ``builtins.__dict__`` under the guard's key
-    instead (``CompilePackage.install``,
-    ``AOTCompiledFunction._seed_guard_scope``), so the guard rebuilt at load
-    catches a builtin swapped afterwards (``test_aot_compile.py``
+    both loaders rebind the guard's key to the dict derived from the loading
+    scope's own ``__builtins__`` (``CompilePackage.install``,
+    ``AOTCompiledFunction._seed_guard_scope``), the LIVE ``builtins.__dict__``
+    unless the caller pre-bound another, so the guard rebuilt at load catches
+    a builtin swapped afterwards (``test_aot_compile.py``
     ``test_kept_builtin_match_guard_reads_the_seeded_builtins_dict`` pins the
     live dict). DICT_KEYS_MATCH is kept by type for another reason. The derived
     types an entry carries are the UNSAVED build's: ``CheckFunctionManager``
@@ -247,18 +251,26 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     on ``torch.utils._pytree.SUPPORTED_NODES`` promotes itself to DICT_VERSION
     in exactly that build, whereas the save build pins it to a keys-match
     (``guard._force_dict_keys_match``) that the pre-check accepts; dropping it
-    on the unsaved build's DICT_VERSION would discard the one guard that
-    notices a pytree node registered between capture and load. Check any new
-    refused derived type against the save build before dropping on it. Past
-    the chain the filter mirrors nothing, and the refusal that matters there
-    is of local-scope types, which cannot be pickled by name. It has two paths:
-    the chain's TYPE_MATCH/BUILTIN_MATCH branch raises when
-    ``guard._unserializable`` is set, and ``GuardsStatePickler.reducer_override``
-    refuses a plain instance of such a type wherever it sits in the guard tree,
-    so a kept guard whose source walks through one fails there.
-    (FAKE_SCRIPT_TYPE_MATCH sets the same flag, but nothing outside that branch
-    reads it, so a local-scope script-object type is the known hole: kept here
-    and not refused by the pre-check.) The pickler's refusal is not universal:
+    on the unsaved build's DICT_VERSION discards a guard the artifact can carry
+    and pads ``dropped_guards`` with it. It is not the only guard on that
+    registry: the kept guards on the entries ``tree_flatten`` reads put a
+    DictGuardManager over it whose length check notices a node registered
+    between capture and load either way; the keys-match is what notices a
+    same-count change of keys (one node deregistered, another registered).
+    Check any new refused derived type against the save build before dropping
+    on it. Past the chain the filter mirrors nothing, and the refusal that
+    matters there is of local-scope types, which cannot be pickled by name. It
+    has two paths: the chain's TYPE_MATCH/BUILTIN_MATCH branch raises when
+    ``guard._unserializable`` is set, and ``GuardsStatePickler.reducer_override``,
+    once none of its earlier branches has rebuilt the object, refuses a plain
+    non-tuple instance of such a type anywhere in the guard tree (a local tuple
+    subclass fails later, in plain pickle, as a PackageError wrapping the
+    AttributeError), so a kept guard whose source walks through one fails
+    there. FAKE_SCRIPT_TYPE_MATCH sets the same flag, which nothing outside
+    that branch reads, so the pre-check passes a local-scope opaque-object
+    type; its only installer, the opaque-object path of ``VariableBuilder``,
+    guards a plain instance, which the pickler then refuses with the same
+    message, so nothing ships. The pickler's refusal is not universal:
     the branches before it rebuild a local function by value, a local
     namedtuple type from its fields, and an ``nn.Module`` of a local class with
     the default ``__getstate__`` as a plain ``torch.nn.Module``, so for a
@@ -270,19 +282,23 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     cannot pickle ships an artifact that never checks the type, whereas keeping
     it makes serialization refuse loudly. Passing this filter therefore does
     not mean the artifact serializes.
-    ``CheckFunctionManager.__init__`` applies a different policy inline under
-    ``torch._dynamo.config.caching_precompile`` (drop ID_MATCH, CLOSURE_MATCH,
-    WEAKREF_ALIVE, DICT_VERSION and anything deriving ID_MATCH or
-    DICT_VERSION). The two agree on every refused type, since NN_MODULE,
+    Under ``torch._dynamo.config.caching_precompile``,
+    ``CheckFunctionManager.__init__`` wraps the ``guard_filter_fn`` it is
+    given, this one included: the caller's verdicts come first, then it also
+    drops ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE, DICT_VERSION and anything
+    deriving ID_MATCH or DICT_VERSION, so its drops win and both exemptions
+    above are void there: BUILTIN_MATCH goes through its derived ID_MATCH and
+    the SUPPORTED_NODES DICT_KEYS_MATCH through the unsaved build's
+    DICT_VERSION. That list reaches most refused types, since NN_MODULE,
     FUNCTION_MATCH, CLASS_MATCH and MODULE_MATCH all derive ID_MATCH (the first
     two through ID_MATCH, the other two through ``id_match_unchecked`` directly,
-    which records the name ID_MATCH); they differ on BUILTIN_MATCH, which that
-    policy drops through its derived ID_MATCH and this keeps, on
-    DICT_KEYS_MATCH over SUPPORTED_NODES, which that policy drops through the
-    unsaved build's DICT_VERSION and this keeps, and on one of those four
-    rooted at a TypeSource, which ``id_match_unchecked`` turns into a
-    TYPE_MATCH on a fresh guard so the original derives nothing: dropped here
-    by type, kept there.
+    which records the name ID_MATCH), but it keys on what the unsaved build
+    recorded, so a refused guard whose build recorded nothing is dropped here
+    by type and kept there, into a ``serialize_guards`` that refuses it by
+    type: a CLASS_MATCH rooted at a TypeSource, which ``id_match_unchecked``
+    turns into a TYPE_MATCH on a fresh guard (of those four only CLASS_MATCH
+    can be rooted there, a TypeSource's value being a class), and an NN_MODULE
+    that ``build_guards`` skipped under ``guard_nn_modules=False``.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
@@ -349,7 +365,11 @@ def _stdlib_roots() -> tuple[str, ...]:
     roots = []
     os_file = getattr(os, "__file__", None)
     if os_file:
-        roots.append(os.path.dirname(os_file))
+        # Both the directory os was imported from and the one its file resolves
+        # into: a venv over a symlink-farm prefix (a Nix, Guix or Spack profile)
+        # keeps a real directory of per-file links into the store, and every
+        # consumer normalizes the file, so only the second names what they see.
+        roots += [os.path.dirname(os_file), os.path.dirname(_norm(os_file))]
     frozen_dir = getattr(sys, "_stdlib_dir", None)  # 3.11+
     if frozen_dir:
         roots.append(frozen_dir)
@@ -365,15 +385,17 @@ def _stdlib_roots() -> tuple[str, ...]:
 def _install_roots() -> tuple[str, ...]:
     """
     Where a third party lands. This is the load-bearing exclusion: purelib is
-    NESTED inside stdlib in a conda layout and inside platstdlib in a venv, so
-    without it every pip-installed package is under a stdlib root.
+    NESTED inside stdlib in a conda layout and inside platstdlib in a venv (on
+    a --with-platlibdir=lib64 build it is platlib that nests, purelib living
+    under lib instead), so without it every pip-installed package is under a
+    stdlib root.
     """
     paths = sysconfig.get_paths()
     roots = [paths["purelib"], paths["platlib"]]
     for name in ("getsitepackages", "getusersitepackages"):
         try:
             got = getattr(site, name)()
-            found = [got] if isinstance(got, str) else list(got or ())
+            found = [got] if isinstance(got, str) else list(got)
         except Exception:
             continue  # an old-virtualenv site.py lacks it, or it cannot answer
         roots += [p for p in found if isinstance(p, str)]
@@ -440,21 +462,28 @@ def _classify_file(file: str, stdlib: bool) -> bool | None:
         return _within(path, _torch_roots())
     if _within(path, _install_roots()):
         return False
+    # The roots are sorted, so the first match is the outermost and the part
+    # below it the longest: the strictest reading of _INSTALL_DIR_NAMES.
     for root in _stdlib_roots():
-        if path == root or path.startswith(root + os.sep):
+        if _within(path, (root,)):
             return _INSTALL_DIR_NAMES.isdisjoint(path[len(root) + 1 :].split(os.sep))
     return False
 
 
-def _located(module: types.ModuleType, name: str, stdlib: bool) -> bool | None:
+def _located(module: object, name: str, stdlib: bool) -> bool | None:
     """
-    Shipped here (True), shipped elsewhere (False), or no evidence (None). A
-    ``__file__`` that ``_classify_file`` can place decides, and only then is the
-    loader read: importlib._bootstrap carries a stdlib ``__file__`` next to a
-    FrozenImporter whose table knows it only as _frozen_importlib. The built-in
-    and frozen arms answer on the name alone under either ``stdlib``: compiled
-    into the interpreter, such a module is shipped with it and no sys.path
-    entry can shadow it.
+    Shipped here (True), shipped elsewhere (False), or no evidence (None), for
+    a sys.modules entry, which need not be a module. A ``__file__`` that
+    ``_classify_file`` can place decides, and only then is the loader read:
+    importlib._bootstrap carries a stdlib ``__file__`` next to a FrozenImporter
+    whose table knows it only as _frozen_importlib. The built-in and frozen
+    arms answer on the name alone under either ``stdlib``: both importers
+    precede the path finder, so no sys.path entry can shadow such a module,
+    and its code is fixed by the interpreter binary, which is what either
+    waiver needs. The ``stdlib=False`` case is an embedding that registers
+    torch._C through PyImport_AppendInittab while torch's Python files stay on
+    disk, so ``_torch_roots`` is non-empty and ``_is_library_module`` does not
+    waive torch on its name.
     """
     # The module dict rather than getattr: a PEP 562 module __getattr__ is user
     # code, and a module that raises on an unknown attribute would take the
@@ -573,10 +602,12 @@ def _defined_where_read(
     statement. Its methods can tell: a class statement compiles its defs in
     its own file under its own ``__qualname__`` prefix, so a class is waived
     when at least one function in its own ``__dict__``, stored under key ``k``
-    with ``__qualname__`` ``Cls.k`` (staticmethod and classmethod unwrapped
-    through ``__func__``, property through ``fget``; a cached_property keeps
-    its function under ``.func`` and does not count), was compiled in the
-    reading file. A function attached afterwards keeps its bare qualname, so
+    with ``__qualname__`` ``Cls.k`` (a staticmethod or classmethod is
+    unwrapped through ``__func__`` and a property through ``fget``, by type
+    rather than by ``getattr``, which a proxy attribute such as
+    ``torch.classes.<ns>`` answers by raising; a cached_property keeps its
+    function under ``.func`` and does not count), was compiled in the reading
+    file. A function attached afterwards keeps its bare qualname, so
     an imported class the reader extends (``Point.extra = _extra``) and a
     factory fed same-file methods (``type(name, bases, {"area": _area})``,
     ``make_dataclass(..., namespace=...)``) are refused, and ``class Marker:
@@ -585,12 +616,14 @@ def _defined_where_read(
     -- because those methods compile in ``<string>`` or the stdlib, so a plain
     config dataclass read as a global is reported. The one function the
     compiler itself puts in a class ``__dict__``, the PEP 649 annotate function
-    3.14 stores under ``__annotate_func__`` for an annotated class body,
-    compiles in the reading file under the class's prefix but is not a def the
-    author wrote, so it is skipped and the verdict is the same on every
-    version. Nothing else without a code object is waived, because a
-    C-implemented wrapper such as functools.lru_cache claims the reader's
-    module the same way. A ``co_filename`` is not always a path: an exec
+    3.14 stores for an annotated class body, compiles in the reading file, but
+    under key ``__annotate_func__`` with ``__qualname__`` ``Cls.__annotate__``,
+    so the key rule refuses it and the verdict is the same on every version;
+    both annotate keys are skipped outright as well, against a version that
+    stores it under its own name. Nothing else without a code object is
+    waived, because a C-implemented wrapper such as functools.lru_cache claims
+    the reader's module the same way. A ``co_filename`` is not always a path:
+    an exec
     records ``<string>``, a REPL ``<stdin>``, and ``_norm`` would resolve
     either against the cwd, so a fields-only dataclass read from an
     exec-generated frame would collide with it and be waived. Only absolute
@@ -604,18 +637,23 @@ def _defined_where_read(
     if not user_stack or getattr(value, "__qualname__", None) != global_name:
         return False
     if isinstance(value, type):
-        # The PEP 649 annotate function (3.14) is the compiler's, not a method;
-        # type() keeps the namespace's key, the class statement renames it.
+        # 3.14 stores the PEP 649 annotate function under __annotate_func__
+        # with qualname Cls.__annotate__, which the key rule refuses; the skip
+        # covers a version that stores it under its own name.
         skip = ("__annotate__", "__annotate_func__")
-        codes = []
+        files: list[str] = []
         for key, attr in vars(value).items():
-            member = getattr(attr, "__func__", getattr(attr, "fget", attr))
-            own = getattr(member, "__qualname__", None) == f"{global_name}.{key}"
-            if own and key not in skip:
-                codes.append(getattr(member, "__code__", None))
+            if isinstance(attr, (staticmethod, classmethod)):
+                attr = attr.__func__
+            elif isinstance(attr, property):
+                attr = attr.fget
+            if not isinstance(attr, types.FunctionType) or key in skip:
+                continue
+            if attr.__qualname__ == f"{global_name}.{key}":
+                files.append(attr.__code__.co_filename)
     else:
-        codes = [getattr(value, "__code__", None)]
-    files = [c.co_filename for c in codes if isinstance(c, types.CodeType)]
+        code = getattr(value, "__code__", None)
+        files = [code.co_filename] if isinstance(code, types.CodeType) else []
     read = user_stack[0].filename
     if not os.path.isabs(read):
         return False
@@ -636,10 +674,10 @@ def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
     does not carry it; unmangling collides only for a module literally named
     ``a_dot_b``.
     """
-    prefix = "__import_"
-    if not global_name.startswith(prefix):
+    if not global_name.startswith(_IMPORT_ALIAS_PREFIX):
         return None
-    return sys.modules.get(global_name[len(prefix) :].replace("_dot_", "."))
+    tail = global_name[len(_IMPORT_ALIAS_PREFIX) :]
+    return sys.modules.get(tail.replace("_dot_", "."))
 
 
 def _module_namespaces(
@@ -720,11 +758,6 @@ def _module_namespaces(
         return ok
 
     return {name: module for name, (_, module) in modules.items() if is_trusted(name)}
-
-
-# Dynamo's own handle on the builtins dict, minted by
-# OutputGraph.install_builtins_dict_in_fglobals.
-_BUILTINS_DICT_PREFIX = "__builtins_dict__"
 
 
 def _reads_a_builtin(source: Source, value: object) -> bool:
@@ -1336,6 +1369,9 @@ def _wont_generalize(
     pinned = {n for t, n in kept if _pins_a_value(t, n)}
     if not pinned:
         return ()
+    # A source survives if SOME frame pins it and never serves it generically;
+    # a frame that does both cancels only its own pin, not another frame's.
+    survivors: set[str] = set()
     for variants in guard_sets.values():
         pins: set[str] = set()
         generic: set[str] = set()
@@ -1345,8 +1381,8 @@ def _wont_generalize(
             # A variant that reached the source without pinning it is the
             # graph that serves other values.
             generic |= {f.source for f in facts} - here
-        pinned -= pins & generic
-    return tuple(sorted(pinned))
+        survivors |= pins - generic
+    return tuple(sorted(pinned & survivors))
 
 
 def _varying_guard_slots(
