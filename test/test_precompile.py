@@ -102,10 +102,10 @@ class TestPrecompile(TestCase):
             guarded_codes=4,
             backend_graphs=3,
             bypassed=("gen",),
-            truncated=("loop",),
+            truncated=("loop (m.py:12)",),
             uncovered_frames=("helper",),
             wont_generalize=("n",),
-            dropped_guards=risky + (("HASATTR", "m"),),
+            dropped_guards=(("HASATTR", "m"),) + risky,
             kept_guards=(("TENSOR_MATCH", "x"),),
             risky_dropped_guards=risky,
             policy_dropped_guards=(("CONSTANT_MATCH", "flag"),),
@@ -119,7 +119,7 @@ class TestPrecompile(TestCase):
         # failures last, so a failure never sits between two notes.
         self.assertExpectedInline(
             str(summary),
-            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'ID_MATCH': 1, 'HASATTR': 1} (1 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (1 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
         )
         # Keyword-only: four leading ints would otherwise transpose silently.
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
@@ -142,7 +142,7 @@ class TestPrecompile(TestCase):
             dropped_guards=(act,),
             risky_dropped_guards=(act,),
             policy_dropped_guards=(act,),
-            dropped_guard_code=(act + ("hasattr(L['self'], 'act')",),),
+            dropped_guard_code=(act + ("hasattr(L['self'].act, 'inplace')",),),
         )
         self.assertEqual(summary.dropped_guard_types, {"HASATTR": 1})
         self.assertExpectedInline(
@@ -174,27 +174,29 @@ class TestPrecompile(TestCase):
     def test_summary_digest_and_guard_type_counts(self):
         from torch.compiler._precompile_types import PrecompileSummary
 
+        # Slots arrive sorted, as the builder emits them; the tallies keep
+        # that order.
         plain = PrecompileSummary(
             frames=2,
             resume_functions=1,
             guarded_codes=3,
             backend_graphs=2,
             dropped_guards=(
+                ("HASATTR", "m"),
                 ("ID_MATCH", "G['fn']"),
                 ("ID_MATCH", "G['g']"),
-                ("HASATTR", "m"),
             ),
-            kept_guards=(("TYPE_MATCH", "x"), ("TENSOR_MATCH", "x")),
+            kept_guards=(("TENSOR_MATCH", "x"), ("TYPE_MATCH", "x")),
             policy_dropped_guards=(("CONSTANT_MATCH", "flag"),),
             # For programmatic consumers: the digest below does not mention it.
             dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
             wont_generalize=("scale",),
         )
-        self.assertEqual(plain.dropped_guard_types, {"ID_MATCH": 2, "HASATTR": 1})
-        self.assertEqual(plain.kept_guard_types, {"TYPE_MATCH": 1, "TENSOR_MATCH": 1})
+        self.assertEqual(plain.dropped_guard_types, {"HASATTR": 1, "ID_MATCH": 2})
+        self.assertEqual(plain.kept_guard_types, {"TENSOR_MATCH": 1, "TYPE_MATCH": 1})
         self.assertExpectedInline(
             str(plain),
-            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'ID_MATCH': 2, 'HASATTR': 1} (2 kept), 1 policy-dropped guard, 1 value-pinned source""",
+            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 2} (2 kept), 1 policy-dropped guard, 1 value-pinned source""",
         )
         # No optional clause: kept guards show up only beside the drops.
         clean = PrecompileSummary(
@@ -218,7 +220,7 @@ class TestPrecompile(TestCase):
             guarded_codes=1,
             backend_graphs=1,
             bypassed=("gen",),
-            truncated=("loop",),
+            truncated=("loop (m.py:12)",),
             uncovered_frames=("helper",),
             dropped_guards=risky,
             risky_dropped_guards=risky,
@@ -226,7 +228,7 @@ class TestPrecompile(TestCase):
         )
         self.assertExpectedInline(
             str(bad),
-            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
         )
         # The list clauses stop at five entries and count the rest, so the
         # digest stays one line however many frames a model has.
