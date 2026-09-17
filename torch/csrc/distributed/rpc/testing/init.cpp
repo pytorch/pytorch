@@ -22,9 +22,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Add the FaultyTensorPipeAgent and its backend options object
   // to the python module torch._C._distributed_rpc_testing
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
-  if (!torch_C_module) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(torch_C_module);
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
   auto m = torch_C_m.def_submodule(

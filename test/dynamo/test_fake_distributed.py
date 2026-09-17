@@ -166,6 +166,30 @@ class GraphModule(torch.nn.Module):
         expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
+    def test_all_gather_tensor_gather_dim_negative_view_path(self):
+        """gather_dim=-1 on a 2D input must match gather_dim=1 (view path)."""
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=-1, group=dist.group.WORLD)
+
+        x = torch.randn(1, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
+    def test_all_gather_tensor_gather_dim_negative_chunk_cat_path(self):
+        """gather_dim=-1 on a 3D input must match gather_dim=2 (chunk+cat path)."""
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(x):
+            return all_gather_single(x, gather_dim=-1, group=dist.group.WORLD)
+
+        x = torch.randn(1, 3, 4)
+        result = fn(x)
+        expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
+        self.assertEqual(result, expected)
+
     def test_device_mesh_get_local_rank(self):
         device_mesh = init_device_mesh(
             device_type="cpu",
@@ -347,13 +371,52 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[0]" = batch_p2p_ops[0]
         getitem_1: "f32[10]" = batch_p2p_ops[1];  batch_p2p_ops = None
 
-        wait_tensor: "f32[10]" = torch.ops._c10d_functional.wait_tensor(getitem_1);  getitem_1 = None
-
-        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem);  getitem = wait_tensor_1 = None
-        wait_tensor_2: "f32[10]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_2 = None
+        wait_tensors_default = torch.ops._c10d_functional.wait_tensors.default([getitem, getitem_1]);  getitem = getitem_1 = wait_tensors_default = None
         return ()
 """,
         )
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_batch_isend_irecv_waits_clear_work_registry(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(send0, recv0, send1, recv1):
+            work = dist.batch_isend_irecv(
+                [
+                    dist.P2POp(dist.isend, send0, 1),
+                    dist.P2POp(dist.irecv, recv0, 1),
+                    dist.P2POp(dist.isend, send1, 1),
+                    dist.P2POp(dist.irecv, recv1, 1),
+                ]
+            )
+            for w in work:
+                w.wait()
+
+        fn(torch.ones(4), torch.zeros(4), torch.ones(4), torch.zeros(4))
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+    @torch._dynamo.config.patch(enable_p2p_compilation=True)
+    def test_compiled_batch_isend_irecv_preserves_separate_waits(self):
+        backend = EagerAndRecordGraphs()
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def fn(send_tensor, recv_tensor):
+            work = dist.batch_isend_irecv(
+                [
+                    dist.P2POp(dist.isend, send_tensor, 1),
+                    dist.P2POp(dist.irecv, recv_tensor, 1),
+                ]
+            )
+            work[0].wait()
+            send_tensor.add_(1)
+            work[1].wait()
+            return send_tensor
+
+        fn(torch.ones(4), torch.zeros(4))
+        self.assertEqual(len(backend.graphs), 1)
+        graph = normalize_graph(backend.graphs[0])
+        self.assertNotIn("wait_tensors", graph)
+        self.assertEqual(graph.count("_functional_collectives.wait_tensor("), 2)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
     @torch._dynamo.config.patch(enable_p2p_compilation=True)
     def test_compiled_p2p_interleave_graph(self):
@@ -399,32 +462,28 @@ class GraphModule(torch.nn.Module):
         l_y0_ = L_y0_
         l_y1_ = L_y1_
 
-        batch_p2p_ops = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [l_x0_, l_y0_], '0')
+        batch_p2p_ops = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [l_x0_, l_y0_], '0');  l_y0_ = None
         getitem: "f32[0]" = batch_p2p_ops[0]
         getitem_1: "f32[64, 64]" = batch_p2p_ops[1];  batch_p2p_ops = None
-
-        wait_tensor: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(getitem_1);  getitem_1 = None
 
         mul: "f32[64, 64]" = l_x0_ * 2;  l_x0_ = None
         add: "f32[64, 64]" = mul + 1;  mul = None
 
-        add_1: "f32[64, 64]" = l_y0_ + add;  l_y0_ = add = None
+        wait_tensors_default = torch.ops._c10d_functional.wait_tensors.default([getitem, getitem_1]);  getitem = getitem_1 = None
+        getitem_4 = wait_tensors_default[1];  wait_tensors_default = None
 
-        wait_tensor_1: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem);  getitem = wait_tensor_1 = None
-        wait_tensor_2: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor);  wait_tensor = wait_tensor_2 = None
+        add_1: "f32[64, 64]" = getitem_4 + add;  getitem_4 = add = None
 
-        batch_p2p_ops_1 = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [add_1, l_y1_], '0')
+        batch_p2p_ops_1 = torch.ops._c10d_functional.batch_p2p_ops(['isend', 'irecv'], [1, 1], [0, 0], [add_1, l_y1_], '0');  l_y1_ = None
         getitem_2: "f32[0]" = batch_p2p_ops_1[0]
         getitem_3: "f32[64, 64]" = batch_p2p_ops_1[1];  batch_p2p_ops_1 = None
 
-        wait_tensor_3: "f32[64, 64]" = torch.ops._c10d_functional.wait_tensor(getitem_3);  getitem_3 = None
-
         mul_1: "f32[64, 64]" = add_1 * 1.000244140625;  add_1 = None
 
-        add_2: "f32[64, 64]" = l_y1_ + mul_1;  l_y1_ = mul_1 = None
+        wait_tensors_default_1 = torch.ops._c10d_functional.wait_tensors.default([getitem_2, getitem_3]);  getitem_2 = getitem_3 = None
+        getitem_5 = wait_tensors_default_1[1];  wait_tensors_default_1 = None
 
-        wait_tensor_4: "f32[0]" = torch.distributed._functional_collectives.wait_tensor(getitem_2);  getitem_2 = wait_tensor_4 = None
-        wait_tensor_5: "f32[64, 64]" = torch.distributed._functional_collectives.wait_tensor(wait_tensor_3);  wait_tensor_3 = wait_tensor_5 = None
+        add_2: "f32[64, 64]" = getitem_5 + mul_1;  getitem_5 = mul_1 = None
         return (add_2,)
 """,
         )

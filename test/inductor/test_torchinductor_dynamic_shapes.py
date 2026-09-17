@@ -11,6 +11,8 @@ from functools import partial
 import torch
 import torch.library
 from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
+from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
@@ -60,6 +62,12 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
+    # of the model, so the parent stops emitting triton_per_ and the
+    # persistent-vs-looped contrast the test asserts no longer exists.
+    "test_regional_codegen_only_config_cpp_wrapper_dynamic_shapes": TestFailure(
+        ("cuda", "xpu"), is_skip=True
+    ),
     # PDL tests are CUDA SM90+ only, skip on CPU
     "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
@@ -72,6 +80,11 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
+    # This fails on periodic CPU shards but passes on other CPU configurations,
+    # so skip it instead of producing unexpected successes.
+    "test_index_propagation_to_dtype_inf_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
@@ -124,11 +137,44 @@ class DynamicShapesTestCase(TestCase):
         super().tearDownClass()
 
 
+class DynamicShapesOpTests:
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_prod_backward_keeps_input_shape_dynamic(self):
+        def fn(x):
+            return torch.prod(x, 3, keepdim=True)
+
+        self.common(
+            fn,
+            (torch.randn(8, 10, 3, 2, requires_grad=True),),
+            check_gradient=True,
+            assert_dynamic_dims={0: (0, 1, 2, 3)},
+        )
+
+
 if HAS_CPU:
 
-    class DynamicShapesCpuTests(TestCase):
+    class DynamicShapesCpuTests(DynamicShapesOpTests, TestCase):
         common = check_model
         device = "cpu"
+
+        @torch._dynamo.config.patch(assume_static_by_default=False)
+        def test_assert_dynamic_dims_disables_aot_autograd_cache(self):
+            counters.clear()
+            AOTAutogradCache.clear()
+
+            def fn(x):
+                return torch.prod(x, 3, keepdim=True)
+
+            for _ in range(2):
+                self.common(
+                    fn,
+                    (torch.randn(8, 10, 3, 2, requires_grad=True),),
+                    check_gradient=True,
+                    assert_dynamic_dims={0: (0, 1, 2, 3)},
+                )
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
 
         def test_bincount_weighted_count_nonzero_dtype(self):
             def fn(x, weights):
@@ -162,7 +208,7 @@ if HAS_CPU:
 
 if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
 
-    class DynamicShapesGPUTests(DynamicShapesTestCase):
+    class DynamicShapesGPUTests(DynamicShapesOpTests, DynamicShapesTestCase):
         common = check_model_gpu
         device = GPU_TYPE
 
@@ -320,6 +366,54 @@ class TestInductorDynamic(DynamicShapesTestCase):
             [], dtype=torch.float32, device=device, requires_grad=False
         )
         self.assertEqual(fn(arg0_test, arg1_test), compiled_fn(arg0_test, arg1_test))
+
+    # Each flag is required for the divergent layout this test needs:
+    # pad_dynamic_shapes (off by default) is what lets inductor pad a
+    # symbolically-shaped buffer at all; comprehensive_padding is on by default
+    # but env-controlled, so pin it; disable_padding_cpu would otherwise make
+    # compile_fx force comprehensive_padding back off on CPU, leaving the CPU
+    # variant unable to fail.
+    @torch._inductor.config.patch(
+        comprehensive_padding=True,
+        pad_dynamic_shapes=True,
+        disable_padding_cpu=False,
+    )
+    def test_saved_activation_symbolic_stride_backward(self, device):
+        # A saved activation's stride must stay symbolic under dynamic shapes.
+        # Without the fix it freezes at the first input's hint (128*112 =
+        # 14336) and the n=96 pass dies in the backward's assert_size_stride
+        # with `stride 24576==14336 at dim=0`.
+        #
+        # The setup is load-bearing. The saved activation must be a computed
+        # intermediate so inductor owns its layout -- a graph input's layout is
+        # fixed by the caller and can never diverge. The innermost dim must be
+        # misaligned (98 pads to 128) so inductor's layout moves off the
+        # contiguous stride the backward placeholder assumes, which is what
+        # makes the restride fire. And the outer stride must depend on a
+        # dynamic dim, so the freeze is observable at a second size.
+        def fn(x, w):
+            h = torch.tanh(x).permute(0, 2, 1)
+            return (h @ w).sum()
+
+        cfn = self.compile_fn(fn)
+        metrics.reset()
+        for n in (56, 96):
+            x = torch.randn(2, 2 * n, 98, device=device, requires_grad=True)
+            w = torch.randn(2, 2 * n, 128, device=device, requires_grad=True)
+            x_ref = x.detach().clone().requires_grad_()
+            w_ref = w.detach().clone().requires_grad_()
+
+            cfn(x, w).backward()
+            fn(x_ref, w_ref).backward()
+
+            self.assertEqual(x.grad, x_ref.grad)
+            self.assertEqual(w.grad, w_ref.grad)
+
+        # The scenario only exercises the restride if padding moved inductor's
+        # layout off the contiguous stride the backward placeholder assumes.
+        # Assert it fired, so this cannot keep passing while silently no longer
+        # covering the fix.
+        self.assertGreater(metrics.num_comprehensive_padding, 0)
 
     def test_arange_dynamic(self, device):
         def fn(a):
