@@ -10884,10 +10884,10 @@ class TestLargeTensors(TestCaseMPS):
     # avg_pool2d(ceil_mode) are the 4-D forwards, the 3-D tests add dims==5,
     # max_pool3d and adaptive drive the max_pool backward at dims 5 and 4
     # respectively while avg_pool3d drives the avg_pool backward, and
-    # max_unpool covers unpooling. The last two tests target the thread grid
-    # instead of a new kernel. The dims==3 (unbatched) specialization and
-    # max_unpool3d are not covered. References come from a slice, so a full-size
-    # CPU tensor is never materialized.
+    # max_unpool covers unpooling, and the last three add the dims==3 unbatched
+    # specialization, max_unpool3d, and a run wide enough to need more than one
+    # dispatch. References come from a slice, so a full-size CPU tensor is never
+    # materialized.
     @largeMPSBufferTest(int(4.2 * 1024**3), device="mps")
     @largeTensorTest("6GB", device="mps")
     @serialTest()
@@ -11124,28 +11124,86 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
-    @largeMPSBufferTest(int(4.0 * 1024**3), device="mps")
+    @largeMPSBufferTest(int(4.1 * 1024**3), device="mps")
     @largeTensorTest("9GB", device="mps")
     @serialTest()
-    def test_pool_grid_size_boundary(self):
-        # A 1-D dispatch width is taken modulo 2**32, so exactly 2**32 threads
-        # runs nothing at all and returns an untouched output. A 1-byte dtype is
-        # the only way to reach that many threads in 4 GiB. Check both sides of
-        # the boundary so the cutoff cannot drift either way.
-        x = torch.ones(1, 15, 65537, 4369, dtype=torch.uint8, device="mps")
-        self.assertEqual(x.numel(), 2**32 - 1)
-        y = F.avg_pool2d(x, 1, ceil_mode=True)
-        self.assertEqual(y.view(-1)[-1].item(), 1)
-        del x, y
+    def test_pool_grid_above_2_32_threads(self):
+        # A 1-D dispatch width is taken modulo 2**32, so a run this size has to
+        # be split into several dispatches with the kernel adding the offset
+        # back. Without that, exactly 2**32 threads runs nothing at all.
+        N, D, H, W = 2, 2048, 2048, 513
+        hw = ((torch.arange(H, device="mps") % 5).view(H, 1) * 3
+              + torch.arange(W, device="mps") % 13).to(torch.uint8)
+        d_col = (((torch.arange(D, device="mps") % 7) * 16).to(torch.uint8)).view(D, 1, 1)
+        x = torch.empty(N, 1, D, H, W, dtype=torch.uint8, device="mps")
+        for n in range(N):
+            x[n] = hw
+            x[n] += d_col
+            x[n] += n
+        self.assertGreater(x.numel(), 2**32)
+
+        y = F.avg_pool3d(x, 1)
+        flat = y.view(-1)
+        # Straddle the chunk boundary at 2**32 - 1.
+        for i in [0, 2**32 - 2, 2**32 - 1, 2**32, x.numel() - 1]:
+            n, rem = divmod(i, D * H * W)
+            d, rem = divmod(rem, H * W)
+            h, w = divmod(rem, W)
+            expected = (d % 7) * 16 + (h % 5) * 3 + w % 13 + n
+            self.assertEqual(flat[i].item(), expected, msg=f"wrong value at linear index {i}")
+
+        del x, y, flat, hw, d_col
         gc.collect()
         torch.mps.empty_cache()
 
-        x = torch.ones(2, 1, 2048, 2048, 512, dtype=torch.uint8, device="mps")
-        self.assertEqual(x.numel(), 2**32)
-        with self.assertRaisesRegex(NotImplementedError, r"limited to 2\^32 - 1 threads"):
-            F.avg_pool3d(x, 1)
+    @largeMPSBufferTest(int(5.6 * 1024**3), device="mps")
+    @largeTensorTest("7GB", device="mps")
+    @serialTest()
+    def test_max_unpool3d_64bit_indexing(self):
+        # max_unpool through the dims==5 offset specialization.
+        N, S, K = 33, 64, 7
+        x = (torch.arange(S**3, device="mps", dtype=torch.float32).remainder(997) + 1).to(torch.half)
+        x = x.view(1, 1, S, S, S).expand(N, 1, S, S, S).contiguous()
+        plane = (S * K) ** 3
+        idx = (torch.arange(S**3, device="mps", dtype=torch.long) * 379).remainder(plane)
+        idx = idx.view(1, 1, S, S, S).expand(N, 1, S, S, S).contiguous()
 
-        del x
+        y = F.max_unpool3d(x, idx, K)
+        self.assertGreater(sum((d - 1) * st for d, st in zip(y.shape, y.stride())),
+                           torch.iinfo(torch.int32).max)
+        for n in [0, N - 1]:
+            self.assertEqual(y[n].count_nonzero().item(), S**3)
+        flat = y.view(N, -1)
+        for n in [0, N - 1]:
+            self.assertEqual(flat[n, idx[n, 0].flatten()].float().cpu(), x[n, 0].flatten().float().cpu())
+
+        del x, y, idx, flat
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @largeMPSBufferTest(int(2.1 * 1024**3), device="mps")
+    @largeTensorTest("5GB", device="mps")
+    @serialTest()
+    def test_avg_pool2d_unbatched_64bit_indexing(self):
+        # An unbatched input takes the dims==3 offset specialization, which the
+        # batched tests never reach.
+        C, H, W = 1, 65537, 32768
+        row = (torch.arange(W, device="mps") % 13).to(torch.uint8)
+        h_col = (((torch.arange(H, device="mps") % 5) * 16).to(torch.uint8)).view(H, 1)
+        x = torch.empty(C, H, W, dtype=torch.uint8, device="mps")
+        x[0] = row
+        x[0] += h_col
+        self.assertEqual(x.dim(), 3)
+        self.assertGreater(x.numel(), torch.iinfo(torch.int32).max)
+
+        y = F.avg_pool2d(x, 1, ceil_mode=True)
+        flat = y.view(-1)
+        for i in [0, 2**31 - 1, 2**31, x.numel() - 1]:
+            h, w = divmod(i, W)
+            self.assertEqual(flat[i].item(), (h % 5) * 16 + w % 13,
+                             msg=f"wrong value at linear index {i}")
+
+        del x, y, flat, row, h_col
         gc.collect()
         torch.mps.empty_cache()
 

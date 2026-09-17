@@ -190,8 +190,8 @@ PoolOffsets<IdxT> find_pool_offsets_dim_specific(
     IdxT pooling_dim_indices[3],
     int32_t leading_dims,
     bool return_indices,
-    uint tid) {
-  auto output_idx = static_cast<IdxT>(tid);
+    IdxT gid) {
+  auto output_idx = gid;
   PoolOffsets<IdxT> offsets;
 
   for (auto dim = dims - 1; dim >= 0; dim--) {
@@ -226,7 +226,7 @@ PoolOffsets<IdxT> find_pool_offsets(
     int32_t dims,
     int32_t leading_dims,
     bool return_indices,
-    uint tid) {
+    IdxT gid) {
   switch (dims) {
     case 5:
       return find_pool_offsets_dim_specific<5, IdxT>(
@@ -237,7 +237,7 @@ PoolOffsets<IdxT> find_pool_offsets(
           pooling_dim_indices,
           leading_dims,
           return_indices,
-          tid);
+          gid);
     case 4:
       return find_pool_offsets_dim_specific<4, IdxT>(
           output_sizes,
@@ -247,7 +247,7 @@ PoolOffsets<IdxT> find_pool_offsets(
           pooling_dim_indices,
           leading_dims,
           return_indices,
-          tid);
+          gid);
     case 3:
       return find_pool_offsets_dim_specific<3, IdxT>(
           output_sizes,
@@ -257,7 +257,7 @@ PoolOffsets<IdxT> find_pool_offsets(
           pooling_dim_indices,
           leading_dims,
           return_indices,
-          tid);
+          gid);
   }
   return PoolOffsets<IdxT>();
 }
@@ -270,6 +270,7 @@ kernel void max_pool(
     device int64_t* indices [[buffer(2)]],
     constant PoolingParams<5, IdxT>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
+  const auto gid = static_cast<IdxT>(tid) + params.tid_offset;
   bool return_indices = params.return_indices;
   auto pooling_dims = params.pooling_dims;
   auto dims = params.dims;
@@ -306,7 +307,7 @@ kernel void max_pool(
       dims,
       leading_dims,
       return_indices,
-      tid);
+      gid);
 
   output += offsets.output;
   indices += offsets.indices;
@@ -376,6 +377,7 @@ kernel void max_pool_backward(
     constant int64_t* indices [[buffer(2)]],
     constant PoolingBackwardParams<5, IdxT>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
+  const auto gid = static_cast<IdxT>(tid) + params.tid_offset;
   auto pooling_dims = params.pooling_dims;
   auto dims = params.dims;
   auto grad_input_sizes = params.grad_input_sizes.data();
@@ -395,7 +397,7 @@ kernel void max_pool_backward(
       dims,
       leading_dims,
       /*return_indices=*/true,
-      tid);
+      gid);
 
   max_pool_backward_impl<T, IdxT>(
       grad_input,
@@ -460,6 +462,7 @@ kernel void max_unpool(
     constant MaxUnpoolingParams<5, IdxT>& params [[buffer(3)]],
     device c10::metal::ErrorMessages* error_buffer [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
+  const auto gid = static_cast<IdxT>(tid) + params.tid_offset;
   auto pooling_dims = params.pooling_dims;
   auto dims = params.dims;
   auto input_sizes = params.input_sizes.data();
@@ -482,7 +485,7 @@ kernel void max_unpool(
       dims,
       leading_dims,
       /*return_indices=*/true,
-      tid);
+      gid);
 
   max_unpool_impl<T, IdxT>(
       output + offsets.input_leading,
@@ -689,6 +692,7 @@ kernel void avg_pool(
     device T* output [[buffer(1)]],
     constant AvgPoolingParams<5, IdxT>& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
+  const auto gid = static_cast<IdxT>(tid) + params.tid_offset;
   auto pooling_dims = params.pooling_dims;
   auto dims = params.dims;
   auto input_sizes = params.input_sizes.data();
@@ -713,7 +717,7 @@ kernel void avg_pool(
       dims,
       leading_dims,
       /*return_indices=*/false,
-      tid);
+      gid);
 
   output += offsets.output;
   input += offsets.input_leading;
@@ -755,6 +759,7 @@ kernel void avg_pool_backward(
     constant T* grad_output [[buffer(1)]],
     constant AvgPoolingParams<5, IdxT>& params [[buffer(2)]],
     uint tid [[thread_position_in_grid]]) {
+  const auto gid = static_cast<IdxT>(tid) + params.tid_offset;
   auto pooling_dims = params.pooling_dims;
   auto dims = params.dims;
   auto grad_input_sizes = params.input_sizes.data();
@@ -779,7 +784,7 @@ kernel void avg_pool_backward(
       dims,
       leading_dims,
       /*return_indices=*/false,
-      tid);
+      gid);
 
   grad_output += offsets.output;
   grad_input_sizes += leading_dims;
