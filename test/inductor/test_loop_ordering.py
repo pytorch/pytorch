@@ -338,6 +338,7 @@ class ImplDetailTest(MockSchedulerTest):
 
     def test_can_fuse_loop_state_tracker_cleanup_on_base_exception(self):
         scheduler = mock.Mock(spec=Scheduler)
+        scheduler.available_buffer_names = ()
         scheduler._loop_mutation_listener = None
         snodes = [
             SchedulerNode(scheduler, self._create_computed_buffer_ax2())
