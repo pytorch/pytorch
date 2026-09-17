@@ -11,20 +11,23 @@ from torch._higher_order_ops.invoke_subgraph import (
     NestedCompileRegionOptions,
 )
 
-# ``torch.compiler.precompile``: make_fx AOT capture -> self-contained Python source
-# plus an acceleration cache. Re-exported from the private impl module, whose
-# ``_PrecompileApi.__module__`` is forced to "torch.compiler" so this is the single
-# public location. Distinct from ``torch._dynamo.config.caching_precompile`` (a
-# ``torch.compile`` guard-serialization caching mode), despite the shared word.
+# ``torch.compiler.precompile``: a namespace, not itself callable. Capture is
+# caller-driven -- the caller invokes a capture around their own execution.
+# ``precompile.capture(fn, artifact_path=..., cache_path=...)`` is a context manager
+# that writes a ``(python_code, cache)`` artifact when the block exits, and
+# ``precompile.load(...)`` reloads one. Re-exported from the private impl. Distinct
+# from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
+# guard-serialization caching mode), despite the shared word.
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
 from torch._precompile import (
-    precompile as precompile,
+    PrecompiledCallable as PrecompiledCallable,
+    PrecompiledRunnable as PrecompiledRunnable,
     PrecompileError as PrecompileError,
 )
 
-from . import config
+from . import config, precompile as precompile
 from ._cache import CacheInfo
 
 
@@ -50,6 +53,8 @@ __all__ = [
     "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
+    "PrecompiledCallable",
+    "PrecompiledRunnable",
     "PrecompileError",
     "wrap_numpy",
     "is_compiling",

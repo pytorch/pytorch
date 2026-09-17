@@ -34,12 +34,29 @@ In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
 :::
 
-`torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. It
-captures a whole computation `fn(*example_inputs)` -- with the model(s) passed among
-`example_inputs`, e.g. `precompile(lambda model, x: model(x), model, x)` -- and lowers it
-to a self-contained, runnable Python source string plus an acceleration cache. Reload the
-artifact with `torch.compiler.precompile.load`; since no weights are baked in, you pass
-the model again at runtime. See the {ref}`API reference <torch.compiler_api>` for details.
+`torch.compiler` also includes an ahead-of-time API, `torch.compiler.precompile`. Capture
+is caller-driven: enter `precompile.capture(fn, artifact_path=..., cache_path=...)` as a
+context manager and call it exactly as you would `fn` -- with the model(s) passed among the
+arguments, positionally (the default `MakeFxTracer` takes positional arguments only;
+`DynamoTracer` will also accept keyword arguments), e.g.
+
+```python
+with torch.compiler.precompile.capture(
+    lambda model, x: model(x), artifact_path="m.py", cache_path="m.cache"
+) as cap:
+    y = cap(model, x)
+f = torch.compiler.precompile.load("m.py", "m.cache")
+```
+
+-- and it writes a self-contained, runnable Python source artifact plus an acceleration
+cache when the block exits. The default `MakeFxTracer` captures a single call;
+`DynamoTracer`, which captures several calls with the graph breaks and recompilations
+between them, is landing in follow-up changes. Call `cap.save()` inside the block to write
+the on-disk artifact without ending the capture; with `DynamoTracer` that checkpoints the
+loop partway through, while a `MakeFxTracer` capture records a single call, so `save()` and
+block exit write the same files. Reload the artifact with
+`torch.compiler.precompile.load`; since no weights are baked in, you pass the model again at
+runtime. See the {ref}`API reference <torch.compiler_api>` for details.
 
 :::{warning}
 `torch.compile` may not support recently released major versions of Python.

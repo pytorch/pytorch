@@ -1,18 +1,30 @@
 # Owner(s): ["oncall: pt2"]
+import atexit
+import collections
 import copy
+import errno
+import functools
+import hashlib
+import inspect
 import io
 import os
 import pickle
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+import warnings
+from unittest import mock
 
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._precompile import PrecompileError
+from torch._precompile import _read_artifact, _write_artifact
+from torch.compiler import PrecompiledRunnable, PrecompileError
+from torch.compiler.precompile import DynamoTracer, MakeFxTracer
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -23,6 +35,79 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+
+# One root for every artifact pair the adapters below stage, removed once at
+# process exit. Both adapters free their own staging directory as they go, a
+# refused capture() or block entry included, so a run does not accumulate one
+# directory per capture.
+_ARTIFACT_ROOT = tempfile.TemporaryDirectory()
+atexit.register(_ARTIFACT_ROOT.cleanup)
+
+
+class _CaptureToFiles:
+    """Test adapter over capture, which writes the artifact to disk when the block
+    exits. Stages the pair under _ARTIFACT_ROOT and exposes
+    result() -> (python_code, cache) by reading the two files back."""
+
+    def __init__(self, fn, *, backend="inductor", training=False):
+        self._dir = tempfile.mkdtemp(dir=_ARTIFACT_ROOT.name)
+        self._artifact_path = os.path.join(self._dir, "artifact.py")
+        self._cache_path = os.path.join(self._dir, "artifact.cache")
+        self._pair = None
+        try:
+            self._cap = torch.compiler.precompile.capture(
+                fn,
+                artifact_path=self._artifact_path,
+                cache_path=self._cache_path,
+                backend=backend,
+                training=training,
+            )
+        except BaseException:
+            shutil.rmtree(self._dir, ignore_errors=True)
+            raise
+
+    def __enter__(self):
+        try:
+            self._cap.__enter__()
+        except BaseException:
+            shutil.rmtree(self._dir, ignore_errors=True)
+            raise
+        return self
+
+    def __exit__(self, *exc):
+        # The pair only has to outlive the block, so read it back here, where the
+        # inner exit has just written it, and free the staging directory instead of
+        # keeping one artifact directory per capture alive for the whole run.
+        try:
+            ret = self._cap.__exit__(*exc)
+            if exc[0] is None:
+                self._pair = _read_artifact(self._artifact_path, self._cache_path)
+            return ret
+        finally:
+            shutil.rmtree(self._dir, ignore_errors=True)
+
+    def __call__(self, *args):
+        return self._cap(*args)
+
+    def result(self):
+        if self._pair is None:
+            raise AssertionError(
+                "result() is only available after the capture's `with` block exits "
+                "cleanly; the block raised, or has not exited yet"
+            )
+        return self._pair
+
+
+def _load_pair(code, cache):
+    """Load an in-memory (python_code, cache) pair, staging the two halves to files
+    with the library writer since load is paths-only. load reads both files eagerly
+    and the runnable keeps no paths, so the staging directory goes away here."""
+    with tempfile.TemporaryDirectory(dir=_ARTIFACT_ROOT.name) as d:
+        ap = os.path.join(d, "artifact.py")
+        cp = os.path.join(d, "artifact.cache")
+        _write_artifact(ap, cp, code, cache)
+        return torch.compiler.precompile.load(ap, cp)
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -49,9 +134,10 @@ _pytree.register_pytree_node(
 
 
 def _strip_artifact(cache: bytes) -> bytes:
-    """Return the cache envelope with its compiled artifact removed, forcing load()
-    onto the inlined (no-cache) path that JIT-compiles from python_code. Many tests
-    reload the same artifact both cache-primed and stripped to check they agree."""
+    """Return the cache envelope with its compiled artifact removed, forcing
+    precompile.load() onto the inlined (no-cache) path that JIT-compiles from
+    python_code. Many tests reload the same artifact both cache-primed and stripped to
+    check they agree."""
     blob = torch.load(io.BytesIO(cache), weights_only=True)
     blob["artifact"] = None
     buf = io.BytesIO()
@@ -64,9 +150,9 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
     (cache-primed) path always, plus -- on inductor only -- the inlined path that
     strips the artifact to force JIT from python_code. The eager backend has a single
     driver, so it yields the default path alone."""
-    yield "default", torch.compiler.precompile.load(code, cache)
+    yield "default", _load_pair(code, cache)
     if backend == "inductor":
-        yield "inlined", torch.compiler.precompile.load(code, _strip_artifact(cache))
+        yield "inlined", _load_pair(code, _strip_artifact(cache))
 
 
 # precompile drives make_fx internally, which cannot symbolically trace a
@@ -90,30 +176,11 @@ class TestPrecompile(TestCase):
         joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
         self.assertEqual(joined.render(), "[enforced] a ; b")
 
-    def test_decompositions_kwarg(self):
-        # The decompositions table is threaded into make_fx during capture; a
-        # custom decomposition is invoked and the result still matches eager.
-        called = []
-
-        def my_relu_decomp(x):
-            called.append(True)
-            return (x > 0) * x
-
-        decomps = {torch.ops.aten.relu.default: my_relu_decomp}
-        m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
-        x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, x: model(x), m, x, decompositions=decomps
-        )
-        self.assertTrue(called)  # the table was used during capture
-
-        f_c = torch.compiler.precompile.load(code, cache)
-        self.assertEqual(f_c(m, x), m(x))
-
     def test_constant_tensor_is_rejected(self):
         captured = torch.randn(3)
         with self.assertRaisesRegex(PrecompileError, "hard-coded"):
-            torch.compiler.precompile(lambda x: x + captured, torch.randn(3))
+            with _CaptureToFiles(lambda x: x + captured) as cap:
+                cap(torch.randn(3))
 
     def test_global_tensor_rejected_unlike_make_fx(self):
         # Vanilla make_fx silently bakes a referenced global tensor into the
@@ -133,7 +200,8 @@ class TestPrecompile(TestCase):
         self.assertTrue(baked, "expected vanilla make_fx to bake a tensor constant")
 
         with self.assertRaisesRegex(PrecompileError, "hard-coded"):
-            torch.compiler.precompile(f, torch.randn(3))
+            with _CaptureToFiles(f) as cap:
+                cap(torch.randn(3))
 
     def test_unregistered_module_tensor_attr_is_rejected(self):
         # A plain tensor attribute (not a registered parameter/buffer) is not
@@ -149,7 +217,8 @@ class TestPrecompile(TestCase):
 
         m = M().eval()
         with self.assertRaisesRegex(PrecompileError, "hard-coded"):
-            torch.compiler.precompile(lambda model, x: model(x), m, torch.randn(2, 4))
+            with _CaptureToFiles(lambda model, x: model(x)) as cap:
+                cap(m, torch.randn(2, 4))
 
     def test_export_and_reload_roundtrip(self):
         class M(torch.nn.Module):
@@ -163,23 +232,27 @@ class TestPrecompile(TestCase):
 
         m = M().eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
 
         self.assertIn("Inductor output code", code)
         self.assertIn("def forward(", code)
         self.assertIn("PARAM_NAMES = ['lin.weight', 'lin.bias']", code)
 
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_self_contained_exec_needs_no_cache(self):
         # python_code runs standalone with NO cache: exec it and call forward().
-        # The default eager backend has no kernels; the captured graph is
-        # interpreted directly from the inlined source and the cache is always
-        # empty (artifact=None), so python_code is fully self-contained.
+        # The default inductor backend embeds its kernel source in python_code, so
+        # exec'ing the file JITs those kernels; the cache only primes the kernel
+        # caches to skip that JIT, which is why python_code needs none of it.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, _cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, _cache = cap.result()
 
         ns = {"__name__": "_artifact"}
         exec(compile(code, "<artifact>", "exec"), ns)
@@ -208,12 +281,14 @@ class TestPrecompile(TestCase):
             .cuda()
         )
         x = torch.randn(3, 8, device="cuda")
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIsInstance(cache, bytes)
 
         with fresh_cache():
             counters.clear()
-            f_c = torch.compiler.precompile.load(code, cache)
+            f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x), m(x))
             self.assertEqual(
                 counters["inductor"]["triton_bundler_load_static_autotuner"], 0
@@ -234,9 +309,11 @@ class TestPrecompile(TestCase):
 
         m = M().cuda().eval()
         x = torch.randn(128, 512, device="cuda")
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         with fresh_cache():
-            f_c = torch.compiler.precompile.load(code, cache)
+            f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x), m(x))
 
     def test_dtensor_subclass(self):
@@ -268,14 +345,17 @@ class TestPrecompile(TestCase):
             x = distribute_tensor(torch.randn(5, 4), mesh, [Replicate()])
             ref = m(x)
 
-            code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+            with _CaptureToFiles(lambda model, x: model(x)) as cap:
+                cap(m, x)
+            code, cache = cap.result()
             # Subclass handling is via our own protocol-based driver, not embedded
             # AOTAutograd wrapper source.
             self.assertIn("__tensor_unflatten__", code)
             self.assertNotIn("subclass_wrapper", code)
 
-            # load() takes the bundled-artifact path (real AOTAutograd runtime).
-            f_c = torch.compiler.precompile.load(code, cache)
+            # precompile.load() takes the bundled-artifact path (real AOTAutograd
+            # runtime).
+            f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x).to_local(), ref.to_local())
 
             # Also exercise the standalone driver (the generated python, no cache):
@@ -295,18 +375,22 @@ class TestPrecompile(TestCase):
     def test_cache_holds_only_artifact(self):
         # The cache is purely an acceleration: the only COMPILED blob it carries is the
         # ``artifact`` (no weights, no calling-convention metadata -- that lives in
-        # python_code, the single source of truth, and load() parses it back from
-        # there). The envelope additionally carries a lightweight format/version/backend
-        # integrity tag (plain str/int), which load() verifies.
+        # python_code, the single source of truth, and precompile.load() parses it back
+        # from there). The envelope additionally carries a lightweight
+        # format/version/backend integrity tag (plain str/int), which precompile.load()
+        # verifies.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
 
         from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
 
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         # The artifact is the only compiled blob; the rest is the integrity tag (the
-        # format/version/backend tag plus a code_hash binding the cache to its python_code).
+        # format/version/backend tag plus a code_hash binding the cache to its
+        # python_code).
         self.assertEqual(
             set(blob), {"artifact", "format", "version", "backend", "code_hash"}
         )
@@ -321,37 +405,43 @@ class TestPrecompile(TestCase):
         self.assertEqual(meta["BACKEND"], "inductor")
         self.assertEqual(meta["MODULE_POSITIONS"], [0])
 
-        # load() works using metadata from python_code + artifact from the cache.
-        f_c = torch.compiler.precompile.load(code, cache)
+        # precompile.load() works using metadata from python_code + artifact from the
+        # cache.
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_inlined_fallback_when_artifact_absent(self):
-        # When the cache holds no serialized artifact, load() falls back to
+        # When the cache holds no serialized artifact, precompile.load() falls back to
         # executing the inlined python (recompiling kernels). Force that branch by
         # stripping the artifact and check it still matches eager; this also
         # exercises the self-contained inlined path (JIT from inlined source).
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
 
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         self.assertIsNotNone(blob["artifact"])
 
-        f_c = torch.compiler.precompile.load(code, _strip_artifact(cache))
+        f_c = _load_pair(code, _strip_artifact(cache))
         self.assertEqual(f_c(m, x), m(x))
 
     def test_cache_envelope_is_weights_only_safe(self):
         # The cache is a plain {"artifact": bytes, "format"/"version"/"backend": ...}
         # envelope of only str/int/bytes: it loads with the safe unpickler
         # (weights_only=True). The executable part is the inner artifact bytes, fed to
-        # load_cache_artifacts inside load() to prime the inductor cache -- that (plus the
-        # subsequent exec of python_code) is the code-execution step, not this outer load.
-        # The integrity tag is present and correct (and itself weights_only-safe).
+        # load_cache_artifacts inside precompile.load() to prime the inductor cache --
+        # that (plus the subsequent exec of python_code) is the code-execution step, not
+        # this outer load. The integrity tag is present and correct (and itself
+        # weights_only-safe).
         from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
 
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        _code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        _code, cache = cap.result()
         blob = torch.load(io.BytesIO(cache), weights_only=True)  # must not raise
         self.assertEqual(
             set(blob), {"artifact", "format", "version", "backend", "code_hash"}
@@ -366,12 +456,14 @@ class TestPrecompile(TestCase):
     def test_wrong_param_count_model_rejected(self):
         # Invariant 2: a runtime model whose param/buffer count differs from the
         # traced model is rejected with a clear error rather than an opaque inner
-        # failure. This exercises the default eager load path, which execs
-        # python_code (the eager cache carries no artifact).
+        # failure. This exercises the default load path, where the cache carries an
+        # inductor artifact; the next test pins the same guard on the inlined path.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
 
         bigger = torch.nn.Sequential(
             torch.nn.Linear(4, 4), torch.nn.Linear(4, 3)
@@ -381,12 +473,15 @@ class TestPrecompile(TestCase):
 
     def test_wrong_param_count_rejected_inlined(self):
         # The same guard fires on the inlined (no-cache) path with the same exception
-        # type as the cached path (PrecompileError): strip the artifact so load()
-        # execs python_code, then call with a structurally different model.
+        # type as the cached path (PrecompileError): strip the artifact so
+        # precompile.load() execs python_code, then call with a structurally different
+        # model.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, _strip_artifact(cache))
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, _strip_artifact(cache))
 
         bigger = torch.nn.Sequential(
             torch.nn.Linear(4, 4), torch.nn.Linear(4, 3)
@@ -400,26 +495,26 @@ class TestPrecompile(TestCase):
         # IN_SPEC check, rather than silently flattening to the wrong leaves.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "different structure"):
             f_c(m, [x, x])
 
     def test_unserializable_in_spec_still_compiles(self):
         # A runtime input whose pytree TreeSpec is not JSON-serializable (an unregistered
-        # collections.namedtuple) must still compile/run on the default eager backend:
+        # collections.namedtuple) must still compile and run on the default backend:
         # IN_SPEC degrades to None and the structure check is skipped rather than
         # hard-failing.
-        import collections
-
         P = collections.namedtuple("P", ["x", "y"])
         m = torch.nn.Linear(4, 3).eval()
         inp = P(torch.randn(5, 4), torch.randn(5, 4))
-        code, cache = torch.compiler.precompile(
-            lambda model, p: model(p.x + p.y), m, inp
-        )
+        with _CaptureToFiles(lambda model, p: model(p.x + p.y)) as cap:
+            cap(m, inp)
+        code, cache = cap.result()
         self.assertIn("IN_SPEC = None", code)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, inp), m(inp.x + inp.y))
 
     def test_unserializable_context_in_spec_still_compiles(self):
@@ -428,11 +523,11 @@ class TestPrecompile(TestCase):
         # degrade to None rather than crashing precompile.
         m = torch.nn.Linear(4, 3).eval()
         inp = _UnserializableCtxInput(torch.randn(5, 4), torch.randn(5, 4))
-        code, cache = torch.compiler.precompile(
-            lambda model, h: model(h.a + h.b), m, inp
-        )
+        with _CaptureToFiles(lambda model, h: model(h.a + h.b)) as cap:
+            cap(m, inp)
+        code, cache = cap.result()
         self.assertIn("IN_SPEC = None", code)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, inp), m(inp.a + inp.b))
 
     def test_unserializable_out_spec_hard_fails(self):
@@ -440,13 +535,12 @@ class TestPrecompile(TestCase):
         # so unlike IN_SPEC it CANNOT degrade to None. An fn that RETURNS an unregistered
         # collections.namedtuple has a non-JSON-serializable output TreeSpec and must
         # raise a clear PrecompileError rather than leaking a raw pytree error.
-        import collections
-
         Out = collections.namedtuple("Out", ["a", "b"])
         with self.assertRaisesRegex(
             PrecompileError, "cannot serialize the output structure"
         ):
-            torch.compiler.precompile(lambda x: Out(x + 1, x + 2), torch.randn(4))
+            with _CaptureToFiles(lambda x: Out(x + 1, x + 2)) as cap:
+                cap(torch.randn(4))
 
     def test_input_leaf_count_mismatch_rejected_when_spec_unserializable(self):
         # When IN_SPEC degrades to None the structural in_spec check is skipped; a runtime
@@ -455,11 +549,13 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         inp = _UnserializableCtxInput(torch.randn(5, 4), torch.randn(5, 4))
         for backend in ("inductor", "eager"):
-            code, cache = torch.compiler.precompile(
-                lambda model, h: model(h.a + h.b), m, inp, backend=backend
-            )
+            with _CaptureToFiles(
+                lambda model, h: model(h.a + h.b), backend=backend
+            ) as cap:
+                cap(m, inp)
+            code, cache = cap.result()
             self.assertIn("IN_SPEC = None", code)
-            f = torch.compiler.precompile.load(code, cache)
+            f = _load_pair(code, cache)
             with self.assertRaisesRegex(PrecompileError, "flattened to"):
                 f(m, torch.randn(5, 4))  # one leaf vs the traced two
 
@@ -479,13 +575,15 @@ class TestPrecompile(TestCase):
             def forward(self, t):
                 return self.l1(self.l0(t))
 
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
-        f_i = torch.compiler.precompile.load(code, _strip_artifact(cache))
-        code_e, cache_e = torch.compiler.precompile(
-            lambda mm, t: mm(t), m, x, backend="eager"
-        )
-        f_e = torch.compiler.precompile.load(code_e, cache_e)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
+        f_i = _load_pair(code, _strip_artifact(cache))
+        with _CaptureToFiles(lambda mm, t: mm(t), backend="eager") as cap:
+            cap(m, x)
+        code_e, cache_e = cap.result()
+        f_e = _load_pair(code_e, cache_e)
         for f in (f_c, f_i, f_e):
             with self.assertRaisesRegex(PrecompileError, "dtype"):
                 f(
@@ -497,19 +595,15 @@ class TestPrecompile(TestCase):
         # so unlike IN_SPEC it cannot degrade to None: a fn returning an unregistered
         # namedtuple must fail with a clear PrecompileError, not a raw pytree error, on
         # both backends. A registered namedtuple output round-trips fine.
-        import collections
-
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         NT = collections.namedtuple("NT", ["p", "q"])
         for backend in ("inductor", "eager"):
             with self.assertRaisesRegex(PrecompileError, "output structure"):
-                torch.compiler.precompile(
-                    lambda model, xx: NT(model(xx), model(xx) + 1),
-                    m,
-                    x,
-                    backend=backend,
-                )
+                with _CaptureToFiles(
+                    lambda model, xx: NT(model(xx), model(xx) + 1), backend=backend
+                ) as cap:
+                    cap(m, x)
         # A registered namedtuple output serializes and round-trips on both backends.
         # Registration mutates the process-global pytree registry, so deregister it on
         # cleanup rather than leaking the node into later tests.
@@ -518,10 +612,12 @@ class TestPrecompile(TestCase):
         self.addCleanup(_pytree._deregister_pytree_node, RNT)
         ref = (m(x), m(x) + 1)
         for backend in ("inductor", "eager"):
-            code, cache = torch.compiler.precompile(
-                lambda model, xx: RNT(model(xx), model(xx) + 1), m, x, backend=backend
-            )
-            out = torch.compiler.precompile.load(code, cache)(m, x)
+            with _CaptureToFiles(
+                lambda model, xx: RNT(model(xx), model(xx) + 1), backend=backend
+            ) as cap:
+                cap(m, x)
+            code, cache = cap.result()
+            out = _load_pair(code, cache)(m, x)
             self.assertEqual((out.p, out.q), ref)
 
     def test_cached_and_inlined_paths_agree(self):
@@ -543,21 +639,19 @@ class TestPrecompile(TestCase):
         def step(ma, mb, mc, x, target):
             loss_fn(mc(mb(torch.relu(ma(x)))), target).backward()
 
-        code, cache = torch.compiler.precompile(step, a, b, c, x, target)
+        with _CaptureToFiles(step, training=True) as cap:
+            cap(a, b, c, x, target)
+        code, cache = cap.result()
 
         def grads(ms):
             return [p.grad for m in ms for p in m.parameters()]
 
         # deepcopy the three together so the a/b weight tie is preserved.
         ca, cb, cc = copy.deepcopy((a, b, c))
-        torch.compiler.precompile.load(code, cache)(
-            ca, cb, cc, x, target
-        )  # cached path
+        _load_pair(code, cache)(ca, cb, cc, x, target)  # cached path
 
         ia, ib, ic = copy.deepcopy((a, b, c))
-        torch.compiler.precompile.load(code, _strip_artifact(cache))(
-            ia, ib, ic, x, target
-        )  # inlined
+        _load_pair(code, _strip_artifact(cache))(ia, ib, ic, x, target)  # inlined
 
         for cg, ig in zip(grads((ca, cb, cc)), grads((ia, ib, ic))):
             self.assertEqual(cg, ig)
@@ -585,19 +679,17 @@ class TestPrecompile(TestCase):
             return [p.grad for m in ms for p in m.parameters()]
 
         # deepcopy the three together so the a/b weight tie is preserved.
-        icode, icache = torch.compiler.precompile(step, a, b, c, x, target)
+        with _CaptureToFiles(step, training=True) as cap:
+            cap(a, b, c, x, target)
+        icode, icache = cap.result()
         ia, ib, ic = copy.deepcopy((a, b, c))
-        torch.compiler.precompile.load(icode, icache)(
-            ia, ib, ic, x, target
-        )  # inductor cached path
+        _load_pair(icode, icache)(ia, ib, ic, x, target)  # inductor cached path
 
-        ecode, ecache = torch.compiler.precompile(
-            step, a, b, c, x, target, backend="eager"
-        )
+        with _CaptureToFiles(step, backend="eager", training=True) as cap:
+            cap(a, b, c, x, target)
+        ecode, ecache = cap.result()
         ea, eb, ec = copy.deepcopy((a, b, c))
-        torch.compiler.precompile.load(ecode, ecache)(
-            ea, eb, ec, x, target
-        )  # eager path
+        _load_pair(ecode, ecache)(ea, eb, ec, x, target)  # eager path
 
         ind_grads = grads((ia, ib, ic))
         eager_grads = grads((ea, eb, ec))
@@ -610,8 +702,10 @@ class TestPrecompile(TestCase):
         # PrecompileError citing invariant 2, not a bare AttributeError.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "must be the nn.Module"):
             f_c(x, x)  # tensor at the module slot
 
@@ -623,15 +717,17 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3)
         x = torch.randn(2, 4)
         # Module at position 1 (so a missing trailing arg would index past args).
-        code, cache = torch.compiler.precompile(lambda xx, model: model(xx), x, m)
+        with _CaptureToFiles(lambda xx, model: model(xx)) as cap:
+            cap(x, m)
+        code, cache = cap.result()
         inlined_cache = _strip_artifact(cache)  # force the inlined path
-        ecode, ecache = torch.compiler.precompile(
-            lambda xx, model: model(xx), x, m, backend="eager"
-        )
+        with _CaptureToFiles(lambda xx, model: model(xx), backend="eager") as cap:
+            cap(x, m)
+        ecode, ecache = cap.result()
         loaders = {
-            "cached": torch.compiler.precompile.load(code, cache),
-            "inlined": torch.compiler.precompile.load(code, inlined_cache),
-            "eager": torch.compiler.precompile.load(ecode, ecache),
+            "cached": _load_pair(code, cache),
+            "inlined": _load_pair(code, inlined_cache),
+            "eager": _load_pair(ecode, ecache),
         }
         for label, f_c in loaders.items():
             with self.subTest(path=label):
@@ -656,7 +752,10 @@ class TestPrecompile(TestCase):
         m = M()
         x = torch.randn(4)
         with self.assertRaisesRegex(PrecompileError, "buffer received a gradient"):
-            torch.compiler.precompile(lambda model, x: model(x).backward(), m, x)
+            with _CaptureToFiles(
+                lambda model, x: model(x).backward(), training=True
+            ) as cap:
+                cap(m, x)
 
     def test_user_input_requiring_grad_rejected(self):
         # Sibling of the buffer guard: a requires_grad USER INPUT (not a param) that
@@ -664,7 +763,10 @@ class TestPrecompile(TestCase):
         # are), so precompile rejects it rather than silently dropping the grad.
         x = torch.randn(4, requires_grad=True)
         with self.assertRaisesRegex(PrecompileError, "user input received a gradient"):
-            torch.compiler.precompile(lambda t: (t * t).sum().backward(), x)
+            with _CaptureToFiles(
+                lambda t: (t * t).sum().backward(), training=True
+            ) as cap:
+                cap(x)
 
     def test_control_flow_subgraph_rejected(self):
         # torch.cond captures as a HOP with get_attr subgraph submodules, which the
@@ -673,21 +775,43 @@ class TestPrecompile(TestCase):
             return torch.cond(x.sum() > 0, lambda t: t + 1, lambda t: t - 1, (x,))
 
         with self.assertRaisesRegex(PrecompileError, "control-flow subgraph"):
-            torch.compiler.precompile(f, torch.randn(4))
+            with _CaptureToFiles(f) as cap:
+                cap(torch.randn(4))
+
+    def test_while_loop_rejected(self):
+        # torch.while_loop is the other HOP that refusal names, and it never reaches the
+        # post-trace get_attr check: its fake kernel enters
+        # mode.shape_env.ignore_fresh_unbacked_symbols(), which on a static capture (no
+        # ShapeEnv) raises an AttributeError mid-trace. It must still be refused with the
+        # same PrecompileError, not leak that internal error.
+        def f(x):
+            def cond_fn(i, v):
+                return i < 3
+
+            def body_fn(i, v):
+                return i + 1, v + 1
+
+            return torch.while_loop(cond_fn, body_fn, (torch.tensor(0), x))
+
+        with self.assertRaisesRegex(PrecompileError, "control-flow subgraph"):
+            with _CaptureToFiles(f) as cap:
+                cap(torch.randn(4))
 
     def test_load_falls_back_when_cache_unreconstructable(self):
         # The cache is only an acceleration; python_code always runs standalone. A
         # corrupt / stale cache must degrade to the inlined JIT path, not crash.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         self.assertIsNotNone(blob["artifact"])
         blob["artifact"] = b"corrupt-not-a-real-artifact"
         buf = io.BytesIO()
         torch.save(blob, buf)
 
-        f_c = torch.compiler.precompile.load(code, buf.getvalue())  # must not raise
+        f_c = _load_pair(code, buf.getvalue())  # must not raise
         self.assertEqual(f_c(m, x), m(x))
 
     def test_load_falls_back_on_corrupt_cache_envelope(self):
@@ -696,45 +820,49 @@ class TestPrecompile(TestCase):
         # since the cache is purely an acceleration.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, _cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(
-            code, b"not-a-torch-save-blob"
-        )  # must not raise
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, _cache = cap.result()
+        f_c = _load_pair(code, b"not-a-torch-save-blob")  # must not raise
         self.assertEqual(f_c(m, x), m(x))
 
     def test_load_invalid_python_code_rejected(self):
-        # load() surfaces a clear PrecompileError (not a raw SyntaxError) when
-        # python_code is not valid Python.
+        # precompile.load() surfaces a clear PrecompileError (not a raw SyntaxError)
+        # when python_code is not valid Python.
         buf = io.BytesIO()
         torch.save({"artifact": None}, buf)
         with self.assertRaisesRegex(PrecompileError, "not valid Python"):
-            torch.compiler.precompile.load("def (:::", buf.getvalue())
+            _load_pair("def (:::", buf.getvalue())
 
     def test_untrusted_input_warning_fires_per_load(self):
-        # The trust warning is emitted PER load (not warning_once) via log.warning on the
-        # torch._precompile logger: load() always execs python_code (through
-        # _make_inlined_forward), which warns before the exec, whether or not the cache
-        # primed the kernels first. Calling load() TWICE must fire the untrusted-input
-        # warning on BOTH calls, locking in per-load behavior rather than once-per-process.
+        # The trust warning is emitted PER load (not warning_once) via log.warning on
+        # the torch._precompile logger: precompile.load() always execs python_code
+        # (through _make_inlined_forward), which warns before the exec, whether or not
+        # the cache primed the kernels first. Calling precompile.load() TWICE must fire
+        # the untrusted-input warning on BOTH calls, locking in per-load behavior rather
+        # than once-per-process.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         # Cached path (inductor): the exec of python_code warns about untrusted input.
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         for _ in range(2):
             with self.assertLogs("torch._precompile", level="WARNING") as cm:
-                torch.compiler.precompile.load(code, cache)
+                _load_pair(code, cache)
             self.assertTrue(
                 any("untrusted" in line.lower() for line in cm.output),
                 f"cached load did not warn about untrusted input: {cm.output}",
             )
-        # Eager backend (empty cache, nothing to prime): load() still EXECs python_code
-        # via _make_inlined_forward, which warns about exec'ing untrusted code every load.
-        ecode, ecache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend="eager"
-        )
+        # Eager backend (empty cache, nothing to prime): precompile.load() still EXECs
+        # python_code via _make_inlined_forward, which warns about exec'ing untrusted
+        # code every load.
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, x)
+        ecode, ecache = cap.result()
         for _ in range(2):
             with self.assertLogs("torch._precompile", level="WARNING") as cm:
-                torch.compiler.precompile.load(ecode, ecache)
+                _load_pair(ecode, ecache)
             self.assertTrue(
                 any("untrusted" in line.lower() for line in cm.output),
                 f"inlined load did not warn about untrusted input: {cm.output}",
@@ -753,12 +881,17 @@ class TestPrecompile(TestCase):
         x = torch.randn(4)
         for fn in (lambda xx: 7, lambda xx: xx, lambda xx: xx.detach()):
             with self.assertRaisesRegex(PrecompileError, "no compute"):
-                torch.compiler.precompile(fn, x)
+                with _CaptureToFiles(fn) as cap:
+                    cap(x)
         # The eager backend handles a passthrough and a constant fn.
-        code, cache = torch.compiler.precompile(lambda xx: xx, x, backend="eager")
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), x)
-        code, cache = torch.compiler.precompile(lambda xx: 7, x, backend="eager")
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(x), 7)
+        with _CaptureToFiles(lambda xx: xx, backend="eager") as cap:
+            cap(x)
+        code, cache = cap.result()
+        self.assertEqual(_load_pair(code, cache)(x), x)
+        with _CaptureToFiles(lambda xx: 7, backend="eager") as cap:
+            cap(x)
+        code, cache = cap.result()
+        self.assertEqual(_load_pair(code, cache)(x), 7)
 
     def test_same_count_different_structure_rejected(self):
         # Invariant 2: the structural check now compares the baked PARAM_NAMES /
@@ -768,7 +901,9 @@ class TestPrecompile(TestCase):
         # weights. Both the cached and the inlined (artifact-stripped) load paths fire.
         a = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 4)).eval()
         x = torch.randn(2, 4)
-        code, cache = torch.compiler.precompile(lambda m, x: m(x), a, x)
+        with _CaptureToFiles(lambda m, x: m(x)) as cap:
+            cap(a, x)
+        code, cache = cap.result()
         # The traced names come from the Sequential (``0.weight``, ``1.weight`` ...).
         self.assertIn(
             "PARAM_NAMES = ['0.weight', '0.bias', '1.weight', '1.bias']", code
@@ -785,8 +920,8 @@ class TestPrecompile(TestCase):
 
         b = B().eval()
         loaders = {
-            "cached": torch.compiler.precompile.load(code, cache),
-            "inlined": torch.compiler.precompile.load(code, _strip_artifact(cache)),
+            "cached": _load_pair(code, cache),
+            "inlined": _load_pair(code, _strip_artifact(cache)),
         }
         for label, f_c in loaders.items():
             with self.subTest(path=label):
@@ -803,9 +938,9 @@ class TestPrecompile(TestCase):
         # INPUT -- same count / different name, not a count mismatch.
         a = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 4)).eval()
         x = torch.randn(2, 4)
-        code, cache = torch.compiler.precompile(
-            lambda m, x: m(x), a, x, backend="eager"
-        )
+        with _CaptureToFiles(lambda m, x: m(x), backend="eager") as cap:
+            cap(a, x)
+        code, cache = cap.result()
         self.assertIn(
             "PARAM_NAMES = ['0.weight', '0.bias', '1.weight', '1.bias']", code
         )
@@ -820,7 +955,7 @@ class TestPrecompile(TestCase):
                 return self.l0(x) + self.l1(x)
 
         b = B().eval()
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "do not match the traced model"):
             f_c(b, x)
 
@@ -846,60 +981,126 @@ class TestPrecompile(TestCase):
                 with self.assertRaisesRegex(
                     PrecompileError, "effectful op.*not supported yet"
                 ):
-                    torch.compiler.precompile(
-                        lambda a: torch.ops.mlprecompile.eff(a), torch.randn(4)
-                    )
+                    with _CaptureToFiles(
+                        lambda a: torch.ops.mlprecompile.eff(a)
+                    ) as cap:
+                        cap(torch.randn(4))
             finally:
                 _register_effectful_op(op, None)
 
-    def test_public_api_surface(self):
-        # precompile is a public API under the compiler namespace
-        # (torch.compiler.precompile), with a load method and a public error type;
-        # it is deliberately NOT a top-level torch.* verb.
-        self.assertIn("precompile", torch.compiler.__all__)
-        self.assertNotIn("precompile", torch.__all__)
-        # __all__ membership and the attribute itself are independent, so lock in
-        # removal of the top-level entry point too (re-adding the re-export without
-        # touching __all__ would silently resurrect torch.precompile).
-        self.assertFalse(hasattr(torch, "precompile"))
-        self.assertTrue(callable(torch.compiler.precompile))
-        self.assertTrue(callable(torch.compiler.precompile.load))
-        self.assertIs(torch.compiler.precompile.PrecompileError, PrecompileError)
-        # The public location: test_public_bindings.test_correct_module_names also
-        # enforces this for every torch.compiler.__all__ member.
-        self.assertEqual(torch.compiler.precompile.__module__, "torch.compiler")
+    def test_summary_types_pickle(self):
+        # A capture summary or invariants report is the kind of value users
+        # stash next to an artifact (torch.save of a diagnostics record, a
+        # multiprocessing capture farm). A previous revision pointed these
+        # classes' __module__ at torch.compiler, which does not export them,
+        # so pickle could not resolve the class and every instance raised.
+        from torch.compiler._precompile_types import (
+            FrameInvariants,
+            GuardFact,
+            PrecompileSummary,
+        )
 
-    def test_backend_invalid_raises(self):
-        a, b = torch.randn(4, 4), torch.randn(4, 4)
-        with self.assertRaisesRegex(
-            ValueError, "backend must be 'inductor' or 'eager'"
-        ):
-            torch.compiler.precompile(lambda x, y: x + y, a, b, backend="nope")
+        fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
+        inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
+        summary = PrecompileSummary(1, 0, 1, 1, ())
+        for obj in (fact, inv, summary):
+            self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
 
-    def test_tracer_default_and_explicit_make_fx(self):
-        # tracer defaults to "make_fx"; passing it explicitly is equivalent and works.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        for kwargs in ({}, {"tracer": "make_fx"}):
-            code, cache = torch.compiler.precompile(
-                lambda model, xx: model(xx), m, x, **kwargs
+    def test_tracer_annotations_resolve_after_the_re_home(self):
+        # torch/compiler/precompile.py pre-resolves the two tracers' annotations before
+        # it re-homes their __module__: they are defined in torch._precompile, which is
+        # under `from __future__ import annotations`, so their annotations are strings
+        # that resolve against THAT module's globals, while get_type_hints resolves
+        # through __module__ -- this module. Without the pre-resolution the names in
+        # them (Callable, Sequence, Any) are missing here and this raises NameError.
+        import typing
+        from collections.abc import Callable, Sequence
+        from typing import Any
+
+        self.assertEqual(
+            typing.get_type_hints(DynamoTracer)["guard_filter_fn"],
+            Callable[[Sequence[Any]], Sequence[bool]] | None,
+        )
+        self.assertEqual(typing.get_type_hints(DynamoTracer)["recompile_limit"], int)
+        self.assertEqual(
+            typing.get_type_hints(MakeFxTracer)["decompositions"], dict | None
+        )
+
+    def _summary(self, **kwargs):
+        from torch.compiler.precompile import PrecompileSummary
+
+        fields = dict(
+            frames=2,
+            resume_functions=1,
+            guarded_codes=3,
+            backend_graphs=2,
+            bypassed=(),
+        )
+        return PrecompileSummary(**{**fields, **kwargs})
+
+    def test_summary_guard_type_counts(self):
+        summary = self._summary(
+            dropped_guards=(
+                ("TENSOR_MATCH", "L['x']"),
+                ("TENSOR_MATCH", "L['y']"),
+                ("HASATTR", "L['m'].w"),
+            ),
+            kept_guards=(("TYPE_MATCH", "L['x']"), ("TYPE_MATCH", "L['y']")),
+        )
+        self.assertEqual(
+            summary.dropped_guard_types(), {"TENSOR_MATCH": 2, "HASATTR": 1}
+        )
+        self.assertEqual(summary.kept_guard_types(), {"TYPE_MATCH": 2})
+        self.assertEqual(self._summary().dropped_guard_types(), {})
+        self.assertEqual(self._summary().kept_guard_types(), {})
+
+    def test_summary_complete(self):
+        # complete gates an artifact, so every way a capture can be incomplete has
+        # to flip it: no guarded code at all, a frame that hit the recompile limit, was
+        # bypassed or never reached, a call that raised, and (because
+        # allow_empty_graphs lets a frame that compiled nothing still count as a
+        # guarded code) a capture with no backend graph at all.
+        self.assertTrue(self._summary().complete)
+        for field in ("bypassed", "truncated", "uncovered_frames", "capture_errors"):
+            self.assertFalse(self._summary(**{field: ("f",)}).complete)
+        self.assertFalse(self._summary(guarded_codes=0).complete)
+        self.assertFalse(self._summary(backend_graphs=0).complete)
+
+    def test_summary_str(self):
+        self.assertEqual(
+            str(self._summary()),
+            "2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs",
+        )
+        rendered = str(
+            self._summary(
+                bypassed=("b",),
+                truncated=("t",),
+                uncovered_frames=("u",),
+                wont_generalize=("w",),
+                dropped_guards=(("HASATTR", "L['m'].w"),),
+                risky_dropped_guards=(("HASATTR", "L['m'].risky"),),
+                capture_errors=("boom",),
             )
-            self.assertEqual(torch.compiler.precompile.load(code, cache)(m, x), m(x))
-
-    def test_tracer_dynamo_not_implemented(self):
-        # "dynamo" is a valid (planned) tracer value but is not implemented yet; it must
-        # raise NotImplementedError, not silently fall back to make_fx.
-        m = torch.nn.Linear(4, 3).eval()
-        x = torch.randn(5, 4)
-        with self.assertRaisesRegex(NotImplementedError, "tracer='dynamo'"):
-            torch.compiler.precompile(
-                lambda model, xx: model(xx), m, x, tracer="dynamo"
-            )
+        )
+        self.assertIn("dropped guards {'HASATTR': 1}", rendered)
+        self.assertIn("RISKY drops [\"L['m'].risky\"]", rendered)
+        self.assertIn("1 UNCOVERED: ['u']", rendered)
+        self.assertIn("1 value-pinned guards", rendered)
+        self.assertIn(">=1 TRUNCATED: ['t']", rendered)
+        self.assertIn("1 BYPASSED: ['b']", rendered)
+        self.assertIn("1 CAPTURE ERROR(S)", rendered)
 
     def test_tracer_invalid_raises(self):
-        a, b = torch.randn(4, 4), torch.randn(4, 4)
-        with self.assertRaisesRegex(ValueError, "tracer must be 'make_fx' or 'dynamo'"):
-            torch.compiler.precompile(lambda x, y: x + y, a, b, tracer="nope")
+        # precompile.capture() takes a tracer OBJECT; a wrong type is a TypeError naming
+        # the accepted tracers.
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(TypeError, "MakeFxTracer or DynamoTracer"):
+                torch.compiler.precompile.capture(
+                    lambda x, y: x + y,
+                    artifact_path=os.path.join(d, "m.py"),
+                    cache_path=os.path.join(d, "m.cache"),
+                    tracer="nope",
+                )
 
     def test_backend_default_is_inductor(self):
         # The default lowers through Inductor: the generated code inlines the Inductor
@@ -907,7 +1108,9 @@ class TestPrecompile(TestCase):
         # form is only emitted when config.graph_partition is on, which is off in fbcode).
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, _ = torch.compiler.precompile(lambda model, x: model(x), m, x)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, _ = cap.result()
         self.assertIn("Inductor output code", code)
 
     def test_inductor_graph_partition_off(self):
@@ -920,9 +1123,11 @@ class TestPrecompile(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         with ind_config.patch(graph_partition=False):
-            code, cache = torch.compiler.precompile(lambda model, xx: model(xx), m, x)
+            with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
+                cap(m, x)
+            code, cache = cap.result()
             self.assertNotIn("call = runner.call", code)  # non-partition form
-            f_c = torch.compiler.precompile.load(code, cache)
+            f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x), m(x))
 
     def test_inductor_caches_disabled(self):
@@ -939,9 +1144,9 @@ class TestPrecompile(TestCase):
             {"fx_graph_cache": False},
         ):
             with ind_config.patch(**patch):
-                code, cache = torch.compiler.precompile(
-                    lambda model, xx: model(xx), m, x
-                )
+                with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
+                    cap(m, x)
+                code, cache = cap.result()
                 # No saveable artifact when caches are off; the cache is empty.
                 blob = torch.load(io.BytesIO(cache), weights_only=True)
                 self.assertIsNone(blob["artifact"], patch)
@@ -949,10 +1154,8 @@ class TestPrecompile(TestCase):
                 ns = {"__name__": "_a"}
                 exec(compile(code, "<a>", "exec"), ns)
                 self.assertEqual(ns["forward"](m, x), m(x), patch)
-                # ...and load() falls back to the inlined path.
-                self.assertEqual(
-                    torch.compiler.precompile.load(code, cache)(m, x), m(x), patch
-                )
+                # ...and precompile.load() falls back to the inlined path.
+                self.assertEqual(_load_pair(code, cache)(m, x), m(x), patch)
 
     def test_inductor_cpp_wrapper_pinned_off(self):
         # cpp_wrapper would make Inductor emit a C++ ``call`` (no python module); a
@@ -963,14 +1166,19 @@ class TestPrecompile(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         with ind_config.patch(cpp_wrapper=True):
-            code, cache = torch.compiler.precompile(lambda model, xx: model(xx), m, x)
-            f_c = torch.compiler.precompile.load(code, cache)
+            with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
+                cap(m, x)
+            code, cache = cap.result()
+            f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x), m(x))
 
     def test_example_grad_restored_when_fn_raises(self):
         # If fn runs a backward then raises during the make_fx trace, the example
         # model's .grad must be restored (the snapshot/restore is in a finally), not
-        # left clobbered -- precompile does not mutate the example model's grads.
+        # left clobbered -- a failed capture leaves the caller's grads as it found
+        # them. This is the raising path only: a capture that SUCCEEDS runs the call
+        # for real and accumulates onto .grad, which the sibling
+        # test_preexisting_param_grad_capture_succeeds pins.
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
@@ -982,7 +1190,8 @@ class TestPrecompile(TestCase):
             raise ValueError("boom")
 
         with self.assertRaisesRegex(ValueError, "boom"):
-            torch.compiler.precompile(boom, m, x)
+            with _CaptureToFiles(boom, training=True) as cap:
+                cap(m, x)
         for n, p in m.named_parameters():
             self.assertIsNone(p.grad, f"{n}: example .grad must be restored on failure")
 
@@ -990,7 +1199,10 @@ class TestPrecompile(TestCase):
         # Regression: in the mark_unbacked path the example params are fakeified BEFORE
         # the grad clear. A model with a pre-existing .grad (the warmup-step-then-
         # precompile flow) plus a backward in fn must still capture -- the clear must
-        # precede fakeify so the fakes inherit no grad -- and the real .grad is restored.
+        # precede fakeify so the fakes inherit no grad. Capture then runs the step once
+        # for real (caller-driven contract), and since the warmup used the same weights
+        # and the same x, the .grad it accumulates doubles the warmup one. (Only the sum
+        # is pinned here; test_preexisting_param_grad_capture_succeeds pins both terms.)
         from torch._dynamo.decorators import mark_unbacked
 
         torch.manual_seed(0)
@@ -999,10 +1211,14 @@ class TestPrecompile(TestCase):
         m(x).sum().backward()  # warmup: populate .grad before precompile
         saved = {n: p.grad.clone() for n, p in m.named_parameters()}
         mark_unbacked(x, 0)
-        code, _ = torch.compiler.precompile(lambda mm, t: mm(t).sum().backward(), m, x)
+        with _CaptureToFiles(
+            lambda mm, t: mm(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, _ = cap.result()
         self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)  # dim 0 is dynamic
         for n, p in m.named_parameters():
-            self.assertEqual(p.grad, saved[n])  # warmup grad restored, not clobbered
+            self.assertEqual(p.grad, saved[n] * 2)  # warmup + the captured backward
 
     def test_backend_eager_no_inductor_lowering(self):
         # backend="eager" skips Inductor: the generated code has no inductor ``call``
@@ -1011,9 +1227,9 @@ class TestPrecompile(TestCase):
         # is empty -- python_code is the whole artifact.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, x: model(x), m, x, backend="eager"
-        )
+        with _CaptureToFiles(lambda model, x: model(x), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn('backend="eager"', code)
         self.assertNotIn("call = runner.call", code)
         self.assertIn("torch.ops.aten", code)  # readable captured graph
@@ -1038,9 +1254,9 @@ class TestPrecompile(TestCase):
         # is inlined) and runs, matching eager.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
         x = torch.randn(5, 4)
-        code, _cache = torch.compiler.precompile(
-            lambda model, x: model(x), m, x, backend="eager"
-        )
+        with _CaptureToFiles(lambda model, x: model(x), backend="eager") as cap:
+            cap(m, x)
+        code, _cache = cap.result()
 
         ns = {"__name__": "_eager"}
         exec(compile(code, "<eager>", "exec"), ns)
@@ -1054,22 +1270,28 @@ class TestPrecompile(TestCase):
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
-        m(x).sum().backward()  # warmup: params now carry a .grad
+        # Warm up on a DIFFERENT input, so the warmup grad and the captured call's grad
+        # are distinguishable terms rather than the same value twice.
+        m(torch.randn(3, 4)).sum().backward()
         self.assertIsNotNone(m.weight.grad)
         grad_before = m.weight.grad.clone()
-
-        code, cache = torch.compiler.precompile(
-            lambda model, xx: model(xx).sum().backward(), m, x
-        )
-        # Capture must not mutate the example model's pre-existing grad (restored).
-        self.assertEqual(m.weight.grad, grad_before)
-
-        run = torch.nn.Linear(4, 3)
-        run.load_state_dict(m.state_dict())
-        torch.compiler.precompile.load(code, cache)(run, x)  # run.grad starts None
         ref = torch.nn.Linear(4, 3)
         ref.load_state_dict(m.state_dict())
         ref(x).sum().backward()
+
+        with _CaptureToFiles(
+            lambda model, xx: model(xx).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract), so the warmup
+        # grad is preserved and exactly one backward on x is accumulated onto it -- both
+        # terms pinned, since ref's grad comes from x alone.
+        self.assertEqual(m.weight.grad, grad_before + ref.weight.grad)
+
+        run = torch.nn.Linear(4, 3)
+        run.load_state_dict(m.state_dict())
+        _load_pair(code, cache)(run, x)  # run.grad starts None
         for (n, p), (_, rp) in zip(run.named_parameters(), ref.named_parameters()):
             self.assertEqual(p.grad, rp.grad, n)
 
@@ -1082,18 +1304,17 @@ class TestPrecompile(TestCase):
         x = torch.randn(2, 4)
         for bad in (3.14, 2 + 3j, "hi"):
             with self.assertRaisesRegex(PrecompileError, "non-tensor Python value"):
-                torch.compiler.precompile(lambda model, t, b=bad: (model(t), b), m, x)
+                with _CaptureToFiles(lambda model, t, b=bad: (model(t), b)) as cap:
+                    cap(m, x)
         for extra in (7, None):
-            code, cache = torch.compiler.precompile(
-                lambda model, t, e=extra: (model(t), e), m, x
-            )
-            self.assertEqual(
-                torch.compiler.precompile.load(code, cache)(m, x)[1], extra
-            )
-        ecode, ecache = torch.compiler.precompile(
-            lambda model, t: (model(t), 3.14), m, x, backend="eager"
-        )
-        self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(m, x)[1], 3.14)
+            with _CaptureToFiles(lambda model, t, e=extra: (model(t), e)) as cap:
+                cap(m, x)
+            code, cache = cap.result()
+            self.assertEqual(_load_pair(code, cache)(m, x)[1], extra)
+        with _CaptureToFiles(lambda model, t: (model(t), 3.14), backend="eager") as cap:
+            cap(m, x)
+        ecode, ecache = cap.result()
+        self.assertEqual(_load_pair(ecode, ecache)(m, x)[1], 3.14)
 
     def test_input_layout_mismatch_inductor_clean_error(self):
         # The inductor backend bakes each input's stride / memory format (invariant 6);
@@ -1105,25 +1326,23 @@ class TestPrecompile(TestCase):
             8, 6
         ).t()  # example: shape (6, 8), non-contiguous stride (1, 6)
         self.assertFalse(xex.is_contiguous())
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, xex)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, xex)
+        code, cache = cap.result()
         self.assertIn("assert_size_stride", code)  # the layout guard we convert
         xrt = torch.randn(6, 8)  # same shape, contiguous -> different layout
         with self.assertRaisesRegex(PrecompileError, "memory format"):
-            torch.compiler.precompile.load(code, cache)(m, xrt)  # cached path
+            _load_pair(code, cache)(m, xrt)  # cached path
         with self.assertRaisesRegex(PrecompileError, "memory format"):
-            torch.compiler.precompile.load(code, _strip_artifact(cache))(
-                m, xrt
-            )  # inlined path
+            _load_pair(code, _strip_artifact(cache))(m, xrt)  # inlined path
         # A matching (same-stride) input still works on inductor.
         xmatch = torch.randn(8, 6).t()
-        self.assertEqual(
-            torch.compiler.precompile.load(code, cache)(m, xmatch), m(xmatch)
-        )
+        self.assertEqual(_load_pair(code, cache)(m, xmatch), m(xmatch))
         # The eager backend accepts the differently-strided input.
-        ecode, ecache = torch.compiler.precompile(
-            lambda model, t: model(t), m, xex, backend="eager"
-        )
-        self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(m, xrt), m(xrt))
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, xex)
+        ecode, ecache = cap.result()
+        self.assertEqual(_load_pair(ecode, ecache)(m, xrt), m(xrt))
 
     def test_input_layout_mismatch_enforced_without_size_asserts(self):
         # The layout guard must be a PROACTIVE driver check, not a reliance on inductor's
@@ -1135,13 +1354,13 @@ class TestPrecompile(TestCase):
         xex = torch.randn(8, 6).t()  # non-contiguous example, shape (6, 8)
         xrt = torch.randn(6, 8)  # same shape, contiguous -> different layout
         with ind_config.patch(size_asserts=False):
-            code, cache = torch.compiler.precompile(lambda model, t: model(t), m, xex)
+            with _CaptureToFiles(lambda model, t: model(t)) as cap:
+                cap(m, xex)
+            code, cache = cap.result()
             with self.assertRaisesRegex(PrecompileError, "memory format"):
-                torch.compiler.precompile.load(code, cache)(m, xrt)  # cached path
+                _load_pair(code, cache)(m, xrt)  # cached path
             with self.assertRaisesRegex(PrecompileError, "memory format"):
-                torch.compiler.precompile.load(code, _strip_artifact(cache))(
-                    m, xrt
-                )  # inlined
+                _load_pair(code, _strip_artifact(cache))(m, xrt)  # inlined
 
     def test_input_shape_mismatch_clean_error(self):
         # A same-structure but wrong-SHAPE input is an invariant-3 (shape) mismatch, NOT
@@ -1150,16 +1369,16 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(8, 5).eval()
         xex = torch.randn(6, 8)  # contiguous example
         xrt = torch.randn(7, 8)  # contiguous, different shape (same pytree structure)
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, xex)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, xex)
+        code, cache = cap.result()
         with self.assertRaisesRegex(PrecompileError, "shape"):
-            torch.compiler.precompile.load(code, cache)(m, xrt)  # cached path
+            _load_pair(code, cache)(m, xrt)  # cached path
         with self.assertRaisesRegex(PrecompileError, "shape"):
-            torch.compiler.precompile.load(code, _strip_artifact(cache))(
-                m, xrt
-            )  # inlined path
+            _load_pair(code, _strip_artifact(cache))(m, xrt)  # inlined path
         # The error must NOT mislabel a pure shape mismatch as a memory-format one.
         try:
-            torch.compiler.precompile.load(code, cache)(m, xrt)
+            _load_pair(code, cache)(m, xrt)
         except PrecompileError as e:
             self.assertNotIn("memory format", str(e))
 
@@ -1169,15 +1388,17 @@ class TestPrecompile(TestCase):
         # slice x[i:i+1] (size-1 dim with a wider stride) must RUN, not raise.
         m = torch.nn.Linear(4, 3).eval()
         xex = torch.randn(1, 4)  # contiguous, stride (4, 1)
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, xex)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, xex)
+        code, cache = cap.result()
         row = torch.randn(2, 8)[
             0:1, :4
         ]  # shape (1, 4), stride (8, 1): size-1 dim differs
         self.assertEqual(tuple(row.shape), (1, 4))
         self.assertNotEqual(row.stride(), xex.stride())
-        self.assertEqual(torch.compiler.precompile.load(code, cache)(m, row), m(row))
+        self.assertEqual(_load_pair(code, cache)(m, row), m(row))
         self.assertEqual(
-            torch.compiler.precompile.load(code, _strip_artifact(cache))(m, row),
+            _load_pair(code, _strip_artifact(cache))(m, row),
             m(row),
         )
 
@@ -1185,8 +1406,10 @@ class TestPrecompile(TestCase):
         # The numel==0 exemption must relax ONLY the (meaningless) stride check, not the
         # shape check: an empty runtime input whose shape differs from the example must
         # still raise invariant 3, not silently return the traced-shape output.
-        code, cache = torch.compiler.precompile(lambda t: t.sum(0), torch.randn(0, 4))
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda t: t.sum(0)) as cap:
+            cap(torch.randn(0, 4))
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "shape"):
             f_c(torch.randn(0, 6))
         # A matching empty input runs (shape matches; stride is not checked).
@@ -1203,8 +1426,10 @@ class TestPrecompile(TestCase):
         m = M().eval()
         x = torch.randn(4, 4)  # square so .t() keeps shape (4, 4)
         y = torch.randn(4, 4)
-        code, cache = torch.compiler.precompile(lambda mm, a, b: mm(a, b), m, x, y)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, a, b: mm(a, b)) as cap:
+            cap(m, x, y)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         xt = x.t()  # same shape, different stride; only x.shape is consumed
         self.assertNotEqual(xt.stride(), x.stride())
         self.assertEqual(f_c(m, xt, y), m(xt, y))
@@ -1218,8 +1443,10 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(8, 4)
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, torch.randn(16, 4)).shape, (16, 3))  # dynamic dim free
         with self.assertRaisesRegex(PrecompileError, "dynamic dim"):
             f_c(m, torch.randn(16, 5))  # static feature dim mismatched
@@ -1236,8 +1463,48 @@ class TestPrecompile(TestCase):
                 return mm(t)
             return mm(t) + 1
 
-        with self.assertRaisesRegex(PrecompileError, "guard on a dim marked with"):
-            torch.compiler.precompile(needs_guard, m, x)
+        with self.assertRaisesRegex(PrecompileError, "guard on a value this capture"):
+            with _CaptureToFiles(needs_guard) as cap:
+                cap(m, x)
+
+    def test_dynamic_shapes_unbacked_item_captured(self):
+        # An unbacked capture is the only path with a ShapeEnv, so where a static capture
+        # refuses .item() outright it holds the value as an unbacked symbol: a use that
+        # never guards on it captures, and the loaded artifact matches eager. Replay on a
+        # DIFFERENT input (fresh values, a different marked size) so a baked .item() value
+        # or a specialized batch dim fails here rather than passing on the capture input.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def scale_by_item(mm, t):
+            return mm(t) * t.sum().item()
+
+        with _CaptureToFiles(scale_by_item) as cap:
+            cap(m, x)
+        f_c = _load_pair(*cap.result())
+        other = torch.randn(16, 4)
+        self.assertEqual(f_c(m, other), scale_by_item(m, other))
+
+    def test_dynamic_shapes_unbacked_item_guard_rejected(self):
+        # The other half of the same contract: a branch on the .item() value must guard
+        # on that unbacked symbol, so capture fails LOUDLY instead of baking the value
+        # the example run happened to produce.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def branches_on_item(mm, t):
+            return mm(t) if t.sum().item() > 0 else mm(t) + 1
+
+        with self.assertRaisesRegex(
+            PrecompileError, "guard on a value this capture"
+        ) as cm:
+            with _CaptureToFiles(branches_on_item) as cap:
+                cap(m, x)
+        # The refusal must name the VALUE symbol (an unbacked float, zuf0 > 0.0), not the
+        # marked dim (u0 > 4) -- the marked-dim case produces the same top line verbatim.
+        self.assertRegex(str(cm.exception), r"Underlying:.*zuf\d+ > 0\.0")
 
     def test_dynamic_shapes_eager_rejected(self):
         m = torch.nn.Linear(4, 3).eval()
@@ -1246,7 +1513,8 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(
             NotImplementedError, "only supported with backend='inductor'"
         ):
-            torch.compiler.precompile(lambda mm, t: mm(t), m, x, backend="eager")
+            with _CaptureToFiles(lambda mm, t: mm(t), backend="eager") as cap:
+                cap(m, x)
 
     @parametrize("path", ("cached", "inlined"))
     def test_dtype_mismatch_rejected(self, path):
@@ -1254,10 +1522,12 @@ class TestPrecompile(TestCase):
         # a different dtype is rejected up front on BOTH the cached and inlined paths.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)  # float32 example
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         if path == "inlined":
             cache = _strip_artifact(cache)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
@@ -1268,10 +1538,12 @@ class TestPrecompile(TestCase):
         # artifact rejects a cuda input up front on BOTH load paths.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)  # cpu example
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         if path == "inlined":
             cache = _strip_artifact(cache)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "device"):
             f_c(m, x.cuda())
 
@@ -1283,7 +1555,8 @@ class TestPrecompile(TestCase):
         x = torch.randn(8, 4)
         mark_dynamic(x, 0)
         with self.assertRaisesRegex(PrecompileError, "mark_dynamic"):
-            torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+            with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+                cap(m, x)
 
     def test_mark_unbacked_hint_override_honored(self):
         # A mark_unbacked hint_override is a perf-only autotuning size hint (never a
@@ -1292,8 +1565,10 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(8, 4)
         mark_unbacked(x, 0, hint_override=16)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
         x2 = torch.randn(32, 4)
         self.assertEqual(f_c(m, x2), m(x2))
@@ -1305,7 +1580,8 @@ class TestPrecompile(TestCase):
         x = torch.randn(8, 4)
         mark_unbacked(x, 0, specialize_on=[lambda t: t.shape[0] == 8])
         with self.assertRaisesRegex(PrecompileError, "specialize_on"):
-            torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+            with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+                cap(m, x)
 
     def test_mark_unbacked_subclass_rejected(self):
         # A mark_unbacked dim on a tensor subclass (DTensor) cannot be honored: the
@@ -1332,7 +1608,8 @@ class TestPrecompile(TestCase):
             x = distribute_tensor(torch.randn(8, 4), mesh, [Replicate()])
             mark_unbacked(x, 0)
             with self.assertRaisesRegex(PrecompileError, "tensor subclass"):
-                torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+                with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+                    cap(m, x)
         finally:
             dist.destroy_process_group()
             for k, v in saved_env.items():
@@ -1354,14 +1631,16 @@ class TestPrecompile(TestCase):
         y = torch.randn(8, 4)
         mark_unbacked(x, 0, shape_id="b")
         mark_unbacked(y, 0, shape_id="b")
-        code, cache = torch.compiler.precompile(lambda mm, a, b: mm(a) + b, m, x, y)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, x, y)
+        code, cache = cap.result()
         if path == "inlined":
             blob = torch.load(io.BytesIO(cache), weights_only=True)
             blob["artifact"] = None
             buf = io.BytesIO()
             torch.save(blob, buf)
             cache = buf.getvalue()
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "shape or memory format"):
             f_c(m, torch.randn(8, 4), torch.randn(16, 4))
 
@@ -1379,14 +1658,16 @@ class TestPrecompile(TestCase):
         y = torch.randn(8, 4)
         mark_unbacked(x, 0, shape_id="b", min=2)
         mark_unbacked(y, 0, shape_id="b", max=64)
-        code, cache = torch.compiler.precompile(lambda mm, a, b: mm(a) + b, m, x, y)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, x, y)
+        code, cache = cap.result()
         if path == "inlined":
             blob = torch.load(io.BytesIO(cache), weights_only=True)
             blob["artifact"] = None
             buf = io.BytesIO()
             torch.save(blob, buf)
             cache = buf.getvalue()
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         for bs in (2, 8, 64):  # min boundary, an interior size, max boundary
             xt = torch.randn(bs, 4)
             yt = torch.randn(bs, 4)
@@ -1408,7 +1689,9 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(8, 4)
         mark_unbacked(x, 0, min=4)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("USER_INPUT_BOUNDS = [{0: (4, None)}]", code)
         if path == "inlined":
             blob = torch.load(io.BytesIO(cache), weights_only=True)
@@ -1416,7 +1699,7 @@ class TestPrecompile(TestCase):
             buf = io.BytesIO()
             torch.save(blob, buf)
             cache = buf.getvalue()
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "size 2.*min=4"):
             f_c(m, torch.randn(2, 4))
         xt = torch.randn(8, 4)
@@ -1427,10 +1710,10 @@ class TestPrecompile(TestCase):
         # rejected (invariant 3).
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "shape"):
             f_c(m, torch.randn(7, 4))
 
@@ -1439,46 +1722,51 @@ class TestPrecompile(TestCase):
         # (invariant 6).
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
     def test_cache_integrity_tampered_backend_rejected(self):
         # The cache envelope's backend tag is an integrity check: a tampered backend
         # (here flipped to a value that does not match python_code's BACKEND) makes
-        # load() raise a clear PrecompileError rather than reconstruct a foreign cache.
+        # precompile.load() raise a clear PrecompileError rather than reconstruct a
+        # foreign cache.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         blob["backend"] = "eager"  # python_code says inductor
         buf = io.BytesIO()
         torch.save(blob, buf)
         with self.assertRaisesRegex(PrecompileError, "backend"):
-            torch.compiler.precompile.load(code, buf.getvalue())
+            _load_pair(code, buf.getvalue())
 
     @parametrize("tag", ("format", "version"))
     def test_cache_format_version_mismatch_degrades(self, tag):
         # The cache is acceleration-only, so a FORMAT or VERSION mismatch (a foreign or
-        # different-build envelope) is NOT fatal: load() DEGRADES to JIT'ing from
-        # python_code rather than hard-failing. The reloaded callable must still run and
-        # match eager, and load() must emit a degrade WARNING on the torch._precompile
-        # logger. (A BACKEND or CODE_HASH mismatch still hard-fails -- see
-        # test_cache_integrity_tampered_backend_rejected and
+        # different-build envelope) is NOT fatal: precompile.load() DEGRADES to JIT'ing
+        # from python_code rather than hard-failing. The reloaded callable must still
+        # run and match eager, and precompile.load() must emit a degrade WARNING on the
+        # torch._precompile logger. (A BACKEND or CODE_HASH mismatch still hard-fails --
+        # see test_cache_integrity_tampered_backend_rejected and
         # test_load_rejects_mismatched_code_cache_pair.)
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         # Tamper either the format string or bump the version to a foreign value.
         blob[tag] = "not-a-precompile-cache" if tag == "format" else 999
         buf = io.BytesIO()
         torch.save(blob, buf)
         with self.assertLogs("torch._precompile", level="WARNING") as cm:
-            f_c = torch.compiler.precompile.load(code, buf.getvalue())  # must not raise
+            f_c = _load_pair(code, buf.getvalue())  # must not raise
         self.assertTrue(
             any("different torch build" in line for line in cm.output),
             f"expected a format/version degrade warning, got: {cm.output}",
@@ -1487,7 +1775,8 @@ class TestPrecompile(TestCase):
 
     def test_missing_calling_convention_metadata_rejected(self):
         # Syntactically valid python_code that lacks a required metadata global is not a
-        # precompile artifact; load() raises a clear PrecompileError naming the gap.
+        # precompile artifact; precompile.load() raises a clear PrecompileError naming
+        # the gap.
         buf = io.BytesIO()
         torch.save(
             {
@@ -1501,16 +1790,7 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(
             PrecompileError, "missing calling-convention metadata"
         ):
-            torch.compiler.precompile.load("x = 1\n", buf.getvalue())
-
-    def test_singleton_pickle_deepcopy_roundtrip(self):
-        # torch.compiler.precompile is a process-wide singleton; pickle and deepcopy
-        # must round-trip to the SAME object (it carries no per-call state), and its
-        # repr is the stable public name.
-        p = torch.compiler.precompile
-        self.assertIs(pickle.loads(pickle.dumps(p)), p)
-        self.assertIs(copy.deepcopy(p), p)
-        self.assertEqual(repr(p), "torch.compiler.precompile")
+            _load_pair("x = 1\n", buf.getvalue())
 
     def test_standalone_runtime_artifact_execs_in_fresh_process(self):
         # A generated artifact that imports a standalone_runtime helper (here output-
@@ -1520,7 +1800,9 @@ class TestPrecompile(TestCase):
         # exec used to hit. We write python_code to a temp file and exec it in a
         # subprocess that imports only torch, then runs forward().
         x = torch.randn(3, 4)
-        code, _cache = torch.compiler.precompile(lambda a: a.t(), x)
+        with _CaptureToFiles(lambda a: a.t()) as cap:
+            cap(x)
+        code, _cache = cap.result()
         self.assertIn("standalone_runtime import gen_alias_from_base", code)
         with tempfile.NamedTemporaryFile(
             "w", suffix=".py", delete=False
@@ -1563,12 +1845,16 @@ class TestPrecompile(TestCase):
         # silent-wrong-result guard). The MATCHED pair still runs and is correct.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        codeA, cacheA = torch.compiler.precompile(lambda mm, t: mm(t) * 2, m, x)
-        codeB, cacheB = torch.compiler.precompile(lambda mm, t: mm(t) + 100, m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t) * 2) as cap:
+            cap(m, x)
+        codeA, cacheA = cap.result()
+        with _CaptureToFiles(lambda mm, t: mm(t) + 100) as cap:
+            cap(m, x)
+        codeB, cacheB = cap.result()
         self.assertNotEqual(codeA, codeB)
         with self.assertRaisesRegex(PrecompileError, "code_hash|does not match"):
-            torch.compiler.precompile.load(codeA, cacheB)
-        f_a = torch.compiler.precompile.load(codeA, cacheA)
+            _load_pair(codeA, cacheB)
+        f_a = _load_pair(codeA, cacheA)
         self.assertEqual(f_a(m, x), m(x) * 2)
 
     def test_non_size_stride_assertion_propagates_unchanged(self):
@@ -1582,7 +1868,9 @@ class TestPrecompile(TestCase):
         # assertion and re-pair its code_hash, exercising the inlined relabel guard.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         head = code[: code.index("\ndef call(")]
         banner = code.rindex(
             "# " + "=" * 70, 0, code.index("# 2. Calling-convention metadata")
@@ -1593,12 +1881,10 @@ class TestPrecompile(TestCase):
         new_code = head + new_call + code[banner:]
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         blob["artifact"] = None  # force the inlined path so the doctored call() runs
-        import hashlib
-
         blob["code_hash"] = hashlib.sha256(new_code.encode()).hexdigest()
         buf = io.BytesIO()
         torch.save(blob, buf)
-        f = torch.compiler.precompile.load(new_code, buf.getvalue())
+        f = _load_pair(new_code, buf.getvalue())
         with self.assertRaisesRegex(AssertionError, "my custom user assertion"):
             f(m, x)
         # The original assertion must NOT be relabeled as a layout error.
@@ -1608,14 +1894,20 @@ class TestPrecompile(TestCase):
             self.assertNotIn("shape or memory format", str(e))
 
     def test_public_identity_module_and_qualname(self):
-        # PrecompileError and load are public under torch.compiler.precompile, so their
-        # __module__ / __qualname__ must report that public location (so Sphinx and
-        # introspection anchor them under torch.compiler, not the private module).
+        # PrecompileError is exported as torch.compiler.PrecompileError, so it
+        # reports that location; load reports the precompile module it is
+        # re-exported from, where introspection (Sphinx, help()) resolves it.
+        # Assert the joined __module__ + __qualname__, since that dotted spelling --
+        # not either half on its own -- is what pickle, a Sphinx cross-reference and
+        # help() have to resolve back to these objects.
         err = torch.compiler.precompile.PrecompileError
-        self.assertEqual(err.__module__, "torch.compiler")
-        self.assertEqual(err.__qualname__, "precompile.PrecompileError")
-        self.assertEqual(torch.compiler.precompile.load.__module__, "torch.compiler")
-        self.assertEqual(torch.compiler.precompile.load.__qualname__, "precompile.load")
+        self.assertEqual(
+            f"{err.__module__}.{err.__qualname__}", "torch.compiler.PrecompileError"
+        )
+        load = torch.compiler.precompile.load
+        self.assertEqual(
+            f"{load.__module__}.{load.__qualname__}", "torch.compiler.precompile.load"
+        )
 
     @parametrize("backend", ("inductor", "eager"))
     def test_renamed_buffer_structural_mismatch_rejected(self, backend):
@@ -1636,23 +1928,14 @@ class TestPrecompile(TestCase):
 
         m = WithBuf("buf").eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda mm, t: mm(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda mm, t: mm(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("BUFFER_NAMES = ['buf']", code)
         renamed = WithBuf("buf2").eval()  # same params, buffer renamed (same shape)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "do not match the traced model"):
             f_c(renamed, x)
-
-    def test_example_input_inplace_mutation_not_restored(self):
-        # Capture EXECUTES fn once on the example inputs (invariant 3), so an in-place
-        # mutation fn performs on its example user input happens at capture time and is
-        # NOT restored -- only .grad is snapshotted/restored. Pin this surprising contract
-        # so it stays covered: the example tensor reflects the mutation afterward.
-        scratch = torch.zeros(4)
-        torch.compiler.precompile(lambda a: a.add_(1.0), scratch)
-        self.assertEqual(scratch, torch.ones(4))
 
     @parametrize("path", ("cached", "inlined", "eager"))
     def test_wrong_dtype_rejected_across_all_paths(self, path):
@@ -1663,14 +1946,16 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         if path == "eager":
-            code, cache = torch.compiler.precompile(
-                lambda mm, t: mm(t), m, x, backend="eager"
-            )
+            with _CaptureToFiles(lambda mm, t: mm(t), backend="eager") as cap:
+                cap(m, x)
+            code, cache = cap.result()
         else:
-            code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+            with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+                cap(m, x)
+            code, cache = cap.result()
             if path == "inlined":
                 cache = _strip_artifact(cache)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
@@ -1680,10 +1965,10 @@ class TestPrecompile(TestCase):
         # artifact rejects a cuda input up front, like the inductor backend.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)  # cpu example
-        code, cache = torch.compiler.precompile(
-            lambda mm, t: mm(t), m, x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, t: mm(t), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "device"):
             f_c(m, x.cuda())
 
@@ -1695,11 +1980,11 @@ class TestPrecompile(TestCase):
         # per-leaf shape). Make that best-effort gap explicit.
         m = torch.nn.Linear(4, 3).eval()
         inp = _UnserializableCtxInput(torch.randn(5, 4), torch.randn(5, 4))
-        code, cache = torch.compiler.precompile(
-            lambda model, h: model(h.a + h.b), m, inp
-        )
+        with _CaptureToFiles(lambda model, h: model(h.a + h.b)) as cap:
+            cap(m, inp)
+        code, cache = cap.result()
         self.assertIn("IN_SPEC = None", code)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         t = torch.randn(5, 4)
         # The traced structure (the custom node) and a plain list of the same two leaves
         # have distinct pytree structures but the same flattened leaves/shapes; both run.
@@ -1718,7 +2003,9 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(8, 4)
         mark_unbacked(x, 0, max=16)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("USER_INPUT_BOUNDS = [{0: (None, 16)}]", code)
         if path == "inlined":
             blob = torch.load(io.BytesIO(cache), weights_only=True)
@@ -1726,7 +2013,7 @@ class TestPrecompile(TestCase):
             buf = io.BytesIO()
             torch.save(blob, buf)
             cache = buf.getvalue()
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "max"):
             f_c(m, torch.randn(32, 4))
         xt = torch.randn(8, 4)
@@ -1748,10 +2035,12 @@ class TestPrecompile(TestCase):
 
         x = torch.randn(64)
         with functorch_config.patch(functionalize_rng_ops=True):
-            code, cache = torch.compiler.precompile(
-                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
-            )
-            f_c = torch.compiler.precompile.load(code, cache)
+            with _CaptureToFiles(
+                lambda a: torch.nn.functional.dropout(a, 0.5, training=True)
+            ) as cap:
+                cap(x)
+            code, cache = cap.result()
+            f_c = _load_pair(code, cache)
             torch.manual_seed(0)
             out = f_c(x)
         torch.manual_seed(0)
@@ -1770,9 +2059,9 @@ class TestPrecompile(TestCase):
         # backend (no assert_size_stride backstop) silently returned a wrong-shaped tensor.
         m = torch.nn.Linear(4, 3).eval()  # M = 3
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         bad = torch.nn.Linear(4, 7).eval()  # K = 7 != 3, same param names
 
         for label, f_c in _default_and_inlined_loaders(code, cache, backend):
@@ -1791,9 +2080,9 @@ class TestPrecompile(TestCase):
         # same way test_param_shape_mismatch_rejected covers the shape branch.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         bad = torch.nn.Linear(4, 3).eval().half()  # same shape, different dtype
 
         for label, f_c in _default_and_inlined_loaders(code, cache, backend):
@@ -1822,9 +2111,9 @@ class TestPrecompile(TestCase):
 
         m = WithBuf(3, torch.float32).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("BUFFER_NAMES = ['b']", code)
         # Same buffer name and count, but a different SHAPE / DTYPE.
         bad_shape = WithBuf(5, torch.float32).eval()
@@ -1846,7 +2135,9 @@ class TestPrecompile(TestCase):
         # backend is layout-flexible and ACCEPTS the same non-contiguous weight.
         m = torch.nn.Linear(8, 5).eval()
         x = torch.randn(4, 8)
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
 
         def with_noncontig_weight():
             run = torch.nn.Linear(8, 5).eval()
@@ -1858,25 +2149,18 @@ class TestPrecompile(TestCase):
             run.weight = torch.nn.Parameter(nc)
             return run
 
-        def loaders():
-            yield "cached", torch.compiler.precompile.load(code, cache)
-            yield (
-                "inlined",
-                torch.compiler.precompile.load(code, _strip_artifact(cache)),
-            )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(
                     PrecompileError, r"memory format.*PARAMETER/BUFFER.*layout"
                 ):
                     f_c(with_noncontig_weight(), x)
         # The eager backend accepts the same non-contiguous weight (layout-flexible).
-        ecode, ecache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend="eager"
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, x)
+        ecode, ecache = cap.result()
         run = with_noncontig_weight()
-        self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(run, x), run(x))
+        self.assertEqual(_load_pair(ecode, ecache)(run, x), run(x))
 
     def test_unbacked_equality_shared_vs_independent_shape_id(self):
         # MAJOR1 (invariant 3 DANGER note): two mark_unbacked dims that the graph requires
@@ -1898,10 +2182,10 @@ class TestPrecompile(TestCase):
         ys = torch.randn(8, 4)
         mark_unbacked(xs, 0, shape_id="b")
         mark_unbacked(ys, 0, shape_id="b")
-        code_s, cache_s = torch.compiler.precompile(
-            lambda mm, a, b: mm(a) + b, m, xs, ys
-        )
-        f_s = torch.compiler.precompile.load(code_s, cache_s)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, xs, ys)
+        code_s, cache_s = cap.result()
+        f_s = _load_pair(code_s, cache_s)
         xt, yt = torch.randn(8, 4), torch.randn(8, 4)
         self.assertEqual(f_s(m, xt, yt), m(xt) + yt)  # matched sizes work
         with self.assertRaisesRegex(PrecompileError, "shape or memory format"):
@@ -1912,10 +2196,10 @@ class TestPrecompile(TestCase):
         yi = torch.randn(8, 4)
         mark_unbacked(xi, 0)
         mark_unbacked(yi, 0)
-        code_i, cache_i = torch.compiler.precompile(
-            lambda mm, a, b: mm(a) + b, m, xi, yi
-        )
-        f_i = torch.compiler.precompile.load(code_i, cache_i)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, xi, yi)
+        code_i, cache_i = cap.result()
+        f_i = _load_pair(code_i, cache_i)
         xm, ym = torch.randn(10, 4), torch.randn(10, 4)
         self.assertEqual(f_i(m, xm, ym), m(xm) + ym)  # matched sizes work
         out = f_i(m, torch.randn(10, 4), torch.randn(12, 4))  # mismatch NOT rejected
@@ -1926,14 +2210,21 @@ class TestPrecompile(TestCase):
         # clone), so a caller holding a prior p.grad reference -- or optimizer state keyed
         # on grad identity -- is not invalidated. Warm up a backward to populate .grad,
         # snapshot the object identity, precompile a backward step on the same model, and
-        # assert p.grad is still the SAME object afterward.
+        # assert p.grad is still the SAME object afterward. Capture runs the step once for
+        # real (caller-driven contract), so the served artifact also scatters its grads
+        # with an in-place p.grad += g: on exit .grad holds two backwards' worth of
+        # gradient, and that accumulate is the second mechanism the assertIs covers (the
+        # first being capture's snapshot/restore around the trace).
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
         m(x).sum().backward()  # warmup populates .grad
         g = m.weight.grad
         self.assertIsNotNone(g)
-        torch.compiler.precompile(lambda mm, t: mm(t).sum().backward(), m, x)
+        with _CaptureToFiles(
+            lambda mm, t: mm(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
         self.assertIs(m.weight.grad, g)  # same object, not a clone
 
     def test_precompile_error_public_binding(self):
@@ -1950,20 +2241,22 @@ class TestPrecompile(TestCase):
         # via the public torch.compiler.PrecompileError alias.
         captured = torch.randn(3)
         with self.assertRaisesRegex(torch.compiler.PrecompileError, "hard-coded"):
-            torch.compiler.precompile(lambda x: x + captured, torch.randn(3))
+            with _CaptureToFiles(lambda x: x + captured) as cap:
+                cap(torch.randn(3))
 
     def test_single_trust_warning_on_inlined_load(self):
         # On the inlined load path (an eager artifact has an empty cache, so there is
-        # nothing to prime and load() just EXECs python_code) the untrusted-input / EXEC
-        # warning must fire EXACTLY ONCE -- only _make_inlined_forward warns. Asserting
-        # "exactly once" guards against the EXEC warning being duplicated on this load.
+        # nothing to prime and precompile.load() just EXECs python_code) the
+        # untrusted-input / EXEC warning must fire EXACTLY ONCE -- only
+        # _make_inlined_forward warns. Asserting "exactly once" guards against the EXEC
+        # warning being duplicated on this load.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend="eager"
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
         with self.assertLogs("torch._precompile", level="WARNING") as cm:
-            torch.compiler.precompile.load(code, cache)
+            _load_pair(code, cache)
         exec_warnings = [line for line in cm.output if "EXEC" in line]
         self.assertEqual(
             len(exec_warnings), 1, f"expected one EXEC warning, got: {cm.output}"
@@ -1986,15 +2279,20 @@ class TestPrecompile(TestCase):
 
         m = Tied()
         t = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t).sum().backward(), m, t
-        )
+        with _CaptureToFiles(
+            lambda model, t: model(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, t)
+        code, cache = cap.result()
         self.assertIn("PARAM_NAMES = ['l1.weight']", code)  # tie collapsed to one
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # deepcopy'd reference and the loaded artifact each see exactly one backward.
+        m.zero_grad(set_to_none=True)
 
         ref = copy.deepcopy(m)  # deepcopy preserves the tie within the object graph
         ref(t).sum().backward()
 
-        torch.compiler.precompile.load(code, cache)(m, t)  # one call: tied grad
+        _load_pair(code, cache)(m, t)  # one call: tied grad
         self.assertEqual(m.l1.weight.grad, ref.l1.weight.grad)
         self.assertIs(m.l1.weight, m.l2.weight)  # still one tensor at runtime
 
@@ -2006,11 +2304,13 @@ class TestPrecompile(TestCase):
         m1 = torch.nn.Linear(4, 4)
         m2 = torch.nn.Linear(4, 3)
         t = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda a, b, t: b(a(t)), m1, m2, t)
+        with _CaptureToFiles(lambda a, b, t: b(a(t))) as cap:
+            cap(m1, m2, t)
+        code, cache = cap.result()
         self.assertIn("MODULE_POSITIONS = [0, 1]", code)
         self.assertIn("m0.weight", code)  # first module's params prefixed m0.*
         self.assertIn("m1.weight", code)  # second module's params prefixed m1.*
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m1, m2, t), m2(m1(t)))
 
     def test_frozen_param_keeps_none_grad(self):
@@ -2030,14 +2330,19 @@ class TestPrecompile(TestCase):
 
         m = M()
         t = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t).sum().backward(), m, t
-        )
+        with _CaptureToFiles(
+            lambda model, t: model(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, t)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # deepcopy'd reference and the loaded artifact each see exactly one backward.
+        m.zero_grad(set_to_none=True)
 
         ref = copy.deepcopy(m)
         ref(t).sum().backward()
 
-        torch.compiler.precompile.load(code, cache)(m, t)
+        _load_pair(code, cache)(m, t)
         for p in m.frozen.parameters():
             self.assertIsNone(p.grad)  # frozen: never harvested
         for p in m.trainable.parameters():
@@ -2056,19 +2361,1455 @@ class TestPrecompile(TestCase):
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)  # params require grad at capture
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda mm, t: mm(t).sum().backward(), m, x
-        )
+        with _CaptureToFiles(
+            lambda mm, t: mm(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         run = torch.nn.Linear(4, 3)
         run.load_state_dict(m.state_dict())
         for p in run.parameters():
             p.requires_grad_(False)  # flip OFF at runtime -- must be a no-op
-        torch.compiler.precompile.load(code, cache)(run, x)
+        _load_pair(code, cache)(run, x)
         self.assertIsNotNone(run.weight.grad)  # still scattered despite the flip
         ref = torch.nn.Linear(4, 3)
         ref.load_state_dict(m.state_dict())
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
+
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know is refused rather than baked from the example. The distinct
+        # fake-tensor failure paths, each exercised end to end through capture:
+        # .item() (DataDependentOutputException), .nonzero() (DynamicOutputShapeException),
+        # and an op with no meta/fake kernel (UnsupportedOperatorException for a
+        # library op, a RuntimeError naming the missing fake impl for a custom_op).
+        from torch.library import _scoped_library
+
+        model = torch.nn.Linear(4, 4)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        def nonzero(m, x):
+            return m(x)[x[:, 0].nonzero().flatten()]
+
+        for fn in (items, nonzero):
+            with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
+                with _CaptureToFiles(fn, backend="eager") as cap:
+                    cap(model, torch.randn(3, 4))
+
+        # Both op registrations are global, so undo them: the scoped library takes
+        # its own op with it, and the custom_op's library is destroyed in finally.
+        with _scoped_library("mlprecompile", "FRAGMENT") as lib:
+            lib.define("no_meta(Tensor x) -> Tensor")
+            lib.impl("no_meta", lambda x: x * 2, "CPU")
+
+            @torch.library.custom_op("mlprecompile::no_fake_impl", mutates_args=())
+            def no_fake_impl(x: torch.Tensor) -> torch.Tensor:
+                return x * 2
+
+            try:
+                for op in (torch.ops.mlprecompile.no_meta, no_fake_impl):
+                    with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                        with _CaptureToFiles(
+                            lambda m, x, op=op: op(m(x)), backend="eager"
+                        ) as cap:
+                            cap(model, torch.randn(3, 4))
+            finally:
+                no_fake_impl._lib._destroy()
+
+        # The ops above live in a namespace FakeTensorMode's unsafe fallback does not
+        # allow, so they are refused even with the fallback on. In an ALLOWLISTED
+        # namespace (aten, prims, quantized, ...) the fallback would instead run the
+        # real kernel on ZERO-FILLED substitutes and bake whatever shape that produced;
+        # the capture mode passes allow_fallback_kernels=False so this is refused too.
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_no_meta", lambda x: x * 2, "CPU")
+            with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                with _CaptureToFiles(
+                    lambda m, x: torch.ops.quantized.mlprecompile_no_meta(m(x)),
+                    backend="eager",
+                ) as cap:
+                    cap(model, torch.randn(3, 4))
+
+    def test_capture_refuses_a_data_ptr_read(self):
+        # Capture traces on fake tensors, which have no real memory behind them, so a
+        # .data_ptr() read in fn (or in a kernel that dereferences one) could only
+        # return a meaningless value: the capture fake mode is built with
+        # fake_tensor_allow_unsafe_data_ptr_access off, which turns the read into a
+        # refusal at capture time.
+        model = torch.nn.Linear(4, 4)
+
+        def reads_pointer(m, x):
+            x.data_ptr()
+            return m(x)
+
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            with _CaptureToFiles(reads_pointer, backend="eager") as cap:
+                cap(model, torch.randn(3, 4))
+
+    def test_unfakeifiable_input_refused_without_clobbering_grad(self):
+        # Fakeification runs INSIDE the .grad save/restore window, so an example input
+        # the meta converter cannot represent (a quantized tensor) is refused with a
+        # PrecompileError naming it, and the caller's example .grad is put back -- the
+        # same object, not a copy.
+        model = torch.nn.Linear(3, 3)
+        grad = torch.ones_like(model.weight)
+        model.weight.grad = grad
+        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+        ):
+            with _CaptureToFiles(
+                lambda m, t: m(t.dequantize()), backend="eager"
+            ) as cap:
+                cap(model, q)
+        self.assertIs(model.weight.grad, grad)
+
+    def test_nested_input_refused(self):
+        # A nested example input is refused up front with a named PrecompileError rather
+        # than the raw internal assertion fakeifying one raises (a static capture has no
+        # ShapeEnv to mint the jagged ragged dim's symbolic nested int). The refusal runs
+        # ahead of the recorded-shape reads, so the strided layout (whose .shape read
+        # raises inside NestedTensorImpl) takes the same path. It is capture-WIDE, so the
+        # unbacked path -- whose ShapeEnv could fakeify a jagged input, but which has no
+        # nested representation downstream either -- gets the same refusal, and its
+        # message claims a restriction rather than that the tensor is unfakeifiable.
+        model = torch.nn.Linear(3, 3)
+        parts = [torch.randn(2, 3), torch.randn(4, 3)]
+        for layout in (torch.jagged, torch.strided):
+            nt = torch.nested.nested_tensor(parts, layout=layout)
+            with (
+                self.subTest(layout=layout),
+                self.assertRaisesRegex(
+                    PrecompileError, "user input 0 is a nested tensor"
+                ),
+            ):
+                with _CaptureToFiles(lambda m, t: m(t), backend="eager") as cap:
+                    cap(model, nt)
+        # Unbacked capture is inductor-only, so this case takes the default backend; the
+        # marked input is the dense one, the nested one is refused before any tracing.
+        x = torch.randn(4, 3)
+        mark_unbacked(x, 0)
+        nt = torch.nested.nested_tensor(parts, layout=torch.jagged)
+        with self.assertRaisesRegex(PrecompileError, "user input 1 is a nested tensor"):
+            with _CaptureToFiles(lambda m, t, u: m(t)) as cap:
+                cap(model, x, nt)
+
+    def test_unbacked_capture_refuses_an_unfakeifiable_input(self):
+        # Both fakeify paths refuse an input the meta converter cannot represent through
+        # the same helper, so a quantized example input gets the same named
+        # PrecompileError (not the raw converter exception) whether or not some other dim
+        # happens to be marked. Unbacked capture is inductor-only, so no backend override.
+        model = torch.nn.Linear(3, 3)
+        x = torch.randn(4, 3)
+        mark_unbacked(x, 0)
+        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 1 cannot be represented as a fake tensor"
+        ):
+            with _CaptureToFiles(lambda m, t, u: m(t) + m(u.dequantize()).sum()) as cap:
+                cap(model, x, q)
+
+    def test_unbacked_capture_refuses_a_data_ptr_read(self):
+        # The unbacked fake mode carries the same two hardenings as the static one, so the
+        # Note's "no op is ever run for real on zero-filled substitutes" holds on both
+        # paths. Here: its mode is also built inside the
+        # fake_tensor_allow_unsafe_data_ptr_access patch, so a .data_ptr() read in fn is
+        # refused instead of returning a meaningless value.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def reads_pointer(mm, t):
+            t.data_ptr()
+            return mm(t)
+
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            with _CaptureToFiles(reads_pointer) as cap:
+                cap(m, x)
+
+    def test_unbacked_capture_refuses_a_meta_less_op_in_an_allowlisted_namespace(self):
+        # The other unbacked-mode hardening: allow_fallback_kernels=False. An op with no
+        # meta/fake kernel in an ALLOWLISTED namespace (aten, prims, quantized, ...) would
+        # otherwise have FakeTensorMode's unsafe fallback run its real kernel on
+        # zero-filled substitutes and bake whatever shape that produced. The op is called
+        # on the UNMARKED input on purpose: the fallback declines symbolic-sized arguments
+        # by itself, so only a static one exercises the flag.
+        from torch.library import _scoped_library
+
+        m = torch.nn.Linear(4, 3).eval()
+        x, y = torch.randn(8, 4), torch.randn(2, 3)
+        mark_unbacked(x, 0)
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_unbacked_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_unbacked_no_meta", lambda t: t * 2, "CPU")
+            op = torch.ops.quantized.mlprecompile_unbacked_no_meta
+            with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                with _CaptureToFiles(lambda mm, t, u: mm(t) + op(u).sum()) as cap:
+                    cap(m, x, y)
+
+    def test_user_runtime_error_from_fn_propagates_unchanged(self):
+        # Capture catches EVERY RuntimeError out of the trace to relabel the two it
+        # owns (a missing fake impl, a data-pointer read), so a RuntimeError raised by
+        # fn itself must fall through the substring checks and reach the caller with
+        # its ORIGINAL message, not be relabeled as a missing meta/fake kernel.
+        model = torch.nn.Linear(4, 4)
+
+        def raises(m, x):
+            raise RuntimeError("my own capture-time failure")
+
+        try:
+            with _CaptureToFiles(raises, backend="eager") as cap:
+                cap(model, torch.randn(3, 4))
+        except RuntimeError as e:
+            self.assertIn("my own capture-time failure", str(e))
+            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
+            self.assertNotIsInstance(e, PrecompileError)
+            self.assertNotIn("no meta/fake kernel", str(e))
+        else:
+            self.fail("expected fn's RuntimeError to propagate out of capture")
+
+    def test_input_is_mutated_exactly_once_by_the_capture_call(self):
+        # Capture traces fn on FAKE tensors (invariant 3), so the in-place mutation fn
+        # performs during the trace never reaches the caller's tensor; the capture call
+        # then SERVES the artifact on the real args, and that serve is what mutates the
+        # real input -- exactly once, not once per trace-plus-serve. A loaded artifact
+        # mutates its input exactly once per call too.
+        scratch = torch.zeros(4)
+        with _CaptureToFiles(lambda a: a.add_(1.0)) as cap:
+            out = cap(scratch)
+        self.assertEqual(scratch, torch.ones(4))
+        self.assertEqual(out, torch.ones(4))
+        f = _load_pair(*cap.result())
+        f(scratch)
+        self.assertEqual(scratch, torch.full((4,), 2.0))
+        f(scratch)
+        self.assertEqual(scratch, torch.full((4,), 3.0))
+
+    def test_dynamo_tracer_is_refused_in_this_build(self):
+        # DynamoTracer is part of the surface, but precompile.capture() refuses it until
+        # the front-end lands; the refusal names the tracer to pass instead.
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(PrecompileError, "not available in this build"):
+                torch.compiler.precompile.capture(
+                    lambda x: x + 1,
+                    artifact_path=os.path.join(d, "m.py"),
+                    cache_path=os.path.join(d, "m.cache"),
+                    tracer=DynamoTracer(),
+                )
+
+    def test_default_tracer_is_make_fx(self):
+        default = (
+            inspect.signature(torch.compiler.precompile.capture)
+            .parameters["tracer"]
+            .default
+        )
+        self.assertEqual(default, MakeFxTracer())
+
+    def test_public_api_surface(self):
+        # precompile lives under torch.compiler only: no torch.precompile, and the
+        # module is what torch.compiler exports.
+        self.assertIn("precompile", torch.compiler.__all__)
+        self.assertNotIn("precompile", torch.__all__)
+        self.assertFalse(hasattr(torch, "precompile"))
+        self.assertIs(
+            torch.compiler.precompile, sys.modules["torch.compiler.precompile"]
+        )
+        # The two loaded-handle classes are exported beside PrecompileError, and their
+        # __module__ has to name that home: the docs autoclass directives and
+        # test_public_bindings.test_correct_module_names both key on it.
+        for name in ("PrecompiledRunnable", "PrecompiledCallable"):
+            self.assertIn(name, torch.compiler.__all__)
+            self.assertEqual(getattr(torch.compiler, name).__module__, "torch.compiler")
+        # The module's __all__ IS the surface this commit freezes, so pin it exactly
+        # and resolve every name through the public module: a name dropped from the
+        # list, or listed but missing, fails here.
+        self.assertEqual(
+            torch.compiler.precompile.__all__,
+            [
+                "capture",
+                "load",
+                "Capture",
+                "MakeFxTracer",
+                "DynamoTracer",
+                "PrecompileSummary",
+                "FrameInvariants",
+                "GuardFact",
+            ],
+        )
+        for name in torch.compiler.precompile.__all__:
+            self.assertIsNotNone(getattr(torch.compiler.precompile, name))
+        self.assertTrue(callable(torch.compiler.precompile.load))
+
+    def test_precompiled_callable_protocol(self):
+        # PrecompiledCallable is the handle an installing artifact will return, and
+        # nothing in this build produces one, so construct it over a stand-in to pin the
+        # documented surface: it installs, it delegates the call / unload / compile
+        # count, `with` unloads on exit, and a dynamo PackageError / RecompileError out
+        # of any of its entry points surfaces as a PrecompileError.
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        class _Installed:
+            def __init__(self):
+                self.log = []
+
+            def __call__(self, x):
+                return x + 1
+
+            def __enter__(self):
+                self.log.append("enter")
+
+            def unload(self):
+                self.log.append("unload")
+
+            def serve_time_compiles(self):
+                return 3
+
+        installed = _Installed()
+        handle = torch.compiler.PrecompiledCallable(installed)
+        self.assertIsInstance(handle, torch.compiler.PrecompiledRunnable)
+        self.assertTrue(handle.installed)
+        with handle as entered:
+            self.assertIs(entered, handle)
+            self.assertEqual(handle(torch.ones(2)), torch.full((2,), 2.0))
+            self.assertEqual(handle.serve_time_compiles(), 3)
+        self.assertEqual(installed.log, ["enter", "unload"])
+        handle.unload()
+        self.assertEqual(installed.log, ["enter", "unload", "unload"])
+
+        class _Raises:
+            def __init__(self, exc):
+                self._exc = exc
+
+            def __call__(self, *args):
+                raise self._exc
+
+            def __enter__(self):
+                raise self._exc
+
+            def unload(self):
+                raise self._exc
+
+            def serve_time_compiles(self):
+                raise self._exc
+
+        # Nothing in this build produces a PrecompiledCallable, so this is the whole
+        # enforcement of the translation: every public entry point goes through _call,
+        # and both dynamo-private types it converts are exercised -- PackageError is
+        # the arm the class exists for.
+        for exc in (PackageError("bad package"), RecompileError("guard miss")):
+            broken = torch.compiler.PrecompiledCallable(_Raises(exc))
+            with self.assertRaisesRegex(PrecompileError, str(exc)):
+                broken(torch.ones(2))
+            with self.assertRaisesRegex(PrecompileError, str(exc)):
+                broken.__enter__()
+            with self.assertRaisesRegex(PrecompileError, str(exc)):
+                broken.unload()
+            with self.assertRaisesRegex(PrecompileError, str(exc)):
+                broken.serve_time_compiles()
+
+
+class _FilesModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+
+def _files_fn(model, x):
+    return model(x)
+
+
+def _files_train_step(model, x):
+    out = model(x)
+    out.sum().backward()
+    return out
+
+
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileCaptureFiles(TestCase):
+    """precompile.capture() / precompile.load() through the on-disk pair (MakeFxTracer)."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.artifact = os.path.join(self.dir, "m.py")
+        self.cache = os.path.join(self.dir, "m.cache")
+        self.model = _FilesModel()
+        self.x = torch.randn(2, 4)
+
+    def _capture(self, fn=_files_fn, **kwargs):
+        kwargs.setdefault("artifact_path", self.artifact)
+        kwargs.setdefault("cache_path", self.cache)
+        kwargs.setdefault("tracer", MakeFxTracer())
+        kwargs.setdefault("backend", "eager")
+        return torch.compiler.precompile.capture(fn, **kwargs)
+
+    def _leftovers(self):
+        return sorted(n for n in os.listdir(self.dir) if n not in ("m.py", "m.cache"))
+
+    def _read(self, path):
+        with open(path, "rb") as f:
+            return f.read()
+
+    def _rewrite_raises(self, exc_type, regex, backend="inductor"):
+        # Recapture into the same paths, expecting the exit write to fail with the
+        # exception the caller patched in.
+        with self.assertRaisesRegex(exc_type, regex):
+            with self._capture(backend=backend) as cap:
+                cap(self.model, self.x)
+
+    def _write_pair(self):
+        # The "previous artifact" the recovery tests want on disk; both halves' bytes
+        # come back.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        return self._read(self.artifact), self._read(self.cache)
+
+    def _assert_serves(self):
+        f = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def _replacing(self, *names, exc, after=False, once=True, by_src=False):
+        """Patch os.replace so a rename INTO one of ``names`` (or OUT of one, with
+        ``by_src``) raises ``exc``: before performing it, or (``after``) once it has,
+        which is where a KeyboardInterrupt lands. ``once`` fails only the first one."""
+        real, fired = os.replace, []
+
+        def replace(src, dst):
+            if (src if by_src else dst) not in names or (once and fired):
+                return real(src, dst)
+            fired.append(dst)
+            if after:
+                real(src, dst)
+            raise exc
+
+        return mock.patch("os.replace", replace)
+
+    def test_exit_writes_the_pair_and_load_serves_it(self):
+        with self._capture() as cap:
+            y = cap(self.model, self.x)
+        self.assertEqual(y, self.model(self.x))
+        self.assertTrue(os.path.exists(self.artifact) and os.path.exists(self.cache))
+        f = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+        self.assertFalse(f.installed)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_default_tracer_writes_a_loadable_pair(self):
+        # No tracer= at all: precompile.capture()'s default has to produce a loadable
+        # artifact. Every other test here passes a tracer explicitly, so this is the
+        # only coverage of the default path end to end.
+        with torch.compiler.precompile.capture(
+            _files_fn,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            backend="eager",
+        ) as cap:
+            y = cap(self.model, self.x)
+        self.assertEqual(y, self.model(self.x))
+        f = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def test_artifact_bytes_are_exactly_what_the_cache_hashes(self):
+        # Both halves move in binary on purpose: a text-mode read would collapse CRLF
+        # on every platform (universal newlines) and a text-mode write would translate
+        # the newlines on Windows, while the cache's code_hash is over
+        # exactly the python_code bytes and torch.compiler.precompile.load() re-hashes
+        # the text it reads back. code_hash cannot catch that on its own (a text-mode
+        # write is hashed as written), so pin the file bytes of a real capture, then
+        # round-trip a python_code holding CRLF -- the one character class for which
+        # byte mode and text mode differ -- through the writer and the reader, asserting
+        # the writer's open mode too, since the write side is unobservable here (see
+        # below).
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        raw = self._read(self.artifact)
+        self.assertNotIn(b"\r", raw)
+        blob = torch.load(self.cache, weights_only=True)
+        self.assertEqual(blob["code_hash"], hashlib.sha256(raw).hexdigest())
+
+        crlf = "x = 1\r\ny = 2\n"
+        buf = io.BytesIO()
+        torch.save({"code_hash": hashlib.sha256(crlf.encode()).hexdigest()}, buf)
+        artifact = os.path.join(self.dir, "crlf.py")
+        cache = os.path.join(self.dir, "crlf.cache")
+        # The mode is what has to be pinned, not the bytes: text mode with
+        # newline=None translates only "\n", to os.linesep, which IS "\n" here, so a
+        # text-mode write is indistinguishable from a binary one on this platform.
+        with mock.patch("builtins.open", wraps=open) as opened:
+            _write_artifact(artifact, cache, crlf, buf.getvalue())
+        self.assertEqual({call.args[1] for call in opened.call_args_list}, {"wb"})
+        # The writer put the CR on disk rather than translating it away, ...
+        self.assertEqual(self._read(artifact), crlf.encode())
+        read_code, read_cache = _read_artifact(artifact, cache)
+        # ... the reader handed the same string back, ...
+        self.assertEqual(read_code, crlf)
+        # ... and the hash the pair was sealed with still covers what the reader
+        # returns, which is the equality precompile.load() checks before it execs the
+        # source.
+        self.assertEqual(
+            torch.load(io.BytesIO(read_cache), weights_only=True)["code_hash"],
+            hashlib.sha256(read_code.encode()).hexdigest(),
+        )
+
+    def test_inductor_pair_round_trips(self):
+        with self._capture(backend="inductor") as cap:
+            cap(self.model, self.x)
+        f = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def test_second_call_is_refused(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+            with self.assertRaisesRegex(PrecompileError, "single call"):
+                cap(self.model, self.x)
+
+    def test_a_failed_serve_writes_nothing(self):
+        # The call renders the artifact and then SERVES it, which is where the driver's
+        # runtime checks run: a serve that raised is a call that did not work, so a
+        # caller who catches it must not get that pair written at exit either.
+        def raising_serve(*args, **kwargs):
+            def f(*call_args):
+                raise RuntimeError("serve failed")
+
+            return f
+
+        with mock.patch("torch._precompile._runnable_from_pair", raising_serve):
+            with self.assertRaisesRegex(PrecompileError, "while serving"):
+                with self._capture() as cap:
+                    with self.assertRaisesRegex(RuntimeError, "serve failed"):
+                        cap(self.model, self.x)
+                    with self.assertRaisesRegex(PrecompileError, "already ran and"):
+                        cap(self.model, self.x)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_keyword_arguments_are_refused(self):
+        with self._capture() as cap:
+            with self.assertRaisesRegex(TypeError, "positional arguments only"):
+                cap(self.model, x=self.x)
+            cap(self.model, self.x)
+
+    def test_exception_in_block_leaves_files_untouched(self):
+        before = self._write_pair()
+        # A different backend, so a write from the raising block would change both
+        # halves' bytes; re-capturing the same shape on the same backend renders
+        # byte-identical output and the comparison could not fail.
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with self._capture(backend="inductor") as cap:
+                cap(self.model, self.x)
+                raise RuntimeError("boom")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_save_writes_before_exit_and_exit_rewrites_the_same_pair(self):
+        with self._capture() as cap:
+            with self.assertRaisesRegex(PrecompileError, "before calling save"):
+                cap.save()
+            cap(self.model, self.x)
+            cap.save()
+            saved = (self._read(self.artifact), self._read(self.cache))
+            # The rewrite repeats the same bytes, so pin the inodes instead: each
+            # write renames fresh temps into place, and skipping the exit write
+            # would leave save()'s inodes in place.
+            inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+            self._assert_serves()
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), saved)
+        rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        self.assertNotEqual(rewritten, inodes)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_rewrite_replaces_the_previous_pair(self):
+        first = self._write_pair()[1]
+        with self._capture(backend="inductor") as cap:
+            cap(self.model, self.x)
+        self.assertNotEqual(self._read(self.cache), first)
+        self._assert_serves()
+        self.assertEqual(self._leftovers(), [])
+
+    def test_same_file_for_both_halves_is_refused(self):
+        # Also when the two halves are two SPELLINGS of one path, one of them bytes:
+        # the cache write would truncate the source half, so the comparison is on the
+        # fsdecoded resolved paths, not the strings the caller passed.
+        pairs = (
+            (self.artifact, self.artifact),
+            (self.artifact, os.path.join(self.dir, ".", "m.py")),
+            (self.artifact, os.path.relpath(self.artifact)),
+            (os.fsencode(self.artifact), self.artifact),
+        )
+        for artifact_path, cache_path in pairs:
+            with self.assertRaisesRegex(ValueError, "same file"):
+                self._capture(artifact_path=artifact_path, cache_path=cache_path)
+            with self.assertRaisesRegex(ValueError, "same file"):
+                torch.compiler.precompile.load(artifact_path, cache_path)
+
+    def test_a_directory_for_either_half_is_refused(self):
+        # Refused up front for either half, which is an earlier and clearer error
+        # than the writer's own refusal.
+        for path in (self.artifact, self.cache):
+            os.mkdir(path)
+            with open(os.path.join(path, "keep.txt"), "w", encoding="utf-8") as f:
+                f.write("mine")
+            with self.assertRaisesRegex(ValueError, "not a regular file"):
+                self._capture()
+            with self.assertRaisesRegex(ValueError, "not a regular file"):
+                torch.compiler.precompile.load(self.artifact, self.cache)
+            # And the writer itself refuses a directory that appears after the
+            # up-front check: os.link re-raises EPERM for the source half, and the
+            # cache half fails its rename with the source half installed, so the
+            # undo removes that orphan.
+            with self.assertRaises(OSError):
+                torch._precompile._write_artifact(self.artifact, self.cache, "x", b"y")
+            self.assertEqual(os.listdir(path), ["keep.txt"])
+            self.assertFalse(os.path.isfile(self.artifact))
+            self.assertEqual(self._leftovers(), [])
+            os.remove(os.path.join(path, "keep.txt"))
+            os.rmdir(path)
+
+    def test_non_tracer_is_refused(self):
+        with self.assertRaisesRegex(TypeError, "must be a MakeFxTracer"):
+            self._capture(tracer="make_fx")
+
+    def test_unknown_backend_is_refused(self):
+        msg = "backend must be 'inductor' or 'eager'"
+        with self.assertRaisesRegex(ValueError, msg):
+            self._capture(backend="nope")
+
+    def test_graph_devices_come_from_the_graph_not_the_inputs(self):
+        # GRAPH_DEVICES is scanned from the graph: fn here takes no tensor at all, so a
+        # scan of the runtime arguments would find no device to neutralize autocast on.
+        def fn(n):
+            return torch.ones(4) * n
+
+        with self._capture(fn) as cap:
+            cap(3)
+        self.assertIn("GRAPH_DEVICES = ('cpu',)", self._read(self.artifact).decode())
+
+    def test_served_output_ignores_ambient_autocast(self):
+        # eager only: this model lowers to extern_kernels.addmm(..., out=buf0), whose
+        # out= overload has no CPU autocast registration, so the inductor artifact
+        # cannot observe the ambient state (the extern-kernel test below covers it).
+        with self._capture(backend="eager") as cap:
+            y = cap(self.model, self.x)
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+            z = served(self.model, self.x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_served_extern_kernel_ignores_ambient_autocast(self, backend):
+        # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
+        # CPU autocast and which the inductor artifact calls as a fallback: without
+        # _autocast_off the served call casts a second time and comes back in
+        # bfloat16 (or, as here, fails inside oneDNN on the mixed-dtype primitive).
+        model = torch.nn.LSTM(8, 8, batch_first=True)
+        x = torch.randn(2, 3, 8)
+
+        def fn(m, t):
+            return m(t)[0]
+
+        with self._capture(fn, backend=backend) as cap:
+            y = cap(model, x)
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("device", ("notadevice", "privateuseone", "mkldnn"))
+    def test_an_unautocastable_graph_device_still_serves(self, device):
+        # GRAPH_DEVICES is unfiltered, so the serving build decides: a device type it
+        # cannot parse makes is_autocast_available raise, a deprecated spelling it does
+        # parse makes it emit a UserWarning, and an out-of-tree backend with no autocast
+        # module reports available then refuses to construct. Each is skipped, not failed
+        # on. mkldnn's warning is TORCH_WARN_ONCE, so it reaches the Warning arm of the
+        # catch only on the first parse in the process and takes the not-available route
+        # to the same skip after that; the test below covers that arm every run.
+        with self._capture() as cap:
+            y = cap(self.model, self.x)
+        source = self._read(self.artifact).decode()
+        patched = source.replace(
+            "GRAPH_DEVICES = ('cpu',)", f"GRAPH_DEVICES = ('cpu', {device!r})"
+        )
+        self.assertNotEqual(patched, source)
+        blob = torch.load(self.cache, weights_only=True)
+        blob["code_hash"] = hashlib.sha256(patched.encode()).hexdigest()
+        with open(self.artifact, "wb") as f:
+            f.write(patched.encode())
+        torch.save(blob, self.cache)
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            # Announced rather than silent: on a device the build DOES know, the same
+            # skip would mean the served call casts twice. Through logging, not warnings,
+            # so no served call can raise under an error filter.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
+                    z = served(self.model, self.x)
+                self.assertIn("cannot autocast the captured", "".join(logs.output))
+                # Not once per served call.
+                with self.assertNoLogs("torch._precompile_driver", "WARNING"):
+                    self.assertEqual(served(self.model, self.x), z)
+            # ...and not once per PROCESS either: the report-once set is emitted into
+            # the artifact, so a second load of the same pair reports again.
+            with self.assertLogs("torch._precompile_driver", "WARNING"):
+                torch.compiler.precompile.load(self.artifact, self.cache)(
+                    self.model, self.x
+                )
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    def test_a_warning_from_the_device_probe_is_a_skip(self):
+        # The Warning arm of _autocast_off's catch, which the mkldnn case above reaches
+        # only on the first parse in the process (TORCH_WARN_ONCE). Raise the warning
+        # from the probe instead, so the arm runs whatever else touched that device.
+        from torch import _precompile_driver
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with mock.patch.object(
+                _precompile_driver, "_AUTOCAST_SKIPS_REPORTED", set()
+            ):
+                with mock.patch(
+                    "torch.amp.is_autocast_available",
+                    side_effect=UserWarning("no longer used as device type"),
+                ):
+                    with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
+                        with _precompile_driver._autocast_off(("cpu", "notreal")):
+                            # Skipped, so the caller's region is still casting.
+                            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+        self.assertIn("'cpu', 'notreal'", "".join(logs.output))
+
+    def test_autocast_off_unwinds_a_failure_partway_through(self):
+        # The disables already entered have to come back out if the stack is not
+        # built to the end: the emitted driver hands the stack to the caller's
+        # `with`, so a leaked entry silently stops the caller autocasting.
+        from torch import _precompile_driver
+
+        real_autocast = torch.amp.autocast
+        entered = []
+
+        def autocast(device_type, **kwargs):
+            entered.append(device_type)
+            if len(entered) == 2:
+                raise KeyboardInterrupt("interrupted partway through")
+            return real_autocast(device_type, **kwargs)
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with mock.patch("torch.amp.autocast", autocast):
+                with self.assertRaises(KeyboardInterrupt):
+                    _precompile_driver._autocast_off(("cpu", "cuda"))
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+
+    @parametrize("backend", ("eager", "inductor"))
+    @unittest.skipUnless(TEST_CUDA, "CUDA has its own autocast policy and dtype")
+    def test_served_output_ignores_ambient_cuda_autocast(self, backend):
+        # Autocast is per device -- CUDA picks float16 and has its own op allowlist --
+        # so the neutralization is covered there too, on both drivers. The graph's
+        # aten.addmm.default IS registered for CUDA autocast, so without it the
+        # served call would come back in float16.
+        model = _FilesModel().cuda()
+        x = torch.randn(2, 4, device="cuda")
+        with self._capture(backend=backend) as cap:
+            y = cap(model, x)
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        with torch.autocast("cuda", dtype=torch.float16):
+            self.assertEqual(model(x).dtype, torch.float16)
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_batchnorm_running_stats_update_once(self, backend):
+        bn = torch.nn.BatchNorm1d(4)
+        ref = copy.deepcopy(bn)
+        x = torch.randn(8, 4)
+        with self._capture(backend=backend) as cap:
+            y = cap(bn, x)
+        self.assertEqual(y, ref(x))
+        self.assertEqual(bn.num_batches_tracked, ref.num_batches_tracked)
+        self.assertEqual(bn.running_mean, ref.running_mean)
+        self.assertEqual(bn.running_var, ref.running_var)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_training_captures_the_backward(self, backend):
+        ref = copy.deepcopy(self.model)
+        _files_train_step(ref, self.x)
+        with self._capture(_files_train_step, backend=backend, training=True) as cap:
+            y = cap(self.model, self.x)
+        self.assertFalse(y.requires_grad)
+        self.assertEqual(self.model.lin.weight.grad, ref.lin.weight.grad)
+        self.assertEqual(self.model.lin.bias.grad, ref.lin.bias.grad)
+        with torch.enable_grad(), self._capture(backend=backend) as cap:
+            self.assertFalse(cap(self.model, self.x).requires_grad)
+
+    def test_a_backward_without_training_points_at_training_true(self):
+        # training=False traces under no_grad, so nothing fn's .backward() sees has a
+        # grad_fn and autograd raises; the capture re-reports that as a refusal
+        # naming the switch that fixes it.
+        with self.assertRaisesRegex(PrecompileError, "Pass training=True") as cm:
+            with self._capture(_files_train_step) as cap:
+                cap(self.model, self.x)
+        self.assertIn("does not require grad", str(cm.exception.__cause__))
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_a_frozen_parameter_backward_is_not_blamed_on_training(self):
+        # Autograd raises the same "does not require grad" when nothing fn differentiates
+        # requires grad (here every parameter is frozen), which training=True does not
+        # fix, so its own error stands unrelabelled.
+        model = _FilesModel().requires_grad_(False)
+        with self.assertRaisesRegex(RuntimeError, "does not require grad") as cm:
+            with self._capture(_files_train_step) as cap:
+                cap(model, self.x)
+        self.assertNotIsInstance(cm.exception, PrecompileError)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_served_output_requires_grad_contract(self, backend):
+        # The documented contract: an output that IS an input comes back as that same
+        # tensor, a computed output requires no grad, and an ALIASING output is a view
+        # rebuilt at serve time -- off the runtime input by eager (so it takes its
+        # requires_grad), with the capture's value baked in by inductor.
+        def fn(t):
+            return t, t.t(), t * 2
+
+        with self._capture(fn, backend=backend) as cap:
+            cap(torch.randn(2, 3, requires_grad=True))
+        x = torch.randn(2, 3)
+        same, view, computed = torch.compiler.precompile.load(
+            self.artifact, self.cache
+        )(x)
+        self.assertIs(same, x)
+        self.assertFalse(computed.requires_grad)
+        self.assertIs(view._base, x)
+        self.assertEqual(view.requires_grad, backend == "inductor")
+
+    def test_training_captures_the_backward_under_ambient_no_grad(self):
+        # training= selects grad mode for the captured call whatever the caller's
+        # ambient mode, so a training step captured inside no_grad still carries its
+        # backward and the served gradients match the eager ones, rather than merely
+        # being present.
+        ref = copy.deepcopy(self.model)
+        _files_train_step(ref, self.x)
+        with torch.no_grad():
+            with self._capture(_files_train_step, training=True) as cap:
+                cap(self.model, self.x)
+        # precompile.capture() runs the call for real, so the grads standing on the
+        # model now ARE the ones the captured backward produced under the ambient
+        # no_grad.
+        self.assertEqual(self.model.lin.weight.grad, ref.lin.weight.grad)
+        self.assertEqual(self.model.lin.bias.grad, ref.lin.bias.grad)
+        self.model.zero_grad()
+        torch.compiler.precompile.load(self.artifact, self.cache)(self.model, self.x)
+        self.assertEqual(self.model.lin.weight.grad, ref.lin.weight.grad)
+        self.assertEqual(self.model.lin.bias.grad, ref.lin.bias.grad)
+
+    def test_a_failed_cache_rename_restores_the_previous_pair(self):
+        # The first rename landed, so the undo renames the backup back over the new
+        # source, which consumes the .bak and leaves the trailing unlink a no-op. A
+        # failing FIRST rename is the other shape (nothing to put back: the named
+        # artifact still IS the hard-linked previous source), covered by
+        # test_a_read_only_first_rename_leaves_the_previous_pair_intact.
+        before = self._write_pair()
+        with self._replacing(self.cache, exc=OSError("disk full")):
+            self._rewrite_raises(OSError, "disk full")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_a_failed_exit_write_leaves_the_capture_savable(self):
+        # The block is over, but a write that RAISED (here ENOSPC on the first rename)
+        # left the files untouched and the render in memory, so save() retries the
+        # write: a transient failure does not cost a re-trace and re-lower.
+        cap = self._capture()
+        no_space = OSError(errno.ENOSPC, "no space left")
+        with self._replacing(self.artifact, exc=no_space):
+            with self.assertRaisesRegex(OSError, "no space left"):
+                with cap:
+                    cap(self.model, self.x)
+        self.assertEqual(os.listdir(self.dir), [])
+        cap.save()
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+        # Spent for tracing all the same, and the retry route closes with the write.
+        with self.assertRaisesRegex(PrecompileError, "capture is spent"):
+            with cap:
+                pass
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap.save()
+
+    @parametrize("half", ("artifact", "cache"))
+    def test_a_failed_rename_on_a_first_write_leaves_nothing_named(self, half):
+        # No previous pair to restore, so the undo takes the new artifact back out from
+        # under its name: a first write cannot leave a named source with no cache beside
+        # it, and there is no broken pair to report either.
+        no_space = OSError(errno.ENOSPC, "no space left")
+        with self._replacing(getattr(self, half), exc=no_space):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "no space left", backend="eager")
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_a_second_writers_pair_is_not_undone(self):
+        # Two writers: this one's first rename landed and then ANOTHER writer installed
+        # its whole pair before this one's second rename failed. The artifact name is no
+        # longer this call's, so the undo leaves that pair alone (restoring would put a
+        # THIRD, older source beside the other writer's cache) and reports nothing.
+        self._write_pair()
+        other = torch.nn.Linear(4, 3)
+        w2 = (os.path.join(self.dir, "w.py"), os.path.join(self.dir, "w.cache"))
+        with self._capture(artifact_path=w2[0], cache_path=w2[1]) as cap:
+            cap(other, self.x)
+        w2_bytes = (self._read(w2[0]), self._read(w2[1]))
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if dst != self.cache:
+                return real_replace(src, dst)
+            # The other writer lands both halves in the window between this writer's
+            # two renames.
+            real_replace(w2[0], self.artifact)
+            real_replace(w2[1], self.cache)
+            raise OSError(errno.ENOSPC, "no space left")
+
+        with mock.patch("os.replace", replace):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "no space left")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), w2_bytes)
+        self.assertEqual(self._leftovers(), [])
+        served = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertEqual(served(other, self.x), other(self.x))
+
+    def test_rewrite_without_hard_links(self):
+        first = self._write_pair()[1]
+        link_fails = OSError(errno.EOPNOTSUPP, "no hard links")
+        with mock.patch("os.link", side_effect=link_fails):
+            with self._capture(backend="inductor") as cap:
+                cap(self.model, self.x)
+        self.assertNotEqual(self._read(self.cache), first)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+        # An os.link failure that does NOT mean "no hard links on this filesystem" says
+        # something about the path, so it is raised rather than papered over by moving
+        # whatever is there aside. It fails before either rename: nothing to report.
+        with mock.patch("os.link", side_effect=OSError(errno.EIO, "io error")):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "io error", backend="eager")
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_double_failure_without_hard_links_keeps_the_previous_source(self):
+        # No hard links, so the previous source was MOVED to the backup; then the rename
+        # into place fails AND so does the undo that would put it back, so the backup
+        # holds its only copy. It survives, named by the warning.
+        before = self._write_pair()[0]
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with self._replacing(self.artifact, exc=OSError("disk full"), once=False):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    self._rewrite_raises(OSError, "disk full")
+        self.assertFalse(os.path.exists(self.artifact))
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+
+    def test_double_failure_on_the_second_rename_keeps_the_previous_source(self):
+        # Hard link taken, the artifact rename lands, the cache rename fails and the
+        # undo fails too: the named pair is the new source beside the previous cache,
+        # which load refuses, so the previous source stays in the backup.
+        before = self._write_pair()[0]
+        before_cache = self._read(self.cache)
+        real_replace = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if dst == self.cache:
+                raise OSError("disk full")
+            if len(calls) > 1:
+                raise OSError("undo failed")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                self._rewrite_raises(OSError, "disk full")
+        self.assertNotEqual(self._read(self.artifact), before)
+        self.assertEqual(self._read(self.cache), before_cache)
+        with self.assertRaisesRegex(PrecompileError, "different precompile captures"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+
+    def test_a_read_only_first_rename_leaves_the_previous_pair_intact(self):
+        # A read-only remount: the artifact rename fails, and so would the undo. The
+        # backup is a hard LINK, so the named artifact still IS the previous source
+        # and the cache was never touched: nothing to undo, nothing to report, no .bak.
+        before = self._write_pair()
+        read_only = OSError(errno.EROFS, "read-only file system")
+        with self._replacing(self.artifact, self.cache, exc=read_only, once=False):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "read-only file system")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_a_first_write_that_cannot_be_undone_warns_about_the_orphan(self):
+        # A FIRST write whose cache rename failed and whose undo then failed leaves a
+        # named artifact with no cache beside it, exactly the state the report exists
+        # to announce even though there was no previous pair.
+        real_unlink = os.unlink
+        no_space = OSError(errno.ENOSPC, "no space left")
+
+        def unlink(path):
+            if path == self.artifact:
+                raise OSError(errno.EPERM, "cannot unlink")
+            return real_unlink(path)
+
+        with self._replacing(self.cache, exc=no_space), mock.patch("os.unlink", unlink):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                self._rewrite_raises(OSError, "no space left", backend="eager")
+        self.assertTrue(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertTrue(
+            any("has no cache beside it" in m for m in logs.output), logs.output
+        )
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupted_undo_keeps_the_previous_source(self):
+        # The undo can be cut short by a KeyboardInterrupt rather than an OSError, and
+        # the rename is then just as undone. Without hard links the backup holds the
+        # previous source's only copy, so it survives that too and the warning names it.
+        before = self._write_pair()[0]
+        real_replace = os.replace
+        installs = []
+
+        def replace(src, dst):
+            if dst != self.artifact:
+                return real_replace(src, dst)
+            installs.append(src)
+            if len(installs) == 1:
+                raise OSError("disk full")
+            raise KeyboardInterrupt("interrupted during the undo")
+
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with mock.patch("os.replace", replace):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertFalse(os.path.exists(self.artifact))
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+
+    def test_an_interrupt_after_the_move_aside_restores_the_name(self):
+        # Taking the backup has that window too: without hard links the previous source
+        # is MOVED aside, so an interrupt after os.replace returned leaves the artifact
+        # NAME gone -- a flag set after that call left the caller's path empty, silently.
+        before = self._write_pair()
+        cut = KeyboardInterrupt("interrupted after the move aside")
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with self._replacing(self.artifact, exc=cut, after=True, by_src=True):
+                with self.assertNoLogs("torch._precompile", level="WARNING"):
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupt_after_the_hard_link_drops_the_backup(self):
+        # The same window on the hard-link path: the .bak is already a link to the
+        # previous source, and a flag that read "no backup" skipped the cleanup and left
+        # it pinning that inode forever. The named pair is untouched, so it just goes.
+        before = self._write_pair()
+        real_link = os.link
+
+        def link(src, dst):
+            real_link(src, dst)
+            raise KeyboardInterrupt("interrupted after the hard link")
+
+        with mock.patch("os.link", link):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupt_after_the_first_rename_restores_the_previous_source(self):
+        # A KeyboardInterrupt is raised at the bytecode after os.replace RETURNED, so the
+        # first rename can have landed with a flag that records it still unset. Reading
+        # that flag rather than the disk called this a write that never started and
+        # unlinked the backup -- with hard links, the previous source's last link.
+        before = self._write_pair()
+        before_ino = os.stat(self.artifact).st_ino
+        cut = KeyboardInterrupt("interrupted after the first rename")
+        with self._replacing(self.artifact, exc=cut, after=True):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(os.stat(self.artifact).st_ino, before_ino)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_an_interrupt_after_the_second_rename_keeps_the_new_pair(self):
+        # The same window one rename later: both halves are already under their names,
+        # so the write SUCCEEDED and there is nothing to undo -- undoing anyway puts
+        # the previous source back beside the new cache, an unloadable pair.
+        before = self._write_pair()
+        cut = KeyboardInterrupt("interrupted after the second rename")
+        with self._replacing(self.cache, exc=cut, after=True):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertNotEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_an_interrupt_after_the_undos_rename_reports_nothing(self):
+        # The undo's OWN os.replace has that window too: the previous source is back under
+        # its name and the .bak it came from is consumed, while the flag that records the
+        # undo still reads False. Reporting off that flag named a gone .bak, so it reads
+        # the disk.
+        before = self._write_pair()
+        before_ino = os.stat(self.artifact).st_ino
+        real_replace = os.replace
+        installs = []
+
+        def replace(src, dst):
+            if dst == self.cache:
+                raise OSError(errno.ENOSPC, "no space left")
+            real_replace(src, dst)
+            if installs:
+                raise KeyboardInterrupt("interrupted after the undo's rename")
+            installs.append(dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(os.stat(self.artifact).st_ino, before_ino)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_an_interrupt_after_the_undos_unlink_reports_nothing(self):
+        # The same window on a FIRST write, whose undo unlinks the orphan artifact
+        # instead: the file the report would name is already gone, so there is
+        # nothing left to announce.
+        real_unlink = os.unlink
+        no_space = OSError(errno.ENOSPC, "no space left")
+
+        def unlink(path):
+            real_unlink(path)
+            if path == self.artifact:
+                raise KeyboardInterrupt("interrupted after the undo's unlink")
+
+        with self._replacing(self.cache, exc=no_space), mock.patch("os.unlink", unlink):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted", backend="eager")
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertEqual(os.listdir(self.dir), [])
+
+    @unittest.skipIf(sys.platform == "win32", "chmod does not set a POSIX mode there")
+    def test_a_rewrite_preserves_the_previous_modes(self):
+        # os.replace repoints the name at the temp's inode, so a rewrite would carry
+        # the temp's umask-derived mode onto the pair and silently widen a mode the
+        # caller set. Both halves keep theirs instead.
+        self._write_pair()
+        for path in (self.artifact, self.cache):
+            os.chmod(path, 0o600)
+        with self._capture(backend="inductor") as cap:
+            cap(self.model, self.x)
+        for path in (self.artifact, self.cache):
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600, path)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_a_failed_directory_fsync_does_not_fail_the_write(self):
+        # The directory fsync is best effort: a directory fd cannot be fsync'd
+        # everywhere, and by then both renames have returned, so there is nothing to
+        # undo and nothing to retry.
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EINVAL, "no fsync on a directory")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            with self._capture() as cap:
+                cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+        self._assert_serves()
+
+    def test_a_failed_temp_fsync_leaves_no_scratch_files(self):
+        # The fsync of a scratch file is NOT best effort: unflushed bytes would be
+        # renamed into place, so it propagates -- with every scratch file removed and
+        # both named halves untouched.
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EIO, "fsync failed")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            self._rewrite_raises(OSError, "fsync failed", backend="eager")
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_partial_binding_a_module_or_tensor_is_refused(self):
+        # A bound model or tensor never reaches the call-argument scan, so its
+        # params would bake into the graph as constants; the refusal names that.
+        for fn in (
+            functools.partial(_files_fn, self.model),
+            functools.partial(_files_fn, x=self.x),
+        ):
+            with self.assertRaisesRegex(PrecompileError, "binds a tensor or an"):
+                self._capture(fn)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_a_partial_binding_a_scalar_is_captured(self):
+        # Only a bound tensor / module is the hazard, so a partial that binds a
+        # plain scalar captures and serves like any other callable.
+        def fn(model, x, alpha):
+            return model(x) * alpha
+
+        with self._capture(functools.partial(fn, alpha=0.5)) as cap:
+            y = cap(self.model, self.x)
+        expected = self.model(self.x) * 0.5
+        self.assertEqual(y, expected)
+        self.assertEqual(
+            torch.compiler.precompile.load(self.artifact, self.cache)(
+                self.model, self.x
+            ),
+            expected,
+        )
+
+    def test_mismatched_pair_is_refused(self):
+        self._write_pair()
+        with open(self.artifact, "a", encoding="utf-8") as f:
+            f.write("\n# edited\n")
+        with self.assertRaisesRegex(PrecompileError, "code_hash"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+
+    def test_unreadable_cache_falls_back_to_python_code(self):
+        self._write_pair()
+        with open(self.cache, "wb") as f:
+            f.write(b"not a torch.save envelope")
+        with self.assertLogs("torch._precompile", level="WARNING") as logs:
+            f = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertTrue(
+            any(":precompile.load could not read the cache" in m for m in logs.output)
+        )
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def test_non_literal_metadata_is_refused(self):
+        self._write_pair()
+        source = self._read(self.artifact).decode()
+        self.assertIn("BACKEND = 'eager'", source)
+        with open(self.artifact, "wb") as f:
+            f.write(source.replace("BACKEND = 'eager'", "BACKEND = str(1)").encode())
+        # The metadata parse runs ahead of the cache pairing check, so this is the
+        # error the caller sees even though the edit also broke the code_hash.
+        with self.assertRaisesRegex(PrecompileError, "must be a Python literal"):
+            torch.compiler.precompile.load(self.artifact, self.cache)
+
+    def test_unreadable_paths_are_reported_as_precompile_errors(self):
+        self._write_pair()
+        missing = os.path.join(self.dir, "gone.py")
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile.load(missing, self.cache)
+        self.assertIn("could not read the artifact pair", str(cm.exception))
+        # The message renders both paths with !r, and a Windows path's repr doubles
+        # its backslashes, so compare against the repr rather than the raw string.
+        self.assertIn(repr(missing), str(cm.exception))
+        self.assertIn(repr(self.cache), str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, FileNotFoundError)
+        # A value that is not a path at all reaches the same diagnostic.
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile.load("x" * 5000, self.cache)
+        self.assertIsInstance(cm.exception.__cause__, OSError)
+
+    def test_transposed_paths_are_reported_as_precompile_errors(self):
+        # load takes two same-typed positional paths, so the likeliest caller
+        # mistake is swapping them: the cache's binary envelope then fails to
+        # decode as source, and that has to name both paths too.
+        self._write_pair()
+        with self.assertRaises(PrecompileError) as cm:
+            torch.compiler.precompile.load(self.cache, self.artifact)
+        self.assertIn("could not read the artifact pair", str(cm.exception))
+        self.assertIn(repr(self.artifact), str(cm.exception))
+        self.assertIn(repr(self.cache), str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
+
+    def test_paths_come_in_pairs(self):
+        # Half a pair never loads, so both entry points refuse one up front, before fn
+        # runs (the same file for both halves is refused too, above).
+        both = "neither artifact_path nor cache_path"
+        cases = [
+            ((self.artifact, None), "artifact_path without cache_path"),
+            ((None, self.cache), "cache_path without artifact_path"),
+            ((None, None), both),
+        ]
+        for (artifact, cache), regex in cases:
+            with self.assertRaisesRegex(ValueError, regex):
+                self._capture(artifact_path=artifact, cache_path=cache)
+            with self.assertRaisesRegex(ValueError, regex):
+                torch.compiler.precompile.load(artifact, cache)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_call_outside_the_block_is_refused(self):
+        # Only the block exit writes the files, so a call made without entering
+        # would trace and serve and then write nothing.
+        cap = self._capture()
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_call_after_the_block_is_refused(self):
+        # The block already wrote the pair, so a later call would trace and serve
+        # and write nothing; it is not the single-call refusal.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_call_after_a_caught_empty_exit_is_refused(self):
+        # A caller that catches the nothing-was-captured raise and calls anyway
+        # must be refused too: the exit is over, so nothing would be written.
+        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
+            with self._capture() as cap:
+                pass
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_save_outside_the_block_is_refused(self):
+        # The render survives a block that raised, so save() is gated on the block
+        # being live exactly like __call__ is; otherwise it writes the pair the
+        # exit deliberately refused to write.
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with self._capture() as cap:
+                cap(self.model, self.x)
+                raise RuntimeError("boom")
+        with self.assertRaisesRegex(PrecompileError, r"call save\(\) inside"):
+            cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_the_block_is_entered_once(self):
+        # Single-shot in both directions: a nested block would deactivate the
+        # capture on its own exit, mid-use, and a second block would rewrite both
+        # files from the render the first one already wrote.
+        with self._capture() as cap:
+            with self.assertRaisesRegex(PrecompileError, "not re-entrant"):
+                with cap:
+                    pass
+            cap(self.model, self.x)
+        # The rewrite would repeat the same bytes, so pin the inodes: each write
+        # renames fresh temps into place.
+        inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        with self.assertRaisesRegex(PrecompileError, "capture is spent"):
+            with cap:
+                pass
+        rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        self.assertEqual(rewritten, inodes)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_failed_trace_is_reported_as_a_failed_trace(self):
+        # The single-call flag counts a RENDER, not an attempt: after a trace that raised
+        # nothing was captured, so the retry must describe the failed trace rather than
+        # claim a call was already captured, and save() / the clean exit must not tell
+        # the caller to call a capture it did call.
+        def data_dependent(model, x):
+            return model(x) * x.sum().item()
+
+        cap = self._capture(data_dependent)
+        with self.assertRaisesRegex(PrecompileError, "raised before it rendered"):
+            with cap:
+                with self.assertRaisesRegex(PrecompileError, "data-dependent"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "already ran and raised"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "raised before it"):
+                    cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_tracer_decompositions_are_used(self):
+        # MakeFxTracer.decompositions reaches make_fx through precompile.capture(): the
+        # custom decomposition runs during the capture and the pair still serves eager.
+        called = []
+
+        def my_relu_decomp(x):
+            called.append(True)
+            return (x > 0) * x
+
+        decomps = {torch.ops.aten.relu.default: my_relu_decomp}
+        with self._capture(tracer=MakeFxTracer(decompositions=decomps)) as cap:
+            y = cap(self.model, self.x)
+        self.assertTrue(called)  # the table was used during capture
+        self.assertEqual(y, self.model(self.x))
+        self._assert_serves()
+
+    def test_loaded_artifact_honors_the_standalone_contract(self):
+        # The documented contract for installed=False: __enter__ hands back the
+        # same handle, unload() takes nothing out (so it is idempotent), and the
+        # handle serves the same result before, inside and after the block.
+        self._write_pair()
+        f = torch.compiler.precompile.load(self.artifact, self.cache)
+        self.assertIsInstance(f, PrecompiledRunnable)
+        self.assertFalse(f.installed)
+        expected = self.model(self.x)
+        with f as entered:
+            self.assertIs(entered, f)
+            self.assertEqual(f(self.model, self.x), expected)
+        self.assertFalse(f.installed)
+        self.assertEqual(f(self.model, self.x), expected)
+        f.unload()
+        f.unload()
+        self.assertEqual(f(self.model, self.x), expected)
+
+    def test_missing_parent_directories_are_created(self):
+        nested = os.path.join(self.dir, "a", "b")
+        artifact = os.path.join(nested, "m.py")
+        cache = os.path.join(nested, "m.cache")
+        with self._capture(artifact_path=artifact, cache_path=cache) as cap:
+            cap(self.model, self.x)
+        self.assertEqual(
+            torch.compiler.precompile.load(artifact, cache)(self.model, self.x),
+            self.model(self.x),
+        )
+
+    def test_carriage_return_in_the_artifact_round_trips(self):
+        # The pair goes out and comes back as bytes, so a \r in python_code is not
+        # translated on the way in and the cache's code_hash over it still matches.
+        # Written through _write_artifact, the writer under test, not a raw open.
+        self._write_pair()
+        code = self._read(self.artifact).decode() + "# a trailing comment\r\n"
+        blob = torch.load(self.cache, weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code.encode()).hexdigest()
+        buf = io.BytesIO()
+        torch.save(blob, buf)
+        torch._precompile._write_artifact(
+            self.artifact, self.cache, code, buf.getvalue()
+        )
+        self.assertIn(b"\r\n", self._read(self.artifact))
+        self._assert_serves()
+
+    def test_module_is_not_callable(self):
+        with self.assertRaisesRegex(TypeError, "not callable"):
+            torch.compiler.precompile(_files_fn, self.model, self.x)
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
@@ -2082,11 +3823,20 @@ class TestPrecompileNumerics(TestCase):
 
         a = make_tensor((4, 4), device=device, dtype=torch.float32)
         b = make_tensor((4, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(f, a, b)
-        self.assertIsInstance(code, str)
-        self.assertIsInstance(cache, bytes)
+        with _CaptureToFiles(f) as cap:
+            cap(a, b)
+        # Both halves were written with content (the adapter reads them back from
+        # disk), and the cache carries a compiled artifact on this device (an
+        # uncacheable capture leaves artifact None, which would silently push every
+        # load below onto the inlined path). The envelope's key set is
+        # device-independent and pinned by test_cache_holds_only_artifact.
+        code, cache = cap.result()
+        self.assertGreater(len(code), 0)
+        self.assertGreater(len(cache), 0)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertIsNotNone(blob["artifact"])
 
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         out = f_c(a, b)
         ref = f(a, b)
         self.assertEqual(out[0], ref[0])
@@ -2104,8 +3854,10 @@ class TestPrecompileNumerics(TestCase):
 
         m = M().to(device).eval()
         x = make_tensor((5, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_multiple_module_args(self, device):
@@ -2116,14 +3868,14 @@ class TestPrecompileNumerics(TestCase):
         x = make_tensor((2, 4), device=device, dtype=torch.float32)
         ref = b(torch.relu(a(x)))
 
-        code, cache = torch.compiler.precompile(
-            lambda ma, mb, x: mb(torch.relu(ma(x))), a, b, x
-        )
+        with _CaptureToFiles(lambda ma, mb, x: mb(torch.relu(ma(x)))) as cap:
+            cap(a, b, x)
+        code, cache = cap.result()
         self.assertIn(
             "PARAM_NAMES = ['m0.weight', 'm0.bias', 'm1.weight', 'm1.bias']", code
         )
 
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(a, b, x), ref)
 
     def test_inplace_on_intermediate_is_allowed(self, device):
@@ -2132,8 +3884,10 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU(inplace=True))
         m.to(device).eval()
         x = make_tensor((5, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_training_backward_harvest_matches_eager(self, device):
@@ -2157,8 +3911,14 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, model, x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(model, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract), so the example
+        # model already carries one backward; reset so what we measure below is the
+        # loaded artifact's own scatter, matching one eager step.
+        model.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
 
         # The model is passed at runtime (no weights baked); the artifact mutates
         # model.parameters().grad in place, returning fn's result (None).
@@ -2203,8 +3963,13 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, model, x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(model, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's scatter, matching one eager step.
+        model.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         f_c(model, x, target)
         for (n, p), (_, rp) in zip(model.named_parameters(), ref.named_parameters()):
             if rp.grad is None:
@@ -2230,8 +3995,14 @@ class TestPrecompileNumerics(TestCase):
         def train_step(ma, mb, x, target):
             loss_fn(mb(torch.relu(ma(x))), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, a, b, x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(a, b, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset both
+        # models so the check sees only the loaded artifact's scatter.
+        a.zero_grad(set_to_none=True)
+        b.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         f_c(a, b, x, target)
         for (n, p), (_, rp) in zip(a.named_parameters(), ref_a.named_parameters()):
             if rp.grad is None:
@@ -2259,8 +4030,10 @@ class TestPrecompileNumerics(TestCase):
         m = Tied().to(device)
         x = make_tensor((3, 4), device=device, dtype=torch.float32)
 
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
         # The tied weight is lifted once (single name), so it is one graph input.
         self.assertIn("PARAM_NAMES = ['a.weight']", code)
@@ -2271,10 +4044,15 @@ class TestPrecompileNumerics(TestCase):
         ref(x).sum().backward()
         ref_grad = ref.a.weight.grad
 
-        code, cache = torch.compiler.precompile(
-            lambda model, x: model(x).sum().backward(), m, x
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(
+            lambda model, x: model(x).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's single scatter onto the tie.
+        m.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         f_c(m, x)
         self.assertEqual(m.a.weight.grad, ref_grad)
         # The tie means a.weight and b.weight are the same object, so b sees it too.
@@ -2287,8 +4065,10 @@ class TestPrecompileNumerics(TestCase):
 
         a = make_tensor((4, 4), device=device, dtype=torch.float32)
         b = make_tensor((4, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(f, a, b, backend="eager")
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(f, backend="eager") as cap:
+            cap(a, b)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         out = f_c(a, b)
         ref = f(a, b)
         self.assertEqual(out[0], ref[0])
@@ -2298,10 +4078,10 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU())
         m.to(device).eval()
         x = make_tensor((5, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(
-            lambda model, x: model(x), m, x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_backend_eager_training_harvest(self, device):
@@ -2321,10 +4101,13 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(
-            train_step, model, x, target, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, backend="eager", training=True) as cap:
+            cap(model, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's own scatter.
+        model.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         out = f_c(model, x, target)
         self.assertIsNone(out)
         for p, rg in zip(model.parameters(), ref_grads):
@@ -2346,10 +4129,10 @@ class TestPrecompileNumerics(TestCase):
         ref_out = ref(x)
         ref_rm = ref[1].running_mean.clone()
 
-        code, cache = torch.compiler.precompile(
-            lambda m, xx: m(xx), fresh(), x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda m, xx: m(xx), backend="eager") as cap:
+            cap(fresh(), x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         run = fresh()
         self.assertEqual(f_c(run, x), ref_out)
         self.assertEqual(run[1].running_mean, ref_rm)
@@ -2361,8 +4144,10 @@ class TestPrecompileNumerics(TestCase):
             return torch.relu(x).masked_fill(x < 0, float("-inf"))
 
         x = make_tensor((8,), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(f, x, backend="eager")
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(f, backend="eager") as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), f(x))
 
     def test_batchnorm_train_with_backward(self, device):
@@ -2391,8 +4176,10 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, fresh(), x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(fresh(), x, target)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         run = fresh()
         f_c(run, x, target)
         for p, rg in zip(run.parameters(), ref_grads):
@@ -2403,16 +4190,20 @@ class TestPrecompileNumerics(TestCase):
         # An output that is a view of an input goes through AOTAutograd's output-
         # alias epilogue; precompile reproduces it.
         x = make_tensor((2, 3), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda a: a.t(), x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.t()) as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), x.t())
 
     def test_input_mutation_supported(self, device):
         # In-place input mutation is reflected on the passed tensor (and matches
         # eager), via AOTAutograd's mutation handling composed into the artifact.
         scratch = make_tensor((4,), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda a: a.add_(1.0), scratch)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.add_(1.0)) as cap:
+            cap(scratch)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         x = torch.zeros(4, device=device)
         out = f_c(x)
         self.assertEqual(x, torch.ones(4, device=device))
@@ -2429,10 +4220,12 @@ class TestPrecompileNumerics(TestCase):
 
         x = make_tensor((64,), device=device, dtype=torch.float32)
         with functorch_config.patch(functionalize_rng_ops=True):
-            code, cache = torch.compiler.precompile(
-                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
-            )
-            f_c = torch.compiler.precompile.load(code, cache)
+            with _CaptureToFiles(
+                lambda a: torch.nn.functional.dropout(a, 0.5, training=True)
+            ) as cap:
+                cap(x)
+            code, cache = cap.result()
+            f_c = _load_pair(code, cache)
             out = f_c(x)
         self.assertEqual(out.shape, x.shape)
         self.assertTrue((out == 0).any())
@@ -2440,7 +4233,9 @@ class TestPrecompileNumerics(TestCase):
     def test_batchnorm_train_buffer_mutation(self, device):
         # A stateful module (BatchNorm in training mode) mutates its running stats.
         # precompile reflects that onto the runtime model's buffers and matches eager
-        # -- the mutation handling comes from AOTAutograd's codegen.
+        # -- the mutation handling comes from AOTAutograd's codegen -- while the TRACE
+        # leaves the example model's buffers alone (the served call in the block is
+        # what advances them, once).
         def fresh():
             torch.manual_seed(0)
             m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.BatchNorm1d(4))
@@ -2448,15 +4243,26 @@ class TestPrecompileNumerics(TestCase):
             return m.to(device)
 
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), fresh(), x)
+        example = fresh()
+        bn = example[1]
+        with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
+            cap(example, x)
+        code, cache = cap.result()
 
         ref = fresh()
         ref_out = ref(x)
         ref_rm = ref[1].running_mean.clone()
         ref_rv = ref[1].running_var.clone()
         ref_nbt = ref[1].num_batches_tracked.clone()
+        # Capture reparametrizes FAKE params/buffers in (invariant 3), so the trace
+        # leaves the example module's running stats alone; only the one served call
+        # inside the block advances them, exactly as the single eager call above did
+        # (a real-tensor trace would have advanced them a second time).
+        self.assertEqual(bn.running_mean, ref_rm)
+        self.assertEqual(bn.running_var, ref_rv)
+        self.assertEqual(bn.num_batches_tracked, ref_nbt)
 
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         run = fresh()
         out = f_c(run, x)
         self.assertEqual(out, ref_out)
@@ -2471,13 +4277,16 @@ class TestPrecompileNumerics(TestCase):
         # mutated inputs go through AOTAutograd's now-codegen'd synthetic-base wrapper.
         fn = lambda a, b: (a.mul_(2.0), a + b)[1]  # noqa: E731
         t = make_tensor((4,), device=device, dtype=torch.float32)
-        # Clone references BEFORE precompile: capture runs fn once, mutating t.
+        # The capture call serves the artifact it just rendered on the real args, so
+        # cap(t, t) below doubles t in place; take both clones before the block.
         ref = t.clone()
         ref_out = fn(ref, ref)
         run = t.clone()
 
-        code, cache = torch.compiler.precompile(fn, t, t)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(fn) as cap:
+            cap(t, t)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         out = f_c(run, run)
         self.assertEqual(out, ref_out)
 
@@ -2491,14 +4300,16 @@ class TestPrecompileNumerics(TestCase):
         m.to(device).eval()
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)  # dim 0 dynamic
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         blob["artifact"] = None
         buf = io.BytesIO()
         torch.save(blob, buf)
-        f_i = torch.compiler.precompile.load(code, buf.getvalue())
+        f_i = _load_pair(code, buf.getvalue())
         for bs in (8, 16, 1):
             xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
             self.assertEqual(f_c(m, xt), m(xt))  # cached path
@@ -2512,10 +4323,12 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Linear(4, 3).to(device)
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t).sum().backward(), m, x
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(
+            lambda model, t: model(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         for bs in (8, 16, 5):
             run = torch.nn.Linear(4, 3).to(device)
             run.load_state_dict(m.state_dict())
@@ -2535,8 +4348,10 @@ class TestPrecompileNumerics(TestCase):
         y = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0, shape_id="b")
         mark_unbacked(y, 0, shape_id="b")
-        code, cache = torch.compiler.precompile(lambda mm, a, b: mm(a) + b, m, x, y)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, x, y)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         for bs in (8, 16, 3):
             xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
             yt = make_tensor((bs, 4), device=device, dtype=torch.float32)
@@ -2549,9 +4364,11 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Linear(4, 3).to(device).eval()
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0, strict=True)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         for bs in (8, 16, 2):
             xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
             self.assertEqual(f_c(m, xt), m(xt))
@@ -2562,8 +4379,10 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Linear(4, 3).to(device).eval()
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         xt = make_tensor((0, 4), device=device, dtype=torch.float32)
         self.assertEqual(f_c(m, xt), m(xt))
 
@@ -2577,8 +4396,10 @@ class TestPrecompileNumerics(TestCase):
         x = x.to(memory_format=torch.channels_last)
         self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(lambda t: torch.relu(t) * 2.0, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda t: torch.relu(t) * 2.0) as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         xt = make_tensor((5, 3, 4, 4), device=device, dtype=torch.float32)
         xt = xt.to(memory_format=torch.channels_last)
         out = f_c(xt)
@@ -2594,16 +4415,17 @@ class TestPrecompileNumerics(TestCase):
         self.assertFalse(x.is_contiguous())
         mark_unbacked(x, 0)
         with self.assertRaisesRegex(PrecompileError, "memory format"):
-            torch.compiler.precompile(lambda t: t.contiguous() * 2.0, x)
+            with _CaptureToFiles(lambda t: t.contiguous() * 2.0) as cap:
+                cap(x)
 
     def test_eager_backend_input_mutation(self, device):
         # The eager backend replays the raw ATen graph, so input mutation is reflected on
         # the passed tensor and matches eager, like the inductor backend.
         scratch = make_tensor((4,), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(
-            lambda a: a.add_(1.0), scratch, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.add_(1.0), backend="eager") as cap:
+            cap(scratch)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         x = torch.zeros(4, device=device)
         out = f_c(x)
         self.assertEqual(x, torch.ones(4, device=device))
@@ -2613,11 +4435,16 @@ class TestPrecompileNumerics(TestCase):
         # The eager backend reproduces an output that aliases an input (a view), matching
         # eager, via the raw ATen replay.
         x = make_tensor((2, 3), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda a: a.t(), x, backend="eager")
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.t(), backend="eager") as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), x.t())
 
 
+# Device-generic: this instantiates a variant of every method per available device
+# type. The Inductor-backend accelerator variants lower through triton, so in a build
+# without it they error rather than skip.
 instantiate_device_type_tests(TestPrecompileNumerics, globals())
 
 
