@@ -1,14 +1,18 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import errno
 import functools
+import hashlib
 import io
 import os
 import pickle
+import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 import torch
 import torch.utils._pytree as _pytree
@@ -76,6 +80,21 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
+    def test_guard_fact_render(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
+        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
+        # No rendered code falls back to <guard_type>, a value is appended, and
+        # the dropped label pads to the width of "enforced" so lines align.
+        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
+        self.assertEqual(
+            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        )
+        # Several code parts are joined; no source drops the " on ..." suffix.
+        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
+        self.assertEqual(joined.render(), "[enforced] a ; b")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
@@ -1631,13 +1650,14 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "do not match the traced model"):
             f_c(renamed, x)
 
-    def test_example_input_inplace_mutation_not_restored(self):
-        # Capture EXECUTES fn once on the example inputs (invariant 3), so an in-place
-        # mutation fn performs on its example user input happens at capture time and is
-        # NOT restored -- only .grad is snapshotted/restored. Pin this surprising contract
-        # so it stays covered: the example tensor reflects the mutation afterward.
+    def test_example_input_is_not_mutated_by_capture(self):
+        # Capture traces fn on FAKE tensors (invariant 3), so an in-place mutation fn
+        # performs on its example user input never reaches the caller's tensor; the
+        # served artifact is what mutates a real input, exactly once per call.
         scratch = torch.zeros(4)
-        torch.compiler.precompile(lambda a: a.add_(1.0), scratch)
+        python_code, cache = torch.compiler.precompile(lambda a: a.add_(1.0), scratch)
+        self.assertEqual(scratch, torch.zeros(4))
+        torch.compiler.precompile.load(python_code, cache)(scratch)
         self.assertEqual(scratch, torch.ones(4))
 
     @parametrize("path", ("cached", "inlined", "eager"))
@@ -2056,6 +2076,127 @@ class TestPrecompile(TestCase):
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know is refused rather than baked from the example. The distinct
+        # fake-tensor failure paths, each through the public entry point: .item()
+        # (DataDependentOutputException), .nonzero() (DynamicOutputShapeException),
+        # and an op with no meta/fake kernel (UnsupportedOperatorException for a
+        # library op, a RuntimeError naming the missing fake impl for a custom_op).
+        from torch.library import _scoped_library
+
+        model = torch.nn.Linear(4, 4)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        def nonzero(m, x):
+            return m(x)[x[:, 0].nonzero().flatten()]
+
+        for fn in (items, nonzero):
+            with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
+                torch.compiler.precompile(fn, model, torch.randn(3, 4), backend="eager")
+
+        # Both op registrations are global, so undo them: the scoped library takes
+        # its own op with it, and the custom_op's library is destroyed in finally.
+        with _scoped_library("mlprecompile", "FRAGMENT") as lib:
+            lib.define("no_meta(Tensor x) -> Tensor")
+            lib.impl("no_meta", lambda x: x * 2, "CPU")
+
+            @torch.library.custom_op("mlprecompile::no_fake_impl", mutates_args=())
+            def no_fake_impl(x: torch.Tensor) -> torch.Tensor:
+                return x * 2
+
+            try:
+                for op in (torch.ops.mlprecompile.no_meta, no_fake_impl):
+                    with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                        torch.compiler.precompile(
+                            lambda m, x, op=op: op(m(x)),
+                            model,
+                            torch.randn(3, 4),
+                            backend="eager",
+                        )
+            finally:
+                no_fake_impl._lib._destroy()
+
+    def test_capture_refuses_a_data_ptr_read(self):
+        # Capture traces on fake tensors, which have no real memory behind them, so a
+        # .data_ptr() read in fn (or in a kernel that dereferences one) could only
+        # return a meaningless value: the capture fake mode is built with
+        # fake_tensor_allow_unsafe_data_ptr_access off, which turns the read into a
+        # refusal at capture time.
+        model = torch.nn.Linear(4, 4)
+
+        def reads_pointer(m, x):
+            x.data_ptr()
+            return m(x)
+
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            torch.compiler.precompile(
+                reads_pointer, model, torch.randn(3, 4), backend="eager"
+            )
+
+    def test_unfakeifiable_input_refused_without_clobbering_grad(self):
+        # Fakeification runs INSIDE the .grad save/restore window, so an example input
+        # the meta converter cannot represent (a quantized tensor) is refused with a
+        # PrecompileError naming it, and the caller's example .grad is put back -- the
+        # same object, not a copy.
+        model = torch.nn.Linear(3, 3)
+        grad = torch.ones_like(model.weight)
+        model.weight.grad = grad
+        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+        ):
+            torch.compiler.precompile(
+                lambda m, t: m(t.dequantize()), model, q, backend="eager"
+            )
+        self.assertIs(model.weight.grad, grad)
+
+    def test_user_runtime_error_from_fn_propagates_unchanged(self):
+        # Capture catches EVERY RuntimeError out of the trace to relabel the two it
+        # owns (a missing fake impl, a data-pointer read), so a RuntimeError raised by
+        # fn itself must fall through the substring checks and reach the caller with
+        # its ORIGINAL message, not be relabeled as a missing meta/fake kernel.
+        model = torch.nn.Linear(4, 4)
+
+        def raises(m, x):
+            raise RuntimeError("my own capture-time failure")
+
+        args = (raises, model, torch.randn(3, 4))
+        with self.assertRaisesRegex(RuntimeError, "my own capture-time failure"):
+            torch.compiler.precompile(*args, backend="eager")
+        try:
+            torch.compiler.precompile(*args, backend="eager")
+        except RuntimeError as e:
+            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
+            self.assertNotIsInstance(e, PrecompileError)
+            self.assertNotIn("no meta/fake kernel", str(e))
+
+    def test_callable_api_traces_a_backward_under_ambient_no_grad(self):
+        # The callable API keeps grad enabled around the trace whatever the caller's
+        # ambient mode, so a training step captured inside no_grad still carries
+        # its backward and the artifact does not depend on the call site: the served
+        # gradients match the eager ones, not merely being present.
+        torch.manual_seed(0)
+        model = torch.nn.Linear(4, 2)
+        x, t = torch.randn(3, 4), torch.randn(3, 2)
+
+        def step(m, x, t):
+            torch.nn.functional.mse_loss(m(x), t).backward()
+
+        with torch.no_grad():
+            python_code, cache = torch.compiler.precompile(
+                step, model, x, t, backend="eager"
+            )
+        torch.compiler.precompile.load(python_code, cache)(model, x, t)
+        self.assertIsNotNone(model.weight.grad)
+        ref = torch.nn.Linear(4, 2)
+        ref.load_state_dict(model.state_dict())
+        step(ref, x, t)
+        self.assertEqual(model.weight.grad, ref.weight.grad)
+        self.assertEqual(model.bias.grad, ref.bias.grad)
+
 
 class _FilesModel(torch.nn.Module):
     def __init__(self):
@@ -2070,13 +2211,22 @@ def _files_fn(model, x):
     return model(x)
 
 
+def _files_train_step(model, x):
+    out = model(x)
+    out.sum().backward()
+    return out
+
+
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+@instantiate_parametrized_tests
 class TestPrecompileCaptureFiles(TestCase):
     """capture()/load() through the on-disk artifact pair (MakeFxTracer)."""
 
     def setUp(self):
         super().setUp()
-        self.dir = tempfile.mkdtemp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
         self.artifact = os.path.join(self.dir, "m.py")
         self.cache = os.path.join(self.dir, "m.cache")
         self.model = _FilesModel()
@@ -2134,12 +2284,15 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_exception_in_block_leaves_files_untouched(self):
         with self._capture() as cap:
             cap(self.model, self.x)
-        before = self._read(self.artifact)
+        before = (self._read(self.artifact), self._read(self.cache))
+        # A different backend, so a write from the raising block would change both
+        # halves' bytes; re-capturing the same shape on the same backend renders
+        # byte-identical output and the comparison could not fail.
         with self.assertRaisesRegex(RuntimeError, "boom"):
-            with self._capture() as cap:
-                cap(self.model, self.x * 2)
+            with self._capture(backend="inductor") as cap:
+                cap(self.model, self.x)
                 raise RuntimeError("boom")
-        self.assertEqual(self._read(self.artifact), before)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
         self.assertEqual(self._leftovers(), [])
 
     def test_save_writes_before_exit_and_exit_rewrites_the_same_pair(self):
@@ -2148,11 +2301,17 @@ class TestPrecompileCaptureFiles(TestCase):
                 cap.save()
             cap(self.model, self.x)
             cap.save()
-            saved = self._read(self.artifact)
+            saved = (self._read(self.artifact), self._read(self.cache))
+            # The rewrite repeats the same bytes, so pin the inodes instead: each
+            # write renames fresh temps into place, and skipping the exit write
+            # would leave save()'s inodes in place.
+            inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
             self.assertEqual(
                 load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
             )
-        self.assertEqual(self._read(self.artifact), saved)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), saved)
+        rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        self.assertNotEqual(rewritten, inodes)
         self.assertEqual(self._leftovers(), [])
 
     def test_rewrite_replaces_the_previous_pair(self):
@@ -2168,17 +2327,434 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertEqual(self._leftovers(), [])
 
     def test_same_file_for_both_halves_is_refused(self):
-        with self.assertRaisesRegex(ValueError, "same file"):
-            capture(
-                _files_fn,
-                artifact_path=self.artifact,
-                cache_path=self.artifact,
-                tracer=MakeFxTracer(),
-            )
+        # Also when the two halves are two SPELLINGS of one path: the cache write
+        # would truncate the source half, so the comparison is on the resolved
+        # paths and not on the strings the caller passed.
+        spellings = (
+            self.artifact,
+            os.path.join(self.dir, ".", "m.py"),
+            os.path.relpath(self.artifact),
+        )
+        for cache_path in spellings:
+            with self.assertRaisesRegex(ValueError, "same file"):
+                capture(
+                    _files_fn,
+                    artifact_path=self.artifact,
+                    cache_path=cache_path,
+                    tracer=MakeFxTracer(),
+                )
+            with self.assertRaisesRegex(ValueError, "same file"):
+                load(self.artifact, cache_path)
+
+    def test_a_directory_for_either_half_is_refused(self):
+        # Refused up front for either half, which is an earlier and clearer error
+        # than the writer's own refusal.
+        for path in (self.artifact, self.cache):
+            os.mkdir(path)
+            with open(os.path.join(path, "keep.txt"), "w", encoding="utf-8") as f:
+                f.write("mine")
+            with self.assertRaisesRegex(ValueError, "not a regular file"):
+                self._capture()
+            with self.assertRaisesRegex(ValueError, "not a regular file"):
+                load(self.artifact, self.cache)
+            # And the writer itself refuses a directory that appears after the
+            # up-front check: os.link re-raises EPERM for the source half, and
+            # the cache half fails its rename with the source half already
+            # installed, so the undo removes that orphan.
+            with self.assertRaises(OSError):
+                torch._precompile._write_artifact(self.artifact, self.cache, "x", b"y")
+            self.assertEqual(os.listdir(path), ["keep.txt"])
+            self.assertFalse(os.path.isfile(self.artifact))
+            self.assertEqual(self._leftovers(), [])
+            os.remove(os.path.join(path, "keep.txt"))
+            os.rmdir(path)
 
     def test_non_tracer_is_refused(self):
         with self.assertRaisesRegex(TypeError, "must be a MakeFxTracer"):
             self._capture(tracer="make_fx")
+
+    def test_unknown_backend_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "backend must be"):
+            self._capture(backend="nope")
+
+    def test_load_refuses_the_same_file_for_both_halves(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(ValueError, "same file"):
+            load(self.artifact, self.artifact)
+
+    def test_served_output_ignores_ambient_autocast(self):
+        # eager only: this model lowers to extern_kernels.addmm(..., out=buf0), and
+        # the out= overload has no CPU autocast registration, so the inductor
+        # artifact cannot observe the ambient state either way. The extern-kernel
+        # path is covered by test_served_extern_kernel_ignores_ambient_autocast,
+        # whose graph keeps an autocast-registered default overload.
+        with self._capture(backend="eager") as cap:
+            y = cap(self.model, self.x)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+            z = served(self.model, self.x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_served_extern_kernel_ignores_ambient_autocast(self, backend):
+        # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
+        # CPU autocast and which the inductor artifact calls as a fallback, so this
+        # is the case _autocast_off exists for: without it the served call casts a
+        # second time and comes back in bfloat16 (or, as here, fails inside oneDNN
+        # on the mixed-dtype primitive).
+        model = torch.nn.LSTM(8, 8, batch_first=True)
+        x = torch.randn(2, 3, 8)
+
+        def fn(m, t):
+            return m(t)[0]
+
+        with capture(
+            fn,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            tracer=MakeFxTracer(),
+            backend=backend,
+        ) as cap:
+            y = cap(model, x)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    @parametrize("device", ("notadevice", "privateuseone"))
+    def test_an_unautocastable_graph_device_still_serves(self, device):
+        # GRAPH_DEVICES is recorded from the captured graph and not filtered, so the
+        # serving build decides: a device type it cannot parse makes
+        # is_autocast_available raise, and an out-of-tree backend with no registered
+        # autocast module reports available and then refuses to construct. Either
+        # must be skipped rather than fail every served call, and the caller's own
+        # autocast region must survive the attempt.
+        with self._capture() as cap:
+            y = cap(self.model, self.x)
+        source = self._read(self.artifact).decode()
+        patched = source.replace(
+            "GRAPH_DEVICES = ('cpu',)", f"GRAPH_DEVICES = ('cpu', {device!r})"
+        )
+        self.assertNotEqual(patched, source)
+        blob = torch.load(self.cache, weights_only=True)
+        blob["code_hash"] = hashlib.sha256(patched.encode()).hexdigest()
+        with open(self.artifact, "wb") as f:
+            f.write(patched.encode())
+        torch.save(blob, self.cache)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            z = served(self.model, self.x)
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    def test_autocast_off_unwinds_a_failure_partway_through(self):
+        # The disables already entered have to come back out if the stack is not
+        # built to the end: the emitted driver hands the stack to the caller's
+        # `with`, so a leaked entry silently stops the caller's own autocast
+        # region from autocasting.
+        from torch import _precompile_driver
+
+        real_autocast = torch.amp.autocast
+        entered = []
+
+        def autocast(device_type, **kwargs):
+            entered.append(device_type)
+            if len(entered) == 2:
+                raise KeyboardInterrupt("interrupted partway through")
+            return real_autocast(device_type, **kwargs)
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with mock.patch("torch.amp.autocast", autocast):
+                with self.assertRaises(KeyboardInterrupt):
+                    _precompile_driver._autocast_off(("cpu", "cuda"))
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_batchnorm_running_stats_update_once(self, backend):
+        bn = torch.nn.BatchNorm1d(4)
+        ref = copy.deepcopy(bn)
+        x = torch.randn(8, 4)
+        with self._capture(backend=backend) as cap:
+            y = cap(bn, x)
+        self.assertEqual(y, ref(x))
+        self.assertEqual(bn.num_batches_tracked, ref.num_batches_tracked)
+        self.assertEqual(bn.running_mean, ref.running_mean)
+        self.assertEqual(bn.running_var, ref.running_var)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_training_captures_the_backward(self, backend):
+        ref = copy.deepcopy(self.model)
+        _files_train_step(ref, self.x)
+        with capture(
+            _files_train_step,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            tracer=MakeFxTracer(),
+            backend=backend,
+            training=True,
+        ) as cap:
+            y = cap(self.model, self.x)
+        self.assertFalse(y.requires_grad)
+        self.assertEqual(self.model.lin.weight.grad, ref.lin.weight.grad)
+        self.assertEqual(self.model.lin.bias.grad, ref.lin.bias.grad)
+        with torch.enable_grad(), self._capture(backend=backend) as cap:
+            self.assertFalse(cap(self.model, self.x).requires_grad)
+
+    def test_failed_second_rename_restores_the_previous_pair(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = (self._read(self.artifact), self._read(self.cache))
+        real_replace = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if len(calls) == 2:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                with self._capture(backend="inductor") as cap:
+                    cap(self.model, self.x)
+        self.assertEqual(calls[1], self.cache)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
+
+    def test_failed_first_rename_restores_the_previous_pair(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = (self._read(self.artifact), self._read(self.cache))
+        real_replace = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if len(calls) == 1:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                with self._capture(backend="inductor") as cap:
+                    cap(self.model, self.x)
+        self.assertEqual(calls[0], self.artifact)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        # No stray .bak: the backup is a hard link to the artifact, so the undo
+        # rename does not consume it.
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
+
+    def test_failed_second_rename_on_a_first_write_leaves_no_named_files(self):
+        # No previous pair, so there is nothing to restore: the undo moves the
+        # new artifact back out from under its name, which is what keeps a first
+        # write from leaving a named source with no cache beside it.
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if dst == self.cache:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                with self._capture() as cap:
+                    cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertEqual(self._leftovers(), [])
+
+    def test_rewrite_without_hard_links(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        first = self._read(self.cache)
+        link_fails = OSError(errno.EOPNOTSUPP, "no hard links")
+        with mock.patch("os.link", side_effect=link_fails):
+            with self._capture(backend="inductor") as cap:
+                cap(self.model, self.x)
+        self.assertNotEqual(self._read(self.cache), first)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
+        # An os.link failure that does NOT mean "no hard links on this filesystem"
+        # says something about the path, not about the filesystem, so it is raised
+        # rather than papered over by moving whatever is there aside.
+        with mock.patch("os.link", side_effect=OSError(errno.EIO, "io error")):
+            with self.assertRaisesRegex(OSError, "io error"):
+                with self._capture() as cap:
+                    cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
+
+    def test_double_failure_without_hard_links_keeps_the_previous_source(self):
+        # No hard links, so the previous source was MOVED to the backup; then the
+        # rename into place fails AND so does the undo that would put it back, so
+        # the backup holds the only remaining copy of the previous source. It must
+        # survive, and the warning must name it.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = self._read(self.artifact)
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if dst == self.artifact:
+                raise OSError("disk full")
+            return real_replace(src, dst)
+
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with mock.patch("os.replace", replace):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        with self._capture(backend="inductor") as cap:
+                            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+
+    def test_double_failure_on_the_second_rename_keeps_the_previous_source(self):
+        # Hard link taken, the artifact rename lands, the cache rename fails and
+        # the undo fails too: the named pair is now the new source beside the
+        # previous cache, which load refuses, so the previous source has to stay
+        # in the backup rather than being unlinked with it.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = self._read(self.artifact)
+        before_cache = self._read(self.cache)
+        real_replace = os.replace
+        calls = []
+
+        def replace(src, dst):
+            calls.append(dst)
+            if dst == self.cache:
+                raise OSError("disk full")
+            if len(calls) > 1:
+                raise OSError("undo failed")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    with self._capture(backend="inductor") as cap:
+                        cap(self.model, self.x)
+        self.assertNotEqual(self._read(self.artifact), before)
+        self.assertEqual(self._read(self.cache), before_cache)
+        with self.assertRaisesRegex(PrecompileError, "different precompile captures"):
+            load(self.artifact, self.cache)
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+
+    def test_a_read_only_first_rename_leaves_the_previous_pair_intact(self):
+        # A read-only remount: the artifact rename fails, and so would the undo.
+        # The backup is a hard LINK, so the named artifact still IS the previous
+        # source and the cache was never touched -- the pair on disk is the intact
+        # previous pair. There is nothing to undo, nothing to report, and no .bak
+        # to keep pinning the previous inode's blocks.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        before = (self._read(self.artifact), self._read(self.cache))
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if dst in (self.artifact, self.cache):
+                raise OSError(errno.EROFS, "read-only file system")
+            return real_replace(src, dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                with self.assertRaisesRegex(OSError, "read-only file system"):
+                    with self._capture(backend="inductor") as cap:
+                        cap(self.model, self.x)
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
+
+    def test_a_first_write_that_cannot_be_undone_warns_about_the_orphan(self):
+        # A FIRST write whose cache rename failed and whose undo then failed leaves
+        # a named artifact with no cache beside it, which is exactly the state the
+        # report exists to announce even though there was no previous pair.
+        real_replace = os.replace
+        real_unlink = os.unlink
+
+        def replace(src, dst):
+            if dst == self.cache:
+                raise OSError(errno.ENOSPC, "no space left")
+            return real_replace(src, dst)
+
+        def unlink(path):
+            if path == self.artifact:
+                raise OSError(errno.EPERM, "cannot unlink")
+            return real_unlink(path)
+
+        with mock.patch("os.replace", replace), mock.patch("os.unlink", unlink):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                with self.assertRaisesRegex(OSError, "no space left"):
+                    with self._capture() as cap:
+                        cap(self.model, self.x)
+        self.assertTrue(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertTrue(
+            any("has no cache beside it" in m for m in logs.output), logs.output
+        )
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_failed_directory_fsync_does_not_fail_the_write(self):
+        # The directory fsync is best effort: a directory fd cannot be fsync'd
+        # everywhere, and by then both renames have returned, so there is nothing
+        # to undo and nothing to retry.
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EINVAL, "no fsync on a directory")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            with self._capture() as cap:
+                cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
+
+    def test_a_failed_temp_fsync_leaves_no_scratch_files(self):
+        # The fsync of a scratch file is NOT best effort: unflushed bytes would be
+        # renamed into place, so it propagates -- with every scratch file removed
+        # and both named halves untouched.
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EIO, "fsync failed")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            with self.assertRaisesRegex(OSError, "fsync failed"):
+                with self._capture() as cap:
+                    cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertEqual(self._leftovers(), [])
 
     def test_partial_is_refused(self):
         with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
@@ -2197,15 +2773,6 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertRaisesRegex(PrecompileError, "code_hash"):
             load(self.artifact, self.cache)
 
-    def test_cache_with_a_different_tracer_tag_is_refused(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        blob = torch.load(self.cache, weights_only=True)
-        blob["tracer"] = "dynamo"
-        torch.save(blob, self.cache)
-        with self.assertRaisesRegex(PrecompileError, "cache tracer 'dynamo'"):
-            load(self.artifact, self.cache)
-
     def test_unreadable_cache_falls_back_to_python_code(self):
         with self._capture() as cap:
             cap(self.model, self.x)
@@ -2218,19 +2785,225 @@ class TestPrecompileCaptureFiles(TestCase):
         )
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
-    def test_fn_is_refused_for_a_standalone_artifact(self):
+    def test_non_literal_metadata_is_refused(self):
         with self._capture() as cap:
             cap(self.model, self.x)
-        with self.assertRaisesRegex(PrecompileError, "fn= applies only"):
-            load(self.artifact, self.cache, fn=_files_fn)
+        source = self._read(self.artifact).decode()
+        self.assertIn("BACKEND = 'eager'", source)
+        with open(self.artifact, "wb") as f:
+            f.write(source.replace("BACKEND = 'eager'", "BACKEND = str(1)").encode())
+        # The metadata parse runs ahead of the cache pairing check, so this is the
+        # error the caller sees even though the edit also broke the code_hash.
+        with self.assertRaisesRegex(PrecompileError, "must be a Python literal"):
+            load(self.artifact, self.cache)
+
+    def test_unreadable_paths_are_reported_as_precompile_errors(self):
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        missing = os.path.join(self.dir, "gone.py")
+        with self.assertRaises(PrecompileError) as cm:
+            load(missing, self.cache)
+        self.assertIn("could not read the artifact pair", str(cm.exception))
+        self.assertIn(missing, str(cm.exception))
+        self.assertIn(self.cache, str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, FileNotFoundError)
+        # A value that is not a path at all reaches the same diagnostic.
+        with self.assertRaises(PrecompileError) as cm:
+            load("x" * 5000, self.cache)
+        self.assertIsInstance(cm.exception.__cause__, OSError)
+
+    def test_transposed_paths_are_reported_as_precompile_errors(self):
+        # load takes two same-typed positional paths, so the likeliest caller
+        # mistake is swapping them: the cache's binary envelope then fails to
+        # decode as source, and that has to name both paths too.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaises(PrecompileError) as cm:
+            load(self.cache, self.artifact)
+        self.assertIn("could not read the artifact pair", str(cm.exception))
+        self.assertIn(self.artifact, str(cm.exception))
+        self.assertIn(self.cache, str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
+
+    def test_paths_come_in_pairs(self):
+        # Half a pair never loads and one file for both halves would overwrite the
+        # source, so both entry points refuse either up front, before fn runs.
+        both = "neither artifact_path nor cache_path"
+        cases = [
+            ((self.artifact, None), "artifact_path without cache_path"),
+            ((None, self.cache), "cache_path without artifact_path"),
+            ((None, None), both),
+            ((self.artifact, self.artifact), "same file"),
+        ]
+        for (artifact, cache), regex in cases:
+            with self.assertRaisesRegex(ValueError, regex):
+                capture(
+                    _files_fn,
+                    artifact_path=artifact,
+                    cache_path=cache,
+                    tracer=MakeFxTracer(),
+                    backend="eager",
+                )
+            with self.assertRaisesRegex(ValueError, regex):
+                load(artifact, cache)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_call_outside_the_block_is_refused(self):
+        # Only the block exit writes the files, so a call made without entering
+        # would trace and serve and then write nothing.
+        cap = self._capture()
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_call_after_the_block_is_refused(self):
+        # The block already wrote the pair, so a later call would trace and serve
+        # and write nothing; it is not the single-call refusal.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_call_after_a_caught_empty_exit_is_refused(self):
+        # A caller that catches the nothing-was-captured raise and calls anyway
+        # must be refused too: the exit is over, so nothing would be written.
+        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
+            with self._capture() as cap:
+                pass
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap(self.model, self.x)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_save_outside_the_block_is_refused(self):
+        # The render survives a block that raised, so save() is gated on the block
+        # being live exactly like __call__ is; otherwise it writes the pair the
+        # exit deliberately refused to write.
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with self._capture() as cap:
+                cap(self.model, self.x)
+                raise RuntimeError("boom")
+        with self.assertRaisesRegex(PrecompileError, r"call save\(\) inside"):
+            cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_the_block_is_entered_once(self):
+        # Single-shot in both directions: a nested block would deactivate the
+        # capture on its own exit, mid-use, and a second block would rewrite both
+        # files from the render the first one already wrote.
+        with self._capture() as cap:
+            with self.assertRaisesRegex(PrecompileError, "not re-entrant"):
+                with cap:
+                    pass
+            cap(self.model, self.x)
+        # The rewrite would repeat the same bytes, so pin the inodes: each write
+        # renames fresh temps into place.
+        inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        with self.assertRaisesRegex(PrecompileError, "capture is spent"):
+            with cap:
+                pass
+        rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+        self.assertEqual(rewritten, inodes)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_a_failed_trace_is_reported_as_a_failed_trace(self):
+        # The single-call flag counts a RENDER, not an attempt: after a trace that
+        # raised, nothing was captured, so the retry must describe the failed trace
+        # rather than claim a call was already captured, and save() / the clean exit
+        # must not tell the caller to call a capture it did call.
+        def data_dependent(model, x):
+            return model(x) * x.sum().item()
+
+        cap = capture(
+            data_dependent,
+            artifact_path=self.artifact,
+            cache_path=self.cache,
+            tracer=MakeFxTracer(),
+            backend="eager",
+        )
+        with self.assertRaisesRegex(PrecompileError, "raised before it rendered"):
+            with cap:
+                with self.assertRaisesRegex(PrecompileError, "data-dependent"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "already ran and raised"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "raised before it"):
+                    cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_tracer_decompositions_are_used(self):
+        # MakeFxTracer.decompositions reaches make_fx through capture(): the custom
+        # decomposition runs during the capture and the pair still serves eager.
+        called = []
+
+        def my_relu_decomp(x):
+            called.append(True)
+            return (x > 0) * x
+
+        decomps = {torch.ops.aten.relu.default: my_relu_decomp}
+        with self._capture(tracer=MakeFxTracer(decompositions=decomps)) as cap:
+            y = cap(self.model, self.x)
+        self.assertTrue(called)  # the table was used during capture
+        self.assertEqual(y, self.model(self.x))
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
+
+    def test_loaded_artifact_enters_and_unloads(self):
+        # A make_fx artifact is standalone: __enter__/__exit__/unload() install and
+        # take back out nothing, and the handle stays callable through both.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        with load(self.artifact, self.cache) as f:
+            self.assertFalse(f.installed)
+            self.assertEqual(f(self.model, self.x), self.model(self.x))
+        self.assertFalse(f.installed)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+        f.unload()
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def test_missing_parent_directories_are_created(self):
+        nested = os.path.join(self.dir, "a", "b")
+        artifact = os.path.join(nested, "m.py")
+        cache = os.path.join(nested, "m.cache")
+        with capture(
+            _files_fn,
+            artifact_path=artifact,
+            cache_path=cache,
+            tracer=MakeFxTracer(),
+            backend="eager",
+        ) as cap:
+            cap(self.model, self.x)
+        self.assertEqual(load(artifact, cache)(self.model, self.x), self.model(self.x))
+
+    def test_carriage_return_in_the_artifact_round_trips(self):
+        # The pair goes out and comes back as bytes, so a \r in python_code is not
+        # translated on the way in and the cache's code_hash over it still matches.
+        with self._capture() as cap:
+            cap(self.model, self.x)
+        code = self._read(self.artifact) + b"# a trailing comment\r\n"
+        blob = torch.load(self.cache, weights_only=True)
+        blob["code_hash"] = hashlib.sha256(code).hexdigest()
+        with open(self.artifact, "wb") as f:
+            f.write(code)
+        torch.save(blob, self.cache)
+        self.assertEqual(
+            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
+        )
 
     def test_callable_api_load_still_reads_an_in_memory_pair(self):
         python_code, cache = torch.compiler.precompile(
             _files_fn, self.model, self.x, backend="eager"
         )
-        with self._capture() as cap:
+        # The callable API traces with grad enabled, so training=True renders the
+        # same python_code; the file bytes are exactly that string on every platform.
+        with self._capture(training=True) as cap:
             cap(self.model, self.x)
-        self.assertEqual(self._read(self.artifact).decode(), python_code)
+        self.assertEqual(self._read(self.artifact), python_code.encode())
+        self.assertNotIn(b"\r", self._read(self.artifact))
+        read_back, _ = torch._precompile._read_artifact(self.artifact, self.cache)
+        self.assertEqual(read_back, python_code)
         f = torch.compiler.precompile.load(python_code, cache)
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
@@ -2239,7 +3012,6 @@ class TestPrecompileCaptureFiles(TestCase):
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
-
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y
@@ -2604,7 +3376,8 @@ class TestPrecompileNumerics(TestCase):
     def test_batchnorm_train_buffer_mutation(self, device):
         # A stateful module (BatchNorm in training mode) mutates its running stats.
         # precompile reflects that onto the runtime model's buffers and matches eager
-        # -- the mutation handling comes from AOTAutograd's codegen.
+        # -- the mutation handling comes from AOTAutograd's codegen -- while CAPTURE
+        # leaves the example model's buffers alone.
         def fresh():
             torch.manual_seed(0)
             m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.BatchNorm1d(4))
@@ -2612,7 +3385,17 @@ class TestPrecompileNumerics(TestCase):
             return m.to(device)
 
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), fresh(), x)
+        example = fresh()
+        bn = example[1]
+        pre_rm = bn.running_mean.clone()
+        pre_rv = bn.running_var.clone()
+        pre_nbt = bn.num_batches_tracked.clone()
+        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), example, x)
+        # Capture reparametrizes FAKE params/buffers in (invariant 3), so the example
+        # module's running stats must not move; a real-tensor trace advanced them.
+        self.assertEqual(bn.running_mean, pre_rm)
+        self.assertEqual(bn.running_var, pre_rv)
+        self.assertEqual(bn.num_batches_tracked, pre_nbt)
 
         ref = fresh()
         ref_out = ref(x)
@@ -2635,7 +3418,8 @@ class TestPrecompileNumerics(TestCase):
         # mutated inputs go through AOTAutograd's now-codegen'd synthetic-base wrapper.
         fn = lambda a, b: (a.mul_(2.0), a + b)[1]  # noqa: E731
         t = make_tensor((4,), device=device, dtype=torch.float32)
-        # Clone references BEFORE precompile: capture runs fn once, mutating t.
+        # Capture traces on fakes and leaves t alone; only the served artifact mutates
+        # its input, so give each run its own clone of t.
         ref = t.clone()
         ref_out = fn(ref, ref)
         run = t.clone()
