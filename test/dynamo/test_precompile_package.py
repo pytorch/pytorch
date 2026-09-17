@@ -117,12 +117,24 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_default_guard_filter_keeps_the_pytree_registry_keys_match(self):
         # The DICT_KEYS_MATCH on SUPPORTED_NODES reaches the filter as the
         # unsaved build's DICT_VERSION and is kept; the save build serializes it
-        # as a keys-match. The registry's other kept guards put a
-        # DictGuardManager over it whose length check notices a node registered
-        # after capture with or without the keys-match; a same-count change of
-        # keys is what only the keys-match notices.
+        # as a keys-match. A load rebuilds the guards against the live registry,
+        # so no filter notices a change made before it; after load, the
+        # DictGuardManager the registry's other kept guards build notices a
+        # registration by length with or without the keys-match, and a
+        # same-count change of keys is what only the keys-match notices.
         def fn_tree(x):
             return pytree.tree_flatten({"a": x, "b": x * 2})[0][1]
+
+        def dropping(entries):
+            # The predicate before the exemption: drops on the derived DICT_VERSION.
+            keep = precompile_package.default_guard_filter_fn(entries)
+            promoted = ["DICT_VERSION" in e.derived_guard_types for e in entries]
+            return [k and not p for k, p in zip(keep, promoted)]
+
+        def load(data):
+            # Module globals the kept guards read (G['pytree']) resolve against
+            # the live scope, as in test_aot_compile.py's f_globals=globals() loads.
+            return AOTCompiledFunction.deserialize(data, f_globals=globals())
 
         def deregister(cls):
             if cls in pytree.SUPPORTED_NODES:
@@ -144,6 +156,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         class Other:
             pass
 
+        class Extra:
+            pass
+
         register(Node)
         seen = []
         x = torch.randn(3)
@@ -152,13 +167,23 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(promoted, [True])
         self.assertIn("DICT_KEYS_MATCH", _kept_types(compiled)[1])
         data = AOTCompiledFunction.serialize(compiled).serialized_data
-        # Module globals the kept guards read (G['pytree']) resolve against the
-        # live scope, as in test_aot_compile.py's f_globals=globals() loads.
-        loaded = AOTCompiledFunction.deserialize(data, f_globals=globals())
+        control = _aot_compile(fn_tree, x, guard_filter_fn=dropping)
+        self.assertNotIn("DICT_KEYS_MATCH", _kept_types(control)[1])
+        control_data = AOTCompiledFunction.serialize(control).serialized_data
+        # A node registered before load is baked into the rebuilt guards.
+        register(Extra)
+        self.assertTrue(load(data).guard_check(x))
+        deregister(Extra)
+        loaded, loaded_control = load(data), load(control_data)
         self.assertEqual(loaded(x), fn_tree(x))
+        register(Extra)
+        self.assertFalse(loaded.guard_check(x))
+        self.assertFalse(loaded_control.guard_check(x))
+        deregister(Extra)
         deregister(Node)
         register(Other)
         self.assertFalse(loaded.guard_check(x))
+        self.assertTrue(loaded_control.guard_check(x))
 
     def test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal(self):
         # A local-scope class passes the filter (the TYPE_MATCH on L['obj'] is

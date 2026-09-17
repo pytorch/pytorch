@@ -1,11 +1,13 @@
 """
 Ahead-of-time precompilation of a callable into MANY graphs: the multi-graph
 counterpart of ``torch.compile(fn, fullgraph=True).aot_compile(...)``. Every
-frame Dynamo produces while the caller's calls run -- the entry frame, each
-``torch_dynamo_resume_in_*`` continuation created by a graph break, and every
-recompiled variant of each -- is captured into one serializable artifact whose
-frames are stored through CompilePackage (``torch/_dynamo/package.py``), a
-low-level component that is not meant to be used directly.
+frame Dynamo produces while the caller's calls run and the package can record
+-- the entry frame, each ``torch_dynamo_resume_in_*`` continuation created by a
+graph break, and every recompiled variant of each -- is captured into one
+serializable artifact whose frames are stored through CompilePackage
+(``torch/_dynamo/package.py``), a low-level component that is not meant to be
+used directly; a frame it could not record is listed in
+``PrecompileSummary.bypassed``.
 
 Everything here is internal, and the module fills in over several commits: the
 guard filter the serialized copy is written under (``default_guard_filter_fn``)
@@ -83,7 +85,10 @@ Know these before relying on an artifact in production:
   yields an artifact that only serves calls reproducing those exact values.
   ``PrecompileSummary.wont_generalize`` lists them; exercise every value you
   need to serve with a captured call, or expect poor coverage on new data.
-  ``dynamic=True`` helps with shapes but not with pinned values.
+  ``dynamic=True`` un-pins an int or float, argument or crossed value alike,
+  by making it symbolic from the first call, as the default's automatic
+  dynamic does for an int from its second distinct value; a bool or str stays
+  pinned either way.
 * Identity guards (and the dict-version and weakref-liveness guards) cannot be
   serialized, so precompiling gives up on noticing that a guarded object was
   rebound, mutated or collected. ``PrecompileSummary.dropped_guards`` is the
@@ -151,12 +156,15 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     Keeping them instead makes serialization raise for essentially every
     function, so every drop is recorded with its source name in
     ``PrecompileSummary.dropped_guards``, and the only rail on by default is
-    the module's risky-drop lint over them; a lint is not a proof.
+    ``PrecompileSummary.risky_dropped_guards``, the drops the module's
+    risky-drop lint flags or that differed between captured variants of one
+    frame; a lint is not a proof.
 
     This mirrors the type tests of the three branches of the serializer's
-    pre-check, the if/elif chain at the top of ``serialize_guards``, and
-    nothing past it: not the raise inside the first branch, which is the
-    local-scope refusal below. A guard of a refused type is dropped, and so is
+    pre-check, the if/elif chain at the top of ``serialize_guards``, with one
+    type added to the first branch's (DICT_KEYS_MATCH, below) and nothing past
+    the chain: not the raise inside the first branch, which is the local-scope
+    refusal below. A guard of a refused type is dropped, and so is
     a guard of another type that DERIVES one (a CONSTANT_MATCH on a code object
     runs through ID_MATCH), except that TYPE_MATCH and BUILTIN_MATCH are kept
     whatever they derive, as the chain takes their branch first: BUILTIN_MATCH
@@ -178,20 +186,30 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     (``guard._force_dict_keys_match``) that the pre-check accepts; dropping it
     on the unsaved build's DICT_VERSION discards a guard the artifact can carry
     and pads ``dropped_guards`` with it. It is not the only guard on that
-    registry: the kept guards on the entries ``tree_flatten`` reads put a
-    DictGuardManager over it whose length check notices a node registered
-    between capture and load either way; the keys-match is what notices a
-    same-count change of keys (one node deregistered, another registered).
+    registry, and neither notices a change made before load: a load rebuilds
+    the guard tree against the loading process's registry, so both bake its
+    keys and length at that point. After load, the kept guards on the entries
+    ``tree_flatten`` reads put a DictGuardManager over the registry whose
+    length check notices a node registered (a late import) either way; the
+    keys-match is what notices a same-count change of keys (one node
+    deregistered, another registered).
     Check any new refused derived type against the save build before dropping
     on it. Past the chain the filter mirrors nothing, and the refusal that
     matters there is of local-scope types, which cannot be pickled by name. It
     has two paths: the chain's TYPE_MATCH/BUILTIN_MATCH branch raises when
     ``guard._unserializable`` is set, and ``GuardsStatePickler.reducer_override``,
     once none of its earlier branches has rebuilt the object, refuses a plain
-    non-tuple instance of such a type anywhere in the guard tree (a local tuple
-    subclass fails later, in plain pickle, as a PackageError wrapping the
-    AttributeError), so a kept guard whose source walks through one fails
-    there. FAKE_SCRIPT_TYPE_MATCH sets the same flag, which nothing outside
+    non-tuple instance of such a type anywhere in the guard tree, so a kept
+    guard whose source walks through one fails there. A tuple instance passes
+    that check: a local tuple subclass then fails in plain pickle, a
+    PackageError wrapping the AttributeError, but only a filter that drops
+    TYPE_MATCH gets there (every tuple-subclass value Dynamo reads carries its
+    own TYPE_MATCH, which under this filter refuses it on the first path), and
+    a local namedtuple has no refusal at all: its guard is a SEQUENCE_LENGTH,
+    whose ``_unserializable`` the first branch never reads, its type is
+    rebuilt from its fields by an earlier branch, and the rebuilt type is a
+    new class, so the artifact ships and its type check never passes for the
+    caller's own. FAKE_SCRIPT_TYPE_MATCH sets the same flag, which nothing outside
     that branch reads, so the pre-check passes a local-scope opaque-object
     type; its only installer, the opaque-object path of ``VariableBuilder``,
     guards a plain instance, which the pickler then refuses with the same
