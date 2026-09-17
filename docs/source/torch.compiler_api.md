@@ -83,11 +83,8 @@ deprecation cycle.
 
    Because the caller makes the calls, inputs flow through naturally and return values stay
    available, so the capture drops into an ordinary training or pipeline loop where
-   intermediate values are needed; call ``cap.save()`` inside the block to write the
-   artifact without ending the capture. With :class:`precompile.DynamoTracer` that
-   checkpoints the calls made so far, re-rendering and rewriting both files; a
-   :class:`precompile.MakeFxTracer` capture records a single call, so ``save()`` and
-   block exit write the same files.
+   intermediate values are needed; :meth:`precompile.Capture.save` writes the artifact
+   from inside the block without ending the capture.
    ``tracer`` picks the capture front-end and carries its tracer-specific
    configuration: :class:`precompile.MakeFxTracer` (the default) is one non-strict ATen
    trace and takes exactly one call (a second call raises); :class:`precompile.DynamoTracer`
@@ -107,13 +104,12 @@ deprecation cycle.
       specialized to the captured call, and shapes are static -- each size is baked in. With
       no dim marked unbacked (below), a data-dependent op (``.item()``, a branch over a
       tensor value) instead raises at capture, since the trace runs under fake mode where
-      the value is unknown; once a dim is marked, the value is held as an unbacked symbol
-      and a use that never guards on it captures, while a guard on it fails. The
-      exception to static shapes is a tensor dim explicitly marked unbacked with
-      ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call (with
-      ``make_fx`` this requires the inductor backend; with :class:`precompile.DynamoTracer`
-      either backend works); such a dim is captured as an unbacked symint, so one artifact
-      serves any runtime size of it, and a graph that needs to guard on it fails at capture.
+      the value is unknown. The exception to static shapes is a tensor dim explicitly
+      marked unbacked with ``torch._dynamo.decorators.mark_unbacked`` on the inputs
+      before the call (with ``make_fx`` this requires the inductor backend; with
+      :class:`precompile.DynamoTracer` either backend works); such a dim is captured as an
+      unbacked symint, so one artifact serves any runtime size of it, and a graph that
+      needs to guard on it fails at capture.
       Each input's dtype and device are specialized too (a runtime mismatch is rejected),
       and the inductor backend additionally specializes on input memory format. See Note
       [precompile programming model] in ``torch/_precompile.py``. ``torch.compiler.precompile``
@@ -147,17 +143,13 @@ deprecation cycle.
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments. With :class:`precompile.DynamoTracer`, ``cap(...)`` also
        accepts keyword arguments and the loaded artifact takes them the same way;
-       :class:`precompile.MakeFxTracer` is positional-only. Enter the returned capture and
-       call it once (make_fx) or as many times as you need (dynamo). The ``nn.Module``
-       arguments are lifted and the rest are the runtime inputs. Each call's grad mode comes
-       from ``training``, not from the mode ambient at the call site.
+       :class:`precompile.MakeFxTracer` is positional-only. The ``nn.Module`` arguments
+       are lifted and the rest are the runtime inputs.
    :param artifact_path: File to write ``python_code`` to when the block exits. Required.
    :param cache_path: File to write the acceleration cache to. Required.
    :param tracer: The capture front-end and its configuration, a
-       :class:`precompile.MakeFxTracer` (default) or :class:`precompile.DynamoTracer`.
-       :class:`precompile.DynamoTracer` is not available in this build yet: passing one
-       raises ``PrecompileError`` at the dispatch point, so ``MakeFxTracer`` is the only
-       front-end that captures here.
+       :class:`precompile.MakeFxTracer` (default, and the only one that captures in this
+       build) or :class:`precompile.DynamoTracer`.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the captured call).
@@ -215,7 +207,7 @@ deprecation cycle.
 ```
 
 ```{eval-rst}
-.. py:function:: precompile.load(artifact_path, cache_path, /, *, fn=None)
+.. py:function:: precompile.load(artifact_path, cache_path, /)
 
    Reconstruct a runnable from the two files a precompile capture wrote -- the
    ``python_code`` artifact and its ``cache``. They load only as a matched pair (the cache
@@ -240,12 +232,6 @@ deprecation cycle.
        :func:`precompile.capture` (or by :meth:`precompile.Capture.save`).
    :param cache_path: File holding ``cache``, as written by
        :func:`precompile.capture` (or by :meth:`precompile.Capture.save`).
-   :param fn: For a dynamo artifact that serves by installing onto live code objects,
-       the function object to install onto, when it is not importable from where it was
-       captured (e.g. defined in ``__main__`` or a notebook); pass it before the first
-       call. A standalone artifact rejects ``fn=`` with ``PrecompileError``, and since
-       every artifact this build can produce is standalone, ``fn=`` is not available
-       here: ``load`` refuses it unconditionally.
    :returns: A :class:`torch.compiler.PrecompiledRunnable` with the same calling
        convention as the captured ``fn``. A make_fx artifact takes positional arguments
        only; a dynamo artifact also accepts keyword arguments, the way the
@@ -260,17 +246,13 @@ deprecation cycle.
        for the installing shape, ``False`` for standalone) tells them apart. Which one
        you get is a property of the capture, not a load-time choice. The installing
        shape arrives with :class:`precompile.DynamoTracer` and is not available in this
-       build yet (``load`` raises ``PrecompileError`` for an artifact whose
-       ``SERVING_MODE`` is ``'installed'``).
+       build yet.
    :raises PrecompileError: if either half cannot be read (a missing or unreadable file,
-       one of the two paths handed artifact contents rather than a path, or the two paths
-       swapped -- the cache's bytes then fail to decode as source); if ``python_code`` is
-       not a valid precompile artifact (it fails to parse or is missing its
-       calling-convention metadata); if ``cache`` is paired with a different
-       ``python_code`` (mismatched ``backend`` tag, ``tracer`` tag, or ``code_hash``); if
-       the artifact declares ``SERVING_MODE = 'installed'`` or ``fn=`` is passed (neither
-       is available in this build); or if a runtime call violates the precompile
-       contract.
+       or the two paths swapped -- the cache's bytes then fail to decode as source); if
+       ``python_code`` is not a valid precompile artifact (it fails to parse or is
+       missing its calling-convention metadata); if ``cache`` is paired with a different
+       ``python_code`` (mismatched ``backend`` tag or ``code_hash``); or if a runtime
+       call violates the precompile contract.
    :raises ValueError: for one file named as both halves, or for a path that exists but
        is not a regular file. These are checked before either file is opened.
 
@@ -345,10 +327,8 @@ deprecation cycle.
 
    The object :func:`precompile.capture` returns. Enter it as a context manager and call
    it like ``fn`` inside the block to fold each call into the capture (see
-   :func:`precompile.capture` for the semantics); it is not constructed directly. The
-   artifact is written to the two files on a clean exit from the block that captured at
-   least one call: a block that raised leaves the files untouched, and a clean exit that
-   never called the capture raises ``PrecompileError`` rather than writing. Also exposes:
+   :func:`precompile.capture` for the semantics, including which exits write the two
+   files); it is not constructed directly. Also exposes:
 
    .. py:method:: save()
 
