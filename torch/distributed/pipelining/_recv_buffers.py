@@ -91,8 +91,30 @@ class _RecvInfo:
         )
 
 
+def _ensure_recv_infos_drained(
+    recv_info_by_microbatch: dict[int, tuple[_RecvInfo, ...]],
+) -> None:
+    """Reject descriptor replacement while an interrupted step owns storage."""
+    for recv_infos in recv_info_by_microbatch.values():
+        for info in recv_infos:
+            if info.buffer is not None:
+                raise PipeliningMetadataError(
+                    _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=info.input_name)
+                )
+
+
+def _clear_unlaunched_recv_infos(recv_infos: tuple[_RecvInfo, ...]) -> None:
+    """Drop buffers from a receive batch that was never submitted to P2P."""
+    for info in recv_infos:
+        info.buffer = None
+
+
 class _RecvBufferPool:
     """Fixed receive buffers with explicit per-slot ownership.
+
+    The pool retains ordinary, autograd-neutral base tensors for stable storage
+    addresses. Each acquisition gives the receive descriptor a fresh detached
+    alias so per-lease autograd state cannot survive slot reuse.
 
     A slot is released only after its schedule-derived consumers finish.
     ProcessGroupNCCL then orders a later receive after work already enqueued on
@@ -134,13 +156,35 @@ class _RecvBufferPool:
             self._buffers = ()
         if len(self._buffers) >= num_slots:
             return
-        self._buffers += tuple(
-            tuple(
-                _make_tensor_from_meta(meta, device) if meta is not None else None
-                for meta in metas
+        with torch.inference_mode(False):
+            self._buffers += tuple(
+                tuple(
+                    _make_tensor_from_meta(meta, device) if meta is not None else None
+                    for meta in metas
+                )
+                for _ in range(num_slots - len(self._buffers))
             )
-            for _ in range(num_slots - len(self._buffers))
-        )
+
+    @property
+    def is_idle(self) -> bool:
+        """Return whether no microbatch owns a slot."""
+        return not self._owners
+
+    @property
+    def num_slots(self) -> int:
+        """Return the number of allocated slots."""
+        return len(self._buffers)
+
+    def reset(self) -> None:
+        """Release an idle pool's retained allocation and metadata."""
+        if self._owners:
+            raise PipeliningMetadataError(
+                f"The {self._direction} receive buffer pool still has storage "
+                "owned by an incomplete pipeline step; destroy the process "
+                "group, then reconstruct the stages and schedule before retrying"
+            )
+        self._buffers = ()
+        self._allocation_signature = ()
 
     def acquire(
         self,
@@ -148,7 +192,7 @@ class _RecvBufferPool:
         microbatch_index: int,
         recv_infos: tuple[_RecvInfo, ...],
     ) -> None:
-        """Assign one exclusively owned pool slot to receive descriptors."""
+        """Assign fresh tensor aliases from one exclusively owned pool slot."""
         if not 0 <= slot < len(self._buffers):
             raise PipeliningMetadataError(
                 f"{self._direction} receive buffer slot {slot} is out of range"
@@ -165,9 +209,14 @@ class _RecvBufferPool:
                 f"{self._direction} receive buffer slot {slot} has "
                 f"{len(buffers)} tensors, expected {len(recv_infos)}"
             )
+        for info in recv_infos:
+            if info.buffer is not None:
+                raise PipeliningMetadataError(
+                    _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=info.input_name)
+                )
         for info, buffer in zip(recv_infos, buffers, strict=True):
             if buffer is not None:
-                info.set_buffer(buffer)
+                info.set_buffer(buffer.detach())
         self._owners[slot] = microbatch_index
 
     def release(self, slot: int, microbatch_index: int) -> None:
@@ -183,20 +232,12 @@ class _RecvBufferPool:
                 f"microbatch {owner}, not {microbatch_index}"
             )
 
-        for buffer in self._buffers[slot]:
-            if buffer is not None:
-                # Autograd writes leaf grads onto received activations. A pool
-                # slot must return to the same neutral state before reuse.
-                buffer.grad = None
-                if buffer.requires_grad:
-                    buffer.requires_grad_(False)
         del self._owners[slot]
 
     def aliases(self, tensor: torch.Tensor) -> bool:
         """Return whether ``tensor`` shares storage with any pooled buffer."""
-        storage_id = tensor.untyped_storage()._cdata
         return any(
-            buffer is not None and buffer.untyped_storage()._cdata == storage_id
+            buffer is not None and torch._C._is_alias_of(tensor, buffer)
             for slot_buffers in self._buffers
             for buffer in slot_buffers
         )
