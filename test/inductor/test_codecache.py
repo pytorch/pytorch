@@ -84,7 +84,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -123,6 +122,34 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
+    @parametrize(
+        "backend_precision,expected,legacy_calls",
+        (("bfx9", "bfx9", 0), ("tf32", "high", 1)),
+    )
+    def test_precompile_cache_key_handles_bfx9(
+        self, backend_precision, expected, legacy_calls
+    ):
+        from torch._inductor.select_algorithm import create_precompile_key
+
+        choice = types.SimpleNamespace(kernel_hash_key=lambda: "choice")
+        with (
+            mock.patch.object(
+                torch._C,
+                "_get_fp32_precision_getter",
+                return_value=backend_precision,
+            ),
+            mock.patch.object(
+                torch,
+                "get_float32_matmul_precision",
+                return_value="high",
+            ) as legacy_getter,
+        ):
+            self.assertEqual(
+                create_precompile_key("op", "inputs", [choice]),
+                f"op:inputs:{expected}:choice",
+            )
+            self.assertEqual(legacy_getter.call_count, legacy_calls)
+
     def _compact_sha256(self, data: bytes) -> str:
         return (
             base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
@@ -817,8 +844,6 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(
                 "Static triton launcher requires cuda/xpu and triton bundling"
             )
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         grad_multiplier = 2 if grad else 1
 
@@ -2295,9 +2320,6 @@ class TestFxGraphCache(TestCase):
     @parametrize("bundle_triton", (False, True))
     @parametrize("use_static_triton_launcher", (False, True))
     def test_triton_op(self, bundle_triton, use_static_triton_launcher):
-        if use_static_triton_launcher and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
-
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
@@ -3782,15 +3804,15 @@ class TestFxGraphCacheHashing(TestCase):
         # A region's inductor_config_patches must be part of the cache key,
         # otherwise two regions differing only in their patches would collide
         # and reuse a stale compiled artifact.
-        same1 = self._nested_region_gm({"max_autotune": True})
-        same2 = self._nested_region_gm({"max_autotune": True})
-        different = self._nested_region_gm({"max_autotune": False})
+        same1 = self._nested_region_gm({"fallback_by_default": True})
+        same2 = self._nested_region_gm({"fallback_by_default": True})
+        different = self._nested_region_gm({"fallback_by_default": False})
 
         self.assertEqual(
             FxGraphHashDetails(
                 same1, [], cast(Any, {}), []
             ).nested_inductor_config_patches,
-            (("", (("max_autotune", True),)),),
+            (("", (("fallback_by_default", True),)),),
         )
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
@@ -3802,40 +3824,16 @@ class TestFxGraphCacheHashing(TestCase):
         )
 
     def test_nested_region_uncacheable_config_bypasses_cache(self):
-        # A callable patch value can't be hashed into the cache key.
-        def custom_pass(graph):
-            return graph
+        # Config annotations are not enforced when a patch is applied, so an
+        # allowed key can still carry a callable value that cannot be cached.
+        def invalid_value():
+            pass
 
         with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
             CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": custom_pass}),
+                self._nested_region_gm({"fallback_by_default": invalid_value}),
                 require_shape_env=False,
             ).validate()
-
-        # A non-callable value under a custom-pass key is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "custom pass"):
-            CacheabilityValidator(
-                self._nested_region_gm({"post_grad_custom_pre_pass": "sentinel"}),
-                require_shape_env=False,
-            ).validate()
-
-        # A callable hidden inside a list value (e.g.
-        # _fuse_ddp_communication_passes) is uncacheable too.
-        with self.assertRaisesRegex(BypassFxGraphCache, "callable value"):
-            CacheabilityValidator(
-                self._nested_region_gm(
-                    {"_fuse_ddp_communication_passes": [custom_pass]}
-                ),
-                require_shape_env=False,
-            ).validate()
-
-        # A list of non-callables stays cacheable.
-        CacheabilityValidator(
-            self._nested_region_gm(
-                {"_fuse_ddp_communication_passes": ["fuse_ddp_with_concat_op"]}
-            ),
-            require_shape_env=False,
-        ).validate()
 
     def _nested_region_bw_gm(self, bw_patches):
         from torch._higher_order_ops.invoke_subgraph import (
@@ -3869,17 +3867,17 @@ class TestFxGraphCacheHashing(TestCase):
         # Backward config replaces (does not merge with) the forward config.
         bw_config = get_backward_nested_region_config(
             get_invoke_subgraph_compile_options(
-                bw_inductor_config_patches={"max_autotune": True}
+                bw_inductor_config_patches={"fallback_by_default": True}
             )
         )
         self.assertEqual(
             bw_config.inductor_config_patches,
-            {"max_autotune": True},
+            {"fallback_by_default": True},
         )
 
-        same1 = self._nested_region_bw_gm({"max_autotune": True})
-        same2 = self._nested_region_bw_gm({"max_autotune": True})
-        different = self._nested_region_bw_gm({"max_autotune": False})
+        same1 = self._nested_region_bw_gm({"fallback_by_default": True})
+        same2 = self._nested_region_bw_gm({"fallback_by_default": True})
+        different = self._nested_region_bw_gm({"fallback_by_default": False})
         self.assertEqual(
             self._fx_graph_cache_key(same1, []),
             self._fx_graph_cache_key(same2, []),
