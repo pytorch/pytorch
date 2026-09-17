@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/bit_cast.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -601,12 +602,41 @@ struct Environment {
   ValueTable value_table;
 };
 
-template <class T, class Hash>
+// Constant identity is bitwise for floats: -0.0 == 0.0 under IEEE eq, but
+// memoizing them to one constant changes numerics (reciprocal/copysign);
+// nan keys would never match. Key float/complex memo maps by bit pattern.
+struct BitwiseDoubleHash {
+  size_t operator()(double val) const {
+    return std::hash<int64_t>{}(c10::bit_cast<int64_t>(val));
+  }
+};
+
+struct BitwiseDoubleEq {
+  bool operator()(double lhs, double rhs) const {
+    return c10::bit_cast<int64_t>(lhs) == c10::bit_cast<int64_t>(rhs);
+  }
+};
+
+struct BitwiseComplexHash {
+  size_t operator()(c10::complex<double> val) const {
+    return c10::get_hash(
+        c10::bit_cast<int64_t>(val.real()), c10::bit_cast<int64_t>(val.imag()));
+  }
+};
+
+struct BitwiseComplexEq {
+  bool operator()(c10::complex<double> lhs, c10::complex<double> rhs) const {
+    return BitwiseDoubleEq()(lhs.real(), rhs.real()) &&
+        BitwiseDoubleEq()(lhs.imag(), rhs.imag());
+  }
+};
+
+template <class T, class Hash, class KeyEqual>
 static Value* materializeConstant(
     T val,
     Graph& graph,
     const SourceRange& r,
-    std::unordered_map<T, Value*, Hash>& map) {
+    std::unordered_map<T, Value*, Hash, KeyEqual>& map) {
   auto existing_constant = map.find(val);
   if (existing_constant != map.end()) {
     return existing_constant->second;
@@ -696,11 +726,13 @@ struct to_ir {
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
   std::unordered_map<int64_t, Value*, std::hash<int64_t>> integral_constants;
-  std::unordered_map<double, Value*, std::hash<double>> fp_constants;
+  std::unordered_map<double, Value*, BitwiseDoubleHash, BitwiseDoubleEq>
+      fp_constants;
   std::unordered_map<
       c10::complex<double>,
       Value*,
-      c10::hash<c10::complex<double>>>
+      BitwiseComplexHash,
+      BitwiseComplexEq>
       complex_constants;
   std::unordered_set<Block*> exit_blocks;
   ScriptTypeParser typeParser_;
@@ -734,7 +766,7 @@ struct to_ir {
   // If the graph might not return, add an implicit None return at the end
   void handleMaybeNoReturn(const Def& def, Block* block) {
     auto decl_ret = def_stack_.back().declared_return_type_;
-    if (exit_blocks.count(block) == 0) {
+    if (!exit_blocks.contains(block)) {
       auto decl_ret = def_stack_.back().declared_return_type_;
       if (decl_ret && decl_ret != NoneType::get()) {
         throw(
@@ -1161,7 +1193,7 @@ struct to_ir {
       }
       // Found an exit statement in this block. The remaining statements aren't
       // reachable so we don't emit them.
-      if (exit_blocks.count(environment_stack->block()))
+      if (exit_blocks.contains(environment_stack->block()))
         return;
     }
   }
@@ -1974,8 +2006,8 @@ struct to_ir {
     auto save_false = emitSingleIfBranch(
         false_block, falseBranch, cond_value.refinements().Not());
 
-    bool true_exits = exit_blocks.count(true_block);
-    bool false_exits = exit_blocks.count(false_block);
+    bool true_exits = exit_blocks.contains(true_block);
+    bool false_exits = exit_blocks.contains(false_block);
     if (true_exits && false_exits) {
       exit_blocks.insert(n->owningBlock());
     }
@@ -3540,9 +3572,10 @@ struct to_ir {
         checkApplyNumInputs(apply, 1);
         auto arg = emitSugaredExpr(apply.inputs()[0], 1);
         auto inputs = arg->asTuple(apply.range(), method);
-        auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
-          return sv->asValue(apply.range(), method);
-        });
+        auto inp_values =
+            fmap(std::move(inputs), [&](const SugaredValuePtr& sv) {
+              return sv->asValue(apply.range(), method);
+            });
         return std::make_shared<SimpleValue>(
             graph->insertNode(graph->createTuple(inp_values))->output());
       }
