@@ -4035,6 +4035,50 @@ make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 
 
+def _is_bool_dtype_view_from_non_bool(x):
+    """
+    Returns True if x is a torch.bool tensor whose underlying storage represents
+    non-boolean data (e.g. x.view(torch.bool) where x was float32).
+    In Inductor/Triton, boolean pointwise loads/stores normalize bytes to 0/1 (tl.int1),
+    which silently corrupts raw non-boolean byte values during bitwise copies.
+    """
+    if not isinstance(x, (TensorBox, ir.IRNode)):
+        return False
+    try:
+        if x.get_dtype() != torch.bool:
+            return False
+    except AttributeError:
+        return False
+
+    cur = x
+    while isinstance(cur, (TensorBox, ir.StorageBox, ir.View)):
+        cur = cur.data
+
+    # Check for fallback kernel (e.g. aten.view.dtype when bitwidths differ)
+    if isinstance(cur, ir.MultiOutput) and len(cur.inputs) == 1:
+        view_node = cur.inputs[0]
+        if (
+            getattr(view_node, "op_overload", None) is aten.view.dtype
+            and getattr(view_node, "constant_args", None) == (torch.bool,)
+        ):
+            try:
+                base = view_node.inputs[0]
+                if base.get_dtype() != torch.bool:
+                    return True
+            except (AttributeError, IndexError):
+                pass
+
+    # Check for DtypeView or ReinterpretView (when bitwidths match)
+    if isinstance(cur, ir.DtypeView):
+        if cur.target_dtype == torch.bool and cur.data.get_dtype() != torch.bool:
+            return True
+    elif isinstance(cur, ir.ReinterpretView):
+        if cur.layout.dtype == torch.bool and cur.data.get_dtype() != torch.bool:
+            return True
+
+    return False
+
+
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
 @register_lowering(aten.copy, type_promotion_kind=None)
@@ -4046,6 +4090,12 @@ def copy(self, src, non_blocking=False):
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
         x = to_dtype(x, self.get_dtype())
+
+    if _is_bool_dtype_view_from_non_bool(self) or _is_bool_dtype_view_from_non_bool(src):
+        return fallback_handler(
+            aten.copy.default,
+            add_to_fallback_set=False,
+        )(self, src, non_blocking=non_blocking)
 
     if self.get_size() != src.get_size():
         out = expand(x, self.get_size())
@@ -4064,6 +4114,11 @@ def clone(x, *, memory_format=None):
     # Don't materialize the layout here based on memory_format,
     # as we want to give the scheduler opportunity to perform layout optimization.
     # Let the downstream op handle the input stride as needed.
+    if _is_bool_dtype_view_from_non_bool(x):
+        return fallback_handler(
+            aten.clone.default,
+            add_to_fallback_set=False,
+        )(x, memory_format=memory_format)
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
@@ -7765,6 +7820,11 @@ def copy_(dst, src, non_blocking=False):
     if dst is src:
         # dst.copy_(dst) can happen from the reinplacing pass
         return dst
+    if _is_bool_dtype_view_from_non_bool(dst) or _is_bool_dtype_view_from_non_bool(src):
+        return fallback_handler(
+            aten.copy_.default,
+            add_to_fallback_set=False,
+        )(dst, src, non_blocking=non_blocking)
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())

@@ -17216,6 +17216,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         y = torch.randn(8, 8, device=self.device)
         self.common(fn, (x, y), reference_in_float=False)
 
+    def test_bool_view_copy_bitwise_fidelity(self):
+        # https://github.com/pytorch/pytorch/issues/193760
+        # view(torch.bool).copy_(y.view(torch.bool)) should preserve raw byte values
+        # instead of normalizing bytes to boolean True/False.
+        def fn(x, y):
+            return x.view(torch.bool).copy_(y.view(torch.bool)).view(torch.float32)
+
+        x = torch.randn(8, 8, device=self.device) * 10
+        y = torch.randn(8, 8, device=self.device) * 10
+        self.common(fn, (x, y), reference_in_float=False)
+
+    def test_bool_view_clone_bitwise_fidelity(self):
+        # https://github.com/pytorch/pytorch/issues/193760
+        def fn(x):
+            return x.view(torch.bool).clone().view(torch.float32)
+
+        x = torch.randn(8, 8, device=self.device) * 10
+        self.common(fn, (x,), reference_in_float=False)
+
     @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile
