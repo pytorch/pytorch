@@ -120,6 +120,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
+    parametrize,
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
@@ -2271,6 +2272,24 @@ class TestDistributions(DistributionsTestCase):
             dist = RelaxedOneHotCategorical(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_rand_excludes_upper_bound(self, device, dtype):
+        values = torch.rand(65537, device=device, dtype=dtype)
+        self.assertTrue((values >= 0).all().item())
+        self.assertTrue((values < 1).all().item())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("bounds", [(0, 4), (-4, -2), (-2, 3), (2, 2)])
+    def test_uniform_excludes_upper_bound(self, device, dtype, bounds):
+        low, high = bounds
+        values = torch.empty(65537, device=device, dtype=dtype)
+        values.uniform_(low, high)
+        if low == high:
+            self.assertEqual(values, torch.full_like(values, low))
+        else:
+            self.assertTrue((values >= low).all().item())
+            self.assertTrue((values < high).all().item())
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -6030,6 +6049,29 @@ class TestKL(DistributionsTestCase):
             MultivariateNormal(loc[1], scale_tril=scale_tril[1]),
         )
         self.assertEqual(expected_kl, actual_kl)
+
+    @skipIfTorchDynamo("This test explicitly invokes torch.compile")
+    def test_compile_kl_multivariate_normal(self):
+        def fn(p_mu, p_log_var, q_mu, q_log_var):
+            q_var = torch.diag_embed(torch.exp(q_log_var))
+            p_var = torch.diag_embed(torch.exp(p_log_var))
+            p = MultivariateNormal(p_mu, p_var)
+            q = MultivariateNormal(q_mu, q_var)
+            return kl_divergence(p, q).mean()
+
+        set_rng_seed(0)
+        p_mu = torch.randn(4, 3)
+        p_log_var = torch.randn(4, 3)
+        q_mu = torch.randn(4, 3)
+        q_log_var = torch.randn(4, 3)
+
+        expected = fn(p_mu, p_log_var, q_mu, q_log_var)
+        for dynamic in (False, True):
+            with self.subTest(dynamic=dynamic):
+                actual = torch.compile(
+                    fn, backend="eager", fullgraph=True, dynamic=dynamic
+                )(p_mu, p_log_var, q_mu, q_log_var)
+                self.assertEqual(actual, expected)
 
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]

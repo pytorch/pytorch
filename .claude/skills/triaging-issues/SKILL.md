@@ -33,7 +33,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 2.5: PT2 Issues — Special Handling
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
-  - Step 5: High Priority — REQUIRES HUMAN REVIEW
+  - Step 5: Escalate — High Priority (human review), then release triage
   - Step 6: bot-triaged (automatic)
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
@@ -219,7 +219,13 @@ Only if the issue stays in the general queue:
 
 **Label based on the actual bug, not keywords.** Read the issue to understand what is actually broken. A bug about broadcasting that happens to mention "nan" in a parameter name is a frontend bug, not a NaN/Inf bug.
 
-### 5) High Priority — REQUIRES HUMAN REVIEW
+### 5) Escalate — High Priority (human review), then release triage
+
+Two independent decisions, in this order. Work through 5a first, then 5b for **every**
+issue — 5b is not limited to issues you escalated in 5a, and an issue can end up with
+both labels, one, or neither.
+
+#### 5a) High Priority — REQUIRES HUMAN REVIEW
 
 **CRITICAL:** If you believe an issue is high priority, you MUST:
 1. Add `triage review` label and do not add `triaged`
@@ -233,6 +239,44 @@ High priority criteria:
 - Internal assert failure
 - Many users affected
 - Core component or popular model impact
+
+#### 5b) release triage — Affects an Upcoming Release
+
+Add `release triage` when an issue would affect a release if it went unfixed. The label
+only surfaces the issue for whoever owns the release; it is not a cherry-pick request and
+does not decide anything.
+
+**You are told which version is current — never guess it.** Your prompt carries a
+`RELEASE CONTEXT` block giving the most recent released minor version. If the block
+says `unknown`, skip the two version-dependent criteria below and judge the rest on their
+own merits.
+
+Add it when **any** of these hold:
+
+- **Regression against the most recent released minor version.** The issue reports
+  something that worked on that minor (or later) and is broken now. Pair it with
+  `module: regression`. If the last-working version is older than that minor, it is not
+  release-relevant.
+- **Critical correctness or stability:** silent correctness (wrong results, no error),
+  backwards-compatibility break, crash / segfault, deadlock or hang, or a large memory
+  leak.
+- **Critical fix to a feature introduced in the most recent minor release** — new surface
+  that shipped broken. Go by what the issue says ("new in 2.x", "added in 2.x", "since
+  upgrading to 2.x") checked against the version in `RELEASE CONTEXT`; do not try to recall
+  which features shipped in which release.
+- **Binary / packaging:** anything affecting wheels, Docker images,
+  install, or the release build itself. Pair it with `module: binaries`.
+- **Would ship broken in the next release.** A defect on main, a nightly, an RC, or the
+  release branch that reaches users if nobody fixes it — including anything surfaced by
+  release validation or downstream canaries. This holds even when it is not a regression
+  against anything, e.g. a bug in code that has never shipped.
+
+Apply it generously. A false positive costs the release manager one glance; a miss costs
+a broken release. When unsure, add it.
+
+`release triage` is independent of the `triage review` decision in 5a — an issue can carry
+both. Do not add it to feature requests, enhancements, or documentation-only issues, and do
+not add it for a regression against a version older than the last released minor.
 
 ### 6) bot-triaged (automatic)
 
@@ -257,6 +301,7 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
+- Add `release triage` whenever an issue would affect an upcoming release (step 5b); err toward adding it
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
 
