@@ -557,7 +557,7 @@ def flex_gemm_grouped_mm(
     gemm_kwargs: dict[str, Any],
     kernel_options: dict[str, Any],
 ) -> Any:
-    """Normalize the MoE forward grouped GEMM: 2-D A, 3-D B, ``offs`` as a tensor operand.
+    """Normalize variable-length-M grouped GEMM: 2-D A, 3-D B, ``offs`` as a tensor operand.
 
     ``offs`` moves from ``gemm_kwargs`` into the HOP's tensor operands so Dynamo
     and the body graph carry it as a tensor rather than a constant.
@@ -586,7 +586,7 @@ def flex_gemm_grouped_mm(
         or mat_b.ndim != 3
     ):
         raise NotImplementedError(
-            "FlexGEMM grouped_mm supports only the MoE forward form: 2-D A "
+            "FlexGEMM grouped_mm supports only the variable-length-M form: 2-D A "
             "[total_m, K], 3-D B [E, K, N] and an int32 offs tensor; 3-D A, the "
             "2-D/2-D weight-gradient form and offs=None are not supported"
         )
