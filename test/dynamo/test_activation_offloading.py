@@ -114,7 +114,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         torch._dynamo.reset()
 
         def run_compiled():
-            return torch.compile(self.fn)(self.x)
+            return torch.compile(self.fn)(self.x)  # noqa: UNSPECIFIED_BACKEND
 
         with torch._functorch.config.patch(
             enable_activation_offloading=True,
@@ -454,7 +454,7 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         torch._dynamo.reset()
 
         def run_compiled():
-            return torch.compile(self.fn)(self.x)
+            return torch.compile(self.fn)(self.x)  # noqa: UNSPECIFIED_BACKEND
 
         with torch._functorch.config.patch(
             enable_activation_offloading=True,

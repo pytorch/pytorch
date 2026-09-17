@@ -228,7 +228,8 @@ class TestLazyOpInfo(TestCase):
             cands.append(f"{prefix}::{alias.name}{symint_suffix}")
 
         self.assertTrue(
-            any(c in metrics for c in cands), f"none of {cands} not found in {metrics}"
+            any(c in metrics for c in cands),
+            lambda msg: f"{msg}\nnone of {cands} not found in {metrics}",
         )
 
     @ops(

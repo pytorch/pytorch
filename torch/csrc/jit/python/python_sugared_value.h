@@ -232,7 +232,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
  private:
   // Check that the type of all submodules is a subtype of ty. If the function
   // returns false, more information about why it returns false (e.g. which
-  // submodule's type is not a subtype of ty) is printed it why_not if it is not
+  // submodule's type is not a subtype of ty) is printed to why_not if it is not
   // null.
   bool areAllSubmodulesSubtypeOf(
       const TypePtr& ty,

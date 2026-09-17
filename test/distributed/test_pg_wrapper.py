@@ -45,24 +45,25 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def _validate_error(self, exception, op_type, rank, tensor, verify_diff=True):
         err = str(exception)
         self.assertTrue(
-            op_type in err, f"Got {err} but expected {op_type} to be in error."
+            op_type in err,
+            lambda msg: f"{msg}\nGot {err} but expected {op_type} to be in error.",
         )
         # User doesn't call barrier with tensor.
         if op_type != "BARRIER":
             self.assertTrue(
                 f"{list(tensor.shape)}" in err,
-                f"Did not find shapes {list(tensor.shape)} in error {err}",
+                lambda msg: f"{msg}\nDid not find shapes {list(tensor.shape)} in error {err}",
             )
             # For CUDA, only assert on device type, not index
             if device_type in str(tensor.device):
                 self.assertTrue(
                     device_type in err,
-                    f"Did not find {device_type} device in error {err}",
+                    lambda msg: f"{msg}\nDid not find {device_type} device in error {err}",
                 )
             else:
                 self.assertTrue(
                     str(tensor.device) in err,
-                    f"Did not find tensor device {str(tensor.device)} in error {err}",
+                    lambda msg: f"{msg}\nDid not find tensor device {str(tensor.device)} in error {err}",
                 )
             # C++ and python type strings are not exactly the same.
             if "float" in str(tensor.dtype):
@@ -77,7 +78,8 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             # Ensure info about how collectives diff is in the error.
             if verify_diff:
                 self.assertTrue(
-                    "Collectives differ in the following" in err, f"Got error {err}"
+                    "Collectives differ in the following" in err,
+                    lambda msg: f"{msg}\nGot error {err}",
                 )
 
     def _test_collective_hang(self, wrapper_pg, use_accel=False):
@@ -212,6 +214,41 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             op_type="SCATTER",
             rank=self.rank,
             tensor=outputs[self.rank],
+        )
+
+    def _test_allgather_into_tensor_coalesced_op_mismatch(
+        self, wrapper_pg, use_accel=False
+    ):
+        # Verify runCollectiveChecks is actually invoked for the coalesced
+        # allgather path by triggering an op type mismatch across ranks: rank 0
+        # runs allgather_into_tensor_coalesced while the other ranks run
+        # reduce_scatter_tensor_coalesced. Shape checking is intentionally
+        # disabled for these ops (the fingerprint uses empty tensors), so only
+        # the op type is verified in the raised error.
+        dev = self.rank if use_accel else "cpu"
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
+            if self.rank == 0:
+                output = torch.zeros(4 * self.world_size, device=dev)
+                input = torch.ones(4, device=dev)
+                wrapper_pg.allgather_into_tensor_coalesced([output], [input]).wait()
+            else:
+                output = torch.zeros(4, device=dev)
+                input = torch.ones(4 * self.world_size, device=dev)
+                wrapper_pg.reduce_scatter_tensor_coalesced([output], [input]).wait()
+        err = str(cm.exception)
+        op_type = (
+            "ALLGATHER_INTO_TENSOR_COALESCED"
+            if self.rank == 0
+            else "REDUCE_SCATTER_TENSOR_COALESCED"
+        )
+        self.assertTrue(
+            op_type in err, f"Got {err} but expected {op_type} to be in error."
+        )
+        # These ops fingerprint with empty tensors, so no shape/dtype info is
+        # present; only the sequence number and op-type diff are reported.
+        self.assertTrue("SequenceNumber" in err)
+        self.assertTrue(
+            "Collectives differ in the following" in err, f"Got error {err}"
         )
 
 
@@ -391,6 +428,51 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 )
                 self.assertTrue(torch.allclose(output, expected))
 
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_allgather_into_tensor_coalesced_debug_mode(self):
+            """
+            Tests that allgather_into_tensor_coalesced correctly invokes
+            runCollectiveChecks in ProcessGroupWrapper. Previously this was the
+            only collective missing the check.
+            Regression test for https://github.com/pytorch/pytorch/pull/185123
+            """
+            torch.cuda.set_device(self.rank)
+            pg = self._create_wrapper_pg(with_new_group=True)
+            dev = torch.cuda.current_device()
+
+            in_shapes = [(2, 2), (3, 3)]
+            out_shapes = [(s[0] * self.world_size,) + s[1:] for s in in_shapes]
+
+            inputs = [torch.ones(s, device=dev) * (self.rank + 1) for s in in_shapes]
+            outputs = [torch.zeros(s, device=dev) for s in out_shapes]
+
+            work = pg.allgather_into_tensor_coalesced(outputs, inputs)
+            work.wait()
+
+            # Each output gathers inputs from all ranks: rank r contributes r + 1.
+            for i, output in enumerate(outputs):
+                expected = torch.zeros(out_shapes[i], device=dev)
+                for r in range(self.world_size):
+                    start = r * in_shapes[i][0]
+                    end = (r + 1) * in_shapes[i][0]
+                    expected[start:end] = torch.ones(in_shapes[i], device=dev) * (r + 1)
+                self.assertTrue(torch.allclose(output, expected))
+
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_allgather_into_tensor_coalesced_op_mismatch_debug_mode(self):
+            """
+            Verify runCollectiveChecks detects a collective mismatch on the
+            coalesced allgather path.
+            Regression test for https://github.com/pytorch/pytorch/pull/185123
+            """
+            torch.cuda.set_device(self.rank)
+            pg = self._create_wrapper_pg(with_new_group=True)
+            self._test_allgather_into_tensor_coalesced_op_mismatch(pg, use_accel=True)
+
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
@@ -424,7 +506,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             self.assertEqual(wrapper.supports_splitting, unwrapped.supports_splitting)
             self.assertEqual(wrapper.supports_coalescing, unwrapped.supports_coalescing)
             self.assertEqual(
-                wrapper.supports_time_estimate, unwrapped.supports_time_estimate
+                wrapper._supports_time_estimate, unwrapped._supports_time_estimate
             )
             self.assertEqual(
                 wrapper.supports_tensor_alloc(device),
@@ -444,6 +526,30 @@ if not TEST_WITH_DEV_DBG_ASAN:
                     1024, dtype=torch.float32, device=device
                 )
                 self.assertEqual(tensor.shape, torch.Size([1024]))
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_wrapper_forwards_bound_device_id(self):
+            """
+            Tests that ProcessGroupWrapper propagates bound_device_id to the
+            wrapped backend when init_process_group is called with device_id.
+            See issue #178977.
+            """
+            torch.cuda.set_device(self.rank)
+            device = torch.device(f"cuda:{self.rank}")
+            store = c10d.FileStore(self.file_name, self.world_size)
+            c10d.init_process_group(
+                backend=backend,
+                rank=self.rank,
+                world_size=self.world_size,
+                store=store,
+                device_id=device,
+            )
+            pg = c10d.distributed_c10d._get_default_group()
+            pg_backend = pg._get_backend(device)
+            self.assertIsInstance(pg_backend, _ProcessGroupWrapper)
+            self.assertEqual(pg_backend.wrapped_pg.bound_device_id, device)
 
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
@@ -567,6 +673,42 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         for i, (output, _) in enumerate(zip(outputs, inputs)):
             expected = torch.ones(out_shapes[i]) * sum(range(1, self.world_size + 1))
             self.assertTrue(torch.allclose(output, expected))
+
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_allgather_into_tensor_coalesced_debug_mode(self):
+        """
+        Tests that allgather_into_tensor_coalesced correctly invokes
+        runCollectiveChecks in ProcessGroupWrapper (Gloo backend).
+        Regression test for https://github.com/pytorch/pytorch/pull/185123
+        """
+        pg = self._create_wrapper_pg(with_new_group=True)
+
+        in_shapes = [(2, 2), (3, 3)]
+        out_shapes = [(s[0] * self.world_size,) + s[1:] for s in in_shapes]
+        inputs = [torch.ones(s) * (self.rank + 1) for s in in_shapes]
+        outputs = [torch.zeros(s) for s in out_shapes]
+
+        work = pg.allgather_into_tensor_coalesced(outputs, inputs)
+        work.wait()
+
+        # Each output gathers inputs from all ranks: rank r contributes r + 1.
+        for i, output in enumerate(outputs):
+            expected = torch.zeros(out_shapes[i])
+            for r in range(self.world_size):
+                start = r * in_shapes[i][0]
+                end = (r + 1) * in_shapes[i][0]
+                expected[start:end] = torch.ones(in_shapes[i]) * (r + 1)
+            self.assertTrue(torch.allclose(output, expected))
+
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_allgather_into_tensor_coalesced_op_mismatch_debug_mode(self):
+        """
+        Verify runCollectiveChecks detects a collective mismatch on the
+        coalesced allgather path (Gloo backend).
+        Regression test for https://github.com/pytorch/pytorch/pull/185123
+        """
+        pg = self._create_wrapper_pg(with_new_group=True)
+        self._test_allgather_into_tensor_coalesced_op_mismatch(pg)
 
 
 if __name__ == "__main__":

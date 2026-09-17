@@ -12,7 +12,6 @@
 #endif
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
@@ -31,6 +30,28 @@ bool allow_overlapping_devices() {
       true;
 }
 
+namespace {
+
+// Every PG exchange during rendezvous stages its payload on `device_idx`: the
+// group may only have a CUDA backend, so a CPU tensor would dispatch to a
+// backend that isn't there. The H2D/D2H copies are negligible at the sizes
+// exchanged (a few hundred bytes per rank).
+at::Tensor stage_bytes_to_device(
+    const void* data,
+    size_t nbytes,
+    int device_idx) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  void* mutable_data = const_cast<void*>(data);
+  return at::from_blob(
+             mutable_data,
+             {static_cast<int64_t>(nbytes)},
+             at::TensorOptions().dtype(at::kByte))
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+      .to(c10::Device(c10::DeviceType::CUDA, device_idx));
+}
+
+} // namespace
+
 at::Tensor pg_all_gather_bytes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
     const void* data,
@@ -43,26 +64,59 @@ at::Tensor pg_all_gather_bytes(
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   c10::cuda::CUDAGuard guard(device_idx);
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  auto device = c10::Device(c10::DeviceType::CUDA, device_idx);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  void* mutable_data = const_cast<void*>(data);
-  at::Tensor in_buf = at::from_blob(
-                          mutable_data,
-                          {static_cast<int64_t>(nbytes)},
-                          at::TensorOptions().dtype(at::kByte))
-                          .to(device);
-
+  at::Tensor in_buf = stage_bytes_to_device(data, nbytes, device_idx);
   at::Tensor out_buf = at::empty(
       {static_cast<int64_t>(total_bytes)},
-      at::TensorOptions().dtype(at::kByte).device(device));
+      at::TensorOptions().dtype(at::kByte).device(in_buf.device()));
 
   c10d::AllgatherOptions ag_opts;
   ag_opts.asyncOp = false;
   pg->all_gather_single(out_buf, in_buf, ag_opts);
 
   return out_buf.cpu();
+}
+
+at::Tensor pg_broadcast_bytes(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    const void* data,
+    size_t nbytes,
+    int device_idx,
+    int root) {
+  TORCH_CHECK(pg != nullptr, "pg_broadcast_bytes: null ProcessGroup");
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  c10::cuda::CUDAGuard guard(device_idx);
+
+  std::vector<at::Tensor> bufs{stage_bytes_to_device(data, nbytes, device_idx)};
+
+  c10d::BroadcastOptions bc_opts;
+  bc_opts.rootRank = root;
+  bc_opts.asyncOp = false;
+  pg->broadcast(bufs, bc_opts);
+
+  return bufs[0].cpu();
+}
+
+void pg_barrier(
+    const c10::intrusive_ptr<c10d::ProcessGroup>& pg,
+    int device_idx) {
+  TORCH_CHECK(pg != nullptr, "pg_barrier: null ProcessGroup");
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  c10::cuda::CUDAGuard guard(device_idx);
+
+  c10d::BarrierOptions bar_opts;
+  // ProcessGroup::barrier stages its own dummy tensor, so pinning the device
+  // here is what keeps it on the CUDA backend, same as the exchanges above.
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  bar_opts.device = c10::Device(c10::DeviceType::CUDA, device_idx);
+  bar_opts.device_ids = {static_cast<int64_t>(device_idx)};
+  bar_opts.asyncOp = false;
+  auto work = pg->barrier(bar_opts);
+  if (work != nullptr) {
+    work->wait();
+  }
 }
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
@@ -259,7 +313,7 @@ std::string IpcChannel::get_socket_name(int pid) {
   }
   std::ostringstream oss;
   oss << tmp_dir << "/symm_mem-" << pid;
-  return oss.str();
+  return std::move(oss).str();
 }
 
 void map_block(

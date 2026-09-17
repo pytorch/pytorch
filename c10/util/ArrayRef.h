@@ -82,7 +82,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// front - Get the first element.
   /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
   /// STD_TORCH_CHECK
-  constexpr const T& front() const {
+  [[nodiscard]] constexpr const T& front() const {
     TORCH_CHECK(
         !this->empty(), "ArrayRef: attempted to access front() of empty list");
     return this->Data[0];
@@ -91,7 +91,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// back - Get the last element.
   /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
   /// STD_TORCH_CHECK
-  constexpr const T& back() const {
+  [[nodiscard]] constexpr const T& back() const {
     TORCH_CHECK(
         !this->empty(), "ArrayRef: attempted to access back() of empty list");
     return this->Data[this->Length - 1];
@@ -100,7 +100,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// slice(n, m) - Take M elements of the array starting at element N
   /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
   /// STD_TORCH_CHECK
-  constexpr ArrayRef<T> slice(size_t N, size_t M) const {
+  [[nodiscard]] constexpr ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
         N + M <= this->size(),
         "ArrayRef: invalid slice, N = ",
@@ -115,7 +115,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// slice(n) - Chop off the first N elements of the array.
   /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
   /// STD_TORCH_CHECK
-  constexpr ArrayRef<T> slice(size_t N) const {
+  [[nodiscard]] constexpr ArrayRef<T> slice(size_t N) const {
     TORCH_CHECK(
         N <= this->size(),
         "ArrayRef: invalid slice, N = ",
@@ -132,7 +132,7 @@ class ArrayRef : public HeaderOnlyArrayRef<T> {
   /// Vector compatibility
   /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
   /// STD_TORCH_CHECK
-  constexpr const T& at(size_t Index) const {
+  [[nodiscard]] constexpr const T& at(size_t Index) const {
     TORCH_CHECK(
         Index < this->Length,
         "ArrayRef: invalid index Index = ",
@@ -222,62 +222,62 @@ std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
 
 /// Construct an ArrayRef from a single element.
 template <typename T>
-ArrayRef<T> makeArrayRef(const T& OneElt) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T& OneElt) {
   return OneElt;
 }
 
 /// Construct an ArrayRef from a pointer and length.
 template <typename T>
-ArrayRef<T> makeArrayRef(const T* data, size_t length) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T* data, size_t length) {
   return ArrayRef<T>(data, length);
 }
 
 /// Construct an ArrayRef from a range.
 template <typename T>
-ArrayRef<T> makeArrayRef(const T* begin, const T* end) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T* begin, const T* end) {
   return ArrayRef<T>(begin, end);
 }
 
 /// Construct an ArrayRef from a SmallVector.
 template <typename T>
-ArrayRef<T> makeArrayRef(const SmallVectorImpl<T>& Vec) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const SmallVectorImpl<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a SmallVector.
 template <typename T, unsigned N>
-ArrayRef<T> makeArrayRef(const SmallVector<T, N>& Vec) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const SmallVector<T, N>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a std::vector.
 template <typename T>
-ArrayRef<T> makeArrayRef(const std::vector<T>& Vec) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const std::vector<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a std::array.
 template <typename T, std::size_t N>
-ArrayRef<T> makeArrayRef(const std::array<T, N>& Arr) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const std::array<T, N>& Arr) {
   return Arr;
 }
 
 /// Construct an ArrayRef from an ArrayRef (no-op) (const)
 template <typename T>
-ArrayRef<T> makeArrayRef(const ArrayRef<T>& Vec) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const ArrayRef<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from an ArrayRef (no-op)
 template <typename T>
-ArrayRef<T>& makeArrayRef(ArrayRef<T>& Vec) {
+[[nodiscard]] ArrayRef<T>& makeArrayRef(ArrayRef<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a C array.
 template <typename T, size_t N>
 // NOLINTNEXTLINE(*c-arrays*)
-ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
+[[nodiscard]] ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }
 
@@ -288,3 +288,15 @@ using IntList [[deprecated(
     ArrayRef<int64_t>;
 
 } // namespace c10
+
+#if __cplusplus >= 202002L
+#include <ranges>
+// ArrayRef is a non-owning view; iterators remain valid after the ArrayRef
+// is destroyed (the underlying array outlives it). Opt in to the ranges
+// borrowed-range contract so that algorithms like std::ranges::find return
+// real iterators rather than std::ranges::dangling for temporary ArrayRefs.
+namespace std::ranges {
+template <typename T>
+inline constexpr bool enable_borrowed_range<c10::ArrayRef<T>> = true;
+} // namespace std::ranges
+#endif

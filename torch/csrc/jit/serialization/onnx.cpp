@@ -235,7 +235,7 @@ void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
 std::string prettyPrint(const ::ONNX_NAMESPACE::ModelProto& model) {
   std::ostringstream ss;
   dump(model, ss, 0);
-  return ss.str();
+  return std::move(ss).str();
 }
 
 } // namespace torch::jit

@@ -6,10 +6,16 @@ import torch
 import torch.fx
 from torch.fx.experimental import const_fold
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
-from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestConstFold(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _get_attr(self, node):
         mod = node.graph.owning_module
         target = str(node.target)
@@ -751,6 +757,105 @@ class TestConstFold(TestCase):
         )
         self.assertIsNone(mod_folded.const_subgraph_module)
 
+    def test_skip_folding_node_fn_in_subgraph(self):
+        """
+        A call_module node can only be folded as a whole, so if its subgraph
+        contains a node that skip_folding_node_fn says to skip, the whole
+        call_module node should be skipped.
+        """
+
+        class SubModule(torch.nn.Module):
+            def forward(self):
+                return torch.full((5, 10), 2.0) + 1
+
+        def _make_parent() -> torch.fx.GraphModule:
+            ep = torch.export.export(SubModule(), ())
+            parent_graph = torch.fx.Graph()
+            call_mod = parent_graph.call_module("sub", args=())
+            get_item = parent_graph.call_function(
+                operator.getitem, args=(call_mod, slice(None))
+            )
+            parent_graph.output((get_item,))
+            return torch.fx.GraphModule({"sub": ep.module()}, parent_graph)
+
+        # skip_folding_node_fn matches a node *inside* the submodule, so the
+        # whole call_module node must be skipped and nothing gets folded.
+        def skip_full(node: torch.fx.Node) -> bool:
+            return node.target == torch.ops.aten.full.default
+
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(
+            _make_parent(),
+            skip_folding_node_fn=skip_full,
+            device_for_folded_attrs="cpu",
+        )
+        self.assertIsNone(mod_folded.const_subgraph_module)
+
+        # Control: when skip_folding_node_fn matches nothing in the submodule,
+        # the same pure subgraph is still folded as usual.
+        def skip_nothing(node: torch.fx.Node) -> bool:
+            return False
+
+        mod_folded = const_fold.split_const_subgraphs(
+            _make_parent(),
+            skip_folding_node_fn=skip_nothing,
+            device_for_folded_attrs="cpu",
+        )
+        self._verify_const_fold_mod(mod_folded)
+
+    def test_skip_folding_dynamic_node_in_subgraph(self):
+        """
+        A dynamic (symbolic-shape) node inside a call_module subgraph. A call_module
+        folds atomically, so folding it makes const folding *execute* the subgraph
+        at compile time, which crashes with "NameError: name 's..' is not defined"
+        because the shape symbol is only bound at runtime.
+        """
+        import torch.utils._pytree as pytree
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def _make_parent() -> torch.fx.GraphModule:
+            # Submodule whose forward materializes a tensor of symbolic size
+            sub_graph = torch.fx.Graph()
+            sym = ShapeEnv().create_unbacked_symint()
+            full = sub_graph.call_function(
+                torch.ops.aten.full.default,
+                args=([sym, 1], 0),
+                kwargs={"dtype": torch.bfloat16},
+            )
+            sub_graph.output((full,))
+            sub = torch.fx.GraphModule(torch.nn.Module(), sub_graph)
+
+            parent_graph = torch.fx.Graph()
+            call_mod = parent_graph.call_module("sub", args=())
+            get_item = parent_graph.call_function(operator.getitem, args=(call_mod, 0))
+            parent_graph.output((get_item,))
+            return torch.fx.GraphModule({"sub": sub}, parent_graph)
+
+        # Skips nodes carrying a symbolic value. they can't be evaluated at
+        # compile time, so folding them would fail.
+        def skip_dynamic(node: torch.fx.Node) -> bool:
+            return any(
+                isinstance(a, torch.SymInt)
+                for a in pytree.tree_leaves((node.args, node.kwargs))
+            )
+
+        # Folding this subgraph without skipping fails, because the symbolic size
+        # is unbound at compile time
+        with self.assertRaises(Exception):
+            unguarded = const_fold.split_const_subgraphs(
+                _make_parent(), device_for_folded_attrs="cpu"
+            )
+            unguarded.run_folding()
+
+        # With skip_dynamic, the dynamic node inside the submodule is skipped, so
+        # the call_module is not folded and running folding is a safe no-op.
+        mod_folded = const_fold.split_const_subgraphs(
+            _make_parent(),
+            skip_folding_node_fn=skip_dynamic,
+            device_for_folded_attrs="cpu",
+        )
+        self.assertIsNone(mod_folded.const_subgraph_module)
+        mod_folded.run_folding()
+
     def test_const_fold_partial_graph(self):
         """
         If a model graph is partially const folded,
@@ -773,6 +878,53 @@ class TestConstFold(TestCase):
             ep.module(), device_for_folded_attrs="cpu"
         )
         self._verify_const_fold_mod(mod_folded)
+
+    def test_const_fold_is_impure_node_preserves_dead_node(self):
+        r"""
+        Const folding runs dead-code elimination, which by default drops a node
+        with no users when ``Node.is_impure()`` is False. A caller can pass
+        ``is_impure_node`` to preserve such a node -- e.g. a destination-passing
+        op whose only effect is writing a buffer through an ``out=`` kwarg its
+        schema does not declare as mutated, so the default check treats it as
+        pure dead code.
+        """
+
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attr1 = torch.nn.Parameter(torch.randn(2, 3))
+                self.attr2 = torch.nn.Parameter(torch.randn(2, 3))
+
+            def forward(self, x):
+                folded = self.attr1 + self.attr2  # const-foldable subgraph
+                _unused = torch.relu(x)  # no users -> dead-code candidate
+                return x + folded
+
+        def _num_userless_relus(gm: torch.fx.GraphModule) -> int:
+            return sum(
+                1
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and "relu" in str(n.target)
+                and len(n.users) == 0
+            )
+
+        def _is_userless_relu(n: torch.fx.Node) -> bool:
+            return (
+                n.op == "call_function"
+                and "relu" in str(n.target)
+                and len(n.users) == 0
+            )
+
+        # Default: the user-less relu is dead-code-eliminated.
+        mod_default = const_fold.split_const_subgraphs(ConstFoldTestModule())
+        self.assertEqual(_num_userless_relus(mod_default), 0)
+
+        # With is_impure_node marking the user-less relu impure, it survives.
+        mod_kept = const_fold.split_const_subgraphs(
+            ConstFoldTestModule(), is_impure_node=_is_userless_relu
+        )
+        self.assertEqual(_num_userless_relus(mod_kept), 1)
 
 
 if __name__ == "__main__":

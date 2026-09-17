@@ -325,7 +325,6 @@ class DictTest(__TestCase):
 
         self.assertRaises(ValueError, {}.update, [(1, 2, 3)])
 
-    @unittest.skip("test hangs")
     def test_fromkeys(self):
         self.assertEqual(dict.fromkeys('abc'), {'a':None, 'b':None, 'c':None})
         d = {}
