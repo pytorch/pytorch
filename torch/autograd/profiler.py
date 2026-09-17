@@ -792,9 +792,10 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                # Skip OVERHEAD events (profiler-internal host cost):
-                # they do no device work and would otherwise inflate reported device time.
-                if fe.activity_type != "overhead":
+                # Unlinked runtime/driver records and overhead have external_id=0.
+                # Their correlation ids can alias PyTorch operator ids, so do not
+                # use them to look up device work. See KinetoEvent::externalId().
+                if fe.external_id != 0:
                     frontend_function_events.append(fe)
             else:
                 raise RuntimeError(

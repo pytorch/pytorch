@@ -45,6 +45,9 @@ from trymerge import (
     gh_get_pr_info,
     gh_get_team_members,
     GitHubPR,
+    HAS_NO_CONNECTED_DIFF_TITLE,
+    IMPORT_STATUS_CHECKRUN_NAME,
+    INTERNAL_CHANGES_CHECKRUN_NAME,
     is_authorized_without_greenlight,
     is_bot_initiated_codev_merge,
     is_docker_affecting_files,
@@ -927,7 +930,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         self.assertTrue(
             checks[
@@ -995,7 +998,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
@@ -1009,7 +1012,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
@@ -1025,7 +1028,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
@@ -1039,7 +1042,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         workflow_name = "linux-bionic-cuda12.1-py3.10-gcc9-bazel-test"
         job_name = "build-and-test (default, 1, 1, linux.4xlarge.nvidia.gpu, unstable)"
@@ -1061,7 +1064,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         print(checks)
         workflow_name = "test-llama-app"
@@ -1121,7 +1124,7 @@ class TestBypassFailures(TestCase):
                 pr.pr_num,
                 pr.project,
                 checks,
-                [],
+                None,
             )
 
             pending, failed, _ = categorize_checks(checks, list(checks.keys()))
@@ -1158,7 +1161,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [broken_trunk, flaky],
+            {(pr.pr_num, broken_trunk), (pr.pr_num, flaky)},
         )
         self.assertTrue(checks[flaky].classification == "FLAKY")
         self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
@@ -1191,7 +1194,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(
             checks,
@@ -1210,7 +1213,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(
             checks,
@@ -1246,7 +1249,7 @@ class TestBypassFailures(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         oot_check = (
             "inductor / cuda11.8-py3.10-gcc7-sm86"
@@ -1287,7 +1290,7 @@ class TestBypassFailuresOnSandCastle(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
@@ -1313,7 +1316,7 @@ class TestBypassFailuresOnSandCastle(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
@@ -1334,7 +1337,7 @@ class TestBypassFailuresOnSandCastle(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
@@ -1347,7 +1350,7 @@ class TestBypassFailuresOnSandCastle(TestCase):
             pr.pr_num,
             pr.project,
             checks,
-            [],
+            None,
         )
         pending, failed, ignorable = categorize_checks(checks, list(checks.keys()))
         self.assertTrue(len(pending) == 0)
@@ -1520,6 +1523,38 @@ class TestGitHubPRGhstackDependencies(TestCase):
             top_pr.merge_ghstack_into(mock_repo, True)
 
         self.assertIn("#106034", str(cm.exception))
+
+    @mock.patch.object(GitHubPR, "is_closed", return_value=False)
+    @mock.patch("trymerge.can_skip_internal_checks", return_value=False)
+    @mock.patch("trymerge.find_matching_merge_rule")
+    @mock.patch("trymerge.GitRepo")
+    @mock.patch("trymerge.get_ghstack_prs")
+    def test_merge_ghstack_into_gates_lower_prs_with_the_waivers(
+        self,
+        mock_get_ghstack_prs: mock.MagicMock,
+        mock_repo: mock.MagicMock,
+        mock_find_matching_merge_rule: mock.MagicMock,
+        _mock_can_skip_internal_checks: mock.MagicMock,
+        _mock_is_closed: mock.MagicMock,
+        *args: Any,
+    ) -> None:
+        """The per-stacked-PR gate, which `merge -i` never used to reach at all."""
+        parent_pr = GitHubPR("pytorch", "pytorch", 106034)
+        top_pr = GitHubPR("pytorch", "pytorch", 106068)
+        waivers = {(parent_pr.pr_num, "parent-red"), (top_pr.pr_num, "top-red")}
+        mock_get_ghstack_prs.return_value = [
+            (parent_pr, "rev_parent"),
+            (top_pr, "rev_top"),
+        ]
+        mock_find_matching_merge_rule.return_value = (None, [], [], {})
+
+        top_pr.merge_ghstack_into(mock_repo, True, ignore_current_checks=waivers)
+
+        mock_find_matching_merge_rule.assert_called_once()
+        self.assertEqual(
+            mock_find_matching_merge_rule.call_args.kwargs["ignore_current_checks"],
+            waivers,
+        )
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -1739,6 +1774,120 @@ class TestTimelineFunctions(TestCase):
         self.assertIsNone(sha)
 
 
+class TestImportStatusCheck(TestCase):
+    """CodeSync leaves `Import Status` queued on an unimported revision (#189303), so
+    a pending one must not make the merge wait once CodeSync has cleared the commit."""
+
+    BUILD_CHECK = "pull / linux-jammy-py3.10-gcc11 / build"
+
+    @staticmethod
+    def check(name: str, status: str | None, title: str | None = None) -> JobCheckState:
+        return JobCheckState(name, "", status, None, None, title, None)
+
+    def cleared_by_codesync(self) -> dict[str, JobCheckState]:
+        return {
+            INTERNAL_CHANGES_CHECKRUN_NAME: self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME,
+                "SUCCESS",
+                HAS_NO_CONNECTED_DIFF_TITLE,
+            )
+        }
+
+    def test_pending_import_status_is_not_pending(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(IMPORT_STATUS_CHECKRUN_NAME, None),
+            self.BUILD_CHECK: self.check(self.BUILD_CHECK, "SUCCESS"),
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(pending, [])
+        self.assertEqual(failed, [])
+
+    def test_other_pending_checks_still_block(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(IMPORT_STATUS_CHECKRUN_NAME, None),
+            self.BUILD_CHECK: self.check(self.BUILD_CHECK, None),
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual([name for name, _, _ in pending], [self.BUILD_CHECK])
+        self.assertEqual(failed, [])
+
+    def test_pending_import_status_blocks_while_a_diff_is_connected(self) -> None:
+        # The internal Diff has yet to land, so the import is still meaningful and
+        # waiting on it is the pre-existing behaviour.
+        checks = {
+            INTERNAL_CHANGES_CHECKRUN_NAME: self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "SUCCESS", "Diff is not landed yet"
+            ),
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(IMPORT_STATUS_CHECKRUN_NAME, None),
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(
+            [name for name, _, _ in pending], [IMPORT_STATUS_CHECKRUN_NAME]
+        )
+        self.assertEqual(failed, [])
+
+    def test_pending_import_status_blocks_without_a_codesync_verdict(self) -> None:
+        for internal_check in (
+            None,
+            self.check(INTERNAL_CHANGES_CHECKRUN_NAME, None, None),
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, None, HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "FAILURE", HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+            # SKIPPED and NEUTRAL pass is_passing_status, but neither is a verdict
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "SKIPPED", HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+            self.check(
+                INTERNAL_CHANGES_CHECKRUN_NAME, "NEUTRAL", HAS_NO_CONNECTED_DIFF_TITLE
+            ),
+        ):
+            with self.subTest(internal_check=internal_check):
+                checks = {
+                    IMPORT_STATUS_CHECKRUN_NAME: self.check(
+                        IMPORT_STATUS_CHECKRUN_NAME, None
+                    )
+                }
+                if internal_check is not None:
+                    checks[INTERNAL_CHANGES_CHECKRUN_NAME] = internal_check
+                pending, _, _ = categorize_checks(checks, list(checks.keys()))
+                self.assertIn(
+                    IMPORT_STATUS_CHECKRUN_NAME, [name for name, _, _ in pending]
+                )
+
+    def test_failed_import_status_still_blocks(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(
+                IMPORT_STATUS_CHECKRUN_NAME, "FAILURE"
+            )
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(pending, [])
+        self.assertEqual([name for name, _, _ in failed], [IMPORT_STATUS_CHECKRUN_NAME])
+
+    def test_successful_import_status_is_not_a_failure(self) -> None:
+        checks = self.cleared_by_codesync() | {
+            IMPORT_STATUS_CHECKRUN_NAME: self.check(
+                IMPORT_STATUS_CHECKRUN_NAME, "SUCCESS"
+            )
+        }
+        pending, failed, _ = categorize_checks(checks, list(checks.keys()))
+        self.assertEqual(pending, [])
+        self.assertEqual(failed, [])
+
+    def test_import_status_is_not_a_mandatory_check(self) -> None:
+        # A pending `Import Status` is skipped by name, so listing it in
+        # merge_rules.yaml would look like a gate while never acting as one.
+        rules = read_merge_rules(DummyGitRepo(), "pytorch", "pytorch")
+        self.assertGreater(len(rules), 0)
+        for rule in rules:
+            for mandatory_check in rule.mandatory_checks_name or []:
+                # Mandatory names match check-runs by substring, not equality
+                self.assertNotIn(mandatory_check, IMPORT_STATUS_CHECKRUN_NAME)
+
+
 class TestDockerCiGates(TestCase):
     """Unit tests for the docker-image merge gates."""
 
@@ -1827,7 +1976,7 @@ class TestDockerCiGates(TestCase):
         mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
         mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
         top_pr.merge_changes_locally.assert_called_once_with(
-            repo, False, 1, ghstack_prs=ghstack_prs
+            repo, False, 1, ghstack_prs=ghstack_prs, ignore_current_checks=None
         )
 
 
@@ -1922,16 +2071,27 @@ class TestAuthorizedWithoutGreenlight(TestCase):
                 repo,
                 skip_mandatory_checks=True,
                 skip_internal_checks=True,
-                ignore_current_checks=["some-check"],
+                ignore_current_checks={(115495, "some-check")},
             )
         self.assertEqual(
             mock_rule.call_args.kwargs,
             {
                 "skip_mandatory_checks": True,
                 "skip_internal_checks": True,
-                "ignore_current_checks": ["some-check"],
+                "ignore_current_checks": {(115495, "some-check")},
                 "approved_by_override": {"malfet"},
             },
+        )
+
+    def test_waived_checks_do_not_stand_in_for_a_missing_approval(
+        self, *args: Any
+    ) -> None:
+        """`merge -i` relaxes check status; it never relaxes who has to approve."""
+        pr = self._pr_approved_by(GREENLIGHT_LOGIN)
+        self.assertFalse(
+            is_authorized_without_greenlight(
+                pr, DummyGitRepo(), ignore_current_checks={(pr.pr_num, "Lint")}
+            )
         )
 
     def test_pending_mandatory_checks_keep_the_guard_on(self, *args: Any) -> None:
@@ -2458,7 +2618,7 @@ class TestGreenlightGuardWiring(TestCase):
                 wait_window=None,
                 skip_mandatory_checks=True,
                 skip_internal_checks=True,
-                ignore_current_checks=["some-check"],
+                ignore_current_checks={(7, "some-check")},
             )
             _, prs = mock_evaluate.call_args.args
             prs[0].is_authorized_without_greenlight()
@@ -2467,7 +2627,7 @@ class TestGreenlightGuardWiring(TestCase):
             {
                 "skip_mandatory_checks": True,
                 "skip_internal_checks": True,
-                "ignore_current_checks": ["some-check"],
+                "ignore_current_checks": {(7, "some-check")},
             },
         )
 
@@ -2493,14 +2653,199 @@ class TestGreenlightGuardWiring(TestCase):
                 mock.MagicMock(spec=GitRepo),
                 comment_id=1,
                 skip_mandatory_checks=True,
-                ignore_current_checks=["some-check"],
+                ignore_current_checks={(1, "some-check")},
             )
 
         self.assertEqual(mock_check.call_args.kwargs["skip_mandatory_checks"], True)
         self.assertEqual(mock_check.call_args.kwargs["skip_internal_checks"], True)
         self.assertEqual(
-            mock_check.call_args.kwargs["ignore_current_checks"], ["some-check"]
+            mock_check.call_args.kwargs["ignore_current_checks"], {(1, "some-check")}
         )
+        self.assertEqual(
+            pr.merge_changes_locally.call_args.kwargs["ignore_current_checks"],
+            {(1, "some-check")},
+        )
+
+
+@mock.patch("trymerge.get_drci_classifications", return_value={})
+class TestIgnoreCurrentScope(TestCase):
+    """The waiver set names (PR, check) pairs, so a gate waives only what was red on
+    the PR it is judging, and only the checks that were red when the command ran."""
+
+    def _categorize(
+        self,
+        pr_num: int,
+        status: str | None,
+        names: list[str],
+        waived: set[tuple[int, str]],
+    ) -> tuple[list[str], list[str]]:
+        checks = {
+            name: JobCheckState(name, "", status, None, None, None, None)
+            for name in names
+        }
+        classified = get_classifications(pr_num, "pytorch", checks, waived)
+        pending, failed, _ = categorize_checks(classified, names)
+        return [x[0] for x in pending], [x[0] for x in failed]
+
+    def test_a_waiver_does_not_carry_to_the_same_job_on_another_pr(
+        self, *args: Any
+    ) -> None:
+        red = "pull / build"
+        _, failed = self._categorize(1001, "FAILURE", [red], {(1000, red)})
+        self.assertEqual(failed, [red])
+
+    def test_a_failure_that_appeared_after_the_snapshot_still_blocks(
+        self, *args: Any
+    ) -> None:
+        _, failed = self._categorize(
+            1001, "FAILURE", ["snapshotted", "appeared-later"], {(1001, "snapshotted")}
+        )
+        self.assertEqual(failed, ["appeared-later"])
+
+    def test_a_pending_check_is_never_waived(self, *args: Any) -> None:
+        red = "pull / build"
+        pending, failed = self._categorize(1001, None, [red], {(1001, red)})
+        self.assertEqual((pending, failed), ([red], []))
+
+
+@mock.patch("trymerge.gh_add_labels")
+@mock.patch("trymerge.check_for_sev")
+@mock.patch("trymerge.post_starting_merge_comment")
+@mock.patch("trymerge.ensure_mergeable_labels")
+@mock.patch("trymerge.find_matching_merge_rule")
+@mock.patch("trymerge.get_classifications", return_value={})
+@mock.patch("trymerge.GitHubPR")
+@mock.patch("trymerge.get_ghstack_prs")
+class TestIgnoreCurrentSnapshot(TestCase):
+    def _pr(self, pr_num: int, red: str | None, ghstack: bool = False) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = pr_num
+        pr.last_commit_sha.return_value = f"sha-{pr_num}"
+        pr.get_labels.return_value = []
+        pr.is_ghstack_pr.return_value = ghstack
+        pr.get_checkrun_conclusions.return_value = (
+            {red: JobCheckState(red, "", "FAILURE", None, None, None, None)}
+            if red
+            else {}
+        )
+        return pr
+
+    def _waivers_of_stack(
+        self, ghstack_prs: Any, pr_cls: Any, lower_red: str | None, top_red: str | None
+    ) -> Any:
+        lower = self._pr(1000, lower_red)
+        top = self._pr(1001, top_red, ghstack=True)
+        ghstack_prs.return_value = [(lower, "lower"), (top, "top")]
+        pr_cls.return_value = top
+        merge(
+            top,
+            mock.MagicMock(spec=GitRepo),
+            comment_id=1,
+            dry_run=True,
+            ignore_current=True,
+        )
+        return top.merge_into.call_args.kwargs["ignore_current_checks"]
+
+    def _waived_names(self, post_comment: Any) -> list[str]:
+        """The names the merge comment renders for what it waived."""
+        info = post_comment.call_args.kwargs["ignore_current_checks_info"]
+        return [name for name, _, _ in info]
+
+    def test_every_stacked_pr_contributes_its_own_red_checks(
+        self,
+        mock_get_ghstack_prs: Any,
+        mock_pr_cls: Any,
+        mock_get_classifications: Any,
+        mock_find_matching_merge_rule: Any,
+        mock_ensure_mergeable_labels: Any,
+        mock_post_comment: Any,
+        *args: Any,
+    ) -> None:
+        """One job name, red on both PRs: the waivers must not collapse into one,
+        and the comment must say which PR each came from."""
+        self.assertEqual(
+            self._waivers_of_stack(mock_get_ghstack_prs, mock_pr_cls, "red", "red"),
+            {(1000, "red"), (1001, "red")},
+        )
+        self.assertEqual(
+            self._waived_names(mock_post_comment), ["red (#1000)", "red (#1001)"]
+        )
+
+    def test_a_lone_pr_tags_nothing(
+        self,
+        mock_get_ghstack_prs: Any,
+        mock_pr_cls: Any,
+        mock_get_classifications: Any,
+        mock_find_matching_merge_rule: Any,
+        mock_ensure_mergeable_labels: Any,
+        mock_post_comment: Any,
+        *args: Any,
+    ) -> None:
+        pr = self._pr(1000, "red")
+        mock_pr_cls.return_value = pr
+        merge(
+            pr,
+            mock.MagicMock(spec=GitRepo),
+            comment_id=1,
+            dry_run=True,
+            ignore_current=True,
+        )
+        self.assertEqual(self._waived_names(mock_post_comment), ["red"])
+        mock_get_ghstack_prs.assert_not_called()
+
+    def test_a_green_stack_waives_nothing(
+        self, mock_get_ghstack_prs: Any, mock_pr_cls: Any, *args: Any
+    ) -> None:
+        """An empty set is falsy, which is what the s3 record's flag reads."""
+        self.assertEqual(
+            self._waivers_of_stack(mock_get_ghstack_prs, mock_pr_cls, None, None), set()
+        )
+
+
+@mock.patch("trymerge.get_drci_classifications", return_value={})
+@mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules_greenlight)
+class TestIgnoreCurrentAcrossAStack(TestCase):
+    def setUp(self) -> None:
+        _AUTHORIZED_WITHOUT_GREENLIGHT.clear()
+
+    def _stacked_pr(self, pr_num: int, red: str) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org = "pytorch"
+        pr.project = "pytorch"
+        pr.pr_num = pr_num
+        pr.last_commit_sha.return_value = f"sha-{pr_num}"
+        pr.get_approved_by.return_value = [GREENLIGHT_LOGIN, "malfet"]
+        pr.get_changed_files.return_value = ["torch/foo.py"]
+        pr.has_internal_changes.return_value = False
+        pr.get_checkrun_conclusions.return_value = {
+            "Lint": JobCheckState("Lint", "", "SUCCESS", None, None, None, None),
+            red: JobCheckState(red, "", "FAILURE", None, None, None, None),
+        }
+        return pr
+
+    @mock.patch("trymerge.evaluate_greenlight_guard")
+    def test_each_stacked_pr_is_asked_about_its_own_waived_checks(
+        self, mock_evaluate: Any, *args: Any
+    ) -> None:
+        """Same job name red on both PRs, snapshotted on only one: the guard's
+        hypothetical must waive it on that PR and still see it red on the other."""
+        red = "pull / linux-build"
+        waived, blocked = self._stacked_pr(1000, red), self._stacked_pr(1001, red)
+        mock_evaluate.return_value = GuardResult(GuardVerdict.ALLOW)
+
+        check_greenlight_reviewed_head_sha(
+            waived,
+            None,
+            [waived, blocked],
+            wait_window=None,
+            ignore_current_checks={(waived.pr_num, red)},
+        )
+
+        _, prs = mock_evaluate.call_args.args
+        self.assertTrue(prs[0].is_authorized_without_greenlight())
+        self.assertFalse(prs[1].is_authorized_without_greenlight())
 
 
 if __name__ == "__main__":
