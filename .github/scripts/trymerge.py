@@ -454,6 +454,16 @@ INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
 )
+# Meta CodeSync creates this check-run in the queued state on every new head commit
+# of a PR it tracks internally, and only ever completes it once someone imports that
+# exact revision, so on a PR that has been rebased -- or was never imported -- it just
+# stays queued ("PR has not been imported") until somebody imports again.  Because the
+# merge loop waits on every check on the PR, not just the ones a merge rule requires,
+# waiting on it stalls the merge until the job times out: on #189303 it sat queued for
+# 29 hours, timing out one merge job and holding up the next.  So a pending one is not
+# treated as blocking -- but only where CodeSync has cleared the commit through
+# INTERNAL_CHANGES_CHECKRUN_NAME, which does conclude (see categorize_checks).
+IMPORT_STATUS_CHECKRUN_NAME = "Import Status"
 # This could be set to -1 to ignore all flaky and broken trunk failures. On the
 # other hand, using a large value like 10 here might be useful in sev situation
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
@@ -1408,6 +1418,7 @@ class GitHubPR:
         comment_id: int | None = None,
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
+        ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         if not self.is_ghstack_pr():
             raise AssertionError(
@@ -1433,6 +1444,7 @@ class GitHubPR:
                         repo,
                         skip_mandatory_checks=skip_mandatory_checks,
                         skip_internal_checks=can_skip_internal_checks(self, comment_id),
+                        ignore_current_checks=ignore_current_checks,
                     )
                 except MergeRuleFailedError as ex:
                     raise type(ex)(
@@ -1499,7 +1511,7 @@ class GitHubPR:
         skip_mandatory_checks: bool = False,
         dry_run: bool = False,
         comment_id: int,
-        ignore_current_checks: list[str] | None = None,
+        ignore_current_checks: set[tuple[int, str]] | None = None,
         greenlight_wait: GreenlightWaitWindow | None = None,
     ) -> None:
         skip_internal_checks = can_skip_internal_checks(self, comment_id)
@@ -1553,6 +1565,7 @@ class GitHubPR:
                 skip_mandatory_checks,
                 comment_id,
                 ghstack_prs=ghstack_prs,
+                ignore_current_checks=ignore_current_checks,
             )
 
             # Log, but do not block on, a docker land race.
@@ -1628,6 +1641,7 @@ class GitHubPR:
         branch: str | None = None,
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
+        ignore_current_checks: set[tuple[int, str]] | None = None,
     ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
@@ -1645,6 +1659,7 @@ class GitHubPR:
                 comment_id=comment_id,
                 skip_all_rule_checks=skip_all_rule_checks,
                 ghstack_prs=ghstack_prs,
+                ignore_current_checks=ignore_current_checks,
             )
 
         msg = self.gen_commit_message()
@@ -1818,7 +1833,7 @@ def find_matching_merge_rule(
     repo: GitRepo | None = None,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
-    ignore_current_checks: list[str] | None = None,
+    ignore_current_checks: set[tuple[int, str]] | None = None,
     approved_by_override: set[str] | None = None,
 ) -> tuple[
     MergeRule,
@@ -2018,7 +2033,7 @@ def is_authorized_without_greenlight(
     *,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
-    ignore_current_checks: list[str] | None = None,
+    ignore_current_checks: set[tuple[int, str]] | None = None,
 ) -> bool:
     """Whether some merge rule still matches once greenlight's approval is dropped.
 
@@ -2044,7 +2059,7 @@ def is_authorized_without_greenlight(
         frozenset(approvers),
         skip_mandatory_checks,
         skip_internal_checks,
-        tuple(ignore_current_checks or ()),
+        frozenset(ignore_current_checks or ()),
     )
     if key in _AUTHORIZED_WITHOUT_GREENLIGHT:
         return _AUTHORIZED_WITHOUT_GREENLIGHT[key]
@@ -2087,7 +2102,7 @@ def check_greenlight_reviewed_head_sha(
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
-    ignore_current_checks: list[str] | None = None,
+    ignore_current_checks: set[tuple[int, str]] | None = None,
 ) -> None:
     """Block a merge that only greenlight authorizes and that greenlight has not
     approved at the head commit being landed.
@@ -2506,7 +2521,7 @@ def get_classifications(
     pr_num: int,
     project: str,
     checks: dict[str, JobCheckState],
-    ignore_current_checks: list[str] | None,
+    ignore_current_checks: set[tuple[int, str]] | None,
 ) -> dict[str, JobCheckState]:
     # Get the failure classification from Dr.CI, which is the source of truth
     # going forward. It's preferable to try calling Dr.CI API directly first
@@ -2612,7 +2627,7 @@ def get_classifications(
             )
             continue
 
-        if ignore_current_checks is not None and name in ignore_current_checks:
+        if ignore_current_checks and (pr_num, name) in ignore_current_checks:
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -2853,6 +2868,21 @@ def has_label(labels: list[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
 
+def codesync_reports_no_connected_diff(check_runs: JobNameToStateDict) -> bool:
+    """Whether Meta CodeSync has affirmatively cleared this commit for merging,
+    i.e. it sees no internal Diff connected to the PR.  Deliberately demands an
+    outright success: a missing, still-running, skipped or neutral check is not a
+    clearance.  Stricter on purpose than GitHubPR.has_no_connected_diff, which looks
+    at the title alone -- do not unify them, this one guards a merge.
+    """
+    check = check_runs.get(INTERNAL_CHANGES_CHECKRUN_NAME)
+    return (
+        check is not None
+        and check.status == "SUCCESS"
+        and check.title == HAS_NO_CONNECTED_DIFF_TITLE
+    )
+
+
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: list[str],
@@ -2889,6 +2919,18 @@ def categorize_checks(
         url = check_runs[checkname].url
         classification = check_runs[checkname].classification
         job_id = check_runs[checkname].job_id
+
+        if (
+            status is None
+            and checkname == IMPORT_STATUS_CHECKRUN_NAME
+            and codesync_reports_no_connected_diff(check_runs)
+        ):
+            # NB: Waiting on this one has no end unless somebody imports the commit by
+            # hand -- see the comment on IMPORT_STATUS_CHECKRUN_NAME. Scoped to the case
+            # where CodeSync itself says there is no internal Diff connected: a PR whose
+            # Diff has yet to land internally keeps waiting, as before. A conclusive
+            # failure is not ignored either, it falls through to the handling below.
+            continue
 
         if status is None and classification != "UNSTABLE":
             # NB: No need to wait if the job classification is unstable as it would be
@@ -2965,12 +3007,14 @@ def merge(
         ignore_current,
     )
 
-    # probably a bad name, but this is a list of current checks that should be
-    # ignored and is toggled by the --ignore-current flag
     ignore_current_checks_info = []
+    ignore_current_checks: set[tuple[int, str]] = set()
 
-    if pr.is_ghstack_pr():
-        get_ghstack_prs(repo, pr)  # raises error if out of sync
+    stacked_prs = (
+        [p for p, _ in get_ghstack_prs(repo, pr)]  # raises error if out of sync
+        if pr.is_ghstack_pr()
+        else [pr]
+    )
 
     check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
@@ -2992,13 +3036,16 @@ def merge(
     ensure_mergeable_labels(pr, comment_id, dry_run)
 
     if ignore_current:
-        checks = pr.get_checkrun_conclusions()
-        _, failing, _ = categorize_checks(
-            checks,
-            list(checks.keys()),
-            ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
-        )
-        ignore_current_checks_info = failing
+        for stacked in stacked_prs:
+            checks = stacked.get_checkrun_conclusions()
+            _, failing, _ = categorize_checks(
+                checks,
+                list(checks.keys()),
+                ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD,
+            )
+            ignore_current_checks |= {(stacked.pr_num, n) for n, _, _ in failing}
+            tag = f" (#{stacked.pr_num})" if len(stacked_prs) > 1 else ""
+            ignore_current_checks_info += [(f"{n}{tag}", u, j) for n, u, j in failing]
 
     post_starting_merge_comment(
         repo,
@@ -3014,9 +3061,6 @@ def merge(
     # Owned out here so the greenlight wait budget spans every iteration below rather
     # than restarting each time merge_into is re-entered.
     greenlight_wait = GreenlightWaitWindow()
-    ignore_current_checks = [
-        x[0] for x in ignore_current_checks_info
-    ]  # convert to List[str] for convenience
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(pr.org, pr.project, skip_mandatory_checks)
         current_time = time.time()

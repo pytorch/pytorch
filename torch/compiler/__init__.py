@@ -34,6 +34,7 @@ from ._cache import CacheInfo
 if TYPE_CHECKING:
     from torch._dynamo.eval_frame import StanceStr
 
+
 __all__ = [
     "compile",
     "config",
@@ -72,14 +73,8 @@ __all__ = [
 
 
 _P = ParamSpec("_P")
-
-
 _R = TypeVar("_R")
-
-
 FuncType = Callable[..., Any]
-
-
 F = TypeVar("F", bound=FuncType)
 
 
@@ -589,11 +584,7 @@ def wrap_numpy(fn):
 
 
 _is_compiling_flag: bool = False
-
-
 _is_exporting_flag: bool = False
-
-
 _is_non_strict_tracing_flag: bool = False
 
 
