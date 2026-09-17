@@ -284,17 +284,10 @@ class FSDPParamGroup:
             ]
         orig_dtypes = {p.orig_dtype for p in params_for_dtype}
         reduce_dtypes = {p.reduce_dtype for p in params_for_dtype}
-        unsharded_grad_dtypes = {p.unsharded_grad_dtype for p in params_for_dtype}
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
             # Models may have no grad params
             raise AssertionError(
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
-            )
-        if len(unsharded_grad_dtypes) > 1:
-            dtypes = ", ".join(sorted(str(dtype) for dtype in unsharded_grad_dtypes))
-            raise NotImplementedError(
-                "FSDP does not support multiple unsharded gradient dtypes within a "
-                f"parameter group but got: {dtypes}"
             )
         dtype_sets_are_uniform = len(orig_dtypes) == 1 and len(reduce_dtypes) == 1
         self._orig_dtype = next(iter(orig_dtypes)) if dtype_sets_are_uniform else None
@@ -742,7 +735,11 @@ class FSDPParamGroup:
                     self._reduce_dtype,
                     self.device,
                     self.gradient_divide_factor,
-                    all_reduce_pg,
+                    (
+                        self._all_reduce_process_group
+                        if isinstance(self.mesh_info, DDPMeshInfo)
+                        else None
+                    ),
                     all_reduce_stream,
                     self.all_reduce_grads,
                     self._partial_reduce_output,

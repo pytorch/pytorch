@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
 import torch
@@ -26,9 +26,9 @@ class MixedPrecisionPolicy:
     parameters for the optimizer step.
 
     .. warning::
-        ``param_dtype_override_fn`` must return the same result for each logical parameter
-        on every rank. Rank-dependent results may cause ranks to build incompatible
-        collective buffers, which can fail or hang.
+        ``param_dtype_overrides`` must specify the same dtype for each logical
+        parameter on every rank. Rank-dependent values may cause ranks to build
+        incompatible collective buffers, which can fail or hang.
 
     Attributes:
         param_dtype (Optional[torch.dtype]): This specifies the default dtype
@@ -55,50 +55,45 @@ class MixedPrecisionPolicy:
             forward's floating-point input tensors to ``param_dtype`` or not.
             For grouped ``fully_shard([a, b, ...])``, the cast is applied per
             module, before each module's forward.
-        param_dtype_override_fn (Optional[Callable[[nn.Parameter], Optional[torch.dtype]]]):
-            Optional per-parameter override for ``param_dtype``. The callable
-            is evaluated once for each managed parameter when FSDP is applied.
-            Returning the parameter's original dtype preserves that parameter
-            in its original dtype; returning ``None`` or ``param_dtype`` uses
-            the default ``param_dtype``. Other dtypes are not supported.
-            Forward input casting continues to use ``param_dtype``. If
-            parameters within one group resolve to multiple compute dtypes,
-            configure one common effective reduction dtype for the group.
-            (Default: ``None``)
+        param_dtype_overrides (Optional[Mapping[nn.Parameter, torch.dtype]]):
+            Optional per-parameter overrides for ``param_dtype``. Parameters
+            absent from the mapping use ``param_dtype``. Mapping a parameter to
+            its original dtype preserves that parameter in its original dtype.
+            Other dtypes are not supported. Forward input casting continues to
+            use ``param_dtype``. If parameters within one group resolve to
+            multiple compute dtypes, configure one common reduction dtype for
+            the group. (Default: ``None``)
     """
 
     param_dtype: torch.dtype | None = None
     reduce_dtype: torch.dtype | None = None
     output_dtype: torch.dtype | None = None
     cast_forward_inputs: bool = True
-    param_dtype_override_fn: Callable[[nn.Parameter], torch.dtype | None] | None = field(
+    param_dtype_overrides: Mapping[nn.Parameter, torch.dtype] | None = field(
         default=None, kw_only=True
     )
 
     def _resolve_for_param(self, param: nn.Parameter) -> "MixedPrecisionPolicy":
-        if self.param_dtype_override_fn is None:
+        if self.param_dtype_overrides is None:
             return self
-        param_dtype = self.param_dtype
-        if self.param_dtype_override_fn is not None:
-            param_dtype_override = self.param_dtype_override_fn(param)
-            if param_dtype_override is not None:
-                if not isinstance(param_dtype_override, torch.dtype):
-                    raise ValueError(
-                        "param_dtype_override_fn must return a torch.dtype or None but got "
-                        f"{type(param_dtype_override)}"
-                    )
-                if param_dtype_override not in (self.param_dtype, param.dtype):
-                    raise ValueError(
-                        "param_dtype_override_fn must return None, param_dtype, or the "
-                        "parameter's original dtype but got "
-                        f"{param_dtype_override} for a parameter with dtype "
-                        f"{param.dtype} and param_dtype {self.param_dtype}"
-                    )
-                param_dtype = param_dtype_override
+        param_dtype = self.param_dtype_overrides.get(param, self.param_dtype)
+        if param_dtype is not None:
+            if not isinstance(param_dtype, torch.dtype):
+                raise ValueError(
+                    "param_dtype_overrides values must be torch.dtype but got "
+                    f"{type(param_dtype)}"
+                )
+            if param_dtype not in (self.param_dtype, param.dtype):
+                raise ValueError(
+                    "param_dtype_overrides values must be param_dtype or the "
+                    "parameter's original dtype but got "
+                    f"{param_dtype} for a parameter with dtype {param.dtype} "
+                    f"and param_dtype {self.param_dtype}"
+                )
         return replace(
             self,
             param_dtype=param_dtype,
-            param_dtype_override_fn=None,
+            param_dtype_overrides=None,
         )
 
 

@@ -55,17 +55,14 @@ device_type = torch.device(get_devtype())
 
 
 class TestMixedPrecisionPolicy(TestCase):
-    def test_param_dtype_override_fn(self):
+    def test_param_dtype_overrides(self):
         default_param = nn.Parameter(torch.ones(1))
         override_param = nn.Parameter(torch.ones(1))
-
-        def param_dtype_override_fn(param: nn.Parameter) -> torch.dtype | None:
-            return torch.float32 if param is override_param else None
 
         policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.bfloat16,
-            param_dtype_override_fn=param_dtype_override_fn,
+            param_dtype_overrides={override_param: torch.float32},
         )
         self.assertEqual(
             policy._resolve_for_param(default_param),
@@ -80,14 +77,14 @@ class TestMixedPrecisionPolicy(TestCase):
             ),
         )
 
-        def invalid_dtype_fn(_: nn.Parameter) -> Any:
-            return "invalid"
-
-        invalid_policy = MixedPrecisionPolicy(param_dtype_override_fn=invalid_dtype_fn)
-        with self.assertRaisesRegex(ValueError, "must return a torch.dtype or None"):
+        invalid_dtype: Any = "invalid"
+        invalid_policy = MixedPrecisionPolicy(
+            param_dtype_overrides={default_param: invalid_dtype}
+        )
+        with self.assertRaisesRegex(ValueError, "values must be torch.dtype"):
             invalid_policy._resolve_for_param(default_param)
 
-    def test_param_dtype_override_fn_is_keyword_only(self):
+    def test_param_dtype_overrides_is_keyword_only(self):
         self.assertEqual(
             MixedPrecisionPolicy.__match_args__,
             ("param_dtype", "reduce_dtype", "output_dtype", "cast_forward_inputs"),
@@ -367,14 +364,11 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         for param in ref_compute_model.parameters():
             param.grad_dtype = reduce_dtype
 
-        def param_dtype_override_fn(param: nn.Parameter) -> torch.dtype | None:
-            return torch.float32 if param in fp32_params else None
-
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=reduce_dtype,
             cast_forward_inputs=True,
-            param_dtype_override_fn=param_dtype_override_fn,
+            param_dtype_overrides=dict.fromkeys(fp32_params, torch.float32),
         )
         fully_shard(model, mp_policy=mp_policy)
         optim = torch.optim.SGD(model.parameters(), lr=1e-2)
