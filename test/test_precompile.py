@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: pt2"]
 import copy
-import functools
 import io
 import os
 import pickle
@@ -13,7 +12,7 @@ import unittest
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._precompile import capture, load, MakeFxTracer, PrecompileError
+from torch._precompile import PrecompileError
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -76,6 +75,21 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
+    def test_guard_fact_render(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
+        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
+        # No rendered code falls back to <guard_type>, a value is appended, and
+        # the dropped label pads to the width of "enforced" so lines align.
+        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
+        self.assertEqual(
+            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        )
+        # Several code parts are joined; no source drops the " on ..." suffix.
+        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
+        self.assertEqual(joined.render(), "[enforced] a ; b")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
@@ -2059,207 +2073,130 @@ class TestPrecompile(TestCase):
 
     def test_static_capture_rejects_data_dependent_ops(self):
         # A static make_fx capture traces on fake tensors, so a value the trace
-        # cannot know must be refused cleanly rather than baked from the example
-        # or leaked as a raw fake-tensor exception.
-        from torch._precompile import _capture
+        # cannot know is refused rather than baked from the example. The distinct
+        # fake-tensor failure paths, each through the public entry point: .item()
+        # (DataDependentOutputException), .nonzero() (DynamicOutputShapeException),
+        # and an op with no meta/fake kernel (UnsupportedOperatorException for a
+        # library op, a RuntimeError naming the missing fake impl for a custom_op).
+        from torch.library import _scoped_library
 
         model = torch.nn.Linear(4, 4)
-
-        def branches(m, x):
-            return m(x) if x.sum() > 0 else m(-x)
 
         def items(m, x):
             return m(x) * x.sum().item()
 
-        for fn in (branches, items):
+        def nonzero(m, x):
+            return m(x)[x[:, 0].nonzero().flatten()]
+
+        for fn in (items, nonzero):
             with self.assertRaisesRegex(PrecompileError, "data-dependent operation"):
-                _capture(fn, (model, torch.randn(3, 4)), None)
+                torch.compiler.precompile(fn, model, torch.randn(3, 4), backend="eager")
 
+        # Both op registrations are global, so undo them: the scoped library takes
+        # its own op with it, and the custom_op's library is destroyed in finally.
+        with _scoped_library("mlprecompile", "FRAGMENT") as lib:
+            lib.define("no_meta(Tensor x) -> Tensor")
+            lib.impl("no_meta", lambda x: x * 2, "CPU")
 
-class _FilesModel(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lin = torch.nn.Linear(4, 4)
+            @torch.library.custom_op("mlprecompile::no_fake_impl", mutates_args=())
+            def no_fake_impl(x: torch.Tensor) -> torch.Tensor:
+                return x * 2
 
-    def forward(self, x):
-        return torch.relu(self.lin(x))
+            try:
+                for op in (torch.ops.mlprecompile.no_meta, no_fake_impl):
+                    with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                        torch.compiler.precompile(
+                            lambda m, x, op=op: op(m(x)),
+                            model,
+                            torch.randn(3, 4),
+                            backend="eager",
+                        )
+            finally:
+                no_fake_impl._lib._destroy()
 
+    def test_capture_refuses_a_data_ptr_read(self):
+        # Capture traces on fake tensors, which have no real memory behind them, so a
+        # .data_ptr() read in fn (or in a kernel that dereferences one) could only
+        # return a meaningless value: the capture fake mode is built with
+        # fake_tensor_allow_unsafe_data_ptr_access off, which turns the read into a
+        # refusal at capture time.
+        model = torch.nn.Linear(4, 4)
 
-def _files_fn(model, x):
-    return model(x)
+        def reads_pointer(m, x):
+            x.data_ptr()
+            return m(x)
 
-
-@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
-class TestPrecompileCaptureFiles(TestCase):
-    """capture()/load() through the on-disk artifact pair (MakeFxTracer)."""
-
-    def setUp(self):
-        super().setUp()
-        self.dir = tempfile.mkdtemp()
-        self.artifact = os.path.join(self.dir, "m.py")
-        self.cache = os.path.join(self.dir, "m.cache")
-        self.model = _FilesModel()
-        self.x = torch.randn(2, 4)
-
-    def _capture(self, **kwargs):
-        kwargs.setdefault("tracer", MakeFxTracer())
-        kwargs.setdefault("backend", "eager")
-        return capture(
-            _files_fn, artifact_path=self.artifact, cache_path=self.cache, **kwargs
-        )
-
-    def _leftovers(self):
-        return sorted(n for n in os.listdir(self.dir) if n not in ("m.py", "m.cache"))
-
-    def _read(self, path):
-        with open(path, "rb") as f:
-            return f.read()
-
-    def test_exit_writes_the_pair_and_load_serves_it(self):
-        with self._capture() as cap:
-            y = cap(self.model, self.x)
-        self.assertEqual(y, self.model(self.x))
-        self.assertTrue(os.path.exists(self.artifact) and os.path.exists(self.cache))
-        f = load(self.artifact, self.cache)
-        self.assertEqual(f(self.model, self.x), self.model(self.x))
-        self.assertFalse(f.installed)
-        self.assertEqual(self._leftovers(), [])
-
-    def test_inductor_pair_round_trips(self):
-        with self._capture(backend="inductor") as cap:
-            cap(self.model, self.x)
-        f = load(self.artifact, self.cache)
-        self.assertEqual(f(self.model, self.x), self.model(self.x))
-
-    def test_no_call_raises_and_writes_nothing(self):
-        with self.assertRaisesRegex(PrecompileError, "nothing was captured"):
-            with self._capture():
-                pass
-        self.assertFalse(os.path.exists(self.artifact))
-        self.assertFalse(os.path.exists(self.cache))
-
-    def test_second_call_is_refused(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-            with self.assertRaisesRegex(PrecompileError, "single call"):
-                cap(self.model, self.x)
-
-    def test_keyword_arguments_are_refused(self):
-        with self._capture() as cap:
-            with self.assertRaisesRegex(ValueError, "positional arguments only"):
-                cap(self.model, x=self.x)
-            cap(self.model, self.x)
-
-    def test_exception_in_block_leaves_files_untouched(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        before = self._read(self.artifact)
-        with self.assertRaisesRegex(RuntimeError, "boom"):
-            with self._capture() as cap:
-                cap(self.model, self.x * 2)
-                raise RuntimeError("boom")
-        self.assertEqual(self._read(self.artifact), before)
-        self.assertEqual(self._leftovers(), [])
-
-    def test_save_writes_before_exit_and_exit_rewrites_the_same_pair(self):
-        with self._capture() as cap:
-            with self.assertRaisesRegex(PrecompileError, "before calling save"):
-                cap.save()
-            cap(self.model, self.x)
-            cap.save()
-            saved = self._read(self.artifact)
-            self.assertEqual(
-                load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
-            )
-        self.assertEqual(self._read(self.artifact), saved)
-        self.assertEqual(self._leftovers(), [])
-
-    def test_rewrite_replaces_the_previous_pair(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        first = self._read(self.cache)
-        with self._capture(backend="inductor") as cap:
-            cap(self.model, self.x)
-        self.assertNotEqual(self._read(self.cache), first)
-        self.assertEqual(
-            load(self.artifact, self.cache)(self.model, self.x), self.model(self.x)
-        )
-        self.assertEqual(self._leftovers(), [])
-
-    def test_same_file_for_both_halves_is_refused(self):
-        with self.assertRaisesRegex(ValueError, "same file"):
-            capture(
-                _files_fn,
-                artifact_path=self.artifact,
-                cache_path=self.artifact,
-                tracer=MakeFxTracer(),
+        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+            torch.compiler.precompile(
+                reads_pointer, model, torch.randn(3, 4), backend="eager"
             )
 
-    def test_non_tracer_is_refused(self):
-        with self.assertRaisesRegex(TypeError, "must be a MakeFxTracer"):
-            self._capture(tracer="make_fx")
-
-    def test_partial_is_refused(self):
-        with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
-            capture(
-                functools.partial(_files_fn, self.model),
-                artifact_path=self.artifact,
-                cache_path=self.cache,
-                tracer=MakeFxTracer(),
+    def test_unfakeifiable_input_refused_without_clobbering_grad(self):
+        # Fakeification runs INSIDE the .grad save/restore window, so an example input
+        # the meta converter cannot represent (a quantized tensor) is refused with a
+        # PrecompileError naming it, and the caller's example .grad is put back -- the
+        # same object, not a copy.
+        model = torch.nn.Linear(3, 3)
+        grad = torch.ones_like(model.weight)
+        model.weight.grad = grad
+        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+        ):
+            torch.compiler.precompile(
+                lambda m, t: m(t.dequantize()), model, q, backend="eager"
             )
+        self.assertIs(model.weight.grad, grad)
 
-    def test_mismatched_pair_is_refused(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        with open(self.artifact, "a", encoding="utf-8") as f:
-            f.write("\n# edited\n")
-        with self.assertRaisesRegex(PrecompileError, "code_hash"):
-            load(self.artifact, self.cache)
+    def test_user_runtime_error_from_fn_propagates_unchanged(self):
+        # Capture catches EVERY RuntimeError out of the trace to relabel the two it
+        # owns (a missing fake impl, a data-pointer read), so a RuntimeError raised by
+        # fn itself must fall through the substring checks and reach the caller with
+        # its ORIGINAL message, not be relabeled as a missing meta/fake kernel.
+        model = torch.nn.Linear(4, 4)
 
-    def test_cache_with_a_different_tracer_tag_is_refused(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        blob = torch.load(self.cache, weights_only=True)
-        blob["tracer"] = "dynamo"
-        torch.save(blob, self.cache)
-        with self.assertRaisesRegex(PrecompileError, "cache tracer 'dynamo'"):
-            load(self.artifact, self.cache)
+        def raises(m, x):
+            raise RuntimeError("my own capture-time failure")
 
-    def test_unreadable_cache_falls_back_to_python_code(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        with open(self.cache, "wb") as f:
-            f.write(b"not a torch.save envelope")
-        with self.assertLogs("torch._precompile", level="WARNING") as logs:
-            f = load(self.artifact, self.cache)
-        self.assertTrue(
-            any("could not read the cache envelope" in m for m in logs.output)
-        )
-        self.assertEqual(f(self.model, self.x), self.model(self.x))
+        args = (raises, model, torch.randn(3, 4))
+        with self.assertRaisesRegex(RuntimeError, "my own capture-time failure"):
+            torch.compiler.precompile(*args, backend="eager")
+        try:
+            torch.compiler.precompile(*args, backend="eager")
+        except RuntimeError as e:
+            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
+            self.assertNotIsInstance(e, PrecompileError)
+            self.assertNotIn("no meta/fake kernel", str(e))
 
-    def test_fn_is_refused_for_a_standalone_artifact(self):
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        with self.assertRaisesRegex(PrecompileError, "fn= applies only"):
-            load(self.artifact, self.cache, fn=_files_fn)
+    def test_callable_api_traces_a_backward_under_ambient_no_grad(self):
+        # The callable API keeps grad enabled around the trace whatever the caller's
+        # ambient mode, so a training step captured inside no_grad still carries
+        # its backward and the artifact does not depend on the call site: the served
+        # gradients match the eager ones, not merely being present.
+        torch.manual_seed(0)
+        model = torch.nn.Linear(4, 2)
+        x, t = torch.randn(3, 4), torch.randn(3, 2)
 
-    def test_callable_api_load_still_reads_an_in_memory_pair(self):
+        def step(m, x, t):
+            torch.nn.functional.mse_loss(m(x), t).backward()
+
         with torch.no_grad():
             python_code, cache = torch.compiler.precompile(
-                _files_fn, self.model, self.x, backend="eager"
+                step, model, x, t, backend="eager"
             )
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        self.assertEqual(self._read(self.artifact).decode(), python_code)
-        f = torch.compiler.precompile.load(python_code, cache)
-        self.assertEqual(f(self.model, self.x), self.model(self.x))
+        torch.compiler.precompile.load(python_code, cache)(model, x, t)
+        self.assertIsNotNone(model.weight.grad)
+        ref = torch.nn.Linear(4, 2)
+        ref.load_state_dict(model.state_dict())
+        step(ref, x, t)
+        self.assertEqual(model.weight.grad, ref.weight.grad)
+        self.assertEqual(model.bias.grad, ref.bias.grad)
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 class TestPrecompileNumerics(TestCase):
     # Numeric-correctness tests run device-generically so the same coverage
     # exercises the CUDA lowering, not just CPU.
-
     def test_plain_function(self, device):
         def f(x, y):
             return (x @ y).sin(), x + y
@@ -2624,7 +2561,8 @@ class TestPrecompileNumerics(TestCase):
     def test_batchnorm_train_buffer_mutation(self, device):
         # A stateful module (BatchNorm in training mode) mutates its running stats.
         # precompile reflects that onto the runtime model's buffers and matches eager
-        # -- the mutation handling comes from AOTAutograd's codegen.
+        # -- the mutation handling comes from AOTAutograd's codegen -- while CAPTURE
+        # leaves the example model's buffers alone.
         def fresh():
             torch.manual_seed(0)
             m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.BatchNorm1d(4))
@@ -2632,7 +2570,17 @@ class TestPrecompileNumerics(TestCase):
             return m.to(device)
 
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), fresh(), x)
+        example = fresh()
+        bn = example[1]
+        pre_rm = bn.running_mean.clone()
+        pre_rv = bn.running_var.clone()
+        pre_nbt = bn.num_batches_tracked.clone()
+        code, cache = torch.compiler.precompile(lambda model, xx: model(xx), example, x)
+        # Capture reparametrizes FAKE params/buffers in (invariant 3), so the example
+        # module's running stats must not move; a real-tensor trace advanced them.
+        self.assertEqual(bn.running_mean, pre_rm)
+        self.assertEqual(bn.running_var, pre_rv)
+        self.assertEqual(bn.num_batches_tracked, pre_nbt)
 
         ref = fresh()
         ref_out = ref(x)
@@ -2655,7 +2603,8 @@ class TestPrecompileNumerics(TestCase):
         # mutated inputs go through AOTAutograd's now-codegen'd synthetic-base wrapper.
         fn = lambda a, b: (a.mul_(2.0), a + b)[1]  # noqa: E731
         t = make_tensor((4,), device=device, dtype=torch.float32)
-        # Clone references BEFORE precompile: capture runs fn once, mutating t.
+        # Capture traces on fakes and leaves t alone; only the served artifact mutates
+        # its input, so give each run its own clone of t.
         ref = t.clone()
         ref_out = fn(ref, ref)
         run = t.clone()
