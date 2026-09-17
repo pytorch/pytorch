@@ -165,25 +165,24 @@ def _autocast_off(devices):
     re-dispatches (an inductor artifact calls extern_kernels, which hit the
     autocast key), so a serving process with autocast on would cast a second
     time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
-    than from the runtime tensors: a graph can reach a device none of its
-    inputs live on, and one built from factory ops has no input device at all.
+    than from the runtime tensors: a graph built from factory ops has no input
+    device at all.
 
     A device this build cannot autocast at all is SKIPPED with a logged warning,
-    not an error: a device type the serving build does not know makes
-    ``is_autocast_available`` raise ``RuntimeError``, and an out-of-tree backend
-    with no registered autocast module reports available and then fails an
-    ``assert`` in the constructor (``privateuseone``). There is no ambient autocast
-    to neutralize on a device this process cannot enter, so an unfamiliar name in
-    GRAPH_DEVICES must not fail every served call -- but the skip is announced,
-    because on a device this build DOES know a failure here means the served call
-    casts twice, the divergence this function exists to prevent. Reported through
-    ``logging`` rather than ``warnings``, and ONCE per device per LOADED
-    ARTIFACT (_AUTOCAST_SKIPS_REPORTED above is the artifact's own copy, so a second
-    ``load`` of it reports again): a ``UserWarning`` would make the served call raise
-    under ``-W error``, failing the very call this skip keeps working. Only those two
-    exception types are swallowed; anything else propagates. The stack is built
-    inside a ``with`` and handed back with ``pop_all`` so a propagating failure
-    unwinds the disables already entered, not leaving the caller's autocast off.
+    not an error, since a device this process cannot enter has no ambient autocast
+    to neutralize. The three ways that shows up are all caught: an unknown device
+    type raises ``RuntimeError``, a deprecated-but-parseable spelling (``mkldnn``)
+    emits a ``UserWarning`` -- which under ``-W error`` IS the raise, hence
+    ``Warning`` in the catch -- and an out-of-tree backend with no registered
+    autocast module reports available and then fails an ``assert`` in the
+    constructor (``privateuseone``). Nothing else is swallowed. The skip is still
+    announced, because on a device this build DOES know it means the served call
+    casts twice; through ``logging`` rather than ``warnings`` (a ``UserWarning``
+    would fail the very call this skip keeps working under ``-W error``) and once
+    per device per LOADED artifact (_AUTOCAST_SKIPS_REPORTED is the artifact's own
+    copy, so a second ``load`` reports again). The stack is built inside a ``with``
+    and handed back with ``pop_all`` so a propagating failure unwinds the disables
+    already entered, not leaving the caller's autocast off.
     """
     import contextlib as _contextlib
     import logging as _logging
@@ -195,7 +194,7 @@ def _autocast_off(devices):
                 if _torch.amp.is_autocast_available(_dev):
                     stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
                     continue
-            except (RuntimeError, AssertionError):
+            except (RuntimeError, AssertionError, Warning):
                 pass
             if _dev not in _AUTOCAST_SKIPS_REPORTED:
                 _AUTOCAST_SKIPS_REPORTED.add(_dev)
@@ -205,9 +204,9 @@ def _autocast_off(devices):
             # into the artifact, which is not this module.
             _logging.getLogger("torch._precompile_driver").warning(
                 "precompile: this build cannot autocast the captured graph's "
-                "device(s) %s, so ambient autocast is left on for them. A call "
-                "served inside an autocast region for one of those devices can "
-                "cast a second time on top of the casts already baked into the "
+                "device(s) %s, so any ambient autocast is left on for them. A "
+                "call served inside an autocast region for one of those devices "
+                "can cast a second time on top of the casts already baked into the "
                 "artifact and return a different dtype than the capture did.",
                 _skipped,
             )
