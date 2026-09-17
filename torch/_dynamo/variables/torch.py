@@ -328,6 +328,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
+        torch._C._is_tracing: False,
         torch.fx._symbolic_trace.is_fx_tracing: False,
         torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
@@ -674,7 +675,7 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) == "math"
+        return getattr(self.value, "__module__", None) in ("math", "cmath")
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
@@ -1152,6 +1153,77 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 list(args),
                 kwargs,
             )
+
+        @register(math.ceil)
+        def handle_ceil(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.ceil", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.ceil() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__ceil__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.floor)
+        def handle_floor(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.floor", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.floor() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__floor__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.trunc)
+        def handle_trunc(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            no_keywords(tx, "math.trunc", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.trunc() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__trunc__", [])
+            if result is None:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __trunc__ method"
+                )
+            return result
 
         @register(math.radians)
         def handle_radians(
