@@ -4,6 +4,7 @@
 # SYCL_LIBRARY_DIR         : The path to the SYCL library.
 # SYCL_LIBRARY             : SYCL library fullname.
 # SYCL_COMPILER_VERSION    : SYCL compiler version.
+# LevelZero_INCLUDE_DIR    : Level Zero include directory.
 
 include(FindPackageHandleStandardArgs)
 
@@ -168,10 +169,33 @@ if(NOT SYCL_LIBRARY)
   return()
 endif()
 
+# Find Level Zero include directory.
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+  find_path(
+    LevelZero_INCLUDE_DIR
+    NAMES level_zero/ze_api.h
+    PATH_SUFFIXES include
+    )
+elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
+  find_path(
+    LevelZero_INCLUDE_DIR
+    NAMES level_zero/ze_api.h
+    HINTS $ENV{LEVEL_ZERO_V1_SDK_PATH}
+    PATH_SUFFIXES include
+    )
+endif()
+
+if(NOT LevelZero_INCLUDE_DIR)
+  set(SYCL_FOUND False)
+  set(SYCL_REASON_FAILURE "Level Zero include directory not found!!")
+  set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
+  return()
+endif()
+
 find_package_handle_standard_args(
   SYCL
   FOUND_VAR SYCL_FOUND
-  REQUIRED_VARS SYCL_INCLUDE_DIR SYCL_LIBRARY_DIR SYCL_LIBRARY
+  REQUIRED_VARS SYCL_INCLUDE_DIR SYCL_LIBRARY_DIR SYCL_LIBRARY LevelZero_INCLUDE_DIR
   REASON_FAILURE_MESSAGE "${SYCL_REASON_FAILURE}"
   VERSION_VAR SYCL_COMPILER_VERSION
   )
