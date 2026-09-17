@@ -100,13 +100,18 @@ deprecation cycle.
 
    .. note::
 
-      With :class:`precompile.MakeFxTracer`, capture is non-strict. Control flow is
-      specialized to the captured call, and shapes are static -- each size is baked in. With
-      no dim marked unbacked (below), a data-dependent op (``.item()``, a branch over a
-      tensor value) instead raises at capture, since the trace runs under fake mode where
-      the value is unknown. The exception to static shapes is a tensor dim explicitly
-      marked unbacked with ``torch._dynamo.decorators.mark_unbacked`` on the inputs
-      before the call (with ``make_fx`` this requires the inductor backend; with
+      With :class:`precompile.MakeFxTracer`, capture is non-strict and traces ``fn`` on
+      FAKE tensors. Python control flow is specialized to the captured call, and shapes
+      are static -- each size is baked in; a control-flow HOP (``torch.cond`` /
+      ``torch.while_loop``) is refused rather than specialized. Tracing on fakes also
+      refuses what it cannot know: a data-dependent op (``.item()``, ``.nonzero()``, a
+      Python branch over a tensor value), an op with no meta/fake kernel, a read of a
+      traced tensor's data (``.data_ptr()``, ``.numpy()``), and an example input a fake
+      tensor cannot represent (quantized) or whose metadata it silently drops (pinned,
+      mkldnn, sparse, nested).
+      The exception to static shapes is a tensor dim explicitly marked unbacked with
+      ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call (with
+      ``make_fx`` this requires the inductor backend; with
       :class:`precompile.DynamoTracer` either backend works); such a dim is captured as an
       unbacked symint, so one artifact serves any runtime size of it, and a graph that
       needs to guard on it fails at capture.
