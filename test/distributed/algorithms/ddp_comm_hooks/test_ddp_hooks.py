@@ -16,12 +16,12 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
     register_ddp_comm_hook,
 )
 from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
@@ -219,7 +219,9 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
         self.assertFalse(any(flags[:-1]))
 
 
-instantiate_device_type_tests(DistributedDataParallelCommHookTest, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(
+    DistributedDataParallelCommHookTest, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
