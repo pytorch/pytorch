@@ -19,7 +19,9 @@ points, its ``guard_filter_fn`` and ``require_no_dropped_guards`` options and
 the runnable ``load`` returns -- is a follow-up, so until it lands nothing
 under ``torch/`` calls into this module; the module docstring of
 ``torch/_precompile.py``, rewritten near the top of this stack, carries the
-caller-facing usage. This is distinct from
+caller-facing usage. Until that rewrite, the file documents the single-graph
+callable API those entry points replace, ``torch.compiler.precompile(fn,
+*example_inputs)`` and its ``load(python_code, cache)``. This is distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture.
 
@@ -119,30 +121,37 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     Read this before trusting an artifact. The refused set is the IDENTITY
     guards -- ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH, NN_MODULE,
     CLASS_MATCH -- plus DICT_VERSION (dict mutation) and WEAKREF_ALIVE
-    (liveness), so precompiling inherently gives up on noticing that a guarded
-    object was REBOUND to a different object of the same shape, MUTATED or
-    COLLECTED. Most such guards are on modules and are stable in practice, but
-    one on a global holding a function is not: rebind it between capture and
-    load and the artifact serves the graph traced against the old one, with no
-    error. Keeping them instead makes serialization raise for essentially every
+    (liveness); the module docstring says what dropping them gives up. Most
+    such guards are on modules and are stable in practice, but one on a global
+    holding a function is not: rebind it between capture and load and the
+    artifact serves the graph traced against the old one, with no error.
+    Keeping them instead makes serialization raise for essentially every
     function, so every drop is recorded with its source name in
-    ``PrecompileSummary.dropped_guards`` and the only rail on by default is the
-    module's risky-drop lint over them; a lint is not a proof.
+    ``PrecompileSummary.dropped_guards``, and the only rail on by default is
+    the module's risky-drop lint over them; a lint is not a proof.
 
-    This mirrors the serializer's test branch for branch. A guard of a refused
-    type is dropped, and so is a guard of another type that DERIVES one (a
-    CONSTANT_MATCH on a code object runs through ID_MATCH), except that
-    TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the
-    serializer takes their branch first: BUILTIN_MATCH is an
-    ``id_match_unchecked`` that records ID_MATCH, but the builtin pickles by
-    name and the guard is rebuilt at load against what the name resolves to, so
-    the kept guard catches a builtin swapped after load
-    (``test_guard_serialization.py`` ``test_builtin_match``). The one divergence
-    is the direction the filter cannot mirror soundly: a TYPE_MATCH on a
-    local-scope class passes here and the serializer still refuses it, because
-    the type cannot be pickled. ``orig_guard._unserializable`` would tell, but
-    dropping the guard would ship an artifact that never checks the type,
-    whereas keeping it makes ``serialize_guards`` refuse loudly.
+    This mirrors the three branches of the serializer's pre-check, the if/elif
+    chain at the top of ``serialize_guards``, and nothing past it. A guard of a
+    refused type is dropped, and so is a guard of another type that DERIVES one
+    (a CONSTANT_MATCH on a code object runs through ID_MATCH), except that
+    TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the chain
+    takes their branch first: BUILTIN_MATCH is an ``id_match_unchecked`` that
+    records ID_MATCH, but the builtin pickles by name and the builtins dict
+    travels as a reference resolved in the loading process
+    (``GuardsStatePickler._globals_snapshot``), so the guard rebuilt at load
+    catches a builtin swapped afterwards (``test_guard_serialization.py``
+    ``test_builtin_match``). Past the chain the filter mirrors nothing, and the
+    refusal that matters there is of local-scope types, which cannot be
+    pickled. It has more than one path: the chain's TYPE_MATCH/BUILTIN_MATCH
+    branch raises when ``guard._unserializable`` is set, FAKE_SCRIPT_TYPE_MATCH
+    sets the same flag but takes no branch of the chain, and
+    ``GuardsStatePickler.reducer_override`` refuses any non-tuple object of
+    such a type wherever it sits in the guard tree, so a kept guard whose source
+    walks through an instance of one fails there. Passing this filter therefore
+    does not mean the artifact serializes. The filter keeps all of these on
+    purpose: ``orig_guard._unserializable`` would tell for the first two, but
+    dropping a guard on a type the artifact cannot pickle ships an artifact that
+    never checks the type, whereas keeping it makes serialization refuse loudly.
     ``CheckFunctionManager.__init__`` applies a different policy inline under
     ``torch._dynamo.config.caching_precompile`` (drop ID_MATCH, CLOSURE_MATCH,
     WEAKREF_ALIVE, DICT_VERSION and anything deriving ID_MATCH or
