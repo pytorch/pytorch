@@ -120,7 +120,7 @@ def flex_attn_example(world_size: int, rank: int) -> None:
 
     # kv all-gather
     # NOTE: we don't consider load-balance for now
-    # NOTE: wait() is immediately called in all_gather_tensor when gather_dim != 0
+    # NOTE: wait() is immediately called in all_gather_single when gather_dim != 0
     k_full, v_full = (t.full_tensor(grad_placements=[Partial()]) for t in qkv_dist[1:])
 
     # rewrite `block_mask`

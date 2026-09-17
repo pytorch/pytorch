@@ -8,7 +8,10 @@ from torch._inductor.ir import ExternKernelNode as inductor_ExternKernelNode
 def serialize_extern_kernel_node(
     extern_kernel_node: inductor_ExternKernelNode,
 ) -> ExternKernelNode:
-    assert isinstance(extern_kernel_node.node, Node)
+    if not isinstance(extern_kernel_node.node, Node):
+        raise AssertionError(
+            f"expected node to be a Node, got {type(extern_kernel_node.node)}"
+        )
     return ExternKernelNode(
         name=extern_kernel_node.name,
         node=extern_kernel_node.node,

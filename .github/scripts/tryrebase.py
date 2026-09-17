@@ -55,11 +55,25 @@ def rebase_onto(
     pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
 ) -> bool:
     branch = f"pull/{pr.pr_num}/head"
-    remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
+    head_repo = pr.info["headRepository"]
+    if head_repo is None:
+        raise RuntimeError(
+            f"Can't determine the head repository of PR #{pr.pr_num}; its org likely "
+            "forbids access via mergebot's token (classic PAT), so the rebased branch "
+            "can't be pushed back. Please rebase locally and push."
+        )
+    remote_url = f"https://github.com/{head_repo['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
     repo.fetch(branch, branch)
-    repo._run_git("rebase", onto_branch, branch)
+    # Rebase only the PR's own commits. The 2-arg `git rebase <onto_branch>
+    # <branch>` form replays all of onto_branch..branch, which grafts in trunk
+    # commits when the PR has merged its base in and onto_branch (e.g.
+    # viable/strict) lags that base. Anchoring on the fork point from the PR's
+    # base branch excludes anything already on the base. See #187374.
+    base_branch = f"refs/remotes/{repo.remote}/{pr.base_ref()}"
+    fork_point = repo.get_merge_base(base_branch, branch)
+    repo._run_git("rebase", "--onto", onto_branch, fork_point, branch)
 
     if repo.rev_parse(branch) == repo.rev_parse(onto_branch):
         raise Exception(SAME_SHA_ERROR)  # noqa: TRY002

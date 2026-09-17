@@ -138,6 +138,14 @@ class DSLController:
         return registry.get_dsl_version(self._dsl_name)
 
     @property
+    def backend(self) -> str:
+        """Chosen lowering backend for DSLs that have one (e.g. helion)."""
+        chosen = getattr(_get_dsl_module(self._dsl_name), "_chosen_backend", None)
+        if chosen is None:
+            raise AttributeError(f"{self._dsl_name} DSL has no configurable backend")
+        return chosen()
+
+    @property
     def enabled(self) -> bool:
         """Check if DSL is currently enabled."""
         filter_state = _get_filter_state()
@@ -168,12 +176,30 @@ class DSLController:
 
     @contextmanager
     def disabled(self):
-        """Context manager to temporarily disable DSL."""
+        """Context manager to temporarily disable DSL.
+
+        Also masks the native-AOT kernel stubs (kernels AOT-compiled
+        from this DSL and embedded in the aten kernels themselves) so
+        code inside the block sees stock aten behavior, e.g. for
+        reference computations in tests.
+
+        Two things stay active by design, because for them the override IS
+        the implementation and masking would change results rather than
+        performance: overrides registered with
+        `unconditional_override=True`, and ops whose AOT declaration sets
+        UNCONDITIONAL. A reference computation that must bypass those too
+        has to nest torch._native._unconditional_masked().
+        """
+        from torch import _native
+
         original_state = self.enabled
+        original_aot = _native.aot_enabled()
         try:
             self.disable()
+            _native.set_aot_enabled(False)
             yield
         finally:
+            _native.set_aot_enabled(original_aot)
             if original_state:
                 self.enable()
 

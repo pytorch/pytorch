@@ -113,7 +113,7 @@ struct TORCH_API Operator {
             op_creator}) {}
 
   // Helper constructor to register `op` to run
-  // run for _every_ IR Node where n.kind() == name, regardless of arguments.
+  // for _every_ IR Node where n.kind() == name, regardless of arguments.
   // This is accomplished by marking the schema varargs and having no required
   // arguments.
   Operator(

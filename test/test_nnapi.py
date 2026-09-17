@@ -8,7 +8,11 @@ import unittest
 import torch
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
 from torch.testing._internal.common_quantized import supported_qengines
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def qpt(t, scale, zero_point, dtype=torch.quint8):
@@ -27,6 +31,8 @@ def nhwc(t):
     "This Pytorch Build has not been built with or does not support QNNPACK",
 )
 class TestNNAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Avoid saturation in fbgemm

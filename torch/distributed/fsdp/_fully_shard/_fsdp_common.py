@@ -74,6 +74,10 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
         self.shard_process_group = self.mesh.get_group(self.shard_mesh_dim)
         self.shard_mesh_rank: int = self.shard_process_group.rank()
+        # Reduce-scatter shares the shard PG (one NCCL communicator) by default;
+        # FSDPModule.set_separate_reduce_scatter_group assigns a dedicated PG
+        # here so reduce-scatter can overlap all-gather in backward.
+        self.reduce_scatter_process_group: dist.ProcessGroup | None = None
 
 
 @dataclass

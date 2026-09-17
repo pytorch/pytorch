@@ -37,17 +37,18 @@ std::string DynamicType::str() const {
   }
   std::string ret = "Dynamic<";
   ret += std::to_string(static_cast<DynamicTypeBits>(tag_));
-  ret += ">";
+  ret += '>';
   if (tag_ != Tag::Class && !arguments_.elems.empty()) {
-    ret += "[";
+    ret += '[';
     for (const auto& arg : arguments_.elems) {
       if (arg.label) {
-        ret += *arg.label + ":";
+        ret += *arg.label;
+        ret += ':';
       }
       ret += arg.ty->str();
-      ret += ",";
+      ret += ',';
     }
-    ret += "]";
+    ret += ']';
   }
   return ret;
 }

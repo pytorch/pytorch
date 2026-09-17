@@ -8,32 +8,11 @@
 #include <c10/util/env.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <array>
 #include <iostream>
 #include <utility>
-
-namespace std {
-template<>
-struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
-  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
-    // This hashing is all hidden behind a static initializer so it
-    // doesn't have to be optimal
-    auto hash = std::hash<std::string>()(std::get<0>(t));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<2>(t)));
-    return hash;
-  }
-};
-template<>
-struct hash<std::tuple<std::string, c10::TypePtr>> {
-  size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
-    auto hash = std::hash<std::string>()(std::get<0>(t));
-    hash = at::hash_combine(hash, std::hash<c10::TypePtr>()(std::get<1>(t)));
-    return hash;
-  }
-};
-} // namespace std
 
 namespace c10 {
 
@@ -287,7 +266,8 @@ TypePtr OptionalType::get(TypePtr inner) {
 }
 
 TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  using Key = std::tuple<std::string, TypePtr>;
+  static ska::flat_hash_map<Key, TypePtr, c10::hash<Key>> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.
@@ -301,7 +281,8 @@ TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
 }
 
 TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  using Key = std::tuple<std::string, TypePtr, TypePtr>;
+  static ska::flat_hash_map<Key, TypePtr, c10::hash<Key>> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.
@@ -510,7 +491,7 @@ MatchTypeReturn matchTypeVariables(
     ss << "Type variable '" << vt->name() << "' previously matched to type "
        << it->second->repr_str() << " is matched to type "
        << actual->repr_str();
-    return ss.str();
+    return std::move(ss).str();
   } else if (auto lt_formal = formal->castRaw<ListType>()) {
     if (auto lt_actual = actual->castRaw<ListType>()) {
       auto innerMatch = matchTypeVariables(
@@ -532,7 +513,7 @@ MatchTypeReturn matchTypeVariables(
     std::stringstream ss;
     ss << "Cannot match " << lt_formal->repr_str() << " to "
        << actual->repr_str();
-    return ss.str();
+    return std::move(ss).str();
   } else if (auto tp_formal = formal->castRaw<TupleType>()) {
     if (auto tp_actual = actual->castRaw<TupleType>()) {
       if (tp_formal->elements().size() != tp_actual->elements().size()) {
@@ -549,7 +530,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a tuple to " << actual->repr_str();
-      return MatchTypeReturn(ss.str());
+      return MatchTypeReturn(std::move(ss).str());
     }
   } else if (auto lt_formal = formal->castRaw<FutureType>()) {
     if (auto lt_actual = actual->castRaw<FutureType>()) {
@@ -562,7 +543,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   } else if (auto lt_formal = formal->castRaw<AwaitType>()) {
     if (auto lt_actual = actual->castRaw<AwaitType>()) {
@@ -575,7 +556,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match an await to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
     if (auto lt_actual = actual->castRaw<RRefType>()) {
@@ -588,7 +569,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a rref to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   } else if (auto opt_formal = formal->castRaw<OptionalType>()) {
     if (auto opt_actual = actual->castRaw<OptionalType>()) {
@@ -625,7 +606,7 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a dict to " << actual->repr_str();
-      return ss.str();
+      return std::move(ss).str();
     }
   }
 
@@ -913,7 +894,7 @@ std::string TupleType::str() const {
     }
     ss << ')';
   }
-  return ss.str();
+  return std::move(ss).str();
 }
 std::string TupleType::annotation_str_impl(const TypePrinter& printer) const {
   if (schema_ && name()) {

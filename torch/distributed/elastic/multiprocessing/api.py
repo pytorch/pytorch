@@ -701,7 +701,7 @@ def _wrap(
 
     with stdout_cm, stderr_cm:
         fn = _maybe_wrap_with_numa_binding(
-            fn, gpu_index=local_rank, numa_options=numa_options
+            fn, device_index=local_rank, numa_options=numa_options
         )
         ret = record(fn)(*args_)
     ret_val_.put(ret)

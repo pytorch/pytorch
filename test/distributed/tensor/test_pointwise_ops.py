@@ -1020,6 +1020,37 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result[1].placements, (Shard(0),))
 
     @with_comms
+    def test_auto_registered_foreach_unary(self):
+        device_mesh = self.build_device_mesh()
+        inputs = [
+            torch.linspace(0.05, 0.95, 32, device=self.device_type).reshape(8, 4),
+            torch.linspace(0.1, 0.9, 32, device=self.device_type).reshape(4, 8),
+        ]
+        dtensors = [
+            distribute_tensor(input, device_mesh, [Shard(0)]) for input in inputs
+        ]
+
+        expected = torch._foreach_acos(inputs)
+        result = torch._foreach_acos(dtensors)
+
+        self.assertEqual(len(result), len(expected))
+        for actual, expected_tensor in zip(result, expected):
+            self.assertEqual(actual.placements, (Shard(0),))
+            self.assertEqual(actual.full_tensor(), expected_tensor)
+
+        inplace_inputs = [input.clone() for input in inputs]
+        inplace_dtensors = [
+            distribute_tensor(input, device_mesh, [Shard(0)])
+            for input in inplace_inputs
+        ]
+        torch._foreach_acos_(inplace_inputs)
+        torch._foreach_acos_(inplace_dtensors)
+
+        for actual, expected_tensor in zip(inplace_dtensors, inplace_inputs):
+            self.assertEqual(actual.placements, (Shard(0),))
+            self.assertEqual(actual.full_tensor(), expected_tensor)
+
+    @with_comms
     @skip_unless_torch_gpu
     @parametrize(
         "mesh_type,amsgrad",
@@ -1390,12 +1421,12 @@ class TestPointwiseRuleValidation(TestCase):
                     self.assertEqual(
                         stats.true_positives,
                         expected,
-                        f"{name}: expected {expected} true_positives, got {stats.true_positives}",
+                        lambda msg: f"{msg}\n{name}: expected {expected} true_positives, got {stats.true_positives}",
                     )
                     self.assertEqual(
                         len(stats.false_positives),
                         0,
-                        f"{name}: found incorrect rules: {stats.false_positives}",
+                        lambda msg: f"{msg}\n{name}: found incorrect rules: {stats.false_positives}",
                     )
 
                 self._with_even_sizes(run)

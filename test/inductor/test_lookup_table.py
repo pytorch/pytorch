@@ -23,7 +23,6 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON, HAS_GPU
 from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
@@ -511,22 +510,26 @@ class TestLookupTable(BaseLookupTableTest):
             if result is None:
                 raise AssertionError(f"Result should not be None for {description}")
             self.assertIn(
-                "triton", result, f"Should have triton result for {description}"
+                "triton",
+                result,
+                lambda msg: f"{msg}\nShould have triton result for {description}",
             )
             self.assertEqual(
-                len(result["triton"]), 1, f"Should have 1 config for {description}"
+                len(result["triton"]),
+                1,
+                lambda msg: f"{msg}\nShould have 1 config for {description}",
             )
             # template_hash should be removed from returned config
             self.assertNotIn(
                 "template_hash",
                 result["triton"][0],
-                f"template_hash should be removed from result for {description}",
+                lambda msg: f"{msg}\ntemplate_hash should be removed from result for {description}",
             )
             # Other config fields should be preserved
             self.assertEqual(
                 result["triton"][0]["BLOCK_M"],
                 128,
-                f"BLOCK_M should be preserved for {description}",
+                lambda msg: f"{msg}\nBLOCK_M should be preserved for {description}",
             )
 
     @parametrize(
@@ -613,7 +616,7 @@ class TestLookupTable(BaseLookupTableTest):
             self.assertEqual(
                 result,
                 {},
-                f"Should return empty dict when expected_found={expected_found}",
+                lambda msg: f"{msg}\nShould return empty dict when expected_found={expected_found}",
             )
 
     def test_device_key_priority(self):
@@ -904,15 +907,10 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             {"max_autotune_gemm": max_autotune, "max_autotune": max_autotune},
         )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180234")
     @parametrize("operation", ["mm", "addmm", "bmm", "mm_plus_mm"])
     @fresh_cache()
     def test_valid_lookup_table_entry(self, operation):
         """Test when there's a valid entry for the operation"""
-        if operation == "addmm" and torch.version.hip:
-            self.skipTest(
-                "skipping on ROCm since https://github.com/pytorch/pytorch/issues/179955 didn't skip as expected"
-            )
         k = 256 if operation == "mm_plus_mm" else 64
         tensors = self.create_tensors(operation, k=k)
 
@@ -992,7 +990,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
 
             self.run_model("mm", tensors)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180233")
     @fresh_cache()
     def test_bias_addmm_lookup_table_entry(self):
         """Test bias_addmm template entry"""
