@@ -1090,16 +1090,22 @@ Example:
   module
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makePreMulSum<double>,
+          &::c10d::makePreMulSum<at::Tensor>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_make_nccl_premul_sum",
-          &::c10d::makePreMulSum<at::Tensor>,
-          py::arg("factor").noconvert(),
-          py::return_value_policy::copy, // seems safest
-          py::call_guard<py::gil_scoped_release>());
+          [](const py::object& factor) {
+            if (!PyFloat_Check(factor.ptr())) {
+              throw py::type_error("factor must be a float or Tensor");
+            }
+            const auto value = factor.cast<double>();
+            py::gil_scoped_release release;
+            return ::c10d::makePreMulSum<double>(value);
+          },
+          py::arg("factor"),
+          py::return_value_policy::copy); // seems safest
 
   module.def(
       "_set_thread_isolation_mode",

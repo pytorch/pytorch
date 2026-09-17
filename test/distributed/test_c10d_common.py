@@ -3214,6 +3214,9 @@ class ReduceOpTest(TestCase):
             self.assertIsInstance(premul_sum, c10d.ReduceOp)
             self.assertEqual(premul_sum.factor, scale)
 
+        with self.assertRaises(TypeError):
+            dist._make_nccl_premul_sum(2)
+
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
     def test_reduceop_copyable(self):
         for reduce_op in (
