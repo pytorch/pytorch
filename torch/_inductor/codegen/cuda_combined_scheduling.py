@@ -14,6 +14,7 @@ from ..scheduler import (
     FusedStagedReduction,
     Scheduler,
     SchedulerNode,
+    SubParentFusionResult,
 )
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
@@ -68,8 +69,11 @@ class CUDACombinedScheduling(BaseScheduling):
     def has_sub_parent_epilogue(
         self,
         nodes: Sequence[BaseSchedulerNode],
+        fusion_result: SubParentFusionResult | None = None,
     ) -> bool:
-        return self._triton_scheduling.has_sub_parent_epilogue(nodes)
+        return self._triton_scheduling.has_sub_parent_epilogue(
+            nodes, fusion_result
+        )
 
     def validate_staged_reduction(self, node: FusedStagedReduction) -> None:
         return self._triton_scheduling.validate_staged_reduction(node)
