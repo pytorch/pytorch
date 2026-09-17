@@ -490,15 +490,15 @@ def _reduce_all(
 
         # Avoid row-packing threads for a single-row launch; None keeps the existing config.
         cfg = rt.single_row_config(L, x.element_size() * 8)
-        kw = (
-            {}
-            if cfg is None
-            else {
-                "threads_per_row": cfg.threads_per_row,
-                "threads_per_block": cfg.threads_per_block,
-            }
+        outs = rt.reduce_row_tile(
+            trait,
+            trait_key,
+            x2,
+            out_dtypes,
+            nouts=nouts,
+            threads_per_row=None if cfg is None else cfg.threads_per_row,
+            threads_per_block=None if cfg is None else cfg.threads_per_block,
         )
-        outs = rt.reduce_row_tile(trait, trait_key, x2, out_dtypes, nouts=nouts, **kw)
         return tuple(_as_shape(o, ()) for o in outs)
     from . import kernel_xcta as xc
 
