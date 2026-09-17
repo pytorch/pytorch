@@ -45,12 +45,13 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     setup_torchcomms_pg,
     skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
     skip_if_rocm_multiprocess,
-    skip_if_rocm_ver_atleast_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI350_ARCH,
     parametrize,
     requires_cuda,
     requires_cuda_p2p_access,
@@ -284,7 +285,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_get_signal_pad(self) -> None:
         self._init_process()
 
@@ -349,7 +350,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_rendezvous_via_pg_allgather(self) -> None:
         import pickle
 
@@ -416,7 +417,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_rendezvous_custom_backend(self) -> None:
         # Simulate the ncclx multi-backend setup.  NCCLXStub wraps NCCL
         # (CUDA-only, like ncclx) and registers via extended_api=True.
@@ -481,7 +482,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_pg_rendezvous_abort_after(self) -> None:
         self._init_process()
 
@@ -508,7 +509,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
         self._init_process()
@@ -630,7 +631,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @parametrize("reduce_op", ["sum", "avg"])
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_reduce_scatter(
@@ -785,7 +786,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_dispatcher_torchbind_symmetric_memory(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
@@ -805,7 +806,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_cuda_multimem_barrier_kernel(self) -> None:
         self._init_process()
 
@@ -832,7 +833,12 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
-@skip_if_rocm_multiprocess  # AsyncTP is not yet supported on ROCm
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
+# The first AsyncTPTest case to execute hangs in its subprocess on the gfx950
+# CI distributed runners (whichever test that is), while the whole class passes
+# locally on gfx950 at world sizes 2/4/8 and on the mi300 CI shard with the same
+# ROCm image; skipped on that arch until it can be investigated on those runners.
+@skip_if_rocm_arch_multiprocess(MI350_ARCH)
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class AsyncTPTest(MultiProcContinuousTest):
@@ -1298,7 +1304,7 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p(self, set_device: bool) -> None:
         self._init_process(set_device)
@@ -1318,9 +1324,8 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
-    @skip_if_rocm_ver_lessthan_multiprocess((7, 0))
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     @parametrize("set_device", [True, False])
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
         self._init_process(set_device)
@@ -1658,7 +1663,7 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(4)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_two_shot_all_reduce(self) -> None:
         self._init_process()
         group_name = dist.group.WORLD.group_name
@@ -2505,10 +2510,15 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         torch.cuda.set_device(self.device)
         torch.manual_seed(42 + self.rank)
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Same gfx950 CI runner failure family as test_mempool_large_alloc_barrier:
+    # the first device-side atomic on the peer's signal pad in
+    # one_shot_all_reduce never completes and the test hangs until the per-test
+    # timeout (SR-IOV virtual functions); passes on gfx950 outside those runners
+    # and on the mi300 runners with the same image.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_mempool_tensor_factory(self):
         self._init_process()
@@ -2534,7 +2544,7 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
     def test_mempool_compute_ops(self):
         self._init_process()
         group_name = dist.group.WORLD.group_name
@@ -2569,10 +2579,14 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         hdl.barrier(timeout_ms=60000)
         return t, hdl
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Same gfx950 CI runner failure family as test_mempool_large_alloc_barrier:
+    # the worker dies with hipErrorLaunchFailure on the first peer signal-pad
+    # access (SR-IOV virtual functions); passes on gfx950 outside those runners
+    # and on the mi300 runners with the same image.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_mempool_recycled_alloc_signal_pad(self):
         # Regression test for the signal-pad pollution bug: the symmetric
@@ -2593,10 +2607,15 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         t2, hdl2 = self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
         del hdl2, t2
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # On the gfx950 CI distributed runners (SR-IOV virtual functions) the
+    # rendezvous succeeds but barrier_kernel's first atomic on the peer's signal
+    # pad memory-faults; passes on gfx950 outside those runners and on the mi300
+    # runners with the same image. Skipped on that arch until the runner P2P
+    # path is understood.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_mempool_large_alloc_barrier(self):
         # alloc() only zeros the signal pad, not the whole (much larger) data
@@ -2608,7 +2627,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         numel, dtype = 4 * 1024 * 1024, torch.float
         self._mempool_barrier_roundtrip(mempool, numel, dtype, group_name)
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -2636,7 +2654,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
             "MemPool should return the same storage block for same-size re-allocation",
         )
 
-    @skipIf(TEST_WITH_ROCM, "https://github.com/pytorch/pytorch/issues/180464")
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
