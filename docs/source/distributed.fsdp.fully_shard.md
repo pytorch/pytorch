@@ -145,9 +145,9 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
   around frozen parameters, and allows for communication-free (sharded) state
   dicts, which otherwise require all-gathers in FSDP1.
 - FSDP2 implements a different memory management approach to handle the
-  multi-stream usages that avoids `torch.Tensor.record_stream`. This ensures
-  deterministic and expected memory usage and does not require blocking the CPU
-  like in FSDP1's `limit_all_gathers=True`.
+  multi-stream usages that avoids `torch.Tensor.record_stream` by default. This
+  ensures deterministic and expected memory usage and does not require blocking
+  the CPU like in FSDP1's `limit_all_gathers=True`.
 - FSDP2 exposes APIs for manual control over prefetching and collective
   scheduling, allowing power users more customization. See the methods on
   `FSDPModule` below for details.
@@ -160,6 +160,45 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
   [here](https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md) for
   details.
 
+
+### Backend gradient lifetime tracking
+
+FSDP produces sharded gradients on communication streams and makes the compute
+stream wait before consuming them. Backends whose allocators also need to track
+the compute stream for deallocation can register an implementation of the
+internal `fsdp::record_gradient_stream` operator. This requires no training-loop
+changes. The default implementation does nothing, preserving FSDP's existing
+memory management.
+
+The operator receives the final gradient buffer after conversion to the original
+parameter dtype, followed by the consumer stream's `stream_id`, `device_index`,
+and `device_type`. Parameter gradients may be views of this buffer. Registration
+dispatches on the buffer's device; the backend is responsible for honoring the
+allocator and memory pool that own its storage.
+
+For example, a `PrivateUse1` backend with a working `Tensor.record_stream`
+implementation can register the following during backend initialization, even
+before FSDP is imported:
+
+```python
+import torch
+
+
+@torch.library.impl("fsdp::record_gradient_stream", "privateuseone")
+def _record_gradient_stream(buffer, stream_id, device_index, device_type):
+    stream = torch.Stream(
+        stream_id=stream_id, device_index=device_index, device_type=device_type
+    )
+    buffer.record_stream(stream)
+```
+
+The implementation must register the original storage without copying or
+modifying the buffer. Deallocation must account for work queued on the consumer
+stream up to the time the storage is released, including optimizer work queued
+after this operator returns. Recording a completion event only when the operator
+is called is too early. FSDP continues to provide the producer-to-consumer waits;
+the hook provides any additional consumer-to-deallocation ordering. Applications
+that use gradients on other streams remain responsible for those uses.
 
 ```{eval-rst}
 .. currentmodule:: torch.distributed.fsdp
