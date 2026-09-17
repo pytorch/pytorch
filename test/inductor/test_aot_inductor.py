@@ -1535,6 +1535,7 @@ class AOTInductorTestsTemplate:
         self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
 
     @torch._inductor.config.patch(
+        use_pre_grad_passes=True,
         pre_grad_fusion_options={
             "normalization_pass": {},
             "remove_split_with_size_one_pass": {},
@@ -2899,6 +2900,35 @@ class AOTInductorTestsTemplate:
             prepend_predicates(inputs, num_predicates=3),
             dynamic_shapes=dynamic_shapes,
         )
+
+    @common_utils.parametrize("weights_format", ("binary_blob", "pickle_weights"))
+    @config.patch(torch._inductor.lite_mode_options)
+    def test_cond_nested_constants(self, weights_format):
+        class Model(CondModels.Nested):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("constant0", torch.tensor(5.0))
+
+            def forward(self, p0, p1, p2, a, b, c):
+                return super().forward(p0, p1, p2, a, b, c) + self.constant0
+
+        inputs = tuple(torch.randn(3, 4, device=self.device) for _ in range(3))
+        list_inputs = prepend_predicates(inputs, num_predicates=3)
+        model = Model().to(self.device)
+        package_path = AOTIRunnerUtil.compile(
+            model,
+            list_inputs[0],
+            inductor_configs={
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+                "aot_inductor.package_constants_in_so": False,
+                "aot_inductor.package_constants_on_disk_format": weights_format,
+            },
+        )
+        contents = load_pt2(package_path, load_weights_from_disk=True)
+        optimized = contents.aoti_runners["model"]
+        for example_inputs in list_inputs:
+            self.assertEqual(optimized(*example_inputs), model(*example_inputs))
 
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
@@ -5285,6 +5315,35 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args)
 
+    @common_utils.parametrize("optional_elements", (False, True))
+    @common_utils.parametrize(
+        "optional_list,values", ((False, []), (True, []), (True, None))
+    )
+    def test_proxy_executor_empty_scalar_list(
+        self, optional_elements, optional_list, values
+    ):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            scalar_type = "Scalar?" if optional_elements else "Scalar"
+            list_type = f"{scalar_type}[]{'?' if optional_list else ''}"
+            torch.library.define(
+                "mylib::empty_scalar_list",
+                f"(Tensor x, {list_type} values, int offset) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::empty_scalar_list", self.device, lib=lib)
+            @torch.library.register_fake("mylib::empty_scalar_list", lib=lib)
+            def empty_scalar_list_impl(x, scalars, offset):
+                self.assertEqual(scalars, values)
+                return x + offset
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.empty_scalar_list(x, values, 7)
+
+            self.check_model(Model(), (torch.randn(3, device=self.device),))
+
     def test_proxy_executor_scalar_tensor_arg(self):
         # A Python float bound to a Tensor-typed schema arg ("scalar in place of a
         # tensor", a wrapped number) on a no-c-shim op. complex64 forces div.Tensor to
@@ -5301,6 +5360,49 @@ class AOTInductorTestsTemplate:
         example_args = (torch.randn((1, 300, 201), dtype=torch.complex64),)
         m = M()
         self.check_model(m, example_args)
+
+    @common_utils.parametrize("unbacked", (False, True))
+    @common_utils.parametrize(
+        "op,dtype",
+        (
+            common_utils.subtest(
+                (torch.ops.aten.add.Tensor, torch.int64), name="int64_add"
+            ),
+            common_utils.subtest(
+                (torch.ops.aten.sub.Tensor, torch.float16), name="float16_sub"
+            ),
+            common_utils.subtest(
+                (torch.ops.aten.sub.Tensor, torch.bfloat16), name="bfloat16_sub"
+            ),
+        ),
+    )
+    def test_proxy_executor_symint_tensor_arg(self, unbacked, op, dtype):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                value = y.item() if unbacked else y.shape[0]
+                return op(x, value, alpha=2)
+
+        shape = (4,) if dtype == torch.int64 else ()
+        x = torch.ones(shape, dtype=dtype, device=self.device)
+        values = (3, 257, -4) if unbacked else (3, 257)
+        list_inputs = [
+            (x, torch.tensor(value, device=self.device))
+            if unbacked
+            else (x, torch.ones(value, device=self.device))
+            for value in values
+        ]
+        actual = AOTIRunnerUtil.run_multiple(
+            Model(),
+            list_inputs,
+            inductor_configs={
+                "fallback_by_default": True,
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            },
+            dynamic_shapes=(None, None if unbacked else {0: Dim("n")}),
+        )
+        expected = [Model()(*inputs) for inputs in list_inputs]
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     def test_proxy_executor_symint_scalar_arg(self):
         # A SymInt (a symbolic scalar from a dynamic shape) bound to a Number/Scalar-typed
@@ -5869,6 +5971,7 @@ class AOTInductorTestsTemplate:
                 optimized(torch.randn(100), torch.tensor(2))
 
     @patch.dict(os.environ, {"TORCHINDUCTOR_SCALAR_ASSERTS_FULL": "1"})
+    @config.patch({"fallback_by_default": False})
     def test_aoti_runtime_asserts_backed_symint(self):
         if not full_aoti_runtime_assert():
             raise unittest.SkipTest("full runtime assert not turned on")

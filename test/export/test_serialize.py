@@ -1190,6 +1190,40 @@ def forward(self, x):
         loaded_ep = load(buffer)
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
+    @parametrize("optional", (False, True))
+    @parametrize("optional_elements", (False, True))
+    def test_empty_scalar_list_custom_op(self, optional, optional_elements):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            scalar_type = "Scalar?" if optional_elements else "Scalar"
+            scalar_list = f"{scalar_type}[]{'?' if optional else ''}"
+            torch.library.define(
+                "mylib::empty_scalar_list",
+                f"(Tensor x, {scalar_list} values) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::empty_scalar_list", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::empty_scalar_list", lib=lib)
+            def empty_scalar_list_impl(x, values):
+                self.assertEqual(values, [])
+                return x + 1
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.empty_scalar_list(x, [])
+
+            inputs = (torch.randn(3),)
+            ep = export(Model(), inputs, strict=True)
+            buffer = io.BytesIO()
+            save(ep, buffer)
+            buffer.seek(0)
+            loaded = load(buffer)
+            self.assertEqual(loaded.module()(*inputs), Model()(*inputs))
+
+
+instantiate_parametrized_tests(TestSerialize)
+
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

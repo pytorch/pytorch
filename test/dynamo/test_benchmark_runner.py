@@ -47,6 +47,7 @@ class AccuracyBenchmarkRunner(common.BenchmarkRunner):
 
 class BenchmarkRunnerTests(TestCase):
     @parametrize("preexisting_graphs", (0, 1, 3))
+    @torch._dynamo.disable
     def test_accuracy_counters_exclude_model_setup(self, preexisting_graphs):
         torch._dynamo.reset()
         self.addCleanup(torch._dynamo.reset)

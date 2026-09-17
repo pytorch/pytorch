@@ -1626,8 +1626,26 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
 
+    @staticmethod
+    def _output_aliases_constant(output_buffer: ir.IRNode) -> bool:
+        name = output_buffer.maybe_get_name()
+        if name is None:
+            return False
+        pending = [name]
+        visited: OrderedSet[str] = OrderedSet()
+        while pending:
+            name = pending.pop()
+            if name in visited:
+                continue
+            visited.add(name)
+            if name in V.graph.constants:
+                return True
+            buffer = V.graph.name_to_buffer.get(name)
+            if buffer is not None:
+                pending.extend(buffer.get_inputs_that_alias_output())
+        return False
+
     def generate_return(self, output_refs: list[str]):
-        cst_names = V.graph.constants.keys()
         output2idx: dict[str, int] = {}
 
         # If any output ref represents an rvalue tensor, materialize it to an lvalue
@@ -1642,17 +1660,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if output == "nullptr":
                 continue
 
-            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            if isinstance(output_buffer, ir.BaseView):
-                output_storage = output_buffer.unwrap_view()
-                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
-                    raise AssertionError(
-                        f"expected output_storage to be BaseView or MutableBox, "
-                        f"got {type(output_storage)}"
-                    )
-                if isinstance(output_storage.data, ir.ConstantBuffer):
-                    is_constant_buffer = True
+            is_constant_buffer = self._output_aliases_constant(output_buffer)
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors

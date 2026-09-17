@@ -339,6 +339,9 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
             " but got ",
             serialized_arg_type);
         stack.at(index) = serialized_arg_val.get<std::vector<std::string>>();
+      } else if (serialized_arg_val.is_array() && serialized_arg_val.empty()) {
+        stack.at(index) = c10::impl::GenericList(
+            schema_arg_type->castRaw<at::ListType>()->getElementType());
       } else {
         TORCH_CHECK(
             false,

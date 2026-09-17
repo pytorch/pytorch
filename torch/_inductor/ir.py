@@ -9974,6 +9974,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
+            self.use_runtime_dispatch = self._uses_aot_proxy_executor(kernel)
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
             # If the op is in custom_ops_to_c_shims, generate direct function call
@@ -10103,7 +10104,12 @@ class FallbackKernel(ExternKernelAlloc):
             from torchgen.aoti.fallback_ops import inductor_fallback_ops
 
             return str(kernel) not in inductor_fallback_ops
-        if kernel.namespace == "_quantized":
+        if str(kernel) in {
+            "_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16.default",
+            "_quantized.wrapped_fbgemm_linear_fp16_weight.default",
+            "_quantized._wrapped_linear_prepack.default",
+            "_quantized._wrapped_quantized_linear_prepacked.default",
+        }:
             return False
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
 
@@ -10169,13 +10175,13 @@ class FallbackKernel(ExternKernelAlloc):
     ) -> tuple[Any, Any, bool]:
         # A scalar bound to a Tensor-typed schema arg ("scalar in place of a tensor", a
         # wrapped number) cannot be serialized by the AOT ProxyExecutor fill_args path.
-        # Materialize it into a real constant tensor buffer up front so it flows through
+        # Materialize it into a tensor buffer up front so it flows through
         # the tensor path uniformly (arg classification, serialization, and the host proxy
-        # executor all agree that it is a TensorArgument). The constant dtype follows
+        # executor all agree that it is a TensorArgument). The dtype follows
         # eager's weak-scalar promotion (torch.result_type) so numerics match normal
         # lowering, which inlines the scalar via promote_constants.
         #
-        # Returns the rewritten (args, kwargs) plus whether anything was materialized;
+        # Returns rewritten (args, kwargs) and whether a real tensor constant was created;
         # the caller needs to know because process_kernel feeds graph constants back in
         # as *real* tensors (see the V.graph.constants branch there).
         if not isinstance(kernel, torch._ops.OpOverload):
@@ -10239,14 +10245,21 @@ class FallbackKernel(ExternKernelAlloc):
             return isinstance(t, torch.TensorType)
 
         def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
-            # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
-            if not isinstance(value, (int, float, complex)):
+            expr = value.node.expr if isinstance(value, torch.SymInt) else value
+            is_symint = isinstance(expr, Expr) and expr.is_integer is True
+            if not isinstance(value, (int, float, complex)) and not is_symint:
                 return value
             if not is_tensor_slot(arg_info):
                 return value
             alias = arg_info.alias_info
             if alias is not None and alias.is_write:
                 return value
+            if is_symint:
+                dtype = scalar_dtype(0)
+                # Keep integer promotion for zero-dimensional floating-point inputs.
+                if dtype.is_floating_point or dtype.is_complex:
+                    dtype = torch.int64
+                return IndexingConstant(index=expr, dtype=dtype, device=device)
             with torch.utils._python_dispatch._disable_current_modes():
                 const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
             materialized.append(True)

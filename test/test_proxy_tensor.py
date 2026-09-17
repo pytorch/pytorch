@@ -1693,6 +1693,33 @@ def forward(self, x_1, y_1):
             )
 
 
+    def test_selective_decompose_preserves_runtime_assert(self):
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.proxy_tensor import selective_decompose
+
+        def fn(x):
+            indices = x.nonzero()
+            torch._check(indices.size(0) < 10)
+            return indices
+
+        x = torch.ones(8)
+        gm = make_fx(fn, tracing_mode="symbolic")(x)
+        fake_inputs = fx_placeholder_vals(gm)
+        fake_mode = detect_fake_mode(fake_inputs)
+        with fake_mode:
+            gm = selective_decompose(
+                gm,
+                *fake_inputs,
+                decomposition={},
+                should_decompose=lambda node: False,
+                trace_joint_graph=False,
+            )
+        insert_deferred_runtime_asserts(gm, fake_mode.shape_env, "test")
+        gm.recompile()
+        self.assertEqual(gm(x), fn(x))
+        with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed"):
+            gm(torch.ones(16))
+
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
             # tolist not directly supported atm

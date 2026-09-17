@@ -203,8 +203,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def _codegen_v2_raw_outputs(
         self, code: IndentedBuffer, output_refs: list[str]
     ) -> None:
-        cst_names = V.graph.constants.keys()
-
         def write_output_to_c_array(idx: int, output: str) -> None:
             output_arrayref_name = f"output_arrayref_{idx}"
             code.splice(
@@ -219,17 +217,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if output == "nullptr":
                 continue
 
-            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            if isinstance(output_buffer, ir.BaseView):
-                output_storage = output_buffer.unwrap_view()
-                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
-                    raise AssertionError(
-                        f"expected output_storage to be BaseView or MutableBox, got "
-                        f"{type(output_storage).__name__}"
-                    )
-                if isinstance(output_storage.data, ir.ConstantBuffer):
-                    is_constant_buffer = True
+            is_constant_buffer = self._output_aliases_constant(output_buffer)
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 output_tensor = f"scalar_to_tensor_{next(self.scalar_to_tensor_id)}"
@@ -613,7 +602,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 )
 
     def generate_return(self, output_refs: list[str]):
-        cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph
             and config.aot_inductor.use_minimal_arrayref_interface
@@ -662,17 +650,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             if output == "nullptr":
                 continue
 
-            is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
-            if isinstance(output_buffer, ir.BaseView):
-                output_storage = output_buffer.unwrap_view()
-                if not isinstance(output_storage, (ir.BaseView, ir.MutableBox)):
-                    raise AssertionError(
-                        f"expected output_storage to be BaseView or MutableBox, got "
-                        f"{type(output_storage).__name__}"
-                    )
-                if isinstance(output_storage.data, ir.ConstantBuffer):
-                    is_constant_buffer = True
+            is_constant_buffer = self._output_aliases_constant(output_buffer)
 
             if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                 # Need to wrap scalar into tensor as the main function returns a vector of tensors
