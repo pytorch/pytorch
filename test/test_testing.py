@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     IS_CI, IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_PERIODIC, TEST_WITH_ROCM, decorateIf, periodic, skipIfTorchDynamo, skipIfXpu,
-    getRocmVersion, skipIfRocmVersionAtLeast, TemporaryFileName, xfailIf
+    getRocmVersion, skipIfRocmVersionAtLeast, TemporaryFileName,
 )
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_device_side_assert
 from torch.testing._internal.common_device_type import \
@@ -2820,7 +2820,6 @@ class TestImports(TestCase):
     @skipIfXpu(msg="The test is flaky on XPU, see https://github.com/pytorch/pytorch/issues/110040")
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
-    @xfailIf(sys.version_info >= (3, 15))
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
