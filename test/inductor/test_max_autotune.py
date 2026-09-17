@@ -2878,6 +2878,14 @@ class TestMaxAutotune(TestCase):
                     "triton.decompose_k_threshold": decompose_k_threshold,
                 }
             ):
+                device_properties = DeviceProperties.create(torch.device(GPU_TYPE))
+                expected_splits = get_k_splits(
+                    M,
+                    N,
+                    K,
+                    num_sms=device_properties.multi_processor_count,
+                    max_workspace_bytes=128 * 1024 * 1024,
+                )
                 compiled_func = torch.compile(lambda a, b: a @ b)
                 _, code = run_and_get_code(compiled_func, a, b)
 
@@ -2890,6 +2898,7 @@ class TestMaxAutotune(TestCase):
                     K // M < decompose_k_threshold
                     or K // N < decompose_k_threshold
                     or num_decompose_k_splits == 0
+                    or not expected_splits
                 ):
                     self.assertEqual(decompose_count, 0)
                 else:
@@ -2946,20 +2955,61 @@ class TestMaxAutotune(TestCase):
         )
         self.assertLessEqual(len(irregular_candidates), 8)
 
-        # When the legal set is already smaller than the tuning budget, retain
-        # every candidate rather than trying to predict the vendor BMM winner.
+        # Mathematical divisibility alone is insufficient.  This small shape
+        # cannot produce one GPU wave even at its largest useful exact split,
+        # so do not compile known-underfilled BMM plans.
         get_k_splits.cache_clear()
         small_candidates = get_k_splits(
             64,
             64,
             5248,
             num_sms=148,
-            ctas_per_tile=2,
             max_workspace_bytes=128 * 1024 * 1024,
         )
-        self.assertEqual(small_candidates, [2, 4, 8, 16, 32, 41])
+        self.assertEqual(small_candidates, [])
         self.assertLessEqual(
             len(small_candidates), config.triton.num_decompose_k_splits
+        )
+
+        # Sparse factorization must not force a bad choice.  split=7 cannot
+        # fill a wave for this semiprime production K, while the other exact
+        # divisors make Kpart too small or violate the workspace limit.
+        get_k_splits.cache_clear()
+        sparse_candidates = get_k_splits(
+            256,
+            128,
+            11_091_857,
+            num_sms=148,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(sparse_candidates, [])
+
+        # Sparse does not automatically mean bad: this dynamic production K
+        # has a split that fills the GPU and leaves a still-K-dominant BMM.
+        get_k_splits.cache_clear()
+        useful_sparse_candidates = get_k_splits(
+            256,
+            128,
+            10_954_007,
+            num_sms=148,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(useful_sparse_candidates, [587])
+
+        # If filtering takes an over-budget divisor set below the configured
+        # limit, it must remain ranked rather than expanding from eight
+        # candidates to every survivor.
+        get_k_splits.cache_clear()
+        filtered_ranked_candidates = get_k_splits(
+            256,
+            256,
+            9_216,
+            num_sms=148,
+            max_workspace_bytes=128 * 1024 * 1024,
+        )
+        self.assertEqual(
+            filtered_ranked_candidates,
+            [12, 16, 18, 36, 32, 24],
         )
 
     @unittest.skipIf(
