@@ -570,6 +570,20 @@ class InterruptsOnCompare:
         raise self.exc
 
 
+class WrapsAnInterruptOnCompare:
+    # RaisesOnCompare's slot again, raising the shape one unwrap hop misses: an
+    # explicit `raise SystemError(...) from <interrupt>`, which the boundary wraps
+    # in a second SystemError, leaving the interrupt two hops down.
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __hash__(self):
+        return hash("foo")
+
+    def __eq__(self, other):
+        raise SystemError("inner") from self.exc
+
+
 class DictBranchModule(torch.nn.Module):
     def forward(self, x, d):
         if d is None:
@@ -648,6 +662,15 @@ class StoresEpsModule(torch.nn.Module):
         y = x * EPS
         EPS = EPS * 2
         return y
+
+
+class ReturnsEpsModule(torch.nn.Module):
+    # Returns a certified global instead of computing with it, so the graph input
+    # it was lifted into is pruned as unused and used_globals -- filled from the
+    # graph inputs' sources -- never records the name, while the generated
+    # bytecode still reads it. The shape the load-time merge exists for.
+    def forward(self, x):
+        return x + 1, EPS
 
 
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
@@ -3621,6 +3644,43 @@ from user code:
                         model(x, evil)
                     self.assertIs(ctx.exception.__cause__, interrupt)
 
+    def test_aot_compile_module_doubly_wrapped_interrupt_propagates(self):
+        # The boundary wraps whatever a leaf left set, an explicit `raise
+        # SystemError(...) from KeyboardInterrupt(...)` included, so an interrupt
+        # can arrive two SystemError hops down. _unwrapped_raise follows the whole
+        # chain, so the handlers re-raise here as they do one hop down; unwrapping
+        # one hop reads SystemError("inner") as an ordinary raise and the call ends
+        # in the report, the interrupt quoted on [0]'s line.
+        model, x = self._aot_compile_dict_branches({})
+        interrupt = KeyboardInterrupt("ctrl-c")
+        evil = {WrapsAnInterruptOnCompare(interrupt): 1}
+        with self.assertRaisesRegex(
+            SystemError, "returned a result with an exception set"
+        ) as ctx:
+            model(x, evil)
+        inner = ctx.exception.__cause__
+        self.assertIsInstance(inner, SystemError)
+        self.assertIs(inner.__cause__, interrupt)
+
+    def test_aot_compile_module_serving_over_a_raise_frees_this_call_s_inputs(self):
+        # A recorded raise keeps its traceback, and the traceback keeps this call's
+        # frame and args, so the serving exits clear the record: with the cycle
+        # collector off, an input of a call that recorded a raise and then served a
+        # graph dies at the return like any other call's. The opted-out shape above,
+        # unmocked: [0]'s tree raises through the leaf in both passes, [1] rejects
+        # the dict, and the last resort serves [0]'s graph.
+        model, x = self._aot_compile_dict_branches({}, None)
+        model.forward.compiled_results[0].disable_guard_check()
+        key = RaisesOnCompare()
+        ref = weakref.ref(key)
+        gc.disable()
+        try:
+            self.assertEqual(model(x, {key: 1}), x * 2)
+            del key
+            self.assertIsNone(ref())
+        finally:
+            gc.enable()
+
     def test_aot_compile_module_serves_a_later_match_after_an_earlier_raise(self):
         # The one path where tolerating a raise changes an ANSWER and not a
         # message: [0] raised, [1]'s guards passed on this call, and the parent
@@ -4937,7 +4997,12 @@ from user code:
         # not an unarmed artifact. EPS is bound away from the module-level 1e-7
         # for the capture, so `x * EPS` is far enough from zero for a baseline
         # assertion about it to discriminate at assertEqual's tolerance, and
-        # restored at cleanup, so the caller rebinds it freely.
+        # restored at cleanup, so the caller rebinds it freely. It is bound a
+        # second time between the save and the load, to a tensor of the same
+        # metadata and a different value, so the LOAD-time value the caller
+        # baselines against differs from the pickled one in value and not only in
+        # identity: a merge that read the artifact's own dict, or no merge at
+        # all, then fails the assertion below instead of agreeing numerically.
         global EPS
 
         self._hide_leaked_dynamo_globals()
@@ -4951,6 +5016,7 @@ from user code:
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
         data = model._save_aot_compiled_module()
         torch._dynamo.reset()
+        EPS = torch.tensor(6.0)
         reloaded = torch.compile(
             module_cls(), fullgraph=True, backend="eager", options=options
         )
@@ -4959,6 +5025,9 @@ from user code:
         self.assertEqual(len(results), len(sizes))
         for result in results:
             self.assertEqual(result._live_global_names, names)
+            # The load-time merge, which no call has had a chance to redo: the
+            # bytecode's globals hold the scope's tensor and not the pickled one.
+            self.assertIs(result.fn.__globals__["EPS"], EPS)
         return xs, reloaded, results
 
     def test_aot_compile_module_every_certified_global_is_re_read(self):
@@ -5007,6 +5076,31 @@ from user code:
             self.assertEqual(reloaded(x), x * load_time_eps)
         self.assertIs(globals()["EPS"], load_time_eps)
         self.assertEqual(result.fn.__globals__["EPS"], load_time_eps * 2)
+
+    def test_aot_compile_module_load_binds_a_global_off_the_graph(self):
+        # The shape the load-time merge exists for, and the one the per-call
+        # re-read cannot cover on its own: EPS is returned rather than computed
+        # with, so the placeholder it was lifted into is pruned and
+        # used_globals, filled from the graph inputs' sources, never records the
+        # name, while the generated bytecode reads it. forward_callable builds
+        # fn.__globals__ out of import_sources and used_globals alone and runs
+        # _check_external_refs at load, before any call, so with the merge gone
+        # the load itself refuses this artifact.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(ReturnsEpsModule, 3)
+        env = result._artifacts.runtime_env
+        self.assertIn("EPS", env.external_refs)
+        self.assertNotIn("EPS", env.used_globals)
+        self.assertNotIn("EPS", env.import_sources)
+        # Bound before any call, so the merge is the only thing that can have.
+        self.assertIs(result.fn.__globals__["EPS"], EPS)
+        self.assertEqual(reloaded(x), (x + 1, EPS))
+
+        rebound = torch.tensor(2.0)
+        EPS = rebound
+        self.assertEqual(reloaded(x), (x + 1, rebound))
+        self.assertIs(result.fn.__globals__["EPS"], rebound)
 
     def test_aot_compile_module_sweep_rebind_is_served(self):
         # Dispatch's sweep over results[1:] re-reads the guarded global as well.
@@ -7121,9 +7215,11 @@ from user code:
         )
         self.assertEqual(loaded(x), fn(x))
         # Re-checked after the call: the guard scope's binding is never copied
-        # over the bytecode's. __post_init__ subtracts this key from both the
-        # arming set and the certified set on every load path, so it is never in
-        # _live_global_names and _serve never copies it.
+        # over the bytecode's. __post_init__ subtracts this key from the arming
+        # set on every load path, and the certified set it picks from takes bare
+        # GlobalSource roots only, while every source under this key is a
+        # DictGetItemSource, so it is never in _live_global_names and _serve
+        # never copies it.
         self.assertTrue(
             loaded.fn.__globals__[builtins_key] is builtins.__dict__,
             "a call rewired the bytecode to the guard scope's binding",
