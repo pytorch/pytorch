@@ -26,29 +26,38 @@ def _entry(source, value, guard_type="ID_MATCH", derived=()):
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_default_guard_filter_drops_the_unserializable_types(self):
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-        refused = [_entry(GlobalSource("g"), None, guard_type=t) for t in unsupported]
-        self.assertEqual(
-            precompile_package.default_guard_filter_fn(refused),
-            [False] * len(unsupported),
-        )
+        g = GlobalSource("g")
+        refused = [_entry(g, None, guard_type=t) for t in unsupported]
+        kept = precompile_package.default_guard_filter_fn(refused)
+        self.assertEqual([t for t, keep in zip(unsupported, kept) if keep], [])
+        # A CONSTANT_MATCH on a code object runs through ID_MATCH; the
+        # serializer refuses the derived type, so the filter drops it too.
+        derived = _entry(g, None, "CONSTANT_MATCH", derived=("ID_MATCH",))
+        self.assertEqual(precompile_package.default_guard_filter_fn([derived]), [False])
+
+    def test_default_guard_filter_keeps_what_the_serializer_accepts(self):
+        class Local:
+            pass
+
+        # The one divergence: TYPE_MATCH marks a class whose __qualname__ is not
+        # its __name__ here and serialize_guards refuses it through this
+        # attribute. The filter keeps it so the refusal stays loud rather than
+        # shipping an artifact that never checks the type.
+        g = GlobalSource("g")
+        local_type = _entry(g, None, "TYPE_MATCH")
+        local_type.orig_guard._unserializable = Local
         entries = [
-            _entry(GlobalSource("g"), None, "TENSOR_MATCH"),
-            # Looser than serialize_guards, which refuses a TYPE_MATCH on a
-            # local-scope class. orig_guard._unserializable would tell, but a
-            # dropped guard ships an artifact that never checks the type; kept,
-            # the serializer refuses it loudly.
-            _entry(GlobalSource("g"), None, "TYPE_MATCH"),
-            _entry(GlobalSource("g"), None, "TYPE_MATCH", derived=("NN_MODULE",)),
-            # Every BUILTIN_MATCH is an id_match_unchecked that records ID_MATCH
-            # as its derived type, so none survives although serialize_guards
-            # would accept them: a builtin rebound between capture and load goes
-            # unnoticed, like every other identity drop.
-            _entry(GlobalSource("g"), None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
+            _entry(g, None, "TENSOR_MATCH"),
+            _entry(g, None, "TYPE_MATCH"),
+            local_type,
+            # An id_match_unchecked on a builtin records ID_MATCH as its derived
+            # type; serialize_guards takes its TYPE_MATCH/BUILTIN_MATCH branch
+            # first and never reaches the derived-type refusal, so neither does
+            # the filter.
+            _entry(g, None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
         ]
-        self.assertEqual(
-            precompile_package.default_guard_filter_fn(entries),
-            [True, True, False, False],
-        )
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(keep, [True] * 4)
 
 
 if __name__ == "__main__":
