@@ -4,10 +4,7 @@ from collections.abc import Sequence
 
 
 def _count_types(pairs: Sequence[tuple[str, str]]) -> dict[str, int]:
-    counts: collections.Counter[str] = collections.Counter()
-    for guard_type, _ in pairs:
-        counts[guard_type] += 1
-    return dict(counts)
+    return dict(collections.Counter(guard_type for guard_type, _ in pairs))
 
 
 @dataclasses.dataclass(frozen=True)
