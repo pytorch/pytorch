@@ -1436,6 +1436,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(1)
     def test_merge_group_clones_store_for_uninitialized_child(self):
         parent_store = c10d.FileStore(self.file_name, self.world_size)
         parent = self._create_process_group_nccl(parent_store, self.opts())

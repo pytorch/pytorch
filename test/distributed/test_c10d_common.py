@@ -2987,11 +2987,11 @@ class SplitGroupOptionsTest(TestCase):
         child = pg.split_group([0], group_name="child")
 
         self.assertEqual(store.clone_count, 0)
-        for backend in (cpu_backend, default_backend):
-            self.assertIsInstance(backend.split_store, dist.PrefixStore)
         self.assertIs(cpu_backend.split_store, default_backend.split_store)
         self.assertIs(cpu_backend.split_store.underlying_store, store)
         self.assertIs(child.get_group_store(), cpu_backend.split_store)
+        child.get_group_store().add("probe", 1)
+        self.assertTrue(any(key.startswith("child/") for key in store._values))
 
     def test_split_group_clones_parent_options(self):
         # getBackendOptions() returns the backend's live options_, and split()
