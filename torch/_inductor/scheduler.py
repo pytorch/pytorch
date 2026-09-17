@@ -3551,24 +3551,21 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> float | None:
 
 @dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    name1: str
-    name2: str
-    reason: str
-    args: tuple[Any, ...]
+    name1: BaseSchedulerNode | str
+    name2: BaseSchedulerNode | str
 
-    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
-        self.name1 = node1.get_name()
-        self.name2 = node2.get_name()
+    @staticmethod
+    def _name(node: BaseSchedulerNode | str) -> str:
+        return node if isinstance(node, str) else node.get_name()
 
     def __call__(self, reason: str, *args: Any) -> None:
-        self.reason = reason
-        self.args = args
-        fusion_log.debug(self)
-
-    def __str__(self) -> str:
-        return f"cannot fuse {self.name1} with {self.name2}: " + (
-            self.reason % self.args
-        )
+        if fusion_log.isEnabledFor(logging.DEBUG):
+            fusion_log.debug(
+                "cannot fuse %s with %s: " + reason,
+                self._name(self.name1),
+                self._name(self.name2),
+                *args,
+            )
 
 
 def pformat(obj: object) -> str:
@@ -3703,7 +3700,6 @@ class SchedulerNode(BaseSchedulerNode):
         node: ir.ComputedBuffer | ir.TemplateBuffer,
     ) -> None:
         super().__init__(scheduler)
-        self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
         self._loop_state_gen = 0
         self._init_from_node(node)
         self._compute_attrs()
@@ -3822,8 +3818,8 @@ class SchedulerNode(BaseSchedulerNode):
         self.clear_loop_body_dependent_caches(need_clear_tiling_cache=True)
 
     def _before_loop_state_mutation(self) -> None:
-        if self._loop_mutation_listener is not None:
-            self._loop_mutation_listener(self)
+        if self.scheduler._loop_mutation_listener is not None:
+            self.scheduler._loop_mutation_listener(self)
         # Identifies the current loop state, so analyses derived from it can be
         # cached across the O(n^2) fusion pair search. Bumped after notifying
         # the listener, which snapshots the pre-mutation state: snapshot and
@@ -5683,51 +5679,45 @@ class _LoopMutationTracker:
     """
 
     nodes: tuple[BaseSchedulerNode, ...]
-    watched_nodes: OrderedSet[SchedulerNode] = dataclasses.field(
-        default_factory=OrderedSet
-    )
-    previous_listeners: dict[SchedulerNode, Callable[[SchedulerNode], None] | None] = (
-        dataclasses.field(default_factory=dict)
-    )
+    scheduler: Scheduler
+    previous_listener: Callable[[SchedulerNode], None] | None
     state: _LoopStateSnapshot | None = None
 
     @classmethod
     def create(cls, nodes: tuple[BaseSchedulerNode, ...]) -> _LoopMutationTracker:
-        """Create a rollback scope and watch mutable leaf scheduler nodes."""
-        seen = OrderedSet(nodes)
-        tracker = cls(nodes=tuple(seen))
-        for node in _iter_loop_state_nodes(seen):
-            if isinstance(node, SchedulerNode):
-                tracker.watch(node)
+        """Create a rollback scope without walking candidate leaves."""
+        seen = tuple(OrderedSet(nodes))
+        if not seen:
+            raise AssertionError("expected at least one scheduler node")
+        scheduler = seen[0].scheduler
+        if any(node.scheduler is not scheduler for node in seen[1:]):
+            raise AssertionError("expected scheduler nodes to have the same owner")
+        tracker = cls(
+            nodes=seen,
+            scheduler=scheduler,
+            previous_listener=scheduler._loop_mutation_listener,
+        )
+        scheduler._loop_mutation_listener = tracker.track
         return tracker
-
-    def watch(self, sn: SchedulerNode) -> None:
-        """Install this scope as the mutation listener for a leaf node."""
-        if sn in self.watched_nodes:
-            return
-        self.previous_listeners[sn] = sn._loop_mutation_listener
-        self.watched_nodes.add(sn)
-        sn._loop_mutation_listener = self.track
 
     def track(self, sn: SchedulerNode) -> None:
         """Lazily snapshot candidate roots when the first mutation occurs."""
-        if sn not in self.watched_nodes:
-            raise AssertionError(f"scheduler node {sn} is not being watched")
-        if previous := self.previous_listeners[sn]:
-            previous(sn)
+        if self.previous_listener is not None:
+            self.previous_listener(sn)
         if self.state is not None:
             # Keep the original pre-mutation snapshot for the whole scope.
             return
+        if not any(sn in node.get_nodes() for node in self.nodes):
+            return
 
-        # The listener tells us a child loop mutated. Snapshot the original
-        # candidate roots here so we also capture fused-node group state,
-        # which is reassigned directly and has no listener of its own.
+        # The mutation tells us a child loop changed. Snapshot the original
+        # candidate roots so we also capture fused-node group state, which is
+        # reassigned directly and has no mutation hook of its own.
         self.state = _LoopStateSnapshot.create(self.nodes)
 
     def finish(self, *, rollback: bool) -> None:
-        """Detach listeners and restore captured state if rolling back."""
-        for sn in self.watched_nodes:
-            sn._loop_mutation_listener = self.previous_listeners[sn]
+        """Detach the listener and restore captured state if rolling back."""
+        self.scheduler._loop_mutation_listener = self.previous_listener
         if not rollback or self.state is None:
             return
         self.state.restore()
@@ -5752,6 +5742,7 @@ class Scheduler:
         return sum(1 for node in nodes if not isinstance(node, NopKernelSchedulerNode))
 
     def _init(self, nodes: list[ir.Operation]) -> None:
+        self._loop_mutation_listener: Callable[[SchedulerNode], None] | None = None
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         # buffer name -> reuse key, see _single_user_read_reuse_keys
         self._fusion_reuse_keys: dict[str, Any] = {}
@@ -9847,12 +9838,16 @@ class Scheduler:
         rolled back if the fusion decision ultimately fails.
         """
         tracker = _LoopMutationTracker.create((node1, node2))
-        can_fuse = self._can_fuse_impl(
-            node1,
-            node2,
-            can_reorder=can_reorder,
-            allow_mix_order_reduction=allow_mix_order_reduction,
-        )
+        try:
+            can_fuse = self._can_fuse_impl(
+                node1,
+                node2,
+                can_reorder=can_reorder,
+                allow_mix_order_reduction=allow_mix_order_reduction,
+            )
+        except BaseException:
+            tracker.finish(rollback=True)
+            raise
         tracker.finish(rollback=not can_fuse)
         return can_fuse
 
