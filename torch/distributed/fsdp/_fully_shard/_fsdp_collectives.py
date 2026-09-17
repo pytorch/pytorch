@@ -20,6 +20,13 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
+_PrepareAllGatherOutputs = Callable[[FSDPParam], tuple[list[torch.Tensor], bool]]
+_PrepareReduceScatterInputs = Callable[
+    [list[FSDPParam], list[torch.Tensor], int],
+    tuple[list[torch.Tensor], Sequence[torch.Size]],
+]
+
+
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
@@ -427,11 +434,25 @@ def _get_param_all_gather_inputs(
     return param_all_gather_inputs
 
 
+def _prepare_all_gather_outputs_with_reorder(
+    fsdp_param: FSDPParam,
+) -> tuple[list[torch.Tensor], bool]:
+    """Return copy destinations and whether they need a separate reorder."""
+    outputs = fsdp_param.all_gather_outputs
+    if fsdp_param.fsdp_placement.dim == 0:
+        return outputs, False
+    return [torch.empty_like(t) for t in outputs], True
+
+
 @torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
+    *,
+    prepare_all_gather_outputs: _PrepareAllGatherOutputs = (
+        _prepare_all_gather_outputs_with_reorder
+    ),
 ) -> None:
     (
         all_gather_output,
@@ -461,13 +482,10 @@ def foreach_all_gather_copy_out(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs = fsdp_param.all_gather_outputs
-        if fsdp_param.fsdp_placement.dim != 0:
-            # Copy to a temporary and then chunk-cat into the final all-gather
-            # output tensors
-            param_all_gather_outputs = [
-                torch.empty_like(t) for t in param_all_gather_outputs
-            ]
+        param_all_gather_outputs, needs_separate_reorder = prepare_all_gather_outputs(
+            fsdp_param
+        )
+        if needs_separate_reorder:
             shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
         split_with_sizes_out.extend(param_all_gather_outputs)
 
@@ -518,6 +536,31 @@ def foreach_all_gather_copy_out(
                 torch.cat(chunks, dim=shard_dim, out=cat_out)
 
 
+def _prepare_reduce_scatter_inputs_with_reorder(
+    fsdp_params: list[FSDPParam],
+    unsharded_grads: list[torch.Tensor],
+    world_size: int,
+) -> tuple[list[torch.Tensor], tuple[torch.Size, ...]]:
+    """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
+    if world_size > 1:
+        for i, (fsdp_param, unsharded_grad) in enumerate(
+            zip(fsdp_params, unsharded_grads)
+        ):
+            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
+                continue
+            if unsharded_grad.size(shard_dim) % world_size != 0:
+                raise AssertionError(
+                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+                )
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+            unsharded_grads[i] = torch.cat(chunks, dim=0)
+
+    padded_unsharded_sizes = tuple(
+        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+    )
+    return unsharded_grads, padded_unsharded_sizes
+
+
 @torch.no_grad()
 def foreach_reduce(
     fsdp_params: list[FSDPParam],
@@ -535,6 +578,10 @@ def foreach_reduce(
     partial_reduce_output: torch.Tensor | None,  # only used for HSDP
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
+    *,
+    prepare_reduce_scatter_inputs: _PrepareReduceScatterInputs = (
+        _prepare_reduce_scatter_inputs_with_reorder
+    ),
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -576,21 +623,8 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    if world_size > 1:
-        for i, (fsdp_param, unsharded_grad) in enumerate(
-            zip(fsdp_params, unsharded_grads)
-        ):
-            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
-                continue
-            if unsharded_grad.size(shard_dim) % world_size != 0:
-                raise AssertionError(
-                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-                )
-            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
-            unsharded_grads[i] = torch.cat(chunks, dim=0)
-
-    padded_unsharded_sizes = tuple(
-        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
+    copy_in_grads, padded_unsharded_sizes = prepare_reduce_scatter_inputs(
+        fsdp_params, unsharded_grads, world_size
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
@@ -600,9 +634,10 @@ def foreach_reduce(
         device=device,
     )
 
-    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
+    foreach_reduce_scatter_copy_in(copy_in_grads, reduce_scatter_input, world_size)
 
     # Only after the copy-in finishes can we free the gradients
+    copy_in_grads.clear()
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
