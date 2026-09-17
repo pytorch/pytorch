@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
-    from ._fsdp_collectives import _AllGatherOutputFn, _PrepareReduceScatterInputs
+    from ._fsdp_collectives import _AllGatherOutputFn, _ReduceScatterInputFn
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -712,7 +712,7 @@ class FSDPModule:
                     fsdp_param_group._all_gather_output_fn = fn
 
     def set_reduce_scatter_input_fn(
-        self, fn: _PrepareReduceScatterInputs, *, recurse: bool = True
+        self, fn: _ReduceScatterInputFn, *, recurse: bool = True
     ) -> None:
         """Set the function that prepares reduce-scatter inputs.
 
