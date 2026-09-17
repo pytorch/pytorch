@@ -82,10 +82,13 @@ it.
 #    layout (.contiguous() to match a contiguous example), or use backend='eager' for
 #    layout-flexible weights.
 #
-# 3. Control flow (and, by default, shapes) is specialized to the example. A non-strict
-#    trace follows the single path taken for the example inputs: Python ``if``/``for``
-#    over a static (Python ``int``) value and shape-dependent branching on a static size
-#    are resolved at trace time and baked. Shapes are static BY DEFAULT (capture runs
+# 3. PYTHON control flow (and, by default, shapes) is specialized to the example. A
+#    non-strict trace follows the single path taken for the example inputs: Python
+#    ``if``/``for`` over a static (Python ``int``) value and shape-dependent branching on
+#    a static size are resolved at trace time and baked. A control-flow HOP is the
+#    exception: ``torch.cond`` / ``torch.while_loop`` is REFUSED outright rather than
+#    specialized, because neither backend can lower the captured subgraph it traces into.
+#    Shapes are static BY DEFAULT (capture runs
 #    make_fx in its "fake" mode, so each size is baked as a concrete constant). What is
 #    NOT silently baked is a data-dependent op -- ``.item()``, ``.nonzero()``, a Python
 #    ``if`` over a TENSOR VALUE: under fake tracing the value is unknown. (A ``for`` over
@@ -103,7 +106,8 @@ it.
 #    static capture deliberately does not have. An UNBACKED capture (mark_unbacked, below)
 #    is the only path with a ShapeEnv, so it can instead CAPTURE ``.item()`` as an unbacked
 #    value -- and likewise a ``.nonzero()``-sized intermediate, which captures and serves
-#    at any runtime size -- and fails only if the computation must GUARD on one.
+#    at any runtime size -- and fails if the computation must GUARD on one, or if the op is
+#    one no ShapeEnv can fake at all (e.g. ``aten.equal``), which BOTH paths refuse.
 #    Tracing on fake tensors also needs a meta/fake kernel for every op ``fn`` calls: an
 #    op without one (a custom op missing ``torch.library.register_fake``, but also a
 #    built-in one -- capture turns FakeTensorMode's unsafe fallback OFF, so no op is ever
@@ -328,7 +332,9 @@ class PrecompileError(RuntimeError):
     read of a traced tensor's data (``.data_ptr()``, ``.numpy()`` / ``np.asarray()``), an
     example input that cannot be represented as a fake tensor (a quantized tensor) or whose
     metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
-    input, none of which capture supports on either path (invariant 3), a non-tensor output
+    input, none of which capture supports on either path (invariant 3), a control-flow HOP
+    (``torch.cond`` / ``torch.while_loop``), whose captured subgraph neither backend can
+    lower, a non-tensor output
     the inductor backend cannot lower, or a runtime input whose shape or memory format
     differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -868,6 +874,9 @@ def _capture(
     # param/buffer records and the user-input _dense_shape records alike -- which is what
     # gets a STRIDED nested parameter, buffer or user input the same named refusal rather
     # than the raw "NestedTensorImpl doesn't support sizes" that reading t.shape raises.
+    # The clause order is for diagnosis quality: mkldnn precedes the generic-layout test so
+    # an mkldnn input is told about the traced-away conversions rather than about nnz, and
+    # the dispatched is_pinned() probe (see below) comes last.
     for label, a in zip(input_labels, flat_args):
         if not isinstance(a, torch.Tensor):
             continue
@@ -896,7 +905,18 @@ def _capture(
                 "tensor -- on the model for a parameter/buffer, at the call site for a "
                 "user input."
             )
-        if a.is_pinned():
+        # is_pinned() DISPATCHES, unlike the three metadata reads above, so unlike them it
+        # can raise: reaching an mkldnn OpaqueTensorImpl's storage is a NotImplementedError
+        # and a functorch-batched tensor has no batching rule for it. It stays last so a
+        # tensor one of the clauses above describes better gets that diagnosis, and the
+        # probe is guarded so neither raise can escape as a raw error: a tensor whose
+        # dispatch declines the op is not pinned. One clause covers both, since
+        # NotImplementedError subclasses RuntimeError.
+        try:
+            is_pinned = a.is_pinned()
+        except RuntimeError:
+            is_pinned = False
+        if is_pinned:
             raise PrecompileError(
                 f"precompile: example {label} is in pinned memory, which a fake tensor "
                 "cannot represent: is_pinned() reads False while tracing, so a branch on "
@@ -1198,8 +1218,10 @@ def _capture(
                 # AssertionError("NYI: <op>") instead of UnsupportedOperatorException, so
                 # e.g. the usual "pin if not pinned" idiom in fn escaped raw. It is the
                 # missing-fake-kernel condition wearing a different exception type; give it
-                # that refusal. The prefix match is exact (one raise site, in fake_impls);
-                # any other AssertionError is an internal bug or fn's own.
+                # that refusal. The prefix match is exact (one raise site, in fake_impls),
+                # so any AssertionError whose message does not carry that prefix is an
+                # internal bug or fn's own and is re-raised; an fn that itself raises
+                # AssertionError("NYI: ...") is relabeled, an accepted collision.
                 if not str(e).startswith("NYI: "):
                     raise
                 raise _missing_fake_kernel_refusal(
@@ -2092,7 +2114,7 @@ class _PrecompileApi:
         are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
         (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
         here (see the Note): the runtime model must be structurally identical to the
-        example, and control flow / shapes are specialized to ``example_inputs``
+        example, and Python control flow / shapes are specialized to ``example_inputs``
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked as a constant (invariant 1), effectful ops (invariant 4), a
         data-dependent op a static (fake-tensor) capture cannot know -- ``.item()``,
@@ -2103,7 +2125,9 @@ class _PrecompileApi:
         ``.numpy()`` / ``np.asarray()``), an example input the fake trace cannot represent
         (a quantized tensor) or whose metadata it silently drops (a pinned, mkldnn or
         sparse tensor), a nested example input, none of which capture supports on either
-        path (invariant 3), and -- for the inductor backend -- a runtime input whose
+        path (invariant 3), a control-flow HOP (``torch.cond`` / ``torch.while_loop``),
+        which is refused rather than specialized because neither backend can lower the
+        subgraph it captures, and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
