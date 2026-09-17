@@ -9,8 +9,8 @@ from ._utils import _make_tensor_from_meta, PipeliningMetadataError, TensorMeta
 _INCOMPLETE_RECV_BUFFER_ERROR = (
     "Receive buffer for {input_name!r} is still owned by an incomplete pipeline "
     "step; in-flight P2P work may still write to it. Call "
-    "dist.destroy_process_group() before constructing a new schedule; recreating "
-    "the schedule alone does not make the storage safe to reuse"
+    "dist.destroy_process_group(), then reconstruct the stages and schedule; "
+    "recreating the schedule alone does not make the storage safe to reuse"
 )
 
 
@@ -89,3 +89,21 @@ class _RecvInfo:
             f"_RecvInfo(input={self.input_name}, source={self.source}, "
             f"shape={shape}, meta={meta_type}, buffer={buffer_state})"
         )
+
+
+def _ensure_recv_infos_drained(
+    recv_info_by_microbatch: dict[int, tuple[_RecvInfo, ...]],
+) -> None:
+    """Reject descriptor replacement while an interrupted step owns storage."""
+    for recv_infos in recv_info_by_microbatch.values():
+        for info in recv_infos:
+            if info.buffer is not None:
+                raise PipeliningMetadataError(
+                    _INCOMPLETE_RECV_BUFFER_ERROR.format(input_name=info.input_name)
+                )
+
+
+def _clear_unlaunched_recv_infos(recv_infos: tuple[_RecvInfo, ...]) -> None:
+    """Drop buffers from a receive batch that was never submitted to P2P."""
+    for info in recv_infos:
+        info.buffer = None
