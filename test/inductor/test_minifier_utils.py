@@ -140,42 +140,42 @@ class MinifierUtilsTests(TestCase):
             model_string.strip(),
             """\
 # from torch.nn import *
-# class true_graph_0_0(torch.nn.Module):
+# class false_graph_0_0(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
 
 
 
 #     def forward(self, x):
-#         clone = torch.ops.aten.clone.default(x);  x = None
-#         return (clone,)
+#         clone_default = torch.ops.aten.clone.default(x);  x = None
+#         return (clone_default,)
 
 
-# class false_graph_0_1(torch.nn.Module):
+# class true_graph_0_1(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
 
 
 
 #     def forward(self, x):
-#         clone = torch.ops.aten.clone.default(x);  x = None
-#         return (clone,)
+#         clone_default = torch.ops.aten.clone.default(x);  x = None
+#         return (clone_default,)
 
 
 # class Repro(torch.nn.Module):
 #     def __init__(self) -> None:
 #         super().__init__()
-#         self.true_graph_0 = true_graph_0_0()
-#         self.false_graph_0 = false_graph_0_1()
+#         self.false_graph_0 = false_graph_0_0()
+#         self.true_graph_0 = true_graph_0_1()
 
 
 
 #     def forward(self, x, flag):
 #         x, flag, = fx_pytree.tree_flatten_spec(([x, flag], {}), self._in_spec)
-#         item = torch.ops.aten.item.default(flag);  flag = None
-#         gt = item > 0;  item = None
-#         true_graph_0 = self.true_graph_0
+#         item_default = torch.ops.aten.item.default(flag);  flag = None
+#         gt = item_default > 0;  item_default = None
 #         false_graph_0 = self.false_graph_0
+#         true_graph_0 = self.true_graph_0
 #         cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x,));  gt = true_graph_0 = false_graph_0 = x = None
 #         getitem = cond[0];  cond = None
 #         return pytree.tree_unflatten((getitem,), self._out_spec)""",

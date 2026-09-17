@@ -82,6 +82,8 @@ class TestCase(TorchTestCase):
                 raise_on_ctx_manager_usage=True,
                 suppress_errors=False,
                 log_compilation_metrics=False,
+                # Exercise canonicalization even where it is off by default
+                # (fbcode justknob); goldens assume canonical node names.
                 canonicalize_output_graph_node_order=True,
             ),
         )
