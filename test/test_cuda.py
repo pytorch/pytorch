@@ -3921,6 +3921,35 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_graph_destroy_preserves_current_device(self):
+        # ~CUDAGraph runs when the last reference goes away, on whatever thread drops
+        # it, so it must leave that thread's current device alone. The invariant is
+        # device-generic; the regression it guards is ROCm-only, where the destructor
+        # synchronizes the capture device to let deferred frees finish.
+        torch.cuda.set_device(0)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.device(1):
+            # Capture on an explicit stream of this device. The default capture stream
+            # is a process-wide singleton that may already belong to device 0, which
+            # would move the capture (and so capture_dev_) off this device and leave
+            # the assert below testing nothing.
+            s = torch.cuda.Stream()
+            a = torch.full((8,), 1, device="cuda:1")
+            b = a + 1  # warm up before capture
+            with torch.cuda.graph(g, stream=s):
+                self.assertEqual(torch.cuda.current_device(), 1)
+                b = a + 1
+            g.replay()
+            torch.cuda.synchronize()
+        self.assertEqual(torch.cuda.current_device(), 0)
+        del a, b, g, s
+        gc.collect()
+        self.assertEqual(torch.cuda.current_device(), 0)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_capture_reset_recapture(self):
         s = torch.cuda.Stream()
 
