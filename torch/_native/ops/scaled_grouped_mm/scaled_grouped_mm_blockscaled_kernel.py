@@ -23,6 +23,7 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
         cluster_tile_shape_mnk,
         problem_shape_mnkl,
     ):
+        unused_cached_problem_shape = (cutlass.Int32(-1),) * 4
         return cls(
             tile_sched_params,
             cutlass.Int32(1),  # num_persistent_clusters (unused)
@@ -37,10 +38,12 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             utils.create_initial_search_state(),
             group_count,
             problem_shape_mnkl,
+            unused_cached_problem_shape,
+            unused_cached_problem_shape,
         )
 
     def __new_from_mlir_values__(self, values):
-        if len(values) < 11:
+        if len(values) < 19:
             raise ValueError("Length of mlir values extracted is incorrect.")
         new_num_persistent_clusters = cutlass.new_from_mlir_values(
             self.num_persistent_clusters, [values[0]]
@@ -58,7 +61,9 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
         problem_shape_mnkl = cutlass.new_from_mlir_values(
             self.problem_shape_mnkl, [values[10]]
         )
-        params = cutlass.new_from_mlir_values(self.params, values[11:])
+        cached_problem_shape_0 = tuple(cutlass.Int32(v) for v in values[11:15])
+        cached_problem_shape_1 = tuple(cutlass.Int32(v) for v in values[15:19])
+        params = cutlass.new_from_mlir_values(self.params, values[19:])
 
         return ClcGroupedGemmTileSchedulerHelper(
             params,
@@ -70,6 +75,8 @@ class ClcGroupedGemmTileSchedulerHelper(utils.StaticPersistentGroupTileScheduler
             search_state,
             self.group_count,
             problem_shape_mnkl,
+            cached_problem_shape_0,
+            cached_problem_shape_1,
         )
 
     def delinearize_z(self, cta_tile_coord, problem_shape_mnkl):
