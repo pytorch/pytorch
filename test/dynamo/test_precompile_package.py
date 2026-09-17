@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import traceback
 from unittest import mock
 
 import torch
@@ -18,6 +19,26 @@ from torch._guards import Guard
 
 def _user_op(x):
     return x + 1
+
+
+def _aot_compile(fn, *args, guard_filter_fn=None, seen=None):
+    """aot_compile fn on args through guard_filter_fn (the default filter when
+    None), appending every (entry, verdict) pair to seen."""
+
+    def recording(entries):
+        keep = (guard_filter_fn or precompile_package.default_guard_filter_fn)(entries)
+        if seen is not None:
+            seen.extend(zip(entries, keep))
+        return keep
+
+    opts = {"guard_filter_fn": recording}
+    fn_c = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
+    return fn_c.aot_compile((args, {}))
+
+
+def _kept_types(compiled):
+    state = load_guards_state(compiled._artifacts.guards_state)
+    return state, {g.create_fn_name() for g in state.output_graph.guards}
 
 
 def _entry(source, value, guard_type="ID_MATCH", derived=()):
@@ -67,29 +88,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(keep, [True] * 5)
 
     def test_default_guard_filter_through_serialize_guards(self):
-        seen = []
-
-        def recording(entries):
-            keep = precompile_package.default_guard_filter_fn(entries)
-            seen.extend(zip(entries, keep))
-            return keep
-
-        def aot_compile(fn, *args, guard_filter_fn=recording):
-            seen.clear()
-            opts = {"guard_filter_fn": guard_filter_fn}
-            fn_c = torch.compile(fn, fullgraph=True, backend="eager", options=opts)
-            return fn_c.aot_compile((args, {}))
-
-        def kept_types(compiled):
-            state = load_guards_state(compiled._artifacts.guards_state)
-            return state, {g.create_fn_name() for g in state.output_graph.guards}
-
         def fn(x):
             return _user_op(x) + len(x.shape)
 
+        seen = []
         x = torch.randn(3)
-        compiled = aot_compile(fn, x)
-        state, kept = kept_types(compiled)
+        compiled = _aot_compile(fn, x, seen=seen)
+        state, kept = _kept_types(compiled)
         # The refused guard on the global function is dropped and gone from the
         # serialized set; the builtin's BUILTIN_MATCH is kept.
         dropped = {(e.guard_type, e.name) for e, keep in seen if not keep}
@@ -109,58 +114,89 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 loaded(x)
         self.assertTrue(loaded.guard_check(x))
 
+    def test_default_guard_filter_keeps_the_pytree_registry_keys_match(self):
         # The DICT_KEYS_MATCH on SUPPORTED_NODES reaches the filter as the
         # unsaved build's DICT_VERSION and is kept; the save build serializes it
-        # as a keys-match, which trips on a node registered after capture.
+        # as a keys-match. The registry's other kept guards put a
+        # DictGuardManager over it whose length check notices a node registered
+        # after capture with or without the keys-match; a same-count change of
+        # keys is what only the keys-match notices.
         def fn_tree(x):
             return pytree.tree_flatten({"a": x, "b": x * 2})[0][1]
 
-        compiled = aot_compile(fn_tree, x)
+        def deregister(cls):
+            if cls in pytree.SUPPORTED_NODES:
+                pytree._deregister_pytree_node(cls)
+
+        def register(cls):
+            # Only a registry key here, so the <locals> in it is harmless; it
+            # must be unique because nameless registrations share one slot of
+            # SERIALIZED_TYPE_TO_PYTHON_TYPE and deregistering the first fails.
+            name = f"{__name__}.{cls.__qualname__}"
+            pytree.register_pytree_node(
+                cls, lambda n: ([], None), lambda c, _: cls(), serialized_type_name=name
+            )
+            self.addCleanup(deregister, cls)
+
+        class Node:
+            pass
+
+        class Other:
+            pass
+
+        register(Node)
+        seen = []
+        x = torch.randn(3)
+        compiled = _aot_compile(fn_tree, x, seen=seen)
         promoted = [keep for e, keep in seen if "DICT_VERSION" in e.derived_guard_types]
         self.assertEqual(promoted, [True])
-        self.assertIn("DICT_KEYS_MATCH", kept_types(compiled)[1])
+        self.assertIn("DICT_KEYS_MATCH", _kept_types(compiled)[1])
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         # Module globals the kept guards read (G['pytree']) resolve against the
         # live scope, as in test_aot_compile.py's f_globals=globals() loads.
         loaded = AOTCompiledFunction.deserialize(data, f_globals=globals())
         self.assertEqual(loaded(x), fn_tree(x))
-
-        class Node:
-            pass
-
-        pytree.register_pytree_node(
-            Node,
-            lambda n: ([], None),
-            lambda c, _: Node(),
-            serialized_type_name=f"{__name__}.{Node.__qualname__}",
-        )
-        self.addCleanup(pytree._deregister_pytree_node, Node)
+        deregister(Node)
+        register(Other)
         self.assertFalse(loaded.guard_check(x))
 
+    def test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal(self):
         # A local-scope class passes the filter (the TYPE_MATCH on L['obj'] is
         # kept) and serialization refuses it, naming the class. The filter keeps
         # the guard so the refusal is loud rather than an artifact that never
-        # checks the type. For a plain instance the pickler refuses anyway,
-        # wherever it sits in the guard tree, so dropping the TYPE_MATCH changes
-        # nothing; for an nn.Module of a local class it does not (the instance
-        # is rebuilt as a plain torch.nn.Module), so there the kept TYPE_MATCH
-        # is the only refusal: drop it and the artifact ships, and serves the
-        # local class's graph to a module of another class.
+        # checks the type. For a plain instance the pickler refuses anyway, so
+        # dropping the TYPE_MATCH only moves the refusal from serialize_guards'
+        # pre-check to reducer_override; for an nn.Module of a local class it
+        # does not (the instance is rebuilt as a plain torch.nn.Module), so
+        # there the kept TYPE_MATCH is the only refusal: drop it and the
+        # artifact ships, and serves the local class's graph to a module of
+        # another class.
+        def drop_type_match(entries):
+            keep = precompile_package.default_guard_filter_fn(entries)
+            return [k and e.guard_type != "TYPE_MATCH" for k, e in zip(keep, entries)]
+
+        # Not assertRaises: it stores the exception with its traceback cleared.
+        def refusal_frames(regex, guard_filter_fn, fn, *args):
+            try:
+                _aot_compile(fn, *args, guard_filter_fn=guard_filter_fn)
+            except PackageError as e:
+                self.assertRegex(str(e), regex)
+                return {f.name for f in traceback.extract_tb(e.__traceback__)}
+            self.fail("serialized")
+
         class Local:
             n = 1
 
         def fn2(x, obj):
             return x + obj.n
 
-        def drop_type_match(entries):
-            keep = precompile_package.default_guard_filter_fn(entries)
-            return [k and e.guard_type != "TYPE_MATCH" for k, e in zip(keep, entries)]
-
-        refused_local = "Local'> cannot be saved.*defined in local scope"
-        with self.assertRaisesRegex(PackageError, refused_local):
-            aot_compile(fn2, x, Local())
-        with self.assertRaisesRegex(PackageError, refused_local):
-            aot_compile(fn2, x, Local(), guard_filter_fn=drop_type_match)
+        x = torch.randn(3)
+        refused = "Local'> cannot be saved.*defined in local scope"
+        frames = refusal_frames(refused, None, fn2, x, Local())
+        self.assertIn("raise_local_type_error", frames)
+        self.assertNotIn("reducer_override", frames)
+        frames = refusal_frames(refused, drop_type_match, fn2, x, Local())
+        self.assertIn("reducer_override", frames)
 
         class LocalModule(torch.nn.Module):
             def forward(self, x):
@@ -170,14 +206,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return mod(x)
 
         refused_module = "LocalModule'> cannot be saved.*defined in local scope"
-        with self.assertRaisesRegex(PackageError, refused_module):
-            aot_compile(fn3, x, LocalModule())
+        refusal_frames(refused_module, None, fn3, x, LocalModule())
 
         class Other(torch.nn.Module):
             def forward(self, x):
                 return x - 1
 
-        compiled = aot_compile(fn3, x, LocalModule(), guard_filter_fn=drop_type_match)
+        compiled = _aot_compile(fn3, x, LocalModule(), guard_filter_fn=drop_type_match)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertTrue(loaded.guard_check(x, Other()))
