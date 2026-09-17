@@ -141,22 +141,32 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     (a CONSTANT_MATCH on a code object runs through ID_MATCH), except that
     TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the chain
     takes their branch first: BUILTIN_MATCH is an ``id_match_unchecked`` that
-    records ID_MATCH, but the builtin pickles by name and the builtins dict
-    travels as a reference resolved in the loading process
-    (``GuardsStatePickler._globals_snapshot``), so the guard rebuilt at load
-    catches a builtin swapped afterwards (``test_guard_serialization.py``
-    ``test_builtin_match``). Past the chain the filter mirrors nothing, and the
-    refusal that matters there is of local-scope types, which cannot be
-    pickled. It has more than one path: the chain's TYPE_MATCH/BUILTIN_MATCH
-    branch raises when ``guard._unserializable`` is set, FAKE_SCRIPT_TYPE_MATCH
-    sets the same flag but takes no branch of the chain, and
-    ``GuardsStatePickler.reducer_override`` refuses any non-tuple object of
-    such a type wherever it sits in the guard tree, so a kept guard whose source
-    walks through an instance of one fails there. Passing this filter therefore
-    does not mean the artifact serializes. The filter keeps all of these on
-    purpose: ``orig_guard._unserializable`` would tell for the first two, but
-    dropping a guard on a type the artifact cannot pickle ships an artifact that
-    never checks the type, whereas keeping it makes serialization refuse loudly.
+    records ID_MATCH, but the builtin pickles by name, the artifact carries only
+    a save-time copy of the builtins dict pruned to the names guards read
+    (``serialize_guards``), and both loaders bind the LIVE ``builtins.__dict__``
+    under the guard's key instead (``CompilePackage.install``,
+    ``AOTCompiledFunction._seed_guard_scope``), so the guard rebuilt at load
+    catches a builtin swapped afterwards (``test_aot_compile.py``
+    ``test_kept_builtin_match_guard_reads_the_seeded_builtins_dict`` pins the
+    live dict). Past the chain the filter mirrors nothing, and the refusal that
+    matters there is of local-scope types, which cannot be pickled by name. It
+    has more than one path: the chain's TYPE_MATCH/BUILTIN_MATCH branch raises
+    when ``guard._unserializable`` is set, FAKE_SCRIPT_TYPE_MATCH sets the same
+    flag but takes no branch of the chain, and
+    ``GuardsStatePickler.reducer_override`` refuses a plain instance of such a
+    type wherever it sits in the guard tree, so a kept guard whose source walks
+    through one fails there. That last refusal is not universal: the branches
+    before it rebuild a local function by value, a local namedtuple type from
+    its fields, and an ``nn.Module`` of a local class with the default
+    ``__getstate__`` as a plain ``torch.nn.Module``, so for a module argument of
+    a local class the kept TYPE_MATCH is the only refusal; drop it and the
+    artifact serializes, then serves a differently typed module whose guarded
+    attributes match, with no error. That is why the filter keeps every
+    local-type guard on purpose although ``orig_guard._unserializable`` would
+    tell for the first two paths: dropping a guard on a type the artifact
+    cannot pickle ships an artifact that never checks the type, whereas keeping
+    it makes serialization refuse loudly. Passing this filter therefore does
+    not mean the artifact serializes.
     ``CheckFunctionManager.__init__`` applies a different policy inline under
     ``torch._dynamo.config.caching_precompile`` (drop ID_MATCH, CLOSURE_MATCH,
     WEAKREF_ALIVE, DICT_VERSION and anything deriving ID_MATCH or
@@ -179,6 +189,10 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
 
 
 def _norm(path: str) -> str:
+    """
+    realpath then normcase. A relative path resolves against the process cwd,
+    so a recorded ``__file__`` is gated with isabs before it gets here.
+    """
     return os.path.normcase(os.path.realpath(path))
 
 
@@ -236,9 +250,10 @@ def _torch_roots() -> tuple[str, ...]:
     """
     Every directory torch's own submodules come from. An editable build splits
     them -- torch/__init__.py out of the source tree, _C.so and version.py out
-    of site-packages -- and torch.__path__ is exactly that set. It is only
-    trusted if the directory this file is running from is in it, so a
-    sys.modules['torch'] that is not us cannot nominate its own roots.
+    of site-packages -- and torch.__path__ is exactly that set. The gate rules
+    out a substituted sys.modules['torch'] only: its __path__ is ignored unless
+    the directory this file runs from is among the entries, and then every
+    entry is adopted, one a third party appended to the real torch's included.
     """
     own_file = globals().get("__file__")
     if not own_file:
