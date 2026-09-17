@@ -341,13 +341,13 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
 
 
-class TestFullyShardCopyHooks(FSDPTest):
+class TestFullyShardInputOutputFns(FSDPTest):
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_copy_hooks(self):
+    def test_input_output_fns(self):
         model = nn.Sequential(
             nn.Linear(4, 4), nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
         )
@@ -359,46 +359,44 @@ class TestFullyShardCopyHooks(FSDPTest):
                 reshard_after_forward=True,
             )
 
-        def check_hooks(expected_ag_hooks, expected_rs_hooks):
-            for module, ag_hook, rs_hook in zip(
-                fsdp_modules, expected_ag_hooks, expected_rs_hooks
+        def check_fns(expected_ag_fns, expected_rs_fns):
+            for module, ag_fn, rs_fn in zip(
+                fsdp_modules, expected_ag_fns, expected_rs_fns
             ):
                 param_groups = module._get_fsdp_state()._fsdp_param_groups
                 self.assertTrue(param_groups)
                 for param_group in param_groups:
-                    self.assertIs(param_group._prepare_all_gather_outputs, ag_hook)
-                    self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_hook)
+                    self.assertIs(param_group._prepare_all_gather_outputs, ag_fn)
+                    self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_fn)
 
         default_ag = _prepare_all_gather_outputs_with_reorder
         default_rs = _prepare_reduce_scatter_inputs_with_reorder
-        ag_hook = MagicMock(wraps=default_ag)
-        rs_hook = MagicMock(wraps=default_rs)
-        check_hooks((default_ag,) * 3, (default_rs,) * 3)
-        model._set_all_gather_copy_out_hook(ag_hook, recurse=False)
-        check_hooks((ag_hook, default_ag, default_ag), (default_rs,) * 3)
-        model[1]._set_reduce_scatter_copy_in_hook(rs_hook, recurse=False)
-        check_hooks(
-            (ag_hook, default_ag, default_ag), (default_rs, rs_hook, default_rs)
-        )
+        ag_fn = MagicMock(wraps=default_ag)
+        rs_fn = MagicMock(wraps=default_rs)
+        check_fns((default_ag,) * 3, (default_rs,) * 3)
+        model.set_all_gather_output_fn(ag_fn, recurse=False)
+        check_fns((ag_fn, default_ag, default_ag), (default_rs,) * 3)
+        model[1].set_reduce_scatter_input_fn(rs_fn, recurse=False)
+        check_fns((ag_fn, default_ag, default_ag), (default_rs, rs_fn, default_rs))
         model(torch.ones((2, 4), device=device_type)).sum().backward()
-        ag_hook.assert_called()
-        self.assertEqual(rs_hook.call_count, 1)
+        ag_fn.assert_called()
+        self.assertEqual(rs_fn.call_count, 1)
         model.zero_grad()
 
-        ag_hook.reset_mock()
-        rs_hook.reset_mock()
-        model._set_all_gather_copy_out_hook(ag_hook)
-        model._set_reduce_scatter_copy_in_hook(rs_hook)
-        check_hooks((ag_hook,) * 3, (rs_hook,) * 3)
+        ag_fn.reset_mock()
+        rs_fn.reset_mock()
+        model.set_all_gather_output_fn(ag_fn)
+        model.set_reduce_scatter_input_fn(rs_fn)
+        check_fns((ag_fn,) * 3, (rs_fn,) * 3)
         model(torch.ones((2, 4), device=device_type)).sum().backward()
-        ag_hook.assert_called()
-        self.assertEqual(rs_hook.call_count, len(fsdp_modules))
+        ag_fn.assert_called()
+        self.assertEqual(rs_fn.call_count, len(fsdp_modules))
 
-        model._set_all_gather_copy_out_hook(default_ag, recurse=False)
-        check_hooks((default_ag, ag_hook, ag_hook), (rs_hook,) * 3)
-        model._set_all_gather_copy_out_hook(default_ag)
-        model._set_reduce_scatter_copy_in_hook(default_rs)
-        check_hooks((default_ag,) * 3, (default_rs,) * 3)
+        model.set_all_gather_output_fn(default_ag, recurse=False)
+        check_fns((default_ag, ag_fn, ag_fn), (rs_fn,) * 3)
+        model.set_all_gather_output_fn(default_ag)
+        model.set_reduce_scatter_input_fn(default_rs)
+        check_fns((default_ag,) * 3, (default_rs,) * 3)
 
 
 class TestFullyShardCommunication(FSDPTest):
