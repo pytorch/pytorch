@@ -381,6 +381,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 # Sharding on nonzero dim requires even sharding
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
+                # False tests Shard(1)-only weights; True adds Shard(0) biases.
                 "bias": [False, True],
                 "use_all_gather_output_fn": [False, True],
                 "use_reduce_scatter_input_fn": [False, True],
