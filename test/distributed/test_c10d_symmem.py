@@ -30,7 +30,38 @@ def skip_unless_symmem(func):
     )(func)
 
 
-@skip_unless_symmem
+@unittest.skipUnless(HAS_SYMM_MEM, "SymmetricMemory required")
+class TestSymmemWork(TestCase):
+    def test_wait(self):
+        from torch.distributed.pysymmem.backend import _SymmemWork
+
+        event = Mock()
+        work = _SymmemWork(event)
+        self.assertTrue(work.wait())
+        event.synchronize.assert_called_once_with()
+        event.query.assert_not_called()
+        self.assertIsNone(work._event)
+
+    def test_wait_timeout(self):
+        from torch.distributed.pysymmem.backend import _SymmemWork
+
+        event = Mock()
+        event.query.return_value = False
+        work = _SymmemWork(event)
+        with patch(
+            "torch.distributed.pysymmem.backend.time.monotonic",
+            side_effect=[0.0, 0.01],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+                work.wait(timedelta(milliseconds=5))
+
+        self.assertIs(work._event, event)
+        event.query.return_value = True
+        self.assertTrue(work.wait(timedelta(seconds=1)))
+        self.assertIsNone(work._event)
+
+
+@unittest.skipUnless(HAS_SYMM_MEM, "SymmetricMemory required")
 class TestSymmemBackendUnit(TestCase):
     """Single-process smoke tests (no real communication)."""
 
@@ -62,23 +93,32 @@ class TestSymmemBackendUnit(TestCase):
         self.assertEqual(reduce_op_name(dist.ReduceOp.PRODUCT), "product")
         self.assertEqual(reduce_op_name(dist.ReduceOp.AVG), "avg")
 
-    def test_work_timeout(self):
-        from torch.distributed.pysymmem.backend import _SymmemWork
+    def test_group_barrier_timeout(self):
+        from torch.distributed.pysymmem import SymmemBackend
 
-        event = Mock()
-        event.query.return_value = False
-        work = _SymmemWork(event)
-        with patch(
-            "torch.distributed.pysymmem.backend.time.monotonic",
-            side_effect=[0.0, 0.01],
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
-                work.wait(timedelta(milliseconds=5))
+        backend = SymmemBackend.__new__(SymmemBackend)
+        backend._resources = Mock()
+        backend._timeout = timedelta(microseconds=1001)
+        backend._size = 2
+        backend._world_size = 2
 
-        self.assertIs(work._event, event)
-        event.query.return_value = True
-        self.assertTrue(work.wait(timedelta(seconds=1)))
-        self.assertIsNone(work._event)
+        backend._group_barrier()
+
+        backend._resources.symm_mem.barrier.assert_called_once_with(timeout_ms=1)
+
+    def test_set_timeout(self):
+        from torch.distributed.pysymmem import SymmemBackend
+
+        backend = SymmemBackend.__new__(SymmemBackend)
+        backend._options = Mock()
+        backend._resources = Mock()
+        timeout = timedelta(seconds=5)
+
+        backend.set_timeout(timeout)
+
+        self.assertEqual(backend._timeout, timeout)
+        self.assertEqual(backend._options._timeout, timeout)
+        backend._resources.pg.set_timeout.assert_called_once_with(timeout)
 
 
 @skip_unless_symmem

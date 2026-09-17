@@ -317,17 +317,25 @@ class SymmemBackend(C10DBackend):
     def _group_barrier(self) -> None:
         if self._symm_mem is None:
             raise self._err("symm_mem is None")
+        timeout_ms = self._timeout_ms()
         if self._size == self._world_size:
-            self._symm_mem.barrier()
+            self._symm_mem.barrier(timeout_ms=timeout_ms)
             return
         chan = self._barrier_channel
         my_global = self._world_rank
         for peer_global in self._global_ranks:
             if peer_global != my_global:
-                self._symm_mem.put_signal(peer_global, channel=chan)
+                self._symm_mem.put_signal(
+                    peer_global, channel=chan, timeout_ms=timeout_ms
+                )
         for peer_global in self._global_ranks:
             if peer_global != my_global:
-                self._symm_mem.wait_signal(peer_global, channel=chan)
+                self._symm_mem.wait_signal(
+                    peer_global, channel=chan, timeout_ms=timeout_ms
+                )
+
+    def _timeout_ms(self) -> int:
+        return int(self._timeout.total_seconds() * 1000)
 
     def _send_slot_offset(self, dst_world_rank: int) -> int:
         return self._send_region_offset + dst_world_rank * _SEND_SLOT_BYTES
@@ -405,7 +413,7 @@ class SymmemBackend(C10DBackend):
             alloc_id,
         )
         symm_mem = _SymmetricMemory.rendezvous(workspace_tensor)
-        symm_mem.barrier()
+        symm_mem.barrier(timeout_ms=self._timeout_ms())
         torch.cuda.current_stream(device).synchronize()
         cached = _GroupResources(
             group_name=group_name,
@@ -847,7 +855,9 @@ class SymmemBackend(C10DBackend):
             slot_typed = cast_buffer(slot, tensor)[: tensor.numel()]
             slot_typed.copy_(tensor.reshape(-1).contiguous())
         self._symm_mem.put_signal(
-            dst_world, channel=self._sendrecv_channel(self._world_rank, dst_world)
+            dst_world,
+            channel=self._sendrecv_channel(self._world_rank, dst_world),
+            timeout_ms=self._timeout_ms(),
         )
         return self._make_work()
 
@@ -867,7 +877,9 @@ class SymmemBackend(C10DBackend):
         src_world = self._peer_global(src)
 
         self._symm_mem.wait_signal(
-            src_world, channel=self._sendrecv_channel(src_world, self._world_rank)
+            src_world,
+            channel=self._sendrecv_channel(src_world, self._world_rank),
+            timeout_ms=self._timeout_ms(),
         )
         if tensor.numel() > 0:
             src_slot = self._send_slot(src_world, self._world_rank)
@@ -922,6 +934,12 @@ class SymmemBackend(C10DBackend):
 
     def shutdown(self):
         self._resources = None
+
+    def set_timeout(self, timeout: timedelta) -> None:
+        self._timeout = timeout
+        self._options._timeout = timeout
+        if self._resources is not None:
+            self._resources.pg.set_timeout(timeout)
 
     def abort(self):
         self._resources = None
