@@ -1687,10 +1687,8 @@ def forward(self, arg0_1):
         restored = pytree.tree_unflatten(leaves, spec)
         self.assertTrue(callable(restored.mask_mod))
 
-    @requires_capabilities(
-        Capability.attention.flex_attention
-    )
-    @unittest.skipIf(torch.version.hip, "Requires not ROCm") 
+    @requires_capabilities(Capability.attention.flex_attention)
+    @unittest.skipIf(torch.version.hip, "Requires not ROCm")
     def test_aot_export_flex_attention_callable_mask_mod(self, device):
         """Test flex_attention AOT export with callable class as mask_mod.
 
@@ -1759,9 +1757,7 @@ def forward(self, arg0_1):
         self.assertEqual(out_eager.shape, out_export.shape)
         self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
-    @requires_capabilities(
-        Capability.attention.flex_attention
-    )
+    @requires_capabilities(Capability.attention.flex_attention)
     @unittest.skipIf(torch.version.hip, "Requires not ROCm")
     def test_aot_export_flex_attention_with_blockmask_placeholders(self, device):
         from torch._subclasses.fake_tensor import FakeTensorMode
