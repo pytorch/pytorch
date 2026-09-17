@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
+from torch.utils.data._utils.pin_memory import pin_memory
 
 
 # Pinned memory doesn't make sense on UMA systems (MPS) (see https://github.com/pytorch/pytorch/issues/193845 )
@@ -185,6 +186,65 @@ class TestAccelerator(TestCase):
         torch.accelerator.synchronize()
         self.assertTrue(t_host.is_pinned())
         self.assertEqual(t_acc.cpu(), t_host)
+
+    def test_custom_pin_memory_device_argument(self):
+        class Batch:
+            def __init__(self):
+                self.device = None
+
+            def pin_memory(self, device):
+                self.device = device
+                return self
+
+        batch = Batch()
+        result = pin_memory(batch, "xpu")
+
+        self.assertIs(result, batch)
+        self.assertEqual(batch.device, "xpu")
+
+    def test_custom_pin_memory_device_varargs(self):
+        class Batch:
+            def __init__(self):
+                self.device = None
+
+            def pin_memory(self, *device):
+                self.device = device
+                return self
+
+        batch = Batch()
+        result = pin_memory(batch, "xpu")
+
+        self.assertIs(result, batch)
+        self.assertEqual(batch.device, ("xpu",))
+
+    def test_custom_pin_memory_legacy_no_argument(self):
+        class Batch:
+            def __init__(self):
+                self.called = False
+
+            def pin_memory(self):
+                self.called = True
+                return self
+
+        batch = Batch()
+        result = pin_memory(batch, "xpu")
+
+        self.assertIs(result, batch)
+        self.assertTrue(batch.called)
+
+    def test_custom_pin_memory_unrelated_optional_argument(self):
+        class Batch:
+            def __init__(self):
+                self.copy = False
+
+            def pin_memory(self, copy=False):
+                self.copy = copy
+                return self
+
+        batch = Batch()
+        pin_memory(batch, "xpu")
+
+        self.assertFalse(batch.copy)
 
     def test_generic_event_behavior(self):
         event1 = torch.Event(enable_timing=False)
