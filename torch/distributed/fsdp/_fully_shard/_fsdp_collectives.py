@@ -495,7 +495,7 @@ def foreach_all_gather_copy_out(
         shard_dim = fsdp_param.fsdp_placement.dim
 
         with torch.autograd._unsafe_preserve_version_counter(
-            tuple(fsdp_param.all_gather_outputs)
+            tuple(t for t in fsdp_param.all_gather_outputs if not t.is_inference())
         ):
             for param_all_gather_output, target_all_gather_output in zip(
                 param_all_gather_outputs, fsdp_param.all_gather_outputs
@@ -625,7 +625,7 @@ def foreach_reduce(
         else:
             # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
             # account for a possible gradient_divide_factor.
-            if gradient_divide_factor is not None:
+            if gradient_divide_factor is not None and gradient_divide_factor != 1.0:
                 reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
             else:
                 reduce_output.copy_(reduce_scatter_input)

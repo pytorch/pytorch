@@ -40,7 +40,6 @@ from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
     raise_attribute_error,
-    raise_observed_exception,
     raise_type_error,
     unimplemented,
     Unsupported,
@@ -264,6 +263,36 @@ class AttributeMutationNew(AttributeMutation):
         self.cls_source = cls_source
 
 
+class ValueAndAttributeMutationExisting(
+    ValueMutationExisting, AttributeMutationExisting
+):
+    """
+    Pre-existing objects whose class subclasses a builtin container: both the
+    builtin layout contents (value) and the instance __dict__ (attributes) can
+    mutate. Inherits both branches so isinstance-based dispatch engages the
+    value-axis machinery (is_modified) and the attribute-axis machinery
+    (store_attr_mutations) for the same object.
+    """
+
+    # The parents' cooperative __init__s conflict across the merged MRO, so
+    # initialize the base directly.
+    def __init__(self) -> None:
+        MutationType.__init__(self, SourceType.Existing)
+        self.is_modified = False
+
+
+class ValueAndAttributeMutationNew(ValueMutationNew, AttributeMutationNew):
+    """
+    Like ValueAndAttributeMutationExisting, for objects created during the
+    trace.
+    """
+
+    def __init__(self, cls_source: Source | None = None) -> None:
+        MutationType.__init__(self, SourceType.New)
+        self.is_modified = False
+        self.cls_source = cls_source
+
+
 def _is_top_level_scope(scope_id: int) -> bool:
     return scope_id == 1
 
@@ -457,6 +486,19 @@ def unmodeled_setter(
     )
 
 
+def type_qualified_name(type_: type) -> str:
+    """Equivalent to _PyType_GetFullyQualifiedName, for a raw type object.
+
+    See https://github.com/python/cpython/blob/v3.15.0b4/Objects/typeobject.c#L1658
+    """
+    mod = type_.__module__
+    qn = type_.__qualname__
+    if mod not in ("__main__", "builtins"):
+        return f"{mod}.{qn}"
+    else:
+        return qn
+
+
 def getset_build(
     accessor: Callable[[Any], Any],
 ) -> Getter:
@@ -472,6 +514,7 @@ def store_attr_mutation(
 ) -> None:
     """Store an attribute mutation in the side effects tracker."""
     se = tx.output.side_effects
+    item = item.realize()
     if not se.is_attribute_mutation(item):
         if item.source is not None:
             raise AssertionError(
@@ -560,6 +603,25 @@ def _wrap_unaryfunc(
     if len(args) != 0:
         raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
     return func(self, tx)
+
+
+def _wrap_hashfunc(
+    self: VariableTracker,
+    tx: InstructionTranslatorBase,
+    func: Callable[..., tuple[int, bool]],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    if kwargs:
+        raise_type_error(tx, "this method takes no keyword arguments")
+    if len(args) != 0:
+        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
+
+    h, is_fake = func(self, tx)
+    if is_fake:
+        return FakeIdVariable(h, kind=FakeValueKind.HASH)
+    return ConstantVariable.create(h)
 
 
 def _wrap_binaryfunc(
@@ -862,6 +924,10 @@ def _wrap_descr_get(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) not in (1, 2):
         raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    # wrap_descr_get treats None as absent for both arguments and rejects the
+    # call when both are absent.
+    if all(a.is_constant_none() for a in args):
+        raise_type_error(tx, "__get__(None, None) is invalid")
     obj = args[0]
     owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
     return func(self, tx, obj, owner)
@@ -1131,7 +1197,13 @@ _SLOTDEFS: list[SlotDef] = [
     # SlotDef("__setattr__", ),
     # SlotDef("__delattr__", ),
     TPSLOT("__repr__", "tp_repr_impl", PyTypeSlots.TP_REPR, _wrap_unaryfunc),
-    # TPSLOT("__hash__", "tp_hash_impl", PyTypeSlots.TP_HASH, _wrap_unaryfunc),
+    # hash_impl returns (int, bool), not a VariableTracker like other impls.
+    TPSLOT(
+        "__hash__",
+        "hash_impl",
+        PyTypeSlots.TP_HASH,
+        _wrap_hashfunc,  # pyrefly: ignore[bad-argument-type]
+    ),
     TPSLOT("__call__", "call_function", PyTypeSlots.TP_CALL, wrap_call),
     TPSLOT("__str__", "tp_str_impl", PyTypeSlots.TP_STR, _wrap_unaryfunc),
     TPSLOT(
@@ -1878,12 +1950,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return "<unknown type>"
         # Direct attribute access is safe here because type objects use the getset protocol, which will only return str
         # (and not execute user code)
-        mod = type_.__module__
-        qn = type_.__qualname__
-        if mod not in ("__main__", "builtins"):
-            return f"{mod}.{qn}"
-        else:
-            return qn
+        return type_qualified_name(type_)
 
     def as_python_constant(self) -> Any:
         """For constants"""
@@ -2055,6 +2122,46 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         UDOV overrides to check self.value.__dict__ + side effects.
         """
         return None
+
+    def tp_descr_get_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_get slot.
+
+        Called when type_implements_tp_descr_get returns True for this type.
+        Subclasses override to provide the actual descriptor read.
+        """
+        unimplemented(
+            gb_type="tp_descr_get_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_get slot but no tp_descr_get_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_get C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def tp_descr_set_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        """Mirrors CPython's tp_descr_set slot (``value is None`` deletes).
+
+        Dispatched by the "__set__"/"__delete__" TPSLOT entries (via
+        _wrap_descr_set/_wrap_descr_delete) for any type whose
+        PyTypeSlots.TP_DESCR_SET bit is set. Subclasses override to provide
+        the actual descriptor write.
+        """
+        unimplemented(
+            gb_type="tp_descr_set_impl not implemented",
+            context=f"{type(self).__name__} has tp_descr_set slot but no tp_descr_set_impl override",
+            explanation=f"The type {self.python_type_name()} has a tp_descr_set C slot but "
+            "Dynamo has no model for it.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
     def call_getattr_fallback(
         self, tx: InstructionTranslatorBase, name: str
@@ -2271,19 +2378,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when mp_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_subscript_impl(
         self,
@@ -2721,12 +2820,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         The base implementation raises TypeError, matching CPython's behavior
         when tp_as_number->nb_index is NULL (_PyIndex_Check fails).
         """
-        raise_observed_exception(
-            TypeError,
+        raise_type_error(
             tx,
-            args=[
-                f"'{self.python_type_name()}' object cannot be interpreted as an integer"
-            ],
+            f"'{self.python_type_name()}' object cannot be interpreted as an integer",
         )
 
     def tp_repr_impl(

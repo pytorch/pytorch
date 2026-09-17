@@ -25,6 +25,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
     munge_exc,
@@ -65,6 +66,8 @@ class FakeMapping:
 
 
 class DictTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dict_subclass_instantiation(self):
         def fn(x):
             sd = SimpleDict(x=5)
@@ -2648,6 +2651,8 @@ instantiate_parametrized_tests(DictTests)
 
 
 class DictGuardTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = dict
 
     @make_logging_test(recompiles=True)
@@ -2784,6 +2789,8 @@ class DictGuardTests(LoggingTestCase):
 
 
 class DictMethodsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = dict
 
     # Methods:
@@ -3333,10 +3340,14 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
 
 class DictSubclassMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = SimpleDict
 
 
 class OrderedDictMethodsTests(DictMethodsTests):
+    hw_classification = HardwareClassification.GENERIC
+
     thetype = OrderedDict
 
     # Methods:
@@ -3406,6 +3417,8 @@ class OrderedDictMethodsTests(DictMethodsTests):
 
 
 class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self._prev_trace_unittest = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
@@ -3442,6 +3455,8 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
 
 class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
     """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_dunder_dict_items_includes_mutations(self):
         """Test that __dict__.items() includes both original and mutated keys"""
@@ -3713,6 +3728,41 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         got, d = fn()
         self.assertEqual(got, (10, 20, 30))
         self.assertEqual(d, {1: 10, (3, 4): 30})
+
+    def test_dunder_dict_iteration_no_recompile_on_mutation(self):
+        # DunderDictVariable.install_dict_keys_match_guard() is a deliberate
+        # no-op: __dict__ mutations are already tracked via side effects, so
+        # guarding on its keys would cause needless recompiles. tp_iter_impl
+        # must route through that overridable hook (not install the guard
+        # directly) so plain `for k in obj.__dict__` iteration respects it too.
+        class Foo:
+            pass
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(obj, x):
+            total = 0
+            for _ in obj.__dict__:
+                total += 1
+            return x + total
+
+        f = Foo()
+        f.a, f.b = 1, 2
+        x = torch.zeros(1)
+        self.assertEqual(fn(f, x), x + 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Mutating __dict__'s shape between calls must not trigger a
+        # recompile: DunderDictVariable deliberately suppresses
+        # DICT_KEYS_MATCH, so the guard tree must stay unaffected by this.
+        f.c = 3
+        fn(f, x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        f.d, f.e = 4, 5
+        fn(f, x)
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":
