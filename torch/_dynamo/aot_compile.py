@@ -113,6 +113,11 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
     return type(reason).__name__, reason
 
 
+def _meant_an_exception(e: Exception) -> bool:
+    """Whether what a guard tree meant to raise is an ordinary ``Exception``."""
+    return isinstance(_unwrapped_raise(e)[1], Exception)
+
+
 def _quoted(reason: BaseException) -> str:
     # The exception is the tree's, so its __str__ is user code: one that raises
     # must not take the report with it. Exception, as the handlers catch: an
@@ -1644,14 +1649,23 @@ class AOTCompiledModel:
     nothing, so a raise from a checked input withholds the opt-out, and the
     call raises the no-match ``RuntimeError`` with the last raise of the first
     input that raised in dispatch chained as its ``__cause__`` and the report
-    naming the first checked input that raised. A raise beside an input whose
-    guards did match is served over: the matching graph runs, and at this
-    commit nothing records the raise on that path -- no report is built where a
-    graph is served, so the serve is deliberately silent until a commit above
-    adds the warning it logs. A ``KeyboardInterrupt`` or ``SystemExit`` out of
-    a guard tree is never read as an answer and propagates -- as itself from a
-    Python-level guard manager, or as the ``SystemError`` the pybind boundary
-    wrapped it in when a leaf left it set.
+    naming the first that raised of the inputs nobody opted out -- first in
+    recording order, which is the lowest index only when no input raises for
+    the first time on the second pass. A raise beside an input whose guards did
+    match is served over: the matching graph runs, and at this commit nothing
+    surfaces the raise on that path -- no report is built where a graph is
+    served, so the serve is deliberately silent until a commit above
+    adds the warning it logs. A ``KeyboardInterrupt`` or ``SystemExit`` that
+    reaches dispatch is never read as an answer and propagates -- as itself
+    from a Python-level guard manager, or as the ``SystemError`` the pybind
+    boundary wrapped it in when a leaf left it set. One leaf keeps an interrupt
+    from reaching dispatch at all, and every artifact's tree holds it:
+    ``LAMBDA_GUARD::check_nopybind`` (``guards.cpp:1918-1928``) clears whatever
+    its lambda raised, of whatever type, and answers false, so an interrupt
+    raised under a kept lambda guard is read as an ordinary mismatch and
+    ``check_verbose`` quotes its text as the guard's (``:1930-1936``) -- a
+    pre-existing C++ gap this Python-only stack leaves in place, beside the
+    dead ``result == -1`` branch below.
 
     When no result matches -- or every result that opted out is withheld by a
     raise -- the call raises ``RuntimeError`` with a report headed ``No AOT
@@ -1668,15 +1682,20 @@ class AOTCompiledModel:
     checks; withheld because [k]'s guard check raised>`` for a result the raise
     withheld. Then one ``For [i, j]:`` line per distinct missing-global hint
     naming the entries whose guards failed on a global the process does not
-    define; a ``fix or drop that artifact`` line naming the first checked input
-    that raised, when one did; and the advice to add a ``ModelInput`` or check
-    which guards ``guard_filter_fn`` kept. When some guard tree raised in
-    dispatch, the last raise of the first input that raised is the
+    define; a ``fix or drop that artifact`` line naming the first input that
+    raised of those nobody opted out, when one did; and the advice to add a
+    ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When some
+    guard tree raised in dispatch, the last raise of the first input that
+    raised is the
     ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
     sees: an ``except RuntimeError`` (a ``TORCH_CHECK``) catches the report
-    with the tree's raise one hop down, and an ``except SystemError`` (a leaf
-    that returned with an error set) no longer catches anything. A raise only
-    out of ``check_verbose`` here is quoted on its line and chained nowhere.
+    with the tree's raise one hop down, and an ``except SystemError`` no longer
+    catches a boundary wrap whose cause is an ``Exception``; a wrap around a
+    ``KeyboardInterrupt`` or ``SystemExit`` still reaches the caller as itself.
+    A raise only out of ``check_verbose`` here is quoted on its line and
+    chained nowhere; so is one recorded in dispatch that the next evaluation of
+    the same tree answered, until the caveat a commit above appends to the
+    advice names those trees and quotes their raises.
     """
 
     model: torch.nn.Module
@@ -1710,8 +1729,12 @@ class AOTCompiledModel:
         # and the report below read it -- so scan every result. A raise is
         # recorded in two places: `raised`, the LAST exception per index in
         # first-raise order, and `unanswered`, the indices whose LAST evaluation
-        # reached no answer, so the report knows which entries have no guard to
-        # quote.
+        # RAISED, so the report knows which entries have no guard to quote. The
+        # exception is kept with its traceback, which holds this frame, and so
+        # args and kwargs, until the cyclic collector runs -- the `except ... as
+        # e` cleanup that breaks that cycle is undone by the store: the traceback
+        # is what makes the chained cause worth reading, and only a call some
+        # tree raised on pays for it.
         raised: dict[int, Exception] = {}
         unanswered: set[int] = set()
         # Per-result bindings by index, kept for the re-check and the report.
@@ -1720,8 +1743,8 @@ class AOTCompiledModel:
         # model, so a call it serves builds no accepts() closure and calls
         # through no extra frame: routing it through accepts() measured +0.8us
         # on the 4.7us dispatch overhead, of which this shape keeps ~0.35us (the
-        # cell variables the closure below makes of this scope's locals -- seven
-        # now, eight when measured -- and the three empty records).
+        # seven cell variables the closure below makes of this scope's locals --
+        # eight when measured -- and the three empty records).
         # prepare_f_locals stays outside the try, here and in accepts(), so a
         # call the signature cannot bind surfaces as bind_locals' TypeError, not
         # as a tree that did not match; the try covers check() alone, so a raise
@@ -1736,7 +1759,7 @@ class AOTCompiledModel:
                 # The boundary wraps WHATEVER a leaf left set into SystemError,
                 # an interrupt included: not an answer, and not dispatch's to
                 # swallow. Keep going otherwise so another result can still match.
-                if not isinstance(_unwrapped_raise(e)[1], Exception):
+                if not _meant_an_exception(e):
                     raise
                 raised[0] = e
                 unanswered.add(0)
@@ -1772,7 +1795,7 @@ class AOTCompiledModel:
             try:
                 answer = manager.check(f_locals)
             except Exception as e:
-                if not isinstance(_unwrapped_raise(e)[1], Exception):
+                if not _meant_an_exception(e):
                     raise
                 raised[i] = e
                 unanswered.add(i)
@@ -1809,7 +1832,9 @@ class AOTCompiledModel:
         # The flags are read once, for the veto, the last resort and the report
         # alike: disable_guard_check() is a plain store any thread can make.
         enabled = [result._guard_check_enabled for result in results]
-        if not any(enabled[i] for i in raised):
+        # map, not a generator expression: a genexp reads `enabled` as a closure
+        # variable, and cellifying it costs every served call a MAKE_CELL.
+        if not any(map(enabled.__getitem__, raised)):
             for i, result in enumerate(results):
                 if not enabled[i]:
                     return result._serve(self.model, *args, **kwargs)
@@ -1817,8 +1842,8 @@ class AOTCompiledModel:
             results, raised=raised, unanswered=unanswered, bound=bound, enabled=enabled
         )
         if raised:
-            # `raised` is in recording order, so this chains the first index that
-            # raised, not always the raiser the advice names: they differ when an
+            # `raised` is in recording order, so this chains the index that
+            # raised first, not always the raiser the advice names: they differ when an
             # opted-out result raised first, whose line quotes no exception text.
             raise RuntimeError(report) from next(iter(raised.values()))
         # Not `from None`: an ordinary no-match must not suppress an exception
@@ -1842,8 +1867,9 @@ class AOTCompiledModel:
         dispatch record: the LAST exception each index's ``check()`` raised, in
         first-raise order, so its first value is the one the report is chained
         from. ``unanswered`` holds the indices whose LAST evaluation raised, a
-        subset of ``raised``'s keys; their lines quote that record instead of
-        evaluating the tree again. ``enabled`` is each result's
+        subset of ``raised``'s keys; the lines of those nobody opted out quote
+        that record instead of evaluating the tree again, an opted-out entry
+        reading as the opt-out it is whatever its tree did. ``enabled`` is each result's
         ``_guard_check_enabled`` as the veto read it, so the opt-outs reported
         are the ones dispatch acted on."""
         lines = [
@@ -1862,7 +1888,10 @@ class AOTCompiledModel:
         # last resort above; without one it is served and there is no report.
         # `enabled` is the veto's own read, not a fresh one: check_verbose runs
         # user code that could opt a result out under the loop, and the entries,
-        # the raiser they name and the veto must agree.
+        # the raiser they name and the veto must agree. `raised` is in recording
+        # order, so the raiser is the input that raised first of those nobody
+        # opted out, the lowest index only when none raised for the first time on
+        # the second pass.
         raiser = next((i for i in raised if enabled[i]), None)
         withheld = not all(enabled)
         for i, result in enumerate(results):
@@ -1882,9 +1911,12 @@ class AOTCompiledModel:
                 # the tree a third time, whose answer would not be the one dispatch
                 # acted on. An entry that raised and THEN rejected is not here: it
                 # is re-evaluated below like any other rejection, and its raise
-                # survives in the chain, when it is the first index that raised,
-                # and in the footer's fix-or-drop line, when it is the first
-                # checked one.
+                # survives in the chain when it was recorded first of all, and in
+                # the footer's fix-or-drop line when it was recorded first of the
+                # inputs nobody opted out. When it is neither -- another checked
+                # tree raised before it -- this report carries that raise nowhere,
+                # until the caveat the commits above append to the advice names
+                # such trees and quotes their raises.
                 lines.append(_raised_line(i, raised[i]))
                 continue
             manager = result._live_guard_manager()
@@ -1893,7 +1925,7 @@ class AOTCompiledModel:
             except Exception as e:
                 # check_verbose runs paths check() did not (a repr of a user
                 # object, for one); one entry raising must not cost the others.
-                if not isinstance(_unwrapped_raise(e)[1], Exception):
+                if not _meant_an_exception(e):
                     raise
                 lines.append(_raised_line(i, e))
                 continue
@@ -2016,7 +2048,13 @@ class AOTCompiledModel:
         lifted a value through it -- bound to the dict serialized with the artifact,
         since the key embeds an ``id()`` from the tracing process that no live
         namespace holds -- are inserted (never overwriting an existing key) so
-        guards rooted at them resolve in a process that never traced.
+        guards rooted at them resolve in a process that never traced. Every CALL
+        writes as well, in the other direction: the certified names are written
+        into the globals of the artifact this returns, which all of its calls
+        share, so two threads calling one loaded artifact while either rebinds a
+        guarded global race on that dict and one can run the graph on the value
+        the other thread's guard check accepted. A caller who needs isolation
+        loads the artifact once per thread, since each load builds its own dict.
 
         A symbolic-shape guard on a global with a dynamic dim resolves its
         operands in that live dict as well, whether it installs as a Python
