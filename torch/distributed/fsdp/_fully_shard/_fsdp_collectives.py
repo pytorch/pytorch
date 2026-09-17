@@ -20,6 +20,7 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
+_PrepareAllGatherOutputs = Callable[[FSDPParam], tuple[list[torch.Tensor], bool]]
 _PrepareReduceScatterInputs = Callable[
     [list[FSDPParam], list[torch.Tensor], int],
     tuple[list[torch.Tensor], list[torch.Size]],
@@ -433,13 +434,52 @@ def _get_param_all_gather_inputs(
     return param_all_gather_inputs
 
 
+def _prepare_all_gather_outputs_with_reorder(
+    fsdp_param: FSDPParam,
+) -> tuple[list[torch.Tensor], bool]:
+    """Return copy destinations and whether they need a separate reorder."""
+    outputs = fsdp_param.all_gather_outputs
+    if fsdp_param.fsdp_placement.dim == 0:
+        return outputs, False
+    return [torch.empty_like(t) for t in outputs], True
+
+
+def _prepare_all_gather_outputs_with_dim0_views(
+    fsdp_param: FSDPParam,
+) -> tuple[list[torch.Tensor], bool]:
+    """Use views of the final outputs when the shard layout supports them."""
+    outputs = fsdp_param.all_gather_outputs
+    shard_dim = fsdp_param.fsdp_placement.dim
+    if shard_dim == 0:
+        return outputs, False
+
+    num_leading_elements = math.prod(fsdp_param.padded_sharded_param_size[:shard_dim])
+    if (
+        fsdp_param.sharded_state == ShardedState.SHARDED
+        and num_leading_elements > 0
+        and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+    ):
+        # Each prefix indexes a contiguous suffix sharded on its dim 0.
+        # Copy rank chunks directly into these views of the final buffer.
+        return [
+            view
+            for tensor in outputs
+            for view in tensor.view(num_leading_elements, -1).unbind(0)
+        ], False
+
+    # Extension and post-forward shard layouts may require a separate reorder.
+    return _prepare_all_gather_outputs_with_reorder(fsdp_param)
+
+
 @torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
     *,
-    use_dim0_views_for_copy: bool = False,
+    prepare_all_gather_outputs: _PrepareAllGatherOutputs = (
+        _prepare_all_gather_outputs_with_reorder
+    ),
 ) -> None:
     (
         all_gather_output,
@@ -469,10 +509,10 @@ def foreach_all_gather_copy_out(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs, needs_reorder = _get_all_gather_copy_out_views(
-            fsdp_param, use_dim0_views_for_copy=use_dim0_views_for_copy
+        param_all_gather_outputs, needs_separate_reorder = prepare_all_gather_outputs(
+            fsdp_param
         )
-        if needs_reorder:
+        if needs_separate_reorder:
             shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
         split_with_sizes_out.extend(param_all_gather_outputs)
 
@@ -499,36 +539,6 @@ def foreach_all_gather_copy_out(
         )
 
     _foreach_all_gather_reorder(shard_i_copy_infos, world_size)
-
-
-def _get_all_gather_copy_out_views(
-    fsdp_param: FSDPParam,
-    *,
-    use_dim0_views_for_copy: bool = False,
-) -> tuple[list[torch.Tensor], bool]:
-    """Return copy destinations and whether they need a follow-up reorder."""
-    outputs = fsdp_param.all_gather_outputs
-    shard_dim = fsdp_param.fsdp_placement.dim
-    if shard_dim == 0:
-        return outputs, False
-
-    num_leading_elements = math.prod(fsdp_param.padded_sharded_param_size[:shard_dim])
-    if (
-        use_dim0_views_for_copy
-        and fsdp_param.sharded_state == ShardedState.SHARDED
-        and num_leading_elements > 0
-        and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
-    ):
-        # Each prefix indexes a contiguous suffix sharded on its dim 0.
-        # Copy rank chunks directly into these views of the final buffer.
-        return [
-            view
-            for tensor in outputs
-            for view in tensor.view(num_leading_elements, -1).unbind(0)
-        ], False
-
-    # Extension and post-forward shard layouts may require a separate reorder.
-    return [torch.empty_like(t) for t in outputs], True
 
 
 def _foreach_all_gather_reorder(

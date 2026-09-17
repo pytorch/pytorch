@@ -19,10 +19,6 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_collectives import (
-    _prepare_reduce_scatter_inputs_with_dim0_views,
-    _prepare_reduce_scatter_inputs_with_reorder,
-)
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -43,7 +39,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
-    from ._fsdp_collectives import _PrepareReduceScatterInputs
+    from ._fsdp_collectives import _PrepareAllGatherOutputs, _PrepareReduceScatterInputs
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -682,25 +678,17 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
-    def set_use_dim0_views_for_copy(
-        self, enable: bool, *, recurse: bool = True
+    def _set_all_gather_copy_out_hook(
+        self, hook: _PrepareAllGatherOutputs, *, recurse: bool = True
     ) -> None:
-        """
-        Enables dimension-0 views for copies of nonzero-dimension shards
-        (experimental). Disabled by default.
+        """Set the hook that prepares each parameter's all-gather copy outputs.
 
-        When enabled, all-gather copy-out and reduce-scatter copy-in use
-        contiguous views sharded along their first dimension to avoid separate
-        reorders. Parameter shapes and sharding placements are unchanged.
-        This can improve copying for tensors with small leading dimensions,
-        such as ``[2, F, D]`` with ``Shard(1)``. Large leading dimensions create
-        many views and may increase CPU overhead. Unsupported layouts retain
-        the default copy path.
-
-        Args:
-            enable (bool): Whether to use dimension-0 views for copying.
-            recurse (bool): Whether to set for all FSDP submodules or just
-                the passed-in module. Defaults to ``True``.
+        The hook takes an ``fsdp_param`` with allocated final outputs and returns
+        copy destinations and whether a separate reorder is needed. Destinations
+        must preserve dtype and device. Direct views must split each final output
+        in order; reordering requires one matching temporary per final output.
+        The hook runs on the current compute stream. FSDP owns the native copy
+        and any requested reorder. Reduce-scatter input preparation is unaffected.
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
@@ -708,12 +696,7 @@ class FSDPModule:
             if isinstance(module, FSDPModule):
                 state = module._get_fsdp_state()
                 for fsdp_param_group in state._fsdp_param_groups:
-                    fsdp_param_group._use_dim0_views_for_copy = enable
-                    fsdp_param_group._prepare_reduce_scatter_inputs = (
-                        _prepare_reduce_scatter_inputs_with_dim0_views
-                        if enable
-                        else _prepare_reduce_scatter_inputs_with_reorder
-                    )
+                    fsdp_param_group._prepare_all_gather_outputs = hook
 
     def _set_reduce_scatter_copy_in_hook(
         self, hook: _PrepareReduceScatterInputs, *, recurse: bool = True
@@ -729,7 +712,6 @@ class FSDPModule:
         ``chunk_cat``. FSDP consumes and clears the returned input list.
         The hook runs on the current compute stream; FSDP owns buffer allocation,
         the native copy, and communication. All-gather copy-out is unaffected.
-        Calling ``set_use_dim0_views_for_copy`` selects a built-in hook again.
         """
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]

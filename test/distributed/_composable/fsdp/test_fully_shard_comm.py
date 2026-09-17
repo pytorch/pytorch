@@ -30,6 +30,8 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
+    _prepare_all_gather_outputs_with_dim0_views,
+    _prepare_all_gather_outputs_with_reorder,
     _prepare_reduce_scatter_inputs_with_dim0_views,
     _prepare_reduce_scatter_inputs_with_reorder,
     DefaultAllGather,
@@ -342,6 +344,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
 
 class TestFullyShardNonzeroDimCopy(FSDPTest):
+    _dim0_view_hooks = (
+        _prepare_all_gather_outputs_with_dim0_views,
+        _prepare_reduce_scatter_inputs_with_dim0_views,
+    )
+
     @property
     def world_size(self) -> int:
         return 2
@@ -352,7 +359,7 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
             {
                 "num_linears": [1, 2, 3, 5],
                 "dtype": [torch.float32, torch.bfloat16],
-                "use_dim0_views_for_copy": [False, True],
+                "copy_hooks": [None, self._dim0_view_hooks],
             },
             self._test_nonzero_dim_copy,
         )
@@ -360,14 +367,14 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_nonzero_dim_copy_inference(self):
         self.run_subtests(
-            {"use_dim0_views_for_copy": [False, True]},
+            {"copy_hooks": [None, self._dim0_view_hooks]},
             functools.partial(
                 self._test_nonzero_dim_copy, 3, torch.float32, inference_mode=True
             ),
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_set_use_dim0_views_for_copy(self):
+    def test_copy_hooks(self):
         torch.manual_seed(42)
         model = nn.Sequential(
             nn.Linear(4, 4), nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
@@ -380,28 +387,19 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
                 reshard_after_forward=True,
             )
 
-        def check_options(expected_options, expected_hooks=None):
-            if expected_hooks is None:
-                expected_hooks = tuple(
-                    _prepare_reduce_scatter_inputs_with_dim0_views
-                    if enabled
-                    else _prepare_reduce_scatter_inputs_with_reorder
-                    for enabled in expected_options
-                )
+        def check_hooks(expected_ag_hooks, expected_rs_hooks):
             expected_by_param = {}
-            for module, expected, expected_hook in zip(
-                fsdp_modules, expected_options, expected_hooks
+            for module, ag_hook, rs_hook in zip(
+                fsdp_modules, expected_ag_hooks, expected_rs_hooks
             ):
                 param_groups = module._get_fsdp_state()._fsdp_param_groups
                 self.assertTrue(param_groups)
                 for param_group in param_groups:
-                    self.assertEqual(param_group._use_dim0_views_for_copy, expected)
-                    self.assertIs(
-                        param_group._prepare_reduce_scatter_inputs, expected_hook
-                    )
+                    self.assertIs(param_group._prepare_all_gather_outputs, ag_hook)
+                    self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_hook)
                     expected_by_param[id(param_group.fsdp_params[0])] = (
-                        expected,
-                        expected_hook,
+                        ag_hook,
+                        rs_hook,
                     )
 
             with (
@@ -419,7 +417,7 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
                 model.zero_grad()
 
             for collective, params_arg, keyword, option in (
-                (all_gather_copy_out, 1, "use_dim0_views_for_copy", 0),
+                (all_gather_copy_out, 1, "prepare_all_gather_outputs", 0),
                 (reduce, 0, "prepare_reduce_scatter_inputs", 1),
             ):
                 seen_params = set()
@@ -431,37 +429,38 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
                     seen_params.add(param_id)
                 self.assertEqual(seen_params, set(expected_by_param))
 
-        check_options((False, False, False))
-        model.set_use_dim0_views_for_copy(True, recurse=False)
-        check_options((True, False, False))
-        model.set_use_dim0_views_for_copy(True)
-        check_options((True, True, True))
-        model[1].set_use_dim0_views_for_copy(False, recurse=False)
-        check_options((True, False, True))
+        default_ag = _prepare_all_gather_outputs_with_reorder
+        default_rs = _prepare_reduce_scatter_inputs_with_reorder
+        ag_hook = MagicMock(wraps=_prepare_all_gather_outputs_with_dim0_views)
+        rs_hook = MagicMock(wraps=_prepare_reduce_scatter_inputs_with_dim0_views)
+        check_hooks((default_ag,) * 3, (default_rs,) * 3)
+        model._set_all_gather_copy_out_hook(ag_hook, recurse=False)
+        check_hooks((ag_hook, default_ag, default_ag), (default_rs,) * 3)
+        ag_hook.assert_called()
+        ag_hook.reset_mock()
+        model._set_all_gather_copy_out_hook(ag_hook)
+        check_hooks((ag_hook,) * 3, (default_rs,) * 3)
+        ag_hook.assert_called()
 
-        hook = MagicMock(wraps=_prepare_reduce_scatter_inputs_with_dim0_views)
-        model._set_reduce_scatter_copy_in_hook(hook, recurse=False)
-        check_options(
-            (True, False, True),
-            (
-                hook,
-                _prepare_reduce_scatter_inputs_with_reorder,
-                _prepare_reduce_scatter_inputs_with_dim0_views,
-            ),
-        )
-        self.assertEqual(hook.call_count, 1)
-        hook.reset_mock()
-        model._set_reduce_scatter_copy_in_hook(hook)
-        check_options((True, False, True), (hook,) * len(fsdp_modules))
-        self.assertEqual(hook.call_count, len(fsdp_modules))
-        model.set_use_dim0_views_for_copy(False)
-        check_options((False, False, False))
+        model[1]._set_reduce_scatter_copy_in_hook(rs_hook, recurse=False)
+        check_hooks((ag_hook,) * 3, (default_rs, rs_hook, default_rs))
+        self.assertEqual(rs_hook.call_count, 1)
+        rs_hook.reset_mock()
+        model._set_reduce_scatter_copy_in_hook(rs_hook)
+        check_hooks((ag_hook,) * 3, (rs_hook,) * 3)
+        self.assertEqual(rs_hook.call_count, len(fsdp_modules))
+
+        model._set_all_gather_copy_out_hook(default_ag, recurse=False)
+        check_hooks((default_ag, ag_hook, ag_hook), (rs_hook,) * 3)
+        model._set_all_gather_copy_out_hook(default_ag)
+        model._set_reduce_scatter_copy_in_hook(default_rs)
+        check_hooks((default_ag,) * 3, (default_rs,) * 3)
 
     def _test_nonzero_dim_copy(
         self,
         num_linears: int,
         dtype: torch.dtype,
-        use_dim0_views_for_copy: bool = False,
+        copy_hooks=None,
         inference_mode: bool = False,
     ):
         device = torch.device(device_type.type, self.rank)
@@ -504,11 +503,10 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
             reshard_after_forward=True,
             mp_policy=MixedPrecisionPolicy(reduce_dtype=torch.float32),
         )
-        if use_dim0_views_for_copy:
-            model.set_use_dim0_views_for_copy(True)
-            copy_in_hook = MagicMock(
-                wraps=_prepare_reduce_scatter_inputs_with_dim0_views
-            )
+        if copy_hooks is not None:
+            copy_out_hook = MagicMock(wraps=copy_hooks[0])
+            copy_in_hook = MagicMock(wraps=copy_hooks[1])
+            model._set_all_gather_copy_out_hook(copy_out_hook)
             model._set_reduce_scatter_copy_in_hook(copy_in_hook)
         torch.manual_seed(42 + self.rank)
         if inference_mode:
@@ -516,6 +514,8 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
                 for _ in range(2):
                     inp = torch.randn((2, dim), device=device)
                     self.assertEqual(model(inp), ref_model(inp))
+            if copy_hooks is not None:
+                copy_out_hook.assert_called()
             return
 
         optim = torch.optim.SGD(model.parameters(), lr=1e-3)
@@ -537,7 +537,8 @@ class TestFullyShardNonzeroDimCopy(FSDPTest):
             check_sharded_parity(self, ref_model, model)
             optim.zero_grad()
             ref_optim.zero_grad()
-        if use_dim0_views_for_copy:
+        if copy_hooks is not None:
+            copy_out_hook.assert_called()
             self.assertEqual(copy_in_hook.call_count, 2)
 
 
