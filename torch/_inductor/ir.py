@@ -7643,7 +7643,7 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x: IRNode) -> IRNode:
         if x is None:
             return NoneAsConstantBuffer()
-        if isinstance(x, (Expr, sympy.logic.boolalg.Boolean, int)):
+        if isinstance(x, (Expr, sympy.logic.boolalg.Boolean, int, float)):
             return ShapeAsConstantBuffer(expr=x)
         if isinstance(x, Constant):
             # We need to unset fake mode, or else the torch.tensor() call will
