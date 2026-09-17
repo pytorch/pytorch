@@ -6,7 +6,15 @@
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/library.h>
 
+#include "runtime/OpenRegHooks.h"
+
 namespace at::openreg {
+
+namespace {
+int64_t from_blob_hook_call_count() {
+  return c10::openreg::g_from_blob_hook_call_count.load();
+}
+} // namespace
 
 namespace {
 at::Tensor wrapper_quantize_per_tensor(
@@ -177,6 +185,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
 TORCH_LIBRARY_FRAGMENT(openreg, m) {
   m.def("custom_autograd_fn_returns_self(Tensor input)-> Tensor");
   m.def("custom_autograd_fn_aliasing(Tensor(a) input)-> Tensor(a)");
+  // Test hook: how many times fromBlobPrivateUse1() has fired (see
+  // runtime/OpenRegHooks.h). Not device-specific, so no per-key impl needed.
+  m.def("_from_blob_hook_call_count() -> int", &from_blob_hook_call_count);
 }
 
 TORCH_LIBRARY_IMPL(openreg, AutogradPrivateUse1, m) {
