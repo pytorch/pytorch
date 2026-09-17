@@ -1036,7 +1036,9 @@ class HFOperations(unittest.TestCase):
             )
 
         mul_result = z3.Const(13, tensor_type)
-        if not z3.is_true(z3.simplify(s.model()[mul_result] == s.model()[embedding_result])):
+        if not z3.is_true(
+            z3.simplify(s.model()[mul_result] == s.model()[embedding_result])
+        ):
             raise AssertionError(
                 f"Expected mul_result == embedding_result, "
                 f"got {s.model()[mul_result]} != {s.model()[embedding_result]}"
@@ -1413,13 +1415,21 @@ class ComposeOperationsGradualTypes(unittest.TestCase):
 
         # first dimension could be anything because we have broadcasting
         if solver.model()[s1].as_long() != res[0]:
-            raise AssertionError(f"Expected s1 == {res[0]}, got {solver.model()[s1].as_long()}")
+            raise AssertionError(
+                f"Expected s1 == {res[0]}, got {solver.model()[s1].as_long()}"
+            )
         if solver.model()[s2].as_long() != res[1]:
-            raise AssertionError(f"Expected s2 == {res[1]}, got {solver.model()[s2].as_long()}")
+            raise AssertionError(
+                f"Expected s2 == {res[1]}, got {solver.model()[s2].as_long()}"
+            )
         if solver.model()[s3].as_long() != res[2]:
-            raise AssertionError(f"Expected s3 == {res[2]}, got {solver.model()[s3].as_long()}")
+            raise AssertionError(
+                f"Expected s3 == {res[2]}, got {solver.model()[s3].as_long()}"
+            )
         if solver.model()[s4].as_long() != res[3]:
-            raise AssertionError(f"Expected s4 == {res[3]}, got {solver.model()[s4].as_long()}")
+            raise AssertionError(
+                f"Expected s4 == {res[3]}, got {solver.model()[s4].as_long()}"
+            )
 
     def test_conv_reshape_add_0_3(self):
         class BasicBlock(torch.nn.Module):
