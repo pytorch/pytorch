@@ -1015,6 +1015,23 @@ class TupleIteratorGetItemSource(GetItemSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class ListReverseIteratorGetItemSource(GetItemSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "list_reverseiterator_getitem"
+            )
+        )
+        codegen(self.base)
+        codegen.append_output(codegen.create_load_const(self.index))
+        codegen.extend_output(create_call_function(2, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return f"___list_reverseiterator_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class NamedTupleFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
