@@ -53,16 +53,18 @@ from ._debug import map_debug_info
 
 
 __all__ = [
+    "PIPELINE_MICROBATCH_INDEX_KEY",
+    "PIPELINE_STAGE_INDEX_KEY",
     "PipelineStage",
     "build_stage",
 ]
 
 logger = logging.getLogger(__name__)
 
-_PIPELINE_STAGE_INDEX_KEY = "pipeline_stage_index"
-_PIPELINE_MICROBATCH_INDEX_KEY = "pipeline_microbatch_index"
+PIPELINE_STAGE_INDEX_KEY = "pipeline_stage_index"
+PIPELINE_MICROBATCH_INDEX_KEY = "pipeline_microbatch_index"
 _PIPELINE_METADATA_KEYS = frozenset(
-    (_PIPELINE_STAGE_INDEX_KEY, _PIPELINE_MICROBATCH_INDEX_KEY)
+    (PIPELINE_STAGE_INDEX_KEY, PIPELINE_MICROBATCH_INDEX_KEY)
 )
 
 
@@ -1000,16 +1002,17 @@ class _PipelineStageBase(ABC):
         user_kwargs = kwargs or {}
         composite_kwargs = user_kwargs
         if self._pass_pipeline_metadata:
-            collisions = _PIPELINE_METADATA_KEYS & user_kwargs.keys()
-            if collisions:
-                names = ", ".join(sorted(collisions))
-                raise ValueError(
-                    f"pass_pipeline_metadata reserves forward kwarg name(s): {names}"
-                )
+            # The runtime owns these keys. Dropping caller values avoids a
+            # rank-local error that could strand peers in pipeline P2P.
+            user_kwargs = {
+                key: value
+                for key, value in user_kwargs.items()
+                if key not in _PIPELINE_METADATA_KEYS
+            }
             composite_kwargs = {
                 **user_kwargs,
-                _PIPELINE_STAGE_INDEX_KEY: self.stage_index,
-                _PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
+                PIPELINE_STAGE_INDEX_KEY: self.stage_index,
+                PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
             }
 
         if self._runtime_validate:
@@ -1806,10 +1809,14 @@ class PipelineStage(_PipelineStageBase):
         pass_pipeline_metadata: Pass ``pipeline_stage_index`` and
             ``pipeline_microbatch_index`` to each forward. The values are the
             global logical stage index and the global microbatch index within
-            current training or evaluation step. This requires complete static
-            metadata across the schedule. The wrapped module may accept the
-            reserved keywords directly or consume them in a ``with_kwargs``
-            forward pre-hook. Training with DTensor inputs also requires static
+            current training or evaluation step. The runtime replaces values
+            supplied under these reserved names. Use
+            :data:`PIPELINE_STAGE_INDEX_KEY` and
+            :data:`PIPELINE_MICROBATCH_INDEX_KEY` instead of spelling the names
+            in user code. This requires complete static metadata across the
+            schedule. The wrapped module may accept the reserved keywords
+            directly or consume them in a ``with_kwargs`` forward pre-hook.
+            Training with DTensor inputs also requires static
             ``input_grads`` and ``output_grads`` metadata even when forward-only
             evaluation succeeds without it. Compiled modules receive Python
             integers and may recompile for each distinct value if the forward
@@ -1863,6 +1870,7 @@ class PipelineStage(_PipelineStageBase):
             input_grads=extract_tensor_metas(in_grads, allow_none=True),
             output_grads=extract_tensor_metas(out_grads, allow_none=True),
         )
+
         # Cache meshes from user-provided DTensors
         for args in (inputs, outputs, in_grads, out_grads):
             if args is not None:
