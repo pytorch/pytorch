@@ -1567,17 +1567,14 @@ def tuned_scaled_mm_v2(
     supported_recipe = check_supported_recipe(recipe_a) and check_supported_recipe(
         recipe_b
     )
-    if (
-        _is_k128_ue8m0_scaled_mm(
-            mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
-        )
-        and (
-            not contraction_dim
-            or (
-                len(contraction_dim) == 2
-                and contraction_dim[0] in (1, -1)
-                and contraction_dim[1] in (0, -2)
-            )
+    if _is_k128_ue8m0_scaled_mm(
+        mat_a, mat_b, scale_a, recipe_a, swizzle_a, scale_b, recipe_b, swizzle_b
+    ) and (
+        not contraction_dim
+        or (
+            len(contraction_dim) == 2
+            and contraction_dim[0] in (1, -1)
+            and contraction_dim[1] in (0, -2)
         )
     ):
         node = _tuned_k128_ue8m0_scaled_mm(
