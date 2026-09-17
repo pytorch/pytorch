@@ -888,6 +888,12 @@ if __name__ == "__main__":
         self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_reduce_tensor_cuda_uses_rebuild_cuda_tensor(self):
+        t = torch.zeros(2, device="cuda")
+        func, _args = mp.reductions.reduce_tensor(t)
+        self.assertIs(func, mp.reductions.rebuild_cuda_tensor)
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_rebuild_cuda_tensor(self):
         ctx = mp.get_context("spawn")
         queue = ctx.Queue()
