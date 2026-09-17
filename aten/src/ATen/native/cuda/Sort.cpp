@@ -15,7 +15,6 @@
 #include <ATen/ops/sort_native.h>
 #endif
 
-#include <limits>
 
 namespace at::native {
 
@@ -54,9 +53,6 @@ void sort_cuda_kernel(
   TOTENSOR(self_base, self);
   TOTENSOR(values_base, values);
   TOTENSOR(indices_base, indices);
-
-  TORCH_CHECK(self.sizes()[dim] <= std::numeric_limits<int>::max(),
-    "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
   TORCH_CHECK_TYPE(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,

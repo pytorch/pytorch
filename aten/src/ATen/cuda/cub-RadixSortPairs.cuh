@@ -16,9 +16,9 @@ void radix_sort_pairs_impl(
     bool descending,
     int64_t begin_bit,
     int64_t end_bit) {
-  TORCH_CHECK(
-      n <= std::numeric_limits<int>::max(),
-      "cub sort does not support sorting more than INT_MAX elements");
+  // n is passed through as the backend's NumItemsT/Size, which is 64-bit here:
+  // CUB selects a 64-bit offset type for it and rocPRIM is templated on it, so
+  // there is no INT_MAX ceiling to enforce.
   using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
