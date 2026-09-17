@@ -194,6 +194,7 @@ class FlexGemmEpilogueConfig:
             if self.local_reduce is None
             else self.local_reduce.runtime_plan(resolve, self.epilogue_name),
             self.output_contraction,
+            varlen_m=self.cu_seqlens_index is not None,
         )
 
 
