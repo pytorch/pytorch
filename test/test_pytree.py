@@ -19,6 +19,7 @@ from typing import Any, NamedTuple
 import torch
 import torch.utils._pytree as python_pytree
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.return_types import all_return_types
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -498,6 +499,21 @@ class TestGenericPytree(TestCase):
         result = pytree.tree_unflatten(values, spec)
 
         self.assertEqual(type(result), type(expected))
+        self.assertEqual(result, expected)
+
+    @parametrize(
+        "return_type",
+        [subtest(cls, name=cls.__name__) for cls in all_return_types],
+    )
+    @parametrize_pytree_module
+    def test_return_types_treespec_roundtrip(self, pytree, return_type):
+        expected = return_type(range(return_type.n_sequence_fields))
+        values, spec = pytree.tree_flatten(expected)
+        roundtrip_spec = pytree.treespec_loads(pytree.treespec_dumps(spec))
+        self.assertEqual(roundtrip_spec, spec)
+
+        result = pytree.tree_unflatten(values, roundtrip_spec)
+        self.assertIs(type(result), return_type)
         self.assertEqual(result, expected)
 
     @parametrize_pytree_module
