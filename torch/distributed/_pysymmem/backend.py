@@ -28,13 +28,23 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
+    _DistributedBackendOptions,
     _register_process_group,
     _SymmetricMemory,
     _unregister_process_group,
+    AllgatherOptions,
+    AllreduceOptions,
+    AllToAllOptions,
     Backend as C10DBackend,
+    BarrierOptions,
+    BroadcastOptions,
+    GatherOptions,
     ProcessGroup,
     ProcessGroupGloo,
     ReduceOp,
+    ReduceOptions,
+    ReduceScatterOptions,
+    ScatterOptions,
 )
 from torch.distributed import PrefixStore, Store
 
@@ -62,16 +72,20 @@ def cast_buffer(buf: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
     return buf[:capacity].view(like.dtype)
 
 
-def reduce_op_name(op) -> str:
+def reduce_op_name(op: ReduceOp | ReduceOp.RedOpType) -> str:
     """Return the canonical lowercase name of a ReduceOp or RedOpType."""
-    t = op.op if hasattr(op, "op") else op
+    t = op if isinstance(op, ReduceOp.RedOpType) else op.op
     return t.name.lower()
 
 
 class _SymmemWork(dist._Work):
     """Async work handle backed by a CUDA event."""
 
-    def __init__(self, event: torch.cuda.Event | None = None, device=None):
+    def __init__(
+        self,
+        event: torch.cuda.Event | None = None,
+        device: torch.device | None = None,
+    ) -> None:
         super().__init__()
         self._event = event
         self._device = device
@@ -92,8 +106,8 @@ class _SymmemWork(dist._Work):
         self._event = None
         return True
 
-    def get_future(self):
-        fut = torch.futures.Future()
+    def get_future(self) -> torch.futures.Future[bool]:
+        fut: torch.futures.Future[bool] = torch.futures.Future()
         fut.set_result(True)
         return fut
 
@@ -113,7 +127,9 @@ class _GroupResources:
     _pointer_cache: object | None = field(default=None, init=False, repr=False)
 
 
-_GROUP_RESOURCES: dict[tuple, _GroupResources] = {}
+_ResourceKey = tuple[str, int | None, tuple[int, ...]]
+
+_GROUP_RESOURCES: dict[_ResourceKey, _GroupResources] = {}
 
 
 def _shutdown_all_resources() -> None:
@@ -183,7 +199,11 @@ class SymmemBackend(C10DBackend):
 
     _resources: _GroupResources | None
 
-    def __init__(self, dist_backend_opts, backend_options=None):
+    def __init__(
+        self,
+        dist_backend_opts: _DistributedBackendOptions,
+        backend_options: object | None = None,
+    ) -> None:
         store = dist_backend_opts.store
         rank = dist_backend_opts.group_rank
         size = dist_backend_opts.group_size
@@ -201,7 +221,7 @@ class SymmemBackend(C10DBackend):
         self._size = size
         # global_ranks_in_group is empty for the default, world-spanning group.
         global_ranks = tuple(dist_backend_opts.global_ranks_in_group)
-        self._global_ranks: tuple = global_ranks or tuple(range(size))
+        self._global_ranks: tuple[int, ...] = global_ranks or tuple(range(size))
         self._world_rank = self._global_ranks[rank]
         self._world_size = len(self._global_ranks)
         self._barrier_channel = 0
@@ -235,18 +255,18 @@ class SymmemBackend(C10DBackend):
         self._send_region_offset = self._scratch_bytes
 
     @property
-    def options(self):
+    def options(self) -> C10DBackend.Options:
         return self._options
 
     @property
-    def supports_splitting(self):
+    def supports_splitting(self) -> bool:
         return True
 
     @property
-    def supports_coalescing(self):
+    def supports_coalescing(self) -> bool:
         return False
 
-    def getBackendName(self):
+    def getBackendName(self) -> str:
         return "symmem"
 
     def _err(self, msg: str) -> RuntimeError:
@@ -351,12 +371,14 @@ class SymmemBackend(C10DBackend):
         return _SymmemWork(None, self._device)
 
     @staticmethod
-    def _resource_key(global_ranks: tuple, device: torch.device) -> tuple:
+    def _resource_key(
+        global_ranks: tuple[int, ...], device: torch.device
+    ) -> _ResourceKey:
         return (device.type, device.index, tuple(sorted(global_ranks)))
 
     def _get_or_create_resources(
         self,
-        global_ranks: tuple,
+        global_ranks: tuple[int, ...],
         rank_in_group: int,
         device: torch.device,
         root_store: Store,
@@ -416,7 +438,11 @@ class SymmemBackend(C10DBackend):
         _GROUP_RESOURCES[key] = cached
         return cached
 
-    def allreduce(self, tensor_list, opts=None):
+    def allreduce(
+        self,
+        tensor_list: list[torch.Tensor],
+        opts: AllreduceOptions | None = None,
+    ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
         if tensor.numel() == 0:
@@ -426,7 +452,11 @@ class SymmemBackend(C10DBackend):
         tensor.copy_(result.view(tensor.shape))
         return self._make_work(opts.asyncOp if opts else False)
 
-    def broadcast(self, tensor_list, opts=None):
+    def broadcast(
+        self,
+        tensor_list: list[torch.Tensor],
+        opts: BroadcastOptions | None = None,
+    ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
         root = opts.rootRank if opts else 0
@@ -447,7 +477,11 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def reduce(self, tensor_list, opts=None):
+    def reduce(
+        self,
+        tensor_list: list[torch.Tensor],
+        opts: ReduceOptions | None = None,
+    ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
         root = opts.rootRank if opts else 0
@@ -460,12 +494,15 @@ class SymmemBackend(C10DBackend):
             tensor.copy_(result.view(tensor.shape))
         return self._make_work(async_op)
 
-    _SUPPORTED_REDUCE_DTYPES = (torch.float32, torch.bfloat16)
+    _SUPPORTED_REDUCE_DTYPES: tuple[torch.dtype, ...] = (
+        torch.float32,
+        torch.bfloat16,
+    )
 
     def _reduce_impl(
         self,
         tensor: torch.Tensor,
-        op: ReduceOp,
+        op: ReduceOp | ReduceOp.RedOpType,
         root: int | None,
     ) -> torch.Tensor:
         op_name = reduce_op_name(op)
@@ -500,7 +537,12 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return out
 
-    def allgather(self, output_tensors, input_tensors, opts=None):
+    def allgather(
+        self,
+        output_tensors: list[list[torch.Tensor]],
+        input_tensors: list[torch.Tensor],
+        opts: AllgatherOptions | None = None,
+    ) -> _SymmemWork:
         tensor = input_tensors[0]
         output_list = output_tensors[0]
         self._check_device(tensor)
@@ -523,7 +565,12 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def all_gather_single(self, output, input, opts=None):
+    def all_gather_single(
+        self,
+        output: torch.Tensor,
+        input: torch.Tensor,
+        opts: AllgatherOptions | None = None,
+    ) -> _SymmemWork:
         self._check_device(input)
         self._check_device(output)
         async_op = opts.asyncOp if opts else False
@@ -546,7 +593,13 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def _reduce_peers(self, output, op, elem_offset, n_elements):
+    def _reduce_peers(
+        self,
+        output: torch.Tensor,
+        op: ReduceOp | ReduceOp.RedOpType,
+        elem_offset: int,
+        n_elements: int,
+    ) -> None:
         """Sum n_elements from each peer's scratch into output."""
         op_name = reduce_op_name(op)
         if op_name != "sum":
@@ -561,7 +614,12 @@ class SymmemBackend(C10DBackend):
             peer_buf = cast_buffer(self._peer_scratch(peer), output)
             out_flat.add_(peer_buf[elem_offset : elem_offset + n_elements])
 
-    def reduce_scatter(self, output_tensors, input_tensors, opts=None):
+    def reduce_scatter(
+        self,
+        output_tensors: list[torch.Tensor],
+        input_tensors: list[list[torch.Tensor]],
+        opts: ReduceScatterOptions | None = None,
+    ) -> _SymmemWork:
         output = output_tensors[0]
         input_list = input_tensors[0]
         self._check_device(output)
@@ -591,7 +649,12 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def reduce_scatter_single(self, output, input, opts=None):
+    def reduce_scatter_single(
+        self,
+        output: torch.Tensor,
+        input: torch.Tensor,
+        opts: ReduceScatterOptions | None = None,
+    ) -> _SymmemWork:
         self._check_device(output)
         self._check_device(input)
         op = opts.reduceOp if opts else ReduceOp.SUM
@@ -615,8 +678,13 @@ class SymmemBackend(C10DBackend):
         return self._make_work(async_op)
 
     def all_to_all_single(
-        self, output, input, output_split_sizes, input_split_sizes, opts=None
-    ):
+        self,
+        output: torch.Tensor,
+        input: torch.Tensor,
+        output_split_sizes: list[int],
+        input_split_sizes: list[int],
+        opts: AllToAllOptions | None = None,
+    ) -> _SymmemWork:
         self._check_device(output)
         self._check_device(input)
         async_op = opts.asyncOp if opts else False
@@ -712,7 +780,12 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def alltoall(self, output_tensors, input_tensors, opts=None):
+    def alltoall(
+        self,
+        output_tensors: list[torch.Tensor],
+        input_tensors: list[torch.Tensor],
+        opts: AllToAllOptions | None = None,
+    ) -> _SymmemWork:
         async_op = opts.asyncOp if opts else False
         if len(output_tensors) != self._size or len(input_tensors) != self._size:
             raise self._err("alltoall: list lengths must equal size")
@@ -759,7 +832,12 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def scatter(self, output_tensors, input_tensors, opts=None):
+    def scatter(
+        self,
+        output_tensors: list[torch.Tensor],
+        input_tensors: list[list[torch.Tensor]],
+        opts: ScatterOptions | None = None,
+    ) -> _SymmemWork:
         output = output_tensors[0]
         self._check_device(output)
         root = opts.rootRank if opts else 0
@@ -789,7 +867,12 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def gather(self, output_tensors, input_tensors, opts=None):
+    def gather(
+        self,
+        output_tensors: list[list[torch.Tensor]],
+        input_tensors: list[torch.Tensor],
+        opts: GatherOptions | None = None,
+    ) -> _SymmemWork:
         input_tensor = input_tensors[0]
         self._check_device(input_tensor)
         root = opts.rootRank if opts else 0
@@ -821,11 +904,13 @@ class SymmemBackend(C10DBackend):
         self._group_barrier()
         return self._make_work(async_op)
 
-    def barrier(self, opts=None):
+    def barrier(self, opts: BarrierOptions | None = None) -> _SymmemWork:
         self._group_barrier()
         return self._make_work(opts.asyncOp if opts else False)
 
-    def send(self, tensor_list, dst, tag=0):
+    def send(
+        self, tensor_list: list[torch.Tensor], dst: int, tag: int = 0
+    ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
         if not 0 <= dst < self._size:
@@ -851,7 +936,9 @@ class SymmemBackend(C10DBackend):
         )
         return self._make_work()
 
-    def recv(self, tensor_list, src, tag=0):
+    def recv(
+        self, tensor_list: list[torch.Tensor], src: int, tag: int = 0
+    ) -> _SymmemWork:
         tensor = tensor_list[0]
         self._check_device(tensor)
         if not 0 <= src < self._size:
@@ -877,7 +964,12 @@ class SymmemBackend(C10DBackend):
             tensor.copy_(slot_typed.view(tensor.shape))
         return self._make_work()
 
-    def split(self, store, ranks, opts=None):
+    def split(
+        self,
+        store: Store,
+        ranks: list[int],
+        opts: C10DBackend.Options | None = None,
+    ) -> "SymmemBackend | None":
         ranks_list = list(ranks)
         if len(set(ranks_list)) != len(ranks_list):
             raise self._err("split: ranks list contains duplicates")
@@ -922,7 +1014,7 @@ class SymmemBackend(C10DBackend):
         )
         return child
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         self._resources = None
 
     def set_timeout(self, timeout: timedelta) -> None:
@@ -931,11 +1023,14 @@ class SymmemBackend(C10DBackend):
         if self._resources is not None and self._resources.pg is not None:
             self._resources.pg.set_timeout(timeout)
 
-    def abort(self):
+    def abort(self) -> None:
         self._resources = None
 
 
-def _create_symmem_backend(dist_backend_opts, backend_options):
+def _create_symmem_backend(
+    dist_backend_opts: _DistributedBackendOptions,
+    backend_options: object | None,
+) -> SymmemBackend:
     return SymmemBackend(dist_backend_opts, backend_options)
 
 
