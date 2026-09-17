@@ -2,6 +2,7 @@
 """Decompose-K subgraph and Blackwell partial-BMM lowering."""
 
 import functools
+import hashlib
 import math
 from typing import Any
 
@@ -33,6 +34,37 @@ BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS = (
     BlackwellBMMConfig(128, 128, 64, 4, 4, 1, 1, True, True),
     BlackwellBMMConfig(128, 256, 64, 6, 4, 2, 1, True, True),
 )
+
+
+def _decompose_k_choice_name(
+    input_nodes: list[Buffer],
+    layout: Layout,
+    k_split: int,
+    bmm_backend: str,
+    bmm_config_index: int,
+) -> str:
+    tensor_geometry = (
+        tuple(
+            (
+                tuple(node.get_size()),
+                tuple(node.get_stride()),
+                node.get_dtype(),
+                node.get_device(),
+            )
+            for node in input_nodes
+        ),
+        (
+            tuple(layout.size),
+            tuple(layout.stride),
+            layout.dtype,
+            layout.device,
+        ),
+    )
+    geometry_hash = hashlib.sha256(repr(tensor_geometry).encode()).hexdigest()[:12]
+    name = f"decompose_k_mm_{k_split}_split_{bmm_backend}_{geometry_hash}"
+    if bmm_backend == "triton":
+        name = f"{name}_config_{bmm_config_index}"
+    return name
 
 
 def decomposeK(a, b, k_splits, bmm_backend="aten", bmm_config_index=-1):
@@ -76,9 +108,13 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
 
         from ..decomposition import select_decomp_table
 
-        name = f"decompose_k_mm_{k_split}_split_{bmm_backend}"
-        if bmm_backend == "triton":
-            name = f"{name}_config_{bmm_config_index}"
+        name = _decompose_k_choice_name(
+            input_nodes,
+            layout,
+            k_split,
+            bmm_backend,
+            bmm_config_index,
+        )
         description = f"{k_split=}, {bmm_backend=}, {bmm_config_index=}"
 
         with enable_python_dispatcher():

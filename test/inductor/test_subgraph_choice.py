@@ -80,6 +80,25 @@ class TestSubgraphChoice(TestCase):
             layout=FixedLayout(torch.device(f"{GPU_TYPE}:0"), dtype=dtype, size=shape),
         )
 
+    def test_decompose_k_choice_name_includes_tensor_geometry(self):
+        from torch._inductor.kernel.decompose_k import _decompose_k_choice_name
+
+        def choice_name(width):
+            input_nodes = [
+                self._create_buffer("a", (width, 4096), torch.bfloat16),
+                self._create_buffer("b", (4096, width), torch.bfloat16),
+            ]
+            layout = FixedLayout(
+                torch.device(f"{GPU_TYPE}:0"),
+                dtype=torch.bfloat16,
+                size=(width, width),
+            )
+            return _decompose_k_choice_name(input_nodes, layout, 41, "aten", -1)
+
+        self.assertEqual(choice_name(64), choice_name(64))
+        self.assertNotEqual(choice_name(64), choice_name(96))
+        self.assertNotEqual(choice_name(96), choice_name(128))
+
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
         from torch._inductor.kernel.mm import aten_mm
