@@ -1,13 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import io
 import logging
 import math
 import operator
 import os
 import random
 import sys
-import tempfile
 from functools import reduce
 
 import torch
@@ -745,14 +745,21 @@ class DistributedDataParallelTest(
         # run the model for 6 iterations, with a checkpoint in the middle
         train_loop(ddp_withload, optimizer_withload, 3)
 
-        # zero out parameters of both DDP and non-DDP models and reload them from the DDP state dict
-        checkpoint_path = tempfile.gettempdir() + "/model.checkpoint"
+        # zero out parameters of both DDP and non-DDP models and reload them from the DDP state dict.
+        # Broadcast the serialized checkpoint instead of sharing a file, so that concurrent runs on
+        # the same host cannot collide on a fixed path under the shared temp directory.
         if self.rank == 0:
-            torch.save(ddp_withload.state_dict(), checkpoint_path)
+            buffer = io.BytesIO()
+            torch.save(ddp_withload.state_dict(), buffer)
+            object_list = [buffer.getvalue()]
+        else:
+            object_list = [None]
+        dist.broadcast_object_list(object_list)
 
-        dist.barrier()
         map_location = {"cuda:0": f"cuda:{self.rank:d}"}
-        ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
+        ddp_state_dict = torch.load(
+            io.BytesIO(object_list[0]), map_location=map_location
+        )
 
         for model in [ddp_withload, model_withload]:
             for p in model.parameters():
