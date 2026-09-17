@@ -300,6 +300,17 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
+#ifdef USE_ROCM
+  // The raw handle, without the aborted and ready checks `getNcclComm` makes.
+  // For teardown bookkeeping that has to run on an aborted communicator and
+  // uses the handle only as an identity token, never as a call target.
+  // Throwing is not an option there: it runs from a destructor.
+  ncclComm_t getNcclCommUnchecked() const {
+    LockType lock(mutex_);
+    return ncclComm_;
+  }
+#endif
+
   // Wait for the communicator to be ready. This is a blocking function.
   // Useful in nonblocking mode: NCCL requires the communicator to be ready
   // before issuing a second command.
