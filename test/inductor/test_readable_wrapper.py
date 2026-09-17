@@ -115,6 +115,77 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertEqual(got[0], expected)
 
     @requires_cuda_and_triton
+    def test_preamble_binds_only_what_the_graph_uses(self):
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        preamble = code.split("# kernel path:")[0]
+        self.assertIn("empty_strided_cuda", preamble)
+        self.assertIn("assert_size_stride", preamble)
+        for unused in (
+            "empty_strided_xpu",
+            "empty_strided_mtia",
+            "empty_strided_cpu_pinned",
+            "alloc_from_pool",
+            "maybe_profile",
+            "run_intermediate_hooks",
+            "import tempfile",
+            "import random",
+            "from ctypes import",
+        ):
+            self.assertNotIn(unused, preamble, f"{unused!r} kept but unused")
+
+    def test_cpu_graph_does_not_bind_gpu_allocators(self):
+        def fn(x):
+            return (x + 1).relu().sum(0)
+
+        x = torch.randn(1024)
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        preamble = code.split("async_compile.cpp")[0]
+        self.assertIn("empty_strided_cpu", preamble)
+        self.assertNotIn("empty_strided_cuda", preamble)
+        self.assertNotIn("empty_strided_xpu", preamble)
+
+    @requires_cuda_and_triton
+    def test_a_binding_is_not_kept_alive_by_its_own_definition(self):
+        # `_quantized = torch.ops._quantized` names itself on the right-hand side, so
+        # any analysis that counts attribute names as uses can never drop it.
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertNotIn("_quantized", code)
+
+    @requires_cuda_and_triton
+    def test_a_name_mentioned_only_in_a_comment_is_not_a_use(self):
+        # Inductor stamps each kernel with a provenance comment naming its source ops
+        # ("Original ATen: [aten.mul, ...]"), which is not a use of the aten binding.
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertIn("Original ATen: [aten.", code)
+        self.assertNotIn("aten = torch.ops.aten", code)
+
+    @requires_cuda_and_triton
+    def test_a_name_used_only_inside_a_kernel_is_not_a_wrapper_use(self):
+        # A kernel module supplies its own imports (`math as tl_math`) and carries
+        # `'device': 0` in its metadata. Neither is a use of the wrapper's binding, and
+        # once kernels are hoisted they sit in the same text as the wrapper's own code.
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        self.assertIn("math as tl_math", code)
+        self.assertNotIn("\nimport math\n", code)
+        self.assertNotIn("from torch import device, empty_strided", code)
+
+    @requires_cuda_and_triton
     def test_no_stale_pointer_to_a_cache_file(self):
         # Inductor stamps each kernel "# kernel path: /tmp/torchinductor_.../x.py",
         # naming where the kernel WOULD have been compiled from. It is defined in this
@@ -128,6 +199,23 @@ class TestReadableWrapperCodegen(TestCase):
         self.assertNotIn("# kernel path:", code)
         # the rest of the provenance comment is still worth having
         self.assertIn("Original ATen:", code)
+
+    @requires_cuda_and_triton
+    def test_triton_is_not_imported_twice(self):
+        # A hoisted kernel carries its own triton imports, so the wrapper's copy is dead
+        # weight -- and `start_graph`/`end_graph` are only used under profile_bandwidth.
+        def fn(x):
+            return torch.softmax(x * 2, dim=-1)
+
+        x = torch.randn(64, 128, device="cuda")
+        _, code = _code_for(fn, x, readable_wrapper=True)
+        preamble = code.split("Original ATen:")[0]
+        self.assertNotIn("import triton", preamble)
+        self.assertNotIn("start_graph", preamble)
+        # the kernel still supplies what it needs
+        self.assertIn("import triton", code)
+        for line in ("import triton\n", "import triton.language as tl\n"):
+            self.assertEqual(code.count(line), 1, f"{line!r} appears more than once")
 
     @requires_cuda_and_triton
     def test_default_wrapper_still_uses_async_compile(self):
