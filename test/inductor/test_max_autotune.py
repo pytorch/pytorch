@@ -2878,6 +2878,17 @@ class TestMaxAutotune(TestCase):
                     "triton.decompose_k_threshold": decompose_k_threshold,
                 }
             ):
+                device_properties = DeviceProperties.create(torch.device(GPU_TYPE))
+                output_ctas = 2 * ((M + 63) // 64) * ((N + 63) // 64)
+                min_k_split = (
+                    device_properties.multi_processor_count + output_ctas - 1
+                ) // output_ctas
+                expected_splits = get_k_splits(
+                    M,
+                    N,
+                    K,
+                    min_k_split=min_k_split,
+                )
                 compiled_func = torch.compile(lambda a, b: a @ b)
                 _, code = run_and_get_code(compiled_func, a, b)
 
@@ -2902,65 +2913,24 @@ class TestMaxAutotune(TestCase):
             "max_autotune_gemm_search_space": "DEFAULT",
         }
     )
-    def test_decompose_k_device_aware_aten_split_candidates(self):
+    def test_decompose_k_filters_underfilled_splits(self):
         get_k_splits.cache_clear()
-        candidates = get_k_splits(
-            80,
-            72,
-            1_343_232,
-            num_sms=148,
-            max_workspace_bytes=128 * 1024 * 1024,
-        )
-        self.assertEqual(
-            candidates,
-            [44, 48, 72, 66, 144, 159, 288, 318],
-        )
-        self.assertLessEqual(len(candidates), config.triton.num_decompose_k_splits)
-        self.assertLessEqual(len(candidates), 8)
-
-        # Occupancy-ranked candidates and the aligned fallback stay in the
-        # low-workspace region.
-        def workspace_bytes(split):
-            return split * 80 * 72 * 4
-
-        self.assertLessEqual(
-            max(workspace_bytes(split) for split in candidates), 4 * 1024 * 1024
-        )
-        self.assertTrue(
-            all(workspace_bytes(split) <= 128 * 1024 * 1024 for split in candidates)
-        )
-        self.assertNotIn(5247, candidates)
-        self.assertNotIn(10494, candidates)
+        with config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
+            all_splits = get_k_splits(80, 72, 1_343_232)
 
         get_k_splits.cache_clear()
-        irregular_candidates = get_k_splits(
-            20,
-            20,
-            296_192,
-            num_sms=148,
-            max_workspace_bytes=128 * 1024 * 1024,
-        )
-        self.assertEqual(
-            irregular_candidates,
-            [178, 208, 256, 356, 712, 832, 1157, 2314],
-        )
-        self.assertLessEqual(len(irregular_candidates), 8)
+        candidates = get_k_splits(80, 72, 1_343_232, min_k_split=19)
+        self.assertEqual(candidates, [s for s in all_splits if s >= 19][:10])
+        self.assertIn(72, candidates)
 
-        # When the legal set is already smaller than the tuning budget, retain
-        # every candidate rather than trying to predict the vendor BMM winner.
         get_k_splits.cache_clear()
-        small_candidates = get_k_splits(
-            64,
-            64,
-            5248,
-            num_sms=148,
-            ctas_per_tile=2,
-            max_workspace_bytes=128 * 1024 * 1024,
-        )
-        self.assertEqual(small_candidates, [2, 4, 8, 16, 32, 41])
-        self.assertLessEqual(
-            len(small_candidates), config.triton.num_decompose_k_splits
-        )
+        self.assertEqual(get_k_splits(64, 64, 5248, min_k_split=74), [])
+
+        get_k_splits.cache_clear()
+        self.assertEqual(get_k_splits(256, 128, 11_091_857, min_k_split=10), [])
+
+        get_k_splits.cache_clear()
+        self.assertIn(587, get_k_splits(256, 128, 10_954_007, min_k_split=10))
 
     @unittest.skipIf(
         config.triton.native_matmul,

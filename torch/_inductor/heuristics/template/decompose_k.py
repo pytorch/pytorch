@@ -65,12 +65,18 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         m, n, k = kernel_inputs.mnk_symbolic()
         device_properties = DeviceProperties.create(kernel_inputs.device())
+        m_hint = V.graph.sizevars.guard_int(m)
+        n_hint = V.graph.sizevars.guard_int(n)
+        # Conservatively estimate two CTAs per 64x64 output tile.
+        output_ctas = 2 * ((m_hint + 63) // 64) * ((n_hint + 63) // 64)
+        min_k_split = (
+            device_properties.multi_processor_count + output_ctas - 1
+        ) // output_ctas
         k_splits = get_k_splits(
             m,
             n,
             k,
-            num_sms=device_properties.multi_processor_count,
-            max_workspace_bytes=128 * 1024 * 1024,
+            min_k_split=min_k_split,
         )
 
         for k_split in k_splits:
