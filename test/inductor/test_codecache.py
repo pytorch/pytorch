@@ -3056,7 +3056,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
         with fresh_cache():
-            # captured graph is lambda x, s0: x * s0
+            # captured graph is x * s0; placeholder order follows the traced
+            # graph, so build the call args from `args` rather than assuming it
             gm, args, kwargs = self.capture(f)(x)
             if kwargs:
                 raise AssertionError
@@ -3065,7 +3066,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             gm, args, dynamic_shapes="from_graph", aot=is_aot
         )
         x = torch.ones(4)
-        (result,) = compiled_artifact(x, 4)
+        call_args = [4 if isinstance(a, (int, torch.SymInt)) else x for a in args]
+        (result,) = compiled_artifact(*call_args)
         self.assertEqual(result, x * 4)
 
     @config.patch({"fx_graph_cache": True})
@@ -3373,7 +3375,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
                 gm, args, dynamic_shapes=dynamic_shapes, aot=is_aot
             )
             y = torch.randn(4)
-            (result,) = compiled_artifact(y, 4)
+            call_args = [4 if isinstance(a, (int, torch.SymInt)) else y for a in args]
+            (result,) = compiled_artifact(*call_args)
             self.assertEqual(result, y * 4)
             return compiled_artifact
 
