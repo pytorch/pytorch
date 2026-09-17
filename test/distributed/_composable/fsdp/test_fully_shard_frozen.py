@@ -58,9 +58,6 @@ class TestFullyShardFrozen(FSDPTest):
         via the custom autograd function backward (i.e. that they are not
         delayed until the end of backward).
         """
-        # A bare device type (without index) resolves to each rank's current
-        # device, while the injected `device` is the primary device on every rank.
-        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True, 2],
@@ -68,12 +65,10 @@ class TestFullyShardFrozen(FSDPTest):
                 "freeze_after_init": [False, True],
             },
             self._test_train_mixed_requires_grad_per_group,
-            device_type,
         )
 
     def _test_train_mixed_requires_grad_per_group(
         self,
-        device_type: str,
         reshard_after_forward: bool | int,
         use_activation_checkpointing: bool,
         freeze_after_init: bool,
@@ -89,7 +84,7 @@ class TestFullyShardFrozen(FSDPTest):
                 if "bias" not in param_name:
                     param.requires_grad_(False)
         ref_model = replicate(
-            copy.deepcopy(model).to(device_type),
+            copy.deepcopy(model).to(self.device_type),
             device_ids=[self.rank],
             find_unused_parameters=freeze_after_init,
         )
@@ -134,7 +129,7 @@ class TestFullyShardFrozen(FSDPTest):
             return orig_backward(*args, **kwargs)
 
         torch.manual_seed(42 + self.rank + 1)
-        device = device_type
+        device = self.device_type
         with (
             patch_reduce_scatter(reduce_scatter),
             patch_register_post_backward_hook_backward(backward_with_count),
@@ -161,19 +156,16 @@ class TestFullyShardFrozen(FSDPTest):
         parameters across different FSDP communication groups, including
         possibly unfreezing parameters.
         """
-        device_type = torch.device(device).type
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True, 2],
                 "unfreeze_params": [False, True],
             },
             self._test_train_mixed_requires_grad_across_groups,
-            device_type,
         )
 
     def _test_train_mixed_requires_grad_across_groups(
         self,
-        device_type: str,
         reshard_after_forward: bool | int,
         unfreeze_params: bool,
     ):
@@ -184,7 +176,7 @@ class TestFullyShardFrozen(FSDPTest):
             modules += [nn.Linear(lin_dim, lin_dim), nn.ReLU()]
         model = nn.Sequential(*modules)
         ref_model = replicate(
-            copy.deepcopy(model).to(device_type),
+            copy.deepcopy(model).to(self.device_type),
             device_ids=[self.rank],
             find_unused_parameters=True,
         )
@@ -212,7 +204,7 @@ class TestFullyShardFrozen(FSDPTest):
         _set_requires_grad(ref_model, False)
         num_iters, no_grad_iter_idx = (3, 1)
         torch.manual_seed(42 + self.rank)
-        inp = torch.randn((8, lin_dim), device=device_type)
+        inp = torch.randn((8, lin_dim), device=self.device_type)
         with patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(num_iters):
                 losses: list[torch.Tensor] = []
@@ -244,12 +236,10 @@ class TestFullyShardFrozen(FSDPTest):
         self.run_subtests(
             {"reshard_after_forward": [True, False, 2]},
             self._test_multi_forward_mixed_requires_grad,
-            torch.device(device).type,
         )
 
     def _test_multi_forward_mixed_requires_grad(
         self,
-        device_type: str,
         reshard_after_forward: bool | int,
     ):
         class MultiForwardModule(nn.Module):
@@ -273,7 +263,7 @@ class TestFullyShardFrozen(FSDPTest):
         torch.manual_seed(42)
         model = MultiForwardModule(torch.device("cpu"))
         ref_model = replicate(
-            copy.deepcopy(model).to(device_type), device_ids=[self.rank]
+            copy.deepcopy(model).to(self.device_type), device_ids=[self.rank]
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for module in model.modules():
@@ -282,7 +272,7 @@ class TestFullyShardFrozen(FSDPTest):
         fully_shard(model, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         for iter_idx in range(10):
-            inp = torch.randn((8, 5), device=device_type)
+            inp = torch.randn((8, 5), device=self.device_type)
             losses: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
