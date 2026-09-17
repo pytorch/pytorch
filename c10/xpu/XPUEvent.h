@@ -203,6 +203,7 @@ struct XPUEvent {
       }
     }
     TORCH_CHECK(reusable_, "XPUEvent must be reusable to support IPC.");
+    // Reject re-exporting an event that was itself imported from an IPC handle.
     TORCH_CHECK(
         event().ext_oneapi_ipc_enabled(),
         "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
@@ -242,7 +243,8 @@ struct XPUEvent {
     TORCH_CHECK(
         !enable_ipc_, "XPU IPC events require SYCL compiler 2026.2 or later.");
 #endif
-    // Only IPC-enabled events are backed by a reusable sycl::event;
+    // Only IPC-enabled events are backed by a reusable sycl::event; this
+    // requires SYCL compiler 2026.2 or later.
     reusable_ = enable_ipc_;
 #if SYCL_COMPILER_VERSION >= 20260200
     if (reusable_) {
