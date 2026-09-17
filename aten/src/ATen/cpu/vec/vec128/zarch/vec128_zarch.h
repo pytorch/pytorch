@@ -1982,7 +1982,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   }
 
   C10_ALWAYS_INLINE const vinner_type& data() const {
-    return _vec.data();
+    return _vec;
   }
 
   template <typename U>
