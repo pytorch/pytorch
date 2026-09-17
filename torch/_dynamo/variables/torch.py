@@ -1154,6 +1154,77 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 kwargs,
             )
 
+        @register(math.ceil)
+        def handle_ceil(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.ceil", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.ceil() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__ceil__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.floor)
+        def handle_floor(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.floor", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.floor() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__floor__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.trunc)
+        def handle_trunc(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            no_keywords(tx, "math.trunc", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.trunc() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__trunc__", [])
+            if result is None:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __trunc__ method"
+                )
+            return result
+
         @register(math.radians)
         def handle_radians(
             self,
