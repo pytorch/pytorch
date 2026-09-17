@@ -92,10 +92,18 @@ it.
 #    a tensor is not data-dependent -- it iterates dim 0 at its static size, so it
 #    unrolls and bakes like the static-``int`` case above.) A STATIC capture REFUSES
 #    such a data-dependent op (the fake trace raises DataDependentOutputException /
-#    DynamicOutputShapeException, surfaced as PrecompileError) instead of freezing the
-#    example run's value into the artifact as a real trace would. An UNBACKED capture
-#    (mark_unbacked, below) is the only path with a ShapeEnv, so it can instead CAPTURE
-#    ``.item()`` as an unbacked value and fails only if the computation must GUARD on it.
+#    DynamicOutputShapeException, surfaced as PrecompileError). The op need not be in
+#    ``fn``'s own code: ``nn.BatchNorm*(momentum=None)`` in ``train()`` mode reads
+#    ``float(num_batches_tracked)``, so the refusal names the underlying ATen op. What a
+#    real (non-fake) trace did with these was not one thing: it RAISED on ``.item()`` and
+#    on a branch over a tensor value, so for those the refusal is only an error-quality
+#    win; it CAPTURED ``.nonzero()`` / masked_select into a graph whose output size varies
+#    with the data, so refusing that one is a deliberate narrowing of the STATIC path. It
+#    has to be: minting a size the fake kernel cannot know needs a ShapeEnv, which a
+#    static capture deliberately does not have. An UNBACKED capture (mark_unbacked, below)
+#    is the only path with a ShapeEnv, so it can instead CAPTURE ``.item()`` as an unbacked
+#    value -- and likewise a ``.nonzero()``-sized intermediate, which captures and serves
+#    at any runtime size -- and fails only if the computation must GUARD on one.
 #    Tracing on fake tensors also needs a meta/fake kernel for every op ``fn`` calls: an
 #    op without one (a custom op missing ``torch.library.register_fake``, but also a
 #    built-in one -- capture turns FakeTensorMode's unsafe fallback OFF, so no op is ever
@@ -107,8 +115,10 @@ it.
 #    behind it), where a real trace would have run the kernel. Fake tracing also
 #    constrains the example INPUTS themselves: every example tensor (user input, param or
 #    buffer) must be representable as a fake tensor, so one the meta converter cannot
-#    represent -- a quantized tensor, a lazy-device tensor, a functorch-wrapped tensor, a
-#    view out of a sparse tensor -- is refused at capture; a real trace accepted those. A
+#    represent -- a quantized tensor, a lazy-device tensor, a legacy batched tensor, a
+#    view out of a sparse tensor -- is refused at capture. A real trace accepted a view out
+#    of a sparse tensor; it did NOT accept a quantized input, it crashed on one with a raw
+#    NotImplementedError out of make_fx's own placeholder fakeification. A
 #    NESTED tensor is refused too, on BOTH capture paths, but as a restriction rather than
 #    a claim about fakeification (the unbacked path's ShapeEnv could fakeify a jagged one;
 #    nothing downstream of the trace has a nested representation) -- and a real trace did
@@ -302,7 +312,9 @@ class PrecompileError(RuntimeError):
     Raised when capture, lowering, ``load``, or a runtime call violates the precompile
     contract -- e.g. a tensor baked as a constant (invariant 1), an unsupported /
     effectful op, a data-dependent op the fake-tensor capture cannot know (``.item()``,
-    ``.nonzero()``, a branch over a tensor value), an op with no meta/fake kernel, a
+    ``.nonzero()``, a branch over a tensor value), an op with no meta/fake kernel and none
+    that can be synthesized (a ``torch.library.custom_op`` that only mutates its arguments
+    and returns nothing gets a trivial one, so it needs no ``register_fake``), a
     ``.data_ptr()`` read, an example input that cannot be represented as a fake tensor (a
     quantized tensor), a nested example input, which capture does not support on either
     path (invariant 3), a non-tensor output the inductor backend cannot lower, or a runtime
@@ -559,6 +571,13 @@ def _fakeify_with_unbacked(
             elif not per:
                 fake_user.append(_fakeify_input(fake_mode, leaf, label))
             else:
+                # Validate the marked leaf through the same helper -- the fake it returns
+                # is discarded, since the leaf is rebuilt at its unbacked sizes below --
+                # so an unfakeifiable input is named whether or not it is the marked one.
+                # Without this it escapes as a raw meta-kernel error (for a marked
+                # quantized input: "SymIntArrayRef expected to contain only concrete
+                # integers"), because the rebuild never consults the meta converter.
+                _fakeify_input(fake_mode, leaf, label)
                 sizes: list[Any] = []  # mix of static ints and unbacked SymInts
                 for i, s in enumerate(leaf.shape):
                     if i not in per:
@@ -608,10 +627,12 @@ def _fakeify_input(fake_mode: FakeTensorMode, t: Tensor, label: str) -> Tensor:
     ``label`` is one of ``_capture``'s ``input_labels`` ("parameter w", "buffer nt",
     "user input 0"), so the refusal names what the caller has to change.
 
-    Shared by BOTH capture paths (the unbacked one for its params/buffers and unmarked
-    inputs), so the same input is refused the same way whether or not any dim is marked.
+    Shared by BOTH capture paths, so the same input is refused the same way whether or not
+    any dim is marked: the unbacked path fakeifies its params/buffers and its unmarked
+    inputs through this helper, and calls it on a MARKED leaf too (discarding the result)
+    to validate a leaf it then rebuilds at unbacked sizes.
     An input the meta converter cannot represent -- a quantized tensor, a lazy-device
-    tensor, a functorch-wrapped tensor or a view out of a sparse tensor (fake_tensor.py
+    tensor, a legacy batched tensor or a view out of a sparse tensor (fake_tensor.py
     raises this for the first, and meta_utils returns NotImplemented on the rest) --
     cannot be traced on either path; this buys error quality, a PrecompileError that names
     the input instead of a raw converter error. Narrow on purpose: any other failure in
@@ -788,19 +809,6 @@ def _capture(
         _intern_param_buffers(mods)
     )
     num_pb = len(pb_flat)
-    # Record each interned param's / buffer's example SHAPE, DTYPE, and DEVICE (aligned to
-    # param_names / buffer_names) so the structural check (invariant 2) compares not just
-    # names but also each runtime tensor's shape, dtype, and device. The graph is specialized
-    # to the example param/buffer shapes (and can bake a device literal via a factory op), so
-    # a same-named runtime tensor with a different shape / dtype / device would otherwise
-    # silently compute the wrong thing (eager has no assert_size_stride backstop).
-    param_shapes = [tuple(t.shape) for t in pb_flat[:num_params]]
-    buffer_shapes = [tuple(t.shape) for t in pb_flat[num_params:]]
-    param_dtypes = [str(t.dtype) for t in pb_flat[:num_params]]
-    buffer_dtypes = [str(t.dtype) for t in pb_flat[num_params:]]
-    param_devices = [str(t.device) for t in pb_flat[:num_params]]
-    buffer_devices = [str(t.device) for t in pb_flat[num_params:]]
-
     user_flat, in_spec = pytree.tree_flatten(user_inputs)
     # Reject mark options precompile cannot honor (mark_dynamic, specialize_on) loudly
     # here, before tracing, rather than silently dropping them. (hint_override is honored,
@@ -828,9 +836,10 @@ def _capture(
     # while the unbacked path's ShapeEnv could, nothing downstream of the trace has a
     # nested representation (the recorded dense shape/dtype/device the driver checks
     # against is None for one), so it is a capture-wide restriction rather than a claim
-    # about either fake mode. Refusing here, ahead of the _dense_shape reads below, is also
-    # what gets a STRIDED nested tensor the same named refusal rather than the raw
-    # "NestedTensorImpl doesn't support sizes" that reading t.shape on it raises.
+    # about either fake mode. This loop runs ahead of EVERY shape read below -- the
+    # param/buffer records and the user-input _dense_shape records alike -- which is what
+    # gets a STRIDED nested parameter, buffer or user input the same named refusal rather
+    # than the raw "NestedTensorImpl doesn't support sizes" that reading t.shape raises.
     for label, a in zip(input_labels, flat_args):
         if isinstance(a, torch.Tensor) and a.is_nested:
             raise PrecompileError(
@@ -839,6 +848,19 @@ def _capture(
                 "supported subclass) -- on the model for a parameter/buffer, at the call "
                 "site for a user input."
             )
+    # Record each interned param's / buffer's example SHAPE, DTYPE, and DEVICE (aligned to
+    # param_names / buffer_names) so the structural check (invariant 2) compares not just
+    # names but also each runtime tensor's shape, dtype, and device. The graph is specialized
+    # to the example param/buffer shapes (and can bake a device literal via a factory op), so
+    # a same-named runtime tensor with a different shape / dtype / device would otherwise
+    # silently compute the wrong thing (eager has no assert_size_stride backstop).
+    param_shapes = [tuple(t.shape) for t in pb_flat[:num_params]]
+    buffer_shapes = [tuple(t.shape) for t in pb_flat[num_params:]]
+    param_dtypes = [str(t.dtype) for t in pb_flat[:num_params]]
+    buffer_dtypes = [str(t.dtype) for t in pb_flat[num_params:]]
+    param_devices = [str(t.device) for t in pb_flat[:num_params]]
+    buffer_devices = [str(t.device) for t in pb_flat[num_params:]]
+
     # Record the example user inputs' dense shapes/dtypes/devices so the drivers can
     # reject a shape (invariant 3) or dtype/device (invariant 6) mismatch up front; see
     # the inlined driver checks (torch._precompile_driver). Stride is NOT recorded --
@@ -1025,19 +1047,26 @@ def _capture(
         # (allow_non_fake_inputs), so an in-place op on it does execute for real, before
         # invariant 1 refuses the program below. make_fx re-fakeifies the leaves itself (it
         # passes a source, so from_tensor's identity fast-path does not apply), so the
-        # graph's placeholder metas are NOT the fakes built above. The load-bearing line is
-        # the "with capture_cm" around the trace: detect_fake_mode ranks the ACTIVE
-        # dispatch-stack mode above any mode it finds on the arguments, so the "with" is
-        # what make_fx adopts, and dropping it (say, because "the args are already fake")
-        # is what would silently give make_fx its own mode with a fresh ShapeEnv and turn
-        # every data-dependent refusal below back into an unbacked symint. The pre-fakeify
-        # loop is for the named per-input refusal above (which reports which example input
-        # cannot be fakeified at all) and for handing the lowering fake flat_args; the fake
-        # arguments are only a redundant second source for the same mode. The unbacked path
-        # keeps its symbolic ShapeEnv ("symbolic"); a static capture uses concrete fake
-        # shapes ("fake"). A data-dependent op (.item(), .nonzero(), a tensor-value branch)
-        # that a real trace would silently specialize now raises at capture rather than
-        # baking an unsound constant.
+        # graph's placeholder metas are NOT the fakes built above. What the trace must adopt
+        # is a shape_env-less fake mode, and there are TWO sources for one here:
+        # detect_fake_mode takes the ACTIVE dispatch-stack mode (the "with capture_cm"
+        # below) first and falls back to a mode it finds on the arguments (the flat_args
+        # pre-fakeified above). Dropping either alone still refuses everything below;
+        # dropping BOTH (handing make_fx real tensors with no "with") is what silently gives
+        # it its own mode with a fresh ShapeEnv and allow_fallback_kernels back on, turning
+        # every data-dependent refusal below into an unbacked symint. Both are kept, with
+        # the "with" as the primary: it also covers a call whose flat_args hold no tensor at
+        # all, where there is nothing to detect a mode from. Neither source outranks an
+        # ambient TracingContext.fake_mode, which detect_fake_mode takes authoritatively, so
+        # precompile is not meant to be called from inside another trace. What the
+        # pre-fakeify loop buys on top is the named per-input refusal above (which reports
+        # WHICH example input cannot be fakeified) and the fake flat_args handed to the
+        # lowering. The unbacked path keeps its symbolic ShapeEnv ("symbolic"); a static
+        # capture uses concrete fake shapes ("fake"). A data-dependent op the fake trace
+        # cannot know is refused below rather than leaking the fake exception: a real trace
+        # RAISED on .item() and on a tensor-value branch, and CAPTURED .nonzero() into a
+        # dynamically-sized graph that a shape_env-less capture cannot express at all
+        # (mark_unbacked is the path that can).
         tracing_mode = "symbolic" if fake_mode is not None else "fake"
         with capture_cm:
             try:
@@ -1076,7 +1105,12 @@ def _capture(
                     ".nonzero(), masked_select, a Python branch over a tensor value) "
                     "whose result cannot be known while tracing on fake tensors, so it "
                     "cannot be captured; make_fx specializes only static (Python int) "
-                    f"control flow. Underlying: {e}"
+                    "control flow. The op may be inside a module fn calls rather than in "
+                    "fn's own code -- nn.BatchNorm*(momentum=None) in train() mode reads "
+                    "float(num_batches_tracked) -- so go by the underlying op named below. "
+                    "A shape-producing op (.nonzero(), masked_select) can be captured by "
+                    "marking a user-input dim with torch._dynamo.decorators.mark_unbacked, "
+                    f"which gives capture the ShapeEnv it needs. Underlying: {e}"
                 ) from e
             except AttributeError as e:
                 # torch.while_loop's fake kernel unconditionally enters
@@ -1096,10 +1130,22 @@ def _capture(
                 # raises UnsupportedOperatorException (a RuntimeError subclass, so this
                 # clause catches it); a torch.library.custom_op without
                 # register_fake raises a RuntimeError naming the missing fake impl; a
-                # .data_ptr() read raises "Cannot access data pointer" (that is what the
-                # config patch above buys us). Anything else is not ours to explain.
+                # .data_ptr() read raises one of the two FAKE data-pointer messages matched
+                # below (that is what the config patch above buys us). Anything else is not
+                # ours to explain.
                 first = (str(e).splitlines() or [""])[0]
-                if "Cannot access data pointer" in str(e):
+                # Match the fake-specific texts, not the generic "Cannot access data
+                # pointer" prefix: a REAL tensor with no storage (e.g. a sparse tensor fn
+                # closes over) raises "...of Tensor that doesn't have storage" from the same
+                # c10 code and must reach the caller unrelabeled. Two sites report a fake
+                # read: StorageImpl names FakeTensor, while TensorImpl's typed data_ptr_impl
+                # (reached by a kernel that dereferences a fake tensor -- e.g. tensor_split
+                # with tensor indices) reports uninitialized storage instead.
+                reads_fake_data_ptr = (
+                    "Cannot access data pointer of Tensor (e.g. FakeTensor" in str(e)
+                    or "its data is not allocated yet" in str(e)
+                )
+                if reads_fake_data_ptr:
                     raise PrecompileError(
                         "precompile: fn reads a tensor's data pointer (.data_ptr(), or a "
                         "kernel that dereferences one), which the fake-tensor trace "
@@ -1965,7 +2011,10 @@ class _PrecompileApi:
         tensor baked as a constant (invariant 1), effectful ops (invariant 4), a
         data-dependent op a static (fake-tensor) capture cannot know -- ``.item()``,
         ``.nonzero()``, a Python branch over a tensor value -- an op with no meta/fake
-        kernel, a ``.data_ptr()`` read, an example input the fake trace cannot represent
+        kernel and none that can be synthesized (a ``torch.library.custom_op`` that only
+        mutates its arguments and returns nothing gets a trivial one, so it captures
+        without a ``register_fake``), a ``.data_ptr()`` read, an example input the fake
+        trace cannot represent
         (a quantized tensor), a nested example input, which capture does not support on
         either path (invariant 3), and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
