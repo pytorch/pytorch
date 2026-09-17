@@ -408,7 +408,7 @@ class TestPrecompileRender(torch._inductor.test_case.TestCase):
     def _forward(self, python_code):
         from torch._precompile import _make_inlined_forward
 
-        return _make_inlined_forward(python_code, warn=False)
+        return _make_inlined_forward(python_code, "precompile.load", warn=False)
 
     def test_standalone_artifact_serves_every_captured_variant(self):
         from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
