@@ -101,7 +101,10 @@ class PrecompileSummary:
     the lists can neither identify a frame nor be checked disjoint.
 
     Attributes:
-        frames: Captured frames.
+        frames: Captured frames: every frame the package holds an entry for, the
+            ``bypassed``, ``truncated`` and ``uncovered_frames`` ones included,
+            so the digest's frame clauses cut into this count rather than add
+            to it.
         resume_functions: Of those, the graph-break continuations.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
@@ -128,13 +131,16 @@ class PrecompileSummary:
             guards the source without pinning it, so as captured no variant
             served another value. Observed, not proven: a variant that never
             guarded the source does not count as serving other values of it.
-        dropped_guards: Slots the serialized copy's guard filter rejected: the
-            guards of a type the serializer refuses (the identity guards, plus
-            ``DICT_VERSION`` and ``WEAKREF_ALIVE``), and the guards of another
-            type whose check derives one, listed under their own type (a
-            ``TENSOR_MATCH`` that checks identity is a dropped ``TENSOR_MATCH``;
-            ``TYPE_MATCH`` and ``BUILTIN_MATCH`` are kept whatever they derive);
-            plus whatever a caller-supplied filter dropped.
+        dropped_guards: Slots the serialized copy's guard filter rejected. Under
+            the default filter (``default_guard_filter_fn`` in
+            ``torch._dynamo.precompile_package``) that is the guards of a type
+            the serializer refuses (the identity guards, plus ``DICT_VERSION``
+            and ``WEAKREF_ALIVE``) and the guards of another type whose check
+            derives one, listed under their own type (a ``TENSOR_MATCH`` that
+            checks identity is a dropped ``TENSOR_MATCH``), except the types
+            that filter keeps by type before it looks at what they derive; its
+            docstring names them and says why, and this one does not repeat the
+            list. A caller-supplied filter decides its own set.
         kept_guards: Slots the artifact still checks.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
             captured variants apart, or flagged by the risky-drop lint as a
