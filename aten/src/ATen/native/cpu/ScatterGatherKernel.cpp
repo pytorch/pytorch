@@ -13,7 +13,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
-#include <c10/util/llvmMathExtras.h>
+#include <bit>
 #ifdef USE_FBGEMM
 #include <fbgemm/Utils.h>
 #endif
@@ -844,8 +844,9 @@ std::pair<K*, V*> radix_sort_parallel(
   // up to a sign bit
   int num_bits = sizeof(K) * 8;
   if (!maybe_with_neg_vals)
-    num_bits -= c10::llvm::countLeadingZeros(
-                                 static_cast<typename std::make_unsigned<K>::type>(max_value));
+    num_bits -=
+        std::countl_zero(static_cast<typename std::make_unsigned<K>::type>(
+            max_value));
 
   const unsigned int num_passes = (num_bits + 7) / 8;
 
