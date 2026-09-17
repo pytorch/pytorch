@@ -3116,6 +3116,236 @@ partial_fn = functools.partial(fn, scale=2)
             case {"b": param}:
                 return x / param
 
+    @parametrize("name, expected", (("ceil", 42), ("floor", 7), ("trunc", 3)))
+    def test_math_ceil_floor_trunc_custom_object(self, name, expected):
+        class C:
+            def __ceil__(self):
+                return 42
+
+            def __floor__(self):
+                return 7
+
+            def __trunc__(self):
+                return 3
+
+        fn = getattr(math, name)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + fn(C())
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + expected)
+
+    @parametrize("name", ("ceil", "floor", "trunc"))
+    def test_math_ceil_floor_trunc_special_lookup(self, name):
+        class C:
+            def __ceil__(self):
+                return 42
+
+            __floor__ = __trunc__ = __ceil__
+
+        obj = C()
+        obj.__ceil__ = obj.__floor__ = obj.__trunc__ = lambda: 99
+        fn = getattr(math, name)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + fn(obj)
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + 42)
+
+    def test_math_ceil_floor_float_fallback(self):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def func(x):
+            return x + math.ceil(FloatLike(42.5)) + math.floor(FloatLike(41.9))
+
+        x = torch.rand(10)
+        self.assertEqual(func(x), x + 43 + 41)
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("value", (42, 2**53 + 1))
+    def test_math_ceil_floor_index_fallback(self, name, value):
+        class IndexLike:
+            def __index__(self):
+                return value
+
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(IndexLike())
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("base", (int, float))
+    def test_math_ceil_floor_conversion_subclass(self, name, base):
+        class Number(base):
+            def __float__(self):
+                return 99.5
+
+            def __ceil__(self):
+                return 99
+
+            __floor__ = __ceil__
+
+        value = Number(42.5 if base is float else 42)
+
+        class FloatLike:
+            def __float__(self):
+                return value
+
+        class IndexLike:
+            def __index__(self):
+                return value
+
+        obj = FloatLike() if base is float else IndexLike()
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(obj)
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        with self.assertWarns(DeprecationWarning):
+            expected = func(x)
+        self.assertEqual(opt(x), expected)
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("protocol", ("float", "index"))
+    def test_math_ceil_floor_symbolic_fallback(self, name, protocol):
+        class FloatLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __float__(self):
+                return self.value / 2
+
+        class IndexLike:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        cls = FloatLike if protocol == "float" else IndexLike
+        fn = getattr(math, name)
+
+        def func(x):
+            return x + 1, fn(cls(x.shape[0]))
+
+        x = torch.rand(7)
+        opt = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize(
+        "protocol,value,error",
+        (
+            ("float", 1, TypeError),
+            ("float", float("inf"), OverflowError),
+            ("float", float("nan"), ValueError),
+            ("index", 1.5, TypeError),
+            ("index", 10**400, OverflowError),
+        ),
+    )
+    # Unspecialized, 10**400 hits sym_float: RuntimeError, not OverflowError.
+    @torch._dynamo.config.patch(specialize_int=True)
+    def test_math_ceil_floor_invalid_conversion(self, name, protocol, value, error):
+        class FloatLike:
+            def __float__(self):
+                return value
+
+        class IndexLike:
+            def __index__(self):
+                return value
+
+        obj = FloatLike() if protocol == "float" else IndexLike()
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                fn(obj)
+            except error as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor"))
+    @parametrize("base", (object, str))
+    def test_math_ceil_floor_non_numeric(self, name, base):
+        class C(base):
+            pass
+
+        obj = C("2.5") if base is str else C()
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                fn(obj)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    @parametrize("name", ("ceil", "floor", "trunc"))
+    @parametrize("call", ("extra", "keyword", "both"))
+    def test_math_ceil_floor_trunc_invalid_arguments(self, name, call):
+        class C:
+            def __ceil__(self):
+                raise AssertionError("special method must not be called")
+
+            __floor__ = __trunc__ = __ceil__
+
+        fn = getattr(math, name)
+
+        def func(x):
+            try:
+                if call == "keyword":
+                    fn(x=C())
+                elif call == "both":
+                    fn(C(), 0, x=C())
+                else:
+                    fn(C(), 0)
+            except TypeError as exc:
+                return x + 1, str(exc)
+            return x - 1, "no exception"
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        self.assertEqual(opt(x), func(x))
+
+    def test_math_ceil_floor_trunc_unchanged(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def constant(x):
+            return x + math.ceil(2.3) + math.floor(-2.3) + math.trunc(-2.3)
+
+        x = torch.rand(10)
+        self.assertEqual(constant(x), x + 3 - 3 - 2)
+
+        @torch.compile(backend="eager", fullgraph=True, dynamic=True)
+        def symbolic(t):
+            return t.new_zeros(math.ceil(t.shape[0] / 2))
+
+        self.assertEqual(symbolic(torch.ones(7)).shape[0], 4)
+        self.assertEqual(symbolic(torch.ones(9)).shape[0], 5)
+
     def test_math_radians(self):
         def func(x, a):
             return x + math.radians(a)
