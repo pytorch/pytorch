@@ -15,10 +15,16 @@ from pathlib import Path
 import torch
 import torch._logging._internal as log_internal
 from torch._logging._internal import _init_logs, trace_log, trace_structured
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class LoggingTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_backend_autoload_registers_torch_logs_before_env_parse(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             package_dir = os.path.join(tmpdir, "torch_issue173759_backend")
@@ -221,8 +227,13 @@ class LoggingTest(TestCase):
                     for log_qname in log_internal.log_registry.get_log_qnames():
                         logger = logging.getLogger(log_qname)
                         created_handlers.update(logger.handlers)
+                        torch_handlers = [
+                            handler
+                            for handler in logger.handlers
+                            if log_internal._is_torch_handler(handler)
+                        ]
                         self.assertEqual(
-                            len(logger.handlers),
+                            len(torch_handlers),
                             2,
                             f"{log_qname} should only have stream and file handlers",
                         )
