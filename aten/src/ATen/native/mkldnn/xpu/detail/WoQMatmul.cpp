@@ -253,7 +253,7 @@ void woq_matmul_int4_impl_cache(
       f_attr,
       group_size,
       zp_group_size,
-      static_cast<int>(scale.scalar_type()));
+      scale.scalar_type());
 
   auto& engine = GpuEngineManager::Instance().get_engine();
 
