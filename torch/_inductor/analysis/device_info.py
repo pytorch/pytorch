@@ -288,6 +288,20 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_bw_gbs=1228.8,
         dram_gb=48,
     ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/ark/products/series/232874/
+    # intel-data-center-gpu-max-series.html
+    "Intel(R) Data Center GPU Max 1550": DeviceInfo(
+        tops={
+            torch.float32: 26.2,
+            "torch.tf32": 26.2,
+            torch.float16: 419.43,
+            torch.bfloat16: 419.43,
+            torch.int8: 838.86,
+        },
+        dram_bw_gbs=3276.8,
+        dram_gb=128,
+    ),
 }
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]

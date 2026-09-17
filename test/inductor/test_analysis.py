@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
-from torch._inductor.analysis.device_info import _device_mapping, lookup_device_info
+from torch._inductor.analysis.device_info import (
+    _device_mapping,
+    datasheet_dram_bw_gbs,
+    datasheet_tops,
+    lookup_device_info,
+)
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
@@ -281,6 +286,12 @@ class TestUtils(TestCase):
         self.assertIsNotNone(upper)
         self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
         self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
+
+    def test_datasheet_info_for_intel_data_center_gpu_max_1550(self):
+        device_name = "Intel(R) Data Center GPU Max 1550"
+        self.assertEqual(datasheet_tops(torch.float16, device_name=device_name), 419.43)
+        self.assertEqual(datasheet_tops(torch.float32, device_name=device_name), 26.2)
+        self.assertEqual(datasheet_dram_bw_gbs(device_name=device_name), 3276.8)
 
 
 def has_supported_gpu():
