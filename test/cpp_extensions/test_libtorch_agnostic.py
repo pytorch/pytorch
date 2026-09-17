@@ -421,6 +421,50 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(values, expected.values)
         self.assertEqual(indices, expected.indices)
 
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float32, torch.float64)
+    @parametrize(
+        "torch_op,batch_shape",
+        [(torch.mm, ()), (torch.bmm, (4,))],
+        name_fn=lambda op, _: op.__name__,
+    )
+    def test_my_mm_out_ops(self, device, dtype, torch_op, batch_shape):
+        """Test mm.out and bmm.out stable ops."""
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        stable_op = getattr(libtorch_agnostic.ops, f"my_{torch_op.__name__}_out")
+
+        a = torch.randn(*batch_shape, 3, 5, device=device, dtype=dtype)
+        b = torch.randn(*batch_shape, 5, 2, device=device, dtype=dtype)
+        out = torch.empty(*batch_shape, 3, 2, device=device, dtype=dtype)
+        result = stable_op(out, a, b)
+        self.assertEqual(out, torch_op(a, b))
+        self.assertEqual(id(result), id(out))
+
+        # Non-contiguous (transposed) inputs
+        a_t = torch.randn(*batch_shape, 5, 3, device=device, dtype=dtype).transpose(
+            -1, -2
+        )
+        b_t = torch.randn(*batch_shape, 2, 5, device=device, dtype=dtype).transpose(
+            -1, -2
+        )
+        out_t = torch.empty(*batch_shape, 3, 2, device=device, dtype=dtype)
+        stable_op(out_t, a_t, b_t)
+        self.assertEqual(out_t, torch_op(a_t, b_t))
+
+        # Non-contiguous (transposed) out
+        out_v = torch.empty(*batch_shape, 2, 3, device=device, dtype=dtype).transpose(
+            -1, -2
+        )
+        stable_op(out_v, a, b)
+        self.assertFalse(out_v.is_contiguous())
+        self.assertEqual(out_v, torch_op(a, b))
+
+        # Mismatched inner dimensions should raise
+        bad = torch.randn(*batch_shape, 4, 2, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            stable_op(out, a, bad)
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).

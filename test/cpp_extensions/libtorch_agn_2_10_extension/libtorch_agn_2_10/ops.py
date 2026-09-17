@@ -821,6 +821,34 @@ def my_sort_stable(
     )
 
 
+def my_mm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the matrix product of two 2-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 2-D input tensor
+        mat2: Tensor - second 2-D input tensor
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_mm_out.default(out, self, mat2)
+
+
+def my_bmm_out(out, self, mat2) -> Tensor:
+    """
+    Computes the batch matrix product of two 3-D tensors into out.
+
+    Args:
+        out: Tensor - output tensor, modified in-place
+        self: Tensor - first 3-D input tensor of shape (b, n, m)
+        mat2: Tensor - second 3-D input tensor of shape (b, m, p)
+
+    Returns: Tensor - the out tensor
+    """
+    return torch.ops.libtorch_agn_2_10.my_bmm_out.default(out, self, mat2)
+
+
 # =============================================================================
 # Proxy for inherited ops (from libtorch_agn_2_9_extension/csrc/)
 #

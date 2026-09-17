@@ -1389,6 +1389,62 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
       torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
 }
 
+/// Stable version of the mm.out op.
+///
+/// Computes the matrix product of the 2-D tensors self and mat2, storing the
+/// result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.out op.
+///
+/// Computes the batch matrix product of the 3-D tensors self and mat2,
+/// storing the result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

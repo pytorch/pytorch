@@ -142,6 +142,12 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::matmul
 ```
 
+```{doxygenfunction} torch::stable::mm_out
+```
+
+```{doxygenfunction} torch::stable::bmm_out
+```
+
 ```{doxygenfunction} torch::stable::amax(const torch::stable::Tensor &self, int64_t dim, bool keepdim)
 ```
 
