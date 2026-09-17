@@ -23,6 +23,12 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
+from torch.distributed.pipelining._p2p import (
+    _build_p2p_edge_groups,
+    _p2p_edge_matchings,
+    _p2p_topology,
+    _PP_EDGE_GROUP_CACHE,
+)
 from torch.distributed.pipelining._recv_buffers import _RecvInfo
 from torch.distributed.pipelining._utils import (
     _TensorMeta,
@@ -543,6 +549,39 @@ class ScheduleTest(TestCase):
         ):
             stage.get_fwd_recv_ops(2)
         self.assertIsNone(missing_edge.buffer)
+
+    def test_same_rank_recv_assignment_is_transactional(self):
+        stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
+        stage.stage_index = 1
+        stage.device = torch.device("cpu")
+        stage.has_backward = True
+        meta = _TensorMeta.from_tensor(torch.ones(2))
+
+        fwd_infos = tuple(
+            _RecvInfo(name, source=0, tensor_meta=meta) for name in ("fwd_0", "fwd_1")
+        )
+        stage.args_recv_info = {0: fwd_infos}
+        with self.assertRaisesRegex(AssertionError, "expected tensor values"):
+            stage.set_local_fwd_input((torch.ones(2), "invalid"), 0)
+        self.assertTrue(all(info.buffer is None for info in fwd_infos))
+
+        occupied = torch.ones(2)
+        fwd_infos[1].set_buffer(occupied)
+        with self.assertRaisesRegex(
+            PipeliningMetadataError, "incomplete pipeline step"
+        ):
+            stage.set_local_fwd_input((torch.ones(2), torch.ones(2)), 0)
+        self.assertIsNone(fwd_infos[0].buffer)
+        self.assertIs(fwd_infos[1].buffer, occupied)
+        fwd_infos[1].take_buffer()
+
+        bwd_infos = tuple(
+            _RecvInfo(name, source=2, tensor_meta=meta) for name in ("bwd_0", "bwd_1")
+        )
+        stage.grad_recv_info = {0: bwd_infos}
+        with self.assertRaisesRegex(AssertionError, "expected tensor values"):
+            stage.set_local_bwd_input((None, "invalid"), 0)
+        self.assertTrue(all(info.buffer is None for info in bwd_infos))
 
     def test_timestep_recv_validation_releases_prior_batches(self):
         meta = _TensorMeta.from_tensor(torch.ones(2))

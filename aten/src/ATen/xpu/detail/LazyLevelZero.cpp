@@ -16,87 +16,67 @@ at::DynamicLibrary& getZELibrary() {
   return lib;
 }
 
-#define _STUB_1(LIB, NAME, RETTYPE, ARG1)                                     \
-  RETTYPE NAME(ARG1 a1) {                                                     \
+// Generates the typed parameter list / forwarding argument list for a stub
+// of a given arity, e.g. _STUB_PARAMS_2(int, float) -> "int a1, float a2".
+#define _STUB_PARAMS_1(A1) A1 a1
+#define _STUB_PARAMS_2(A1, A2) A1 a1, A2 a2
+#define _STUB_PARAMS_3(A1, A2, A3) A1 a1, A2 a2, A3 a3
+#define _STUB_PARAMS_4(A1, A2, A3, A4) A1 a1, A2 a2, A3 a3, A4 a4
+#define _STUB_PARAMS_5(A1, A2, A3, A4, A5) A1 a1, A2 a2, A3 a3, A4 a4, A5 a5
+
+// The types aren't needed to forward the call, only their count.
+#define _STUB_ARGS_1(...) a1
+#define _STUB_ARGS_2(...) a1, a2
+#define _STUB_ARGS_3(...) a1, a2, a3
+#define _STUB_ARGS_4(...) a1, a2, a3, a4
+#define _STUB_ARGS_5(...) a1, a2, a3, a4, a5
+
+// Counts the number of variadic ARGn types (1-5) passed to ZE_STUB
+#define _STUB_NARGS_IMPL(_1, _2, _3, _4, _5, N, ...) N
+#define _STUB_NARGS(...) \
+  C10_EXPAND_MSVC_WORKAROUND(_STUB_NARGS_IMPL(__VA_ARGS__, 5, 4, 3, 2, 1))
+
+#define _STUB_DISPATCH(HELPER, NARG, ...) \
+  C10_CONCATENATE(HELPER, NARG)(__VA_ARGS__)
+#define _STUB_PARAMS(...) \
+  _STUB_DISPATCH(_STUB_PARAMS_, _STUB_NARGS(__VA_ARGS__), __VA_ARGS__)
+#define _STUB_ARGS(...) \
+  _STUB_DISPATCH(_STUB_ARGS_, _STUB_NARGS(__VA_ARGS__), __VA_ARGS__)
+
+#define _STUB(LIB, NAME, RETTYPE, ...)                                        \
+  RETTYPE NAME(_STUB_PARAMS(__VA_ARGS__)) {                                   \
     auto fn =                                                                 \
         reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
     TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
     lazyLevelZero.NAME = fn;                                                  \
-    return fn(a1);                                                            \
+    return fn(_STUB_ARGS(__VA_ARGS__));                                       \
   }
 
-#define _STUB_2(LIB, NAME, RETTYPE, ARG1, ARG2)                               \
-  RETTYPE NAME(ARG1 a1, ARG2 a2) {                                            \
-    auto fn =                                                                 \
-        reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
-    lazyLevelZero.NAME = fn;                                                  \
-    return fn(a1, a2);                                                        \
-  }
-
-#define _STUB_3(LIB, NAME, RETTYPE, ARG1, ARG2, ARG3)                         \
-  RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3) {                                   \
-    auto fn =                                                                 \
-        reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
-    lazyLevelZero.NAME = fn;                                                  \
-    return fn(a1, a2, a3);                                                    \
-  }
-
-#define _STUB_4(LIB, NAME, RETTYPE, ARG1, ARG2, ARG3, ARG4)                   \
-  RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4) {                          \
-    auto fn =                                                                 \
-        reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
-    lazyLevelZero.NAME = fn;                                                  \
-    return fn(a1, a2, a3, a4);                                                \
-  }
-
-#define _STUB_5(LIB, NAME, RETTYPE, ARG1, ARG2, ARG3, ARG4, ARG5)             \
-  RETTYPE NAME(ARG1 a1, ARG2 a2, ARG3 a3, ARG4 a4, ARG5 a5) {                 \
-    auto fn =                                                                 \
-        reinterpret_cast<decltype(&NAME)>(get##LIB##Library().sym(__func__)); \
-    TORCH_CHECK(fn, "Can't get symbol " C10_STRINGIZE(NAME));                 \
-    lazyLevelZero.NAME = fn;                                                  \
-    return fn(a1, a2, a3, a4, a5);                                            \
-  }
-
-#define ZE_STUB1(NAME, A1) _STUB_1(ZE, NAME, ze_result_t ZE_APICALL, A1)
-#define ZE_STUB2(NAME, A1, A2) _STUB_2(ZE, NAME, ze_result_t ZE_APICALL, A1, A2)
-#define ZE_STUB3(NAME, A1, A2, A3) \
-  _STUB_3(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3)
-#define ZE_STUB4(NAME, A1, A2, A3, A4) \
-  _STUB_4(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4)
-#define ZE_STUB5(NAME, A1, A2, A3, A4, A5) \
-  _STUB_5(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4, A5)
+#define ZE_STUB(NAME, ...) _STUB(ZE, NAME, ze_result_t ZE_APICALL, __VA_ARGS__)
 
 // Intel level zero is not defaultly available on Windows.
 #ifndef _WIN32
-ZE_STUB5(
+ZE_STUB(
     zeModuleCreate,
     ze_context_handle_t,
     ze_device_handle_t,
     const ze_module_desc_t*,
     ze_module_handle_t*,
     ze_module_build_log_handle_t*)
-ZE_STUB3(
+ZE_STUB(
     zeKernelCreate,
     ze_module_handle_t,
     const ze_kernel_desc_t*,
     ze_kernel_handle_t*)
-ZE_STUB2(zeKernelGetProperties, ze_kernel_handle_t, ze_kernel_properties_t*)
-ZE_STUB4(
+ZE_STUB(zeKernelGetProperties, ze_kernel_handle_t, ze_kernel_properties_t*)
+ZE_STUB(
     zeMemGetAllocProperties,
     ze_context_handle_t,
     const void*,
     ze_memory_allocation_properties_t*,
     ze_device_handle_t*)
-ZE_STUB3(
-    zeModuleBuildLogGetString,
-    ze_module_build_log_handle_t,
-    size_t*,
-    char*)
-ZE_STUB1(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
+ZE_STUB(zeModuleBuildLogGetString, ze_module_build_log_handle_t, size_t*, char*)
+ZE_STUB(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
 
 #endif
 
