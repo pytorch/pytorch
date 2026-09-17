@@ -149,6 +149,14 @@ def _check_structure(pb, names):
             )
 
 
+# Device names _autocast_off has already reported: reporting on every served call
+# would make a documented caveat a line of log noise per call. Not in a function
+# body, so _emit_driver_source emits the artifact's own copy -- which is what makes
+# the scope per LOADED ARTIFACT: load() execs python_code into a fresh namespace, so
+# each loaded handle starts with this set empty.
+_AUTOCAST_SKIPS_REPORTED: set[str] = set()
+
+
 def _autocast_off(devices):
     """Neutralize ambient autocast on the devices the captured graph uses.
 
@@ -160,26 +168,49 @@ def _autocast_off(devices):
     than from the runtime tensors: a graph can reach a device none of its
     inputs live on, and one built from factory ops has no input device at all.
 
-    A device this build cannot autocast at all is SKIPPED, not an error: a
-    device type the serving build does not know makes
-    ``is_autocast_available`` raise, and an out-of-tree backend with no
-    registered autocast module reports available and then refuses to construct
-    (``privateuseone``). There is no ambient autocast to neutralize on a device
-    this process cannot enter, so an unfamiliar name in GRAPH_DEVICES must not
-    fail every served call. The stack is built inside a ``with`` and handed
-    back with ``pop_all`` so any other failure unwinds the disables already
-    entered instead of leaving the caller's autocast region off.
+    A device this build cannot autocast at all is SKIPPED with a logged warning,
+    not an error: a device type the serving build does not know makes
+    ``is_autocast_available`` raise ``RuntimeError``, and an out-of-tree backend
+    with no registered autocast module reports available and then fails an
+    ``assert`` in the constructor (``privateuseone``). There is no ambient autocast
+    to neutralize on a device this process cannot enter, so an unfamiliar name in
+    GRAPH_DEVICES must not fail every served call -- but the skip is announced,
+    because on a device this build DOES know a failure here means the served call
+    casts twice, the divergence this function exists to prevent. Reported through
+    ``logging`` rather than ``warnings``, and ONCE per device per LOADED
+    ARTIFACT (_AUTOCAST_SKIPS_REPORTED above is the artifact's own copy, so a second
+    ``load`` of it reports again): a ``UserWarning`` would make the served call raise
+    under ``-W error``, failing the very call this skip keeps working. Only those two
+    exception types are swallowed; anything else propagates. The stack is built
+    inside a ``with`` and handed back with ``pop_all`` so a propagating failure
+    unwinds the disables already entered, not leaving the caller's autocast off.
     """
     import contextlib as _contextlib
+    import logging as _logging
 
     with _contextlib.ExitStack() as stack:
+        _skipped = []
         for _dev in devices:
             try:
-                if not _torch.amp.is_autocast_available(_dev):
+                if _torch.amp.is_autocast_available(_dev):
+                    stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
                     continue
-                stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
-            except Exception:
-                continue
+            except (RuntimeError, AssertionError):
+                pass
+            if _dev not in _AUTOCAST_SKIPS_REPORTED:
+                _AUTOCAST_SKIPS_REPORTED.add(_dev)
+                _skipped.append(_dev)
+        if _skipped:
+            # The logger named literally, not from __name__: this body is inlined
+            # into the artifact, which is not this module.
+            _logging.getLogger("torch._precompile_driver").warning(
+                "precompile: this build cannot autocast the captured graph's "
+                "device(s) %s, so ambient autocast is left on for them. A call "
+                "served inside an autocast region for one of those devices can "
+                "cast a second time on top of the casts already baked into the "
+                "artifact and return a different dtype than the capture did.",
+                _skipped,
+            )
         return stack.pop_all()
 
 
