@@ -7234,7 +7234,8 @@ def scaled_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         output_dtype: dtype used for the output tensor
-        contraction_dim: describe which dimensions are :math:`K` in the matmul.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
