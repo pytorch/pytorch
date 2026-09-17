@@ -119,6 +119,27 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    def test_combined_scheduling_delegates_staged_validation(self):
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+        from torch._inductor.codegen.xpu.xpu_combined_scheduling import (
+            XPUCombinedScheduling,
+        )
+
+        node = Mock()
+        for scheduling_cls in (CUDACombinedScheduling, XPUCombinedScheduling):
+            with self.subTest(scheduling_cls=scheduling_cls.__name__):
+                scheduling = scheduling_cls.__new__(scheduling_cls)
+                triton_scheduling = Mock()
+                scheduling._triton_scheduling = triton_scheduling
+
+                scheduling.validate_staged_reduction(node)
+
+                triton_scheduling.validate_staged_reduction.assert_called_once_with(
+                    node
+                )
+
     def test_translation_proof_matrix(self):
         """Keep the Phase 1 proof and rejection matrix in the in-tree suite."""
         row, feature = sympy.symbols(

@@ -14,6 +14,7 @@ from ..scheduler import (
     FusedStagedReduction,
     Scheduler,
     SchedulerNode,
+    SubParentFusionResult,
 )
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
 from .cutlass.scheduling import CUTLASSScheduling
@@ -65,11 +66,14 @@ class CUDACombinedScheduling(BaseScheduling):
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
 
-    def has_sub_parent_epilogue(self, nodes: Sequence[BaseSchedulerNode]) -> bool:
-        return self._triton_scheduling.has_sub_parent_epilogue(nodes)
-
-    def validate_staged_reduction(self, node: FusedStagedReduction) -> None:
-        return self._triton_scheduling.validate_staged_reduction(node)
+    def has_sub_parent_epilogue(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        fusion_result: SubParentFusionResult | None = None,
+    ) -> bool:
+        return self._triton_scheduling.has_sub_parent_epilogue(
+            nodes, fusion_result
+        )
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):
