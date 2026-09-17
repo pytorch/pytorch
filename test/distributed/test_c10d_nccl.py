@@ -150,99 +150,105 @@ class RendezvousEnvTest(TestCase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "No GPUs available, skipping test")
     def test_common_errors(self):
-        vars = {
-            "WORLD_SIZE": "1",
-            "RANK": "0",
-            "MASTER_ADDR": "127.0.0.1",
-            "MASTER_PORT": str(common.find_free_port()),
-        }
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so the default process group must not survive a failed attempt.
+        try:
+            vars = {
+                "WORLD_SIZE": "1",
+                "RANK": "0",
+                "MASTER_ADDR": "127.0.0.1",
+                "MASTER_PORT": str(common.find_free_port()),
+            }
 
-        class Env:
-            def __init__(self, vars):
-                self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
+            class Env:
+                def __init__(self, vars):
+                    self.env_patcher = mock.patch.dict(os.environ, vars, clear=True)
 
-            def __enter__(self):
-                self.env_patcher.start()
+                def __enter__(self):
+                    self.env_patcher.start()
 
-            def __exit__(self, type, value, traceback):
-                self.env_patcher.stop()
+                def __exit__(self, type, value, traceback):
+                    self.env_patcher.stop()
 
-        def without(d, key):
-            d = d.copy()
-            d.pop(key)
-            return d
-
-        def withouts(d, keys):
-            d = d.copy()
-            for key in keys:
+            def without(d, key):
+                d = d.copy()
                 d.pop(key)
-            return d
+                return d
 
-        with Env(without(vars, "WORLD_SIZE")):
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
-            c10d.init_process_group(backend=NCCL_BACKEND, world_size=1)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            def withouts(d, keys):
+                d = d.copy()
+                for key in keys:
+                    d.pop(key)
+                return d
 
-        with Env(without(vars, "RANK")):
-            self.assertEqual(None, os.environ.get("RANK"))
-            with self.assertRaisesRegex(ValueError, "RANK expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
-            c10d.init_process_group(backend=NCCL_BACKEND, rank=0)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(without(vars, "WORLD_SIZE")):
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
+                c10d.init_process_group(backend=NCCL_BACKEND, world_size=1)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
-            self.assertEqual(None, os.environ.get("RANK"))
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            c10d.init_process_group(backend=NCCL_BACKEND, rank=0, world_size=1)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(without(vars, "RANK")):
+                self.assertEqual(None, os.environ.get("RANK"))
+                with self.assertRaisesRegex(ValueError, "RANK expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
+                c10d.init_process_group(backend=NCCL_BACKEND, rank=0)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(vars):
-            c10d.init_process_group(backend=NCCL_BACKEND)
-            self.assertEqual(c10d.get_rank(), 0)
-            self.assertEqual(c10d.get_world_size(), 1)
-            c10d.destroy_process_group()
+            with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+                self.assertEqual(None, os.environ.get("RANK"))
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                c10d.init_process_group(backend=NCCL_BACKEND, rank=0, world_size=1)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(without(vars, "MASTER_ADDR")):
-            self.assertEqual(None, os.environ.get("MASTER_ADDR"))
-            with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
+            with Env(vars):
+                c10d.init_process_group(backend=NCCL_BACKEND)
+                self.assertEqual(c10d.get_rank(), 0)
+                self.assertEqual(c10d.get_world_size(), 1)
+                c10d.destroy_process_group()
 
-        with Env(without(vars, "MASTER_PORT")):
-            self.assertEqual(None, os.environ.get("MASTER_PORT"))
-            with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
-                gen = c10d.rendezvous("env://")
-                next(gen)
+            with Env(without(vars, "MASTER_ADDR")):
+                self.assertEqual(None, os.environ.get("MASTER_ADDR"))
+                with self.assertRaisesRegex(ValueError, "MASTER_ADDR expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
 
-        with Env(without(vars, "WORLD_SIZE")):
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?world_size={1}")
-            _, _, size = next(gen)
-            self.assertEqual(size, 1)
+            with Env(without(vars, "MASTER_PORT")):
+                self.assertEqual(None, os.environ.get("MASTER_PORT"))
+                with self.assertRaisesRegex(ValueError, "MASTER_PORT expected"):
+                    gen = c10d.rendezvous("env://")
+                    next(gen)
 
-        with Env(without(vars, "RANK")):
-            self.assertEqual(None, os.environ.get("RANK"))
-            gen = c10d.rendezvous(f"env://?rank={0}")
-            _, rank, _ = next(gen)
-            self.assertEqual(rank, 0)
+            with Env(without(vars, "WORLD_SIZE")):
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                gen = c10d.rendezvous(f"env://?world_size={1}")
+                _, _, size = next(gen)
+                self.assertEqual(size, 1)
 
-        with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
-            self.assertEqual(None, os.environ.get("RANK"))
-            self.assertEqual(None, os.environ.get("WORLD_SIZE"))
-            gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
-            _, rank, size = next(gen)
-            self.assertEqual(rank, 0)
-            self.assertEqual(size, 1)
+            with Env(without(vars, "RANK")):
+                self.assertEqual(None, os.environ.get("RANK"))
+                gen = c10d.rendezvous(f"env://?rank={0}")
+                _, rank, _ = next(gen)
+                self.assertEqual(rank, 0)
+
+            with Env(withouts(vars, ["RANK", "WORLD_SIZE"])):
+                self.assertEqual(None, os.environ.get("RANK"))
+                self.assertEqual(None, os.environ.get("WORLD_SIZE"))
+                gen = c10d.rendezvous(f"env://?rank={0}&world_size={1}")
+                _, rank, size = next(gen)
+                self.assertEqual(rank, 0)
+                self.assertEqual(size, 1)
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
