@@ -8162,6 +8162,40 @@ class TestNNDeviceType(NNTestCase):
                 self._test_LayerNorm_cpu_mixed_dtype(device, dtype=dtype)
 
     @onlyNativeDeviceTypes
+    def test_LayerNorm_dim(self, device):
+        N, C, H, W = 2, 6, 4, 5
+        x = torch.randn(N, C, H, W, device=device, requires_grad=True)
+        for dim, normalized_shape, perm in (
+            (1, (C,), (0, 2, 3, 1)),
+            (-3, (C,), (0, 2, 3, 1)),
+            ([1, 2], (C, H), (0, 3, 1, 2)),
+        ):
+            ln = nn.LayerNorm(normalized_shape, dim=dim).to(device)
+            with torch.no_grad():
+                ln.weight.uniform_(0.5, 1.5)
+                ln.bias.uniform_(-1, 1)
+            out = ln(x)
+            inv = torch.argsort(torch.tensor(perm)).tolist()
+            ref = F.layer_norm(x.permute(perm), normalized_shape, ln.weight, ln.bias, ln.eps).permute(inv)
+            self.assertEqual(out, ref)
+            grad = torch.randn_like(out)
+            self.assertEqual(
+                torch.autograd.grad(out, (x, ln.weight, ln.bias), grad),
+                torch.autograd.grad(ref, (x, ln.weight, ln.bias), grad),
+            )
+        self.assertEqual(F.layer_norm(x, (H, W)), F.layer_norm(x, (H, W), dim=None))
+        self.assertEqual(nn.LayerNorm(C, dim=-3).to(device)(x[0]).shape, x[0].shape)
+        xc = x.detach().to(memory_format=torch.channels_last)
+        self.assertTrue(nn.LayerNorm(C, dim=1).to(device)(xc).is_contiguous(memory_format=torch.channels_last))
+        ln = nn.LayerNorm(C, dim=1).to(device)
+        self.assertEqual(torch.jit.script(ln)(x), ln(x))
+        self.assertIn("dim=[1]", str(ln))
+        with self.assertRaisesRegex(ValueError, "one dimension per entry"):
+            nn.LayerNorm(C, dim=[1, 2])
+        with self.assertRaisesRegex(ValueError, "one dimension per entry"):
+            F.layer_norm(x, (C, H), dim=1)
+
+    @onlyNativeDeviceTypes
     def test_LayerNorm_numeric(self, device):
         def layer_norm_ref(X, gamma, beta, normalized_shape, eps):
             feature_size = np.prod(normalized_shape)
