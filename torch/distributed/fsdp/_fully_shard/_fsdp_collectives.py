@@ -20,13 +20,6 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
-_PrepareAllGatherOutputs = Callable[[FSDPParam], tuple[list[torch.Tensor], bool]]
-_PrepareReduceScatterInputs = Callable[
-    [list[FSDPParam], list[torch.Tensor], int],
-    tuple[list[torch.Tensor], Sequence[torch.Size]],
-]
-
-
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
@@ -449,10 +442,6 @@ def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: list[FSDPParam],
     group: dist.ProcessGroup,
-    *,
-    prepare_all_gather_outputs: _PrepareAllGatherOutputs = (
-        _prepare_all_gather_outputs_with_reorder
-    ),
 ) -> None:
     (
         all_gather_output,
@@ -482,8 +471,8 @@ def foreach_all_gather_copy_out(
             device,
         )
         fsdp_param.alloc_all_gather_outputs()
-        param_all_gather_outputs, needs_separate_reorder = prepare_all_gather_outputs(
-            fsdp_param
+        param_all_gather_outputs, needs_separate_reorder = (
+            _prepare_all_gather_outputs_with_reorder(fsdp_param)
         )
         if needs_separate_reorder:
             shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
@@ -578,10 +567,6 @@ def foreach_reduce(
     partial_reduce_output: torch.Tensor | None,  # only used for HSDP
     all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
-    *,
-    prepare_reduce_scatter_inputs: _PrepareReduceScatterInputs = (
-        _prepare_reduce_scatter_inputs_with_reorder
-    ),
 ) -> tuple[
     torch.Tensor,
     torch.Event,
@@ -623,8 +608,10 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    copy_in_grads, padded_unsharded_sizes = prepare_reduce_scatter_inputs(
-        fsdp_params, unsharded_grads, world_size
+    unsharded_grads, padded_unsharded_sizes = (
+        _prepare_reduce_scatter_inputs_with_reorder(
+            fsdp_params, unsharded_grads, world_size
+        )
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
@@ -634,10 +621,9 @@ def foreach_reduce(
         device=device,
     )
 
-    foreach_reduce_scatter_copy_in(copy_in_grads, reduce_scatter_input, world_size)
+    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
 
     # Only after the copy-in finishes can we free the gradients
-    copy_in_grads.clear()
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
