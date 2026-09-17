@@ -5133,6 +5133,86 @@ if HAS_CUDA_AND_TRITON:
                 optimizer.step()
 
         @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_single_captured_partition_not_static(self):
+            # When the only uncaptured region leads the forward, exactly one
+            # captured partition remains. The saved activation it consumes is
+            # still eager-allocated, so a partition count alone cannot tell the
+            # backward that saved activations move per call.
+            from unittest.mock import patch
+
+            from torch._inductor.utils import count_tangents
+
+            bw_graph = None
+            forward_cudagraph_partitioned = None
+            bw_static_input_idxs = None
+            orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+            def intercept_bw(
+                gm,
+                example_inputs,
+                compiler_config_extra,
+                inner_compile=torch._inductor.compile_fx.compile_fx_inner,
+                **kwargs,
+            ):
+                nonlocal bw_graph, forward_cudagraph_partitioned
+
+                def capture_inner_compile(*args, **inner_kwargs):
+                    nonlocal bw_static_input_idxs
+                    bw_static_input_idxs = inner_kwargs["static_input_idxs"]
+                    return inner_compile(*args, **inner_kwargs)
+
+                bw_graph = gm
+                forward_cudagraph_partitioned = (
+                    compiler_config_extra.forward_is_cudagraph_partitioned.value
+                )
+                return orig_bw(
+                    gm,
+                    example_inputs,
+                    compiler_config_extra,
+                    inner_compile=capture_inner_compile,
+                    **kwargs,
+                )
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    # Leading CPU round-trip, so everything after it is a single
+                    # captured partition and b is saved for backward.
+                    b = x.cpu().cuda()
+                    c = b * b
+                    return self.linear(c)
+
+            model = Mod().cuda()
+            input_data = torch.randn(16, 16, device="cuda")
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+                compiled_model = torch.compile(model, mode="reduce-overhead")
+                for _ in range(5):
+                    output = compiled_model(input_data)
+                    loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+            self.assertTrue(forward_cudagraph_partitioned)
+            self.assertIsNotNone(bw_graph)
+            # Assert on what compile_fx_backward handed to the lowering, named
+            # independently of how it computes them.
+            names = [n.name for n in bw_graph.graph.find_nodes(op="placeholder")]
+            static_names = {names[i] for i in bw_static_input_idxs}
+            self.assertFalse({n for n in static_names if n.startswith("tangents")})
+            # b = x.cpu().cuda(); c = b * b, so "mul" is the saved activation. It
+            # is produced outside a CUDA Graph, hence reallocated every call.
+            self.assertNotIn("mul", static_names)
+            # Non-vacuous: the name-based classification this replaces kept it.
+            self.assertIn("mul", names[: count_tangents(bw_graph)])
+
+        @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_no_partition_keeps_static(self):
             # When graph_partition is enabled but the forward has no unsafe
             # ops, forward_is_cudagraph_partitioned should be False and all saved

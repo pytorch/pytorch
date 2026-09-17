@@ -2053,7 +2053,9 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                # pyrefly: ignore [unbound-name]
+                                use_cudagraph_partition=V.graph.use_cudagraph_partition,
                             )
                         )
 
@@ -2941,7 +2943,7 @@ def compile_fx_forward(
             not is_inference
             and isinstance(result, CompiledFxGraph)
             and result.partition_maps
-            and len(result.partition_maps) > 1
+            and (len(result.partition_maps) > 1 or result.has_uncaptured_partition)
         ):
             compiler_config_extra.forward_is_cudagraph_partitioned.value = True
 
