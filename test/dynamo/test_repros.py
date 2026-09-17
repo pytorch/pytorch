@@ -83,7 +83,6 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfWindows,
     skipIfXpu,
-    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -10014,7 +10013,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(grad, ref_grad)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
     )
     def test_flex_attention_guard_on_constant_func_defaults(self, device):
