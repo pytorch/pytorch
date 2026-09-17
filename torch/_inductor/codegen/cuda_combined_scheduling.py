@@ -11,6 +11,7 @@ from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     FusedSchedulerNode,
+    FusedStagedReduction,
     Scheduler,
     SchedulerNode,
 )
@@ -69,6 +70,9 @@ class CUDACombinedScheduling(BaseScheduling):
         nodes: Sequence[BaseSchedulerNode],
     ) -> bool:
         return self._triton_scheduling.has_sub_parent_epilogue(nodes)
+
+    def validate_staged_reduction(self, node: FusedStagedReduction) -> None:
+        return self._triton_scheduling.validate_staged_reduction(node)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cutlass_scheduling.is_cutlass_template(node):
