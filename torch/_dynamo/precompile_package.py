@@ -7,14 +7,16 @@ create, and the recompiled variants of each -- stored through CompilePackage
 directly.
 
 This module holds the guard filter for the serialized guards
-(``default_guard_filter_fn``), the lint over the guards it drops
-(``_is_risky_drop``), the guard-type classification and fingerprints behind
-the ``PrecompileSummary`` report, the per-frame comparison of captured
-variants and the summary builder (``_varying_guard_slots``, ``_summarize``),
-and the compiler configuration and frame converter a capture runs under
-(``_capture_config``, ``_AllowEmptyGraphsConvertFrame``). Everything here is
-internal. The capture session that drives them, ``torch.compiler.precompile``,
-is a follow-up; nothing under ``torch/`` calls into this module yet. It is
+(``default_guard_filter_fn``), the lint over the identity guards it drops
+(``_is_risky_drop``), the fingerprints and the guard-type classification
+behind the ``PrecompileSummary`` report -- which also decides the only guards
+an invariance policy may drop (``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the
+per-frame comparison of captured variants and the summary builder
+(``_varying_guard_slots``, ``_summarize``), and the compiler configuration and
+frame converter a capture runs under (``_capture_config``,
+``_AllowEmptyGraphsConvertFrame``). Everything here is internal. The
+multi-graph Dynamo capture session that drives them is a follow-up stack;
+nothing under ``torch/`` calls into this module yet. This precompile is
 distinct from ``torch._dynamo.config.caching_precompile``, which caches
 ``torch.compile`` artifacts transparently without an explicit capture.
 """
@@ -29,7 +31,7 @@ import sysconfig
 import types
 from typing import TYPE_CHECKING
 
-from torch._guards import ChainedSource, Source
+from torch._guards import ChainedSource
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .guards import CheckFunctionManager
@@ -40,6 +42,8 @@ if TYPE_CHECKING:
     import traceback
     from collections.abc import Sequence
 
+    from torch._guards import Source
+
     from .types import GuardFilterEntry
 
 
@@ -48,14 +52,16 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     Drop every guard ``CheckFunctionManager.serialize_guards`` would refuse for
     its type or a derived type, and keep everything else.
 
-    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
-    identity guards ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH,
-    NN_MODULE and CLASS_MATCH, plus DICT_VERSION and WEAKREF_ALIVE. Dropping
-    one gives up on noticing that the guarded object was rebound, mutated or
-    collected: rebind a global function between capture and load and the
-    artifact serves the graph traced against the old one, with no error
-    (``test_default_guard_filter_through_serialize_guards``). Every drop is
-    reported in ``PrecompileSummary.dropped_guards``.
+    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: ID_MATCH,
+    FUNCTION_MATCH, MODULE_MATCH, NN_MODULE and CLASS_MATCH, which check the
+    guarded object's identity, CLOSURE_MATCH, which checks a function by its
+    ``__code__`` id, plus DICT_VERSION and WEAKREF_ALIVE. Dropping one gives up
+    on noticing that the guarded object was rebound, mutated or collected:
+    rebind a global function between capture and load and the artifact serves
+    the graph traced against the old one, with no error
+    (``test_default_guard_filter_through_serialize_guards``). Every dropped
+    slot is reported in ``PrecompileSummary.dropped_guards``, once however many
+    variants dropped it.
 
     The test is the serializer's own pre-check over the entry's type and
     derived types: a guard is dropped if its type is refused or one of its
@@ -71,7 +77,10 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     where a DICT_KEYS_MATCH on ``torch.utils._pytree.SUPPORTED_NODES`` is
     promoted to a DICT_VERSION, while the save build pins it to the keys-match
     the pre-check accepts
-    (``test_default_guard_filter_keeps_the_pytree_registry_keys_match``).
+    (``test_default_guard_filter_keeps_the_pytree_registry_keys_match``). That
+    pair only: a DICT_KEYS_MATCH deriving another refused type, and any other
+    type deriving DICT_VERSION, are dropped as the pre-check would refuse them
+    (``test_default_guard_filter_drops_the_unserializable_types``).
 
     Passing this filter does not mean the artifact serializes: the pre-check
     also refuses a kept TYPE_MATCH on a local-scope type, which cannot be
@@ -108,13 +117,15 @@ def _source_root(source: Source) -> Source:
     return source.get_base() if isinstance(source, ChainedSource) else source
 
 
-# The list of Dynamo-generated resume functions a nested resume function takes
-# as its first parameter (resume_execution.py and comprehension_graph_break.py
-# mint the name; codegen_call_resume in symbolic_convert.py builds the list). Its
-# entries are generated code, not a slot any config chooses, so an identity
-# guard lost on one cannot diverge. Its sibling __nested_frame_values is NOT
-# here: it carries each enclosing frame's live stack and locals, so a guard
-# rooted there is judged like the value it stands for.
+# The list of Dynamo-generated resume functions every generated resume function
+# takes as its first parameter (resume_execution.py and
+# comprehension_graph_break.py mint the name; codegen_call_resume in
+# symbolic_convert.py builds the list). Its entries are generated code, not a
+# slot any config chooses, so an identity guard lost on one cannot diverge. Its
+# sibling __nested_frame_values is NOT here: it carries the live stack and
+# locals of the frames nested INSIDE the one resuming, which pops the last
+# entry off it for the callee it resumes, so a guard rooted there is judged like
+# the value it stands for.
 _DYNAMO_SYNTHESIZED = ("__nested_resume_fns",)
 
 
@@ -127,7 +138,8 @@ def _norm(path: str) -> str:
     """
     realpath then normcase. A relative path resolves against the process cwd,
     so a recorded ``__file__`` or a ``__path__`` entry is gated with isabs
-    before it gets here.
+    before it gets here; this module's own ``__file__`` is not, the import
+    system having made it absolute.
     """
     return os.path.normcase(os.path.realpath(path))
 
@@ -147,7 +159,7 @@ def _stdlib_roots() -> tuple[str, ...]:
     """
     roots = []
     os_file = getattr(os, "__file__", None)
-    if os_file:
+    if os_file and os.path.isabs(os_file):
         # The directory the file resolves into, not the one it was imported
         # from: in a venv over a symlink-farm prefix (a Nix, Guix or Spack
         # profile) os.py is a per-file link into the store, sysconfig and
@@ -184,7 +196,11 @@ def _install_roots() -> tuple[str, ...]:
             continue  # an old-virtualenv site.py lacks it, or it cannot answer
         roots += [p for p in found if isinstance(p, str)]
     # On Windows getsitepackages() lists the bare prefix, which the whole stdlib
-    # sits under; a directory a stdlib root lies under is not an install root.
+    # sits under; a directory a stdlib root lies strictly under is not an
+    # install root. A candidate that IS a stdlib root stays one, on purpose:
+    # dropping it would leave a third party installed into the stdlib directory
+    # itself under no install root and waived with the stdlib, while keeping it
+    # only reads the stdlib as third party.
     stdlib = _stdlib_roots()
     normed = {_norm(p) for p in roots}
     above = {r for r in normed for s in stdlib if s.startswith(r + os.sep)}
@@ -248,11 +264,14 @@ def _defined_where_read(
     A class has no code object, and its ``__module__`` is no better: namedtuple
     and ``type()`` stamp it from the calling frame (make_dataclass does from
     3.12) under a BARE ``__qualname__`` (a def or class statement inside the
-    factory would carry ``factory.<locals>.``), so ``Point = lib.make_point()``
-    in the reader looks exactly like a class statement. Its methods can tell: a
-    class statement compiles its defs in its own file under its own
-    ``__qualname__`` prefix, so a class is waived when at least one function in
-    its own ``__dict__``, stored under key ``k`` with ``__qualname__`` ``Cls.k``
+    factory would carry ``factory.<locals>.``), so a ``namedtuple("Point", ...)``
+    called in the reader looks exactly like a class statement -- the frame
+    stamped is the caller's, so the collision needs a factory called from the
+    reading file, a cross-file ``lib.make_point()`` coming back stamped ``lib``.
+    Its methods can tell: a class statement compiles its defs in its own file
+    under its own ``__qualname__`` prefix, so a class is waived when at least one
+    function in its own ``__dict__``, stored under key ``k`` with
+    ``__qualname__`` ``Cls.k``
     (a staticmethod or classmethod is unwrapped through ``__func__`` and a
     property through ``fget``, by type rather than by ``getattr``, which a proxy
     attribute such as ``torch.classes.<ns>`` answers by raising; a
@@ -337,21 +356,28 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
     Dynamo installs to resolve them. That dict is the frame's live
     ``builtins.__dict__``, not a table of the real builtins, so a shim's
     ``builtins.py2_sum = sum`` is a binding under it that another machine's
-    shim can point elsewhere; only a builtin read under its own name is waived
-    (``IOError``, CPython's alias of ``OSError``, fails closed), and only one
-    CPython built: functools.wraps copies ``__module__`` and ``__name__`` onto
-    ``builtins.sum = wraps(sum)(logged_sum)``, a Python function whose
-    CLOSURE_MATCH is dropped, and a class statement exec'd with the builtins
-    namespace as its globals (or handed ``__module__ = "builtins"``) claims the
-    module outright, so the value must be a builtin function or a static type
-    as well, one carrying ``Py_TPFLAGS_IMMUTABLETYPE``, which no class statement
-    or ``type()`` call gets (every callable in ``builtins.__dict__`` is one of
-    the two, apart from the ``_sitebuiltins`` objects, which fail the
-    ``__module__`` test, and ``ExceptionGroup``, the one heap type among them,
-    which fails closed). The exposure is
-    narrow either way: a registered builtin is id-matched into a BUILTIN_MATCH
-    the serializer keeps, so only a deregistered, polyfilled one (``sum``,
-    ``enumerate``) or a shim reaches the dropped set this lint examines.
+    shim can point elsewhere; only a builtin ``builtins`` itself owns, read
+    under its own name, is waived (``IOError``, CPython's alias of ``OSError``,
+    fails closed), and only one CPython built: functools.wraps copies
+    ``__module__`` and ``__name__`` onto ``builtins.sum =
+    wraps(sum)(logged_sum)``, a Python function whose CLOSURE_MATCH is dropped,
+    and a class statement exec'd with the builtins namespace as its globals (or
+    handed ``__module__ = "builtins"``) claims the module outright, so the value
+    must be a builtin function or a static type as well, one carrying
+    ``Py_TPFLAGS_IMMUTABLETYPE``, which a class statement or a ``type()`` call
+    does not carry -- evidence rather than proof, since ``__flags__`` is read as
+    an ordinary attribute a metaclass can shadow, which an advisory lint over a
+    dropped-guard set does not defend against. Every callable in
+    ``builtins.__dict__`` is one of the two kinds apart from the
+    ``_sitebuiltins`` objects, instances of neither, and beside ``IOError``
+    three of them fail closed: ``open``, the one builtin function ``builtins``
+    does not own (it is ``_io.open``, so a dropped guard on one of the most
+    mainstream builtins here is reported), and the heap types ``ExceptionGroup``
+    and ``__loader__``, the latter refused under a name that is not its own as
+    well. The exposure is narrow either way: a registered builtin is id-matched
+    into a BUILTIN_MATCH the serializer keeps, so only a deregistered,
+    polyfilled one (``sum``, ``enumerate``) or a shim reaches the dropped set
+    this lint examines.
 
     A builtin parked in a slot -- ``self.act = abs``, straight out of an
     ACT2FN-style table -- is a slot like any other, so this deliberately keys
@@ -363,8 +389,10 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
         and source.base.global_name.startswith(_BUILTINS_DICT_PREFIX)
         and (
             isinstance(value, types.BuiltinFunctionType)
-            # Py_TPFLAGS_IMMUTABLETYPE: a static type CPython built, never a
-            # class statement or type() call, whose __module__ is writable
+            # Py_TPFLAGS_IMMUTABLETYPE: a static type CPython built, not a
+            # class statement or type() call, whose __module__ is writable. Read
+            # as a plain attribute, so a metaclass can shadow it -- evidence,
+            # not proof, which is all an advisory lint needs.
             or (isinstance(value, type) and bool(value.__flags__ & (1 << 8)))
         )
         and _owning_module(value) == "builtins"
