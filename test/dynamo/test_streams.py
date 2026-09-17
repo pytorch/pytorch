@@ -23,6 +23,7 @@ from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -52,6 +53,7 @@ def strip_annotation_desc(gm_str: str) -> str:
     return re.sub(r"(# Annotation: \{[^}]*\}).*", r"\1", gm_str)
 
 
+@instantiate_parametrized_tests
 class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
     @unittest.skip("Needs graph break support with annotation context")
     def test_stream_enter_exit_graph_break(self):
@@ -467,52 +469,31 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
         res = torch.compile(fn, backend="eager", fullgraph=True)(MyEvent(device="cpu"))
         self.assertEqual(res, torch.ones(2))
 
-    def test_event_record_after_input_mutation_escapes_via_list(self):
-        def fn(x, holder):
-            s = torch.Stream(device="cpu")
-            e = torch.Event(device="cpu")
-            with s:
-                x.add_(1)
-                e.record()
-            holder.append(e)
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device="cpu"), []
-            )
-
-    def test_event_record_after_input_mutation_escapes_via_attr(self):
+    @parametrize("holder_kind", ("list", "set", "attr"))
+    def test_event_record_after_input_mutation_escapes_via_container(self, holder_kind):
+        # The event is stored into caller-owned state, which is replayed at
+        # subgraph exit and so is reachable from outside the region.
         class Holder:
             pass
 
-        def fn(x, h):
-            s = torch.Stream(device="cpu")
-            e = torch.Event(device="cpu")
-            with s:
-                x.add_(1)
-                e.record()
-            h.evt = e
-            return x + 1
-
-        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
-            torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device="cpu"), Holder()
-            )
-
-    def test_event_record_after_input_mutation_escapes_via_set(self):
         def fn(x, holder):
             s = torch.Stream(device="cpu")
             e = torch.Event(device="cpu")
             with s:
                 x.add_(1)
                 e.record()
-            holder.add(e)
+            if holder_kind == "list":
+                holder.append(e)
+            elif holder_kind == "set":
+                holder.add(e)
+            else:
+                holder.evt = e
             return x + 1
 
+        holder = {"list": [], "set": set(), "attr": Holder()}[holder_kind]
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
             torch.compile(fn, backend="eager", fullgraph=True)(
-                torch.ones(2, 2, device="cpu"), set()
+                torch.ones(2, 2, device="cpu"), holder
             )
 
     def test_event_record_after_input_mutation_escapes_via_return_set(self):
@@ -675,6 +656,39 @@ class TestStreamsGeneric(torch._dynamo.test_case.TestCase):
             e2 = torch.Event(device="cpu")
             e2.record(s2)
             return e2
+
+        with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, device="cpu")
+            )
+
+    @parametrize("second_mutation", (False, True))
+    def test_event_record_after_input_mutation_escapes_via_recording_stream(
+        self, second_mutation
+    ):
+        # Returning the stream the event was recorded on.  Synchronizing that
+        # stream from outside is ordered after x is updated only while it is
+        # also the last stream to write x, because the epilogue copy is
+        # scheduled onto the last writer: without the second mutation it does
+        # cover the copy, and with it the copy follows s2 instead, so a sync
+        # on s lands after the record but before x is updated.
+        #
+        # Both must raise.  Which stream ends up owning the copy is decided
+        # when the backend schedules the graph, long after this check runs --
+        # with an eager backend there is no epilogue copy at all -- so the
+        # two cases are indistinguishable here and the first is a deliberate
+        # over-approximation.  main rejects both at record time.
+        def fn(x):
+            s = torch.Stream(device="cpu")
+            e = torch.Event(device="cpu")
+            with s:
+                x.add_(1)
+                e.record()
+            if second_mutation:
+                s2 = torch.Stream(device="cpu")
+                with s2:
+                    x.add_(1)
+            return s
 
         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
             torch.compile(fn, backend="eager", fullgraph=True)(

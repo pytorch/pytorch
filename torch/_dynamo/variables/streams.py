@@ -507,7 +507,7 @@ class StreamVariable(StreamContextVariable):
             event = event_var.value
             event_index = event_var.user_object_index
             tx.output.check_event_record_after_input_mutation(
-                id(self.value),
+                self.value,
                 event_value=event,
                 event_has_source=event_var.source is not None,
             )
@@ -530,7 +530,7 @@ class StreamVariable(StreamContextVariable):
                 ),
             )
             tx.output.check_event_record_after_input_mutation(
-                id(self.value), event_value=event, event_has_source=False
+                self.value, event_value=event, event_has_source=False
             )
             tx.output.note_event_recorded_on_stream(event, self.value, False)
         tx.output.create_proxy(
@@ -735,7 +735,7 @@ class EventVariable(VariableTracker):
     ) -> VariableTracker:
         stream_arg, stream_index = EventVariable._get_stream_arg(tx, args, kwargs)
         tx.output.check_event_record_after_input_mutation(
-            id(stream_arg.value),
+            stream_arg.value,
             event_value=self.value,
             event_has_source=self.source is not None,
         )

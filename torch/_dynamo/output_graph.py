@@ -892,7 +892,9 @@ class OutputGraph(OutputGraphCommon):
         # escaped -- a stream that waited on the event is ordered after the
         # record, which is still before the epilogue copy, so an outside
         # sync on it observes the same stale state, as does an event later
-        # recorded on that stream.  The
+        # recorded on that stream.  The recording stream itself is seeded as
+        # a handle for the same reason; see
+        # check_event_record_after_input_mutation.  The
         # list holds strong refs so the identity checks stay meaningful.
         self._pending_event_record_violations: list[tuple[list[Any], str]] = []
 
@@ -1374,7 +1376,7 @@ class OutputGraph(OutputGraphCommon):
 
     def check_event_record_after_input_mutation(
         self,
-        stream_index: int,
+        stream_value: Any,
         *,
         event_value: Any,
         event_has_source: bool,
@@ -1390,17 +1392,18 @@ class OutputGraph(OutputGraphCommon):
         regardless).  An event constructed during tracing can only gain
         such an observer by escaping the region, so for those
         (``event_has_source=False``) the error is deferred: the violation
-        records the event as its first handle and is raised either by
+        records the event and the recording stream as its first handles and
+        is raised either by
         :meth:`raise_pending_event_record_violations_if_escaping` when any
         handle escapes, or by
         :meth:`_add_event_record_violation_handle` as soon as a handle that
         is reachable from outside by construction picks it up.  Pre-existing
         events (reachable from outside by construction) error immediately.
         """
-        if stream_index not in self._input_mutation_streams:
+        mutation_stack = self._input_mutation_streams.get(id(stream_value))
+        if mutation_stack is None:
             return
 
-        mutation_stack = self._input_mutation_streams[stream_index]
         record_stack = TracingContext.extract_stack()
 
         msg = (
@@ -1415,7 +1418,16 @@ class OutputGraph(OutputGraphCommon):
             f"{''.join(record_stack.format())}\n" + self._EVENT_INPUT_MUTATION_FIX
         )
         if not event_has_source:
-            self._pending_event_record_violations.append(([event_value], msg))
+            # The recording stream is a handle too.  It only covers the
+            # epilogue copy while it remains the last stream to write the
+            # input: a later mutation on another stream moves the copy there,
+            # leaving a sync on this stream ordered after the record but still
+            # before the input is updated.  Which stream ends up owning the
+            # copy is a backend scheduling decision, not visible here, so the
+            # stream is treated as exposed either way.
+            self._pending_event_record_violations.append(
+                ([event_value, stream_value], msg)
+            )
             return
         raise RuntimeError(msg)
 
