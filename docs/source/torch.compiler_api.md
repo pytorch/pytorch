@@ -138,6 +138,12 @@ deprecation cycle.
    returns ``fn``'s own result (``None`` for a bare ``.backward()`` step), not the
    gradients.
 
+   Threading: the inductor lowering step drives process-global compiler state and is
+   serialized by an internal lock, so concurrent ``backend="inductor"`` captures lower
+   one at a time. The capture phase and the ``backend="eager"`` path are NOT
+   serialized. The lock is taken inside the ``cap(...)`` calls, which is where the
+   lowering runs, not held for the surrounding block.
+
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments. With :class:`precompile.DynamoTracer`, ``cap(...)`` also
        accepts keyword arguments and the loaded artifact takes them the same way;
@@ -230,8 +236,10 @@ deprecation cycle.
       to run (see Note [precompile programming model], invariant 7). ``load`` also emits a
       per-call warning before it runs.
 
-   :param artifact_path: File holding ``python_code``, as written by ``precompile``.
-   :param cache_path: File holding ``cache``, as written by ``precompile``.
+   :param artifact_path: File holding ``python_code``, as written by
+       :func:`precompile.capture` (or by :meth:`precompile.Capture.save`).
+   :param cache_path: File holding ``cache``, as written by
+       :func:`precompile.capture` (or by :meth:`precompile.Capture.save`).
    :param fn: For a dynamo artifact that serves by installing onto live code objects,
        the function object to install onto, when it is not importable from where it was
        captured (e.g. defined in ``__main__`` or a notebook); pass it before the first
@@ -271,9 +279,11 @@ deprecation cycle.
 .. autoclass:: torch.compiler.PrecompiledRunnable
    :members: installed, unload
 
-   Every object :func:`precompile.load` returns is one of these, whichever of the
-   two shapes below the capture produced, so ``isinstance(loaded,
-   torch.compiler.PrecompiledRunnable)`` holds for both.
+   Every object :func:`precompile.load` returns is one of these, whichever shape the
+   capture produced -- this class itself is the standalone shape's contract, which is
+   what every artifact this build can produce loads as, and
+   :class:`torch.compiler.PrecompiledCallable` below is the installing shape -- so
+   ``isinstance(loaded, torch.compiler.PrecompiledRunnable)`` holds for both.
 
 .. autoclass:: torch.compiler.PrecompiledCallable
    :members: installed, unload, serve_time_compiles
