@@ -10,6 +10,7 @@ import importlib.util
 import itertools
 import math
 import os
+import re
 import site
 import sys
 import sysconfig
@@ -50,6 +51,11 @@ def _user_op(x):
     return x + 1
 
 
+def _stack(*filenames):
+    """A guard's user_stack, outermost frame first."""
+    return traceback.StackSummary.from_list([(f, 1, "forward", "") for f in filenames])
+
+
 def _aot_compile(fn, *args, guard_filter_fn=None, seen=None):
     """aot_compile fn on args through guard_filter_fn (the default filter when
     None), appending every (entry, verdict) pair to seen."""
@@ -71,8 +77,13 @@ def _kept_types(compiled):
 
 
 def _pre_check_accepts(entry):
-    # The type tests of serialize_guards' pre-check over the entry's own derived
-    # types: the control the filter is compared against, independent of it.
+    # The type tests of serialize_guards' pre-check, over the entry's own derived
+    # types: a second implementation of them, so a control written on it does not
+    # call the filter under test. Not the whole pre-check, which raises rather
+    # than returning a verdict and which also refuses a TYPE_MATCH or
+    # BUILTIN_MATCH whose guard carries _unserializable (a local-scope type) --
+    # harmless in both uses here, where the TYPE_MATCHes are on global types or
+    # dropped wholesale.
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return entry.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH") or (
         entry.guard_type not in unsupported
@@ -82,8 +93,8 @@ def _pre_check_accepts(entry):
 
 _OWN = GlobalSource(__name__)
 _BUILTINS_DICT = GlobalSource("__builtins_dict___0")
-_HERE = traceback.StackSummary.from_list([(__file__, 1, "forward", "")])
-_ELSEWHERE = traceback.StackSummary.from_list([(F.__file__, 1, "forward", "")])
+_HERE = _stack(__file__)
+_ELSEWHERE = _stack(F.__file__)
 
 
 def _entry(
@@ -200,8 +211,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
         # Spelled out: the filter reads the same constant, so on a shrunk one the
         # two would agree on less.
-        identity = {"ID_MATCH", "FUNCTION_MATCH", "CLOSURE_MATCH", "MODULE_MATCH"}
-        refused_types = identity | {
+        refused_types = {
+            "ID_MATCH",
+            "FUNCTION_MATCH",
+            "CLOSURE_MATCH",
+            "MODULE_MATCH",
             "NN_MODULE",
             "CLASS_MATCH",
             "DICT_VERSION",
@@ -213,21 +227,33 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         verdicts = dict(zip(unsupported, filter_fn(refused)))
         self.assertEqual(verdicts, dict.fromkeys(unsupported, False))
         # A refused derived type drops the guard too (a CONSTANT_MATCH on a code
-        # object runs through ID_MATCH); a DICT_KEYS_MATCH is exempt from that
-        # for the unsaved build's DICT_VERSION only.
-        derived = [
-            _entry(g, None, "CONSTANT_MATCH", derived=("ID_MATCH",)),
-            _entry(g, None, "DICT_KEYS_MATCH", derived=("ID_MATCH",)),
+        # object runs through ID_MATCH). The DICT_VERSION exemption is for a
+        # DICT_KEYS_MATCH only, and only for that derived type, so both halves of
+        # its condition have a row here. Mixed verdicts in one call: the filter
+        # returns them positionally, and a table of one verdict cannot tell a
+        # misordered list from a right one.
+        rows = [
+            ("CONSTANT_MATCH", ("ID_MATCH",), False),
+            ("DICT_KEYS_MATCH", ("ID_MATCH",), False),
+            ("DICT_CONTAINS", ("DICT_VERSION",), False),
+            ("DICT_KEYS_MATCH", ("DICT_VERSION",), True),
+            ("CONSTANT_MATCH", (), True),
         ]
-        self.assertEqual(filter_fn(derived), [False, False])
+        derived = [_entry(g, None, t, derived=d) for t, d, _ in rows]
+        keep = filter_fn(derived)
+        self.assertEqual([(t, d, v) for (t, d, _), v in zip(rows, keep)], rows)
 
     def test_default_guard_filter_keeps_what_the_serializer_accepts(self):
         rows = [
             ("TENSOR_MATCH", ()),
             ("TYPE_MATCH", ()),
             # BUILTIN_MATCH is an id_match_unchecked deriving ID_MATCH; the
-            # pre-check accepts TYPE_MATCH and BUILTIN_MATCH before it looks at
-            # derived types, so the filter keeps them whatever they derive.
+            # pre-check takes TYPE_MATCH and BUILTIN_MATCH on their own type,
+            # before it looks at derived types, so the filter keeps them whatever
+            # they derive. That branch is not an unconditional accept: it refuses
+            # these two for a local-scope type, which is what
+            # test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal
+            # covers.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
             ("TYPE_MATCH", ("ID_MATCH",)),
             # The unsaved build's DICT_VERSION on a DICT_KEYS_MATCH; the save
@@ -246,12 +272,18 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         x = torch.randn(3)
         compiled = _aot_compile(fn, x, seen=seen)
         state, kept = _kept_types(compiled)
-        # The refused guard on the global function is dropped and gone from the
-        # serialized set; the builtin's BUILTIN_MATCH is kept.
-        dropped = {(e.guard_type, e.name) for e, keep in seen if not keep}
-        self.assertIn(("CLOSURE_MATCH", "G['_user_op']"), dropped)
-        self.assertNotIn("CLOSURE_MATCH", kept)
-        self.assertIn("BUILTIN_MATCH", kept)
+        builtins_key = state.output_graph.name_of_builtins_dict_key_in_fglobals
+        # The refused guard on the global function is dropped, the builtin's
+        # BUILTIN_MATCH is kept by slot, and the serialized types are exactly the
+        # types of the entries the filter kept: that is the wiring under test.
+        # "CLOSURE_MATCH is absent from the serialized set" could not fail on its
+        # own -- serialize_guards raises on a refused type in the guards it
+        # pickles, so a kept CLOSURE_MATCH would have thrown above.
+        len_slot = f"G['{builtins_key}']['len']"
+        verdicts = {(e.guard_type, e.name): keep for e, keep in seen}
+        self.assertIs(verdicts.get(("CLOSURE_MATCH", "G['_user_op']")), False)
+        self.assertIs(verdicts.get(("BUILTIN_MATCH", len_slot)), True)
+        self.assertEqual(kept, {t for (t, _), keep in verdicts.items() if keep})
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertEqual(loaded(x), fn(x))
@@ -263,8 +295,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(loaded(x), x + 2)
         # The kept guard is live in the loaded artifact: a swapped builtin trips
         # that guard, by name, and the original passes again once restored.
-        builtins_key = state.output_graph.name_of_builtins_dict_key_in_fglobals
-        failed_on_len = rf"___check_obj_id\(G\['{builtins_key}'\]\['len'\]"
+        failed_on_len = rf"___check_obj_id\({re.escape(len_slot)}"
         real_len = len
         with mock.patch.object(builtins, "len", lambda *args: real_len(*args)):
             with self.assertRaisesRegex(RuntimeError, failed_on_len):
@@ -283,8 +314,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return pytree.tree_flatten({"a": x, "b": x * 2})[0][1]
 
         def dropping(entries):
-            # The control: the pre-check's own verdicts, which drop on the
-            # derived DICT_VERSION.
+            # The control: the pre-check's type tests, which drop on the derived
+            # DICT_VERSION.
             return [_pre_check_accepts(e) for e in entries]
 
         def load(data):
@@ -301,8 +332,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # class does not stay in the optree registry register_pytree_node
             # also writes. The name is only a registry key here, so the <locals>
             # in it is harmless; it must be unique because nameless registrations
-            # share one slot of SERIALIZED_TYPE_TO_PYTHON_TYPE and deregistering
-            # the first fails.
+            # share one slot of SERIALIZED_TYPE_TO_PYTHON_TYPE, so the first
+            # deregistration deletes it and the next raises KeyError after it has
+            # already dropped its class from SUPPORTED_NODES.
             name = f"{__name__}.{cls.__qualname__}"
             pytree._private_register_pytree_node(
                 cls, lambda n: ([], None), lambda c, _: cls(), serialized_type_name=name
@@ -328,12 +360,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             if "DICT_VERSION" in e.derived_guard_types
         }
         self.assertEqual(promoted, {("DICT_KEYS_MATCH", "SUPPORTED_NODES", True)})
-        kept = _kept_types(compiled)[1]
+        state, kept = _kept_types(compiled)
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         control = _aot_compile(fn_tree, x, guard_filter_fn=dropping)
-        # The kept keys-match is all that tells the two artifacts' guards apart.
+        control_state, control_kept = _kept_types(control)
+        # The kept keys-match is all that tells the two artifacts' guards apart:
+        # one type name and one guard more, the count because a set of type names
+        # hides a second divergence in a type that keeps another instance.
         self.assertIn("DICT_KEYS_MATCH", kept)
-        self.assertEqual(kept ^ _kept_types(control)[1], {"DICT_KEYS_MATCH"})
+        self.assertEqual(kept ^ control_kept, {"DICT_KEYS_MATCH"})
+        n_control = len(control_state.output_graph.guards)
+        self.assertEqual(len(state.output_graph.guards), n_control + 1)
         control_data = AOTCompiledFunction.serialize(control).serialized_data
         # A node registered before load is baked into either artifact's guards.
         register(Extra)
@@ -346,6 +383,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(loaded.guard_check(x))
         self.assertFalse(loaded_control.guard_check(x))
         deregister(Extra)
+        # A failed check does not latch, so the failures below are the registry
+        # change and not a stuck guard manager.
+        self.assertTrue(loaded.guard_check(x))
         deregister(Node)
         register(Other)
         self.assertFalse(loaded.guard_check(x))
@@ -363,10 +403,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # artifact ships, and serves the local class's graph to a module of
         # another class.
         def drop_type_match(entries):
-            # The control: the pre-check's verdicts minus every TYPE_MATCH.
+            # The control: the pre-check's type tests minus every TYPE_MATCH.
             return [
                 e.guard_type != "TYPE_MATCH" and _pre_check_accepts(e) for e in entries
             ]
+
+        def drop_local_type_match(entries):
+            # The narrow control: minus only the TYPE_MATCHes the pre-check
+            # refuses, on a type whose qualname is not its name (guards.py's own
+            # test, in TYPE_MATCH's _unserializable and in reducer_override). It
+            # is narrow so that the only guard the module case below loses is the
+            # one on the module's own type.
+            def local_type_match(e):
+                t = type(e.value)
+                return e.guard_type == "TYPE_MATCH" and t.__qualname__ != t.__name__
+
+            return [not local_type_match(e) and _pre_check_accepts(e) for e in entries]
 
         # Not assertRaises: it stores the exception with its traceback cleared.
         # Both paths raise through guards.py's raise_local_type_error with one
@@ -378,7 +430,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             except PackageError as e:
                 self.assertRegex(str(e), regex)
                 return {f.name for f in traceback.extract_tb(e.__traceback__)}
-            self.fail("serialized")
+            self.fail(f"{fn.__name__} serialized, expected {regex}")
 
         class Local:
             n = 1
@@ -410,7 +462,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             def forward(self, x):
                 return x - 1
 
-        compiled = _aot_compile(fn3, x, LocalModule(), guard_filter_fn=drop_type_match)
+        compiled = _aot_compile(
+            fn3, x, LocalModule(), guard_filter_fn=drop_local_type_match
+        )
         data = AOTCompiledFunction.serialize(compiled).serialized_data
         loaded = AOTCompiledFunction.deserialize(data)
         self.assertTrue(loaded.guard_check(x, Other()))
@@ -434,10 +488,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         norm, within = precompile_package._norm, precompile_package._within
         # The sets nest one way only: purelib sits inside a stdlib root (conda)
         # or platstdlib (venv; platlib on a lib64 build) and must survive the
-        # exclusion, while on Windows
-        # getsitepackages() names the prefix the stdlib sits under, which must
-        # not; the install-root-wins rule only works if no stdlib root is under
-        # an install root.
+        # exclusion, while on Windows getsitepackages() names the prefix the
+        # stdlib sits under, which must not, or the install-root-wins rule would
+        # read the whole stdlib as third party. No layout sysconfig and site can
+        # produce puts an install root ON a stdlib root either, which is why the
+        # loop below can test containment; the code permits that case on purpose
+        # (test_install_roots_keep_a_directory_that_is_a_stdlib_root).
         self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
         for root in stdlib:
             self.assertFalse(within(root, install), root)
@@ -517,12 +573,27 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     def test_stdlib_roots_take_the_windows_dlls_dir(self):
         # Reachable only on a Windows runner otherwise. sysconfig's first init
-        # imports _sysconfigdata_*_{sys.platform}_*, so prime it unpatched.
+        # imports _sysconfigdata_*_{sys.platform}_*, so prime it unpatched. The
+        # root is taken off base_prefix rather than prefix, and base_prefix is
+        # fabricated here so that reading prefix instead fails: a Windows venv
+        # has no DLLs directory of its own, so under prefix the stdlib's C
+        # extensions (_socket, select, _ssl) would sit under no stdlib root at
+        # all and every guard they own would stop being library-owned. Only
+        # base_prefix is patched, never prefix: sysconfig re-initializes its
+        # config vars whenever sys.prefix moves away from the value it cached
+        # (GH-126789), which would import a _sysconfigdata for the patched
+        # platform however early this test primed it.
         stdlib_roots, norm = precompile_package._stdlib_roots, precompile_package._norm
         sysconfig.get_paths()
-        with mock.patch.object(sys, "platform", "win32"):
+        base = os.path.join(os.sep, "winbase")
+        with (
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch.object(sys, "base_prefix", base),
+        ):
             self._clear_root_caches()
-            self.assertIn(norm(os.path.join(sys.base_prefix, "DLLs")), stdlib_roots())
+            roots = stdlib_roots()
+        self.assertIn(norm(os.path.join(base, "DLLs")), roots)
+        self.assertNotIn(norm(os.path.join(sys.prefix, "DLLs")), roots)
 
     def test_stdlib_roots_take_each_source_in_a_venv_layout(self):
         # Here every source names the one <prefix>/lib/pythonX.Y, so dropping
@@ -555,9 +626,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             with mock.patch.object(os, "__file__", None):
                 stdlib_roots.cache_clear()
                 no_os = stdlib_roots()
+            # A relative os.__file__ is dropped the same way rather than
+            # resolved against the process cwd, which would make the caller's
+            # own project a stdlib root and waive a local module whose name
+            # shadows a stdlib one.
+            with mock.patch.object(os, "__file__", os.path.join("rel", "os.py")):
+                stdlib_roots.cache_clear()
+                relative_os = stdlib_roots()
         for root in (base, venv, frozen, os.path.dirname(norm(os.__file__))):
             self.assertIn(norm(root), stdlib)
         self.assertEqual(no_os, tuple(sorted(norm(r) for r in (base, venv, frozen))))
+        self.assertEqual(relative_os, no_os)
         # The nesting the exclusion exists for: purelib is under a stdlib root
         # and is an install root all the same.
         self.assertTrue(within(norm(purelib), stdlib))
@@ -600,18 +679,62 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertIn(norm(root), install)
 
     def test_install_roots_drop_a_directory_the_stdlib_sits_under(self):
-        # On Windows getsitepackages() lists the bare prefix; replay that shape
-        # here so the exclusion is pinned on every platform, not just there.
-        listed = [sys.prefix, *site.getsitepackages()]
-        with mock.patch.object(site, "getsitepackages", return_value=listed):
+        # On Windows getsitepackages() lists the bare prefix, which the whole
+        # stdlib sits under; replay that shape on every platform. The listed
+        # directory is the parent of a stdlib root, which is a strict ancestor of
+        # it whatever the layout, rather than sys.prefix, whose shape is the
+        # host's: a --prefix=/ build or a Windows embeddable unpacked at a drive
+        # root leaves the prefix at a filesystem root, which this exclusion
+        # cannot drop because `r + os.sep` is then a doubled separator no root
+        # starts with. The code degrades harmlessly there, a root that swallows
+        # everything being one that _within matches nothing against, so only an
+        # assertion on sys.prefix would fail. site.getsitepackages is replaced
+        # rather than extended for the same reason it is read through getattr in
+        # a try: the old-virtualenv site.py this survives does not define it.
+        self._clear_root_caches()
+        above = os.path.dirname(precompile_package._stdlib_roots()[0])
+        with mock.patch.object(site, "getsitepackages", return_value=[above]):
             self._clear_root_caches()
             stdlib = precompile_package._stdlib_roots()
             install = precompile_package._install_roots()
         norm, within = precompile_package._norm, precompile_package._within
-        self.assertNotIn(norm(sys.prefix), install)
+        self.assertNotIn(norm(above), install)
+        # Containment, not equality: no layout sysconfig and site can produce
+        # puts an install root ON a stdlib root, so the stronger property holds
+        # here; the equal shape the code allows on purpose is the next test.
         for root in stdlib:
             self.assertFalse(within(root, install), root)
         self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
+
+    def test_install_roots_keep_a_directory_that_is_a_stdlib_root(self):
+        # The boundary of that exclusion, and the one asymmetry in it: only a
+        # strict ancestor of a stdlib root is dropped, so a directory that IS
+        # one stays an install root. Dropping it instead would leave a third
+        # party installed straight into the stdlib directory under no install
+        # root at all and waived with the stdlib, while keeping it only reads
+        # the stdlib as third party, which over-refuses. No scheme
+        # sysconfig.get_paths() returns has this shape (posix_home is the only
+        # one with purelib at stdlib, and no preferred scheme is home), so the
+        # layout is fabricated: every stdlib source and every install source
+        # names the one directory.
+        eq = os.path.join(os.sep, "eqbuild", "lib", "python3.12")
+        paths = dict(sysconfig.get_paths())
+        paths.update(stdlib=eq, platstdlib=eq, purelib=eq, platlib=eq)
+        norm, within = precompile_package._norm, precompile_package._within
+        with (
+            mock.patch.object(sysconfig, "get_paths", return_value=paths),
+            mock.patch.object(os, "__file__", os.path.join(eq, "os.py")),
+            mock.patch.object(sys, "_stdlib_dir", eq, create=True),
+            mock.patch.object(sys, "platform", "linux"),
+            mock.patch.object(site, "getsitepackages", return_value=[]),
+            mock.patch.object(site, "getusersitepackages", return_value=None),
+        ):
+            self._clear_root_caches()
+            stdlib = precompile_package._stdlib_roots()
+            install = precompile_package._install_roots()
+        self.assertEqual(stdlib, (norm(eq),))
+        self.assertEqual(install, (norm(eq),))
+        self.assertTrue(within(norm(os.path.join(eq, "third_party.py")), install))
 
     def test_install_roots_skip_a_site_accessor_that_raises(self):
         # A site.py that cannot answer is skipped, not propagated: this runs
@@ -685,13 +808,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIs(classify(torch.__file__, False), True, "torch arm")
         self.assertIs(classify(torch.__file__, True), False, "stdlib arm")
         self.assertIs(classify(torch_in_stdlib, False), False)
-        # The install-root exclusion is the stdlib arm's alone: a pip-installed
-        # torch lies under purelib.
-        purelib_torch = os.path.join(paths["purelib"], "torch")
-        installed_torch = norm(os.path.join(purelib_torch, "__init__.py"))
+        # The install-root exclusion is the stdlib arm's alone: torch ships
+        # platform wheels (Root-Is-Purelib: false), so a pip-installed torch
+        # lies under platlib.
+        platlib_torch = os.path.join(paths["platlib"], "torch")
+        installed_torch = norm(os.path.join(platlib_torch, "__init__.py"))
         install_roots = precompile_package._install_roots()
         self.assertTrue(precompile_package._within(installed_torch, install_roots))
-        with patch_module("_torch_roots", return_value=(norm(purelib_torch),)):
+        with patch_module("_torch_roots", return_value=(norm(platlib_torch),)):
             self.assertIs(classify(installed_torch, False), True)
         # Evidence in neither direction: a relative path would resolve against
         # a cwd it was not recorded under, and no file has a NUL in its name
@@ -703,13 +827,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIsNone(classify(os.path.join(stdlib_root, "graph\x00lib.py"), True))
         # Before 3.13 ntpath.isabs accepts a driveless path (its LEGACY BUG),
         # which realpath resolves against the current drive; replay the Windows
-        # path module here so the gate is pinned on every platform. The root
+        # path module here so the gates are pinned on every platform. The root
         # finders do not work under this patch, so they are patched to a Windows
-        # stdlib, and every row in the block must return at the gate: without
-        # the NUL gate the unresolved path lies under that root and is waived.
+        # stdlib. The first two rows return at a gate (without the NUL gate the
+        # unresolved path lies under that root and is waived); the last one gets
+        # as far as _INSTALL_DIR_NAMES, which is what needs the Windows
+        # separator: _norm yields backslashes, so splitting the part below the
+        # root on "/" would leave one component that names nothing.
         import ntpath
 
         nul_under_lib = "C:\\Python312\\Lib\\graphlib.py\x00C:\\evil\\evil.py"
+        win_installed = r"c:\python312\lib\vendored\site-packages\graphlib.py"
         with (
             mock.patch.object(sys, "platform", "win32"),
             mock.patch.object(os, "path", ntpath),
@@ -719,15 +847,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ):
             self.assertIsNone(classify(r"\Lib\graphlib.py", True))
             self.assertIsNone(classify(nul_under_lib, True))
+            self.assertIs(classify(win_installed, True), False)
         # purelib nests inside stdlib (conda) or platstdlib (venv), so the
         # install-root exclusion is what refuses an installed file; with no
-        # install root known, _INSTALL_DIR_NAMES still does, case folded since
-        # normcase is the identity on posix and a macOS filesystem is not
-        # case-sensitive. Under no stdlib root at all the file is elsewhere.
+        # install root known, _INSTALL_DIR_NAMES still does, at any depth below
+        # the root and case folded since normcase is the identity on posix and a
+        # macOS filesystem is not case-sensitive. Under no stdlib root at all
+        # the file is elsewhere. These rows are spelled through a directory that
+        # cannot pre-exist, so that _norm cannot resolve them out of the stdlib
+        # root and into the terminal False instead.
         nested = os.path.join(stdlib_root, "vendored", "graphlib", "__init__.py")
         with patch_module("_install_roots", return_value=()):
             for dir_name in ("site-packages", "dist-packages", "Site-Packages"):
-                installed = os.path.join(stdlib_root, dir_name, "graphlib.py")
+                installed = os.path.join(stdlib_root, "vendored", dir_name, "g.py")
                 self.assertIs(classify(installed, True), False, dir_name)
             self.assertIs(classify(nested, True), True, "nothing installed there")
             with patch_module("_stdlib_roots", return_value=()):
@@ -738,24 +870,39 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertIs(classify(nested, True), False, "vendored is an install root")
         # _INSTALL_DIR_NAMES is matched below the stdlib root the file is under,
         # so an interpreter bundled inside another environment's site-packages
-        # keeps its own stdlib.
-        bundled = os.path.join(stdlib_root, "site-packages", "runtime", "lib")
-        below = os.path.join(bundled, "site-packages", "graphlib.py")
-        with (
-            patch_module("_install_roots", return_value=()),
-            patch_module("_stdlib_roots", return_value=(norm(bundled),)),
-        ):
-            self.assertIs(classify(os.path.join(bundled, "graphlib.py"), True), True)
-            self.assertIs(classify(below, True), False)
-        # Of nested stdlib roots the outermost is matched, so the part below it
-        # is the longest and the check the strictest.
-        classify.cache_clear()
-        outer_and_inner = (norm(stdlib_root), norm(bundled))
-        with (
-            patch_module("_install_roots", return_value=()),
-            patch_module("_stdlib_roots", return_value=outer_and_inner),
-        ):
-            self.assertIs(classify(os.path.join(bundled, "graphlib.py"), True), False)
+        # keeps its own stdlib. Spelled on a tree of its own: a real
+        # <stdlib>/site-packages that is a symlink out of the stdlib (a
+        # relocated site-packages, a Windows junction) would resolve the bundled
+        # root out from under the outer one and stop the two nesting.
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = os.path.join(tmp, "site-packages", "runtime", "lib")
+            in_bundled = os.path.join(bundled, "graphlib.py")
+            below = os.path.join(bundled, "site-packages", "graphlib.py")
+            with (
+                patch_module("_install_roots", return_value=()),
+                patch_module("_stdlib_roots", return_value=(norm(bundled),)),
+            ):
+                self.assertIs(classify(in_bundled, True), True)
+                self.assertIs(classify(below, True), False)
+            # Of nested stdlib roots the outermost is matched, so the part below
+            # it is the longest and the check the strictest.
+            classify.cache_clear()
+            with (
+                patch_module("_install_roots", return_value=()),
+                patch_module("_stdlib_roots", return_value=(norm(tmp), norm(bundled))),
+            ):
+                self.assertIs(classify(in_bundled, True), False)
+            # The path is resolved before it is judged, which is what the root
+            # finders' own docstrings rely on: unresolved, this one names an
+            # install directory, and every venv or symlink-farm __file__ would
+            # be judged by where its link sits rather than where the file is.
+            classify.cache_clear()
+            with (
+                patch_module("_install_roots", return_value=()),
+                patch_module("_stdlib_roots", return_value=(norm(tmp),)),
+            ):
+                unresolved = os.path.join(tmp, "site-packages", os.pardir, "g.py")
+                self.assertIs(classify(unresolved, True), True)
 
     def test_located_reads_the_file_from_the_module_dict(self):
         located, machinery = precompile_package._located, importlib.machinery
@@ -860,6 +1007,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             by_spec = types.ModuleType(name)
             by_spec.__spec__ = machinery.ModuleSpec(name, frozen, origin="frozen")
             self.assertIs(located(by_spec, name, True), expected, name)
+        # Both arms compare the loader by identity, so a __loader__ whose __eq__
+        # answers true for anything (mock.ANY is a stdlib object of exactly that
+        # shape) takes neither waiver, and its __eq__ never runs at all.
+        lying_eq = types.ModuleType("sys")
+        lying_eq.__loader__ = mock.ANY
+        self.assertIsNone(located(lying_eq, "sys", True))
         # __loader__ alone in the dict, with no spec, is the same evidence, and
         # both arms answer under either flag: the torch shape is an embedding
         # that registers torch._C through PyImport_AppendInittab.
@@ -973,17 +1126,24 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, "int"), int))
 
         # Only under the builtin's own name (IOError is CPython's alias of
-        # OSError), and only a type CPython built: a user class installed into
-        # builtins under its own name is a slot whether its __module__ names
-        # the test module or, exec'd with the builtins namespace as its
-        # globals, claims "builtins" outright; only a static type carries
-        # Py_TPFLAGS_IMMUTABLETYPE, which among the builtins refuses the one
-        # heap type, ExceptionGroup, alone.
+        # OSError), only a value CPython built and only one builtins owns. The
+        # flag is what refuses a user class installed into builtins under its
+        # own name, whether its __module__ names the test module or, exec'd with
+        # the builtins namespace as its globals, claims "builtins" outright;
+        # among the real builtin types it costs the heap type ExceptionGroup
+        # alone (__loader__ is a heap type too, but its __name__ is not the
+        # key). The __module__ test is what refuses open, the one builtin
+        # function builtins does not own.
         class UserError(Exception):
             pass
 
         io_read = DictGetItemSource(_BUILTINS_DICT, "IOError")
         self.assertFalse(reads_a_builtin(io_read, IOError))
+        self.assertEqual((open.__module__, open.__name__), ("_io", "open"))
+        open_read = DictGetItemSource(_BUILTINS_DICT, "open")
+        self.assertFalse(reads_a_builtin(open_read, open))
+        loader = vars(builtins)["__loader__"]
+        self.assertNotEqual(getattr(loader, "__name__", None), "__loader__")
         user_read = DictGetItemSource(_BUILTINS_DICT, "UserError")
         self.assertFalse(reads_a_builtin(user_read, UserError))
         ns = dict(vars(builtins))
@@ -1006,8 +1166,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         resume_fns = LocalSource("__nested_resume_fns")
         self.assertTrue(synthesized(resume_fns))
         self.assertTrue(synthesized(GetItemSource(resume_fns, 0)))
-        # The frame values are each enclosing frame's live stack and locals, so
-        # a guard rooted there is judged like the value it stands for.
+        # The frame values are the live stack and locals of the frames nested
+        # inside the one resuming, so a guard rooted there is judged like the
+        # value it stands for.
         self.assertFalse(
             synthesized(GetItemSource(LocalSource("__nested_frame_values"), 0))
         )
@@ -1037,7 +1198,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         unnormalized = os.path.join(
             os.path.dirname(__file__), os.curdir, os.path.basename(__file__)
         )
-        stack = traceback.StackSummary.from_list([(unnormalized, 1, "forward", "")])
+        stack = _stack(unnormalized)
         self.assertTrue(defined_where_read(_user_op, "_user_op", stack))
         # A same-file def bound under another name is a slot, however near.
         self.assertFalse(defined_where_read(_user_op, "act", _HERE))
@@ -1048,9 +1209,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # The guard carries the inlining stack at first use, so its innermost
         # frame can be a helper from another file; the reading file is the root
         # frame's, the one whose globals a bare GlobalSource denotes.
-        two_frame = traceback.StackSummary.from_list(
-            [(__file__, 1, "forward", ""), (F.__file__, 2, "helper", "")]
-        )
+        two_frame = _stack(__file__, F.__file__)
         self.assertTrue(defined_where_read(_user_op, "_user_op", two_frame))
         self.assertFalse(defined_where_read(F.silu, "silu", two_frame))
 
@@ -1103,8 +1262,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         # A co_filename is not always a path: an exec-generated frame records
         # <string>, which realpath would resolve against the cwd, so it would
-        # compare equal to the <string> a fields-only dataclass compiles its
-        # methods in and waive the one class the lint must report. Only
+        # compare equal to the <string> a fields-only dataclass compiles
+        # __init__ in and waive the one class the lint must report. Only
         # absolute filenames compare; a relative one, spelled so that it does
         # resolve to this file from the cwd, and an embedded NUL on either side
         # fail closed instead of raising.
@@ -1112,7 +1271,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         class Cfg:
             x: int
 
-        pseudo = traceback.StackSummary.from_list([("<string>", 1, "forward", "")])
+        pseudo = _stack("<string>")
         self.assertEqual(Cfg.__init__.__code__.co_filename, "<string>")
         self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, pseudo))
         exec_ns = {}
@@ -1120,14 +1279,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(defined_where_read(exec_ns["op"], "op", pseudo))
         relative = os.path.relpath(__file__)
         self.assertTrue(os.path.samefile(relative, __file__))
-        stack = traceback.StackSummary.from_list([(relative, 1, "forward", "")])
+        stack = _stack(relative)
         self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
         code = _user_op.__code__.replace(co_filename=relative)
         relative_op = types.FunctionType(code, globals(), "_user_op")
         self.assertFalse(defined_where_read(relative_op, "_user_op", _HERE))
-        stack = traceback.StackSummary.from_list(
-            [(__file__ + "\x00", 1, "forward", "")]
-        )
+        stack = _stack(__file__ + "\x00")
         self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
         code = _user_op.__code__.replace(co_filename=__file__ + "\x00")
         nul_op = types.FunctionType(code, globals(), "_user_op")
@@ -1149,8 +1306,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # keeps its function under .func and is not unwrapped, so a class with
         # nothing else fails closed, as does a class with no method of its own
         # and one whose only methods are generated (a fields-only dataclass
-        # compiles them in <string>, an Enum and a NamedTuple in the stdlib or
-        # <string>). Members are unwrapped by type, never
+        # compiles __init__ and __eq__ in <string> and takes __repr__ from the
+        # stdlib, an Enum and a NamedTuple theirs from the stdlib or <string>).
+        # Members are unwrapped by type, never
         # probed with getattr: a torch.classes proxy answers any attribute
         # read by raising RuntimeError, and a class holding one is still judged.
         class Ops:
