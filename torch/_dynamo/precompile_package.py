@@ -103,6 +103,7 @@ Know these before relying on an artifact in production:
 from __future__ import annotations
 
 import functools
+import importlib.machinery
 import os
 import site
 import sys
@@ -219,6 +220,11 @@ def _is_dynamo_synthesized(source: Source) -> bool:
     return isinstance(root, LocalSource) and root.local_name in _DYNAMO_SYNTHESIZED
 
 
+# Belt and braces for an install directory none of the roots name: whichever
+# layout put it there, a pip target still ends in one of these.
+_INSTALL_DIR_NAMES = frozenset({"site-packages", "dist-packages"})
+
+
 def _norm(path: str) -> str:
     """
     realpath then normcase. A relative path resolves against the process cwd,
@@ -301,6 +307,55 @@ def _torch_roots() -> tuple[str, ...]:
 def _within(path: str, roots: tuple[str, ...]) -> bool:
     """Prefix test over ``_norm``-ed paths; the caller normalizes both sides."""
     return any(path == r or path.startswith(r + os.sep) for r in roots)
+
+
+@functools.cache
+def _classify_file(file: str, stdlib: bool) -> bool | None:
+    """
+    Cached on the __file__ string rather than on the module name: the roots are
+    fixed for the process, so the answer for a path never changes, while the
+    module a name resolves to can.
+    """
+    if not os.path.isabs(file):
+        # Resolving it would be against a cwd that is not the one it was
+        # recorded under, so it is evidence in neither direction.
+        return None
+    try:
+        path = _norm(file)
+    except ValueError:  # an embedded NUL, which posixpath.realpath lets through
+        return None
+    if not stdlib:
+        return _within(path, _torch_roots())
+    if _INSTALL_DIR_NAMES.intersection(path.split(os.sep)):
+        return False
+    return _within(path, _stdlib_roots()) and not _within(path, _install_roots())
+
+
+def _located(module: types.ModuleType, name: str, stdlib: bool) -> bool | None:
+    """Shipped here (True), shipped elsewhere (False), or no evidence (None)."""
+    # The module dict rather than getattr: a PEP 562 module __getattr__ is user
+    # code, and a module that raises on an unknown attribute would take the
+    # capture session down from inside a lint.
+    attrs = getattr(module, "__dict__", None) or {}
+    file = attrs.get("__file__")
+    if isinstance(file, str) and file:
+        verdict = _classify_file(file, stdlib)
+        if verdict is not None:
+            return verdict
+    # The loader rather than spec.origin: both importers build the spec as
+    # spec_from_loader(name, cls, origin=cls._ORIGIN), so the two never
+    # disagree, and the class is the stronger signal.
+    loader = attrs.get("__loader__") or getattr(attrs.get("__spec__"), "loader", None)
+    if loader is importlib.machinery.BuiltinImporter:
+        # Statically linked, and BuiltinImporter precedes PathFinder on
+        # sys.meta_path, so on import no file on sys.path is reachable under
+        # this name; a spec assigned straight into sys.modules is taken at its
+        # word. The inittab is keyed on the full dotted name.
+        return name in sys.builtin_module_names
+    if loader is importlib.machinery.FrozenImporter:
+        # frozen also precedes the path finder
+        return importlib.machinery.FrozenImporter.find_spec(name) is not None
+    return None  # namespace package, exec'd in memory, REPL __main__
 
 
 def _defined_where_read(

@@ -4,6 +4,7 @@ import builtins
 import collections
 import dataclasses
 import functools
+import importlib.machinery
 import os
 import site
 import sys
@@ -233,6 +234,85 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with mock.patch.object(precompile_package, "__file__", None):
             torch_roots.cache_clear()
             self.assertEqual(torch_roots(), ())  # frozen: no directory to anchor to
+
+    def test_classify_file_places_a_path_by_the_roots_it_lies_under(self):
+        classify, norm = precompile_package._classify_file, precompile_package._norm
+        stdlib_root = sysconfig.get_paths()["stdlib"]
+        torch_in_stdlib = os.path.join(stdlib_root, "torch", "__init__.py")
+        # The verdict is cached per __file__, and one file below is judged
+        # under two install-root sets.
+        self.addCleanup(classify.cache_clear)
+        classify.cache_clear()
+        self.assertIs(classify(os.path.join(stdlib_root, "graphlib.py"), True), True)
+        # The torch arm reads the torch roots, not the stdlib ones, and the
+        # stdlib dir itself is never a pip target.
+        self.assertIs(classify(torch.__file__, False), True)
+        self.assertIs(classify(torch.__file__, True), False)
+        self.assertIs(classify(torch_in_stdlib, False), False)
+        # Evidence in neither direction: a relative path would resolve against
+        # a cwd it was not recorded under, and posixpath.realpath hands an
+        # embedded NUL to os.lstat, which raises ValueError (from 3.11.5/3.12
+        # on, gh-106242, ntpath.realpath swallows it, so nothing to pin there).
+        self.assertIsNone(classify("graphlib.py", True))
+        self.assertIsNone(classify("graphlib.py", False))
+        if sys.platform != "win32":
+            nul = os.path.join(stdlib_root, "graph\x00lib.py")
+            self.assertIsNone(classify(nul, True))
+        # purelib nests inside stdlib (conda) or platstdlib (venv), so the
+        # install-root exclusion is what refuses an installed file; with no
+        # install root known, _INSTALL_DIR_NAMES still does.
+        patch = functools.partial(mock.patch.object, precompile_package)
+        nested = os.path.join(stdlib_root, "vendored", "graphlib", "__init__.py")
+        with patch("_install_roots", return_value=()):
+            for dir_name in ("site-packages", "dist-packages"):
+                installed = os.path.join(stdlib_root, dir_name, "graphlib.py")
+                self.assertIs(classify(installed, True), False, dir_name)
+            self.assertIs(classify(nested, True), True)
+        classify.cache_clear()
+        roots = (norm(os.path.join(stdlib_root, "vendored")),)
+        with patch("_install_roots", return_value=roots):
+            self.assertIs(classify(nested, True), False)
+
+    def test_located_reads_the_file_from_the_module_dict(self):
+        located, machinery = precompile_package._located, importlib.machinery
+        builtin, frozen = machinery.BuiltinImporter, machinery.FrozenImporter
+        stdlib_root = sysconfig.get_paths()["stdlib"]
+        installed = os.path.join(stdlib_root, "site-packages", "graphlib.py")
+        module = types.ModuleType("graphlib")
+        module.__file__ = installed
+        self.assertIs(located(module, "graphlib", True), False)
+        module.__file__ = os.path.join(stdlib_root, "graphlib.py")
+        self.assertIs(located(module, "graphlib", True), True)
+
+        # Only the module dict is read. A class attribute is not in it (torch.ops
+        # is a ModuleType subclass whose __file__ is the class's "_ops.py"), and
+        # getattr would run a PEP 562 module __getattr__, user code that may
+        # raise from inside a lint.
+        class Shadow(types.ModuleType):
+            __file__ = installed
+
+        self.assertIsNone(located(Shadow("graphlib"), "graphlib", True))
+        self.assertNotIn("__file__", vars(torch.ops))
+        self.assertIsNone(located(torch.ops, "torch.ops", False))
+        raising = types.ModuleType("graphlib")
+        raising.__getattr__ = mock.Mock(side_effect=RuntimeError("no __file__"))
+        self.assertIsNone(located(raising, "graphlib", True))
+        raising.__getattr__.assert_not_called()
+        self.assertIsNone(located(types.ModuleType("graphlib"), "graphlib", True))
+        # Built in or frozen, the table is keyed on the full dotted name.
+        self.assertIs(located(sys, "sys", True), True)
+        sub = types.ModuleType("sys.sub")
+        sub.__spec__ = machinery.ModuleSpec("sys.sub", builtin, origin="built-in")
+        self.assertIs(located(sub, "sys.sub", True), False)
+        for name, expected in (("zipimport", True), ("graphlib", False)):
+            module = types.ModuleType(name)
+            module.__spec__ = machinery.ModuleSpec(name, frozen, origin="frozen")
+            self.assertIs(located(module, name, True), expected, name)
+        # __loader__ alone in the dict, with no spec, is the same evidence.
+        for name, loader in (("sys", builtin), ("zipimport", frozen)):
+            module = types.ModuleType(name)
+            module.__loader__ = loader
+            self.assertIs(located(module, name, True), True, name)
 
     def test_reads_a_builtin_keys_on_where_the_read_comes_from(self):
         reads_a_builtin = precompile_package._reads_a_builtin
