@@ -1754,7 +1754,6 @@ class _InProcessFxCompile(FxCompile):
                 const_graph = None
                 const_wrapper_code = None
                 const_kernel_code = None
-                extern_kernel_nodes: list[ExternKernelNode] = []
 
                 if aot_mode and config.aot_inductor.use_runtime_constant_folding:
                     # torchbind objects have name that starts with _torchbind_obj
@@ -1785,7 +1784,7 @@ class _InProcessFxCompile(FxCompile):
                     )
                     with (
                         V.set_graph_handler(const_graph),
-                        V.set_extern_kernel_nodes(extern_kernel_nodes),
+                        V.set_extern_kernel_nodes([]),
                     ):
                         if not cpp_wrapper:
                             raise AssertionError("AOT mode only supports C++ wrapper")
@@ -1826,7 +1825,7 @@ class _InProcessFxCompile(FxCompile):
                 graph.freeze_runtime_asserts()
                 with (
                     V.set_graph_handler(graph),
-                    V.set_extern_kernel_nodes(extern_kernel_nodes),
+                    V.set_extern_kernel_nodes([]),
                     distributed_autotune.graph_context(),
                 ):
                     graph.run(*example_inputs)
@@ -2232,6 +2231,12 @@ def cudagraphify(
 
     cudagraphify_fn: Callable[..., Any]
     if config.triton.cudagraph_trees:
+        managed_input_rerecord_limit = (
+            config.triton.cudagraph_managed_input_rerecord_limit
+        )
+        managed_input_rerecord_action = (
+            config.triton.cudagraph_managed_input_rerecord_action
+        )
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
@@ -2243,6 +2248,11 @@ def cudagraphify(
             mutated_input_idxs=mutated_input_idxs,
             kernel_free_cudagraph=kernel_free_cudagraph,
             user_visible_output_idxs=user_visible_output_idxs,
+            cudagraph_managed_input_rerecord_limit=managed_input_rerecord_limit,
+            cudagraph_managed_input_rerecord_action=managed_input_rerecord_action,
+            cudagraph_initial_mempool_allocation_gb=(
+                config.triton.cudagraph_initial_mempool_allocation_gb
+            ),
             compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:

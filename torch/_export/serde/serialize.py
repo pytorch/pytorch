@@ -1414,8 +1414,6 @@ class GraphModuleSerializer(metaclass=Final):
                         return Argument.create(as_ints=[])
                     elif isinstance(elem_type, torch.FloatType):
                         return Argument.create(as_floats=[])
-                    elif isinstance(elem_type, torch.NumberType):
-                        return Argument.create(as_ints=[])
                     elif isinstance(elem_type, torch.StringType):
                         return Argument.create(as_strings=[])
                     elif isinstance(elem_type, torch.TensorType):

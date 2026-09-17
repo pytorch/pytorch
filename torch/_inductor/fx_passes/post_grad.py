@@ -332,6 +332,20 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         spmd_check(gm)
 
+    wait_tensor = getattr(torch.ops._c10d_functional, "wait_tensor", None)
+    if wait_tensor is not None:
+        waits = gm.graph.find_nodes(
+            op="call_function",
+            target=wait_tensor.default,
+            sort=False,
+        )
+        if waits:
+            from torch._inductor.fx_passes.bucketing import deduplicate_wait_tensors
+
+            GraphTransformObserver(gm, "deduplicate_wait_tensors").apply_graph_pass(
+                functools.partial(deduplicate_wait_tensors, waits=waits)
+            )
+
     if config.aten_distributed_optimizations.allow_comms_decompositions:
         from torch._inductor.fx_passes.decomp_comms import decomp_comms
 

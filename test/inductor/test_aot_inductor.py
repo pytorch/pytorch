@@ -113,8 +113,15 @@ from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import (
+    has_triton_cuda_tma_device,
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
+)
+
+
+requires_cuda_tma = unittest.skipIf(
+    GPU_TYPE == "cuda" and not has_triton_cuda_tma_device(),
+    "requires CUDA TMA device support",
 )
 
 
@@ -1086,6 +1093,7 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
@@ -1535,7 +1543,6 @@ class AOTInductorTestsTemplate:
         self.assertTrue(same(optimized(runtime_input), model(runtime_input)))
 
     @torch._inductor.config.patch(
-        use_pre_grad_passes=True,
         pre_grad_fusion_options={
             "normalization_pass": {},
             "remove_split_with_size_one_pass": {},
@@ -2901,35 +2908,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @common_utils.parametrize("weights_format", ("binary_blob", "pickle_weights"))
-    @config.patch(torch._inductor.lite_mode_options)
-    def test_cond_nested_constants(self, weights_format):
-        class Model(CondModels.Nested):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer("constant0", torch.tensor(5.0))
-
-            def forward(self, p0, p1, p2, a, b, c):
-                return super().forward(p0, p1, p2, a, b, c) + self.constant0
-
-        inputs = tuple(torch.randn(3, 4, device=self.device) for _ in range(3))
-        list_inputs = prepend_predicates(inputs, num_predicates=3)
-        model = Model().to(self.device)
-        package_path = AOTIRunnerUtil.compile(
-            model,
-            list_inputs[0],
-            inductor_configs={
-                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-                "aot_inductor.package_constants_in_so": False,
-                "aot_inductor.package_constants_on_disk_format": weights_format,
-            },
-        )
-        contents = load_pt2(package_path, load_weights_from_disk=True)
-        optimized = contents.aoti_runners["model"]
-        for example_inputs in list_inputs:
-            self.assertEqual(optimized(*example_inputs), model(*example_inputs))
-
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_abc = Dim("s0", min=2, max=1024)
@@ -4205,6 +4183,30 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @parametrize("op", ["max", "topk", "frexp"])
+    @parametrize("strict", [False, True])
+    def test_structseq_output(self, op, strict):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                if op == "max":
+                    return torch.max(x, dim=0)
+                if op == "topk":
+                    return torch.topk(x, 2)
+                return torch.frexp(x)
+
+        model = Model()
+        x = torch.randn(4, 5, device=self.device)
+        expected = model(x)
+        ep = torch.export.export(model, (x,), strict=strict)
+        with tempfile.TemporaryDirectory() as directory:
+            package = torch._inductor.aoti_compile_and_package(
+                ep, package_path=os.path.join(directory, "model.pt2")
+            )
+            loaded = torch._inductor.aoti_load_package(package)
+            actual = loaded(x)
+        self.assertIs(type(actual), type(expected))
+        self.assertEqual(actual, expected)
+
     @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
         if self.device != "cuda":
@@ -4469,6 +4471,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_1d(self, dynamic, tma_version):
@@ -4531,6 +4534,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
@@ -5315,35 +5319,6 @@ class AOTInductorTestsTemplate:
         m = M()
         self.check_model(m, example_args)
 
-    @common_utils.parametrize("optional_elements", (False, True))
-    @common_utils.parametrize(
-        "optional_list,values", ((False, []), (True, []), (True, None))
-    )
-    def test_proxy_executor_empty_scalar_list(
-        self, optional_elements, optional_list, values
-    ):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            scalar_type = "Scalar?" if optional_elements else "Scalar"
-            list_type = f"{scalar_type}[]{'?' if optional_list else ''}"
-            torch.library.define(
-                "mylib::empty_scalar_list",
-                f"(Tensor x, {list_type} values, int offset) -> Tensor",
-                tags=torch.Tag.pt2_compliant_tag,
-                lib=lib,
-            )
-
-            @torch.library.impl("mylib::empty_scalar_list", self.device, lib=lib)
-            @torch.library.register_fake("mylib::empty_scalar_list", lib=lib)
-            def empty_scalar_list_impl(x, scalars, offset):
-                self.assertEqual(scalars, values)
-                return x + offset
-
-            class Model(torch.nn.Module):
-                def forward(self, x):
-                    return torch.ops.mylib.empty_scalar_list(x, values, 7)
-
-            self.check_model(Model(), (torch.randn(3, device=self.device),))
-
     def test_proxy_executor_scalar_tensor_arg(self):
         # A Python float bound to a Tensor-typed schema arg ("scalar in place of a
         # tensor", a wrapped number) on a no-c-shim op. complex64 forces div.Tensor to
@@ -5360,49 +5335,6 @@ class AOTInductorTestsTemplate:
         example_args = (torch.randn((1, 300, 201), dtype=torch.complex64),)
         m = M()
         self.check_model(m, example_args)
-
-    @common_utils.parametrize("unbacked", (False, True))
-    @common_utils.parametrize(
-        "op,dtype",
-        (
-            common_utils.subtest(
-                (torch.ops.aten.add.Tensor, torch.int64), name="int64_add"
-            ),
-            common_utils.subtest(
-                (torch.ops.aten.sub.Tensor, torch.float16), name="float16_sub"
-            ),
-            common_utils.subtest(
-                (torch.ops.aten.sub.Tensor, torch.bfloat16), name="bfloat16_sub"
-            ),
-        ),
-    )
-    def test_proxy_executor_symint_tensor_arg(self, unbacked, op, dtype):
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                value = y.item() if unbacked else y.shape[0]
-                return op(x, value, alpha=2)
-
-        shape = (4,) if dtype == torch.int64 else ()
-        x = torch.ones(shape, dtype=dtype, device=self.device)
-        values = (3, 257, -4) if unbacked else (3, 257)
-        list_inputs = [
-            (x, torch.tensor(value, device=self.device))
-            if unbacked
-            else (x, torch.ones(value, device=self.device))
-            for value in values
-        ]
-        actual = AOTIRunnerUtil.run_multiple(
-            Model(),
-            list_inputs,
-            inductor_configs={
-                "fallback_by_default": True,
-                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
-                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
-            },
-            dynamic_shapes=(None, None if unbacked else {0: Dim("n")}),
-        )
-        expected = [Model()(*inputs) for inputs in list_inputs]
-        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     def test_proxy_executor_symint_scalar_arg(self):
         # A SymInt (a symbolic scalar from a dynamic shape) bound to a Number/Scalar-typed
@@ -5971,7 +5903,6 @@ class AOTInductorTestsTemplate:
                 optimized(torch.randn(100), torch.tensor(2))
 
     @patch.dict(os.environ, {"TORCHINDUCTOR_SCALAR_ASSERTS_FULL": "1"})
-    @config.patch({"fallback_by_default": False})
     def test_aoti_runtime_asserts_backed_symint(self):
         if not full_aoti_runtime_assert():
             raise unittest.SkipTest("full runtime assert not turned on")
@@ -6582,7 +6513,6 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
-    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -6671,7 +6601,6 @@ class AOTInductorTestsTemplate:
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     @common_utils.parametrize("enable_kernel_context_guard", (True, False))
-    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler(self, enable_kernel_context_guard, enable_kernel_profile):
         # basic addmm model
         class Model(torch.nn.Module):
@@ -6730,7 +6659,6 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
-    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler_input_shapes(self):
         # Verify that kernel profiling records tensor input shapes,
         # scalar args, output handles, and ReinterpretView logical shapes.
@@ -6809,7 +6737,6 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
-    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler_multi_output_fallback_input_shapes(self):
         # A tuple-returning fallback (scaled_dot_product_attention) is the
         # representative kernel reaching generate_c_shim_fallback_kernel;
@@ -6859,7 +6786,6 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
-    @config.patch({"fallback_by_default": False, "selective_decompose": False})
     def test_aoti_profiler_tensor_list_input_shapes(self):
         # A tensor-list fallback collapses its whole list into a single codegen
         # arg, so the profiling handles for its ReinterpretView inputs have no
@@ -7210,13 +7136,6 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
-    @config.patch(
-        {
-            "fallback_by_default": False,
-            "selective_decompose": False,
-            "use_joint_graph_passes": True,
-        }
-    )
     def test_aoti_debug_printer_cpp_kernel(self):
         if self.device != "cpu":
             raise unittest.SkipTest("cpu test case only")
@@ -10654,6 +10573,9 @@ GPU_TEST_FAILURES = {
 }
 
 MPS_TEST_FAILURES = {
+    # MPS Inductor does not implement frexp.
+    "test_structseq_output_op_frexp_strict_False": fail_mps(is_skip=True),
+    "test_structseq_output_op_frexp_strict_True": fail_mps(is_skip=True),
     # aten::_scaled_dot_product_efficient_attention is not currently implemented for the MPS device.
     "test_scaled_dot_product_efficient_attention": fail_mps(),
     # MPS doesn't support float64

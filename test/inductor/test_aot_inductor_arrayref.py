@@ -332,15 +332,6 @@ CPU_TEST_FAILURES = {
     "test_seq": fail_stack_allocation(is_skip=True),
 }
 
-if config.fallback_by_default:
-    for name in (
-        "test_cond_unbacked_symint_predicate",
-        "test_while_loop_with_mixed_device_dynamic_True",
-        "test_while_loop_with_mixed_device_dynamic_False",
-        "test_while_loop_with_pytree_inputs",
-    ):
-        CPU_TEST_FAILURES[name] = fail_minimal_arrayref_interface()
-
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     device = "cpu"
@@ -415,7 +406,6 @@ class TestCppWrapperCpuSelection(TestCase):
             "alignment_asserts": True,
             "fx_graph_cache": False,
             "implicit_fallbacks": True,
-            "fallback_by_default": False,
         }
         package_path, code = run_and_get_cpp_code(
             AOTIRunnerUtil.compile,
