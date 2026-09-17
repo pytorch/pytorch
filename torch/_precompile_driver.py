@@ -37,20 +37,6 @@ if TYPE_CHECKING:
     # ahead of the driver. Bound here with placeholder values (not bare annotations) so
     # static tools treat them as real names in the bodies below; this block is not emitted.
     MODULE_POSITIONS: list[int] = []
-    # Multi-graph artifact state, emitted by
-    # torch._precompile._build_multigraph_python_source. _FRAMES is one entry
-    # per Dynamo frame (its code, its variants' guard state and transformed
-    # bytecode, the globals it reads); _BACKENDS is the compiled subgraphs.
-    # The backend the capture used; the drivers key their autocast handling and
-    # their re-serve off it.
-    BACKEND: str = ""
-    _FRAMES: str = ""
-    _BACKENDS: str = ""
-    # An INSTALLED multi-graph artifact carries the whole captured package in
-    # one blob instead of the per-frame records above, because it hands the
-    # frames to the frame evaluator rather than dispatching them itself.
-    _PACKAGE: str = ""
-    _ENTRY_BINDING: str = ""
     NUM_POSITIONAL_ARGS: int = 0
     PARAM_NAMES: list[str] = []
     BUFFER_NAMES: list[str] = []
@@ -159,16 +145,28 @@ def _autocast_off(devices):
     time. ``devices`` is GRAPH_DEVICES, recorded from the captured graph rather
     than from the runtime tensors: a graph can reach a device none of its
     inputs live on, and one built from factory ops has no input device at all.
+
+    A device this build cannot autocast at all is SKIPPED, not an error: a
+    device type the serving build does not know makes
+    ``is_autocast_available`` raise, and an out-of-tree backend with no
+    registered autocast module reports available and then refuses to construct
+    (``privateuseone``). There is no ambient autocast to neutralize on a device
+    this process cannot enter, so an unfamiliar name in GRAPH_DEVICES must not
+    fail every served call. The stack is built inside a ``with`` and handed
+    back with ``pop_all`` so any other failure unwinds the disables already
+    entered instead of leaving the caller's autocast region off.
     """
     import contextlib as _contextlib
 
-    import torch as _t
-
-    stack = _contextlib.ExitStack()
-    for _dev in devices:
-        if _t.amp.is_autocast_available(_dev):
-            stack.enter_context(_t.amp.autocast(_dev, enabled=False))
-    return stack
+    with _contextlib.ExitStack() as stack:
+        for _dev in devices:
+            try:
+                if not _torch.amp.is_autocast_available(_dev):
+                    continue
+                stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
+            except Exception:
+                continue
+        return stack.pop_all()
 
 
 def _eager_forward(*args):
