@@ -82,10 +82,13 @@ it.
 #    layout (.contiguous() to match a contiguous example), or use backend='eager' for
 #    layout-flexible weights.
 #
-# 3. Control flow (and, by default, shapes) is specialized to the example. A non-strict
-#    trace follows the single path taken for the example inputs: Python ``if``/``for``
-#    over a static (Python ``int``) value and shape-dependent branching on a static size
-#    are resolved at trace time and baked. Shapes are static BY DEFAULT (capture runs
+# 3. PYTHON control flow (and, by default, shapes) is specialized to the example. A
+#    non-strict trace follows the single path taken for the example inputs: Python
+#    ``if``/``for`` over a static (Python ``int``) value and shape-dependent branching on
+#    a static size are resolved at trace time and baked. A control-flow HOP is the
+#    exception: ``torch.cond`` / ``torch.while_loop`` is REFUSED outright rather than
+#    specialized, because neither backend can lower the captured subgraph it traces into.
+#    Shapes are static BY DEFAULT (capture runs
 #    make_fx in its "fake" mode, so each size is baked as a concrete constant). What is
 #    NOT silently baked is a data-dependent op -- ``.item()``, ``.nonzero()``, a Python
 #    ``if`` over a TENSOR VALUE: under fake tracing the value is unknown. (A ``for`` over
@@ -103,7 +106,8 @@ it.
 #    static capture deliberately does not have. An UNBACKED capture (mark_unbacked, below)
 #    is the only path with a ShapeEnv, so it can instead CAPTURE ``.item()`` as an unbacked
 #    value -- and likewise a ``.nonzero()``-sized intermediate, which captures and serves
-#    at any runtime size -- and fails only if the computation must GUARD on one.
+#    at any runtime size -- and fails if the computation must GUARD on one, or if the op is
+#    one no ShapeEnv can fake at all (e.g. ``aten.equal``), which BOTH paths refuse.
 #    Tracing on fake tensors also needs a meta/fake kernel for every op ``fn`` calls: an
 #    op without one (a custom op missing ``torch.library.register_fake``, but also a
 #    built-in one -- capture turns FakeTensorMode's unsafe fallback OFF, so no op is ever
@@ -335,7 +339,9 @@ class PrecompileError(RuntimeError):
     read of a traced tensor's data (``.data_ptr()``, ``.numpy()`` / ``np.asarray()``), an
     example input that cannot be represented as a fake tensor (a quantized tensor) or whose
     metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
-    input, none of which capture supports on either path (invariant 3), a non-tensor output
+    input, none of which capture supports on either path (invariant 3), a control-flow HOP
+    (``torch.cond`` / ``torch.while_loop``), whose captured subgraph neither backend can
+    lower, a non-tensor output
     the inductor backend cannot lower, or a runtime input whose shape or memory format
     differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -432,6 +438,12 @@ _SPENT = (
     "capture is spent: its `with` block already ran. Call capture() again for "
     "another artifact."
 )
+# The message for the one spent state with something left to offer, selected by
+# _write_failed: the render is in hand, so the caller wants save(), not a re-trace.
+_SPENT_RETRY = (
+    "capture is spent for tracing, but its WRITE is what failed: call save() to "
+    "retry it."
+)
 
 
 class _MakeFxCapture(Capture):
@@ -454,15 +466,17 @@ class _MakeFxCapture(Capture):
     ) -> None:
         # The module scan and the param/buffer lifting both work off the CALL arguments, so a
         # model reached any OTHER way -- fn itself, fn's __self__, a partial's bound argument
-        # -- is invisible to them and its parameters would bake into the graph as constants
-        # (invariant 1), which crashes confusingly in _check_no_constant_tensors.
-        held = [getattr(fn, "__self__", fn)]
-        if isinstance(fn, functools.partial):
-            held += pytree.tree_leaves((fn.args, fn.keywords))
+        # or the (nestable) callable a partial wraps -- is invisible to them and would bake
+        # into the graph as constants (invariant 1), crashing in _check_no_constant_tensors.
+        target, held = fn, []
+        while isinstance(target, functools.partial):
+            held += pytree.tree_leaves((target.args, target.keywords))
+            target = target.func
+        held.append(getattr(target, "__self__", target))
         if any(isinstance(a, (torch.Tensor, torch.nn.Module)) for a in held):
             raise PrecompileError(
                 "precompile cannot capture a model itself, or a callable that HOLDS a "
-                "tensor or an nn.Module (a bound method, a partial that binds one): "
+                "tensor or an nn.Module (a bound method, a partial that holds one): "
                 "precompile discovers the model(s) and the runtime inputs among the CALL "
                 "arguments, so a held one would be baked into the graph as a constant "
                 "(invariant 1). Pass a function taking them and give them as call "
@@ -490,7 +504,7 @@ class _MakeFxCapture(Capture):
                 "capture is already active: it is not re-entrant, use one `with` block."
             )
         if self._exited:
-            raise PrecompileError(_SPENT)
+            raise PrecompileError(_SPENT_RETRY if self._write_failed else _SPENT)
         self._entered = True
         return self
 
@@ -557,7 +571,7 @@ class _MakeFxCapture(Capture):
         # trace, lower and serve and then write nothing at all.
         if not self._entered:
             if self._exited:
-                raise PrecompileError(_SPENT)
+                raise PrecompileError(_SPENT_RETRY if self._write_failed else _SPENT)
             raise PrecompileError(
                 "capture is not active: call it inside its `with` block."
             )
@@ -1173,6 +1187,9 @@ def _capture(
     # param/buffer records and the user-input _dense_shape records alike -- which is what
     # gets a STRIDED nested parameter, buffer or user input the same named refusal rather
     # than the raw "NestedTensorImpl doesn't support sizes" that reading t.shape raises.
+    # The clause order is for diagnosis quality: mkldnn precedes the generic-layout test so
+    # an mkldnn input is told about the traced-away conversions rather than about nnz, and
+    # the dispatched is_pinned() probe (see below) comes last.
     for label, a in zip(input_labels, flat_args):
         if not isinstance(a, torch.Tensor):
             continue
@@ -1201,7 +1218,18 @@ def _capture(
                 "tensor -- on the model for a parameter/buffer, at the call site for a "
                 "user input."
             )
-        if a.is_pinned():
+        # is_pinned() DISPATCHES, unlike the three metadata reads above, so unlike them it
+        # can raise: reaching an mkldnn OpaqueTensorImpl's storage is a NotImplementedError
+        # and a functorch-batched tensor has no batching rule for it. It stays last so a
+        # tensor one of the clauses above describes better gets that diagnosis, and the
+        # probe is guarded so neither raise can escape as a raw error: a tensor whose
+        # dispatch declines the op is not pinned. One clause covers both, since
+        # NotImplementedError subclasses RuntimeError.
+        try:
+            is_pinned = a.is_pinned()
+        except RuntimeError:
+            is_pinned = False
+        if is_pinned:
             raise PrecompileError(
                 f"precompile: example {label} is in pinned memory, which a fake tensor "
                 "cannot represent: is_pinned() reads False while tracing, so a branch on "
@@ -1504,8 +1532,10 @@ def _capture(
                 # AssertionError("NYI: <op>") instead of UnsupportedOperatorException, so
                 # e.g. the usual "pin if not pinned" idiom in fn escaped raw. It is the
                 # missing-fake-kernel condition wearing a different exception type; give it
-                # that refusal. The prefix match is exact (one raise site, in fake_impls);
-                # any other AssertionError is an internal bug or fn's own.
+                # that refusal. The prefix match is exact (one raise site, in fake_impls),
+                # so any AssertionError whose message does not carry that prefix is an
+                # internal bug or fn's own and is re-raised; an fn that itself raises
+                # AssertionError("NYI: ...") is relabeled, an accepted collision.
                 if not str(e).startswith("NYI: "):
                     raise
                 raise _missing_fake_kernel_refusal(
@@ -2247,9 +2277,8 @@ def _make_inlined_forward(
     ``python_code`` needs no cache -- the kernels (inductor) or graph (eager) are
     inlined, so we just exec it and hand back its ``forward``. The returned
     ``forward`` takes the same args the traced fn took (model(s) plus runtime
-    inputs). ``who`` names the entry point the caller actually called. ``warn`` is off
-    only for the capture-time self-load, where the source was just produced in-process
-    and so is not untrusted input."""
+    inputs). ``who`` names the entry point the caller actually called; ``warn`` is off
+    only for the capture-time self-load, whose source was produced in-process."""
     # python_code is untrusted EXECUTABLE input -- exec'ing it runs whatever it contains
     # (JIT-compiling inlined kernels or running the inlined graph). Warn per load (not
     # warning_once) before the exec so the inlined fallback is never silent about it.
@@ -2274,9 +2303,9 @@ def _check_path_pair(
 
     Three ways it can be unusable: half a pair (the two files only load together), one
     file named for both halves (the write would clobber the source), and a path that
-    exists but is not a regular file. The ``None`` checks are defensive -- both
-    parameters are typed -- but they turn ``os.path.abspath(None)``'s bare ``TypeError``
-    into a message that says a pair is what is wanted.
+    exists but is not a regular file. The ``None`` checks are defensive (both parameters
+    are typed) but turn ``os.path.abspath(None)``'s bare ``TypeError`` into one naming
+    the pair.
     """
     if artifact_path is None or cache_path is None:
         if artifact_path is None and cache_path is None:
@@ -2348,12 +2377,11 @@ def _write_artifact(
     raises, so a Python exception (a full disk, a permission error) leaves the previous
     pair intact. Which undo runs is read off the DISK rather than from flags, and a report
     is gated on the file it names still being there (the comment on the undo has the
-    reasoning). Process
-    death between the two renames is not covered, nor is a reader racing them or two
-    writers interleaving: that can leave one source beside the other's cache, which
-    ``load`` refuses on the cache's sha256 rather than serving stale code, and a name
-    another writer takes in that window costs the previous source, which goes with the
-    backup. The containing directory is fsync'd after, best effort.
+    reasoning). Process death between the two renames is not covered, nor is a reader
+    racing them or two writers interleaving: that can leave one source beside the other's
+    cache, which ``load`` refuses on the cache's sha256 rather than serving stale code,
+    and a name another writer takes in that window costs the previous source, which goes
+    with the backup. The containing directory is fsync'd after, best effort.
     """
     written = []
     new_stats: list[os.stat_result] = []
@@ -2556,9 +2584,8 @@ def _runnable_from_pair(
 
     The shared core of :func:`load`, ``_PrecompileApi.load`` and the capture-time
     self-load in :class:`_MakeFxCapture`, so ``who`` names the entry point the caller
-    actually called rather than one of the other two. ``_trusted`` is set only for
-    that self-load, where the source was just produced in-process, to suppress the
-    exec warning.
+    actually called rather than one of the other two. ``_trusted`` suppresses the exec
+    warning, and is set only for that self-load: its source was produced in-process.
     """
     # Unpickling the cache references classes in AOTAutograd's runtime; import
     # dynamo first so that import completes in a non-circular order (otherwise
@@ -2691,20 +2718,23 @@ def capture(
     ``training=False`` runs it under ``torch.no_grad()``. Either way the value
     ``cap(...)`` returns is the served result: a computed output does not require
     grad, and an output that IS an input or parameter comes back as that same tensor,
-    hence with its own ``requires_grad``. An output that ALIASES an input -- a view of
+    hence with its own ``requires_grad``. An output that ALIASES an INPUT -- a view of
     it, ``t.detach()`` included, which the trace records as a view -- is instead REBUILT
     at serve time and its ``requires_grad`` is not part of the contract (eager takes it
-    from the runtime input the view is regenerated off, inductor bakes in the value the
-    capture saw), so call ``.requires_grad_()`` on it if you depend on it. Aliases of an
-    INPUT only. ``backend`` picks ``"inductor"`` (lower through AOTAutograd +
-    Inductor into self-contained source plus an acceleration cache) or ``"eager"``
-    (inline the captured ATen graph as readable source). Call ``cap.save()`` inside the
-    block to write the files before it exits, and after a WRITE that failed to retry it. The contract is Note [precompile programming model] in this module; see
-    :func:`load` for reading the pair back.
+    from the runtime input, inductor from the capture), so set it yourself if you depend
+    on it. ``backend`` picks ``"inductor"`` (lower through AOTAutograd + Inductor into
+    self-contained source plus an acceleration cache) or ``"eager"`` (inline the captured
+    ATen graph as readable source). Call ``cap.save()`` inside the block to write the
+    files before it exits; after a WRITE that failed -- the exit's or a ``save()``'s --
+    call it again to retry that write, from outside the block too. The contract is Note
+    [precompile programming model] in this module; see :func:`load` for reading the pair
+    back.
 
     Raises ``ValueError`` for a ``backend`` outside ``{"inductor", "eager"}`` and for a
     path pair no entry point can use (half a pair, one file named for both halves, a path
-    that is not a regular file); ``TypeError`` for a non-:class:`MakeFxTracer` ``tracer``.
+    that is not a regular file); ``TypeError`` for a non-:class:`MakeFxTracer` ``tracer``;
+    ``PrecompileError`` for an ``fn`` that HOLDS a model or a tensor instead of taking it
+    as a call argument (a bound method, a partial that holds one).
     """
     # Keyed on the module these live in TODAY; the module switch moves both keys to
     # the public torch.compiler.precompile.* spelling.
@@ -2927,7 +2957,7 @@ class _PrecompileApi:
         are supported -- AOTAutograd's prelude/epilogue is composed into the artifact
         (invariant 4), as is functionalized RNG. Caller responsibilities NOT checked
         here (see the Note): the runtime model must be structurally identical to the
-        example, and control flow / shapes are specialized to ``example_inputs``
+        example, and Python control flow / shapes are specialized to ``example_inputs``
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked as a constant (invariant 1), effectful ops (invariant 4), a
         data-dependent op a static (fake-tensor) capture cannot know -- ``.item()``,
@@ -2938,7 +2968,9 @@ class _PrecompileApi:
         ``.numpy()`` / ``np.asarray()``), an example input the fake trace cannot represent
         (a quantized tensor) or whose metadata it silently drops (a pinned, mkldnn or
         sparse tensor), a nested example input, none of which capture supports on either
-        path (invariant 3), and -- for the inductor backend -- a runtime input whose
+        path (invariant 3), a control-flow HOP (``torch.cond`` / ``torch.while_loop``),
+        which is refused rather than specialized because neither backend can lower the
+        subgraph it captures, and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
