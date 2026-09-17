@@ -67,7 +67,10 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
-from torch.testing._internal.common_cuda import blas_library_context
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    blas_library_context,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -1517,6 +1520,29 @@ class TestFX(JitTestCase):
                     print_output=False, include_stride=True, include_device=True
                 )
                 self.assertIn("x", text)
+
+    def test_print_sparse_tensor_metadata(self):
+        crow = torch.tensor([0, 1, 2])
+        col = torch.tensor([0, 1])
+        vals = [
+            torch.sparse_coo_tensor(torch.tensor([[0, 1], [0, 1]]), torch.randn(2), (2, 2)),
+            torch.sparse_csr_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_csc_tensor(crow, col, torch.randn(2), size=(2, 2)),
+            torch.sparse_bsr_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+            torch.sparse_bsc_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4)),
+        ]
+
+        for val in vals:
+            graph: torch.fx.Graph = torch.fx.Graph()
+            x: torch.fx.Node = graph.create_node("placeholder", "x")
+            node: torch.fx.Node = graph.create_node("call_function", torch.relu, args=(x,))
+            node.meta["val"] = val
+            graph.output(node)
+            gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+            text = gm.print_readable(print_output=False, include_stride=True, include_device=True)
+            if val.layout is not torch.sparse_coo:
+                self.assertIn(f'"f32{list(val.shape)}cpu"', text)
+                self.assertIn(f'"f32{list(val.shape)}cpu"', node.format_node(include_tensor_metadata=True))
 
     def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
         # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
@@ -4748,12 +4774,26 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 },
             )
         else:
+            # cuBLASLt added two internal cudaStreamIsCapturing checks before
+            # launching GEMM kernels starting with CUDA 13.4, which show up
+            # as extra runtime events ahead of each addmm's kernel launch.
+            extra_event = not torch.version.hip and _get_torch_cuda_version() >= (13, 4)
+            capture_1, capture_2 = "", ""
+            if extra_event:
+                capture_1 = (
+                    "event=cudaStreamIsCapturing node=addmm "
+                    "stack_trace=x = self.linear1(x)\n"
+                ) * 2
+                capture_2 = (
+                    "event=cudaStreamIsCapturing node=addmm_1 "
+                    "stack_trace=x = self.linear2(x)\n"
+                ) * 2
             expected = f"""\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
 event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
-event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
+{capture_1}event={kernel_event} node=addmm stack_trace=x = self.linear1(x)
 event=aten::relu node=relu stack_trace=x = self.relu(x)
 event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
 event={kernel_event_relu} node=relu stack_trace=x = self.relu(x)
@@ -4761,7 +4801,7 @@ event=aten::t node=t_1 stack_trace=x = self.linear2(x)
 event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
-event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
+{capture_2}event={kernel_event} node=addmm_1 stack_trace=x = self.linear2(x)"""
             self.assertExpectedInline(actual_traces, expected)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
