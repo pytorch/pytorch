@@ -530,7 +530,12 @@ class BaseListVariable(VariableTracker):
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
         from .dicts import ConstDictVariable
-        from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
+        from .sets import (
+            DictKeySetVariable,
+            FrozensetVariable,
+            OrderedSetVariable,
+            SetVariable,
+        )
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
@@ -540,7 +545,13 @@ class BaseListVariable(VariableTracker):
             self.items.extend(unpack_iterable(tx, args[0]))
         elif isinstance(
             args[0],
-            (ConstDictVariable, SetVariable, FrozensetVariable, DictKeySetVariable),
+            (
+                ConstDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                DictKeySetVariable,
+                OrderedSetVariable,
+            ),
         ):
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
