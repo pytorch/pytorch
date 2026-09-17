@@ -154,21 +154,29 @@ def _autocast_off(devices):
     than from the runtime tensors: a graph built from factory ops has no input
     device at all.
 
-    A device this build cannot autocast at all is SKIPPED with a logged warning,
-    not an error, since a device this process cannot enter has no ambient autocast
-    to neutralize. The three ways that shows up are all caught: an unknown device
-    type raises ``RuntimeError``, a deprecated-but-parseable spelling (``mkldnn``)
-    emits a ``UserWarning`` -- which under ``-W error`` IS the raise, hence
-    ``Warning`` in the catch -- and an out-of-tree backend with no registered
-    autocast module reports available and then fails an ``assert`` in the
-    constructor (``privateuseone``). Nothing else is swallowed. The skip is still
-    announced, because on a device this build DOES know it means the served call
-    casts twice; through ``logging`` rather than ``warnings`` (a ``UserWarning``
-    would fail the very call this skip keeps working under ``-W error``) and once
-    per device per LOADED artifact (_AUTOCAST_SKIPS_REPORTED is the artifact's own
-    copy, so a second ``load`` reports again). The stack is built inside a ``with``
-    and handed back with ``pop_all`` so a propagating failure unwinds the disables
-    already entered, not leaving the caller's autocast off.
+    Nothing is entered for a device that has no autocast on it, which is the
+    overwhelmingly common case: ``is_autocast_enabled(dev)`` is exactly the bit
+    ``autocast(dev, enabled=False)`` clears, so gating on it keeps a served call from
+    paying a context enter/exit per graph device (whose exit would also drop a
+    caller's own weight-cast cache) to disable what is already off.
+
+    A device this build cannot autocast at all is SKIPPED with a logged warning, not
+    an error: the probe raises ``RuntimeError`` for it, and such a device cannot have
+    an ambient region to neutralize anyway, since ``torch.amp.autocast`` refuses to
+    construct one for it. Two narrower failures take the same skip: a
+    deprecated-but-parseable spelling (``mkldnn``) whose device parse emits a
+    ``UserWarning`` -- which under ``-W error`` IS the raise, hence ``Warning`` in the
+    catch -- and an out-of-tree backend that reports autocast enabled and then raises
+    ``AssertionError`` out of the ``autocast`` constructor (``privateuseone`` with no
+    registered device module). Nothing else is swallowed. Those two are what the
+    report is for: unlike the unknown-device case they can fire while autocast IS on
+    for that device, and then the served call does cast a second time. Through
+    ``logging`` rather than ``warnings`` (a ``UserWarning`` would fail the very call
+    this skip keeps working under ``-W error``) and once per device per LOADED
+    artifact (_AUTOCAST_SKIPS_REPORTED is the artifact's own copy, so a second
+    ``load`` reports again). The stack is built inside a ``with`` and handed back with
+    ``pop_all`` so a propagating failure unwinds the disables already entered, not
+    leaving the caller's autocast off.
     """
     import contextlib as _contextlib
     import logging as _logging
@@ -177,9 +185,9 @@ def _autocast_off(devices):
         _skipped = []
         for _dev in devices:
             try:
-                if _torch.amp.is_autocast_available(_dev):
+                if _torch.is_autocast_enabled(_dev):
                     stack.enter_context(_torch.amp.autocast(_dev, enabled=False))
-                    continue
+                continue
             except (RuntimeError, AssertionError, Warning):
                 pass
             if _dev not in _AUTOCAST_SKIPS_REPORTED:
@@ -189,11 +197,15 @@ def _autocast_off(devices):
             # The logger named literally, not from __name__: this body is inlined
             # into the artifact, which is not this module.
             _logging.getLogger("torch._precompile_driver").warning(
-                "precompile: this build cannot autocast the captured graph's "
-                "device(s) %s, so any ambient autocast is left on for them. A "
-                "call served inside an autocast region for one of those devices "
-                "can cast a second time on top of the casts already baked into the "
-                "artifact and return a different dtype than the capture did.",
+                "precompile: this build cannot neutralize autocast on the captured "
+                "graph's device(s) %s, so any autocast that IS on for them is left "
+                "on. A device this build cannot autocast at all can have no such "
+                "region; but if the probe itself failed (a device deprecation "
+                "warning under -W error, or a backend that reports autocast enabled "
+                "and then refuses to construct it), a call served inside an autocast "
+                "region for that device casts a second time on top of the casts "
+                "already baked into the artifact and returns a different dtype than "
+                "the capture did.",
                 _skipped,
             )
         return stack.pop_all()
