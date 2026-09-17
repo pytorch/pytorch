@@ -675,6 +675,24 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "control-flow subgraph"):
             torch.compiler.precompile(f, torch.randn(4))
 
+    def test_while_loop_rejected(self):
+        # torch.while_loop is the other HOP that refusal names, and it never reaches the
+        # post-trace get_attr check: its fake kernel enters
+        # mode.shape_env.ignore_fresh_unbacked_symbols(), which on a static capture (no
+        # ShapeEnv) raises an AttributeError mid-trace. It must still be refused with the
+        # same PrecompileError, not leak that internal error.
+        def f(x):
+            def cond_fn(i, v):
+                return i < 3
+
+            def body_fn(i, v):
+                return i + 1, v + 1
+
+            return torch.while_loop(cond_fn, body_fn, (torch.tensor(0), x))
+
+        with self.assertRaisesRegex(PrecompileError, "control-flow subgraph"):
+            torch.compiler.precompile(f, torch.randn(4))
+
     def test_load_falls_back_when_cache_unreconstructable(self):
         # The cache is only an acceleration; python_code always runs standalone. A
         # corrupt / stale cache must degrade to the inlined JIT path, not crash.
@@ -1236,8 +1254,45 @@ class TestPrecompile(TestCase):
                 return mm(t)
             return mm(t) + 1
 
-        with self.assertRaisesRegex(PrecompileError, "guard on a dim marked with"):
+        with self.assertRaisesRegex(PrecompileError, "guard on a value this capture"):
             torch.compiler.precompile(needs_guard, m, x)
+
+    def test_dynamic_shapes_unbacked_item_captured(self):
+        # An unbacked capture is the only path with a ShapeEnv, so where a static capture
+        # refuses .item() outright it holds the value as an unbacked symbol: a use that
+        # never guards on it captures, and the loaded artifact matches eager. Replay on a
+        # DIFFERENT input (fresh values, a different marked size) so a baked .item() value
+        # or a specialized batch dim fails here rather than passing on the capture input.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def scale_by_item(mm, t):
+            return mm(t) * t.sum().item()
+
+        code, cache = torch.compiler.precompile(scale_by_item, m, x)
+        f_c = torch.compiler.precompile.load(code, cache)
+        other = torch.randn(16, 4)
+        self.assertEqual(f_c(m, other), scale_by_item(m, other))
+
+    def test_dynamic_shapes_unbacked_item_guard_rejected(self):
+        # The other half of the same contract: a branch on the .item() value must guard
+        # on that unbacked symbol, so capture fails LOUDLY instead of baking the value
+        # the example run happened to produce.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def branches_on_item(mm, t):
+            return mm(t) if t.sum().item() > 0 else mm(t) + 1
+
+        with self.assertRaisesRegex(
+            PrecompileError, "guard on a value this capture"
+        ) as cm:
+            torch.compiler.precompile(branches_on_item, m, x)
+        # The refusal must name the VALUE symbol (an unbacked float, zuf0 > 0.0), not the
+        # marked dim (u0 > 4) -- the marked-dim case produces the same top line verbatim.
+        self.assertRegex(str(cm.exception), r"Underlying:.*zuf\d+ > 0\.0")
 
     def test_dynamic_shapes_eager_rejected(self):
         m = torch.nn.Linear(4, 3).eval()
@@ -2114,6 +2169,22 @@ class TestPrecompile(TestCase):
             finally:
                 no_fake_impl._lib._destroy()
 
+        # The ops above live in a namespace FakeTensorMode's unsafe fallback does not
+        # allow, so they are refused even with the fallback on. In an ALLOWLISTED
+        # namespace (aten, prims, quantized, ...) the fallback would instead run the
+        # real kernel on ZERO-FILLED substitutes and bake whatever shape that produced;
+        # the capture mode passes allow_fallback_kernels=False so this is refused too.
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_no_meta", lambda x: x * 2, "CPU")
+            with self.assertRaisesRegex(PrecompileError, "no meta/fake kernel"):
+                torch.compiler.precompile(
+                    lambda m, x: torch.ops.quantized.mlprecompile_no_meta(m(x)),
+                    model,
+                    torch.randn(3, 4),
+                    backend="eager",
+                )
+
     def test_capture_refuses_a_data_ptr_read(self):
         # Capture traces on fake tensors, which have no real memory behind them, so a
         # .data_ptr() read in fn (or in a kernel that dereferences one) could only
@@ -2147,6 +2218,25 @@ class TestPrecompile(TestCase):
                 lambda m, t: m(t.dequantize()), model, q, backend="eager"
             )
         self.assertIs(model.weight.grad, grad)
+
+    def test_nested_input_refused(self):
+        # A jagged nested tensor's ragged dim needs a ShapeEnv to fakeify, which a static
+        # capture has none of, so it is refused up front with the same named
+        # PrecompileError rather than the raw internal assertion from_tensor would raise.
+        # The refusal runs ahead of the recorded-shape reads, so the strided layout (whose
+        # .shape read raises inside NestedTensorImpl) takes the same path.
+        model = torch.nn.Linear(3, 3)
+        parts = [torch.randn(2, 3), torch.randn(4, 3)]
+        for layout in (torch.jagged, torch.strided):
+            nt = torch.nested.nested_tensor(parts, layout=layout)
+            with (
+                self.subTest(layout=layout),
+                self.assertRaisesRegex(
+                    PrecompileError,
+                    "user input 0 cannot be represented as a fake tensor",
+                ),
+            ):
+                torch.compiler.precompile(lambda m, t: m(t), model, nt, backend="eager")
 
     def test_user_runtime_error_from_fn_propagates_unchanged(self):
         # Capture catches EVERY RuntimeError out of the trace to relabel the two it
