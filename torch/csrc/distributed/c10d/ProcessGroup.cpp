@@ -243,7 +243,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
       ? name.value()
       : fmt::format("{}:split:{}", getGroupName(), ranks);
   // The backend owns connection isolation; this prefix owns key isolation.
-  // Therefore, an explicitly supplied group name must be unique among siblings.
+  // Explicitly supplied group names must remain unique among siblings.
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(fmt::format("{}/", groupName), store_));
   std::string groupDesc = desc.has_value()

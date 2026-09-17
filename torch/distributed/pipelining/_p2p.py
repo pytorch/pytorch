@@ -4,6 +4,7 @@
 import itertools
 import logging
 import weakref
+from collections.abc import Mapping
 
 import torch
 import torch.distributed as dist
@@ -18,6 +19,9 @@ _P2PGroupCacheKey = tuple[_P2PTopology, str]
 _P2PGroupCacheEntry = tuple[
     dict[tuple[int, int], dist.ProcessGroup], tuple[_P2PWarmupRound, ...]
 ]
+# A schedule may configure several local stage objects for one topology. Cache
+# their shared children so every parent rank executes each split collective
+# exactly once. Full process-group teardown owns the real child lifetimes.
 _PP_EDGE_GROUP_CACHE: weakref.WeakKeyDictionary[
     dist.ProcessGroup, dict[_P2PGroupCacheKey, _P2PGroupCacheEntry]
 ] = weakref.WeakKeyDictionary()
@@ -89,6 +93,37 @@ def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
     )
 
 
+def _initialize_additional_parent_backends(
+    parent: dist.ProcessGroup,
+    device_backend_map: Mapping[str, str],
+    initialized_backend: str,
+) -> None:
+    """Initialize retained native backends not exercised by stage warmup.
+
+    The schedule initializes the backend for the stage device before reaching
+    this boundary. An unfiltered mixed-backend child retains every distinct
+    backend, and ``split_group`` requires each retained backend to be initialized.
+
+    Args:
+        parent: Parent pipeline process group.
+        device_backend_map: Parent mapping from device type to backend name.
+        initialized_backend: Backend already initialized by schedule warmup.
+    """
+    initialized = {initialized_backend}
+    for device_type, backend_name in sorted(device_backend_map.items()):
+        if backend_name in initialized:
+            continue
+        backend_device = torch.device(device_type)
+        bound_device = parent.bound_device_id
+        if bound_device is not None and bound_device.type == device_type:
+            backend_device = bound_device
+        dist.all_reduce(
+            torch.zeros(1, dtype=torch.int32, device=backend_device),
+            group=parent,
+        )
+        initialized.add(backend_name)
+
+
 def _build_p2p_edge_groups(
     group: dist.ProcessGroup | None,
     stage_index_to_group_rank: dict[int, int],
@@ -111,7 +146,6 @@ def _build_p2p_edge_groups(
             for edge in round_edges:
                 if group_rank in edge:
                     groups[edge] = parent
-        _PP_EDGE_GROUP_CACHE.setdefault(parent, {})[cache_key] = (groups, rounds)
         return groups, rounds
 
     # Match split_group's backend selection so its default-backend validation
@@ -150,6 +184,12 @@ def _build_p2p_edge_groups(
             )
         # Preserve the timeout configured on this exact native backend.
         timeout = parent_backend.options._timeout
+        if backend_filter is None and len(set(device_backend_map.values())) > 1:
+            _initialize_additional_parent_backends(
+                parent,
+                device_backend_map,
+                backend_name,
+            )
     for round_index, round_edges in enumerate(rounds):
         child = dist.split_group(
             parent_pg=parent,

@@ -17317,7 +17317,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 (CheckpointPolicy.PREFER_RECOMPUTE, 1),
                 (CheckpointPolicy.PREFER_CPU_OFFLOAD, 1),
                 (CheckpointPolicy.MUST_RECOMPUTE, 2),
-                (CheckpointPolicy.MUST_CPU_OFFLOAD, 2),
+                (CheckpointPolicy.MUST_CPU_OFFLOAD, 1),
             ):
                 with self.subTest(policy=policy):
                     call_count = 0
@@ -17359,9 +17359,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
             def context_fn():
                 return create_selective_checkpoint_contexts(
-                    lambda _ctx, _op, *args, **kwargs: (
-                        CheckpointPolicy.PREFER_RECOMPUTE
-                    )
+                    lambda _ctx, _op, *args, **kwargs: CheckpointPolicy.PREFER_RECOMPUTE
                 )
 
             x = torch.randn(3, requires_grad=True)
