@@ -697,10 +697,10 @@ class AOTCompiledFunction:
                     # guard rooted at it certifies the live dict itself, which
                     # the graph's globals never copy. Not intersected with the
                     # scope: a name it does not bind yet fails the guard rooted
-                    # at it, so nothing is served on that name until a caller
-                    # who populates the dict after the load binds it -- and then
-                    # the re-read is what the graph gets, not the value the
-                    # artifact was traced with.
+                    # at it, so with the check on nothing is served on that name
+                    # until a caller who populates the dict after the load binds
+                    # it -- and then the re-read is what the graph gets, not the
+                    # value the artifact was traced with.
                     certified = _guard_source_globals(output_graph) - {builtins_key}
                     self._live_global_names = tuple(sorted(certified))
                     # Bound at load as well as re-taken per call in _serve: a
@@ -708,11 +708,12 @@ class AOTCompiledFunction:
                     # lifted -- a global the forward mutates or returns -- is in
                     # external_refs and in no serialized scope, so
                     # forward_callable's check fails unless it is bound here.
-                    live = {
-                        name: guard_scope[name]
-                        for name in certified
-                        if name in guard_scope
-                    }
+                    live = {}
+                    for name in certified:
+                        try:
+                            live[name] = guard_scope[name]
+                        except KeyError:
+                            continue
                     extra_globals = {**(extra_globals or {}), **live}
 
         self.fn = self._artifacts.runtime_env.forward_callable(
@@ -938,6 +939,13 @@ class AOTCompiledFunction:
     def _serve(self, *args: Any, **kwargs: Any) -> Any:
         """Run the graph, re-reading the globals a kept guard certifies.
 
+        Every call of an artifact runs through here -- ``__call__`` once its
+        guards pass or the check is disabled, and all four exits of
+        ``AOTCompiledModel.__call__``: the first pass, the sweep over the later
+        results, the re-check pass and the opted-out last resort -- so this is
+        the only caller of the raw ``fn``, and no dispatch pass serves a value an
+        earlier call re-read for a name the scope binds.
+
         A global a kept guard's own source IS -- not one reached only through a
         sub-path of it, which the guard does not certify -- is re-read from the
         guard scope here, so a rebind that scope took and the guards accepted (a
@@ -973,16 +981,20 @@ class AOTCompiledFunction:
         landing between the two is served unchecked -- the same window an eager
         compiled frame has between guard evaluation and LOAD_GLOBAL. The write
         lands in this artifact's own ``fn.__globals__``, which every call of it
-        shares, so two threads serving one loaded artifact against scopes that
-        differ, or against a scope rebound concurrently, race on that dict and
-        one can run the graph on the value the other just wrote; a caller who
-        needs isolation loads the artifact once per thread, since each load
-        builds its own dict."""
+        shares, so two threads serving one loaded artifact while either rebinds
+        a guarded global race on that dict and one can run the graph on the
+        value the other just wrote; a caller who needs isolation loads the
+        artifact once per thread, since each load builds its own dict."""
         if self._live_global_names and (scope := self._guard_globals) is not None:
             f_globals = self.fn.__globals__
             for name in self._live_global_names:
-                if name in scope:
+                # One read, not a membership test and then a read: the scope is
+                # live, and a del landing between the two would raise where an
+                # absent name is skipped.
+                try:
                     f_globals[name] = scope[name]
+                except KeyError:
+                    continue
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
@@ -1638,14 +1650,13 @@ class AOTCompiledModel:
         f_locals = first.prepare_f_locals(self.model, *args, **kwargs)
         if first._live_guard_manager().check(f_locals):
             # The guard manager already passed; go through _serve rather
-            # than result(), which would re-run the ~1us guard eval on this
+            # than result(), which would re-run the ~0.85us guard eval on this
             # hot dispatch path. _serve costs one Python frame plus a scope
-            # probe and a dict write per certified global instead (about 0.4us
-            # with one name, under the ~0.85us guard eval), and is what hands
-            # the graph the globals that check just accepted. Gating that frame
-            # out per site is not worth it: _serve is the only caller of the raw
-            # fn, and a site that got the gate wrong would serve a stale global
-            # with every guard passing.
+            # read and a dict write per certified global instead (about 0.4us
+            # with one name), and is what hands the graph the globals that
+            # check just accepted. Gating that frame out per site is not worth
+            # it: _serve is the only caller of the raw fn, and a site that got
+            # the gate wrong would serve a stale global with every guard passing.
             return first._serve(self.model, *args, **kwargs)
         bound = [f_locals]
         shared = len(results) > 1 and self._binds_alike(results)
