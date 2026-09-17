@@ -7,7 +7,7 @@ import weakref
 from collections.abc import Callable
 from functools import wraps
 from typing import ParamSpec, TypeVar
-from unittest import SkipTest
+from unittest import mock, SkipTest
 
 import torch
 import torch.cuda
@@ -71,6 +71,24 @@ skip_if_mi350_rocm_lt_10_1 = lazy_skip_if(
     and getRocmVersion() < (10, 1),
     "MI350 symmetric memory requires ROCm 10.1 or newer",
 )
+skip_if_rccl_symmem_not_compiled = skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
+    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
+    "pass the host-translation-unit compatibility probe",
+)
+skip_if_rccl_lt_2_30_4 = skip_but_pass_in_sandcastle_if(
+    TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
+    "RCCL host device APIs require RCCL 2.30.4 or newer",
+)
+
+
+def patch_env(test: TestCase, **values: str) -> None:
+    """Set env vars for the duration of `test`, restoring them afterwards."""
+    patcher = mock.patch.dict(os.environ, values)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
     TestCase = NoTest
@@ -274,16 +292,8 @@ class TestNCCL(TestCase):
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 @skip_if_mi350_rocm_lt_10_1
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
-    "RCCL symmetric-memory API baseline is 2.30.4; the build also requires "
-    "a host-compatible nccl_device.h",
-)
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
-)
+@skip_if_rccl_lt_2_30_4
+@skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
@@ -1319,11 +1329,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
 @requires_cuda_p2p_access()
 @skip_if_mi350_rocm_lt_10_1
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
-)
+@skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryNccl2Test(MultiProcContinuousTest):
     """NCCL symmetric memory over an nccl2-backed process group.
 
@@ -1590,15 +1596,8 @@ class SymmMemCftHandleTest(MultiProcessTestCase):
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific symmetric-memory lifecycle test"
 )
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
-    "RCCL host device APIs require RCCL 2.30.4 or newer",
-)
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
-)
+@skip_if_rccl_lt_2_30_4
+@skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
     """ROCm process-group teardown with retained symmetric-memory handles."""
 
@@ -1606,19 +1605,13 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         super().setUp()
         # These are consumed while the spawned worker imports torch and while
         # RCCL creates its first communicator.
-        required_env = {
-            "TORCH_SYMMEM": "NCCL",
-            "TORCH_DIST_USE_NCCL2": "1",
-            "NCCL_CUMEM_ENABLE": "1",
-            "NCCL_WIN_ENABLE": "1",
-        }
-        for name, value in required_env.items():
-            previous = os.environ.get(name)
-            if previous is None:
-                self.addCleanup(os.environ.pop, name, None)
-            else:
-                self.addCleanup(os.environ.__setitem__, name, previous)
-            os.environ[name] = value
+        patch_env(
+            self,
+            TORCH_SYMMEM="NCCL",
+            TORCH_DIST_USE_NCCL2="1",
+            NCCL_CUMEM_ENABLE="1",
+            NCCL_WIN_ENABLE="1",
+        )
         self._spawn_processes()
 
     @property
@@ -1632,12 +1625,6 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
     def _init_process_group(self, backend_name: str, store_suffix: str) -> None:
         if not PLATFORM_SUPPORTS_SYMM_MEM:
             raise SkipTest("Test requires SymmMem support")
-        for peer in range(self.world_size):
-            if peer != self.rank and not torch._C._cuda_canDeviceAccessPeer(
-                self.rank, peer
-            ):
-                raise SkipTest("Test requires p2p access")
-
         torch.cuda.set_device(self.device)
         c10d.init_process_group(
             backend=backend_name,
@@ -1782,14 +1769,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
         # resolves to stock ProcessGroupNCCL, whose abortCommsFromMap carries
         # the ROCm retirement call; "nccl" resolves to ProcessGroupNCCL2 and
         # retires through its own path.
-        previous = os.environ.get("TORCH_NCCL_ASYNC_ERROR_HANDLING")
-        if previous is None:
-            self.addCleanup(os.environ.pop, "TORCH_NCCL_ASYNC_ERROR_HANDLING", None)
-        else:
-            self.addCleanup(
-                os.environ.__setitem__, "TORCH_NCCL_ASYNC_ERROR_HANDLING", previous
-            )
-        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        patch_env(self, TORCH_NCCL_ASYNC_ERROR_HANDLING="0")
 
         symm_mem.set_backend("NCCL")
         self._init_process_group(backend_name, "_abort")
@@ -1829,11 +1809,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
     TEST_WITH_ROCM and nccl.version() < (2, 30, 7),
     "Capture-time symmetric allocation requires RCCL 2.30.7 or newer",
 )
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
-)
+@skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
     """Capture-time allocation is gated on CUMEM+WIN as sampled at comm init.
 
@@ -1844,24 +1820,11 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        for name, value in {
-            "TORCH_SYMMEM": "NCCL",
-            "TORCH_DIST_USE_NCCL2": "1",
-        }.items():
-            self._restore_env_after_test(name)
-            os.environ[name] = value
+        patch_env(self, TORCH_SYMMEM="NCCL", TORCH_DIST_USE_NCCL2="1")
         # The capability snapshot has to be taken with these absent.
         for name in ("NCCL_CUMEM_ENABLE", "NCCL_WIN_ENABLE"):
-            self._restore_env_after_test(name)
             os.environ.pop(name, None)
         self._spawn_processes()
-
-    def _restore_env_after_test(self, name: str) -> None:
-        previous = os.environ.get(name)
-        if previous is None:
-            self.addCleanup(os.environ.pop, name, None)
-        else:
-            self.addCleanup(os.environ.__setitem__, name, previous)
 
     @property
     def world_size(self) -> int:
@@ -1874,12 +1837,6 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
     def _init_process_group(self) -> None:
         if not PLATFORM_SUPPORTS_SYMM_MEM:
             raise SkipTest("Test requires SymmMem support")
-        for peer in range(self.world_size):
-            if peer != self.rank and not torch._C._cuda_canDeviceAccessPeer(
-                self.rank, peer
-            ):
-                raise SkipTest("Test requires p2p access")
-
         torch.cuda.set_device(self.device)
         symm_mem.set_backend("NCCL")
         c10d.init_process_group(
@@ -1945,15 +1902,8 @@ class NCCLSymmetricMemoryCapabilityGateTest(MultiProcessTestCase):
 @skip_but_pass_in_sandcastle_if(
     not TEST_WITH_ROCM, "ROCm-specific subgroup rendezvous ordering test"
 )
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
-    "RCCL host device APIs require RCCL 2.30.4 or newer",
-)
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
-)
+@skip_if_rccl_lt_2_30_4
+@skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
     """Subgroup rendezvous works when it is the first rendezvous in a process.
 
@@ -1968,17 +1918,7 @@ class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        for name, value in {
-            "TORCH_SYMMEM": "NCCL",
-            "NCCL_CUMEM_ENABLE": "1",
-            "NCCL_WIN_ENABLE": "1",
-        }.items():
-            previous = os.environ.get(name)
-            if previous is None:
-                self.addCleanup(os.environ.pop, name, None)
-            else:
-                self.addCleanup(os.environ.__setitem__, name, previous)
-            os.environ[name] = value
+        patch_env(self, TORCH_SYMMEM="NCCL", NCCL_CUMEM_ENABLE="1", NCCL_WIN_ENABLE="1")
         self._spawn_processes()
 
     @property
@@ -1993,12 +1933,6 @@ class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
     def test_first_rendezvous_on_subgroup(self) -> None:
         if not PLATFORM_SUPPORTS_SYMM_MEM:
             raise SkipTest("Test requires SymmMem support")
-        for peer in range(self.world_size):
-            if peer != self.rank and not torch._C._cuda_canDeviceAccessPeer(
-                self.rank, peer
-            ):
-                raise SkipTest("Test requires p2p access")
-
         torch.cuda.set_device(self.device)
         symm_mem.set_backend("NCCL")
         c10d.init_process_group(
@@ -2035,11 +1969,7 @@ class NCCLSymmetricMemorySubgroupTest(MultiProcessTestCase):
 
 @requires_cuda_p2p_access()
 @skip_if_mi350_rocm_lt_10_1
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
-)
+@skip_if_rccl_symmem_not_compiled
 class NCCLOneSidedOpHandleTypeTest(MultiProcessTestCase):
     """The one-sided ops are schema'd over the SymmetricMemory base class, so a
     handle from another backend is a legal argument rather than a type error.
@@ -2095,15 +2025,8 @@ class NCCLOneSidedOpHandleTypeTest(MultiProcessTestCase):
 
 @requires_cuda_p2p_access()
 @skip_if_mi350_rocm_lt_10_1
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and nccl.version() < (2, 30, 4),
-    "RCCL host device APIs require RCCL 2.30.4 or newer",
-)
-@skip_but_pass_in_sandcastle_if(
-    TEST_WITH_ROCM and not NCCL_SYMMEM_COMPILED,
-    "RCCL symmetric memory was disabled at build time; nccl_device.h did not "
-    "pass the host-translation-unit compatibility probe",
-)
+@skip_if_rccl_lt_2_30_4
+@skip_if_rccl_symmem_not_compiled
 class NCCLSymmetricMemoryRestartTest(MultiProcContinuousTest):
     @property
     def device(self) -> torch.device:
