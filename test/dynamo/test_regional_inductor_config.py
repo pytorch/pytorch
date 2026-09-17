@@ -86,7 +86,14 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
                 lambda: torch.compile(fn, backend="inductor", fullgraph=True)(*inputs)
             )
 
-        self.assertEqual(result, expected)
+        # This test is about which GEMM backend gets selected, not about GEMM
+        # numerics.  When max_autotune routes a matmul to the Triton template
+        # instead of extern_kernels.mm, the two kernels accumulate in a
+        # different order, so the results are not bitwise equal.  On ROCm that
+        # drifts just past the default fp32 tolerance (observed: 1 element of
+        # 32768 off by 1.7e-5, against a default atol of 1e-5), so compare with
+        # a tolerance appropriate for "two different fp32 GEMM kernels".
+        self.assertEqual(result, expected, atol=1e-4, rtol=1e-4)
         self.assertEqual(len(codes), 2)
         fw_code, bw_code = codes
         regions_and_settings = (
