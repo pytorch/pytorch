@@ -115,6 +115,31 @@
     export_graph_data
 ```
 
+### CUDA graph lifecycle hooks
+
+Register callbacks that fire at each point in any CUDA graph's lifecycle -- capture
+start, capture end, instantiate, each replay, and destroy -- for example, a profiler
+observing graph lifecycle without the graph code carrying any consumer knowledge, and
+including graphs the consumer did not build. Registering a hook is the opt-in and the whole
+API -- the graph fires them; with none registered they are no-ops. Each has a per-graph
+counterpart on {class}`torch.cuda.CUDAGraph`. Live in `torch.cuda.graphs`.
+
+```{eval-rst}
+.. currentmodule:: torch.cuda.graphs
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    register_graph_capture_start_hook
+    register_graph_capture_end_hook
+    register_graph_instantiate_hook
+    register_graph_replay_start_hook
+    register_graph_replay_end_hook
+    register_graph_destroy_hook
+
+.. currentmodule:: torch.cuda
+```
+
 ## Graph Kernel Annotations (prototype)
 
 `torch.cuda.graph_annotations` annotates the kernels captured in a CUDA
@@ -358,9 +383,14 @@ direct memory access transfers between GPU memory and storage, avoiding a bounce
 [cufile api documentation](https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api)
 for more details.
 
-These APIs can be used in versions greater than or equal to CUDA 12.6. In order to use these APIs, one must
+These APIs can be used with CUDA 12.6 or newer. In order to use these APIs, one must
 ensure that their system is appropriately configured to use GPUDirect Storage per the
 [GPUDirect Storage documentation](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html).
+
+On ROCm, the same APIs are backed by [hipFile](https://rocm.docs.amd.com/projects/hipFile/en/latest/)
+rather than cuFile and require ROCm 7.14 or newer. The hipFile entry points and the ROCm system
+configuration steps, which differ from the CUDA ones, are covered in
+{ref}`hipFile (GPUDirect Storage)<rocm-gds>`.
 
 See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
 
@@ -373,6 +403,7 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
     :toctree: generated
     :nosignatures:
 
+    is_available
     gds_register_buffer
     gds_deregister_buffer
     GdsFile

@@ -75,6 +75,17 @@ class TestNativeDSLOps(TestCase):
                     "check_native_version_skip",
                 ],
             ),
+            (
+                "torch._native.flydsl_utils",
+                [
+                    "_check_runtime_available",
+                    "_get_flydsl_device_arch",
+                    "_is_supported_arch",
+                    "_version_is_ok",
+                    "check_native_jit_disabled",
+                    "check_native_version_skip",
+                ],
+            ),
         ]
         self._clear_function_caches()
 
@@ -165,7 +176,7 @@ class TestNativeDSLOps(TestCase):
         script = textwrap.dedent("""\
             import sys
             import torch
-            dsl_modules = ["triton", "cutlass", "tvm_ffi", "helion"]
+            dsl_modules = ["triton", "cutlass", "tvm_ffi", "helion", "flydsl"]
             leaked = [m for m in dsl_modules if m in sys.modules]
             print(repr(leaked))
         """)
