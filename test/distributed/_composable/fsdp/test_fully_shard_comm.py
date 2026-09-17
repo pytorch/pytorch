@@ -28,12 +28,12 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
     _prepare_all_gather_outputs_with_dim0_views,
-    _prepare_all_gather_outputs_with_reorder,
     _prepare_reduce_scatter_inputs_with_dim0_views,
-    _prepare_reduce_scatter_inputs_with_reorder,
     DefaultAllGather,
     DefaultReduceScatter,
     foreach_all_gather,
@@ -371,8 +371,8 @@ class TestFullyShardInputOutputFns(FSDPTest):
                     self.assertIs(param_group._prepare_all_gather_outputs, ag_fn)
                     self.assertIs(param_group._prepare_reduce_scatter_inputs, rs_fn)
 
-        default_ag = _prepare_all_gather_outputs_with_reorder
-        default_rs = _prepare_reduce_scatter_inputs_with_reorder
+        default_ag = _default_all_gather_output_fn
+        default_rs = _default_reduce_scatter_input_fn
         ag_fn = MagicMock(wraps=default_ag)
         rs_fn = MagicMock(wraps=default_rs)
         check_fns((default_ag,) * 3, (default_rs,) * 3)

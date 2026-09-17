@@ -21,8 +21,8 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
-    _prepare_all_gather_outputs_with_reorder,
-    _prepare_reduce_scatter_inputs_with_reorder,
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     AllGather,
     AllGatherResult,
     DefaultAllGather,
@@ -214,10 +214,10 @@ class FSDPParamGroup:
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
         self._prepare_all_gather_outputs: _PrepareAllGatherOutputs = (
-            _prepare_all_gather_outputs_with_reorder
+            _default_all_gather_output_fn
         )
         self._prepare_reduce_scatter_inputs: _PrepareReduceScatterInputs = (
-            _prepare_reduce_scatter_inputs_with_reorder
+            _default_reduce_scatter_input_fn
         )
         self._param_group_index: int = 0
         self._num_param_groups: int = 1

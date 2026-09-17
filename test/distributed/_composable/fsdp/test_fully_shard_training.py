@@ -29,7 +29,7 @@ from torch.distributed.fsdp import (
     share_comm_ctx,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _prepare_reduce_scatter_inputs_with_reorder,
+    _default_reduce_scatter_input_fn,
     _PrepareReduceScatterInputs,
     foreach_all_gather,
     foreach_reduce,
@@ -2579,7 +2579,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             force_sum_reduction_for_comms: bool = False,
             *,
             prepare_reduce_scatter_inputs: _PrepareReduceScatterInputs = (
-                _prepare_reduce_scatter_inputs_with_reorder
+                _default_reduce_scatter_input_fn
             ),
         ):
             nonlocal reduce_scatter_streams

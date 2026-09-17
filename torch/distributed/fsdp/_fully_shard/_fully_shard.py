@@ -708,10 +708,12 @@ class FSDPModule:
     ) -> None:
         """Set the function that prepares reduce-scatter inputs.
 
-        The function takes ``(fsdp_params, unsharded_grads, world_size)`` and returns
-        copy inputs and one padded unsharded size per entry in ``fsdp_params``,
-        in the same order. Only parameters participating in this reduction are
-        passed. The function may replace entries in ``unsharded_grads`` to release
+        The function takes ``(fsdp_params, unsharded_grads, reduce_scatter_world_size)``
+        and returns copy inputs and one padded unsharded size per entry in
+        ``fsdp_params``, in the same order. ``reduce_scatter_world_size`` is the
+        reduce-scatter group size, or 1 when no reduce-scatter is needed.
+        Only parameters participating in this reduction are passed.
+        The function may replace entries in ``unsharded_grads`` to release
         gradients that it reorders. Inputs are kept alive through copy submission.
         Returned tensors must preserve dtype and device and be ready for dim-0
         ``chunk_cat``. FSDP consumes and clears the returned input list.
