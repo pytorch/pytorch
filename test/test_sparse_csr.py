@@ -57,7 +57,6 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     subtest,
     suppress_warnings,
@@ -2365,7 +2364,6 @@ class TestSparseCSR(TestCase):
                         self.assertEqual(res_in, res_in_dense)
                         self.assertEqual(res_out, res_in)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/167783")
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
@@ -2409,6 +2407,40 @@ class TestSparseCSR(TestCase):
         for index_dtype in [torch.int32, torch.int64]:
             for m, n in itertools.product([3, 5], [3, 5]):
                 run_test(m, n, index_dtype)
+
+    @skipCPUIfNoMklSparse
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_sparse_add_aliased_out(self, device, dtype):
+        def gen(nnz, index_dtype):
+            return self.genSparseCSRTensor([5, 5], nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            # add(A, A, out=B) must not leave B sharing A's indices, else the
+            # next op writing into B corrupts A.
+            A, B, C, D = gen(4, index_dtype), gen(3, index_dtype), gen(13, index_dtype), gen(7, index_dtype)
+            A_dense = A.to_dense()
+            torch.add(A, A, out=B)
+            self.assertEqual(B, 2 * A_dense)
+            self.assertNotEqual(B.crow_indices().data_ptr(), A.crow_indices().data_ptr())
+            self.assertNotEqual(B.col_indices().data_ptr(), A.col_indices().data_ptr())
+            torch.add(C, D, out=B)
+            self.assertEqual(B, C.to_dense() + D.to_dense())
+            self.assertEqual(A, A_dense)
+            self.assertEqual(B.crow_indices().dtype, index_dtype)
+
+            # in-place add with a growing sparsity pattern, out aliasing self or
+            # other; out is always the smaller operand so the pattern must grow
+            for out_is_self in (True, False):
+                E, F = gen(3, index_dtype), gen(12, index_dtype)
+                if not out_is_self:
+                    E, F = F, E
+                expected = E.to_dense() + 0.5 * F.to_dense()
+                out = E if out_is_self else F
+                nnz_before = out._nnz()
+                torch.add(E, F, alpha=0.5, out=out)
+                self.assertEqual(out, expected)
+                self.assertGreater(out._nnz(), nnz_before)
+                self.assertEqual(out.crow_indices().dtype, index_dtype)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
