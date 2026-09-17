@@ -37,7 +37,6 @@ $env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
 # Set BLAS type
 if ($env:ENABLE_APL -eq "1") {
     $env:BLAS = "APL"
-    $env:USE_LAPACK = "1"
 } elseif ($env:ENABLE_OPENBLAS -eq "1") {
     $env:BLAS = "OpenBLAS"
     $env:OpenBLAS_HOME = Join-Path $env:DEPENDENCIES_DIR "OpenBLAS\install"

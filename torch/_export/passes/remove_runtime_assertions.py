@@ -26,7 +26,7 @@ class _RemoveRuntimeAssertionsPass(PassBase):
                         continue
                     module.graph.erase_node(assert_async_node)
                     # the upstream scalar_tensor <- {le, ge} <- sym_size
-                    # linear chain of nodes of nodes is removed by the
+                    # linear chain of nodes is removed by the
                     # downstream dead code elimination
                     modified = True
 

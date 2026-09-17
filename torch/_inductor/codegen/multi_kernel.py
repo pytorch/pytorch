@@ -12,7 +12,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
-from ..runtime.benchmarking import benchmarker
+from ..runtime.benchmarking import benchmarker, gpu_benchmark_lock
 from ..utils import cache_on_self, IndentedBuffer
 from ..virtualized import V
 from .common import TensorArg, WorkspaceArg
@@ -391,6 +391,7 @@ class MultiKernelCall:
 
         return self._kernels
 
+    @gpu_benchmark_lock
     def benchmark_sub_kernels(self, *args, **kwargs):
         """
         Benchmark all the sub kernels and return the execution time
@@ -439,7 +440,7 @@ class MultiKernelCall:
     #
     # An alternative that reused the multi-kernel cache does not work well
     # since during codegen of the second pass, it's very hard to know the
-    # path for the cache file. Also reading the cache file need do some IO
+    # path for the cache file. Also reading the cache file needs to do some IO
     # which can be slower.
     @staticmethod
     def record_choice(multi_kernel_name: str, picked_kernel_name: str):

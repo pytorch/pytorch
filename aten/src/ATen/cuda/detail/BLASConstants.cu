@@ -31,15 +31,4 @@ float *get_cublas_device_zero() {
   return ptr;
 }
 
-float *get_user_alpha_ptr() {
-  static float *alpha_ptr;
-
-  static bool init_flag [[maybe_unused]] = []() {
-    AT_CUDA_CHECK(cudaMalloc(&alpha_ptr, sizeof(float)));
-    return true;
-  }();
-
-  return alpha_ptr;
-}
-
 } // namespace at::cuda::detail

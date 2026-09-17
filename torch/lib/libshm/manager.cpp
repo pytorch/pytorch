@@ -2,7 +2,6 @@
 #include <poll.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <algorithm>
 #include <cerrno>
 #include <memory>
 #include <set>

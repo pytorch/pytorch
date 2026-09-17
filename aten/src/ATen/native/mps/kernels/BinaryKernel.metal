@@ -3,6 +3,7 @@
 #include <c10/metal/utils.h>
 #include <metal_stdlib>
 using namespace metal;
+using c10::metal::float8_e4m3fn;
 
 struct add_functor {
   template <typename T>
@@ -25,17 +26,15 @@ struct add_alpha_functor {
   }
 };
 
-struct sub_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a - c10::metal::mul(alpha, b));
-  }
-};
-
 struct lerp_alpha_functor {
-  template <typename T>
-  inline T operator()(const T a, const T b, const T alpha) {
-    return static_cast<T>(a + c10::metal::mul(alpha, b - a));
+  // Computed at opmath precision, matching CPU/CUDA: a low-precision `alpha`
+  // both loses accuracy here and cannot represent the weights `lerp.Scalar`
+  // accepts (e.g. 70000).
+  template <typename T, typename A>
+  inline T operator()(const T a, const T b, const A alpha) {
+    using op_t = c10::metal::opmath_t<T>;
+    return static_cast<T>(
+        op_t(a) + c10::metal::mul(static_cast<op_t>(alpha), op_t(b) - op_t(a)));
   }
 };
 
@@ -258,39 +257,61 @@ struct hermite_polynomial_he_functor {
   }
 };
 
+struct laguerre_polynomial_l_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::laguerre_polynomial_l_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::laguerre_polynomial_l_forward(float(a), float(b));
+  }
+};
+
 struct nextafter_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::nextafter(a, b));
   }
 
-  // Metal has no bfloat nextafter overload, so open-code the musl algorithm
-  // over the sign-magnitude bit pattern.
+  static inline ushort nextafter_bfloat_bits(
+      const bfloat from,
+      const bfloat to) {
+    ushort uf = as_type<ushort>(from);
+    const ushort ut = as_type<ushort>(to);
+    const ushort af = uf & 0x7fff;
+    const ushort at = ut & 0x7fff;
+
+    if (uf == ut || (af == 0 && at == 0)) {
+      return ut;
+    }
+    if (af == 0) {
+      return ushort((ut & 0x8000) | 1);
+    }
+
+    const bool neg = (uf & 0x8000) != 0;
+    const int from_value = neg ? -int(af) : int(af);
+    const int to_value = (ut & 0x8000) ? -int(at) : int(at);
+    uf += ((from_value < to_value) != neg) ? 1 : -1;
+    return uf;
+  }
+
   inline bfloat operator()(const bfloat from, const bfloat to) {
+    ushort result;
     if (from != from || to != to) {
-      return from + to;
-    }
-    if (from == to) {
-      return to;
-    }
-    ushort ufrom = as_type<ushort>(from);
-    if (from == 0) {
-      ushort r = (as_type<ushort>(to) & (ushort(1) << 15)) | ushort(1);
-      return as_type<bfloat>(r);
-    }
-    if ((from < to) == (from > 0)) {
-      ufrom++;
+      result = as_type<ushort>(bfloat(from + to));
     } else {
-      ufrom--;
+      result = nextafter_bfloat_bits(from, to);
     }
-    return as_type<bfloat>(ufrom);
+    return as_type<bfloat>(result);
   }
 };
 
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
+    return static_cast<T>(
+        c10::metal::hypot(::metal::fabs(a), ::metal::fabs(b)));
   }
 };
 
@@ -302,6 +323,13 @@ struct atan2_functor {
   template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
   inline float operator()(const T a, const T b) {
     return precise::atan2(float(a), float(b));
+  }
+};
+
+struct pow_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::pow(a, b));
   }
 };
 
@@ -517,6 +545,28 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(le, <=);
 DEFINE_BINARY_COMPARISON_FUNCTOR(gt, >);
 DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
 
+// Logical ops test truthiness of each operand then combine. cast_to<bool>
+// handles every dtype: scalars as x != 0, complex as the per-component nonzero
+// test.
+struct logical_and_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return c10::metal::cast_to<bool>(a) && c10::metal::cast_to<bool>(b);
+  }
+};
+struct logical_or_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return c10::metal::cast_to<bool>(a) || c10::metal::cast_to<bool>(b);
+  }
+};
+struct logical_xor_functor {
+  template <typename T>
+  inline bool operator()(const T a, const T b) {
+    return c10::metal::cast_to<bool>(a) != c10::metal::cast_to<bool>(b);
+  }
+};
+
 #define REGISTER_INTEGER_BINARY_OP_NO_BOOL(NAME) \
   REGISTER_BINARY_OP(NAME, long, long);          \
   REGISTER_BINARY_OP(NAME, int, int);            \
@@ -570,13 +620,17 @@ DEFINE_BINARY_COMPARISON_FUNCTOR(ge, >=);
   REGISTER_BINARY_OP(NAME, bool, bool);           \
   REGISTER_BINARY_CASTOUT_OP(NAME, bool, bool)
 
-// Complex variants for eq/ne only -- lt/le/gt/ge are not well-defined on
-// complex numbers.
+// Complex variants for eq/ne and the logical ops (complex->bool). lt/le/gt/ge
+// are not well-defined on complex numbers, so they don't use this.
 #define REGISTER_COMPLEX_EQ_OP(NAME)              \
   REGISTER_BINARY_OP(NAME, float2, bool);         \
   REGISTER_BINARY_CASTOUT_OP(NAME, float2, bool); \
   REGISTER_BINARY_OP(NAME, half2, bool);          \
   REGISTER_BINARY_CASTOUT_OP(NAME, half2, bool)
+
+#define REGISTER_FP8_EQ_OP(NAME)                 \
+  REGISTER_BINARY_OP(NAME, float8_e4m3fn, bool); \
+  REGISTER_BINARY_CASTOUT_OP(NAME, float8_e4m3fn, bool)
 
 REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(atan2);
@@ -620,6 +674,14 @@ REGISTER_FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
+REGISTER_FLOAT_BINARY_OP(laguerre_polynomial_l);
+REGISTER_INT2FLOAT_BINARY_OP(laguerre_polynomial_l);
+REGISTER_FLOAT_BINARY_OP(pow);
+REGISTER_INTEGER_BINARY_OP(pow);
+REGISTER_BINARY_OP(pow, float2, float2);
+// chalf pow must accumulate in float2: the polar form exp(y*log(x)) overflows
+// half for moderately large magnitudes (e.g. (300+0j)**1 -> inf), see #195585
+REGISTER_OPMATH_BINARY_OP(pow, half2, half2);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
@@ -647,12 +709,20 @@ REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_left_shift);
 REGISTER_INTEGER_BINARY_OP_NO_BOOL(bitwise_right_shift);
 REGISTER_COMPARISON_OP(eq);
 REGISTER_COMPLEX_EQ_OP(eq);
+REGISTER_FP8_EQ_OP(eq);
 REGISTER_COMPARISON_OP(ne);
 REGISTER_COMPLEX_EQ_OP(ne);
+REGISTER_FP8_EQ_OP(ne);
 REGISTER_COMPARISON_OP(lt);
 REGISTER_COMPARISON_OP(le);
 REGISTER_COMPARISON_OP(gt);
 REGISTER_COMPARISON_OP(ge);
+REGISTER_COMPARISON_OP(logical_and);
+REGISTER_COMPLEX_EQ_OP(logical_and);
+REGISTER_COMPARISON_OP(logical_or);
+REGISTER_COMPLEX_EQ_OP(logical_or);
+REGISTER_COMPARISON_OP(logical_xor);
+REGISTER_COMPLEX_EQ_OP(logical_xor);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
@@ -661,26 +731,17 @@ REGISTER_BINARY_ALPHA_OP(add_alpha, short, short, short);
 REGISTER_BINARY_ALPHA_OP(add_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(add_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bool, bool, bool);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, long, long, long);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, int, int, int);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, float, float, float);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, half, half, half);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, short, short, short);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, uchar, uchar, uchar);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, char, char, char);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, bool, bool, bool);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float, float, float);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, half, half);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, half, float, half);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, short, short, short);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
-REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, float, bfloat);
 
 // Complex binary functions
 REGISTER_BINARY_OP(polar, float, float2);
@@ -699,180 +760,21 @@ REGISTER_BINARY_OP(logaddexp, float2, float2);
 REGISTER_BINARY_OP(logaddexp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2, float2);
-REGISTER_BINARY_ALPHA_OP(sub_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, half2, half2, half2);
 
-// lerp with tensor weight: lerp(s, e, w) = fma(w, e - s, s)
-template <typename T>
-inline T lerp_op(T s, T e, T w) {
-  return fma(w, e - s, s);
-}
+// lerp with tensor weight: lerp(s, e, w) = s + w * (e - s)
+// Computed at opmath precision, matching the CPU/CUDA reference, which casts
+// all three operands to `opmath_type` before interpolating.
+struct lerp_functor {
+  template <typename T>
+  inline T operator()(const T s, const T e, const T w) {
+    return static_cast<T>(s + c10::metal::mul(w, e - s));
+  }
+};
 
-inline bfloat lerp_op(bfloat s, bfloat e, bfloat w) {
-  return static_cast<bfloat>(fma(float(w), float(e) - float(s), float(s)));
-}
-
-inline long lerp_op(long s, long e, long w) {
-  return s + w * (e - s);
-}
-
-inline float2 lerp_op(float2 s, float2 e, float2 w) {
-  return s + mul(w, e - s);
-}
-
-template <typename T>
-kernel void lerp_tensor_dense(
-    device T* out [[buffer(0)]],
-    device const T* self [[buffer(1)]],
-    device const T* end [[buffer(2)]],
-    device const T* weight [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  out[tid] = lerp_op(self[tid], end[tid], weight[tid]);
-}
-
-// Scalar weight broadcast: self/end/out contiguous, weight is a single element
-template <typename T>
-kernel void lerp_tensor_scalar_weight(
-    device T* out [[buffer(0)]],
-    device const T* self [[buffer(1)]],
-    device const T* end [[buffer(2)]],
-    device const T& weight [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  out[tid] = lerp_op(self[tid], end[tid], weight);
-}
-
-// 2D strided: coordinates from 2D dispatch, no integer division
-template <typename T>
-kernel void lerp_tensor_strided_2d(
-    device void* out_ptr [[buffer(0)]],
-    constant void* self_ptr [[buffer(1)]],
-    constant void* end_ptr [[buffer(2)]],
-    constant void* weight_ptr [[buffer(3)]],
-    constant long* out_strides [[buffer(4)]],
-    constant long* self_strides [[buffer(5)]],
-    constant long* end_strides [[buffer(6)]],
-    constant long* weight_strides [[buffer(7)]],
-    uint2 tid [[thread_position_in_grid]]) {
-  int out_off =
-      int(tid.x) * int(out_strides[0]) + int(tid.y) * int(out_strides[1]);
-  int self_off =
-      int(tid.x) * int(self_strides[0]) + int(tid.y) * int(self_strides[1]);
-  int end_off =
-      int(tid.x) * int(end_strides[0]) + int(tid.y) * int(end_strides[1]);
-  int wt_off =
-      int(tid.x) * int(weight_strides[0]) + int(tid.y) * int(weight_strides[1]);
-  ref_at_offs<T>(out_ptr, long(out_off)) = lerp_op(
-      val_at_offs<T>(self_ptr, long(self_off)),
-      val_at_offs<T>(end_ptr, long(end_off)),
-      val_at_offs<T>(weight_ptr, long(wt_off)));
-}
-
-// 3D strided: coordinates from 3D dispatch, no integer division
-template <typename T>
-kernel void lerp_tensor_strided_3d(
-    device void* out_ptr [[buffer(0)]],
-    constant void* self_ptr [[buffer(1)]],
-    constant void* end_ptr [[buffer(2)]],
-    constant void* weight_ptr [[buffer(3)]],
-    constant long* out_strides [[buffer(4)]],
-    constant long* self_strides [[buffer(5)]],
-    constant long* end_strides [[buffer(6)]],
-    constant long* weight_strides [[buffer(7)]],
-    uint3 tid [[thread_position_in_grid]]) {
-  int out_off = int(tid.x) * int(out_strides[0]) +
-      int(tid.y) * int(out_strides[1]) + int(tid.z) * int(out_strides[2]);
-  int self_off = int(tid.x) * int(self_strides[0]) +
-      int(tid.y) * int(self_strides[1]) + int(tid.z) * int(self_strides[2]);
-  int end_off = int(tid.x) * int(end_strides[0]) +
-      int(tid.y) * int(end_strides[1]) + int(tid.z) * int(end_strides[2]);
-  int wt_off = int(tid.x) * int(weight_strides[0]) +
-      int(tid.y) * int(weight_strides[1]) + int(tid.z) * int(weight_strides[2]);
-  ref_at_offs<T>(out_ptr, long(out_off)) = lerp_op(
-      val_at_offs<T>(self_ptr, long(self_off)),
-      val_at_offs<T>(end_ptr, long(end_off)),
-      val_at_offs<T>(weight_ptr, long(wt_off)));
-}
-
-template <typename T>
-kernel void lerp_tensor_strided(
-    device void* out_ptr [[buffer(0)]],
-    constant void* self_ptr [[buffer(1)]],
-    constant void* end_ptr [[buffer(2)]],
-    constant void* weight_ptr [[buffer(3)]],
-    constant long* sizes [[buffer(4)]],
-    constant long* out_strides [[buffer(5)]],
-    constant long* self_strides [[buffer(6)]],
-    constant long* end_strides [[buffer(7)]],
-    constant long* weight_strides [[buffer(8)]],
-    constant uint& ndim [[buffer(9)]],
-    uint tid [[thread_position_in_grid]]) {
-  int pos[max_ndim];
-  pos_from_thread_index(int(tid), pos, sizes, ndim);
-  auto self_off = offset_from_coord(pos, self_strides, ndim);
-  auto end_off = offset_from_coord(pos, end_strides, ndim);
-  auto weight_off = offset_from_coord(pos, weight_strides, ndim);
-  auto out_off = offset_from_coord(pos, out_strides, ndim);
-  ref_at_offs<T>(out_ptr, out_off) = lerp_op(
-      val_at_offs<T>(self_ptr, self_off),
-      val_at_offs<T>(end_ptr, end_off),
-      val_at_offs<T>(weight_ptr, weight_off));
-}
-
-#define INSTANTIATE_LERP(DTYPE)                                           \
-  template [[host_name("lerp_tensor_dense_" #DTYPE)]] kernel void         \
-  lerp_tensor_dense<DTYPE>(                                               \
-      device DTYPE * out [[buffer(0)]],                                   \
-      device const DTYPE* self [[buffer(1)]],                             \
-      device const DTYPE* end [[buffer(2)]],                              \
-      device const DTYPE* weight [[buffer(3)]],                           \
-      uint tid [[thread_position_in_grid]]);                              \
-  template [[host_name("lerp_tensor_scalar_weight_" #DTYPE)]] kernel void \
-  lerp_tensor_scalar_weight<DTYPE>(                                       \
-      device DTYPE * out [[buffer(0)]],                                   \
-      device const DTYPE* self [[buffer(1)]],                             \
-      device const DTYPE* end [[buffer(2)]],                              \
-      device const DTYPE& weight [[buffer(3)]],                           \
-      uint tid [[thread_position_in_grid]]);                              \
-  template [[host_name("lerp_tensor_strided_2d_" #DTYPE)]] kernel void    \
-  lerp_tensor_strided_2d<DTYPE>(                                          \
-      device void* out_ptr [[buffer(0)]],                                 \
-      constant void* self_ptr [[buffer(1)]],                              \
-      constant void* end_ptr [[buffer(2)]],                               \
-      constant void* weight_ptr [[buffer(3)]],                            \
-      constant long* out_strides [[buffer(4)]],                           \
-      constant long* self_strides [[buffer(5)]],                          \
-      constant long* end_strides [[buffer(6)]],                           \
-      constant long* weight_strides [[buffer(7)]],                        \
-      uint2 tid [[thread_position_in_grid]]);                             \
-  template [[host_name("lerp_tensor_strided_3d_" #DTYPE)]] kernel void    \
-  lerp_tensor_strided_3d<DTYPE>(                                          \
-      device void* out_ptr [[buffer(0)]],                                 \
-      constant void* self_ptr [[buffer(1)]],                              \
-      constant void* end_ptr [[buffer(2)]],                               \
-      constant void* weight_ptr [[buffer(3)]],                            \
-      constant long* out_strides [[buffer(4)]],                           \
-      constant long* self_strides [[buffer(5)]],                          \
-      constant long* end_strides [[buffer(6)]],                           \
-      constant long* weight_strides [[buffer(7)]],                        \
-      uint3 tid [[thread_position_in_grid]]);                             \
-  template [[host_name("lerp_tensor_strided_" #DTYPE)]] kernel void       \
-  lerp_tensor_strided<DTYPE>(                                             \
-      device void* out_ptr [[buffer(0)]],                                 \
-      constant void* self_ptr [[buffer(1)]],                              \
-      constant void* end_ptr [[buffer(2)]],                               \
-      constant void* weight_ptr [[buffer(3)]],                            \
-      constant long* sizes [[buffer(4)]],                                 \
-      constant long* out_strides [[buffer(5)]],                           \
-      constant long* self_strides [[buffer(6)]],                          \
-      constant long* end_strides [[buffer(7)]],                           \
-      constant long* weight_strides [[buffer(8)]],                        \
-      constant uint& ndim [[buffer(9)]],                                  \
-      uint tid [[thread_position_in_grid]]);
-
-INSTANTIATE_LERP(float);
-INSTANTIATE_LERP(half);
-INSTANTIATE_LERP(bfloat);
-INSTANTIATE_LERP(float2);
-INSTANTIATE_LERP(long);
+REGISTER_OPMATH_TERNARY_OP(lerp, float, float);
+REGISTER_OPMATH_TERNARY_OP(lerp, half, half);
+REGISTER_OPMATH_TERNARY_OP(lerp, bfloat, bfloat);
+REGISTER_OPMATH_TERNARY_OP(lerp, float2, float2);
+REGISTER_OPMATH_TERNARY_OP(lerp, long, long);
