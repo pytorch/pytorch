@@ -1,6 +1,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/driver_api.h>
 
 #include <deque>
 #include <functional>
@@ -1839,16 +1840,51 @@ class DeviceCachingAllocator {
 
   std::pair<size_t, size_t> getMemoryInfo() {
     const auto& device = c10::xpu::get_raw_device(device_index);
-    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
-    TORCH_CHECK(
-        device.has(sycl::aspect::ext_intel_free_memory),
-        "The device (",
-        device.get_info<sycl::info::device::name>(),
-        ") doesn't support querying the available free memory. ",
-        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
-        "to help us prioritize its implementation.");
-    const size_t free =
-        device.get_info<sycl::ext::intel::info::device::free_memory>();
+    const auto arch = device.get_info<sycl::info::device::architecture>();
+    size_t total = 0;
+    size_t free = 0;
+    if (arch <
+        sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21) {
+      total = device.get_info<sycl::info::device::global_mem_size>();
+      free = device.get_info<sycl::ext::intel::info::device::free_memory>();
+      return {free, total};
+    }
+    ze_device_handle_t ze_device =
+        sycl::get_native<sycl::backend::ext_oneapi_level_zero>(device);
+    ze_device_usablemem_size_ext_properties_t usable_mem = {
+        ZE_STRUCTURE_TYPE_DEVICE_USABLEMEM_SIZE_EXT_PROPERTIES};
+    usable_mem.pNext = nullptr;
+    ze_device_properties_t dev_props = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+    dev_props.pNext = &usable_mem;
+    C10_XPU_DRIVER_CHECK(
+        DriverAPI::get()->zeDeviceGetProperties_(ze_device, &dev_props));
+
+    uint32_t mem_prop_count = 0;
+    C10_XPU_DRIVER_CHECK(DriverAPI::get()->zeDeviceGetMemoryProperties_(
+        ze_device, &mem_prop_count, nullptr));
+    std::vector<ze_device_memory_properties_t> mem_props(
+        mem_prop_count,
+        ze_device_memory_properties_t{
+            ZE_STRUCTURE_TYPE_DEVICE_MEMORY_PROPERTIES});
+    std::vector<ze_device_memory_ext_properties_t> mem_ext_props(
+        mem_prop_count,
+        ze_device_memory_ext_properties_t{
+            ZE_STRUCTURE_TYPE_DEVICE_MEMORY_EXT_PROPERTIES});
+
+    for (uint32_t i = 0; i < mem_prop_count; i++) {
+      mem_props[i].pNext = &mem_ext_props[i];
+      mem_ext_props[i].pNext = nullptr;
+    }
+    C10_XPU_DRIVER_CHECK(DriverAPI::get()->zeDeviceGetMemoryProperties_(
+        ze_device, &mem_prop_count, mem_props.data()));
+
+    // See
+    // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
+    free = usable_mem.currUsableMemSize;
+    for (uint32_t i = 0; i < mem_prop_count; i++) {
+      free += (mem_ext_props[i].physicalSize - mem_props[i].totalSize);
+      total += mem_ext_props[i].physicalSize;
+    }
     return {free, total};
   }
 
@@ -1998,11 +2034,11 @@ class DeviceCachingAllocator {
   }
 
   // Called by XPUGraph::capture_begin after begin_recording succeeds. Tracks
-  // real captures separately from the pool-routing list allocation_scopes_, so
-  // that allocator paths gated on "is a capture in progress" can distinguish a
-  // real capture (where event queries are illegal) from a private mempool
-  // diversion (where they are fine). Assumes begin/end for one capture are not
-  // racing each other.
+  // real captures separately from the pool-routing list allocation_scopes_,
+  // so that allocator paths gated on "is a capture in progress" can
+  // distinguish a real capture (where event queries are illegal) from a
+  // private mempool diversion (where they are fine). Assumes begin/end for
+  // one capture are not racing each other.
   void markCaptureBegin() {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     num_active_captures_++;
@@ -2523,3 +2559,4 @@ int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
 }
 
 } // namespace c10::xpu::XPUCachingAllocator
+      
