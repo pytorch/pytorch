@@ -10,6 +10,8 @@ import torch
 import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._functorch.vmap import unwrap_batched, wrap_batched
+from torch._guards import detect_fake_mode
 from torch._higher_order_ops.auto_functionalize import (
     can_auto_functionalize,
     do_auto_functionalize_v2,
@@ -20,7 +22,10 @@ from torch._higher_order_ops.partitioner import (
     HopPartitionedGraph,
 )
 from torch._higher_order_ops.utils import (
+    _batch_dims_as_last_for_scan,
     _maybe_compile_and_run_fn,
+    _move_batch_dims_to_last_for_scan,
+    _VmapCombineFnWrapper,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
@@ -36,7 +41,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -80,6 +85,30 @@ def call_operator(operator, *args):
     return pytree.tree_leaves(operator(*args))
 
 
+def _build_empty_output_for_length_zero(
+    combine_fn: Callable, init: pytree.PyTree
+) -> pytree.PyTree:
+    """Probe combine_fn(init, None) to learn the output structure for length==0."""
+    fake_mode = detect_fake_mode(pytree.tree_leaves(init)) or FakeTensorMode()
+    with fake_mode:
+        fake_init = pytree.tree_map(
+            lambda t: fake_mode.from_tensor(t)
+            if isinstance(t, torch.Tensor) and not is_fake_tensor(t)
+            else t,
+            init,
+        )
+        _, sample_y = combine_fn(fake_init, None)
+
+    def _empty_or_passthrough(l):
+        if isinstance(l, torch.Tensor):
+            return torch.empty([0] + list(l.shape), dtype=l.dtype, device=l.device)
+        if l is not None:
+            raise AssertionError(f"Expected leaf to be a Tensor or None, got {type(l)}")
+        return l
+
+    return pytree.tree_map(_empty_or_passthrough, sample_y)
+
+
 def scan(
     combine_fn: Callable[
         [pytree.PyTree, pytree.PyTree], tuple[pytree.PyTree, pytree.PyTree]
@@ -89,6 +118,7 @@ def scan(
     *,
     dim: int = 0,
     reverse: bool = False,
+    length: int | None = None,
 ) -> tuple[pytree.PyTree, pytree.PyTree]:
     r"""
     Performs an inclusive scan with a combine function.
@@ -111,17 +141,29 @@ def scan(
         init (torch.Tensor or pytree with tensor leaves): The initial scan carry, a tensor, or nested pytree of tensors.
             The ``init`` is expected to have the same pytree structure as the first output element (i.e. carry)
             of ``combine_fn``.
-        xs (torch.Tensor or pytree with tensor leaves): The input tensor, or nested pytree of tensors.
+        xs (torch.Tensor or pytree with tensor leaves or None): The input tensor, or nested pytree of tensors.
+            May be ``None`` when ``length`` is provided, in which case ``combine_fn`` receives ``None`` as ``x``
+            each step (counter-loop mode).
 
-    Kwargs:
+    Keyword Args:
         dim (int): the dimension to scan over, default 0.
         reverse (bool): A boolean stating if the scan should be reversed with respect to ``dim``, default ``False``.
+        length (int or None): Optional number of scan iterations, default ``None``.
+            When ``xs`` has tensor leaves, ``length`` is optional; if given it must equal
+            ``xs.shape[dim]`` and serves only as a consistency check (no constraint when
+            ``length`` is ``None``). When ``xs`` has no leaves (``None`` or empty pytree),
+            ``length`` drives the number of iterations and ``combine_fn`` receives
+            ``x=None`` each step. ``length=0`` with no xs tensors is supported in
+            eager mode only; it is not supported under ``torch.compile``.
 
     Returns:
         final_carry (torch.Tensor or pytree with tensor leaves),
             the final carry of the scan operation with same pytree structure as init.
         out (torch.Tensor or pytree with tensor leaves),
             each tensor leaf is a stacked output along first dim, where each slice is the output of a scan iteration.
+            If the scan dimension has size 0, ``final_carry`` equals ``init`` unchanged and each output leaf has
+            size 0 along ``dim``. The gradient of ``final_carry`` with respect to ``init`` is the identity
+            (not zero), since the body is never called and the carry passes through untouched.
 
     Restrictions:
         - The combine_fn shouldn't have any aliasing between input-input, input-output, and output-output. E.g. return a view
@@ -149,15 +191,41 @@ def scan(
     """
     # The reason we flatten init and xs before calling into dynamo is that
     # we want to create a consistent input ordering for combine_fn
-    # and we also want to the input ordering matches the output ordering.
+    # and we also want the input ordering to match the output ordering.
     leaves_init, spec_init = pytree.tree_flatten(init)
     leaves_xs_orig, spec_xs = pytree.tree_flatten(xs)
 
-    # Shortcut if no xs is provided
-    if len(leaves_xs_orig) == 0:
+    # Determine whether xs carries any tensor data.
+    xs_has_tensors = any(isinstance(l, torch.Tensor) for l in leaves_xs_orig)
+
+    # short-cuts
+    if length is not None:
+        if isinstance(length, bool) or not isinstance(length, int) or length < 0:
+            raise RuntimeError(
+                f"scan() length must be a non-negative integer, got {length!r}"
+            )
+
+        if not xs_has_tensors:
+            if length == 0:
+                if torch.compiler.is_dynamo_compiling():
+                    # TODO: Resolve this in a follow-up PR
+                    raise RuntimeError(
+                        "scan() with length=0 and no xs tensors is not supported under torch.compile"
+                    )
+                return init, _build_empty_output_for_length_zero(combine_fn, init)
+
+            # No real xs: fabricate a length-N dummy purely as an iteration counter.
+            # the wrapped combine_fn below discards each slice and passes x=None to the body.
+            leaves_xs_orig = [torch.zeros(length, dtype=torch.int64)]
+            spec_xs = pytree.tree_structure(None)
+            _user_combine_fn = combine_fn
+
+            def combine_fn(carry, _ignored):  # noqa: E306
+                return _user_combine_fn(carry, None)
+    elif not xs_has_tensors:
         return init, []
 
-    def _validate_input(cfn, lxs, linit, d, r):
+    def _validate_input(cfn, lxs, linit, d, r, l):
         # Basic arguments check
         if not callable(cfn):
             raise RuntimeError(f"Combine_fn must be a callable, but got {cfn}")
@@ -165,6 +233,12 @@ def scan(
             raise RuntimeError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
+
+        if l is not None and xs_has_tensors and lxs[0].shape[d] != l:
+            raise RuntimeError(
+                f"scan() length={l} does not match xs size along dim={d}: "
+                f"{lxs[0].shape[d]}"
+            )
 
         # Checks for init
         if len(linit) == 0:
@@ -178,18 +252,14 @@ def scan(
             if not isinstance(x, torch.Tensor):
                 raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
         if any(x.ndim <= d for x in lxs):
-            raise RuntimeError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
-        if any(x.shape[d] == 0 for x in lxs):
-            raise RuntimeError(
-                "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
-            )
+            raise RuntimeError("All xs leaves must have at least 'dim + 1' dimensions")
+        if any(x.shape[d] != lxs[0].shape[d] for x in lxs[1:]):
+            raise RuntimeError("All xs leaves must have the same scan dimension size")
 
     ndim = leaves_xs_orig[0].ndim
     dim = utils.canonicalize_dim(ndim, dim)
 
-    _validate_input(combine_fn, leaves_xs_orig, leaves_init, dim, reverse)
+    _validate_input(combine_fn, leaves_xs_orig, leaves_init, dim, reverse, length)
 
     # Move scan dim to 0 and always perform scan on dim 0
     leaves_xs = []
@@ -347,6 +417,8 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         num_elems = xs[0].shape[dim]
         num_init_leaves = len(init)
 
+        proto_xs = [first_slice_copy(x, dim) for x in xs]
+
         # Process element 0 to infer output shapes for pre-allocation
         # AND produce the first real result in a single call.  The previous
         # approach used first_slice_copy() for shape inference and then
@@ -357,7 +429,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             call_operator(
                 operator,
                 *carry,
-                *[elem.select(dim, 0) for elem in xs],
+                *proto_xs,
                 *additional_inputs,
             ),
             num_init_leaves,
@@ -382,6 +454,12 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         idxs = [
             torch.ones_like(e, dtype=torch.int64).unsqueeze(0) for e in out_0_masked
         ]
+
+        if num_elems == 0:
+            outs_expanded = [
+                outs.pop(0) if out_m else None for out_m in out_tensor_mask
+            ]
+            return (*init, *outs_expanded)
 
         def store_out_in_outs(out, ind):
             # Store the intermediate out in the outs matrix
@@ -481,11 +559,19 @@ def trace_scan(
     with disable_proxy_modes_tracing():
         scan_length = xs[0].shape[0]
         fake_carry, fake_outputs = _extract_carry_and_out(
-            [o.meta["val"] for o in outputs], len(init)
+            [o.meta["val"] if o is not None else None for o in outputs], len(init)
         )
+        for t in fake_outputs:
+            if not isinstance(t, torch.Tensor) and t is not None:
+                raise AssertionError(
+                    f"Expected leaf to be a Tensor or None, got {type(t)}"
+                )
         out = (
             *fake_carry,
-            *(stack_y(t, scan_length) for t in fake_outputs),
+            *(
+                stack_y(t, scan_length) if isinstance(t, torch.Tensor) else t
+                for t in fake_outputs
+            ),
         )
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
@@ -887,7 +973,7 @@ class ScanAutogradImpl:
             )
             return flat_grads
 
-        single_step_bw_xs = pytree.tree_map(lambda t: t[0], bw_xs)
+        single_step_bw_xs = pytree.tree_map(first_slice_copy, bw_xs)
         bw_single_step_gm = materialize_as_graph(
             bw_single_step_wrapper,
             tuple(
@@ -938,7 +1024,7 @@ def scan_autograd(combine_fn, init, xs, additional_inputs, mutated_arg_indices="
             hop_partitioned_graph: HopPartitionedGraph = (
                 HopGraphMinCutPartitioner.create_partitioned_graph(
                     combine_fn,
-                    (*init, *[x[0] for x in xs], *additional_inputs),
+                    (*init, *[first_slice_copy(x) for x in xs], *additional_inputs),
                     always_recompute_complex_exprs=True,
                 )
             )
@@ -986,9 +1072,17 @@ def scan_fake_tensor_mode(
             ),
             len(init),
         )
+        for t in outputs:
+            if not isinstance(t, torch.Tensor) and t is not None:
+                raise AssertionError(
+                    f"Expected leaf to be a Tensor or None, got {type(t)}"
+                )
         out = (
             *carry,
-            *(stack_y(t, scan_length) for t in outputs),
+            *(
+                stack_y(t, scan_length) if isinstance(t, torch.Tensor) else t
+                for t in outputs
+            ),
         )
         return out
 
@@ -1029,7 +1123,11 @@ def scan_functionalize(
         functional_combine_fn = ctx.functionalize(
             _maybe_run_with_interpreter(combine_fn)
         )
-        sample_unwrapped_xs_sliced = [first_slice_copy(inp) for inp in unwrapped_xs]
+        sample_unwrapped_xs_sliced = (
+            [first_slice_copy(inp) for inp in unwrapped_xs]
+            if len(unwrapped_xs) > 0
+            else [None]
+        )
         sample_inputs = list(
             itertools.chain(
                 unwrapped_init,
@@ -1053,53 +1151,23 @@ def scan_functionalize(
 def scan_batch_rule(
     interpreter, combine_fn, init, xs, additional_inputs, mutated_arg_indices=""
 ):
-    from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
-
     unbatched_args, in_dims = unwrap_batched(
         (init, xs, additional_inputs), interpreter.level()
     )
     # move to last dim to not interfere with scan's batching
-    unbatched_init, unbatched_xs, unbatched_additional_inputs = pytree.tree_map(
-        lambda x, bdim: x.movedim(bdim, -1) if bdim is not None else x,
-        unbatched_args,
-        in_dims,
+    unbatched_init, unbatched_xs, unbatched_additional_inputs = (
+        _move_batch_dims_to_last_for_scan(unbatched_args, in_dims)
     )
-    after_move_dims = tuple(
-        pytree.tree_flatten(
-            pytree.tree_map(lambda x: -1 if x is not None else None, in_dims)
-        )[0]
-    )
+    after_move_dims = _batch_dims_as_last_for_scan(in_dims)
 
     with interpreter.lower():
-        out_dims = None
-
-        def wrapper(*args):
-            nonlocal out_dims
-            outputs, per_slice_out_dims = restore_vmap(
-                combine_fn,
-                after_move_dims,
-                interpreter.batch_size(),
-                interpreter.randomness(),
-            )(*args)
-            # Note: outputs are not batched, we just move the batch dim to the end
-            # this is to avoid it interfering with scan's batching
-            outputs = tuple(
-                pytree.tree_map(
-                    lambda out, out_bdim: out.movedim(out_bdim, -1)
-                    if out_bdim is not None
-                    else out,
-                    outputs,
-                    per_slice_out_dims,
-                )
-            )
-            out_dims = tuple(
-                pytree.tree_map(
-                    lambda out_bdim: -1 if out_bdim is not None else None,
-                    per_slice_out_dims,
-                )
-            )
-            return outputs
-
+        wrapper = _VmapCombineFnWrapper(
+            combine_fn,
+            after_move_dims,
+            interpreter.batch_size(),
+            interpreter.randomness(),
+            op_name="scan",
+        )
         op_kwargs = {}
         if mutated_arg_indices:
             op_kwargs["mutated_arg_indices"] = mutated_arg_indices
@@ -1111,23 +1179,43 @@ def scan_batch_rule(
             **op_kwargs,
         )
 
-    if out_dims is None:
+    if wrapper.out_dims is None:
         raise AssertionError("out_dims must not be None after scan_op")
-    batched_out = wrap_batched(unwrapped_out, out_dims, interpreter.level())
+    # wrap_batched matches bdims against the output container; normalize to a
+    # tuple to align with the tuple out_dims (as in associative_scan_batch_rule).
+    batched_out = wrap_batched(
+        tuple(unwrapped_out), wrapper.out_dims, interpreter.level()
+    )
     return batched_out
 
 
 # dense implementation for scan. Used for testing only.
-def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
+def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False, length=None):
     carry_leaves, carry_spec = pytree.tree_flatten(init)
     inp_leaves, inp_spec = pytree.tree_flatten(xs)
-    if xs is None or len(inp_leaves) == 0:
+    xs_has_tensors = any(isinstance(l, torch.Tensor) for l in inp_leaves)
+
+    if length is not None and not xs_has_tensors:
+        if length == 0:
+            return init, _build_empty_output_for_length_zero(combine_fn, init)
+
+        _user_combine_fn = combine_fn
+
+        def combine_fn(carry, _ignored):
+            return _user_combine_fn(carry, None)
+
+        # Dummy length-N iteration counter; the wrapped combine_fn passes x=None.
+        inp_leaves = [torch.zeros(length, dtype=torch.int64)]
+        inp_spec = pytree.tree_structure(None)
+        xs_has_tensors = True
+
+    if not xs_has_tensors:
         return init, []
     result_flat = []
     carry = carry_leaves
     op = reversed if reverse else lambda x: x
 
-    dummy_carry, dummy_out = combine_fn(
+    _, dummy_out = combine_fn(
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(
             [first_slice_copy(elem, dim) for elem in inp_leaves],
@@ -1135,7 +1223,6 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         ),
     )
     dummy_out_leaves, dummy_out_spec = pytree.tree_flatten(dummy_out)
-    num_leaves = len(dummy_out_leaves)
 
     for ind in op(range(inp_leaves[0].size(dim))):
         xs = [elem.select(dim, ind) for elem in inp_leaves]
@@ -1148,13 +1235,24 @@ def _fake_scan(combine_fn, init, xs=None, dim=0, reverse=False):
         y, _ = pytree.tree_flatten(y)
         result_flat.append(y)
 
-    results = [
-        torch.stack([e[leave_ind] for e in op(result_flat)])
-        for leave_ind in range(num_leaves)
-    ]
-    # Match scan semantics: move the scan dim from 0 to the user-specified dim
-    # when the output has enough dimensions.
-    results = [torch.movedim(r, 0, dim) if dim < r.ndim else r for r in results]
+    results: list[torch.Tensor | None] = []
+    for leaf_idx, leaf in enumerate(dummy_out_leaves):
+        if isinstance(leaf, torch.Tensor):
+            if len(result_flat) == 0:
+                stacked = torch.empty(
+                    [0] + list(leaf.shape), dtype=leaf.dtype, device=leaf.device
+                )
+            else:
+                stacked = torch.stack([e[leaf_idx] for e in op(result_flat)])
+            results.append(
+                torch.movedim(stacked, 0, dim) if dim < stacked.ndim else stacked
+            )
+        else:
+            if leaf is not None:
+                raise AssertionError(
+                    f"Expected leaf to be a Tensor or None, got {type(leaf)}"
+                )
+            results.append(leaf)
     return (
         pytree.tree_unflatten(carry, carry_spec),
         pytree.tree_unflatten(results, dummy_out_spec),
