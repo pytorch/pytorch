@@ -49,7 +49,8 @@ f = torch.compiler.precompile.load("m.py", "m.cache")
 ```
 
 -- and it writes a self-contained, runnable Python source artifact plus an acceleration
-cache when the block exits. The default `MakeFxTracer` captures a single call;
+cache when the block exits cleanly having captured at least one call (a block that raised
+writes nothing). The default `MakeFxTracer` captures a single call;
 `DynamoTracer`, which captures several calls with the graph breaks and recompilations
 between them, is landing in follow-up changes. Call `cap.save()` inside the block to write
 the on-disk artifact without ending the capture; with `DynamoTracer` that checkpoints the
