@@ -5670,6 +5670,28 @@ class GraphModule(torch.nn.Module):
         self.assertIs(WrapperUserMethodVariable._cpython_type, types.MethodType)
         self.assertIs(WrapperUserFunctionVariable._cpython_type, types.FunctionType)
 
+    def test_wrapper_user_method_torchdynamo_inline(self):
+        class Mod(torch.nn.Module):
+            def meth(self, x):
+                return x + 1
+
+        class Plain:
+            def meth(self, x):
+                return x + 2
+
+        Mod.meth._torchdynamo_inline = Mod.meth
+        Plain.meth._torchdynamo_inline = Plain.meth
+
+        m = Mod()
+        p = Plain()
+
+        def fn(mod, plain, x):
+            return mod.meth(x) + plain.meth(x)
+
+        x = torch.randn(2, 2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(m, p, x), opt_fn(m, p, x))
+
     def test_wraps_stacked_on_lru_cache(self):
         # Stacking two functools.wraps layers over an lru_cache-wrapped fn.
         @functools.lru_cache
