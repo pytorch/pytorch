@@ -424,17 +424,19 @@ static void fill_pool_dims(IdxT* dst, const std::vector<int32_t>& src, int32_t p
   }
 }
 
-// A 1-D dispatch width is taken modulo 2^32, so asking for exactly 2^32
-// threads runs none of them and leaves the output untouched, and 2^32 + 1 runs
-// a single thread. Neither reports an error, and 2^32 elements of a 1-byte
-// dtype is reachable, so reject the grid here. Lifting the cap is left for
-// later: either chunk the grid behind a tid offset the way nll_loss does in
-// LossOps.mm, or move to a 2-D dispatch.
-static void check_pool_thread_count(int64_t num_threads, const std::string& op_name) {
-  TORCH_CHECK_NOT_IMPLEMENTED(num_threads <= std::numeric_limits<uint32_t>::max(),
-                              op_name,
-                              ": MPS pooling is limited to 2^32 - 1 threads, got ",
-                              num_threads);
+// A 1-D dispatch width is taken modulo 2^32, so a single dispatch cannot cover
+// 2^32 threads or more: exactly 2^32 runs none of them and 2^32 + 1 runs one,
+// neither reporting an error. Split the run instead and let the kernel add the
+// offset back, as nll_loss does in LossOps.mm.
+static constexpr int64_t max_threads_per_dispatch = std::numeric_limits<uint32_t>::max();
+
+template <typename Params, typename Fn>
+static void dispatch_pool_chunks(const Params& params, int64_t num_threads, Fn&& launch) {
+  for (int64_t offset = 0; offset < num_threads; offset += max_threads_per_dispatch) {
+    auto chunk = params;
+    chunk.tid_offset = offset;
+    launch(chunk, std::min(max_threads_per_dispatch, num_threads - offset));
+  }
 }
 
 template <typename IdxT>
@@ -465,7 +467,6 @@ static void launch_max_pool_kernel(const Tensor& input,
   if (numThreads == 0) {
     return;
   }
-  check_pool_thread_count(numThreads, op_name);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -477,9 +478,10 @@ static void launch_max_pool_kernel(const Tensor& input,
 
       getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
       [computeEncoder setComputePipelineState:maxPoolPSO];
-      mtl_setArgs(computeEncoder, input, output, indices_opt, params);
-
-      mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
+      dispatch_pool_chunks(params, numThreads, [&](const auto& chunk, int64_t n) {
+        mtl_setArgs(computeEncoder, input, output, indices_opt, chunk);
+        mtl_dispatch1DJob(computeEncoder, maxPoolPSO, n);
+      });
       getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
     }
   });
@@ -515,6 +517,7 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
   mtlDispatchByIndexWidth<int32_t, int64_t>(use_u32, [&](auto idx_tag) {
     using IdxT = typename decltype(idx_tag)::type;
     PoolingParams<5, IdxT> params;
+    params.tid_offset = 0;
 
     params.dims = dims;
     params.pooling_dims = pooling_dims;
@@ -543,6 +546,7 @@ static void adaptive_max_pool_out_mps_template(const Tensor& output,
   mtlDispatchByIndexWidth<int32_t, int64_t>(use_u32, [&](auto idx_tag) {
     using IdxT = typename decltype(idx_tag)::type;
     PoolingParams<5, IdxT> params;
+    params.tid_offset = 0;
 
     params.dims = dims;
     params.pooling_dims = pooling_dims;
@@ -579,12 +583,12 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = grad_output.numel();
-  check_pool_thread_count(numThreads, op_name);
   const bool use_u32 = offsetsFitIn<int32_t>(grad_input, grad_output, indices);
 
   mtlDispatchByIndexWidth<int32_t, int64_t>(use_u32, [&](auto idx_tag) {
     using IdxT = typename decltype(idx_tag)::type;
     PoolingBackwardParams<5, IdxT> params;
+    params.tid_offset = 0;
 
     params.dims = dims;
     params.pooling_dims = pooling_dims;
@@ -605,9 +609,10 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
 
         getMPSProfiler().beginProfileKernel(maxPoolPSO, op_name, {input}, mpsStream);
         [computeEncoder setComputePipelineState:maxPoolPSO];
-        mtl_setArgs(computeEncoder, grad_input, grad_output, indices, params);
-
-        mtl_dispatch1DJob(computeEncoder, maxPoolPSO, numThreads);
+        dispatch_pool_chunks(params, numThreads, [&](const auto& chunk, int64_t n) {
+          mtl_setArgs(computeEncoder, grad_input, grad_output, indices, chunk);
+          mtl_dispatch1DJob(computeEncoder, maxPoolPSO, n);
+        });
         getMPSProfiler().endProfileKernel(maxPoolPSO, mpsStream);
       }
     });
@@ -664,12 +669,12 @@ static void max_unpool_out_mps_template(const Tensor& input,
   if (numThreads == 0) {
     return;
   }
-  check_pool_thread_count(numThreads, op_name);
   const bool use_u32 = offsetsFitIn<int32_t>(input, output, indices);
 
   mtlDispatchByIndexWidth<int32_t, int64_t>(use_u32, [&](auto idx_tag) {
     using IdxT = typename decltype(idx_tag)::type;
     MaxUnpoolingParams<5, IdxT> params;
+    params.tid_offset = 0;
 
     params.dims = dims;
     params.pooling_dims = pooling_dims;
@@ -690,9 +695,10 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
         getMPSProfiler().beginProfileKernel(PSO, op_name, {input}, mpsStream);
         [computeEncoder setComputePipelineState:PSO];
-        mtl_setArgs(computeEncoder, output, input, indices, params, mpsStream->getErrorBuffer());
-
-        mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
+        dispatch_pool_chunks(params, numThreads, [&](const auto& chunk, int64_t n) {
+          mtl_setArgs(computeEncoder, output, input, indices, chunk, mpsStream->getErrorBuffer());
+          mtl_dispatch1DJob(computeEncoder, PSO, n);
+        });
         getMPSProfiler().endProfileKernel(PSO, mpsStream);
       }
     });
@@ -841,12 +847,12 @@ static void avg_pool_out_mps_template(const Tensor& output,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = output.numel();
-  check_pool_thread_count(numThreads, op_name);
   const bool use_u32 = offsetsFitIn<int32_t>(input, output);
 
   mtlDispatchByIndexWidth<int32_t, int64_t>(use_u32, [&](auto idx_tag) {
     using IdxT = typename decltype(idx_tag)::type;
     AvgPoolingParams<5, IdxT> params;
+    params.tid_offset = 0;
 
     params.dims = dims;
     params.pooling_dims = pooling_dims;
@@ -875,9 +881,10 @@ static void avg_pool_out_mps_template(const Tensor& output,
 
         getMPSProfiler().beginProfileKernel(PSO, op_name, {input}, mpsStream);
         [computeEncoder setComputePipelineState:PSO];
-        mtl_setArgs(computeEncoder, input, output, params);
-
-        mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
+        dispatch_pool_chunks(params, numThreads, [&](const auto& chunk, int64_t n) {
+          mtl_setArgs(computeEncoder, input, output, chunk);
+          mtl_dispatch1DJob(computeEncoder, PSO, n);
+        });
         getMPSProfiler().endProfileKernel(PSO, mpsStream);
       }
     });
@@ -911,12 +918,12 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = grad_output.numel();
-  check_pool_thread_count(numThreads, op_name);
   const bool use_u32 = offsetsFitIn<int32_t>(grad_input, grad_output);
 
   mtlDispatchByIndexWidth<int32_t, int64_t>(use_u32, [&](auto idx_tag) {
     using IdxT = typename decltype(idx_tag)::type;
     AvgPoolingParams<5, IdxT> params;
+    params.tid_offset = 0;
 
     params.dims = dims;
     params.pooling_dims = pooling_dims;
@@ -945,9 +952,10 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
 
         getMPSProfiler().beginProfileKernel(PSO, op_name, {grad_output}, mpsStream);
         [computeEncoder setComputePipelineState:PSO];
-        mtl_setArgs(computeEncoder, grad_input, grad_output, params);
-
-        mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
+        dispatch_pool_chunks(params, numThreads, [&](const auto& chunk, int64_t n) {
+          mtl_setArgs(computeEncoder, grad_input, grad_output, chunk);
+          mtl_dispatch1DJob(computeEncoder, PSO, n);
+        });
         getMPSProfiler().endProfileKernel(PSO, mpsStream);
       }
     });
