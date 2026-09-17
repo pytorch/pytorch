@@ -18,7 +18,7 @@ capture runs under (``_capture_config``). The capture session that calls them
 points, its ``guard_filter_fn`` and ``require_no_dropped_guards`` options and
 the runnable ``load`` returns -- is a follow-up, so until it lands nothing
 under ``torch/`` calls into this module; the module docstring of
-``torch/_precompile.py``, rewritten at the top of this stack, carries the
+``torch/_precompile.py``, rewritten near the top of this stack, carries the
 caller-facing usage. This is distinct from
 ``torch._dynamo.config.caching_precompile``, which caches ``torch.compile``
 artifacts transparently without an explicit capture.
@@ -118,41 +118,53 @@ if TYPE_CHECKING:
 
 def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[bool]:
     """
-    Drop every guard whose type, or whose derived type, is one the serializer
-    refuses, and keep everything else.
+    Drop every guard ``CheckFunctionManager.serialize_guards`` would refuse,
+    and keep everything else.
 
     Read this before trusting an artifact. The refused set is the IDENTITY
     guards -- ID_MATCH, FUNCTION_MATCH, CLOSURE_MATCH, MODULE_MATCH, NN_MODULE,
     CLASS_MATCH -- plus DICT_VERSION (dict mutation) and WEAKREF_ALIVE
     (liveness), so precompiling inherently gives up on noticing that a guarded
     object was REBOUND to a different object of the same shape, MUTATED or
-    COLLECTED. Most such guards are on modules and builtins and are stable
-    in practice, but one on a global holding a function is not: rebind it
-    between capture and load and the artifact serves the graph traced against
-    the old one, with no error. Keeping them instead makes serialization raise
-    for essentially every function, so every drop is recorded with its source
-    name in ``PrecompileSummary.dropped_guards`` and the only rail on by default
-    is the module's risky-drop lint over them; a lint is not a proof.
+    COLLECTED. Most such guards are on modules and are stable in practice, but
+    one on a global holding a function is not: rebind it between capture and
+    load and the artifact serves the graph traced against the old one, with no
+    error. Keeping them instead makes serialization raise for essentially every
+    function, so every drop is recorded with its source name in
+    ``PrecompileSummary.dropped_guards`` and the only rail on by default is the
+    module's risky-drop lint over them; a lint is not a proof.
 
-    This is not exactly ``CheckFunctionManager.serialize_guards``'s test. It is
-    stricter in one direction: ``GuardBuilder.BUILTIN_MATCH`` is an
-    ``id_match_unchecked`` that records ID_MATCH as its derived type, so this
-    drops EVERY builtin guard (``len``, ``isinstance``, ``torch.relu`` and the
-    like) although the serializer accepts a TYPE_MATCH or BUILTIN_MATCH whatever
-    its derived types; a builtin rebound between capture and load is therefore
-    never detected either. It is looser in the other: a TYPE_MATCH on a
+    This mirrors the serializer's test branch for branch. A guard of a refused
+    type is dropped, and so is a guard of another type that DERIVES one (a
+    CONSTANT_MATCH on a code object runs through ID_MATCH), except that
+    TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the
+    serializer takes their branch first: BUILTIN_MATCH is an
+    ``id_match_unchecked`` that records ID_MATCH, but the builtin pickles by
+    name and the guard is rebuilt at load against what the name resolves to, so
+    the kept guard catches a builtin swapped after load
+    (``test_guard_serialization.py`` ``test_builtin_match``). The one divergence
+    is the direction the filter cannot mirror soundly: a TYPE_MATCH on a
     local-scope class passes here and the serializer still refuses it, because
-    the type cannot be pickled. ``CheckFunctionManager.__init__`` applies the
-    same idea inline under ``torch._dynamo.config.caching_precompile`` (drop
-    ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE, DICT_VERSION and anything deriving
-    ID_MATCH or DICT_VERSION); this set is the serializer's full refusal list,
-    so it also drops NN_MODULE, FUNCTION_MATCH, CLASS_MATCH and MODULE_MATCH and
-    anything deriving them.
+    the type cannot be pickled. ``orig_guard._unserializable`` would tell, but
+    dropping the guard would ship an artifact that never checks the type,
+    whereas keeping it makes ``serialize_guards`` refuse loudly.
+    ``CheckFunctionManager.__init__`` applies a different policy inline under
+    ``torch._dynamo.config.caching_precompile`` (drop ID_MATCH, CLOSURE_MATCH,
+    WEAKREF_ALIVE, DICT_VERSION and anything deriving ID_MATCH or
+    DICT_VERSION). The two agree on every refused type, since NN_MODULE,
+    FUNCTION_MATCH, CLASS_MATCH and MODULE_MATCH all run through ID_MATCH and
+    derive it; they differ on BUILTIN_MATCH, which that policy drops through
+    its derived ID_MATCH and this keeps, and on one of those four rooted at a
+    TypeSource, which ``id_match_unchecked`` turns into a TYPE_MATCH on a fresh
+    guard so the original derives nothing: dropped here by type, kept there.
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return [
-        g.guard_type not in unsupported
-        and not any(d in unsupported for d in g.derived_guard_types)
+        g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
+        or (
+            g.guard_type not in unsupported
+            and not any(d in unsupported for d in g.derived_guard_types)
+        )
         for g in entries
     ]
 
@@ -167,7 +179,9 @@ def _stdlib_roots() -> tuple[str, ...]:
     Where this interpreter's own library lives. os is unquestionably stdlib, so
     its directory is the direct evidence and the only one that stays right when
     the stdlib is a zip; sysconfig and sys._stdlib_dir cover a build where os is
-    frozen with no __file__.
+    frozen with no __file__. An install root can nest inside one of these (see
+    ``_install_roots``), so a path under both is third party: an install root
+    wins over a stdlib root.
     """
     roots = []
     os_file = getattr(os, "__file__", None)
@@ -177,7 +191,7 @@ def _stdlib_roots() -> tuple[str, ...]:
     if frozen_dir:
         roots.append(frozen_dir)
     paths = sysconfig.get_paths()
-    roots += [p for p in (paths.get("stdlib"), paths.get("platstdlib")) if p]
+    roots += [paths["stdlib"], paths["platstdlib"]]
     if sys.platform == "win32":
         # The stdlib's C extensions live beside Lib, not under it.
         roots.append(os.path.join(sys.base_prefix, "DLLs"))
@@ -192,7 +206,7 @@ def _install_roots() -> tuple[str, ...]:
     without it every pip-installed package is under a stdlib root.
     """
     paths = sysconfig.get_paths()
-    roots = [p for p in (paths.get("purelib"), paths.get("platlib")) if p]
+    roots = [paths["purelib"], paths["platlib"]]
     for name in ("getsitepackages", "getusersitepackages"):
         try:
             got = getattr(site, name)()
@@ -201,10 +215,11 @@ def _install_roots() -> tuple[str, ...]:
             continue  # an old-virtualenv site.py lacks it, or it cannot answer
         roots += [p for p in found if isinstance(p, str)]
     # On Windows getsitepackages() lists the bare prefix, which the whole stdlib
-    # sits under; a directory the stdlib lives under is not an install root.
+    # sits under; a directory a stdlib root lies under is not an install root.
     stdlib = _stdlib_roots()
     normed = {_norm(p) for p in roots}
-    return tuple(sorted(r for r in normed if not any(_within(s, (r,)) for s in stdlib)))
+    above = {r for r in normed for s in stdlib if s == r or s.startswith(r + os.sep)}
+    return tuple(sorted(normed - above))
 
 
 @functools.cache

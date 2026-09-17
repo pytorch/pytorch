@@ -3,9 +3,9 @@
 import os
 import site
 import sys
+import sysconfig
+import types
 from unittest import mock
-
-import numpy
 
 import torch
 import torch._dynamo.precompile_package as precompile_package
@@ -32,43 +32,54 @@ def _entry(source, value, guard_type="ID_MATCH", derived=()):
 class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_default_guard_filter_drops_the_unserializable_types(self):
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
-        refused = [_entry(GlobalSource("g"), None, guard_type=t) for t in unsupported]
-        self.assertEqual(
-            precompile_package.default_guard_filter_fn(refused),
-            [False] * len(unsupported),
-        )
-        entries = [
-            _entry(GlobalSource("g"), None, "TENSOR_MATCH"),
-            # Looser than serialize_guards, which refuses a TYPE_MATCH on a
-            # local-scope class. orig_guard._unserializable would tell, but a
-            # dropped guard ships an artifact that never checks the type; kept,
-            # the serializer refuses it loudly.
-            _entry(GlobalSource("g"), None, "TYPE_MATCH"),
-            _entry(GlobalSource("g"), None, "TYPE_MATCH", derived=("NN_MODULE",)),
-            # Every BUILTIN_MATCH is an id_match_unchecked that records ID_MATCH
-            # as its derived type, so none survives although serialize_guards
-            # would accept them: a builtin rebound between capture and load goes
-            # unnoticed, like every other identity drop.
-            _entry(GlobalSource("g"), None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
-        ]
-        self.assertEqual(
-            precompile_package.default_guard_filter_fn(entries),
-            [True, True, False, False],
-        )
+        g = GlobalSource("g")
+        refused = [_entry(g, None, guard_type=t) for t in unsupported]
+        kept = precompile_package.default_guard_filter_fn(refused)
+        self.assertEqual([t for t, keep in zip(unsupported, kept) if keep], [])
+        # A CONSTANT_MATCH on a code object runs through ID_MATCH; the
+        # serializer refuses the derived type, so the filter drops it too.
+        derived = _entry(g, None, "CONSTANT_MATCH", derived=("ID_MATCH",))
+        self.assertEqual(precompile_package.default_guard_filter_fn([derived]), [False])
 
-    def test_roots_tell_the_stdlib_install_and_torch_dirs_apart(self):
+    def test_default_guard_filter_keeps_what_the_serializer_accepts(self):
+        class Local:
+            pass
+
+        # The one divergence: TYPE_MATCH marks a class whose __qualname__ is not
+        # its __name__ here and serialize_guards refuses it through this
+        # attribute. The filter keeps it so the refusal stays loud rather than
+        # shipping an artifact that never checks the type.
+        g = GlobalSource("g")
+        local_type = _entry(g, None, "TYPE_MATCH")
+        local_type.orig_guard._unserializable = Local
+        entries = [
+            _entry(g, None, "TENSOR_MATCH"),
+            _entry(g, None, "TYPE_MATCH"),
+            local_type,
+            # An id_match_unchecked on a builtin records ID_MATCH as its derived
+            # type; serialize_guards takes its TYPE_MATCH/BUILTIN_MATCH branch
+            # first and never reaches the derived-type refusal, so neither does
+            # the filter.
+            _entry(g, None, "BUILTIN_MATCH", derived=("ID_MATCH",)),
+        ]
+        keep = precompile_package.default_guard_filter_fn(entries)
+        self.assertEqual(keep, [True] * 4)
+
+    def test_roots_locate_the_stdlib_install_and_torch_dirs(self):
         stdlib = precompile_package._stdlib_roots()
         install = precompile_package._install_roots()
         torch_roots = precompile_package._torch_roots()
         self.assertTrue(stdlib and install and torch_roots)
         norm, within = precompile_package._norm, precompile_package._within
-        # purelib nests inside a stdlib root (conda) or platstdlib (venv), and
-        # on Windows getsitepackages() names the prefix the stdlib sits under;
-        # the exclusion only works if no stdlib root is under an install root.
+        # The sets nest one way only: purelib sits inside a stdlib root (conda)
+        # or platstdlib (venv) and must survive the exclusion, while on Windows
+        # getsitepackages() names the prefix the stdlib sits under, which must
+        # not; the install-root-wins rule only works if no stdlib root is under
+        # an install root.
+        self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
         for root in stdlib:
             self.assertFalse(within(root, install), root)
         self.assertTrue(within(norm(os.__file__), stdlib))
-        self.assertTrue(within(norm(numpy.__file__), install))
         self.assertIn(norm(os.path.dirname(torch.__file__)), torch_roots)
         root = os.path.join(os.sep, "a", "b")
         self.assertTrue(within(root, (root,)))
@@ -87,7 +98,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertNotIn(norm(sys.prefix), install)
         for root in precompile_package._stdlib_roots():
             self.assertFalse(within(root, install), root)
-        self.assertTrue(within(norm(numpy.__file__), install))
+        self.assertIn(norm(sysconfig.get_paths()["purelib"]), install)
+
+    def test_torch_roots_trust_torch_path_only_when_this_file_is_in_it(self):
+        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
+        own = norm(os.path.dirname(torch.__file__))
+        bogus = os.path.join(os.sep, "elsewhere", "torch")
+        stub = types.SimpleNamespace(__path__=[bogus])
+        self.addCleanup(torch_roots.cache_clear)
+        with mock.patch.dict(sys.modules, {"torch": stub}):
+            # A sys.modules['torch'] that is not us cannot nominate its own
+            # roots until its __path__ lists the directory this file runs from.
+            torch_roots.cache_clear()
+            self.assertEqual(torch_roots(), (own,))
+            stub.__path__.append(os.path.dirname(torch.__file__))
+            torch_roots.cache_clear()
+            self.assertEqual(set(torch_roots()), {own, norm(bogus)})
+        with mock.patch.object(precompile_package, "__file__", None):
+            torch_roots.cache_clear()
+            self.assertEqual(torch_roots(), ())  # frozen: no directory to anchor to
 
 
 if __name__ == "__main__":
