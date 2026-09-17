@@ -146,6 +146,14 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.4-cudnn9-py3.12-gcc11)
+    CUDA_VERSION=13.4.0
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
     CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.12
@@ -365,10 +373,10 @@ case "$tag" in
   ;;
 esac
 
-# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
-# PYTHON_VERSION, while the rocm/xpu images still express it as
-# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
-# get what they expect.
+# The ubuntu and ubuntu-rocm images provision Python from a deadsnakes venv
+# keyed on PYTHON_VERSION, while the xpu image still expresses it as
+# ANACONDA_PYTHON_VERSION (it keeps conda). Mirror the value so every flavor
+# gets what it expects.
 if [ -z "${PYTHON_VERSION}" ]; then
   PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
 fi
