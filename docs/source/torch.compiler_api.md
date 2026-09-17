@@ -259,7 +259,7 @@ deprecation cycle.
 .. autoexception:: torch.compiler.PrecompileError
 
 .. autoclass:: torch.compiler.PrecompiledRunnable
-   :members: installed, unload
+   :members: unload
 
    Every object :func:`precompile.load` returns is one of these, whichever shape the
    capture produced -- this class itself is the standalone shape's contract, which is
@@ -267,11 +267,25 @@ deprecation cycle.
    :class:`torch.compiler.PrecompiledCallable` below is the installing shape -- so
    ``isinstance(loaded, torch.compiler.PrecompiledRunnable)`` holds for both.
 
+   .. py:attribute:: installed
+      :type: bool
+
+      Whether calling this handle installs onto the captured code objects. ``False``
+      for a standalone artifact -- every artifact this build produces -- which serves
+      by being called and so has nothing to take back out.
+
 .. autoclass:: torch.compiler.PrecompiledCallable
-   :members: installed, unload, serve_time_compiles
+   :members: unload, serve_time_compiles
 
    Returned by :func:`precompile.load` for an artifact that serves by installing,
    and used as a callable or context manager; it is not constructed directly.
+
+   .. py:attribute:: installed
+      :type: bool
+
+      ``True``: this handle serves by installing onto the captured code objects, so
+      :meth:`unload` -- or exiting it as a context manager -- is what takes that back
+      out.
 
 .. py:class:: precompile.MakeFxTracer(decompositions=None)
 
