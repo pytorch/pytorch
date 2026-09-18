@@ -260,9 +260,9 @@ ExceptionTypes: TypeAlias = (
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
-    Import the named module and cache the result. importlib.import_module()
-    seems to do some filesystem checking to validate the name so not caching
-    this can be slow.
+    The process's first resolution of the name, kept for its lifetime: nothing
+    invalidates the memo, so after a sys.modules handover it is an older object
+    than the live entry.
     """
     return importlib.import_module(name)
 
@@ -2382,6 +2382,9 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self) -> VariableTracker:
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
+        # import_source leaves a writer's same-named module in the alias slot
+        # when the memo is not the live entry; the value stays the memo, the
+        # module whose __globals__ _call_impl reads the hook dicts through.
         fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
@@ -2428,11 +2431,16 @@ class InstructionTranslatorBase(
             value = torch.package.package_importer._package_imported_modules[
                 module_name
             ]
+            # A registry lookup, not a memo: the module the name resolves to now.
+            live = True
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
             value = _import_module(module_name)
+            # Under the key alone, whatever the module's own __name__: that
+            # entry is what __import__ hands IMPORT_NAME.
+            live = module_name in sys.modules and sys.modules[module_name] is value
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope
@@ -2440,9 +2448,9 @@ class InstructionTranslatorBase(
         # resolves the name itself -- CompilePackage.install, or an artifact load
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
-        # this checks for (two module names still mangle to one alias): such a
-        # slot is accepted and, below, written as an empty one is.
-        if alias in f_globals and f_globals[alias] is not value:
+        # this checks for (two module names still mangle to one alias).
+        conflict = alias in f_globals and f_globals[alias] is not value
+        if conflict:
             bound = f_globals[alias]
             # Both names out of the instance dicts: a PEP 562 module __getattr__
             # and a class-level __getattribute__ (importlib.util._LazyModule
@@ -2499,7 +2507,14 @@ class InstructionTranslatorBase(
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        f_globals[alias] = value
+        # A writer's same-named module stays in the slot unless value is the
+        # live entry, which is what IMPORT_NAME pushed and the graph is built
+        # from; when neither is live it stays too, the memo being no less
+        # stale. The guards this alias roots and the bytecode reconstructed
+        # through it then read the module left in the slot rather than the one
+        # the graph was built from.
+        if not conflict or live:
+            f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
