@@ -34,7 +34,7 @@ class TestFullyShardConversion(TestCase):
             self.assertEqual(actual.grad_dtype, expected.grad_dtype)
             if check_override:
                 self.assertEqual(
-                    actual._has_grad_dtype_override, expected._has_grad_dtype_override
+                    actual._is_grad_dtype_explicit, expected._is_grad_dtype_explicit
                 )
             self.assertEqual(actual.full_tensor(), expected)
             if expected.grad is None:
@@ -52,7 +52,7 @@ class TestFullyShardConversion(TestCase):
                 param.grad,
                 None if param.grad is None else param.grad.clone(),
                 param.grad_dtype,
-                param._has_grad_dtype_override,
+                param._is_grad_dtype_explicit,
             )
             for param in model.parameters()
         ]
@@ -69,7 +69,7 @@ class TestFullyShardConversion(TestCase):
                 self.assertEqual(grad, grad_value)
                 self.assertEqual(grad.dtype, grad_value.dtype)
             self.assertEqual(actual.grad_dtype, grad_dtype)
-            self.assertEqual(actual._has_grad_dtype_override, override)
+            self.assertEqual(actual._is_grad_dtype_explicit, override)
 
     @parametrize("grad_dtype", ["default", torch.float32, None])
     @parametrize("existing_grad", [False, True])
