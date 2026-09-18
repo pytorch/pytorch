@@ -14,6 +14,7 @@ for n in [37, 111, 247, 1023]:
         x = x + x.mH
         x_cuda = x.cuda()
 
+        torch.backends.cuda.preferred_linalg_library("cusolver")
         l, p, _ = torch.linalg.ldl_factor_ex(x.cuda(), hermitian=True)
         sol = torch.linalg.ldl_solve(l.cpu(), p.cpu(), (x_cuda @ x_cuda).cpu(), hermitian=True)
         if (err := diff(sol.cuda(), x_cuda)) > 1e-11:
