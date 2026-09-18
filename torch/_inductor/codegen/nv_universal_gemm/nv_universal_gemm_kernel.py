@@ -15,7 +15,6 @@ import hashlib
 import importlib
 import logging
 import re
-import threading
 from collections import OrderedDict
 from typing import Any, cast, TYPE_CHECKING
 
@@ -25,6 +24,7 @@ from torch._inductor.codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from torch._inductor.codegen.cutedsl.compile_lock import CUTEDSL_COMPILE_LOCK
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
     to_cutlass_scale_mode,
@@ -56,12 +56,6 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
-
-# CuTe DSL compilation mutates process-global compiler state and is not thread
-# safe.  Runtime compilation is normally avoided by the persistent cache, but
-# dynamic shapes can still require it, so serialize the compatibility shim
-# below as well.
-_NVGEMM_COMPILE_LOCK = threading.Lock()
 
 _NVGEMM_BIAS_ADD_EPILOGUE_SOURCE = (
     "def _epilogue_fn(accum, bias):\n    D = accum + bias\n    return D"
@@ -205,13 +199,13 @@ def _current_target_sm(dev_idx: int):
 def _make_disk_config_key(
     kernel_name: str,
     variant_name: str,
-    accumulator_type: Any,
-    scale_type_a: Any | None = None,
-    scale_type_b: Any | None = None,
-    swizzle_type_a: Any | None = None,
-    swizzle_type_b: Any | None = None,
+    accumulator_type: object,
+    scale_type_a: object = None,
+    scale_type_b: object = None,
+    swizzle_type_a: object = None,
+    swizzle_type_b: object = None,
     epilogue_source: str = "",
-) -> tuple:
+) -> tuple[str, ...]:
     return (
         kernel_name,
         variant_name,
@@ -242,8 +236,9 @@ def _compile_nvgemm(
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
-    Kernel compilation is serialized by ``_compile_nvgemm_kernel`` because
-    CuTe DSL compilation mutates process-global state.
+    Autotuning precompile runs in subprocess workers (process-isolated); the
+    in-process compile takes ``CUTEDSL_COMPILE_LOCK`` because other CuTeDSL
+    templates precompile on threads of this process.
 
     kernel_obj: pre-resolved kernel (skips _lookup_gemm_kernel).
     kernel_name: kernel name for _lookup_gemm_kernel.
@@ -300,13 +295,13 @@ def _compile_nvgemm_kernel(kernel, args):
     """
     import cutlass.cute as cute
 
-    with _NVGEMM_COMPILE_LOCK:
-        if hasattr(type(cute.compile), "__getitem__"):
+    with CUTEDSL_COMPILE_LOCK:
+        if hasattr(cute.compile, "__getitem__"):
             return kernel.compile(args)
 
         wrapped_compile = cute.compile
         unwrapped_compile = wrapped_compile
-        while not hasattr(type(unwrapped_compile), "__getitem__"):
+        while not hasattr(unwrapped_compile, "__getitem__"):
             next_compile = getattr(unwrapped_compile, "__wrapped__", None)
             if next_compile is None:
                 return kernel.compile(args)
