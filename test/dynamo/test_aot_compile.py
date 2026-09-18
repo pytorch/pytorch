@@ -616,6 +616,26 @@ class RaisesFromAnInterruptOnCompare:
         raise ValueError("mid") from KeyboardInterrupt("ctrl-c")
 
 
+class HitsThenRaises:
+    # Same collision, but the first `hits` compares answer: a dict lookup of
+    # "foo" hits that many times and raises on every later probe, so a guard tree
+    # that rejects the call cleanly in both dispatch passes still raises while the
+    # report re-checks it. The message names the compare so a test can pin which
+    # evaluation raised.
+    def __init__(self, hits):
+        self.hits = hits
+        self.compares = 0
+
+    def __hash__(self):
+        return hash("foo")
+
+    def __eq__(self, other):
+        self.compares += 1
+        if self.compares > self.hits:
+            raise ValueError(f"boom on compare {self.compares}")
+        return True
+
+
 class RaisesThenHits:
     # The mirror of HitsThenRaises: the first `raises` compares raise and every
     # later one answers, so a tree that raises in the dispatch scan rejects the
@@ -672,6 +692,18 @@ class RaisingTree(NeverReChecked):
     def check(self, f_locals):
         self.checks += 1
         raise RuntimeError(self.text)
+
+
+class RaisesPerPass(NeverReChecked):
+    # A stub guard manager whose every check raises a message naming the pass it
+    # is on: dispatch evaluates an enabled tree once per pass, so the text says
+    # which of two raises a report quotes.
+    def __init__(self):
+        self.checks = 0
+
+    def check(self, f_locals):
+        self.checks += 1
+        raise RuntimeError(f"pass {self.checks} unhappy")
 
 
 class Accepts:
@@ -2645,6 +2677,37 @@ from user code:
         self.assertIsInstance(caught.__cause__, SystemError)
         self.assertEqual(str(caught.__cause__.__cause__), "boom from __eq__")
 
+    def test_no_match_message_when_only_the_report_raises(self):
+        # The other of _raised_line's two call sites: the report's own handler
+        # around check_verbose, not the branch that quotes what dispatch's
+        # handler recorded. Here both dispatch passes got a clean answer out of
+        # the tree -- the DICT_NOT_CONTAINS guard found the key and rejected the
+        # call -- and only the re-check that explains why raised. That is an
+        # ordinary mismatch missing its reason, so the advice a new ModelInput
+        # would satisfy still applies, and it is the only report-side raise here
+        # that crosses the pybind boundary, so the clause on this line is the
+        # report caller's own unwrap.
+        model, x = self._aot_compile_dict_branches({})
+        key = HitsThenRaises(hits=2)
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, {key: 1})
+        message = str(ctx.exception)
+        # Compare 3 is the report asking rather than reusing a dispatch answer,
+        # and only a raise from dispatch is chained onto the report, so a report
+        # raise has to carry what it was raised from in the line itself. hits=2
+        # rests on codegen probing the key once per evaluation: codegen that
+        # probed it twice per check() would move the raise into dispatch pass 2
+        # with this entry line reading the same, and only the last two
+        # assertions tell that apart (measured with a wrapper that calls check()
+        # twice).
+        raised = "[0] <guard check raised ValueError: boom on compare 3 (through the guard tree's pybind boundary)>"
+        self.assertIn(f"  {raised}", message.splitlines())
+        self.assertIn("Add a ModelInput", message)
+        # Nothing raised in dispatch, so nothing is chained and no artifact is
+        # named for fixing: the two readings a dispatch raise would change.
+        self.assertIsNone(ctx.exception.__cause__)
+        self.assertNotIn("fix or drop that artifact", message)
+
     def test_no_match_message_when_a_raise_did_not_cross_the_pybind_boundary(self):
         # Not every raise arrives as a SystemError with the real exception
         # chained behind it: a TORCH_CHECK inside the tree surfaces as a plain
@@ -2704,6 +2767,25 @@ from user code:
         self.assertIn(f"  {raised}", message.splitlines())
         self.assertNotIn("the caller was handling this", message)
         self.assertNotIn("pybind boundary", message)
+
+    def test_aot_compile_module_no_match_does_not_suppress_a_handled_exception(self):
+        # An ordinary no-match, with no raise to chain, has to raise bare rather
+        # than `from None`: `from None` sets __suppress_context__, which erases
+        # the exception a call made inside an `except` block was handling from the
+        # traceback the user reads.
+        class Boom(Exception):
+            pass
+
+        self._hide_leaked_dynamo_globals()
+        model = self._model_with_stub_trees(Rejects())
+        try:
+            raise Boom("the caller was handling this")
+        except Boom:
+            with self.assertRaises(RuntimeError) as ctx:
+                model(torch.randn(3, 3))
+        self.assertIn("No AOT compiled graph matched this call", str(ctx.exception))
+        self.assertIs(ctx.exception.__suppress_context__, False)
+        self.assertIsInstance(ctx.exception.__context__, Boom)
 
     def test_no_match_message_hints_only_the_entry_that_named_a_missing_global(self):
         # One entry names a missing global and the other is a plain mismatch, and
@@ -2770,6 +2852,36 @@ from user code:
         self.assertEqual([line[:9] for line in hints], ["For [0]: ", "For [1]: "])
         self.assertIn("the module the compiled function was traced in", hints[0])
         self.assertIn(f"here vars({__name__})", hints[1])
+
+    def test_no_match_message_keeps_the_advice_beside_a_raise(self):
+        # The independence pinned two tests up by
+        # test_no_match_message_hints_only_the_entry_that_named_a_missing_global,
+        # now with a raise in play: [0] raised and has to be
+        # fixed or dropped, and [1] names a global missing from the module this
+        # captured artifact's guards resolve against. Those two lines stand on
+        # their own entries; the ModelInput line, appended to every report,
+        # stands on none -- it is about the uncovered mode=2 call itself. Read at
+        # fixed indices, which pins that the three are adjacent and last as well,
+        # and reads a dropped advice line as a message diff.
+        model, x = self._aot_compile_mode_branches()
+        tree = RaisingTree("the scanned tree is unhappy")
+        model.forward.compiled_results[0]._artifacts.guard_manager = tree
+        g = globals()
+        self.addCleanup(g.__setitem__, "AOT_BRANCH_SCALE", g["AOT_BRANCH_SCALE"])
+        del g["AOT_BRANCH_SCALE"]
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, 2)
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        raised = "  [0] <guard check raised RuntimeError: the scanned tree is unhappy>"
+        self.assertIn(raised, lines)
+        self.assertIn("[1] KeyError on G['AOT_BRANCH_SCALE']", message)
+        # Header, the two entries, then the hint, the fix-or-drop line and the
+        # ModelInput line.
+        self.assertEqual(len(lines), 6, message)
+        self.assertIn("For [1]: a guarded global is missing", lines[3])
+        self.assertIn("[0]'s guard check raised while checking this call", lines[4])
+        self.assertIn("Add a ModelInput covering this call", lines[5])
 
     def _install_global_probe(self, name, misses):
         # Re-keys this module's global `name` under a CountedKey. Both cleanups
@@ -3611,6 +3723,12 @@ from user code:
         self.assertTrue(lines[2].startswith("  [1] "), lines[2])
         self.assertNotIn("guard check raised", lines[2])
         self.assertIn("Add a ModelInput", lines[3])
+        # Only a dispatch raise is chained, and only a dispatch raise names an
+        # artifact to fix, so a raise this far in leaves both unread: the two
+        # readings that tell a report raise from one in dispatch, which prints
+        # the same line. The fix-or-drop line is emitted immediately above the
+        # ModelInput one, so the assertion above reads its absence already.
+        self.assertIsNone(ctx.exception.__cause__)
 
     def test_no_match_message_reads_a_systemerror_cause_not_the_handled_exception(self):
         # _PyErr_FormatFromCause sets __cause__ and __context__ alike, so only a
@@ -3704,6 +3822,26 @@ from user code:
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
 
+    def test_no_match_message_quotes_the_last_raise_at_one_index(self):
+        # Both dispatch passes evaluate an enabled tree, so one index can raise
+        # twice with two different exceptions. The report quotes the later one:
+        # `raised[i]` is overwritten in place, which the test above pins on its
+        # entry line at [1]. What this one-input twin adds is the chain: it
+        # carries the first index that raised, so with a single input that is
+        # the overwritten exception and `__cause__` reads pass 2 too -- a reading
+        # the two-input test cannot make, its chain being [0]'s only raise. The
+        # pass the line names is the count: every check() here is inside a
+        # handler that overwrites the record or re-raises, so a pass too few or
+        # too many moves the text below.
+        self._hide_leaked_dynamo_globals()
+        model = self._model_with_stub_trees(RaisesPerPass())
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3))
+        lines = str(ctx.exception).splitlines()
+        raised = "  [0] <guard check raised RuntimeError: pass 2 unhappy>"
+        self.assertEqual(lines[1], raised)
+        self.assertEqual(str(ctx.exception.__cause__), "pass 2 unhappy")
+
     def test_aot_compile_module_two_raisers_in_the_report_and_then_the_warning(self):
         # [0] opted out and [1] enabled both raise, so the two records of a raise
         # part: the chain carries the FIRST index that raised, whose opt-out line
@@ -3729,6 +3867,7 @@ from user code:
         checked = "  [1] <guard check raised RuntimeError: checked tree is unhappy>"
         self.assertIn(checked, lines)
         self.assertIn("[1]'s raise, not a guard failure, is what withheld", lines[3])
+        self.assertNotIn("the opted-out tree is unhappy", str(ctx.exception))
         self.assertEqual(str(ctx.exception.__cause__), "the opted-out tree is unhappy")
         # Opted out as well, [1] withholds the last resort no longer, which serves
         # the first opted-out result: one warning per raise, each naming that
@@ -4066,6 +4205,12 @@ from user code:
         self.assertIn(withheld, message)
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
         self.assertIn("Add a ModelInput", message)
+        # One line per input: the withheld opt-out is described once, and
+        # reaching the re-check for it would add a second line about the guards
+        # nobody asked about.
+        self.assertEqual(
+            sum(ln.startswith("  [") for ln in message.splitlines()), 2, message
+        )
         chained = []
         # Start at the cause: a walk from ctx.exception would pass on a report
         # that quoted the raise itself and chained nothing.
