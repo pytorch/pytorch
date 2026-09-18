@@ -51,9 +51,9 @@ from torch.testing._internal.common_utils import (
 
 
 # One root for every artifact pair the adapters below stage, removed once at
-# process exit. Both adapters free their own staging directory as they go, a
-# refused capture() or block entry included, so a run does not accumulate one
-# directory per capture.
+# process exit. Each staged directory is freed as its own adapter finishes with it,
+# including a _CaptureToFiles whose capture() construction is refused, so a run does
+# not accumulate one directory per capture.
 _ARTIFACT_ROOT = tempfile.TemporaryDirectory()
 atexit.register(_ARTIFACT_ROOT.cleanup)
 
@@ -1998,112 +1998,6 @@ class TestPrecompile(TestCase):
             finally:
                 _register_effectful_op(op, None)
 
-    def test_summary_types_pickle(self):
-        # A capture summary or invariants report is the kind of value users
-        # stash next to an artifact (torch.save of a diagnostics record, a
-        # multiprocessing capture farm). A previous revision pointed these
-        # classes' __module__ at torch.compiler, which does not export them,
-        # so pickle could not resolve the class and every instance raised.
-        from torch.compiler._precompile_types import (
-            FrameInvariants,
-            GuardFact,
-            PrecompileSummary,
-        )
-
-        fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
-        inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
-        summary = PrecompileSummary(1, 0, 1, 1)
-        for obj in (fact, inv, summary):
-            self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
-        # PrecompileError has the same failure mode and a home torch.compiler
-        # does export, so pickle resolves it there.
-        error = pickle.loads(pickle.dumps(torch.compiler.PrecompileError("boom")))
-        self.assertIsInstance(error, torch.compiler.PrecompileError)
-        self.assertEqual(str(error), "boom")
-
-    def test_tracer_annotations_resolve_after_the_re_home(self):
-        # torch/compiler/precompile.py pre-resolves the two tracers' annotations before
-        # re-homing their __module__: torch._precompile is under `from __future__ import
-        # annotations`, so its string annotations resolve against THAT module, while
-        # get_type_hints resolves through __module__. DynamoTracer only: MakeFxTracer's
-        # single annotation is all-builtin and could not catch a missed pre-resolution.
-        import typing
-        from collections.abc import Callable, Sequence
-        from typing import Any
-
-        self.assertEqual(
-            typing.get_type_hints(DynamoTracer)["guard_filter_fn"],
-            Callable[[Sequence[Any]], Sequence[bool]] | None,
-        )
-        self.assertEqual(typing.get_type_hints(DynamoTracer)["recompile_limit"], int)
-
-    def _summary(self, **kwargs):
-        from torch.compiler.precompile import PrecompileSummary
-
-        fields = dict(frames=2, resume_functions=1, guarded_codes=3, backend_graphs=2)
-        return PrecompileSummary(**{**fields, **kwargs})
-
-    def test_summary_guard_type_counts(self):
-        summary = self._summary(
-            dropped_guards=(
-                ("TENSOR_MATCH", "L['x']"),
-                ("TENSOR_MATCH", "L['y']"),
-                ("HASATTR", "L['m'].w"),
-            ),
-            kept_guards=(("TYPE_MATCH", "L['x']"), ("TYPE_MATCH", "L['y']")),
-        )
-        self.assertEqual(
-            summary.dropped_guard_types(), {"TENSOR_MATCH": 2, "HASATTR": 1}
-        )
-        self.assertEqual(summary.kept_guard_types(), {"TYPE_MATCH": 2})
-        self.assertEqual(self._summary().dropped_guard_types(), {})
-        self.assertEqual(self._summary().kept_guard_types(), {})
-
-    def test_summary_complete(self):
-        # complete gates an artifact, so every way a capture can be incomplete has
-        # to flip it: no guarded code at all, a frame that hit the recompile limit, was
-        # bypassed or never reached, a call that raised, and (because
-        # allow_empty_graphs lets a frame that compiled nothing still count as a
-        # guarded code) a capture with no backend graph at all.
-        self.assertTrue(self._summary().complete)
-        for field in ("bypassed", "truncated", "uncovered_frames", "capture_errors"):
-            self.assertFalse(self._summary(**{field: ("f",)}).complete)
-        self.assertFalse(self._summary(guarded_codes=0).complete)
-        self.assertFalse(self._summary(backend_graphs=0).complete)
-        # Dropped guards are reported apart, so they deliberately do NOT flip it:
-        # adding any of these would leave essentially every real capture incomplete.
-        drops = ("dropped_guards", "risky_dropped_guards", "policy_dropped_guards")
-        for field in drops:
-            self.assertTrue(self._summary(**{field: (("HASATTR", "s"),)}).complete)
-        self.assertTrue(self._summary(wont_generalize=("w",)).complete)
-
-    def test_summary_str(self):
-        self.assertEqual(
-            str(self._summary()),
-            "2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs",
-        )
-        rendered = str(
-            self._summary(
-                bypassed=("b",),
-                truncated=("t",),
-                uncovered_frames=("u",),
-                wont_generalize=("w",),
-                dropped_guards=(("HASATTR", "L['m'].w"),),
-                risky_dropped_guards=(("HASATTR", "L['m'].risky"),),
-                policy_dropped_guards=(("TYPE_MATCH", "L['m'].policy"),),
-                capture_errors=("boom",),
-            )
-        )
-        self.assertIn("dropped guards {'HASATTR': 1}", rendered)
-        # Type AND source, so it is not read as the histogram one label over.
-        self.assertIn("""RISKY drops ["HASATTR on L['m'].risky"]""", rendered)
-        self.assertIn("1 policy drops", rendered)
-        self.assertIn("1 UNCOVERED: ['u']", rendered)
-        self.assertIn("1 value-pinned guards", rendered)
-        self.assertIn(">=1 TRUNCATED: ['t']", rendered)
-        self.assertIn("1 BYPASSED: ['b']", rendered)
-        self.assertIn("1 CAPTURE ERROR(S)", rendered)
-
     @parametrize("backend", ("inductor", "eager"))
     def test_capture_under_a_torch_function_mode_applies_it_once(self, backend):
         # An ambient torch_function mode has to reach the artifact -- a capture that
@@ -2502,7 +2396,6 @@ class TestPrecompile(TestCase):
                 cap(m, x)
 
     def test_dynamic_shapes_unbacked_item_captured(self):
-        # Stays on the callable API: ported by the module commit (#197343), not here.
         # An unbacked capture is the only path with a ShapeEnv, so where a static capture
         # refuses .item() outright it holds the value as an unbacked symbol: a use that
         # never guards on it captures, and the loaded artifact matches eager. Replay on a
@@ -2521,7 +2414,6 @@ class TestPrecompile(TestCase):
         self.assertEqual(f_c(m, other), scale_by_item(m, other))
 
     def test_dynamic_shapes_unbacked_item_guard_rejected(self):
-        # Stays on the callable API: ported by the module commit (#197343), not here.
         # The other half of the same contract: a branch on the .item() value must guard
         # on that unbacked symbol, so capture fails LOUDLY instead of baking the value
         # the example run happened to produce.
@@ -3708,6 +3600,63 @@ class TestPrecompile(TestCase):
         ):
             _precompile_pair(lambda m, t, u: m(t), model, marked, x.to_sparse())
 
+    def test_wrapper_subclass_over_sparse_data_refused(self):
+        # Those three metadata reads see the OUTER tensor, and a traceable wrapper subclass
+        # reports strided, non-nested, non-mkldnn whatever it wraps -- so before the loop
+        # unwrapped one, a wrapper over SPARSE data passed every clause and then had the
+        # inner nnz dropped by the fake conversion: capture SUCCEEDED and baked "+ 0.0"
+        # where eager adds the real nnz (the parent's real-tensor trace baked it correctly),
+        # the one wrong-artifact hole the loop exists to close. It recurses through
+        # __tensor_flatten__ instead and names the inner tensor. The second half pins that
+        # unwrapping refuses only what a fake gets wrong: a wrapper over DENSE data still
+        # captures, as MaskedTensor and DTensor do.
+        class Wrapper(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, inner.shape, dtype=inner.dtype, device=inner.device
+                )
+
+            def __init__(self, inner):
+                self.inner = inner
+
+            def __tensor_flatten__(self):
+                return ["inner"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner, ctx, outer_size, outer_stride):
+                return Wrapper(inner["inner"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(t):
+                    return t.inner if isinstance(t, Wrapper) else t
+
+                return func(
+                    *_pytree.tree_map(unwrap, args),
+                    **_pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        wrapped_sparse = Wrapper(torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse_coo())
+        # The outer read that let it through, asserted so the test cannot pass because the
+        # wrapper started reporting its inner layout (TwoTensor does, and is refused above).
+        self.assertIs(wrapped_sparse.layout, torch.strided)
+        with self.assertRaisesRegex(
+            PrecompileError,
+            r"user input 0 \(inner tensor 'inner' of a Wrapper subclass\) has "
+            r"torch.sparse_coo layout.*reports 0 nnz",
+        ):
+            _precompile_pair(
+                lambda t: t.values().sum() + float(t._nnz()),
+                wrapped_sparse,
+                backend="eager",
+            )
+
+        code, _ = _precompile_pair(
+            lambda t: t.sum(), Wrapper(torch.randn(3, 4)), backend="eager"
+        )
+        self.assertIn("aten.sum", code)
+
     @unittest.skipUnless(TEST_CUDA, "pin_memory needs an accelerator allocator")
     def test_pinned_input_refused(self):
         # The fourth member of that table, in its own test because constructing the input
@@ -3759,11 +3708,13 @@ class TestPrecompile(TestCase):
 
     def test_capture_inside_another_trace_refused(self):
         # An ambient TracingContext.fake_mode outranks both mode sources capture hands
-        # make_fx, and it carries neither allow_fallback_kernels=False nor the
-        # unsafe-data-ptr-access snapshot every refusal here is built on -- under it a
-        # .data_ptr() read bakes 0 instead of raising (test_capture_refuses_a_data_ptr_read
-        # pins the refusal outside a trace). So capture refuses up front, on a fn that
-        # captures cleanly on its own, rather than tracing under a foreign contract.
+        # make_fx, and no foreign mode passes allow_fallback_kernels=False, so a meta-less
+        # op would be run for real again; one built under DEFAULT config (as here, and as
+        # an AOTAutograd / inductor trace builds its own) also lacks the
+        # unsafe-data-ptr-access snapshot, so a .data_ptr() read bakes 0 instead of raising
+        # (test_capture_refuses_a_data_ptr_read pins the refusal outside a trace). So
+        # capture refuses up front, on a fn that captures cleanly on its own, rather than
+        # tracing under a foreign contract.
         model = torch.nn.Linear(4, 4)
         x = torch.randn(3, 4)
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
@@ -3904,9 +3855,9 @@ class TestPrecompile(TestCase):
                 cap(model, torch.randn(3, 4))
         except RuntimeError as e:
             self.assertIn("my own capture-time failure", str(e))
-            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
+            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped
+            # (the only producer of the relabeled text raises one, so this covers it).
             self.assertNotIsInstance(e, PrecompileError)
-            self.assertNotIn("no meta/fake kernel", str(e))
         else:
             self.fail("expected fn's RuntimeError to propagate out of capture")
 
@@ -3947,8 +3898,9 @@ class TestPrecompile(TestCase):
 
         with self.assertRaises(PrecompileError) as cm:
             _precompile_pair(raises, model, torch.randn(3, 4), backend="eager")
+        # Equality is the whole assertion: every relabel site builds a NEW PrecompileError
+        # with different text, so a lost "except PrecompileError: raise" reds it here.
         self.assertEqual(str(cm.exception), message)
-        self.assertIsNone(cm.exception.__cause__)
 
     def test_mutating_custom_op_captures_without_a_registered_fake(self):
         # The one carve-out in "fake tracing needs a meta/fake kernel for every op": a
@@ -3977,11 +3929,10 @@ class TestPrecompile(TestCase):
             add_one_._lib._destroy()
 
     def test_input_is_mutated_exactly_once_by_the_capture_call(self):
-        # Capture traces fn on FAKE tensors (invariant 3), so the in-place mutation fn
-        # performs during the trace never reaches the caller's tensor; the capture call
-        # then SERVES the artifact on the real args, and that serve is what mutates the
-        # real input -- exactly once, not once per trace-plus-serve. A loaded artifact
-        # mutates its input exactly once per call too.
+        # Capture traces fn on FAKE tensors (invariant 3), so the mutation fn performs
+        # during the trace never reaches the caller's tensor; the capture call then SERVES
+        # the artifact on the real args, and that serve is what mutates the real input --
+        # exactly once, as a loaded artifact does per call.
         scratch = torch.zeros(4)
         with _CaptureToFiles(lambda a: a.add_(1.0)) as cap:
             out = cap(scratch)
@@ -4002,6 +3953,116 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "neither a graph input"):
             _precompile_pair(lambda a: a + closed_over.add_(1.0), torch.zeros(4))
         self.assertEqual(closed_over, torch.ones(4))
+
+
+@instantiate_parametrized_tests
+class TestPrecompilePublicSurface(TestCase):
+    """The public module surface and the report types: nothing here traces."""
+
+    def _summary(self, **kwargs):
+        from torch.compiler.precompile import PrecompileSummary
+
+        fields = dict(frames=2, resume_functions=1, guarded_codes=3, backend_graphs=2)
+        return PrecompileSummary(**{**fields, **kwargs})
+
+    def test_summary_guard_type_counts(self):
+        summary = self._summary(
+            dropped_guards=(
+                ("TENSOR_MATCH", "L['x']"),
+                ("TENSOR_MATCH", "L['y']"),
+                ("HASATTR", "L['m'].w"),
+            ),
+            kept_guards=(("TYPE_MATCH", "L['x']"), ("TYPE_MATCH", "L['y']")),
+        )
+        self.assertEqual(
+            summary.dropped_guard_types(), {"TENSOR_MATCH": 2, "HASATTR": 1}
+        )
+        self.assertEqual(summary.kept_guard_types(), {"TYPE_MATCH": 2})
+        self.assertEqual(self._summary().dropped_guard_types(), {})
+        self.assertEqual(self._summary().kept_guard_types(), {})
+
+    def test_summary_complete(self):
+        # complete gates an artifact, so every way a capture can be incomplete has to
+        # flip it: no guarded code at all, a frame that hit the recompile limit, was
+        # bypassed or never reached, a call that raised, and (because allow_empty_graphs
+        # lets a frame that compiled nothing still count as a guarded code) no graph.
+        self.assertTrue(self._summary().complete)
+        for field in ("bypassed", "truncated", "uncovered_frames", "capture_errors"):
+            with self.subTest(field=field):
+                self.assertFalse(self._summary(**{field: ("f",)}).complete)
+        self.assertFalse(self._summary(guarded_codes=0).complete)
+        self.assertFalse(self._summary(backend_graphs=0).complete)
+        # Dropped guards are reported apart, so they deliberately do NOT flip it:
+        # adding any of these would leave essentially every real capture incomplete.
+        drops = ("dropped_guards", "risky_dropped_guards", "policy_dropped_guards")
+        for field in drops:
+            with self.subTest(field=field):
+                self.assertTrue(self._summary(**{field: (("HASATTR", "s"),)}).complete)
+        self.assertTrue(self._summary(wont_generalize=("w",)).complete)
+
+    def test_summary_str(self):
+        self.assertEqual(
+            str(self._summary()),
+            "2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs",
+        )
+        rendered = str(
+            self._summary(
+                bypassed=("b",),
+                truncated=("t",),
+                uncovered_frames=("u",),
+                wont_generalize=("w",),
+                dropped_guards=(("HASATTR", "L['m'].w"),),
+                risky_dropped_guards=(("HASATTR", "L['m'].risky"),),
+                policy_dropped_guards=(("TYPE_MATCH", "L['m'].policy"),),
+                capture_errors=("boom",),
+            )
+        )
+        self.assertIn("dropped guards {'HASATTR': 1}", rendered)
+        # Type AND source, so it is not read as the histogram one label over.
+        self.assertIn("""RISKY drops ["HASATTR on L['m'].risky"]""", rendered)
+        self.assertIn("1 policy drops", rendered)
+        self.assertIn("1 UNCOVERED: ['u']", rendered)
+        self.assertIn("1 value-pinned guards", rendered)
+        self.assertIn(">=1 TRUNCATED: ['t']", rendered)
+        self.assertIn("1 BYPASSED: ['b']", rendered)
+        self.assertIn("1 CAPTURE ERROR(S)", rendered)
+
+    def test_summary_types_pickle(self):
+        # These reports get stashed next to an artifact (a torch.save'd diagnostics
+        # record, a capture farm). A previous revision pointed their __module__ at
+        # torch.compiler, which does not export them, so pickle could not resolve them.
+        from torch.compiler._precompile_types import (
+            FrameInvariants,
+            GuardFact,
+            PrecompileSummary,
+        )
+
+        fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
+        inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
+        summary = PrecompileSummary(1, 0, 1, 1)
+        for obj in (fact, inv, summary):
+            self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
+        # PrecompileError has the same failure mode and a home torch.compiler
+        # does export, so pickle resolves it there.
+        error = pickle.loads(pickle.dumps(torch.compiler.PrecompileError("boom")))
+        self.assertIsInstance(error, torch.compiler.PrecompileError)
+        self.assertEqual(str(error), "boom")
+
+    def test_tracer_annotations_resolve_after_the_re_home(self):
+        # torch/compiler/precompile.py pre-resolves the two tracers' annotations before
+        # re-homing their __module__: torch._precompile is under `from __future__ import
+        # annotations`, so its string annotations resolve against THAT module while
+        # get_type_hints resolves through __module__. DynamoTracer only: MakeFxTracer's
+        # one annotation is all-builtin and could not catch a missed pre-resolution.
+        import typing
+        from collections.abc import Callable, Sequence
+        from typing import Any
+
+        self.assertEqual(
+            typing.get_type_hints(DynamoTracer)["guard_filter_fn"],
+            Callable[[Sequence[Any]], Sequence[bool]] | None,
+        )
+        self.assertEqual(typing.get_type_hints(DynamoTracer)["recompile_limit"], int)
 
     def test_dynamo_tracer_guard_rail_defaults(self):
         # Two of the three rails are on by default, the coverage gap one and the
@@ -4029,8 +4090,8 @@ class TestPrecompile(TestCase):
         self.assertIs(
             torch.compiler.precompile, sys.modules["torch.compiler.precompile"]
         )
-        # The two loaded-handle classes are exported beside PrecompileError, and their
-        # __module__ has to name that home: the docs autoclass directives and
+        # The two loaded-handle classes are exported beside PrecompileError, with the
+        # __module__ naming that home: the docs autoclass directives and
         # test_public_bindings.test_correct_module_names both key on it.
         for name in ("PrecompiledRunnable", "PrecompiledCallable"):
             self.assertIn(name, torch.compiler.__all__)
@@ -4052,8 +4113,9 @@ class TestPrecompile(TestCase):
             ],
         )
         for name in torch.compiler.precompile.__all__:
-            member = getattr(torch.compiler.precompile, name)
-            self.assertEqual(member.__module__, "torch.compiler.precompile")
+            with self.subTest(name=name):
+                member = getattr(torch.compiler.precompile, name)
+                self.assertEqual(member.__module__, "torch.compiler.precompile")
 
     def test_module_is_not_callable(self):
         # The retired entry point: precompile is a module, so the call itself fails.
@@ -4103,11 +4165,10 @@ class TestPrecompile(TestCase):
             )
 
     def test_precompiled_callable_protocol(self):
-        # PrecompiledCallable is the handle an installing artifact will return, and
-        # nothing in this build produces one, so construct it over a stand-in to pin the
-        # documented surface: it installs, it delegates the call / unload / compile
-        # count, `with` unloads on exit, and a dynamo PackageError / RecompileError out
-        # of any of its entry points surfaces as a PrecompileError.
+        # Nothing in this build produces a PrecompiledCallable, so construct it over a
+        # stand-in to pin the documented surface: it installs, it delegates the call /
+        # unload / compile count, `with` unloads on exit, and a dynamo PackageError or
+        # RecompileError out of any entry point surfaces as a PrecompileError.
         from torch._dynamo.exc import PackageError, RecompileError
 
         class _Installed:
@@ -4154,21 +4215,21 @@ class TestPrecompile(TestCase):
             def serve_time_compiles(self):
                 raise self._exc
 
-        # Nothing in this build produces a PrecompiledCallable, so this is the whole
-        # enforcement of the translation: every public entry point goes through _call,
-        # and both dynamo-private types it converts are exercised -- PackageError is
-        # the arm the class exists for.
+        # This is the whole enforcement of the translation: every public entry point
+        # goes through _call, and both dynamo-private types it converts are exercised --
+        # PackageError is the arm the class exists for.
         for exc in (PackageError("bad package"), RecompileError("guard miss")):
-            broken = torch.compiler.PrecompiledCallable(_Raises(exc))
-            with self.assertRaisesRegex(PrecompileError, str(exc)) as cm:
-                broken(torch.ones(2))
-            self.assertIs(cm.exception.__cause__, exc)
-            with self.assertRaisesRegex(PrecompileError, str(exc)):
-                broken.__enter__()
-            with self.assertRaisesRegex(PrecompileError, str(exc)):
-                broken.unload()
-            with self.assertRaisesRegex(PrecompileError, str(exc)):
-                broken.serve_time_compiles()
+            with self.subTest(exc=type(exc).__name__):
+                broken = torch.compiler.PrecompiledCallable(_Raises(exc))
+                with self.assertRaisesRegex(PrecompileError, str(exc)) as cm:
+                    broken(torch.ones(2))
+                self.assertIs(cm.exception.__cause__, exc)
+                with self.assertRaisesRegex(PrecompileError, str(exc)):
+                    broken.__enter__()
+                with self.assertRaisesRegex(PrecompileError, str(exc)):
+                    broken.unload()
+                with self.assertRaisesRegex(PrecompileError, str(exc)):
+                    broken.serve_time_compiles()
         # And ONLY those two: a user exception out of a served artifact reaches the
         # caller unchanged rather than relabelled as a precompile failure.
         with self.assertRaisesRegex(ValueError, "mine"):
@@ -7594,8 +7655,7 @@ class TestPrecompileCaptureFiles(TestCase):
 
     def test_default_tracer_writes_a_loadable_pair(self):
         # No tracer= at all: precompile.capture()'s default has to produce a loadable
-        # artifact. test_inductor_pair_round_trips covers the default tracer with the
-        # default backend; this is the default tracer with backend="eager".
+        # artifact. test_inductor_pair_round_trips covers it with the default backend.
         with torch.compiler.precompile.capture(
             _files_fn,
             artifact_path=self.artifact,
@@ -7609,12 +7669,10 @@ class TestPrecompileCaptureFiles(TestCase):
 
     def test_artifact_bytes_are_exactly_what_the_cache_hashes(self):
         # Both halves move in binary on purpose: a text-mode read would collapse CRLF
-        # (universal newlines) and a text-mode write would translate newlines on
-        # Windows, while code_hash is over exactly the python_code bytes load() re-hashes.
-        # So pin a real capture's file bytes against the sealed hash, then pin the
-        # writer's open MODE on a CRLF python_code, the one place byte and text mode
-        # differ; test_carriage_return_in_the_artifact_round_trips takes CRLF through
-        # the writer, the reader and load().
+        # and a text-mode write would translate newlines on Windows, while code_hash is
+        # over exactly the python_code bytes load() re-hashes. So pin a real capture's
+        # file bytes against the sealed hash, then pin the writer's open MODE on a CRLF
+        # python_code, the one place byte and text mode differ.
         with self._capture() as cap:
             cap(self.model, self.x)
         raw = self._read(self.artifact)
@@ -7721,16 +7779,19 @@ class TestPrecompileCaptureFiles(TestCase):
             os.path.relpath(self.artifact),
         ]
         if sys.platform != "win32":
-            # A symlinked path COMPONENT names one file too, which normalizing alone misses.
+            # relpath itself raises for a temp dir on another drive, and a symlinked path
+            # COMPONENT names one file too, which normalizing alone misses.
+            spellings.append(os.path.relpath(self.artifact))
             os.symlink(self.dir, os.path.join(self.dir, "link"))
             spellings.append(os.path.join(self.dir, "link", "m.py"))
         pairs = [(self.artifact, p) for p in spellings]
         pairs.append((os.fsencode(self.artifact), self.artifact))
         for artifact_path, cache_path in pairs:
-            with self.assertRaisesRegex(ValueError, "same file"):
-                self._capture(artifact_path=artifact_path, cache_path=cache_path)
-            with self.assertRaisesRegex(ValueError, "same file"):
-                torch.compiler.precompile.load(artifact_path, cache_path)
+            with self.subTest(cache_path=cache_path):
+                with self.assertRaisesRegex(ValueError, "same file"):
+                    self._capture(artifact_path=artifact_path, cache_path=cache_path)
+                with self.assertRaisesRegex(ValueError, "same file"):
+                    torch.compiler.precompile.load(artifact_path, cache_path)
 
     @parametrize("half", ("artifact", "cache"))
     def test_a_directory_for_either_half_is_refused(self, half):
@@ -7810,12 +7871,12 @@ class TestPrecompileCaptureFiles(TestCase):
                 y = cap(self.model, self.x)
         self.assertEqual(y.dtype, torch.bfloat16)
         served = torch.compiler.precompile.load(self.artifact, self.cache)
-        self.assertEqual(served(self.model, self.x).dtype, torch.bfloat16)
+        self.assertEqual(served(self.model, self.x), y)
         # ...and a region with a DIFFERENT dtype does not re-cast what is baked in: the
         # only coverage of a bf16-baked artifact served inside an fp16 region, where a
         # second cast would silently DOWNGRADE precision rather than upgrade it.
         with torch.autocast("cpu", dtype=torch.float16):
-            self.assertEqual(served(self.model, self.x).dtype, torch.bfloat16)
+            self.assertEqual(served(self.model, self.x), y)
 
     def test_a_served_call_enters_no_autocast_when_none_is_on(self):
         # The disable is entered only where there is something to disable: with no

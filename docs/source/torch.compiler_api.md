@@ -63,17 +63,16 @@ deprecation cycle.
 ```{eval-rst}
 .. py:function:: precompile.capture(fn, /, *, artifact_path, cache_path, tracer=DynamoTracer(), backend="inductor", training=False)
 
-   Return a caller-driven capture of ``fn`` as a :class:`precompile.Capture`. Capture is
-   caller-driven: this runs nothing on its own. Enter the returned object as a context
-   manager and call it with the positional arguments ``fn`` takes inside the block -- each
-   call runs for real, folds what it exercised into the capture, and returns the served
+   Return a caller-driven capture of ``fn`` as a :class:`precompile.Capture`: this runs
+   nothing on its own. Enter the returned object as a context manager and call it with the
+   positional arguments ``fn`` takes inside the block -- each call runs for real, folds
+   what it exercised into the capture, and returns the served
    result (a computed output does not require grad; an output that IS an input or
    parameter comes back as that same tensor, hence with its own ``requires_grad``, while
    an output that ALIASES an input is rebuilt at serve time and its ``requires_grad`` is
    not part of the contract -- call ``.requires_grad_()`` on it if you depend on it) --
    and the ``(python_code, cache)`` artifact is written to ``artifact_path`` /
-   ``cache_path`` when the block exits cleanly (a block that raised writes nothing, and a
-   clean exit that never called the capture raises instead of writing)::
+   ``cache_path`` when the block exits cleanly having captured at least one call::
 
        with torch.compiler.precompile.capture(
            fn, artifact_path="m.py", cache_path="m.cache"
@@ -103,25 +102,39 @@ deprecation cycle.
       FAKE tensors. Python control flow is specialized to the captured call, and shapes
       are static -- each size is baked in; a control-flow HOP (``torch.cond`` /
       ``torch.while_loop``) is refused rather than specialized. Tracing on fakes also
-      refuses what a STATIC capture cannot know: a data-dependent op (``.item()``,
-      ``.nonzero()``, a Python branch over a tensor value), an op with no meta/fake kernel,
-      a read of a traced tensor's data (``.data_ptr()``, ``.numpy()``), an example input a
-      fake tensor cannot represent (quantized) or whose metadata it silently drops (pinned,
-      mkldnn, sparse), or a nested one, which capture does not support on either path. It
-      also refuses to run inside another trace, whose fake mode would outrank its own.
+      refuses, on BOTH capture paths, an op with no meta/fake kernel, a read of a traced
+      tensor's data (``.data_ptr()``, ``.numpy()``), an example input a fake tensor cannot
+      represent (quantized) or whose metadata it silently drops (pinned, mkldnn, sparse),
+      and a nested one; and, on a STATIC capture, a data-dependent op (``.item()``,
+      ``.nonzero()``, a Python branch over a tensor value). It also refuses to run inside
+      another trace, whose fake mode would outrank its own.
       The exception to static shapes is a tensor dim explicitly marked unbacked with
       ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call (with
       ``make_fx`` this requires the inductor backend; with
       :class:`precompile.DynamoTracer` either backend works); such a dim is captured as an
       unbacked symint, so one artifact serves any runtime size of it, and a graph that
-      needs to guard on it fails at capture. Such an
+      needs to guard on it fails at capture. Dims that MUST be equal at runtime (two
+      inputs a broadcast requires to match, e.g. ``model(a) + model(b)``) need a SHARED
+      ``mark_unbacked`` ``shape_id``, which makes them one symbol: marked independently
+      they bake a SILENT equal-size assumption, since the capture records that equality
+      only as a deferred runtime assert and precompile does not harvest those yet, so a
+      runtime mismatch does not raise the way eager does. Such an
       unbacked capture also holds a data-dependent value symbolically -- it can capture an
       ``.item()`` result or a ``.nonzero()``-sized intermediate that a static one refuses,
       and fails if the computation must guard on that value (or if the op is one no
       ``ShapeEnv`` can fake, e.g. ``aten.equal``). Each input's dtype and device are
       specialized too (a runtime mismatch is rejected), and the inductor backend
-      additionally specializes on input memory format. See Note [precompile programming
-      model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
+      additionally specializes on input memory format. A call served from the reloaded
+      artifact also IGNORES the serving process's ambient ``torch.autocast``: whatever
+      the capture ran under is already baked in, so autocast is neutralized for the
+      duration of the call on every device this build can autocast, and the call returns
+      the capture's dtypes, not the dtypes the same eager call returns inside that region
+      -- so capture under the autocast you want baked in. The one case that still casts
+      twice is a device that reports autocast enabled and whose disable then refuses to
+      construct (a module registered under the privateuse1 backend name and missing
+      ``get_amp_supported_dtype``); it is skipped with one logged warning per device per
+      loaded artifact. See Note [precompile programming model] in
+      ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
    Gradients and return values keep their normal eager/``torch.compile`` semantics:
@@ -160,22 +173,20 @@ deprecation cycle.
    :param backend: ``"inductor"`` (default) lowers through AOTAutograd + Inductor;
        ``"eager"`` keeps the captured ATen graph (layout-flexible, no kernels; shapes
        are still specialized to the captured call).
-   :param training: Run with grad enabled and lower a backward into the
-       artifact; defaults to ``False``. Required for a ``fn`` that runs a backward. This
-       selects the grad mode of the whole call, trace and serve alike, overriding the
-       ambient one: ``True`` runs it under ``torch.enable_grad()``, ``False`` under
-       ``torch.no_grad()``.
+   :param training: Run with grad enabled and lower a backward into the artifact;
+       defaults to ``False``. Required for a ``fn`` that runs a backward.
    :returns: A :class:`precompile.Capture` -- a context manager and callable. The artifact
        is written to the two files on a clean exit from the block that captured at least
-       one call. Two exits write nothing: a block that raised leaves the files untouched
-       (the exception propagates), and a clean exit that never called the capture raises
-       ``PrecompileError`` instead of writing an empty artifact.
+       one call. Three exits write nothing: a block that raised leaves the files untouched
+       (the exception propagates), and a clean exit with nothing captured -- no call was
+       made, or the only call raised and was caught -- raises ``PrecompileError`` instead
+       of writing an empty artifact.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below; a ``tracer`` of a
        type neither tracer accepts is a ``TypeError`` instead); if one of the two
        paths is handed artifact contents rather than a path; if the block exits
-       cleanly without ever calling the capture (nothing was captured, so nothing is
-       written); a second make_fx call also raises.
+       cleanly with nothing captured (no call was made, or the only call raised), so
+       there is nothing to write; a second make_fx call also raises.
    :raises ValueError: for an unknown ``backend``, for one file named as both halves, or
        for a path that exists but is not a regular file.
    :raises TypeError: if ``tracer`` is not a :class:`precompile.MakeFxTracer` or
@@ -207,12 +218,10 @@ deprecation cycle.
            cap(example_a)
            cap(example_b)
        compiled = torch.compiler.precompile.load("s.py", "s.cache")
-       # staged() breaks only within its own frame, so this artifact is
-       # STANDALONE: `installed` is False, so its `with` / `unload()` are
-       # no-ops (they take something back out only for an installing artifact --
-       # one whose capture holds frames the entry cannot reach).
-       with torch.no_grad():
-           out = compiled(example_a)
+       # staged() breaks only within its own frame, so this artifact is STANDALONE:
+       # `installed` is False and its `with` / `unload()` are no-ops (something is
+       # taken back out only for a capture holding frames the entry cannot reach).
+       out = compiled(example_a)
 ```
 
 ```{eval-rst}
@@ -225,6 +234,10 @@ deprecation cycle.
    accelerates loading -- it carries only the compiled backend artifact (the Inductor bundle
    for ``backend="inductor"``; empty for ``backend="eager"``) and no weights. You pass the
    model(s) again at runtime.
+   Calling the result ignores this process's ambient ``torch.autocast`` on every device
+   this build can autocast, so it returns the capture's dtypes rather than the dtypes the
+   same eager call returns inside that region (see the autocast contract in the note
+   above).
 
    .. warning::
 
@@ -281,17 +294,16 @@ deprecation cycle.
    :members: unload
 
    Every object :func:`precompile.load` returns is one of these, whichever shape the
-   capture produced -- this class itself is the standalone shape's contract, which is
-   what every artifact this build can produce loads as, and
-   :class:`torch.compiler.PrecompiledCallable` below is the installing shape -- so
+   capture produced: this class is the standalone shape's contract, which is what every
+   artifact this build can produce loads as, and
+   :class:`torch.compiler.PrecompiledCallable` below is the installing shape, so
    ``isinstance(loaded, torch.compiler.PrecompiledRunnable)`` holds for both.
 
    .. py:attribute:: installed
       :type: bool
 
-      Whether calling this handle installs onto the captured code objects. ``False``
-      for a standalone artifact -- every artifact this build produces -- which serves
-      by being called and so has nothing to take back out.
+      Whether calling this handle installs onto the captured code objects. ``False`` for
+      a standalone artifact, which serves by being called and has nothing to take out.
 
 .. autoclass:: torch.compiler.PrecompiledCallable
    :members: unload, serve_time_compiles
@@ -346,8 +358,7 @@ deprecation cycle.
    :param require_complete: defaults to ``True``. Refuse to produce an artifact whose
        capture summary is not :attr:`precompile.PrecompileSummary.complete` (no guarded
        code at all, a frame that hit the recompile limit, was bypassed or was left
-       uncovered, a capture
-       call that raised, or no backend graph at all).
+       uncovered, a capture call that raised, or no backend graph at all).
    :param require_no_risky_drops: defaults to ``True``. Refuse to produce an artifact that
        dropped a guard whose loss could change the answer (every drop made by a custom
        ``guard_filter_fn`` counts as risky).
@@ -397,28 +408,52 @@ deprecation cycle.
    exercised.
 
    .. py:attribute:: frames
+
+      How many frames the capture compiled.
+
    .. py:attribute:: resume_functions
+
+      How many of those frames are graph-break continuations.
+
    .. py:attribute:: guarded_codes
+
+      How many guarded code objects the artifact carries.
+
    .. py:attribute:: backend_graphs
 
-      Counts of captured frames, graph-break continuations, guarded code objects, and
-      backend graphs.
+      How many backend graphs were compiled.
 
    .. py:attribute:: bypassed
+
+      Frames that fell back to eager.
+
    .. py:attribute:: truncated
+
+      Frames that hit the recompile limit.
+
    .. py:attribute:: uncovered_frames
+
+      Frames the capture calls never reached.
+
    .. py:attribute:: wont_generalize
 
-      Frames that fell back to eager, hit the recompile limit, were never reached, or
-      carry value-pinned guards that will not generalize.
+      Frames whose guards pin a value and so will not generalize.
 
    .. py:attribute:: dropped_guards
+
+      ``(guard_type, source)`` for guards the artifact omitted (could not serialize).
+
    .. py:attribute:: kept_guards
+
+      ``(guard_type, source)`` for guards the artifact serialized and still checks.
+
    .. py:attribute:: risky_dropped_guards
+
+      ``(guard_type, source)`` for the omitted guards that risk a wrong answer.
+
    .. py:attribute:: policy_dropped_guards
 
-      ``(guard_type, source)`` pairs for guards the artifact omitted (could not serialize),
-      kept, omitted riskily, or dropped by the invariance policy though serializable.
+      ``(guard_type, source)`` for serializable guards the invariance policy dropped.
 
    .. py:attribute:: dropped_guard_code
 
