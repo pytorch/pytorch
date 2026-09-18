@@ -3120,6 +3120,13 @@ def _new_process_group_helper(
     return pg, prefix_store
 
 
+def _release_nvshmem_team_pool(group_name: str) -> None:
+    # NVSHMEM is optional, so this binding is present only in NVSHMEM builds.
+    release = getattr(torch._C._distributed_c10d, "_release_nvshmem_team_pool", None)
+    if release is not None:
+        release(group_name)
+
+
 def destroy_process_group(
     group: ProcessGroup | _NonGroupMember | None = None,
 ) -> None:
@@ -3168,6 +3175,7 @@ def destroy_process_group(
         for pg_to_shutdown in sorted(
             _world.pg_names, key=lambda x: _world.pg_names[x], reverse=True
         ):
+            _release_nvshmem_team_pool(_world.pg_names[pg_to_shutdown])
             pg_to_shutdown.shutdown()
 
         _update_default_pg(None)
@@ -3209,6 +3217,7 @@ def destroy_process_group(
                 _world.comms[:] = [
                     comm for comm in _world.comms if id(comm) not in finalized_comm_ids
                 ]
+        _release_nvshmem_team_pool(_world.pg_names[pg])
         pg.shutdown()
         del _world.pg_map[pg]
         del _world.pg_names[pg]

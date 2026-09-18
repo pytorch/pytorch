@@ -1020,6 +1020,34 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     @requires_nvls()
+    def test_team_pool_released_on_process_group_destroy(self) -> None:
+        self._init_device()
+        ranks = list(range(self.world_size))
+
+        # tile_reduce creates 24 duplicate teams for this tensor size. Repeat
+        # with fresh process groups to exceed NVSHMEM's default team limit if
+        # destroy_process_group() does not release each group's team pool.
+        for _ in range(16):
+            group = dist.new_group(ranks)
+            group_name = group.group_name
+            full_inp = symm_mem.empty(
+                1024, 1024, dtype=torch.float, device=self.device
+            ).fill_(self.rank)
+            full_out = symm_mem.empty(
+                1024, 1024, dtype=torch.float, device=self.device
+            ).zero_()
+
+            torch.ops.symm_mem.tile_reduce(
+                full_inp[:512, :512],
+                full_out[:512, :512],
+                0,
+                group_name,
+            )
+            torch.cuda.synchronize()
+            del full_inp, full_out
+            dist.destroy_process_group(group)
+
+    @requires_nvls()
     @parametrize("tile_size", [32, 128, 512])
     @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
     def test_tile_reduce(self, tile_size: int, dtype: torch.dtype) -> None:

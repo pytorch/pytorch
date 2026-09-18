@@ -1186,6 +1186,11 @@ Example:
   // Check if NVSHMEM is available on current system.
   module.def(
       "_is_nvshmem_available", ::c10d::nvshmem_extension::is_nvshmem_available);
+
+  module.def(
+      "_release_nvshmem_team_pool",
+      ::c10d::nvshmem_extension::release_nvshmem_team_pool,
+      py::arg("group_name"));
 #endif
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
