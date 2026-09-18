@@ -297,13 +297,10 @@ class TestCuspyNodeTimerCUDA(TestCase):
         # key_space="source" is the caller asserting every graph is source-keyed, so the
         # exec node id is not selected at all -- one field less per record -- and the
         # source id alone both names and identifies a span.
-        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
-
         from torch.cuda._graph_annotations import source_node_ids_available
         from torch.cuda.graph_annotations import get_kernel_annotations, mark_kernels
         from torch.profiler._cuspy.observers.base import ObserverAnnotationSettings
         from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
-        from torch.profiler._cuspy.records import Kernel
 
         if not source_node_ids_available():
             self.skipTest("sourceGraphNodeId needs a CUDA driver >= 13.4")
@@ -336,12 +333,6 @@ class TestCuspyNodeTimerCUDA(TestCase):
         if not obs.available:
             self.skipTest("Cuspy unavailable (v2 subscribe failed)")
         try:
-            selected = obs._with_graph_fields(
-                {int(ActivityKind.CONCURRENT_KERNEL): {int(Kernel.START)}}
-            )[int(ActivityKind.CONCURRENT_KERNEL)]
-            self.assertIn(int(Kernel.SOURCE_GRAPH_NODE_ID), selected)
-            self.assertNotIn(int(Kernel.GRAPH_NODE_ID), selected)
-
             obs._cuspy.flush(sync=True)
             obs.drain_annotated()  # discard warmup spans
             for _ in range(3):

@@ -193,7 +193,7 @@ class CuspyObserver:
             )
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
-            activities = self._with_graph_fields(activities)
+            activities = self._with_graph_fields(activities, self._source_key_space)
         if self._eager:
             activities = self._with_eager_fields(activities)
         # frozenset of requested kinds (a field map collapses to keys) for the observer's
@@ -312,13 +312,16 @@ class CuspyObserver:
         aug[int(ActivityKind.RUNTIME)] = {CORRELATION_FIELD[int(ActivityKind.RUNTIME)]}
         return aug
 
-    def _with_graph_fields(self, activities: Any) -> dict[int, set[int]]:
+    @staticmethod
+    def _with_graph_fields(
+        activities: Any, source_key_space: bool = False
+    ) -> dict[int, set[int]]:
         """Augment a field map so the graph resolver can name nodes: add each GPU-op kind's
         GRAPH_NODE_ID, plus its SOURCE_GRAPH_NODE_ID where the CUPTI ABI has one (the key an
         annotation kept on its capture graph is under). Collection-free (normal record
         fields, no extra kinds, stays on the vectorized path). Expects a ``{kind: fields}``
-        map. Under :attr:`_source_key_space` the exec id is left out for any kind that has
-        a source id, since the subclass names nodes by the latter alone."""
+        map. With ``source_key_space`` the exec id is left out for any kind that has a
+        source id, since the caller names nodes by the latter alone."""
         from torch.profiler._cuspy.records import (
             GRAPH_NODE_FIELD,
             SOURCE_GRAPH_NODE_FIELD,
@@ -331,7 +334,7 @@ class CuspyObserver:
             has_source = k in SOURCE_GRAPH_NODE_FIELD
             if has_source:
                 fields.add(SOURCE_GRAPH_NODE_FIELD[k])
-            if k in GRAPH_NODE_FIELD and not (has_source and self._source_key_space):
+            if k in GRAPH_NODE_FIELD and not (has_source and source_key_space):
                 fields.add(GRAPH_NODE_FIELD[k])
             aug[k] = fields
         return aug
