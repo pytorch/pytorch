@@ -2192,6 +2192,18 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ),
             frozenset(),
         )
+        # One HASATTR per attribute, all on the parent source: two facts on one
+        # slot inside a variant are that variant's rendering of it, and the slot
+        # varies only when the variants' renderings differ (here by code alone).
+        has_w = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'weight')",))
+        has_b = fact("HASATTR", "L['mod']", code=("hasattr(L['mod'], 'bias')",))
+        both = frozenset({has_w, has_b})
+        self.assertEqual(_varying_guard_slots({frame: [both]}), frozenset())
+        self.assertEqual(_varying_guard_slots({frame: [both, both]}), frozenset())
+        self.assertEqual(
+            _varying_guard_slots({frame: [frozenset({has_w}), frozenset({has_b})]}),
+            frozenset({("HASATTR", "L['mod']")}),
+        )
 
     def test_summarize_reads_the_frame_lists_off_the_entry(self):
         from torch._dynamo.package import (
@@ -2202,8 +2214,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             SourceInfo,
         )
         from torch._dynamo.precompile_package import _summarize
+        from torch.compiler._precompile_types import GuardFact
 
-        def entry(code, guarded=0, bypassed=False, entered=True, resume=False):
+        def entry(
+            code,
+            guarded=0,
+            backend_ids=(),
+            bypassed=False,
+            entered=True,
+            install_to_global=False,
+        ):
             serialized = SerializedCode.from_code_object(code)
             return _DynamoCodeCacheEntry(
                 python_code=serialized,
@@ -2214,9 +2234,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     for _ in range(guarded)
                 ],
                 import_sources={},
-                backend_ids=[],
+                backend_ids=list(backend_ids),
                 code_source=None,
-                install_to_global=resume,
+                install_to_global=install_to_global,
                 has_compile_id=entered,
                 bypassed=bypassed,
             )
@@ -2240,39 +2260,58 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         def resume():
             pass
 
+        # A save-time bypass (from_cache_entry) leaves the entry's backend ids
+        # in place; install() loads none of them, so they are not counted.
         codes = [
-            entry(A.forward.__code__, guarded=1),
+            entry(A.forward.__code__, guarded=1, backend_ids=["__compiled_fn_1"]),
             entry(B.forward.__code__),
             entry(C.forward.__code__),
-            entry(helper.__code__, bypassed=True),
+            entry(helper.__code__, bypassed=True, backend_ids=["__compiled_fn_2"]),
             # Generated but never executed: no compile id, so not a gap.
-            entry(resume.__code__, entered=False, resume=True),
+            entry(resume.__code__, entered=False, install_to_global=True),
         ]
         info = SourceInfo(inlined_sources=set())
         cache = _DynamoCacheEntry(codes=codes, source_info=info, device_type="cpu")
+        fn_id, flag = ("ID_MATCH", "G['fn']"), ("HASATTR", "mod")
+        mode, torch_mod = ("EQUALS_MATCH", "mode"), ("MODULE_MATCH", "G['torch']")
+        has_bias, is_torch = "hasattr(L['mod'], 'bias')", "G['torch'] is torch"
+        pinned_mode = GuardFact(
+            guard_type="EQUALS_MATCH",
+            source="mode",
+            code=("L['mode'] == 1",),
+            value="",
+            enforced=True,
+        )
         summary = _summarize(
             cache,
-            dropped=set(),
-            kept=set(),
-            policy_dropped=set(),
-            risky=set(),
+            dropped={fn_id, flag},
+            kept={mode, ("TENSOR_MATCH", "x")},
+            policy_dropped={torch_mod},
+            risky={fn_id},
             truncated=frozenset({"forward (m.py:3)"}),
-            capture_errors=(),
-            guard_sets={},
-            dropped_code={},
+            capture_errors=("boom",),
+            guard_sets={("forward", "m.py", 3): [frozenset({pinned_mode})]},
+            # One rendering per dropped slot, from either drop list; fn_id has none.
+            dropped_code={flag: has_bias, torch_mod: is_torch},
         )
         # One bare co_name per frame: two uncovered forwards stay two, and the
         # frame lists are drawn from the frames the count covers.
         self.assertEqual(summary.frames, 5)
         self.assertEqual(summary.resume_functions, 1)
         self.assertEqual(summary.guarded_codes, 1)
+        self.assertEqual(summary.backend_graphs, 1)
         self.assertEqual(summary.bypassed, ("helper",))
         self.assertEqual(summary.uncovered_frames, ("forward", "forward"))
         self.assertFalse(summary.complete)
-        self.assertExpectedInline(
-            str(summary),
-            """5 frames (1 from graph breaks), 1 guarded code, 0 backend graphs, 2 UNCOVERED: ['forward', 'forward'], >=1 TRUNCATED: ['forward (m.py:3)'], 1 BYPASSED: ['helper']""",
+        self.assertEqual(summary.dropped_guards, (flag, fn_id))
+        self.assertEqual(summary.kept_guards, (mode, ("TENSOR_MATCH", "x")))
+        self.assertEqual(summary.policy_dropped_guards, (torch_mod,))
+        self.assertEqual(summary.risky_dropped_guards, (fn_id,))
+        self.assertEqual(
+            summary.dropped_guard_code, ((*flag, has_bias), (*torch_mod, is_torch))
         )
+        self.assertEqual(summary.wont_generalize, ("mode",))
+        self.assertEqual(summary.capture_errors, ("boom",))
 
     def test_capture_config_is_scoped_per_entry_and_per_thread(self):
         import torch._functorch.config as functorch_config
