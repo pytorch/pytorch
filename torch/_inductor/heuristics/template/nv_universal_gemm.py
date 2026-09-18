@@ -241,6 +241,34 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             if m <= 16384:
                 prefetch_configs.update(((256, 64, 2, 2), (128, 64, 2, 2)))
 
+        # The SM100 heuristic can also miss useful 64-wide swapped tactics at
+        # batch sizes between 33 and 64.  A cross-model sweep found the 1x1
+        # 128x64 kernel best for Phi's wide gate/up projection and the
+        # prefetched 4x2 256x64 kernel best for its down projection.  Keep one
+        # candidate from each family and let CUDA-graph autotuning reject them
+        # for nearby Qwen shapes where the existing 2x1 tactic remains faster.
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and 32 < n <= 64
+            and m >= 1024
+        ):
+            targeted_configs.add((128, 64, 1, 1))
+            prefetch_configs.update(((256, 64, 2, 2), (256, 64, 4, 2)))
+
+        # The corresponding native-orientation 256x64 c2x2 tactic is useful
+        # for batch-64 down projections with a comparatively large K.  Scope
+        # it to that regime so smaller-K QKV/output shapes do not pay for an
+        # extra candidate that has not shown a win.
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and 32 < m <= 64
+            and n >= 1024
+            and k >= 3000
+        ):
+            targeted_configs.add((256, 64, 2, 2))
+
         # Once a small-M projection is transposed, the original token count is
         # the kernel's N dimension. nvMatmulHeuristics' CUTLASS3 discovery set
         # does not currently return the Blackwell block-scaled narrow-N
@@ -261,6 +289,15 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (128, 32, 4, 1),
                 )
             )
+            # Small hidden/output dimensions are the cases where rotating
+            # weights made this prefetch variant competitive or best across
+            # Nemotron, Llama, Phi, and Qwen output projections. Keep wider QKV/down
+            # projections on the established non-prefetch policy, where this
+            # tactic regressed full-model decode. FP4 K is expressed in packed
+            # bytes here, so 1120 corresponds to a logical K of 2240.
+            if k <= 1120 or m <= 4480 or (k <= 4096 and m <= 5120):
+                targeted_configs.add((128, 32, 2, 1))
+                prefetch_configs.add((128, 32, 4, 1))
 
             # A complete CUDA-graph autotune sweep over the four Qwen3-32B
             # batch-8 projections found three additional narrow-N winners.
