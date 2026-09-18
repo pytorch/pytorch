@@ -126,11 +126,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._functorch.config as functorch_config
-from torch.compiler._precompile_types import (
-    FrameInvariants,
-    GuardFact as _GuardFact,
-    PrecompileSummary,
-)
+from torch.compiler._precompile_types import GuardFact as _GuardFact, PrecompileSummary
 
 from .convert_frame import CatchErrorsWrapper
 from .exc import PackageError
@@ -167,7 +163,6 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 # import *` in a debugging session pulls the entry points rather than every
 # private helper, and so linters do not flag them as unused.
 __all__ = [
-    "FrameInvariants",
     "PrecompileSession",
     "PrecompileSummary",
     "precompile_capture",
