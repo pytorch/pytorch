@@ -909,6 +909,14 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
         )
 
 
+def sample_inputs_expand_as(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(device=device, dtype=dtype):
+        scalar = torch.randn(
+            (), device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        yield SampleInput(scalar, args=(njt,), name=_describe_njt(njt))
+
+
 def sample_inputs_fill(op_info, device, dtype, requires_grad, **kwargs):
     # scalar case
     unary_func = partial(sample_inputs_elementwise_njt_unary, op_kwargs={"value": 42.0})
@@ -1518,6 +1526,7 @@ njt_sample_inputs = {
     "chunk": sample_inputs_chunk,
     "clone": sample_inputs_clone,
     "count_nonzero": partial(sample_inputs_njt_reduction, supports_keepdim=False),
+    "expand_as": sample_inputs_expand_as,
     "fill": sample_inputs_fill,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
     "nn.functional.embedding": sample_inputs_nn_functional_embedding,
