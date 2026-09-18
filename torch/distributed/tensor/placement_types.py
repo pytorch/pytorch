@@ -388,11 +388,12 @@ class Shard(torch._C._distributed.Shard):
     def _maybe_unpad_tensor_with_sizes(
         dim, local_tensor, pad_sizes, mesh_dim_local_rank, make_contiguous
     ) -> torch.Tensor:
+        from torch.distributed._functional_collectives import _are_we_tracing
         from torch.fx.experimental.symbolic_shapes import guard_or_true
 
         # Only unpad if the local_tensor was padded on the dimension.
         # Assume padding (uneven sharding) as general case for unbacked sizes.
-        if guard_or_true(pad_sizes[mesh_dim_local_rank] > 0):
+        if _are_we_tracing() or guard_or_true(pad_sizes[mesh_dim_local_rank] > 0):
             local_tensor = unpad_tensor(
                 local_tensor, dim, pad_sizes[mesh_dim_local_rank]
             )
@@ -1046,6 +1047,10 @@ class _StridedShard(torch._C._distributed.StridedShard):
             # tracing paths can keep unbacked sizes symbolic.
             max_chunk_size = max([shard.size(self.dim) for shard in shard_list])
             pad_sizes = [max_chunk_size - shard.size(self.dim) for shard in shard_list]
+            shard_list = [
+                pad_tensor(shard, self.dim, pad_size)
+                for shard, pad_size in zip(shard_list, pad_sizes)
+            ]
 
         return shard_list, pad_sizes
 
@@ -1530,14 +1535,12 @@ class _StridedShard(torch._C._distributed.StridedShard):
         if old_dim_padding:
             target_size = old_dim_max_chunk_size
             old_dim_pad_size = target_size - local_tensor.size(old_shard_dim)
-            if old_dim_pad_size > 0:
-                local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
+            local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
 
         if new_dim_padding:
             target_total_size = new_dim_max_chunk_size * num_chunks
             new_dim_pad_size = target_total_size - local_tensor.size(new_shard_dim)
-            if new_dim_pad_size > 0:
-                local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
+            local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
 
         if not local_tensor.is_contiguous():
             local_tensor = local_tensor.contiguous()
@@ -1913,7 +1916,7 @@ class _MaskPartial(Partial):
         # mask the input tensor
         # pyrefly: ignore [unsupported-operation]
         masked_tensor = tensor.clone() - local_offset_on_dim
-        masked_tensor[mask] = 0
+        masked_tensor = masked_tensor.masked_fill(mask, 0)
         # pyrefly: ignore [bad-return]
         return mask, masked_tensor
 
