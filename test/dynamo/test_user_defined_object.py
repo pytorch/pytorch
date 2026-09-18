@@ -10,7 +10,12 @@ import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+)
 
 
 class SlotsOnly:
@@ -105,6 +110,8 @@ class SlotsAndProperty:
 
 class TestSlotsAttrAssignment(TestCase):
     """Tests for attribute assignment on objects with __slots__."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_valid_slot_assignment(self):
         # Case 1: assign to a declared slot — should succeed
@@ -496,6 +503,8 @@ class WithGetattribute:
 class TestSlotsFromCPython(TestCase):
     """Slot tests extracted from CPython's test_descr.py::test_slots."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._u_prev = torch._dynamo.config.enable_trace_unittest
@@ -744,6 +753,8 @@ class TestSlotsFromCPython(TestCase):
 
 
 class TestUserDefinedClassDict(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_class_dict_read(self):
         class MyClass:
             x = 3
@@ -838,6 +849,8 @@ class TestUserDefinedClassDict(TestCase):
 
 
 class TestClassSetattr(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_setattr_class_attribute(self):
         class MyModule:
             x = 10
@@ -918,6 +931,8 @@ class TestUserDefinedSetitem(TestCase):
     enable_trace_load_build_class lets us define helper classes inside the
     test body — keeps the helper next to the assertion that exercises it.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -1205,6 +1220,20 @@ class TestUserDefinedSetitem(TestCase):
         with self.assertRaises(TypeError):
             del obj[0]
 
+    @make_dynamo_test
+    def test_setitem_missing_sibling_method_raises_attributeerror(self):
+        # OnlyDel has __delitem__, so the type has an mp_ass_subscript slot and
+        # __setitem__ lookup reaches _lookup_method's missing-method path
+        # (lookup_method: PyErr_SetObject(PyExc_AttributeError, ...)), rather
+        # than failing earlier with TypeError for having no slot at all.
+        class OnlyDel:
+            def __delitem__(self, k):
+                pass
+
+        obj = OnlyDel()
+        with self.assertRaises(AttributeError):
+            obj[0] = 1
+
     # -- metaclass __delitem__: del Cls[k] --
 
     @make_dynamo_test
@@ -1217,6 +1246,109 @@ class TestUserDefinedSetitem(TestCase):
 
 
 class TestObjectConstruction(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_privateuse1_tensor_class_without_tensor_classes_registration(self):
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class FooBackFloatTensor:
+            def __new__(cls, value):
+                return torch.as_tensor(value, dtype=torch.float32)
+
+        privateuse1_module = types.SimpleNamespace(FloatTensor=FooBackFloatTensor)
+        self.assertNotIn(FooBackFloatTensor, torch._tensor_classes)
+
+        with (
+            unittest.mock.patch.object(
+                torch._C,
+                "_get_privateuse1_backend_name",
+                return_value="fooback",
+            ),
+            unittest.mock.patch.object(
+                torch,
+                "fooback",
+                privateuse1_module,
+                create=True,
+            ),
+        ):
+            self.assertTrue(
+                UserDefinedClassVariable._is_privateuse1_tensor_class(
+                    FooBackFloatTensor
+                )
+            )
+
+    @parametrize(
+        "tensor_type_name,dtype",
+        [
+            ("FloatTensor", torch.float32),
+            ("BoolTensor", torch.bool),
+        ],
+    )
+    def test_privateuse1_tensor_constructor_routed_in_graph(
+        self, tensor_type_name, dtype
+    ):
+        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
+
+        class TensorTypeMeta(type):
+            def __call__(cls, value):
+                return torch.as_tensor(value, dtype=cls.dtype)
+
+        PrivateUse1Tensor = TensorTypeMeta(
+            f"PrivateUse1{tensor_type_name}", (), {"dtype": dtype}
+        )
+        UnregisteredTensor = TensorTypeMeta(tensor_type_name, (), {"dtype": dtype})
+
+        privateuse1_module = types.SimpleNamespace(
+            **{tensor_type_name: PrivateUse1Tensor},
+        )
+
+        # The static class cache may be populated before a backend is registered.
+        self.assertNotIn(
+            PrivateUse1Tensor,
+            UserDefinedClassVariable._in_graph_classes(),
+        )
+
+        with (
+            unittest.mock.patch.object(
+                torch._C,
+                "_get_privateuse1_backend_name",
+                return_value="stub_privateuse1",
+            ),
+            unittest.mock.patch.object(
+                torch,
+                "stub_privateuse1",
+                privateuse1_module,
+                create=True,
+            ),
+        ):
+            self.assertFalse(
+                UserDefinedClassVariable._is_privateuse1_tensor_class(
+                    UnregisteredTensor
+                )
+            )
+            backend = dynamo_testing.EagerAndRecordGraphs()
+
+            @torch.compile(backend=backend, fullgraph=True)
+            def fn(x, y):
+                return PrivateUse1Tensor([x, y])
+
+            x = torch.tensor(1, dtype=dtype)
+            y = torch.tensor(0, dtype=dtype)
+            self.assertEqual(fn(x, y), torch.stack([x, y]))
+            self.assertEqual(len(backend.graphs), 1)
+            self.assertTrue(
+                any(
+                    node.op == "call_function" and node.target is torch.stack
+                    for node in backend.graphs[0].graph.nodes
+                )
+            )
+            self.assertTrue(
+                any(
+                    node.op == "call_function" and node.target is PrivateUse1Tensor
+                    for node in backend.graphs[0].graph.nodes
+                )
+            )
+
     @make_dynamo_test
     def test_object_call_identity(self):
         a = object()
@@ -1271,6 +1403,8 @@ class _RequiredArgNamespace(types.SimpleNamespace):
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestSimpleNamespace(TestCase):
     """types.SimpleNamespace, ported from CPython's SimpleNamespaceTests."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @make_dynamo_test
     def test_constructor(self):
@@ -1553,6 +1687,9 @@ class TestSimpleNamespace(TestCase):
         ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
         self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
+
+
+instantiate_parametrized_tests(TestObjectConstruction)
 
 
 if __name__ == "__main__":
