@@ -568,8 +568,8 @@ if _enabled:
                     # class in question, and not on a superclass (which would
                     # be wrong wrong wrong!).
                     # See also https://github.com/pytorch/pytorch/issues/39463
-                    # Off the class: one without its own annotations gets a
-                    # fresh dict, not the superclass's, and writes persist.
+                    # Reading through the class rather than the instance is
+                    # owned by this class when it has none of its own, so no
                     self.__class__.__annotations__[attr] = value.type
                     value = value.value
                 return super().__setattr__(attr, value)
