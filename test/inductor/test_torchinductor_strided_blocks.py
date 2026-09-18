@@ -129,7 +129,7 @@ class BlockDescriptorTestBase(InductorTestCase):
         return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
 
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
-        reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        reduction_blocks = ["R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]
         return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
 
     def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
@@ -1079,6 +1079,24 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
+    def test_3d_reduction_with_pointwise_output(self):
+        view = self._discontiguous_tensor((5, 7, 3, 5), self.device)
+
+        _result, (code,) = self._run_and_compare(
+            functools.partial(torch.sum, dim=(1, 2, 3)),
+            view,
+            expected_num_triton_kernels=1,
+            config_patches={
+                **tiled_reduction_config,
+                "triton.max_tiles": 3,
+            },
+            rtol=1e-4,
+            atol=1e-4,
+        )
+
+        self._assert_pointwise_ndims(code, 1)
+        self._assert_reduction_ndims(code, 3)
+
     @parametrize(
         "tile_reductions",
         [False, subtest(True, decorators=[xfail_if_cuda_tensor_descriptor])],
@@ -1207,6 +1225,70 @@ class CommonTemplate:
 
         # Verify 2D reduction is used (R0_BLOCK and R1_BLOCK present)
         self._assert_reduction_ndims(code, 2)
+
+    def test_3d_reduction_with_broadcast(self):
+        def fn(x, y):
+            return (x * y[:, :, None]).sum()
+
+        x = torch.empty_strided(
+            (5, 7, 9), (256, 16, 1), device=self.device
+        ).normal_()
+        y = torch.empty_strided((5, 7), (16, 1), device=self.device).normal_()
+
+        class FixedReductionBlockSizeChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                kernel_kwargs["fixed_config"] = FixedTritonConfig(
+                    {
+                        "XBLOCK": 1,
+                        "R0_BLOCK": 2,
+                        "R1_BLOCK": 4,
+                        "R2_BLOCK": 4,
+                    }
+                )
+                return kernel_kwargs
+
+        expected_num_block_pointers = (
+            2 if self.block_descriptor_constructor_str == "tl.make_block_ptr" else None
+        )
+        with V.set_choices_handler(FixedReductionBlockSizeChoices()):
+            _result, (code,) = self._run_and_compare(
+                fn,
+                x,
+                y,
+                expected_num_block_pointers=expected_num_block_pointers,
+                config_patches={
+                    **tiled_reduction_config,
+                    "split_reductions": False,
+                    "triton.cooperative_reductions": False,
+                    "triton.force_cooperative_reductions": False,
+                    "triton.max_tiles": 3,
+                    "triton.persistent_reductions": False,
+                },
+            )
+
+        self._assert_reduction_ndims(code, 3)
+        for reduction_dim in range(3):
+            self.assertIn(
+                f"for r{reduction_dim}_offset in tl.range(0, r{reduction_dim}_numel",
+                code,
+            )
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            self.assertIn("tl.advance(", code)
+
+    def test_3d_reduction_uses_block_descriptor(self):
+        view = self._discontiguous_tensor((4, 8, 16), self.device)
+
+        _result, (code,) = self._run_and_compare(
+            torch.sum,
+            view,
+            expected_num_block_pointers=1,
+            config_patches={
+                **tiled_reduction_config,
+                "triton.max_tiles": 3,
+            },
+        )
+
+        self._assert_reduction_ndims(code, 3)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
@@ -1643,6 +1725,27 @@ class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
 class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
+
+    def test_3d_reduction_descriptor_respects_tensor_rank_limit(self):
+        def reduce_3d(x):
+            return torch.sum(x, dim=(3, 4, 5))
+
+        inp = torch.empty_strided(
+            (12, 3, 4, 4, 4, 4),
+            (1536, 128, 4, 384, 32, 1),
+            device=self.device,
+        ).normal_()
+
+        _result, (code,) = self._run_and_compare(
+            reduce_3d,
+            inp,
+            config_patches={
+                **tiled_reduction_config,
+                "triton.max_tiles": 3,
+            },
+        )
+
+        self.assertIn("tl.load(in_ptr0 +", code)
 
     @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
     @parametrize(
