@@ -87,9 +87,12 @@ _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
 # dict in the tracing process, so no module's vars() in a loading process holds
 # it, and the artifact carries the dict only where the graph lifted a value read
 # through it. None of the three is a name the advice below can send a caller to
-# define. The list is complete because a report here needs
-# a serializable guard rooted at a GlobalSource on the name: every other minted
-# family builds no Source (the codegen-only installs) or a guard type in
+# define. The list is complete because a report here needs a serializable guard
+# that resolves through a GlobalSource on the name, as get_global_source_name
+# decides it: that helper walks a chained source to its base, so a guard on
+# G['__import_torch'].nn.modules.module._global_forward_hooks counts for
+# __import_torch, and prune_variable records the name through it. Every other
+# minted family builds no Source (the codegen-only installs) or a guard type in
 # UNSUPPORTED_SERIALIZATION_GUARD_TYPES, which ___unnamed_scope's was not -- so
 # moving a type off that list means re-checking this one.
 _UNNAMED_SCOPE_PREFIX = "___unnamed_scope"

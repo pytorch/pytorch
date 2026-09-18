@@ -2377,9 +2377,18 @@ class InstructionTranslatorBase(
     @functools.cached_property
     def nn_modules_globals_vt(self) -> VariableTracker:
         # The defining module, whose dicts nn.Module._call_impl reads through
-        # its own __globals__; a sys.modules rebind does not move them.
+        # its own __globals__; a sys.modules rebind moves neither. The alias
+        # binds the live entry, so it roots the guards only while it holds this
+        # module, read back after import_source since that is what a guard
+        # rooted at it reads. Otherwise the guards walk the attributes the value
+        # is read through, from the torch package's own alias: an artifact load
+        # seeds an __import_* name, where one minted by id has no seeding.
         module = torch.nn.modules.module
-        return VariableTracker.build(self, module, self.import_source(module.__name__))
+        source = self.import_source(module.__name__)
+        if self.output.global_scope[source.global_name] is not module:
+            root = self.import_source("torch")
+            source = self.output.get_chained_attr_source(root, "nn.modules.module")
+        return VariableTracker.build(self, module, source)
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.arg is None:
