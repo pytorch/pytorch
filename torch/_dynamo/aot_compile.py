@@ -133,9 +133,18 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
     # read as an answer. It stops at the first link that is not a SystemError: an
     # exception user code raised `from` an interrupt is that code's own answer,
     # and reading past it would report the interrupt in its place.
+    # Bounded by the links already walked, the way TracebackException's own walk
+    # is: a key's __eq__ can chain two SystemErrors to each other, and an
+    # unbounded walk of that cycle spins inside dispatch before any record exists
+    # for the report to recover from. Ids are enough because every link is alive,
+    # held by the chain from e, so none of them is reused under the set.
     reason: BaseException = e
+    seen = {id(reason)}
     while isinstance(reason, SystemError) and reason.__cause__ is not None:
         reason = reason.__cause__
+        if id(reason) in seen:
+            break
+        seen.add(id(reason))
     return type(reason).__name__, reason
 
 
@@ -1790,9 +1799,10 @@ class AOTCompiledModel:
     logger with the advice to fix or drop the input that raised. The raise says
     nothing about the result that did answer, and refusing would repair
     nothing: a tree that raises rejects nothing, and a C++ throw out of it
-    leaves its relational guard state stale -- in any build a
-    ``NO_TENSOR_ALIASING`` set still holding the throwing evaluation's tensors,
-    and under ``enable_cpp_symbolic_shape_guards`` (off by default) a
+    leaves its relational guard state stale -- wherever the tree guards more
+    than one tensor against aliasing, a ``NO_TENSOR_ALIASING`` set still
+    holding the throwing evaluation's tensors, and under
+    ``enable_cpp_symbolic_shape_guards`` (off by default) a
     ``SYMBOLIC_SHAPE_GUARD`` keeping its ``_args_seen`` count across the throw
     -- so its NEXT check can reject a call it fits, and with that config on
     accept one it does not, with no raise on record to veto. The advice names
@@ -1814,7 +1824,7 @@ class AOTCompiledModel:
     opt-out state)`` per model, starting over when a serve that warns finds
     ``compiled_results`` holding results other than the ones last warned about
     -- so a list changed and changed back keeps the old keys in force -- and is
-    not spent while the logger would drop it. The index served
+    not spent while the logger's level would drop it. The index served
     is named in every warning but is not part of the key, so a defect whose
     serve moves is reported once, for whichever serve came first. The type name
     tells two defects at one index apart only when they raise different
@@ -1829,7 +1839,12 @@ class AOTCompiledModel:
     An interrupt behind a link of any other kind is not read: one the tree's
     own code caught and re-raised sits on ``__context__``, which the unwrap
     does not follow, and one an ordinary exception was raised ``from`` is that
-    exception's own answer, which the walk stops on. One leaf keeps an
+    exception's own answer, which the walk stops on. Quoting a raise for the
+    warning reaches user code once more, so an interrupt out of the recorded
+    exception's ``__str__`` propagates from there too and discards the graph
+    the warning was about to serve over: that serve neither runs the graph nor
+    logs anything, and the defect is reported on the next call, which is why
+    the one-shot is spent only after the warning is out. One leaf keeps an
     interrupt from reaching dispatch at all, and every artifact's tree holds
     it:
     ``LAMBDA_GUARD::check_nopybind`` (``guards.cpp:1918-1928``) clears whatever
@@ -1981,8 +1996,11 @@ class AOTCompiledModel:
         # chained cause worth reading. That traceback holds this frame, and so
         # args and kwargs, until the cyclic collector runs -- the `except ... as
         # e` cleanup that breaks that cycle is undone by the store -- so an exit
-        # that serves a graph, and so builds no report to read the record,
-        # clears both first and leaves this call's inputs to reference counting.
+        # that serves a graph, and so builds no report to read the record, clears
+        # `raised` first and leaves this call's inputs to reference counting.
+        # `unanswered` holds ints and frees nothing; it is cleared beside `raised`
+        # to keep the subset invariant _no_match_report documents, so no reader
+        # finds an index unanswered with no exception recorded for it.
         raised: dict[int, Exception] = {}
         unanswered: set[int] = set()
         # Indices that ever reached an answer, which a ModelInput could have covered.
@@ -2069,8 +2087,8 @@ class AOTCompiledModel:
             if accepts(i, result):
                 if raised:
                     self._warn_swallowed(results, raised, i)
-                # Nothing reads the record on a serving exit, and holding it
-                # holds this call's args through the raise's traceback.
+                # Nothing reads the record once the warning is out, and holding
+                # it holds this call's args through the raise's traceback.
                 raised.clear()
                 unanswered.clear()
                 return result._serve(self.model, *args, **kwargs)
