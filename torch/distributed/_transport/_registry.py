@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 _ENTRY_POINT_GROUP = "torch.distributed.transports"
 _BUILTIN_ENTRY_POINTS = {
+    "nixl": "torch.distributed._transport._nixl:NIXLTransport",
     "tcp": "torch.distributed._transport._tcp:TCPTransport",
     "torchcomms": "torch.distributed._transport._torchcomms:TorchCommsTransport",
     "ucxx": "torch.distributed._transport._ucxx:UCXXTransport",
@@ -94,7 +95,43 @@ def new_transport(
     device: torch.device | str | None = None,
     **kwargs: Any,
 ) -> Transport:
-    """Construct a transport, optionally restricting it to ``device``."""
+    """Construct a one-sided transport, optionally restricting tensor devices.
+
+    Args:
+        backend (str): Registered backend name, such as ``"nixl"``.
+        device: Optional CPU/CUDA device restriction; otherwise infer each tensor's
+            device at registration.
+        **kwargs: Backend-specific options. NIXL accepts ``plugin="UCX"``,
+            ``agent_name=None``, ``num_threads=0``, ``enable_prog_thread=True``,
+            ``capture_telemetry=False``, ``backend_options=None``, and
+            ``timeout=30.0``. ``backend_options`` maps plugin parameter names to
+            strings and is forwarded to NIXL's ``create_backend``. NIXL is an
+            optional dependency, imported only when selected.
+
+    Example::
+
+        import torch
+        from torch.distributed._transport import new_transport
+
+        # Both endpoints are shown locally. Across processes, exchange bind()
+        # results and remote descriptors through your application's control plane.
+        with (
+            new_transport("nixl", "cpu") as trainer,
+            new_transport("nixl", "cpu") as replica,
+        ):
+            trainer_url, replica_url = trainer.bind(), replica.bind()
+            trainer.connect(replica_url)
+            replica.connect(trainer_url)
+            weights = torch.arange(8, dtype=torch.float32)
+            received = torch.empty_like(weights)
+            source = trainer.register_memory(weights)
+            target = replica.register_memory(received)
+            remote = target.to_remote_buffer()
+            work = trainer.write(source.to_view(), remote, async_op=True)
+            work.wait()
+            torch.testing.assert_close(received, weights)
+            # Coordinate with peers before closing either endpoint.
+    """
     name = backend.lower()
     factory = _find_factory(name)
     if (

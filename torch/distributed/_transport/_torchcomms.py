@@ -47,7 +47,11 @@ class _Memory:
     ) -> MutableMemoryView:
         return _MutableView(self, self.native.to_mutable_view(offset, length))
 
-    def to_remote_buffer(self) -> RemoteBuffer:
+    def to_remote_buffer(self, *, timeout: float | None = None) -> RemoteBuffer:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         return self.native.to_remote_buffer()
 
     def reused_registration(self) -> bool:
@@ -81,16 +85,30 @@ class TorchCommsTransport(Transport):
             self._transport = self._transport_type(self.device)
         return self._transport
 
-    def bind(self) -> bytes:
+    def bind(self, *, timeout: float | None = None) -> bytes:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         return self._native().bind()
 
-    def connect(self, peer_url: bytes) -> int:
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         return self._native().connect(peer_url)
 
     def connected(self) -> bool:
         return self._transport is not None and self._transport.connected()
 
-    def register_memory(self, tensor: torch.Tensor) -> Memory:
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> Memory:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if self._closed:
             raise RuntimeError("transport is closed")
         return _Memory(tensor, self._memory_type(tensor))
@@ -101,7 +119,12 @@ class TorchCommsTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if not isinstance(local_buffer, _View):
             raise TypeError("local_buffer was not registered by this transport")
         return self._run_transfer(
@@ -116,7 +139,12 @@ class TorchCommsTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if not isinstance(local_buffer, _MutableView):
             raise TypeError("local_buffer was not registered by this transport")
         return self._run_transfer(
@@ -125,7 +153,11 @@ class TorchCommsTransport(Transport):
             async_op=async_op,
         )
 
-    def close(self) -> None:
+    def close(self, *, timeout: float | None = None) -> None:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._close_work()
         self._closed = True
         self._transport = None
