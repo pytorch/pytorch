@@ -54,9 +54,10 @@ def _pre_check_accepts(entry):
     # types: a second implementation of them, so a control written on it does not
     # call the filter under test. Not the whole pre-check, which raises rather
     # than returning a verdict and which also refuses a TYPE_MATCH or
-    # BUILTIN_MATCH whose guard carries _unserializable (a local-scope type) --
-    # harmless in both uses here, where the TYPE_MATCHes are on global types or
-    # dropped wholesale.
+    # BUILTIN_MATCH whose guard carries _unserializable (a local-scope type).
+    # Harmless in the three controls here: the pytree test's TYPE_MATCHes are on
+    # global types, drop_type_match drops them all, and drop_local_type_match
+    # itself removes the local-scope ones, the only ones that carry it.
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return entry.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH") or (
         entry.guard_type not in unsupported
@@ -129,9 +130,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # covers.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
             ("TYPE_MATCH", ("ID_MATCH",)),
-            # The unsaved build's DICT_VERSION on a DICT_KEYS_MATCH; the save
-            # build serializes the keys-match.
-            ("DICT_KEYS_MATCH", ("DICT_VERSION",)),
         ]
         entries = [_entry(GlobalSource("g"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
@@ -608,6 +606,65 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(stdlib, (norm(eq),))
         self.assertEqual(install, (norm(eq),))
         self.assertTrue(within(norm(os.path.join(eq, "third_party.py")), install))
+
+    def test_torch_roots_follow_a_symlink_farm_into_the_store(self):
+        # The same farm for torch: torch.__path__ and this file's directory
+        # both name the farm, whose subdirectories are real while every module
+        # in them is a link into the store, so a root resolved as a directory
+        # stays on the farm and matches no torch file a consumer resolves.
+        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "store", "torch")
+            farm = os.path.join(tmp, "farm", "torch")
+            for rel in (("_dynamo", "precompile_package.py"), ("nn", "functional.py")):
+                os.makedirs(os.path.join(store, rel[0]), exist_ok=True)
+                os.makedirs(os.path.join(farm, rel[0]), exist_ok=True)
+                open(os.path.join(store, *rel), "w").close()
+                try:
+                    os.symlink(os.path.join(store, *rel), os.path.join(farm, *rel))
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlinks unavailable")
+            own = os.path.join(farm, "_dynamo", "precompile_package.py")
+            stub = types.SimpleNamespace(__path__=[farm])
+            with (
+                mock.patch.object(precompile_package, "__file__", own),
+                mock.patch.dict(sys.modules, {"torch": stub}),
+            ):
+                self._clear_root_caches()
+                roots = torch_roots()
+            self.assertEqual(roots, tuple(sorted((norm(farm), norm(store)))))
+            functional = norm(os.path.join(farm, "nn", "functional.py"))
+            self.assertTrue(precompile_package._within(functional, roots))
+
+    def test_roots_drop_a_relative_interpreter_path(self):
+        # A venv whose pyvenv.cfg home is relative, or a relative PYTHONHOME,
+        # leaves sys.base_prefix, sys._stdlib_dir and every sysconfig path
+        # relative while os.__file__ alone is absolute (site.abs_paths() at
+        # startup), and a relative PYTHONUSERBASE leaves the user site so; all
+        # measured on 3.12 with nothing patched. Resolved, each would sit at the
+        # process cwd of the first call and stay cached there, so every one is
+        # dropped like a relative os.__file__: the directory os resolves into is
+        # the only stdlib root left, and there is no install root at all.
+        # sys.platform is patched onto win32 so the DLLs join is exercised too.
+        home = os.path.join("relhome", "lib", "python3.12")
+        purelib = os.path.join(home, "site-packages")
+        user_site = os.path.join("reluser", "lib", "python3.12", "site-packages")
+        paths = dict(sysconfig.get_paths())
+        paths.update(stdlib=home, platstdlib=home, purelib=purelib, platlib=purelib)
+        with (
+            mock.patch.object(sysconfig, "get_paths", return_value=paths),
+            mock.patch.object(sys, "_stdlib_dir", home, create=True),
+            mock.patch.object(sys, "base_prefix", "relhome"),
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch.object(site, "getsitepackages", return_value=[purelib]),
+            mock.patch.object(site, "getusersitepackages", return_value=user_site),
+        ):
+            self._clear_root_caches()
+            stdlib = precompile_package._stdlib_roots()
+            install = precompile_package._install_roots()
+        norm = precompile_package._norm
+        self.assertEqual(stdlib, (os.path.dirname(norm(os.__file__)),))
+        self.assertEqual(install, ())
 
     def test_install_roots_skip_a_site_accessor_that_raises(self):
         # A site.py that cannot answer is skipped, not propagated: this runs
