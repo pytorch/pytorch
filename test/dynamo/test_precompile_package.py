@@ -20,7 +20,7 @@ from torch._dynamo.aot_compile import AOTCompiledFunction
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
 from torch._dynamo.package import load_guards_state
-from torch._dynamo.source import get_global_source_name, GlobalSource
+from torch._dynamo.source import get_global_source_name, GlobalSource, LocalSource
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import Guard
 
@@ -101,13 +101,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         verdicts = dict(zip(unsupported, filter_fn(refused)))
         self.assertEqual(verdicts, dict.fromkeys(unsupported, False))
         # A refused derived type drops the guard too (a CONSTANT_MATCH on a code
-        # object runs through ID_MATCH). The DICT_VERSION exemption is for a
+        # object and a TENSOR_MATCH under match_on_id_for_tensor both run through
+        # ID_MATCH); the TENSOR_MATCH row also pins the accepted-by-type pair as
+        # exactly TYPE_MATCH and BUILTIN_MATCH. The DICT_VERSION exemption is for a
         # DICT_KEYS_MATCH only, and only for that derived type, so both halves of
         # its condition have a row here. Mixed verdicts in one call: the filter
         # returns them positionally, and a table of one verdict cannot tell a
         # misordered list from a right one.
         rows = [
             ("CONSTANT_MATCH", ("ID_MATCH",), False),
+            ("TENSOR_MATCH", ("ID_MATCH",), False),
             ("DICT_KEYS_MATCH", ("ID_MATCH",), False),
             ("DICT_CONTAINS", ("DICT_VERSION",), False),
             ("DICT_KEYS_MATCH", ("DICT_VERSION",), True),
@@ -127,11 +130,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # they derive. That branch is not an unconditional accept: it refuses
             # these two for a local-scope type, which is what
             # test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal
-            # covers.
+            # covers; the rows are on a local source since that is where the kept
+            # TYPE_MATCH the refusal needs sits, and the filter reads no scope.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
             ("TYPE_MATCH", ("ID_MATCH",)),
         ]
-        entries = [_entry(GlobalSource("g"), None, t, derived=d) for t, d in rows]
+        entries = [_entry(LocalSource("obj"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(zip(rows, keep)), [(row, True) for row in rows])
 
@@ -456,7 +460,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # platform however early this test primed it.
         stdlib_roots, norm = precompile_package._stdlib_roots, precompile_package._norm
         sysconfig.get_paths()
-        base = os.path.join(os.sep, "winbase")
+        # abspath here and in the fabricated roots below: drive-qualified on
+        # Windows, where 3.13's isabs rejects a bare \x and the code drops it.
+        base = os.path.abspath(os.path.join(os.sep, "winbase"))
         with (
             mock.patch.object(sys, "platform", "win32"),
             mock.patch.object(sys, "base_prefix", base),
@@ -475,9 +481,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # sys.platform is patched off win32 as well: the DLLs root is the one
         # input that is not a path, and a Windows runner would add it to the
         # exact tuple below.
-        base = os.path.join(os.sep, "base", "lib", "python3.12")
-        venv = os.path.join(os.sep, "venv", "lib", "python3.12")
-        frozen = os.path.join(os.sep, "frozen", "stdlib")
+        base = os.path.abspath(os.path.join(os.sep, "base", "lib", "python3.12"))
+        venv = os.path.abspath(os.path.join(os.sep, "venv", "lib", "python3.12"))
+        frozen = os.path.abspath(os.path.join(os.sep, "frozen", "stdlib"))
         purelib = os.path.join(venv, "site-packages")
         paths = dict(sysconfig.get_paths())
         paths.update(stdlib=base, platstdlib=venv, purelib=purelib, platlib=purelib)
@@ -523,7 +529,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # at /usr/lib/python3.12, the parent of a /usr/lib purelib, and a
         # merged-lib host resolves /usr/lib64 onto /usr/lib; sys.platform is
         # patched off win32, or a Windows runner's DLLs root joins the stdlib.
-        prefix = os.path.join(os.sep, "lib64build")
+        prefix = os.path.abspath(os.path.join(os.sep, "lib64build"))
         stdlib = os.path.join(prefix, "lib64", "python3.12")
         purelib = os.path.join(prefix, "lib", "python3.12", "site-packages")
         platlib = os.path.join(stdlib, "site-packages")
@@ -588,7 +594,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # one with purelib at stdlib, and no preferred scheme is home), so the
         # layout is fabricated: every stdlib source and every install source
         # names the one directory.
-        eq = os.path.join(os.sep, "eqbuild", "lib", "python3.12")
+        eq = os.path.abspath(os.path.join(os.sep, "eqbuild", "lib", "python3.12"))
         paths = dict(sysconfig.get_paths())
         paths.update(stdlib=eq, platstdlib=eq, purelib=eq, platlib=eq)
         norm, within = precompile_package._norm, precompile_package._within
@@ -636,6 +642,39 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             functional = norm(os.path.join(farm, "nn", "functional.py"))
             self.assertTrue(precompile_package._within(functional, roots))
 
+    def test_torch_roots_drop_a_link_that_flattens_this_files_depth(self):
+        # The resolved spelling is two levels up from where this file resolves,
+        # which is the torch directory only while the link keeps the file at
+        # <root>/_dynamo/<file>. A link to a flat patch directory would make its
+        # grandparent, which holds unrelated code, a torch root and waive every
+        # dropped guard over that code; the spelling is skipped instead, so the
+        # patched file lies under no torch root and its guards are kept.
+        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "exp")
+            farm = os.path.join(base, "site-packages", "torch")
+            for sub in ((farm, "_dynamo"), (base, "patchdir"), (base, "my_project")):
+                os.makedirs(os.path.join(*sub))
+            target = os.path.join(base, "patchdir", "precompile_package.py")
+            open(target, "w").close()
+            own = os.path.join(farm, "_dynamo", "precompile_package.py")
+            try:
+                os.symlink(target, own)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+            mymod = os.path.join(base, "my_project", "mymod.py")
+            open(mymod, "w").close()
+            stub = types.SimpleNamespace(__path__=[farm])
+            with (
+                mock.patch.object(precompile_package, "__file__", own),
+                mock.patch.dict(sys.modules, {"torch": stub}),
+            ):
+                self._clear_root_caches()
+                roots = torch_roots()
+            self.assertEqual(roots, (norm(farm),))
+            self.assertFalse(precompile_package._within(norm(mymod), roots))
+            self.assertFalse(precompile_package._within(norm(own), roots))
+
     def test_roots_drop_a_relative_interpreter_path(self):
         # A venv whose pyvenv.cfg home is relative, or a relative PYTHONHOME,
         # leaves sys.base_prefix, sys._stdlib_dir and every sysconfig path
@@ -671,7 +710,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # inside save()'s lint, which must not abort the capture. sysconfig's
         # purelib is read outside the try and the other accessor is still
         # consulted, so what a failing accessor loses is only its own extras.
-        user_site = os.path.join(os.sep, "elsewhere", "user-site")
+        user_site = os.path.abspath(os.path.join(os.sep, "elsewhere", "user-site"))
         with (
             mock.patch.object(site, "getsitepackages", side_effect=RuntimeError),
             mock.patch.object(site, "getusersitepackages", return_value=user_site),
@@ -686,7 +725,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # A non-string entry is dropped rather than handed to realpath outside
         # the try, and the None getusersitepackages returns where there is no
         # home directory (WASI) is skipped like a raise.
-        extra = os.path.join(os.sep, "elsewhere", "site")
+        extra = os.path.abspath(os.path.join(os.sep, "elsewhere", "site"))
         with (
             mock.patch.object(site, "getsitepackages", return_value=[None, extra]),
             mock.patch.object(site, "getusersitepackages", return_value=None),
