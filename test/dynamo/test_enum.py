@@ -7,10 +7,13 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same, skipIfNotPy312
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class EnumTests(torch._dynamo.test_case.TestCase):
     """Tests for enum support in torch.compile."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_enum_as_dict_key(self):
         class MyEnum(enum.Enum):
