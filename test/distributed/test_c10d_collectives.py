@@ -304,7 +304,7 @@ class AbstractCollectivesTest(C10dBackendTest):
             with self.assertRaises((RuntimeError, ValueError)):
                 dist.gather_single(input, output, dst=0)
 
-    def test_gather_into_tensor_deprecated(self):
+    def test_gather_into_tensor(self):
         if not self.supports_gather_single:
             self.skipTest(f"{self.backend_name} does not support gather_single")
         self._init_pg()
@@ -314,8 +314,7 @@ class AbstractCollectivesTest(C10dBackendTest):
             if self.rank == 0
             else None
         )
-        with self.assertWarnsRegex(FutureWarning, "gather_into_tensor` is deprecated"):
-            dist.gather_into_tensor(tensor, output, dst=0)
+        dist.gather_into_tensor(tensor, output, dst=0)
         if self.rank == 0:
             expected = torch.cat(
                 [
