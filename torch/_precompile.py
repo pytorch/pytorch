@@ -187,8 +187,9 @@ it.
 #    False``, so a branch on it bakes the unpinned side). Those three are deliberate
 #    narrowings of both paths, taken because the alternative is a silently wrong artifact
 #    on any backend, and they are applied to a traceable wrapper subclass's INNER tensors
-#    too (a strided-looking wrapper over sparse data would otherwise bake that 0 nnz); ``fn`` calling ``.pin_memory()`` is refused as well, as an op with no
-#    fake kernel. A NESTED tensor is refused too, on BOTH capture paths, but as a
+#    too (a strided-looking wrapper over sparse data would otherwise bake that 0 nnz);
+#    ``fn`` calling ``.pin_memory()`` is refused as well, as an op with no fake
+#    kernel. A NESTED tensor is refused too, on BOTH capture paths, but as a
 #    restriction rather than a claim about fakeification (the unbacked path's ShapeEnv
 #    could fakeify a jagged one; nothing downstream of the trace has a nested
 #    representation) -- and a real trace did not accept a STRIDED nested input either, it
@@ -1583,9 +1584,10 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     # dispatches). Without this a wrapper over sparse data passes every clause above and
     # then has that inner metadata dropped by the fake conversion exactly as the messages
     # describe, baking a wrong artifact where this function exists to leave none.
-    # Unwrapping rather than refusing wrappers wholesale keeps the subclasses capture does
-    # support (DTensor, MaskedTensor over dense data), and it is the same flattening the
-    # fake conversion performs.
+    # Unwrapping rather than refusing wrappers wholesale keeps DTensor working, and it is
+    # the same flattening the fake conversion performs. It is NOT what keeps MaskedTensor
+    # working: that is not a traceable wrapper subclass, so it never reaches this branch --
+    # the except clause on the is_pinned() probe above is what lets it through.
     if is_traceable_wrapper_subclass(a):
         attrs, _ = a.__tensor_flatten__()
         for name in attrs:
@@ -3677,17 +3679,15 @@ def _write_artifact(
 ) -> None:
     """Write the matched (python_code, cache) pair, creating parent directories.
 
-    Each half is written beside its target and renamed into place, so neither named
-    file is ever truncated or half-written. The two renames are not one atomic step: the
+    Each half is written beside its target and renamed into place, so neither named file
+    is ever truncated or half-written. The two renames are not one atomic step: the
     previous source is hard-linked to a backup first and put back if the second rename
     raises, so a Python exception (a full disk, a permission error) leaves the previous
-    pair intact. Which undo runs is read off the DISK rather than from flags, and a report
-    is gated on the file it names still being there (the comment on the undo has the
-    reasoning). Process death between the two renames is not covered, nor is a reader
-    racing them or two writers interleaving: that can leave one source beside the other's
-    cache, which ``load`` refuses on the cache's sha256 rather than serving stale code,
-    and a name another writer takes in that window costs the previous source, which goes
-    with the backup. The containing directory is fsync'd after, best effort.
+    pair intact. Which undo runs, and whether it is reported, is read off the DISK, not
+    from flags (the comment on the undo has the reasoning). Process death between the
+    renames is not covered, nor a reader or a second writer racing them: that can leave
+    one source beside the other's cache, which ``load`` refuses on the cache's sha256,
+    and can cost the previous source. The parent directory is fsync'd after, best effort.
     """
     written = []
     new_stats: list[os.stat_result] = []
@@ -3697,17 +3697,15 @@ def _write_artifact(
             if parent:
                 os.makedirs(parent, exist_ok=True)
             # A unique name per writer: two captures targeting one path must not share a
-            # scratch file, or one renames the other's half-written bytes into place. Beside
-            # the target, so the rename stays on one filesystem.
+            # scratch file. Beside the target, so the rename stays on one filesystem.
             tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
             written.append((tmp, path))
             # The rename repoints the name at the temp's inode and carries its mode over, so
             # the temp is CREATED with the mode of the file it replaces: chmod'ing it down
             # only after the write would publish the whole new payload at the umask mode, in
             # a directory the caller chose. Permission bits only: setuid/setgid on a new inode
-            # owned by the WRITING user name a different principal, and nothing execs an
-            # artifact. No previous file means that umask default. O_BINARY because os.open on
-            # Windows would translate the newlines code_hash is taken over.
+            # owned by the WRITING user name a different principal. No previous file means that
+            # default. O_BINARY: os.open on Windows translates the newlines code_hash covers.
             try:
                 mode: int | None = stat.S_IMODE(os.stat(path).st_mode) & 0o777
             except OSError:
@@ -3736,16 +3734,14 @@ def _write_artifact(
     backup = f"{os.fspath(artifact_path)}.{os.getpid()}.{uuid.uuid4().hex}.bak"
     try:
         # A hard link, not a move: the named path must resolve to the previous or the new
-        # source at every instant, for a reader racing this write and for a crash between
-        # the two renames below.
+        # source at every instant, for a racing reader or a crash between the renames.
         try:
             os.link(artifact_path, backup)
         except FileNotFoundError:
             pass
         except OSError as e:
-            # No hard links on this filesystem: fall back to moving aside. Only for the errnos
-            # that mean unsupported, and only for a regular file: os.link on a DIRECTORY also
-            # fails EPERM, and moving that aside is never the fallback.
+            # No hard links here: fall back to moving aside, only for the errnos that mean
+            # unsupported and only for a regular file (os.link on a DIRECTORY also fails EPERM).
             if e.errno not in _NO_HARD_LINK_ERRNOS or not os.path.isfile(artifact_path):
                 raise
             os.replace(artifact_path, backup)
@@ -3757,15 +3753,13 @@ def _write_artifact(
         # Put the previous source back (or remove the new one on a first write) so the named
         # files stay loadable, best effort; then drop every temp and re-raise. Every predicate
         # that CHOOSES the undo is read off the DISK, never from a flag set after its own
-        # syscall, and the reads sit in this guard, defaulting False, so an interrupt among
-        # them still unlinks, with ``probed`` withholding the report. ``kept``: the backup
-        # name carries this call's pid and a uuid, so its existing means this call took it.
+        # syscall, and ``probed`` says all four reads RAN: an interrupt among them leaves the
+        # rest half-set, so neither the report nor the drop below may consult one. ``kept``:
+        # the backup name carries this call's pid and a uuid, so its existing is this call's.
         # ``complete`` (both names are this call's temps) means written even though this block
         # ran; ``aside`` (a backup with the artifact NAME gone) is the move-aside fallback
-        # before the first rename, holding the previous source's only copy; ``landed`` says
-        # the FIRST rename happened, and nothing landed with no backup puts the failure BEFORE
-        # it, nothing to undo. ``undone`` says the undo RETURNED, the finally's unlink safe
-        # under it; set after a syscall returned, so an interrupt keeps the .bak.
+        # holding the previous source's only copy; ``landed`` says the FIRST rename happened.
+        # ``undone`` says the undo RETURNED, the finally's unlink safe under it.
         complete = kept = landed = aside = probed = undone = False
         try:
             complete = all(map(_same_inode, (artifact_path, cache_path), new_stats))
@@ -3780,25 +3774,22 @@ def _write_artifact(
                     os.replace(backup, artifact_path)
                     undone = True
                 elif kept:
-                    # The artifact name is neither this call's new source nor gone, so the
-                    # name cannot tell the previous source still under the hard link (a failed
-                    # FIRST rename) from one a second WRITER repointed here. Neither wants a
-                    # restore: the first already IS the previous pair, the second would put a
-                    # THIRD, older source beside that cache.
+                    # The artifact name is neither this call's new source nor gone, so it
+                    # cannot tell the previous source still under the hard link (a failed FIRST
+                    # rename) from one a second WRITER repointed here. Neither wants a restore:
+                    # the first already IS the previous pair, the second a THIRD, older source.
                     undone = True
                 elif landed:
-                    # A first write, so there is no previous pair to restore: drop the
-                    # new source rather than leave it named with no cache beside it. An
-                    # unlink, not a rename to a temp: a rename needs a fresh directory
-                    # entry, the resource an ENOSPC failure has just exhausted.
+                    # A first write, so there is no previous pair to restore: drop the new
+                    # source rather than leave it named with no cache beside it. An unlink, not
+                    # a rename: a rename needs a directory entry, which ENOSPC just exhausted.
                     os.unlink(artifact_path)
                     undone = True
             except OSError:
                 pass
         finally:
-            # Keyed on that same on-disk outcome: each report NAMES a file, so it fires only
-            # while that file is there and ``probed`` says its reads ran. ``undone`` alone is
-            # a flag set after its own syscall, and reporting off it named a consumed .bak.
+            # Keyed on that same on-disk outcome: a report NAMES a file, so it fires only
+            # while that file is there and ``probed`` says the reads that chose it ran.
             named = backup if kept else artifact_path
             if probed and not undone and os.path.lexists(named):
                 if kept:
@@ -3818,14 +3809,12 @@ def _write_artifact(
                         os.fspath(artifact_path),
                         os.fspath(cache_path),
                     )
-            elif kept or (not probed and _same_inode(artifact_path, backup)):
+            elif kept if probed else _same_inode(artifact_path, backup):
                 # Reached only where the named pair came out loadable, so the backup is not a
-                # copy anyone still needs: an undo rename consumed it, or there was nothing to
-                # undo because the previous source is still under its own name (a failed FIRST
-                # rename, an interrupt just after the link, or one among the reads above,
-                # which gets here only while that name still resolves to the backup's inode)
-                # -- except under a name a second writer took, which costs it (see the
-                # docstring). Drop it rather than pin the previous inode's blocks with a .bak.
+                # copy anyone still needs: an undo rename consumed it, or nothing needed undoing
+                # because the previous source is still under its own name -- a failed FIRST
+                # rename, or an interrupt among the reads, which never consults ``kept`` and
+                # drops only while that name still resolves to the backup's inode.
                 _unlink_quietly(backup)
             for tmp, _ in written:
                 _unlink_quietly(tmp)
