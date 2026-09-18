@@ -312,20 +312,32 @@ class DefaultLoadPlanner(LoadPlanner):
         by the ``ReadItem``, so distinct items never share storage, and
         ``commit_tensor`` is a no-op.
 
-        That reasoning does not carry over to a subclass that overrides either
-        hook -- the documented extension pattern of materializing a tensor in
-        ``resolve_tensor`` and writing it back in ``commit_tensor`` is
-        order-dependent, for instance. Such subclasses drop back to the
-        sequential path automatically. A subclass that has verified its own
-        hooks are safe can opt back in with a plain class attribute::
+        That reasoning does not carry over to a subclass that changes how
+        tensors are resolved -- the documented extension pattern of
+        materializing a tensor in ``resolve_tensor`` and writing it back in
+        ``commit_tensor`` is order-dependent, for instance. This checks
+        ``lookup_tensor`` and ``transform_tensor`` as well, because
+        ``resolve_tensor`` delegates to them and they are themselves
+        documented extension points, so overriding one changes what storage a
+        ``ReadItem`` resolves to just as much as overriding ``resolve_tensor``
+        would.
+
+        Such subclasses drop back to the sequential path automatically. A
+        subclass that has verified its own hooks are safe can opt back in with
+        a plain class attribute::
 
             class MyPlanner(DefaultLoadPlanner):
                 supports_parallel_load = True
         """
         cls = type(self)
-        return (
-            cls.resolve_tensor is DefaultLoadPlanner.resolve_tensor
-            and cls.commit_tensor is DefaultLoadPlanner.commit_tensor
+        return all(
+            getattr(cls, name) is getattr(DefaultLoadPlanner, name)
+            for name in (
+                "resolve_tensor",
+                "commit_tensor",
+                "lookup_tensor",
+                "transform_tensor",
+            )
         )
 
     def __init__(

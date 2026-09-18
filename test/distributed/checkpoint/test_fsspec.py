@@ -582,10 +582,11 @@ class TestFileSystem(TestCase):
             self.assertEqual(state_dict[f"t_{i}"], load_dict[f"t_{i}"])
 
     def test_default_load_planner_parallel_support_not_inherited(self):
-        # DefaultLoadPlanner is the documented extension point, and the
-        # documented pattern overrides resolve_tensor / commit_tensor. Such a
-        # subclass must not silently inherit the parallel opt-in, because the
-        # reasoning that makes DefaultLoadPlanner safe no longer applies.
+        # DefaultLoadPlanner is the documented extension point, and every
+        # documented way of customizing tensor resolution overrides one of the
+        # four hooks below. Such a subclass must not silently inherit the
+        # parallel opt-in, because the reasoning that makes DefaultLoadPlanner
+        # safe no longer applies.
         self.assertTrue(dcp.DefaultLoadPlanner().supports_parallel_load)
 
         class MaterializingPlanner(dcp.DefaultLoadPlanner):
@@ -603,7 +604,22 @@ class TestFileSystem(TestCase):
 
         self.assertFalse(CommitOnlyPlanner().supports_parallel_load)
 
-        # A subclass that leaves both hooks alone stays on the fast path.
+        # resolve_tensor delegates to lookup_tensor and transform_tensor, which
+        # are documented extension points in their own right. Overriding either
+        # changes what storage a ReadItem resolves to, so both must opt out.
+        class LookupPlanner(dcp.DefaultLoadPlanner):
+            def lookup_tensor(self, index):
+                return super().lookup_tensor(index)
+
+        self.assertFalse(LookupPlanner().supports_parallel_load)
+
+        class TransformPlanner(dcp.DefaultLoadPlanner):
+            def transform_tensor(self, read_item, tensor):
+                return super().transform_tensor(read_item, tensor)
+
+        self.assertFalse(TransformPlanner().supports_parallel_load)
+
+        # A subclass that leaves all four hooks alone stays on the fast path.
         class RenamingPlanner(dcp.DefaultLoadPlanner):
             pass
 
@@ -614,6 +630,14 @@ class TestFileSystem(TestCase):
             supports_parallel_load = True
 
         self.assertTrue(VerifiedPlanner().supports_parallel_load)
+
+    def test_reader_with_offset_opts_into_parallel_load(self):
+        # _ReaderWithOffset overrides lookup_tensor, so it would otherwise fall
+        # off the fast path -- which is the optimizer-state load, the bulk of a
+        # sharded checkpoint. It opts back in explicitly; guard that.
+        from torch.distributed.checkpoint.optimizer import _ReaderWithOffset
+
+        self.assertTrue(_ReaderWithOffset({}).supports_parallel_load)
 
     def test_fsspec_reader_workers_config(self):
         checkpoint_dir = "memory://test_workers_config"

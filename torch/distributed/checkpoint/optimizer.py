@@ -211,6 +211,14 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             requests += reqs
         return LoadPlan(requests)
 
+    # Overriding ``lookup_tensor`` opts this planner out of parallel loading by
+    # default. Re-enable it: ``translation`` is fully populated by
+    # ``create_local_plan`` before any read begins and is only read from here,
+    # and it maps each ``dest_index`` to the same index with a fixed per-fqn
+    # offset subtracted. That mapping is injective, so distinct ``ReadItem``s
+    # still resolve to disjoint regions, which is what the contract requires.
+    supports_parallel_load: bool = True
+
     def lookup_tensor(self, index: MetadataIndex) -> torch.Tensor:
         return super().lookup_tensor(self.translation.get(index, index))
 
