@@ -4,15 +4,23 @@ Each FX node has metadata on it, and in particular, stores a faketensor represen
 
 Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning. Passes do not need to run `FakeTensorUpdater` before each metadata read.
 
+## Alias analysis
+Passes should determine tensor aliasing from FakeTensor storage identity rather than operator schema alias annotations. Two tensor nodes with the same non-`None` storage ID alias. A `None` storage ID means aliasing is unknown and must not be used to establish an alias relationship.
+
 ## Graph outputs
 After AOTDispatch, joint and post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes.
 
 ## Mutations throughout the stack
 The invariant about mutation we have is:
 
-**After AOTDispatch tracing and before Inductor, we have no mutation in our graph, except for a copy_ epilogue at the end of the graph.**
+**After AOTDispatch tracing and before Inductor, we have no mutation in our graph, except for a `copy_` epilogue at the end of the graph and the rare `aten.set_`.**
 
-For example, passes operating on the joint_graph and post_grad graph do not need to worry about mutation, except for the rare `aten.set_`. Its presence means the graph contains mutation, so passes that rely on the functional graph invariant may conservatively exit early when they encounter it.
+Passes operating on the joint_graph and post_grad graph do not need to account for other mutations. Pass authors that do not support the rare `aten.set_` may conservatively exit early if it exists in the graph:
+
+```python
+if graph.find_nodes(op="call_function", target=aten.set_.default):
+    return
+```
 
 Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
 
