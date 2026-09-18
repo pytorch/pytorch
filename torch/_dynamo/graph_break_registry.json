@@ -4461,6 +4461,16 @@
       ]
     }
   ],
+  "GB1392": [
+    {
+      "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
+      "Context": "object={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
   "GB0265": [
     {
       "Gb_type": "FakeScriptObject missing method implementation",
@@ -6426,6 +6436,16 @@
       "Explanation": "Dynamo does not know the equality comparison of the underlying python object for {self}",
       "Hints": [
         "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1940": [
+    {
+      "Gb_type": "Attribute mutation on an untracked user-defined object",
+      "Context": "object={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo cannot safely apply this attribute mutation because the object is not tracked for mutation.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

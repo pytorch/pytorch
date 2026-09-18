@@ -122,13 +122,8 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
-    @parametrize(
-        "backend_precision,expected,legacy_calls",
-        (("bfx9", "bfx9", 0), ("tf32", "high", 1)),
-    )
-    def test_precompile_cache_key_handles_bfx9(
-        self, backend_precision, expected, legacy_calls
-    ):
+    @parametrize("backend_precision", ("bfx9", "tf32"))
+    def test_precompile_cache_key_handles_bfx9(self, backend_precision):
         from torch._inductor.select_algorithm import create_precompile_key
 
         choice = types.SimpleNamespace(kernel_hash_key=lambda: "choice")
@@ -144,11 +139,12 @@ class TestCacheKeyStrategy(TestCase):
                 return_value="high",
             ) as legacy_getter,
         ):
+            expected = f"cuda:{backend_precision},mkldnn:{backend_precision}"
             self.assertEqual(
                 create_precompile_key("op", "inputs", [choice]),
                 f"op:inputs:{expected}:choice",
             )
-            self.assertEqual(legacy_getter.call_count, legacy_calls)
+            self.assertEqual(legacy_getter.call_count, 0)
 
     def _compact_sha256(self, data: bytes) -> str:
         return (
