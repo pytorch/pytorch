@@ -410,6 +410,58 @@ class FSDPModule:
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
 
+    def set_manual_backward_finalization(self, enabled: bool) -> None:
+        """Set whether the caller must finalize backward.
+
+        When enabled, call :meth:`finalize_backward` after backward completes.
+        Gradient synchronization and parameter resharding follow their current
+        settings.
+        """
+        self.set_is_last_backward(not enabled)
+
+    @_dynamo_disable
+    def finalize_backward(self) -> None:
+        """Finalize backward on the calling thread.
+
+        Enable manual finalization before forward, then call this after all
+        backward passes in the logical backward operation. This completes
+        pending gradient reduction and resharding according to their current
+        settings.
+
+        The autograd final callback runs on the autograd thread, where its
+        stream waits cannot be CUDA graph captured. This method runs the work
+        on the calling thread and is safe to call during CUDA graph capture.
+
+        HSDP accumulation that disables only all-reduce is not supported.
+        Enable all-reduce on the final backward pass instead.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is None:
+            raise RuntimeError("A forward pass must run on the root FSDP module first")
+        if not state._is_root:
+            raise RuntimeError(
+                "finalize_backward must be called on the root FSDP module"
+            )
+        if state._state_ctx.is_last_backward:
+            raise RuntimeError(
+                "finalize_backward requires manual backward finalization. Call "
+                "set_manual_backward_finalization(True) before forward"
+            )
+        param_groups = [
+            group
+            for fsdp_state in state._state_ctx.all_states
+            for group in fsdp_state._fsdp_param_groups
+        ]
+        if any(group._partial_reduce_output is not None for group in param_groups):
+            raise RuntimeError(
+                "finalize_backward does not support HSDP accumulation "
+                "with all-reduce disabled. Enable all-reduce on the final backward pass"
+            )
+        self.set_is_last_backward(True)
+        state._root_post_backward_final_callback(manual_finalization=True)
+        state._join_comm_streams()
+        self.set_is_last_backward(False)
+
     def set_requires_gradient_sync(
         self, requires_gradient_sync: bool, *, recurse: bool = True
     ) -> None:
