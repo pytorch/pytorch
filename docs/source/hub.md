@@ -140,6 +140,29 @@ Users can force a reload by calling `hub.load(..., force_reload=True)`. This wil
 the existing GitHub folder and downloaded weights, reinitialize a fresh download. This is useful
 when updates are published to the same branch, users can keep up with the latest release.
 
+### Downloads in distributed jobs
+
+Hub download helpers do not coordinate cache population between processes. If multiple
+processes call {func}`torch.hub.load_state_dict_from_url()` for the same uncached URL and
+cache location at the same time, they can download the same file concurrently.
+
+In distributed jobs, avoid redundant downloads by having one rank populate the shared cache
+before the other ranks load from it. For example, after initializing the process group:
+
+```python
+url = "https://download.pytorch.org/models/resnet18-f37072fd.pth"
+
+if torch.distributed.get_rank() == 0:
+    torch.hub.load_state_dict_from_url(url)
+
+torch.distributed.barrier()
+state_dict = torch.hub.load_state_dict_from_url(url)
+```
+
+This pattern assumes that all ranks use the same Hub cache location. If the process group is
+managed by a framework and cannot be synchronized around the download, populate the cache
+before launching the distributed job instead.
+
 ### Known limitations:
 
 Torch hub works by importing the package as if it was installed. There are some side effects
