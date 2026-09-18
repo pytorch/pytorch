@@ -11,6 +11,7 @@ import enum
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import json
 import logging
@@ -7711,6 +7712,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         # If this doesn't crash, the test passes
         fn(torch.ones(3))
+
+    @parametrize("sequence_type", [torch.Size, tuple, list])
+    @parametrize("shape", [(), (0,), (1, 4), (3, 4)])
+    @parametrize("dynamic", [False, True])
+    def test_tensor_ctor_sequence_shape(self, sequence_type, shape, dynamic):
+        def fn(x):
+            return torch.Tensor(sequence_type(x.size()))
+
+        x = torch.empty(shape)
+        expected_shape = shape if sequence_type is torch.Size else (len(shape),)
+        self.assertEqual(fn(x).shape, expected_shape)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=dynamic)
+        self.assertEqual(compiled(x).shape, expected_shape)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_ctor_list_of_tensor(self):
@@ -15608,6 +15622,13 @@ fn
         self.assertEqual(f(torch.randn(0)).shape, (1,))
         self.assertEqual(f(torch.randn(2)).shape, (2,))
 
+    def _clear_inspect_mro_cache(self):
+        # Some Python 3.12 builds cache classes in inspect.getattr_static.
+        cache = getattr(inspect, "_shadowed_dict_from_mro_tuple", None)
+        cache_clear = getattr(cache, "cache_clear", None)
+        if cache_clear is not None:
+            cache_clear()
+
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         """
         Args:
@@ -15630,6 +15651,7 @@ fn
             torch.compile(mod, backend="eager")(inp)
 
         run()
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
@@ -15698,6 +15720,7 @@ fn
 
         run()
         # del fc  # This should delete all the references
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
@@ -16295,6 +16318,102 @@ fn
             ctx.exception.gb_type,
             "Sourceless _DecoratorContextManager method reconstruction unsupported",
         )
+
+    @parametrize("delete", [False, True])
+    def test_sourceless_bound_clone_self_mutation_graph_breaks(self, delete):
+        def make_method(bound):
+            def method(self, x):
+                if delete:
+                    del bound.__self__.foo
+                else:
+                    bound.__self__.foo = 1
+                return x + 1
+
+            return method
+
+        ctx_manager = torch.no_grad()
+        if delete:
+            ctx_manager.foo = 0
+
+        class A:
+            method = make_method(ctx_manager.clone)
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        if delete:
+            ctx_manager.foo = 0
+        else:
+            del ctx_manager.foo
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+        if delete:
+            self.assertFalse(hasattr(ctx_manager, "foo"))
+            ctx_manager.foo = 0
+        else:
+            self.assertEqual(ctx_manager.foo, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Attribute mutation on an untracked user-defined object",
+        )
+
+    def test_sourced_untracked_mutation_reports_dynamo_bug(self):
+        @dataclasses.dataclass
+        class C:
+            foo: int
+
+        # Pins the reporting path, not desired behavior: _dataclasses_fields_lambda
+        # is missing track_object_existing.
+        field = dataclasses.fields(C)[0]
+
+        def fn(obj, x):
+            dataclasses.fields(obj)[0].name = "bar"
+            return x + 1
+
+        x = torch.ones(1)
+        with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
+            result = torch.compile(fn, backend="eager", fullgraph=False)(C(1), x)
+        self.assertEqual(result, x + 1)
+        self.assertTrue(
+            any(
+                "Attribute mutation on a sourced but untracked user-defined object"
+                in record.getMessage()
+                for record in logs.records
+            )
+        )
+        self.assertEqual(field.name, "bar")
+
+        field.name = "foo"
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(C(1), x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Attribute mutation on a sourced but untracked user-defined object",
+        )
+        self.assertEqual(field.name, "foo")
+
+    def test_enum_member_attribute_mutation_is_tracked(self):
+        class E(enum.Enum):
+            A = 1
+
+        def fn(x):
+            E.A.foo = x
+            return E.A.foo + 1
+
+        x = torch.ones(1)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        self.assertEqual(result, x + 1)
+        self.assertIs(E.A.foo, x)
 
     def test_inspect_signature_parameters(self):
         import inspect
