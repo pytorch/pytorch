@@ -48,7 +48,7 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
-from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
@@ -468,8 +468,8 @@ class FSDPParamGroup:
                     self.device,
                 )
 
+                fsdp_param.alloc_all_gather_outputs()
                 tensor = fsdp_param.all_gather_outputs[0]
-                alloc_storage(tensor)
 
                 with (
                     torch.autograd._unsafe_preserve_version_counter(tensor)

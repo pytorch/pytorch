@@ -693,6 +693,11 @@ class FSDPModule:
         output's storage so FSDP retains it through collective completion.
         The default output callback expects the existing rank-major layout.
 
+        Optional ``output_metadata`` is passed unchanged to the output callback
+        in ``AllGatherResult`` and defaults to ``None``. FSDP does not interpret
+        it. Use it for per-call state instead of mutable state shared between
+        groups or calls.
+
         The function runs without gradient tracking on the all-gather copy-in
         stream. FSDP manages stream dependencies, communication, and output
         processing. Groups of size one bypass this callback.
@@ -722,11 +727,19 @@ class FSDPModule:
         flat rank-major collective buffer, per-parameter input element counts
         and dtypes, and per-rank input split sizes in buffer elements (bytes for
         mixed-dtype buffers). ``world_size`` is the all-gather group size.
+        ``output_metadata`` is the opaque object returned by the input callback
+        for this call, or ``None`` by default.
         The function initializes and allocates each parameter's final
         ``all_gather_outputs`` and owns copying and any reordering into them,
         preserving their dtype, device, and version counters. It runs on the
         current compute stream after FSDP waits for the collective to complete.
         Reduce-scatter input preparation is unaffected.
+
+        To install caller-owned views, use
+        ``fsdp_param.set_all_gather_outputs(outputs, owns_storage=False)``.
+        Their storage must remain valid for parameters and saved autograd views.
+        Changing initialized output storage or ownership is not supported.
+        Caller-owned storage with tensor all-gather extensions is not supported.
 
         Args:
             fn (Callable): Function that initializes and copies all-gather outputs.
