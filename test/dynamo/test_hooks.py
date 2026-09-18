@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
 )
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import HardwareClassification, skipIfRocm
 from torch.utils.hooks import RemovableHandle
 
 
@@ -44,6 +44,8 @@ class ClassWithVal:
 
 
 class HooksTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_tensor_only_register_hook_in_graph_lambda(self):
         def fn(x):
             x.register_hook(lambda grad: grad * 2)
@@ -1160,6 +1162,8 @@ def forward(self, L_x_ : torch.Tensor):
 
 
 class HooksTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipIfRocm(msg="pytorch/pytorch/issues/190414")
     @onlyAccelerator
     def test_register_hook_on_intermediate_autograd_cache(self, device):
