@@ -47,9 +47,7 @@ from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
     GemmReductionGeometry,
     iter_fx_node_inputs,
-    NormalizedGemmReduction,
     NormalizedGetItem,
-    NormalizedPrepareSoftmax,
     NormalizedReduction,
     NormalizedSelect,
     NormalizedSplit,
@@ -213,7 +211,7 @@ class GemmLocalReduceMatch:
         matches: list["GemmLocalReduceMatch"],
         mixed_match_error: str,
     ) -> "GemmLocalReduceMatch | None":
-        """Return the common match when all values share one geometry."""
+        """Return the common match when all values use one reduction geometry."""
         if not matches:
             return None
         match = matches[0]
@@ -334,23 +332,6 @@ class GemmLocalReduceStore:
 
 
 @dataclasses.dataclass(frozen=True)
-class GemmIndexedOutputStore:
-    """Describe one terminal row-indexed output stored from the main result."""
-
-    node: torch.fx.Node
-    indices: torch.fx.Node
-    owned_nodes: tuple[torch.fx.Node, ...]
-
-    def __post_init__(self) -> None:
-        if (
-            not isinstance(self.node, torch.fx.Node)
-            or not isinstance(self.indices, torch.fx.Node)
-            or not all(isinstance(node, torch.fx.Node) for node in self.owned_nodes)
-        ):
-            raise RuntimeError("indexed output plans require tensor nodes")
-
-
-@dataclasses.dataclass(frozen=True)
 class GemmOutputLocalReducePlan:
     """Bind a matched local reduction to store and/or main-output consumers.
 
@@ -373,12 +354,17 @@ class GemmOutputLocalReducePlan:
 
 @dataclasses.dataclass(frozen=True)
 class GemmOutputPlan:
-    """Classify returned values and backend-owned terminal stores."""
+    """Classify the values returned by a FlexGEMM body.
+
+    Attributes:
+        output: FX node returned as the main GEMM result.
+        returned_aux_outputs: Auxiliary FX outputs in the user-visible tuple order.
+        local_reduce: Compressed or feed-main local-reduction output behavior.
+    """
 
     output: torch.fx.Node
     returned_aux_outputs: tuple[torch.fx.Node, ...] = ()
     local_reduce: GemmOutputLocalReducePlan | None = None
-    indexed_output: GemmIndexedOutputStore | None = None
     output_contraction: FlexGemmOutputContraction | None = None
     output_storage: torch.fx.Node | None = None
     output_storage_nodes: tuple[torch.fx.Node, ...] = ()
@@ -391,56 +377,24 @@ class GemmOutputPlan:
                 for aux_output in self.returned_aux_outputs
             )
             or (
-                self.local_reduce is not None
-                and not isinstance(self.local_reduce, GemmOutputLocalReducePlan)
-            )
-            or (
-                self.indexed_output is not None
-                and not isinstance(self.indexed_output, GemmIndexedOutputStore)
-            )
-            or (
                 self.output_storage is not None
                 and not isinstance(self.output_storage, torch.fx.Node)
             )
             or not all(
                 isinstance(node, torch.fx.Node) for node in self.output_storage_nodes
             )
-            or bool(self.output_storage_nodes) != (self.output_storage is not None)
-            or any(
-                node not in self.returned_aux_outputs
-                for node in self.structural_outputs
-            )
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
 
     @property
-    def structural_outputs(self) -> tuple[torch.fx.Node, ...]:
-        """Return auxiliary values stored by backend-owned EpiOps."""
-        store = None if self.local_reduce is None else self.local_reduce.store
-        return (
-            *(() if self.indexed_output is None else (self.indexed_output.node,)),
-            *(() if store is None else (store.node,)),
-        )
-
-    @property
     def aux_outputs(self) -> tuple[torch.fx.Node, ...]:
         """Return ordinary auxiliary values emitted by the generated callback."""
+        store = None if self.local_reduce is None else self.local_reduce.store
         return tuple(
             output
             for output in self.returned_aux_outputs
-            if output not in self.structural_outputs
+            if store is None or output is not store.node
         )
-
-    @property
-    def terminal_rewrites(self) -> dict[torch.fx.Node, torch.fx.Node | None]:
-        """Map terminal wrappers to aliases or backend-owned omissions."""
-        rewrites = dict.fromkeys(self.output_storage_nodes, self.output_storage)
-        store = None if self.local_reduce is None else self.local_reduce.store
-        if store is not None and store.output_storage is not None:
-            rewrites.update(dict.fromkeys(store.output_storage.nodes))
-        if self.indexed_output is not None:
-            rewrites.update(dict.fromkeys(self.indexed_output.owned_nodes))
-        return rewrites
 
 
 @dataclasses.dataclass
@@ -505,9 +459,7 @@ class GemmLocalReduceAnalysis:
             node
             for node in self.graph.dependencies
             if (node is match.value_node or node in dependencies)
-            and isinstance(
-                self.graph.normalized_nodes.get(node), NormalizedGemmReduction
-            )
+            and isinstance(self.graph.normalized_nodes.get(node), NormalizedReduction)
             and node in self.matches
         )
 
@@ -524,7 +476,7 @@ class GemmLocalReduceAnalysis:
             )
             if propagated or fact or grouped:
                 return
-        if isinstance(normalized, NormalizedGemmReduction):
+        if isinstance(normalized, NormalizedReduction):
             if self.bind_grouped_reduction(node, normalized):
                 return
             if (
@@ -532,11 +484,7 @@ class GemmLocalReduceAnalysis:
                 and self.gemm is not None
                 and self.graph.depends_on(normalized.source, self.gemm)
             ):
-                op_name = (
-                    "softmax/logsumexp"
-                    if isinstance(normalized, NormalizedPrepareSoftmax)
-                    else str(getattr(node.target, "overloadpacket", node.target))
-                )
+                op_name = str(getattr(node.target, "overloadpacket", node.target))
                 raise ungrouped_reduction_error(op_name)
         elif isinstance(normalized, NormalizedUnsupportedReduction):
             raise unsupported_reduction_op_error(normalized.target)
@@ -739,18 +687,16 @@ class GemmLocalReduceAnalysis:
     def bind_grouped_reduction(
         self,
         node: torch.fx.Node,
-        reduction: NormalizedGemmReduction,
+        reduction: NormalizedReduction,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
         layout = self.grouped_tensors.get(reduction.source)
         if layout is None:
             return False
-        if isinstance(reduction, NormalizedReduction) and reduction.dtype is not None:
+        if reduction.dtype is not None:
             raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
         validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
         if not layout.matches_reduction_dim(reduction.dim):
-            if isinstance(reduction, NormalizedPrepareSoftmax):
-                return False
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
         source_fact = self.tensorssa_facts.get(reduction.source)
         self.matches[node] = GemmLocalReduceMatch(
@@ -1164,7 +1110,7 @@ class GemmLocalReduceAnalysis:
         return GemmOutputPlan(
             output,
             aux_outputs,
-            local_reduce=match.to_plan(store=None, feeds_main=True),
+            match.to_plan(store=None, feeds_main=True),
         )
 
 
