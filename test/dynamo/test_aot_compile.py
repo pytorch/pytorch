@@ -2640,22 +2640,22 @@ from user code:
         self.assertIn("page break rec sep", message)
 
     def test_no_match_report_keeps_a_raise_on_one_line_past_odd_separators(self):
-        # The raise line is the other report entry whose text is arbitrary user
-        # data, so it needs the collapse the verbose part above gets: a message
-        # carrying any separator splitlines() breaks on would otherwise split one
-        # entry across several lines, and the whole-line assertions and total
-        # line counts the other tests read the report with cannot survive that.
-        # test_aot_compile_module_two_raisers_in_the_report_and_then_the_warning
-        # asserts a raise line whole past \x0c and \x1e already; what this test
-        # reads that it does not is \r and \u2028 at that site -- a collapse
-        # written as two replaces passes there and fails here -- and the line
-        # inventory of a report that carries a raise.
-        self._hide_leaked_dynamo_globals()
-        model = self._model_with_stub_trees(
-            RaisingTree("page\x0cbreak\rrec\x1esep\u2028line\u2029")
-        )
+        # The raise line is the report's other entry carrying arbitrary user
+        # text, so it needs the collapse a verbose part gets: a separator
+        # splitlines() breaks on splits an entry over lines, which the count and
+        # whole-line read below fail on. None of the five is \n and the text
+        # holds no space, so that read says all five arrived and were collapsed.
+        class OddSepOnCompare:
+            # RaisesOnCompare's slot, raising five separators and no space.
+            def __hash__(self):
+                return hash("foo")
+
+            def __eq__(self, other):
+                raise ValueError("page\x0cbreak\rrec\x1esep\u2028line\u2029")
+
+        model, x = self._aot_compile_dict_branches({})
         with self.assertRaises(RuntimeError) as ctx:
-            model(torch.randn(3, 3))
+            model(x, {OddSepOnCompare(): 1})
         message = str(ctx.exception)
         lines = message.splitlines()
         # Header, entry, fix-or-drop advice: one raiser and no answer, so neither
@@ -2666,9 +2666,9 @@ from user code:
         # The raised text holds no spaces, so the whole line says all five
         # separators arrived and were collapsed -- without which the test is
         # vacuous; none of the five is \n, so a \n replace would cover none of
-        # them. The last ends the text: collapsed before the bracket is appended,
-        # it leaves no stray space before the closing one.
-        raised = "  [0] <guard check raised RuntimeError: page break rec sep line>"
+        # them. The last ends the text: collapsed before the boundary clause is
+        # appended, it leaves no stray space before it.
+        raised = "  [0] <guard check raised ValueError: page break rec sep line (through the guard tree's pybind boundary)>"
         self.assertEqual(lines[1], raised)
 
     def test_no_match_message_survives_a_raising_guard(self):
@@ -4585,7 +4585,10 @@ from user code:
         # quoting the link the cycle closed on; walking it unbounded returns
         # nothing, and it runs before any record exists, so there is nothing to
         # recover from. Under an alarm because the failure it pins is a hang:
-        # unbounded, this test never finishes rather than failing.
+        # unbounded, this test never finishes rather than failing. The alarm and
+        # not a harness timeout because there is none per test, so a regression
+        # hangs the whole file locally until the shard's own limit; 60s is a
+        # generous bound on one dispatch that returns in under a millisecond.
         model, x = self._aot_compile_dict_branches({})
         evil = {CyclesOnCompare(): 1}
 
