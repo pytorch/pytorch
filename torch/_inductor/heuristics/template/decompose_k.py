@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
+from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...ir import get_free_symbols
@@ -64,20 +65,24 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        device_properties = DeviceProperties.create(kernel_inputs.device())
-        m_hint = V.graph.sizevars.guard_int(m)
-        n_hint = V.graph.sizevars.guard_int(n)
-        # Conservatively estimate two CTAs per 64x64 output tile.
-        output_ctas = 2 * ((m_hint + 63) // 64) * ((n_hint + 63) // 64)
-        min_k_split = (
-            device_properties.multi_processor_count + output_ctas - 1
-        ) // output_ctas
-        k_splits = get_k_splits(
-            m,
-            n,
-            k,
-            min_k_split=min_k_split,
-        )
+        output_tile_size = config.triton.decompose_k_min_output_tile_size
+        m_is_static = not isinstance(m, sympy.Expr) or bool(m.is_number)
+        n_is_static = not isinstance(n, sympy.Expr) or bool(n.is_number)
+        if output_tile_size > 0 and m_is_static and n_is_static:
+            device_properties = DeviceProperties.create(kernel_inputs.device())
+            m_hint = int(m)
+            n_hint = int(n)
+            output_ctas = (
+                2
+                * ((m_hint + output_tile_size - 1) // output_tile_size)
+                * ((n_hint + output_tile_size - 1) // output_tile_size)
+            )
+            min_k_split = (
+                device_properties.multi_processor_count + output_ctas - 1
+            ) // output_ctas
+            k_splits = get_k_splits(m, n, k, min_k_split=min_k_split)
+        else:
+            k_splits = get_k_splits(m, n, k)
 
         for k_split in k_splits:
             if not V.graph.sizevars.statically_known_true(

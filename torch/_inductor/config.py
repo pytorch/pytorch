@@ -2312,6 +2312,12 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Output tile size used to filter decompose-K splits that cannot fill one
+    # device wave. 0 disables this experimental filter.
+    decompose_k_min_output_tile_size = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MIN_OUTPUT_TILE_SIZE", "0")
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.

@@ -1992,8 +1992,11 @@ class TestMaxAutotune(TestCase):
         "ignore decompose_k when native matmul codegen",
     )
     @config.patch(
-        max_autotune=True,
-        max_autotune_gemm_backends="TRITON",
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "triton.decompose_k_min_output_tile_size": 64,
+        }
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
         # UT specific change to force testing decompose K feature on ROCm until
@@ -2017,9 +2020,15 @@ class TestMaxAutotune(TestCase):
             torch._dynamo.maybe_mark_dynamic(a, 0)
             compiled_func = torch.compile(f)
 
-            with mock.patch(
-                "torch._inductor.kernel.mm.use_decompose_k_choice"
-            ) as decomp_mock:
+            with (
+                mock.patch(
+                    "torch._inductor.kernel.mm.use_decompose_k_choice"
+                ) as decomp_mock,
+                mock.patch(
+                    "torch._inductor.heuristics.template.decompose_k.get_k_splits",
+                    wraps=get_k_splits,
+                ) as get_k_splits_mock,
+            ):
                 decomp_mock.side_effect = (
                     lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
                 )
@@ -2035,6 +2044,13 @@ class TestMaxAutotune(TestCase):
                     f(a, b),
                     atol=1e-4,
                     rtol=1e-4,
+                )
+                self.assertTrue(get_k_splits_mock.called)
+                self.assertTrue(
+                    all(
+                        "min_k_split" not in call.kwargs
+                        for call in get_k_splits_mock.call_args_list
+                    )
                 )
 
     @unittest.skipIf(
@@ -2876,19 +2892,9 @@ class TestMaxAutotune(TestCase):
                 {
                     "triton.num_decompose_k_splits": num_decompose_k_splits,
                     "triton.decompose_k_threshold": decompose_k_threshold,
+                    "triton.decompose_k_min_output_tile_size": 0,
                 }
             ):
-                device_properties = DeviceProperties.create(torch.device(GPU_TYPE))
-                output_ctas = 2 * ((M + 63) // 64) * ((N + 63) // 64)
-                min_k_split = (
-                    device_properties.multi_processor_count + output_ctas - 1
-                ) // output_ctas
-                expected_splits = get_k_splits(
-                    M,
-                    N,
-                    K,
-                    min_k_split=min_k_split,
-                )
                 compiled_func = torch.compile(lambda a, b: a @ b)
                 _, code = run_and_get_code(compiled_func, a, b)
 
@@ -2904,12 +2910,42 @@ class TestMaxAutotune(TestCase):
                 ):
                     self.assertEqual(decompose_count, 0)
                 else:
-                    self.assertTrue(decompose_count > 0)
-                    self.assertTrue(decompose_count <= num_decompose_k_splits)
+                    self.assertEqual(
+                        decompose_count,
+                        len(get_k_splits(M, N, K)),
+                    )
 
     @config.patch(
         {
             "triton.num_decompose_k_splits": 10,
+            "triton.decompose_k_threshold": 8,
+            "triton.decompose_k_min_output_tile_size": 64,
+        }
+    )
+    def test_decompose_k_min_output_tile_size(self):
+        M, N, K = 32, 32, 32768
+        get_k_splits.cache_clear()
+        a = torch.randn(M, K, dtype=torch.float16, device=GPU_TYPE)
+        b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE)
+
+        device_properties = DeviceProperties.create(torch.device(GPU_TYPE))
+        output_ctas = 2 * ((M + 63) // 64) * ((N + 63) // 64)
+        min_k_split = (
+            device_properties.multi_processor_count + output_ctas - 1
+        ) // output_ctas
+        expected_splits = get_k_splits(M, N, K, min_k_split=min_k_split)
+
+        compiled_func = torch.compile(lambda a, b: a @ b)
+        _, code = run_and_get_code(compiled_func, a, b)
+        decompose_count = sum(
+            "benchmark_decompose_k_mm" in codegen for codegen in code
+        )
+        self.assertEqual(decompose_count, len(expected_splits))
+
+    @config.patch(
+        {
+            "triton.num_decompose_k_splits": 10,
+            "triton.decompose_k_min_output_tile_size": 0,
             "max_autotune_gemm_search_space": "DEFAULT",
         }
     )
