@@ -220,7 +220,7 @@ def _autocast_off():
             # into the artifact, which is not this module.
             _logging.getLogger("torch._precompile_driver").warning(
                 "precompile: this build reports autocast enabled on device(s) %s but "
-                "cannot construct the disable for them (a device module registered "
+                "cannot construct the disable for them (e.g. a device module registered "
                 "without get_amp_supported_dtype), so their autocast is left ON for this "
                 "served call: it casts a second time on top of the casts already "
                 "baked into the artifact and returns a different dtype than the "
