@@ -44,7 +44,7 @@ def _resolve_reduce_op_str(
         )
     reduce_op = _get_attr(gm, arg.target)  # type: ignore[arg-type]
     if isinstance(reduce_op, torch.ScriptObject):
-        reduce_op = dist.ReduceOp.RedOpType(reduce_op.op())  # type: ignore[attr-defined]
+        reduce_op = dist.ReduceOp.unbox(reduce_op).op
     return REDUCE_OP_TO_STR[reduce_op]
 
 
@@ -221,6 +221,14 @@ def _functionalize_inplace_collectives(
     for node in list(gm.graph.nodes):
         if node.op != "call_function":
             continue
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and node.target.namespace == "c10d"
+            and node.target._overloadname == "config"
+        ):
+            raise NotImplementedError(
+                "per-collective configuration is not supported while tracing"
+            )
         rewrite = rewrites.get(node.target, None)
         if rewrite is None:
             continue

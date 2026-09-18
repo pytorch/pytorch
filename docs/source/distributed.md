@@ -212,6 +212,37 @@ You can tune NCCL communicators even further using `torch.distributed.ProcessGro
 and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
+(nccl-collective-config)=
+
+### Per-collective NCCL configuration
+
+The `nccl2` backend accepts a keyword-only `config` on supported collective
+functions. This requires NCCL 2.31 or later and
+[nccl4py](https://pypi.org/project/nccl4py/) 0.5.0 or later:
+
+```python
+from nccl.core import NCCLCollConfig
+import torch.distributed as dist
+
+dist.init_process_group("nccl2")
+config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
+dist.all_reduce(tensor, config=config)
+```
+
+Unset fields inherit NCCL's defaults or the communicator configuration.
+Use the same configuration on every participating rank. NCCL validates it
+locally; mismatched configurations can hang. Configurations within one NCCL
+group must also agree on `cga_cluster_size`.
+
+The argument is supported by `broadcast`, `all_reduce`, `all_reduce_coalesced`,
+`reduce`, `all_gather`, `all_gather_single`, `all_gather_coalesced`,
+`gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
+`all_to_all_single`, including their aliases. For `all_to_all_single`, omit
+the split-size lists to use equal splits. Other backends, tracing, the
+coalescing manager, and time estimation reject non-`None` configurations.
+External NCCL group scopes are unsupported.
+Passing `None` preserves existing behavior and does not require nccl4py.
+
 (distributed-basics)=
 
 ## Basics

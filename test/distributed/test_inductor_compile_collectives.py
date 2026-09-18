@@ -110,6 +110,19 @@ def forward(self, t_1):
         x = torch.arange(4, dtype=torch.float32)
         self.assertEqual(gm(x), _f(x))
 
+    def test_functionalize_rejects_collective_config(self):
+        gm = _make_fx_with_allreduce()
+        node = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.c10d.allreduce_.default
+        )[0]
+        node.target = torch.ops.c10d.allreduce_.config
+        node.kwargs = {"config": "test"}
+        with self.assertRaisesRegex(
+            NotImplementedError, "configuration is not supported while tracing"
+        ):
+            _functionalize_inplace_collectives(gm)
+        self.assertEqual(node.target, torch.ops.c10d.allreduce_.config)
+
     def test_post_pass_gm_deepcopy(self):
         # After functionalize + unbox the gm holds a Python ``dist.ProcessGroup``
         # — still not pickleable, but ``_share_torchbind_and_process_group_on_deepcopy()``

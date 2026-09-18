@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import gc
+import inspect
 import os
 import weakref
 from datetime import timedelta
@@ -11,9 +13,57 @@ from torch._C._distributed_c10d import (
     ErrorType,
     ReconfigureOptions,
 )
-from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.distributed_c10d import (
+    _coalescing_manager,
+    _get_default_group,
+    _time_estimator,
+    _world,
+)
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+
+_CONFIG_COLLECTIVES = {
+    "broadcast": "broadcast",
+    "all_reduce": "allreduce",
+    "all_reduce_coalesced": "allreduce_coalesced",
+    "reduce": "reduce",
+    "all_gather": "allgather",
+    "all_gather_single": "all_gather_single",
+    "all_gather_into_tensor": "all_gather_single",
+    "_all_gather_base": "all_gather_single",
+    "all_gather_coalesced": "allgather_coalesced",
+    "gather_single": "gather_single",
+    "gather_into_tensor": "gather_single",
+    "reduce_scatter": "reduce_scatter",
+    "reduce_scatter_single": "reduce_scatter_single",
+    "reduce_scatter_tensor": "reduce_scatter_single",
+    "_reduce_scatter_base": "reduce_scatter_single",
+    "all_to_all_single": "all_to_all_single",
+}
+
+
+def _collective_inputs(name):
+    tensor = torch.ones(2)
+    output = torch.empty_like(tensor)
+    return {
+        "broadcast": ((tensor,), {"group_src": 0}),
+        "allreduce": ((tensor,), {"op": dist.ReduceOp.SUM}),
+        "allreduce_coalesced": (([tensor],), {"op": dist.ReduceOp.SUM}),
+        "reduce": ((tensor,), {"group_dst": 0, "op": dist.ReduceOp.SUM}),
+        "allgather": (([output], tensor), {}),
+        "all_gather_single": ((output, tensor), {}),
+        "allgather_coalesced": (([[output]], [tensor]), {}),
+        "gather_single": ((tensor, output), {"group_dst": 0}),
+        "reduce_scatter": ((output, [tensor]), {"op": dist.ReduceOp.SUM}),
+        "reduce_scatter_single": ((output, tensor), {"op": dist.ReduceOp.SUM}),
+        "all_to_all_single": ((output, tensor), {}),
+    }[_CONFIG_COLLECTIVES[name]]
 
 
 class RecordingWork(dist._Work):
@@ -24,7 +74,7 @@ class RecordingWork(dist._Work):
         self.future_.set_result(result)
         self.backend_ = weakref.ref(backend)
 
-    def wait(self, timeout):
+    def wait(self, timeout=timedelta(0)):
         self.backend_().wait_count += 1
         return True
 
@@ -182,6 +232,12 @@ class RecordingBackend(C10DBackend):
                 output.copy_(input)
         return self._new_work(output_tensors)
 
+    def gather_single(self, output_tensor, input_tensor, opts):
+        self.calls.append(("gather_single", opts))
+        if self.rank() == opts.rootRank:
+            output_tensor.copy_(input_tensor)
+        return self._new_work(output_tensor)
+
     def scatter(self, output_tensors, input_tensors, opts):
         self.calls.append(("scatter", opts))
         if input_tensors:
@@ -310,32 +366,182 @@ def create_process_group(backend):
     return group
 
 
+@instantiate_parametrized_tests
 class TestPyBackend(TestCase):
-    def test_collective_config(self) -> None:
+    @parametrize("name", _CONFIG_COLLECTIVES)
+    @parametrize("async_op", [False, True])
+    @parametrize("config_kind", ["omitted", "none", "object"])
+    def test_collective_config(self, name, async_op, config_kind) -> None:
+        backend = RecordingBackend(0, 1, "nccl2")
+        # PyBackend has no gather_single trampoline; test Python forwarding directly.
+        group = (
+            backend
+            if _CONFIG_COLLECTIVES[name] == "gather_single"
+            else create_process_group(backend)
+        )
+        config = object() if config_kind == "object" else None
+        args, kwargs = _collective_inputs(name)
+        if config_kind != "omitted":
+            kwargs["config"] = config
+        result = getattr(dist, name)(*args, group=group, async_op=async_op, **kwargs)
+        self.assertEqual(
+            [call[0] for call in backend.calls], [_CONFIG_COLLECTIVES[name]]
+        )
+        opts = backend.calls[0][-1]
+        self.assertIs(opts.config, config)
+        self.assertEqual(opts.asyncOp, async_op)
+        if "op" in kwargs:
+            self.assertEqual(opts.reduceOp, kwargs["op"])
+        if "group_src" in kwargs or "group_dst" in kwargs:
+            self.assertEqual(opts.rootRank, 0)
+        self.assertEqual(backend.wait_count, int(not async_op))
+        if not async_op:
+            self.assertIsNone(result)
+            return
+        if name in ("all_reduce_coalesced", "all_gather_coalesced"):
+            self.assertIsInstance(result, torch.Future)
+            self.assertEqual(backend.get_future_count, 1)
+        else:
+            self.assertIsInstance(result, dist.Work)
+        result.wait()
+
+    @parametrize("name", _CONFIG_COLLECTIVES)
+    def test_collective_config_unsupported_backend(self, name) -> None:
         backend = RecordingBackend(0, 1)
+        group = create_process_group(backend)
+        args, kwargs = _collective_inputs(name)
+        with self.assertRaisesRegex(
+            RuntimeError, "only supported by the nccl2 backend"
+        ):
+            getattr(dist, name)(*args, group=group, config=object(), **kwargs)
+        self.assertEqual(backend.calls, [])
+
+    def test_collective_config_selected_backend(self) -> None:
+        cpu_backend = RecordingBackend(0, 1)
+        cuda_backend = RecordingBackend(0, 1, "nccl2")
+        group = create_process_group(cpu_backend)
+        group._register_backend(
+            torch.device("cuda"), dist.ProcessGroup.BackendType.NCCL, cuda_backend
+        )
+        group._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
+        with self.assertRaisesRegex(
+            RuntimeError, "only supported by the nccl2 backend"
+        ):
+            dist.all_reduce(torch.ones(2), group=group, config=object())
+        self.assertEqual(cpu_backend.calls, [])
+        self.assertEqual(cuda_backend.calls, [])
+
+    def test_collective_config_compile_fallback(self) -> None:
+        backend = RecordingBackend(0, 1, "nccl2")
         group = create_process_group(backend)
         config = object()
 
+        def fn(tensor):
+            output = tensor.clone()
+            dist.all_reduce(output, group=group, config=config)
+            return output + 1
+
+        result = torch.compile(fn, backend="eager")(torch.zeros(2))
+        self.assertEqual(result, torch.full((2,), 3.0))
+        self.assertEqual([call[0] for call in backend.calls], ["allreduce"])
+        self.assertIs(backend.calls[0][-1].config, config)
+
+    @parametrize("name", _CONFIG_COLLECTIVES)
+    @parametrize("config_kind", ["omitted", "none", "object"])
+    def test_collective_config_torch_function(self, name, config_kind) -> None:
+        config = object() if config_kind == "object" else None
+        calls = []
+
+        class Mode(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                calls.append(kwargs)
+                return None
+
+        args, kwargs = _collective_inputs(name)
+        if config_kind != "omitted":
+            kwargs["config"] = config
+        with Mode():
+            getattr(dist, name)(*args, **kwargs)
+        self.assertEqual(len(calls), 1)
+        if config is None:
+            self.assertNotIn("config", calls[0])
+        else:
+            self.assertIs(calls[0]["config"], config)
+
+    @parametrize("name", _CONFIG_COLLECTIVES)
+    def test_collective_config_keyword_only(self, name) -> None:
+        param = inspect.signature(getattr(dist, name)).parameters["config"]
+        self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIsNone(param.default)
+
+    @parametrize(
+        "options",
+        [
+            "BroadcastOptions",
+            "AllreduceOptions",
+            "AllreduceCoalescedOptions",
+            "ReduceOptions",
+            "AllgatherOptions",
+            "GatherOptions",
+            "ReduceScatterOptions",
+            "AllToAllOptions",
+        ],
+    )
+    def test_collective_config_lifetime(self, options) -> None:
+        class Config:
+            pass
+
+        opts = getattr(torch._C._distributed_c10d, options)()
+        self.assertIsNone(opts.config)
+        config = Config()
+        ref = weakref.ref(config)
+        opts.config = config
+        self.assertIs(opts.config, config)
+        del config
+        gc.collect()
+        self.assertIsNotNone(ref())
+        opts.config = None
+        gc.collect()
+        self.assertIsNone(opts.config)
+        self.assertIsNone(ref())
+
+    @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
+    @parametrize("device", [None, torch.device("cpu")])
+    @parametrize("pending", [False, True])
+    def test_collective_config_coalescing(self, name, device, pending) -> None:
+        backend = RecordingBackend(0, 1, "nccl2")
+        group = create_process_group(backend)
+        args, kwargs = _collective_inputs(name)
+        collective = getattr(dist, name)
+        with self.assertRaisesRegex(
+            NotImplementedError, "configuration is not supported with coalescing"
+        ):
+            with _coalescing_manager(group, device):
+                if pending:
+                    collective(*args, group=group, **kwargs)
+                collective(*args, group=group, config=object(), **kwargs)
+        self.assertNotIn(group, _world.pg_coalesce_state)
+        self.assertEqual(backend.calls, [])
+        self.assertEqual(backend.start_coalescing_count, int(device is not None))
+        self.assertEqual(backend.end_coalescing_count, int(device is not None))
+        collective(*args, group=group, **kwargs)
+        self.assertEqual(
+            [call[0] for call in backend.calls], [_CONFIG_COLLECTIVES[name]]
+        )
+
+    def test_collective_config_time_estimator_cleanup(self) -> None:
+        backend = RecordingBackend(0, 1, "nccl2")
+        group = create_process_group(backend)
         tensor = torch.zeros(2)
-        dist.all_reduce(tensor, dist.ReduceOp.SUM, group, False, config)
-        dist.all_reduce_coalesced([tensor], group=group, config=config)
-        dist.broadcast(tensor, group=group, group_src=0, config=config)
-        dist.reduce(tensor, group=group, group_dst=0, config=config)
-        dist.all_gather([torch.empty_like(tensor)], tensor, group=group, config=config)
-        dist.all_gather_single(
-            torch.empty_like(tensor), tensor, group=group, config=config
-        )
-        dist.reduce_scatter(
-            torch.empty_like(tensor), [tensor], group=group, config=config
-        )
-        dist.reduce_scatter_single(
-            torch.empty_like(tensor), tensor, group=group, config=config
-        )
-        dist.all_to_all_single(
-            torch.empty_like(tensor), tensor, group=group, config=config
-        )
-        for call in backend.calls:
-            self.assertIs(call[-1].config, config)
+        with self.assertRaisesRegex(NotImplementedError, "during time estimation"):
+            with _time_estimator(group, torch.device("cpu")):
+                self.assertTrue(backend.time_estimate_started)
+                dist.all_reduce(tensor, group=group, config=object())
+        self.assertFalse(backend.time_estimate_started)
+        self.assertEqual(backend.calls, [])
+        dist.all_reduce(tensor, group=group, config=object())
+        self.assertEqual(tensor, torch.full((2,), 2.0))
+        self.assertEqual([call[0] for call in backend.calls], ["allreduce"])
 
     def test_attr_overrides(self) -> None:
         backend = RecordingBackend(0, 1)

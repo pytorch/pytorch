@@ -108,28 +108,31 @@ static bool registered = registerGilChecker();
 
 ::c10d::nccl2::MaterializedCollectiveConfig materializeCollectiveConfig(
     const c10::IValue& config) {
-  TORCH_CHECK(config.isPyObject(), "Collective config must be a Python object");
+  TORCH_CHECK_TYPE(
+      config.isPyObject(), "Collective config must be a Python object");
   pybind11::gil_scoped_acquire gil;
+  py::module_::import("torch.distributed.distributed_c10d")
+      .attr("_grouped_collective_context")
+      .attr("check_config")();
   auto config_obj = py::reinterpret_borrow<py::object>(config.toPyObject());
-  if (!py::hasattr(config_obj, "_to_lowpp")) {
-    throw py::type_error("config must be an nccl4py CollConfig");
-  }
-  auto lowpp = config_obj.attr("_to_lowpp")();
-  if (!py::hasattr(lowpp, "ptr")) {
-    throw py::type_error("config._to_lowpp() must provide ptr");
-  }
-  auto ptr = py::reinterpret_steal<py::object>(
-      PyNumber_Index(lowpp.attr("ptr").ptr()));
-  if (!ptr) {
-    throw py::error_already_set();
-  }
-  void* data = PyLong_AsVoidPtr(ptr.ptr());
-  if (PyErr_Occurred()) {
-    throw py::error_already_set();
-  }
-  TORCH_CHECK(data != nullptr, "config.ptr must be positive");
+  auto nccl_core = py::module_::import("nccl.core.communicator");
+  TORCH_CHECK_TYPE(
+      py::isinstance(config_obj, nccl_core.attr("NCCLCollConfig")),
+      "config must be an nccl.core.NCCLCollConfig");
+  // The tuple owns the native config and its vendor extension chain.
+  auto materialized =
+      nccl_core.attr("_materialize_coll_config")(config_obj).cast<py::tuple>();
+  auto lowpp = materialized[0];
+  auto config_type =
+      py::module_::import("nccl.bindings.nccl").attr("CollConfig");
+  TORCH_CHECK_TYPE(
+      py::isinstance(lowpp, config_type),
+      "config must materialize an nccl.bindings.nccl.CollConfig");
+  auto data = lowpp.attr("ptr").cast<uintptr_t>();
+  TORCH_CHECK(data != 0, "config.ptr must be nonzero");
   return {
-      data, torch::jit::toIValue(std::move(lowpp), c10::PyObjectType::get())};
+      reinterpret_cast<const void*>(data), // NOLINT(performance-no-int-to-ptr)
+      torch::jit::toIValue(std::move(materialized), c10::PyObjectType::get())};
 }
 
 bool registerCollectiveConfigConverter() {
@@ -872,6 +875,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
             return reducer.update_process_group(std::move(new_process_group));
           },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_manual_finalization_required",
+          &::c10d::Reducer::set_manual_finalization_required,
+          py::arg("required"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_should_finalize_after_backward",
+          &::c10d::Reducer::should_finalize_after_backward,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_finalize_backward_manual",
+          &::c10d::Reducer::finalize_backward_manual,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -1061,7 +1077,19 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)");
+          R"(The factor of the PREMUL_SUM ReduceOp.)")
+      .def(
+          "boxed",
+          [](const ::c10d::ReduceOp& self) {
+            return torch::jit::toPyObject(
+                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return *ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -2241,9 +2269,8 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              if (worldSize.value() == 0) {
-                throw py::value_error("TCPStore world size cannot be 0");
-              }
+              TORCH_CHECK_VALUE(
+                  worldSize.value() != 0, "TCPStore world size cannot be 0");
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2306,9 +2333,7 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            if (!store) {
-              throw py::value_error("store argument cannot be None");
-            }
+            TORCH_CHECK_VALUE(store, "store argument cannot be None");
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -3850,8 +3875,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            throw std::invalid_argument(
-                "Specify either `hostname` or `interface` argument.");
+            TORCH_CHECK_VALUE(
+                false, "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",

@@ -1,265 +1,163 @@
 # mypy: allow-untyped-defs
+"""Inductor-owned QuACK GemmConfig search space for FlexGEMM autotuning.
+
+QuACK decides which configs are legal for a generated epilogue; Inductor decides
+which of them are worth benchmarking. The default search space is the measured
+dense FlexGEMM preference order below, in priority order; the EXHAUSTIVE search
+space benchmarks every legal config. Varlen-M (grouped_mm) calls use their own
+measured order and default, since ragged per-group M and per-group B re-reads
+favor smaller tiles than the dense default.
+"""
+
 from __future__ import annotations
 
-from dataclasses import fields
-from functools import cache
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any
 
-import sympy
-
-import torch
-import torch._vendor.quack.gemm_config as quack_gemm_config
-from torch.utils._ordered_set import OrderedSet
+from torch._inductor import config as inductor_config
 
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+QuackConfigKey = tuple[tuple[str, Any], ...]
 
-GemmConfigKey: TypeAlias = tuple[tuple[str, Any], ...]
-
-
-def gemm_config_key(config: quack_gemm_config.GemmConfig) -> GemmConfigKey:
-    """Project a QuACK GEMM config using the dataclass schema as the contract."""
-    return tuple(
-        (field.name, getattr(config, field.name))
-        for field in fields(quack_gemm_config.GemmConfig)
-    )
+# Unranked legal sets (capabilities without a priority list, or constrained calls
+# whose legal set misses it) benchmark at most this many configs.
+_MAX_UNRANKED_CANDIDATES = 12
 
 
-def gemm_config_from_key(config_key: GemmConfigKey) -> quack_gemm_config.GemmConfig:
-    """Reconstruct a QuACK GEMM config from its generated-code cache key."""
-    return quack_gemm_config.GemmConfig(**dict(config_key))
-
-
-def explicit_gemm_configs_for_device(
-    config: dict[str, Any], device: torch.device
-) -> tuple[quack_gemm_config.GemmConfig, ...]:
-    """Return device configs matching every explicitly pinned field.
-
-    Exact type matching prevents bool/int aliases from selecting a different key.
-    """
-    field_names = tuple(field.name for field in fields(quack_gemm_config.GemmConfig))
-    unexpected = [name for name in config if name not in field_names]
-    if unexpected:
-        raise NotImplementedError(
-            "FlexGEMM explicit QUACK config contains unexpected GemmConfig fields: "
-            f"{unexpected}"
-        )
-
-    candidates = candidate_gemm_configs_for_device(device)
-    expected_device_capacity = candidates[0].device_capacity
-    requested_device_capacity = config.get("device_capacity")
-    if (
-        type(requested_device_capacity) is type(expected_device_capacity)
-        and requested_device_capacity != expected_device_capacity
-    ):
-        raise NotImplementedError(
-            f"FlexGEMM explicit QUACK config targets SM{requested_device_capacity}0, "
-            f"but {device} uses SM{expected_device_capacity}0 configs"
-        )
-    matches = tuple(
-        candidate
-        for candidate in candidates
-        if all(
-            type(value) is type(getattr(candidate, name))
-            and value == getattr(candidate, name)
-            for name, value in config.items()
-        )
-    )
-    if matches:
-        return matches
-    raise NotImplementedError(
-        f"FlexGEMM explicit QUACK config constraints are not supported on {device}: "
-        f"{config}"
-    )
-
-
-@cache
-def dense_gemm_config_priority_keys() -> tuple[GemmConfigKey, ...]:
-    """Return the measured dense FlexGEMM QuACK preference order."""
-    configs = (
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=256,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=2,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=192,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=2,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=256,
-            tile_n=256,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=2,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=256,
-            tile_n=256,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=2,
-            cluster_n=2,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=256,
-            tile_n=192,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=2,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=128,
-            pingpong=False,
-            is_dynamic_persistent=False,
-            cluster_m=1,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=256,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=1,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=256,
-            pingpong=False,
-            is_dynamic_persistent=False,
-            cluster_m=1,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=128,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=2,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=256,
-            tile_n=128,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=2,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=224,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=1,
-            device_capacity=10,
-        ),
-        quack_gemm_config.GemmConfig(
-            tile_m=128,
-            tile_n=160,
-            pingpong=False,
-            is_dynamic_persistent=True,
-            cluster_m=1,
-            device_capacity=10,
-        ),
-    )
-    return tuple(gemm_config_key(config) for config in configs)
-
-
-def candidate_gemm_configs_for_device(
-    device: torch.device,
-    device_capacity_override: tuple[int, int] | None = None,
-):
-    """Return device-compatible QuACK configs without requiring CUDA in workers."""
-    device_capacity = (
-        torch.cuda.get_device_capability(device)[0]
-        if device_capacity_override is None
-        else device_capacity_override[0]
-    )
-    if device_capacity == 11:
-        device_capacity = 10
-    priority_map = {
-        key: priority for priority, key in enumerate(dense_gemm_config_priority_keys())
+def _sm100_priority_rank(
+    order: tuple[tuple[int, int, int, int, bool], ...],
+) -> dict[tuple[Any, ...], int]:
+    # Keys are tile M/N, cluster M/N, pingpong, swap_ab, dynamic persistence,
+    # and device capacity.
+    return {
+        (tile_m, tile_n, cluster_m, cluster_n, False, False, dynamic, 10): rank
+        for rank, (tile_m, tile_n, cluster_m, cluster_n, dynamic) in enumerate(order)
     }
-    configs = sorted(
-        (
-            config
-            for config in quack_gemm_config.get_all_configs()
-            if config.device_capacity == device_capacity and not config.use_tma_gather
-        ),
-        key=lambda config: (
-            priority_map.get(gemm_config_key(config), len(priority_map)),
-            config.tile_m,
-            config.tile_n,
-            config.cluster_m,
-            config.cluster_n,
-            int(config.is_dynamic_persistent),
-        ),
+
+
+# Dense FlexGEMM preference order measured on B200 (SM100) with bf16 dense
+# mm epilogues, square M=N=K in 256..1024 (#187108, 2026-06); re-tune there.
+_PRIORITY_RANK = _sm100_priority_rank(
+    (
+        (128, 256, 2, 1, True),
+        (128, 192, 2, 1, True),
+        (256, 256, 2, 1, True),
+        (256, 256, 2, 2, True),
+        (256, 192, 2, 1, True),
+        (128, 128, 1, 1, False),
+        (128, 256, 1, 1, True),
+        (128, 256, 1, 1, False),
+        (128, 128, 2, 1, True),
+        (256, 128, 2, 1, True),
+        (128, 224, 1, 1, True),
+        (128, 160, 1, 1, True),
     )
-    if not configs:
-        raise RuntimeError(
-            f"FlexGEMM found no QuACK configs for CUDA device capability "
-            f"SM{device_capacity}0"
-        )
-    return configs
+)
+
+# Measured varlen-M (grouped_mm) order on SM100 over DeepSeek-V3 16B/671B
+# expert shapes (E in 8..256, balanced and skewed offs); the first entry is
+# the untuned varlen default.
+_VARLEN_PRIORITY_RANK = _sm100_priority_rank(
+    (
+        (128, 128, 2, 1, True),
+        (128, 256, 2, 2, False),
+        (256, 256, 2, 2, False),
+        (128, 128, 2, 1, False),
+    )
+)
 
 
-def default_gemm_config_key(
-    device: torch.device,
-    m,
-    n,
-    configs: Sequence[quack_gemm_config.GemmConfig] | None = None,
-) -> GemmConfigKey:
-    """Return the untuned default QuACK config key for generated code."""
-    configs = candidate_gemm_configs_for_device(device) if configs is None else configs
-    config_keys = OrderedSet([gemm_config_key(config) for config in configs])
-    default_key, skinny_key, large_rect_key, large_key = (
-        dense_gemm_config_priority_keys()[:4]
+def _rank_key(config: QuackConfigKey) -> tuple[Any, ...]:
+    fields = dict(config)
+    return (
+        fields["tile_m"],
+        fields["tile_n"],
+        fields["cluster_m"],
+        fields["cluster_n"],
+        fields["pingpong"],
+        fields["swap_ab"],
+        fields["is_dynamic_persistent"],
+        fields["device_capacity"],
     )
 
-    from torch._inductor.virtualized import V
 
-    guard_or_false = V.graph.sizevars.guard_or_false
-    if guard_or_false(sympy.Le(m, n)):
-        min_dim, max_dim = m, n
-    elif guard_or_false(sympy.Lt(n, m)):
-        min_dim, max_dim = n, m
-    else:
-        return (
-            default_key if default_key in config_keys else gemm_config_key(configs[0])
-        )
+def _priority_rank(config: QuackConfigKey, *, varlen: bool) -> int | None:
+    rank = _VARLEN_PRIORITY_RANK if varlen else _PRIORITY_RANK
+    return rank.get(_rank_key(config))
 
-    if guard_or_false(sympy.Lt(min_dim, 512)):
-        preferred_keys = (skinny_key, default_key)
-    elif guard_or_false(sympy.And(sympy.Eq(min_dim, 1024), sympy.Eq(max_dim, 1024))):
-        preferred_keys = (skinny_key, default_key)
-    elif guard_or_false(
-        sympy.And(
-            sympy.Ge(max_dim, 4096), sympy.Ge(min_dim, 768), sympy.Lt(min_dim, 1024)
-        )
-    ):
-        preferred_keys = (large_key, default_key)
-    elif guard_or_false(sympy.And(sympy.Ge(max_dim, 4096), sympy.Eq(min_dim, 1024))):
-        preferred_keys = (large_rect_key, default_key)
-    elif guard_or_false(sympy.Ge(min_dim, 2048)):
-        preferred_keys = (large_key, default_key)
-    else:
-        preferred_keys = (default_key,)
 
-    for key in preferred_keys:
-        if key in config_keys:
-            return key
-    return gemm_config_key(configs[0])
+# Untuned dense pick by shape hint (same measurement as _PRIORITY_RANK): ranks
+# into _PRIORITY_RANK, tried in order, falling back to QuACK's default.
+_DENSE_DEFAULT, _DENSE_SKINNY, _DENSE_LARGE_RECT, _DENSE_LARGE = range(4)
+
+
+def _dense_default_ranks(m: int, n: int) -> tuple[int, ...]:
+    min_dim, max_dim = min(m, n), max(m, n)
+    if min_dim < 512 or (m == 1024 and n == 1024):
+        return (_DENSE_SKINNY, _DENSE_DEFAULT)
+    if max_dim >= 4096 and 768 <= min_dim < 1024:
+        return (_DENSE_LARGE, _DENSE_DEFAULT)
+    if max_dim >= 4096 and min_dim == 1024:
+        return (_DENSE_LARGE_RECT, _DENSE_DEFAULT)
+    if min_dim >= 2048:
+        return (_DENSE_LARGE, _DENSE_DEFAULT)
+    return (_DENSE_DEFAULT,)
+
+
+def _prioritized(
+    legal_configs: tuple[QuackConfigKey, ...], *, varlen: bool
+) -> list[QuackConfigKey]:
+    ranked = {
+        config: rank
+        for config in legal_configs
+        if (rank := _priority_rank(config, varlen=varlen)) is not None
+    }
+    return sorted(ranked, key=ranked.__getitem__)
+
+
+def flex_gemm_search_space(
+    legal_configs: tuple[QuackConfigKey, ...], *, varlen: bool = False
+) -> tuple[QuackConfigKey, ...]:
+    """Return the legal configs Inductor benchmarks, best-known first.
+
+    ``legal_configs`` comes from QuACK with its untuned default first. The
+    default search space keeps that default plus the measured priority configs;
+    EXHAUSTIVE keeps everything. Legal sets that miss the priority list
+    entirely (other capabilities, or constrained calls such as pinned ``swap_ab``)
+    benchmark QuACK's order, capped at ``_MAX_UNRANKED_CANDIDATES``. Varlen-M
+    calls rank by the grouped_mm order and only add QuACK's dense default when
+    it is measured (it is the slowest common choice for ragged groups).
+    """
+    if inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        return legal_configs
+    prioritized = _prioritized(legal_configs, varlen=varlen)
+    if not prioritized:
+        return legal_configs[:_MAX_UNRANKED_CANDIDATES]
+    default = legal_configs[0]
+    if default not in prioritized and not varlen:
+        prioritized.insert(0, default)
+    return tuple(prioritized)
+
+
+def flex_gemm_default_config(
+    legal_configs: tuple[QuackConfigKey, ...],
+    *,
+    varlen: bool = False,
+    dense_shape: tuple[int, int] | None = None,
+) -> QuackConfigKey:
+    """Return the config pinned when autotuning is off.
+
+    ``dense_shape`` is the ``(M, N)`` optimization hint of a dense call; it picks
+    from the measured dense table without guarding (a different runtime shape
+    still runs a legal config). Varlen-M calls take the best-ranked legal
+    grouped_mm config. Otherwise QuACK's untuned default (``legal_configs[0]``).
+    """
+    if varlen:
+        if prioritized := _prioritized(legal_configs, varlen=True):
+            return prioritized[0]
+        return legal_configs[0]
+    if dense_shape is not None:
+        by_rank = {_PRIORITY_RANK.get(_rank_key(c)): c for c in legal_configs}
+        for rank in _dense_default_ranks(*dense_shape):
+            if (config := by_rank.get(rank)) is not None:
+                return config
+    return legal_configs[0]
