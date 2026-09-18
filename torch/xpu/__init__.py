@@ -1343,6 +1343,7 @@ def memory_usage(device: Device = None) -> float:
     if (
         rc == pyzes.ZE_RESULT_ERROR_NOT_AVAILABLE
         or rc == pyzes.ZE_RESULT_ERROR_UNSUPPORTED_FEATURE
+        or rc == pyzes.ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS
     ):
         raise RuntimeError(
             "GPU memory bandwidth usage querying is not available. Try running with elevated privileges (e.g. sudo)."
