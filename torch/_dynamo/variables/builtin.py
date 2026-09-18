@@ -2519,9 +2519,15 @@ class BuiltinVariable(BaseBuiltinVariable):
         # ref: PyObject_LengthHint (Objects/abstract.c): try __len__, then
         # __length_hint__, falling back to the supplied default for a missing
         # slot, a TypeError raised by the slot, or a NotImplemented result.
-        if kwargs or not (1 <= len(args) <= 2):
+        if kwargs:
+            # `default` is positional-only, so a keyword call is rejected before
+            # any argument count is looked at.  The name matches CPython's.
+            raise_type_error(tx, "_operator.length_hint() takes no keyword arguments")
+        if not args:
+            raise_type_error(tx, "length_hint expected at least 1 argument, got 0")
+        if len(args) > 2:
             raise_type_error(
-                tx, f"length_hint expected 1 or 2 arguments, got {len(args)}"
+                tx, f"length_hint expected at most 2 arguments, got {len(args)}"
             )
         obj = args[0]
         if len(args) == 2:
@@ -2537,7 +2543,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     "to an integer index.",
                     hints=[*graph_break_hints.SUPPORTABLE],
                 )
-            default = ConstantVariable.create(int(pylong_as_ssize_t(tx, default)))
+            default = ConstantVariable.create(pylong_as_ssize_t(tx, default))
         else:
             default = ConstantVariable.create(0)
 
@@ -2561,6 +2567,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             handle_observed_exception(tx)
             return default
 
+        # Like the default, a symbolic hint is specialized so that its type and
+        # range can be checked here instead of at runtime.
+        hint = specialize_symnode(hint)
         if hint.is_python_constant():
             val = hint.as_python_constant()
             if val is NotImplemented:
@@ -2573,11 +2582,11 @@ class BuiltinVariable(BaseBuiltinVariable):
             val = pylong_as_ssize_t(tx, hint)
             if val < 0:
                 raise_value_error(tx, "__length_hint__() should return >= 0")
-            return ConstantVariable.create(int(val))
+            return ConstantVariable.create(val)
 
-        # A non-constant hint (e.g. a symbolic int) cannot be type- or
-        # range-checked at trace time; refuse it rather than return a value
-        # CPython might reject for being negative or out of ssize_t range.
+        # Any other non-constant hint (e.g. a compile-time-only id()) cannot be
+        # type- or range-checked at trace time; refuse it rather than return a
+        # value CPython might reject for being negative or out of ssize_t range.
         hint_type = maybe_get_python_type(hint)
         if not issubclass(hint_type, int):
             raise_type_error(

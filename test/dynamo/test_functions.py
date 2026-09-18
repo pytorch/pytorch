@@ -154,6 +154,67 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
 
 
+class WithLengthHint:
+    def __init__(self, value):
+        self.value = value
+
+    def __length_hint__(self):
+        if type(self.value) is type:
+            raise self.value
+        return self.value
+
+
+class NoHint:
+    pass
+
+
+class LenRaisesTypeError:
+    def __len__(self):
+        raise TypeError
+
+    def __length_hint__(self):
+        return 7
+
+
+class LenRaisesTypeErrorNoHint:
+    def __len__(self):
+        raise TypeError
+
+
+class WithIndex:
+    def __index__(self):
+        return 5
+
+
+class BadIndex:
+    def __index__(self):
+        raise RuntimeError("index failed")
+
+
+def unbound_length_hint(obj):
+    return type(obj).__length_hint__(obj)
+
+
+def deque_length_hints():
+    # (clean, unbound, after-mutation) hints for iter(deque) and
+    # reversed(deque): a deque iterator reports 0 once it raised for a mutated
+    # deque, and `type(it).__length_hint__(it)` must resolve for both types.
+    hints = []
+    for make_iter in (iter, reversed):
+        d = collections.deque([1, 2, 3])
+        it = make_iter(d)
+        hints.append(operator.length_hint(it))
+        hints.append(unbound_length_hint(it))
+        next(it)
+        d.append(4)
+        try:
+            next(it)
+        except RuntimeError:
+            pass
+        hints.append(operator.length_hint(it))
+    return tuple(hints)
+
+
 class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
@@ -4347,106 +4408,67 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
                 self.assertEqual(opt_fn(), fn())
 
-    def test_operator_length_hint(self):
-        class WithLengthHint:
-            def __init__(self, value):
-                self.value = value
-
-            def __length_hint__(self):
-                if type(self.value) is type:
-                    raise self.value
-                return self.value
-
-        class NoHint:
-            pass
-
-        class LenRaisesTypeError:
-            def __len__(self):
-                raise TypeError
-
-            def __length_hint__(self):
-                return 7
-
-        class LenRaisesTypeErrorNoHint:
-            def __len__(self):
-                raise TypeError
-
-        class WithIndex:
-            def __index__(self):
-                return 5
-
-        class BadIndex:
-            def __index__(self):
-                raise RuntimeError("index failed")
-
-        def unbound_length_hint(obj):
-            return type(obj).__length_hint__(obj)
-
-        cases = [
+    @parametrize(
+        "name,call",
+        (
             ("len", lambda: operator.length_hint([], 2)),
             ("iterator", lambda: operator.length_hint(iter([1, 2, 3]))),
             ("hint", lambda: operator.length_hint(WithLengthHint(2))),
             (
-                "not-implemented-falls-back-to-default",
+                "not_implemented_falls_back_to_default",
                 lambda: operator.length_hint(WithLengthHint(NotImplemented), 4),
             ),
             (
-                "type-error-falls-back-to-default",
+                "type_error_falls_back_to_default",
                 lambda: operator.length_hint(WithLengthHint(TypeError), 12),
             ),
-            ("bool-hint-is-int", lambda: operator.length_hint(WithLengthHint(True))),
-            ("non-int-hint", lambda: operator.length_hint(WithLengthHint("abc"))),
-            ("negative-hint", lambda: operator.length_hint(WithLengthHint(-2))),
+            ("non_int_hint", lambda: operator.length_hint(WithLengthHint("abc"))),
+            ("negative_hint", lambda: operator.length_hint(WithLengthHint(-2))),
             (
-                "other-hint-error-propagates",
+                "other_hint_error_propagates",
                 lambda: operator.length_hint(WithLengthHint(LookupError)),
             ),
-            ("bad-default", lambda: operator.length_hint(WithLengthHint(2), "abc")),
+            ("bad_default", lambda: operator.length_hint(WithLengthHint(2), "abc")),
             (
-                "overflowing-default",
+                "overflowing_default",
                 lambda: operator.length_hint(WithLengthHint(2), 2**200),
             ),
             (
-                "index-default",
+                "index_default",
                 lambda: operator.length_hint(WithLengthHint(2), WithIndex()),
             ),
+            ("bad_index_default", lambda: operator.length_hint(NoHint(), BadIndex())),
+            ("overflowing_hint", lambda: operator.length_hint(WithLengthHint(2**200))),
+            ("no_hint", lambda: operator.length_hint(NoHint(), 10)),
             (
-                "bad-index-default",
-                lambda: operator.length_hint(NoHint(), BadIndex()),
-            ),
-            ("overflowing-hint", lambda: operator.length_hint(WithLengthHint(2**200))),
-            ("no-hint", lambda: operator.length_hint(NoHint(), 10)),
-            (
-                "len-type-error-falls-back",
+                "len_type_error_falls_back",
                 lambda: operator.length_hint(LenRaisesTypeError()),
             ),
             (
-                "len-type-error-no-hint-uses-default",
+                "len_type_error_no_hint_uses_default",
                 lambda: operator.length_hint(LenRaisesTypeErrorNoHint(), 10),
             ),
-            ("iterator-bound-hint", lambda: iter([1, 2, 3]).__length_hint__()),
+            ("iterator_bound_hint", lambda: iter([1, 2, 3]).__length_hint__()),
+            ("iterator_unbound_hint", lambda: unbound_length_hint(iter([1, 2, 3]))),
             (
-                "iterator-unbound-hint",
-                lambda: unbound_length_hint(iter([1, 2, 3])),
-            ),
-            (
-                "range-iterator-unbound-hint",
+                "range_iterator_unbound_hint",
                 lambda: unbound_length_hint(iter(range(5))),
             ),
-        ]
+            ("deque_iterator_hints", deque_length_hints),
+            ("too_many_args", lambda: operator.length_hint([], 1, 2)),
+            ("keyword_default", lambda: operator.length_hint([], default=3)),
+        ),
+        name_fn=lambda name, call: name,
+    )
+    def test_operator_length_hint(self, name, call):
+        def fn(x):
+            try:
+                return ("ok", call()), x + 1
+            except Exception as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
 
-        for name, call in cases:
-            with self.subTest(case=name):
-
-                def fn(x):
-                    try:
-                        return ("ok", call()), x + 1
-                    except Exception as e:
-                        return ("raise", type(e).__name__, str(e)), x + 1
-
-                torch._dynamo.reset()
-                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-                self.assertEqual(opt_fn(torch.ones(2)), fn(torch.ones(2)))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(torch.ones(2)), fn(torch.ones(2)), msg=name)
 
     def test_operator_length_hint_type_error_subclass(self):
         # CPython's PyErr_ExceptionMatches catches TypeError subclasses when
@@ -4470,34 +4492,42 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(torch.ones(2))[0], ("raise", "MyTypeError", "boom"))
 
-    def test_operator_length_hint_non_constant_result(self):
-        class SymHint:
-            def __init__(self, value):
-                self.value = value
-
-            def __length_hint__(self):
-                return self.value
-
+    @parametrize("offset", (1, -5))
+    def test_operator_length_hint_symbolic(self, offset):
+        # A symbolic hint and a symbolic default are both specialized, so the
+        # type and range checks run at trace time instead of at runtime.
         def fn(x):
-            return operator.length_hint(SymHint(x.shape[0] - 5)), x + 1
-
-        opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
-        with self.assertRaisesRegex(
-            Unsupported, "length_hint with a non-constant result"
-        ):
-            opt_fn(torch.ones(3))
-
-    def test_operator_length_hint_non_constant_default(self):
-        class NoHint:
-            pass
-
-        def fn(x):
-            # The default is only ever used when the object has no hint, but
-            # PyObject_LengthHint converts it to an ssize_t up front.
-            return operator.length_hint(NoHint(), x.shape[0] - 5), x + 1
+            try:
+                hint = operator.length_hint(WithLengthHint(x.shape[0] + offset))
+                default = operator.length_hint(NoHint(), x.shape[0] + offset)
+                return ("ok", hint, default), x + 1
+            except Exception as e:
+                return ("raise", type(e).__name__, str(e)), x + 1
 
         opt_fn = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
         self.assertEqual(opt_fn(torch.ones(3)), fn(torch.ones(3)))
+
+    def test_operator_length_hint_non_constant(self):
+        # id() of an object created while tracing is a compile-time-only int
+        # that is not a python constant, so neither the hint nor the default
+        # (which PyObject_LengthHint converts to an ssize_t up front) can be
+        # validated here; the default is converted even when it is unused.
+        def hint_fn(x):
+            return operator.length_hint(WithLengthHint(id([1, 2]))), x + 1
+
+        def default_fn(x):
+            return operator.length_hint(NoHint(), id([1, 2])), x + 1
+
+        for fn, gb_type in (
+            (hint_fn, "length_hint with a non-constant result"),
+            (default_fn, "length_hint with a non-constant default"),
+        ):
+            with self.subTest(gb_type=gb_type):
+                opt_fn = torch.compile(
+                    fn, backend="eager", dynamic=True, fullgraph=True
+                )
+                with self.assertRaisesRegex(Unsupported, gb_type):
+                    opt_fn(torch.ones(3))
 
     def test_operator_concat(self):
         for seq_type in (list, tuple):

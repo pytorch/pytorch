@@ -2477,8 +2477,6 @@ class BaseListIteratorVariable(IteratorVariable):
             return ConstantVariable.create(0)
         return ConstantVariable.create(max(len(self.items) - self.index, 0))
 
-    tp_methods = {"__length_hint__": Method(length_hint)}
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
         codegen.add_push_null(
@@ -2492,6 +2490,8 @@ class BaseListIteratorVariable(IteratorVariable):
         codegen.foreach(remaining_items)
         codegen.append_output(create_build_tuple(len(remaining_items)))
         codegen.extend_output(create_call_function(1, False))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
 
 class ListIteratorVariable(BaseListIteratorVariable):
@@ -2534,6 +2534,10 @@ class DequeIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequeiter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1936-L1941
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )
@@ -2570,6 +2574,10 @@ class DequeReverseIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequereviter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2085-L2090
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )

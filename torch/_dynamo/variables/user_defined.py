@@ -1252,14 +1252,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         #
         # `Base.method(instance)` runs Base's C slot, so only an instance whose
         # type is exactly that class may reach here: obj.call_method resolves
-        # from type(obj) and would run a subclass override instead.  The builtin
-        # iterator types are not subclassable, so the type test is exact.
-        if (
-            name == "__length_hint__"
-            and args
-            and isinstance(self.value, type)
-            and self.value.__module__ == "builtins"
-        ):
+        # from type(obj) and would run a subclass override instead.
+        if name == "__length_hint__" and args:
             descriptor = inspect.getattr_static(self.value, name, None)
             if (
                 isinstance(descriptor, types.MethodDescriptorType)
