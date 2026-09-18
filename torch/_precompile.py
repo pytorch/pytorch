@@ -1554,20 +1554,22 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
             "tensor -- on the model for a parameter/buffer, at the call site for a "
             "user input."
         )
-    # is_pinned() DISPATCHES, unlike the three metadata reads above, so unlike them it
-    # can raise, in the two ways an input reaching here can: a functorch-batched tensor
-    # has no batching rule for aten::is_pinned (RuntimeError), and a __torch_dispatch__
-    # subclass that declines the op the documented way -- every handler returning
-    # NotImplemented, as torch.masked.MaskedTensor does for it -- gets a TypeError from
-    # the dispatcher. It stays last so a tensor one of the clauses above describes
-    # better gets that diagnosis, and both raises are swallowed so neither escapes the
-    # public API raw. Swallowing is sound but not because a declining tensor is
-    # unpinned (a vmap-batched view of pinned memory declines the op AND is pinned):
-    # such an input cannot be SHOWN to be pinned here, and it is refused elsewhere on
-    # its own terms -- a batched one by invariant 1, once its compute is traced.
+    # is_pinned() DISPATCHES, unlike the three metadata reads above, so unlike them it can
+    # raise. The types caught are the ways seen so far, not a closed set: no batching rule
+    # for aten::is_pinned on a functorch-batched tensor (RuntimeError), the dispatcher's
+    # TypeError for a __torch_dispatch__ subclass that declines the op the documented way
+    # (every handler returning NotImplemented, as torch.masked.MaskedTensor does), and
+    # UninitializedTensorMixin's ValueError for a lazy module's uninitialized parameter
+    # (its allowlist of tolerated methods omits is_pinned). It stays last so a tensor a
+    # clause above describes better gets that diagnosis, and the raise is swallowed so
+    # none of them escapes the public API raw.
+    # Swallowing is sound but not because a declining tensor is unpinned (a vmap-batched
+    # view of pinned memory declines the op AND is pinned): such an input cannot be SHOWN
+    # to be pinned here, and it is refused elsewhere on its own terms -- a batched one by
+    # invariant 1, once its compute is traced.
     try:
         is_pinned = a.is_pinned()
-    except (RuntimeError, TypeError):
+    except (RuntimeError, TypeError, ValueError):
         is_pinned = False
     if is_pinned:
         raise PrecompileError(
@@ -1989,10 +1991,11 @@ def _capture(
             # rejects it with the same clean PrecompileError a real trace gave,
             # rather than a raw mixed-fake AssertionError. That holds for a
             # REPRESENTABLE closed-over tensor: a quantized or STRIDED-nested one still
-            # dies inside the trace with its own raw error (as it did on a real trace),
-            # since the ops it reaches have no meta kernel. allow_fallback_kernels
-            # defaults to True, which would run a meta-less op in an allowlisted
-            # namespace (aten, prims, quantized, ...) for real on zero-filled
+            # dies inside the trace with its own raw error (as it did on a real trace), in
+            # the meta CONVERSION rather than in an op: make_fx fakeifies that constant for
+            # node metadata and the converter represents neither layout.
+            # allow_fallback_kernels defaults to True, which would run a meta-less op in
+            # an allowlisted namespace (aten, prims, quantized, ...) for real on zero-filled
             # substitutes and bake whatever shape that produced; off, a meta-less op takes
             # the UnsupportedOperatorException path refused below -- unless it is
             # trivially fakeifiable (a mutating op with no returns, for which
@@ -2113,21 +2116,31 @@ def _capture(
                     f"Underlying: {(str(e).splitlines() or [''])[0]}"
                 ) from e
             except AssertionError as e:
+                # The control-flow HOPs assert a ShapeEnv on the mode they trace under,
+                # BEFORE the fake kernel the clause above relabels: an int while_loop carry
+                # (the spelling in its own docstring) takes the proxy path, which
+                # unspecializes it into an unbacked symint, and torch.cond merges differing
+                # int values or output sizes across its branches the same way. Same refusal
+                # as the get_attr check below; only while_loop/cond raise these messages.
+                first = (str(e).splitlines() or [""])[0]
+                if first in (
+                    "Must provide a fake_mode with shape_env.",
+                    "mode.shape_env is None",
+                ):
+                    raise _control_flow_refusal(f"Underlying: {first}") from e
                 # FakeTensorMode declines a small set of device/pinning ops
                 # (aten._pin_memory, aten._resize_output) with a bare
                 # AssertionError("NYI: <op>") instead of UnsupportedOperatorException, so
                 # e.g. the usual "pin if not pinned" idiom in fn escaped raw. It is the
                 # missing-fake-kernel condition wearing a different exception type; give it
                 # that refusal. The prefix match is exact (one raise site reachable inside
-                # make_fx, in fake_impls),
-                # so any AssertionError whose message does not carry that prefix is an
-                # internal bug or fn's own and is re-raised; an fn that itself raises
-                # AssertionError("NYI: ...") is relabeled, an accepted collision.
-                if not str(e).startswith("NYI: "):
+                # make_fx, in fake_impls), so an AssertionError matching neither this
+                # prefix nor the two messages above is an internal bug or fn's own and is
+                # re-raised; an fn that itself raises AssertionError("NYI: ...") is
+                # relabeled, an accepted collision.
+                if not first.startswith("NYI: "):
                     raise
-                raise _missing_fake_kernel_refusal(
-                    f"Underlying: {(str(e).splitlines() or [''])[0]}"
-                ) from e
+                raise _missing_fake_kernel_refusal(f"Underlying: {first}") from e
             except RuntimeError as e:
                 # Tracing on fake tensors needs a meta/fake kernel for every op, and no
                 # op may read a fake tensor's data pointer. A library op with no kernel
