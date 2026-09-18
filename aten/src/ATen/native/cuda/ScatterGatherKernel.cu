@@ -168,7 +168,7 @@ struct _cuda_scatter_gather_internal_kernel {
          std::is_same_v<scalar_t, c10::Half> || std::is_same_v<scalar_t, c10::BFloat16>)) {
       constexpr size_t element_size = sizeof(scalar_t);
       constexpr size_t alignment = 16;
-      if (at::native::fast_scatter_add_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+      if (at::native::fast_scatter_kernel_eligible<alignment>(iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
         auto slice_size = iter.shape()[0] * element_size;
         auto num_ind = iter.shape()[1];
         auto self_stride_bytes = index_stride * element_size;
@@ -176,7 +176,7 @@ struct _cuda_scatter_gather_internal_kernel {
         if (iter.numel() == 0) return;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
         if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
-          at::native::tma_scatter_add_kernel_launch<scalar_t, index_t>(
+          at::native::tma_scatter_kernel_launch<at::native::ScatterAddOp, scalar_t, index_t>(
               reinterpret_cast<scalar_t*>(self_ptr),
               reinterpret_cast<const scalar_t*>(src_ptr),
               reinterpret_cast<index_t*>(index_ptr),
@@ -185,12 +185,66 @@ struct _cuda_scatter_gather_internal_kernel {
           return;
         }
 #endif
-        at::native::vectorized_scatter_add_kernel_launch<alignment, scalar_t, index_t>(
+        at::native::vectorized_scatter_kernel_launch<
+            at::native::ScatterAddOp, alignment, scalar_t, index_t>(
             reinterpret_cast<scalar_t*>(self_ptr),
             reinterpret_cast<const scalar_t*>(src_ptr),
             reinterpret_cast<index_t*>(index_ptr),
             num_ind, slice_size, index_size,
             self_stride_bytes, src_stride_bytes);
+        return;
+      }
+    }
+#endif
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+    if constexpr (is_scatter_like &&
+        (std::is_same_v<func_t, ReduceMinimum> ||
+         std::is_same_v<func_t, ReduceMaximum>) &&
+        (std::is_same_v<scalar_t, c10::Half> ||
+         std::is_same_v<scalar_t, c10::BFloat16>)) {
+      constexpr size_t element_size = sizeof(scalar_t);
+      constexpr size_t alignment = 16;
+      if (at::native::fast_scatter_kernel_eligible<alignment>(
+              iter, self_ptr, src_ptr, index_stride * element_size, element_size)) {
+        auto slice_size = iter.shape()[0] * element_size;
+        auto num_ind = iter.shape()[1];
+        auto self_stride_bytes = index_stride * element_size;
+        auto src_stride_bytes = iter.strides(1)[1];
+        auto ind_dim_size = index_size;
+        if (iter.numel() == 0) return;
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080
+        if (at::cuda::getCurrentDeviceProperties()->major >= 9) {
+          if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
+            at::native::tma_scatter_kernel_launch<at::native::ScatterMaxOp, scalar_t, index_t>(
+                reinterpret_cast<scalar_t*>(self_ptr),
+                reinterpret_cast<const scalar_t*>(src_ptr),
+                reinterpret_cast<index_t*>(index_ptr), num_ind,
+                static_cast<int>(iter.shape()[0]), ind_dim_size,
+                self_stride_bytes, src_stride_bytes);
+          } else {
+            at::native::tma_scatter_kernel_launch<at::native::ScatterMinOp, scalar_t, index_t>(
+                reinterpret_cast<scalar_t*>(self_ptr),
+                reinterpret_cast<const scalar_t*>(src_ptr),
+                reinterpret_cast<index_t*>(index_ptr), num_ind,
+                static_cast<int>(iter.shape()[0]), ind_dim_size,
+                self_stride_bytes, src_stride_bytes);
+          }
+          return;
+        }
+#endif
+        if constexpr (std::is_same_v<func_t, ReduceMaximum>) {
+          at::native::vectorized_scatter_kernel_launch<at::native::ScatterMaxOp, alignment, scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr), num_ind, slice_size,
+              ind_dim_size, self_stride_bytes, src_stride_bytes);
+        } else {
+          at::native::vectorized_scatter_kernel_launch<at::native::ScatterMinOp, alignment, scalar_t, index_t>(
+              reinterpret_cast<scalar_t*>(self_ptr),
+              reinterpret_cast<const scalar_t*>(src_ptr),
+              reinterpret_cast<index_t*>(index_ptr), num_ind, slice_size,
+              ind_dim_size, self_stride_bytes, src_stride_bytes);
+        }
         return;
       }
     }
@@ -508,6 +562,49 @@ struct cuda_scatter_fill_base_kernel {
         });
       }
     );
+  }
+
+  void operator()(
+    const Tensor& self, int64_t dim,
+    const Tensor& index, Scalar src,
+    const std::string& method_name,
+    const TensorAssign& f
+  ) {
+    at::assert_no_internal_overlap(self);
+
+    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto self_restrided = restride_dim(self, dim, index_sizes);
+
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self_restrided)
+      .add_const_input(index)
+      .build();
+
+    auto index_size = ensure_nonempty_size(self, dim);
+    auto index_stride = ensure_nonempty_stride(self, dim);
+
+    AT_DISPATCH_V2(
+      iter.dtype(),
+      "cuda_scatter_fill_base_kernel_func",
+      AT_WRAP([&] {
+        using dtype = std::conditional_t<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>;
+
+        const auto src_scalar_val = src.to<scalar_t>();
+        const auto src_val = *reinterpret_cast<const dtype*>(&src_scalar_val);
+
+        AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "cuda_scatter_fill_base_kernel_func", [&] () {
+          _cuda_scatter_fill_internal_kernel<dtype, index_t>()(
+            iter, src_val, index_size, index_stride, self.numel(), f
+          );
+        });
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      kHalf, kBool, kBFloat16);
   }
 
   void operator()(
