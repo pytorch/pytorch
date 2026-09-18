@@ -745,7 +745,7 @@ class _TestFP8MatmulMixin:
         self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
 
 
-class TestFP8Matmul(TestCase, _TestFP8MatmulMixin):
+class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -3643,7 +3643,7 @@ class TestFP8MatmulCuda(TestCase, _TestFP8MatmulMixin):
             )
 
 
-instantiate_device_type_tests(TestFP8Matmul, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), only_for=('cuda'))
 
 if __name__ == '__main__':
