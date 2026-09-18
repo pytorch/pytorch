@@ -157,6 +157,37 @@ def _nt_quote_args(args: list[str] | None) -> list[str]:
         return []
     return [f'"{arg}"' if ' ' in arg else arg for arg in args]
 
+def _find_pip_cuda_home() -> str | None:
+    """Locate the CUDA include/lib tree shipped by pip-installed nvidia-*-cuXX wheels.
+
+    torch itself depends on a set of split nvidia-*-cuXX wheels (nvidia-cuda-runtime,
+    nvidia-cuda-cccl, nvidia-cudnn, ...) that all install their files into one shared
+    ``nvidia/cu{major}`` directory under site-packages (e.g. for CUDA 13:
+    ``.../site-packages/nvidia/cu13/``, imported as the ``nvidia.cu13`` namespace
+    package). When no full CUDA toolkit is installed -- e.g. a minimal "pip install
+    torch only" environment with no ``nvcc`` on PATH and no ``/usr/local/cuda`` -- that
+    directory (``.../nvidia/cu13/``, the namespace package's root: the directory itself,
+    not any one wheel's contents) is still a usable CUDA_HOME. It has
+    ``.../nvidia/cu13/include/`` (runtime + CCCL headers, including the ``nv/target``
+    header that ``cuda_fp16.h`` needs) and ``.../nvidia/cu13/lib/`` (the runtime .so's,
+    e.g. ``libcudart.so.13``, already loaded by ``torch`` itself at import time) -- just
+    no compiler. Use ``importlib.util.find_spec`` so this doesn't require actually
+    importing anything.
+    """
+    cuda_version = torch.version.cuda
+    if not cuda_version:
+        return None
+    major = cuda_version.split('.')[0]
+    spec = importlib.util.find_spec(f'nvidia.cu{major}')
+    if spec is None:
+        return None
+    if spec.origin is not None:
+        return str(Path(spec.origin).parent.resolve())
+    if spec.submodule_search_locations:
+        return str(Path(next(iter(spec.submodule_search_locations))).resolve())
+    return None
+
+
 def _find_cuda_home() -> str | None:
     """Find the CUDA install path."""
     # Guess #1
@@ -167,18 +198,22 @@ def _find_cuda_home() -> str | None:
         if nvcc_path is not None:
             cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
         else:
-            # Guess #3
-            if IS_WINDOWS:
-                cuda_homes = glob.glob(
-                    'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
-                if len(cuda_homes) == 0:
-                    cuda_home = ''
+            # Guess #3: pip-installed nvidia-*-cuXX wheels (no nvcc/toolkit, but the
+            # headers and runtime libraries torch itself already depends on are there).
+            cuda_home = _find_pip_cuda_home()
+            if cuda_home is None:
+                # Guess #4
+                if IS_WINDOWS:
+                    cuda_homes = glob.glob(
+                        'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
+                    if len(cuda_homes) == 0:
+                        cuda_home = ''
+                    else:
+                        cuda_home = cuda_homes[0]
                 else:
-                    cuda_home = cuda_homes[0]
-            else:
-                cuda_home = '/usr/local/cuda'
-            if not os.path.exists(cuda_home):
-                cuda_home = None
+                    cuda_home = '/usr/local/cuda'
+                if not os.path.exists(cuda_home):
+                    cuda_home = None
     if cuda_home and not torch.cuda.is_available():
         logger.warning("No CUDA runtime is found, using CUDA_HOME='%s'", cuda_home)
     return cuda_home
@@ -1814,6 +1849,22 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
             paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
+
+        # Always also probe torch's own pip nvidia-*-cuXX dependency, even when
+        # CUDA_HOME resolved to somewhere else -- e.g. a vendored toolchain
+        # directory (bundled compiler/binaries only, kept complete for its own
+        # purposes but not necessarily a full CUDA header set) that a build
+        # script points CUDA_HOME at so a bundled compiler can be found. Unlike
+        # the CUDA_HOME fallback in _find_cuda_home(), this runs unconditionally
+        # so it also fills header gaps in an explicitly-set, incomplete
+        # CUDA_HOME instead of only covering the case where CUDA_HOME is unset
+        # entirely. Note this always uses the nvidia/cu{major} matching
+        # torch.version.cuda, so it can't introduce a mismatched-CUDA-version
+        # header even if CUDA_HOME itself points at a different install.
+        if (pip_cuda_home := _find_pip_cuda_home()) is not None:
+            pip_cuda_include = os.path.join(pip_cuda_home, 'include')
+            if pip_cuda_include not in paths:
+                paths.append(pip_cuda_include)
     elif device_type == "xpu":
         paths.append(_join_sycl_home('include'))
         paths.append(_join_sycl_home('include', 'sycl'))
