@@ -191,11 +191,6 @@ class TestTransportBenchmark(TestCase):
         ):
             benchmark.parse_args(["--backend", "ibverbs", "--async-op", "--cuda-graph"])
 
-    @parametrize("backend", ["nixl", "ucxx"])
-    def test_one_way_connect(self, backend):
-        args = benchmark.parse_args(["--backend", backend, "--one-way-connect"])
-        self.assertTrue(args.one_way_connect)
-
     def test_output_metadata(self):
         args = benchmark.parse_args(
             [

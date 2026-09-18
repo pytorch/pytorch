@@ -205,8 +205,8 @@ index_select_add(
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<data_t>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -383,8 +383,8 @@ index_select_add(const Tensor &select_indices,
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<float>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -570,8 +570,8 @@ index_select_scale_add(
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<data_t>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -759,8 +759,8 @@ index_select_scale_add(const Tensor &select_indices,
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
-    auto src_contig = src.contiguous();
-    auto* src_data = src_contig.const_data_ptr<float>();
+    auto src_contig = src.expect_contiguous();
+    auto* src_data = src_contig->const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
     auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
@@ -1038,10 +1038,9 @@ static Tensor apply_bag_size(
     Tensor &output,
     const Tensor &bag_size) {
   if (mode == EmbeddingBagMode::MEAN) {
-    auto bag_size_ = at::max(bag_size, at::ones_like(bag_size, LEGACY_CONTIGUOUS_MEMORY_FORMAT))
+    auto bag_size_ = bag_size.clamp_min(1)
                          .to(output.options())
-                         .unsqueeze(1)
-                         .expand_as(output);
+                         .unsqueeze(1);
     output /= bag_size_;
   }
   return output;
