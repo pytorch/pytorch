@@ -17,7 +17,6 @@
 #include <ATen/ops/log_sigmoid_forward_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
-#include <ATen/ops/relu_native.h>
 #include <ATen/ops/rsub.h>
 #include <ATen/ops/sigmoid.h>
 #include <ATen/ops/sigmoid_backward_native.h>
@@ -35,25 +34,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/ActivationKernel_metallib.h>
 #endif
-
-Tensor relu_mps(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
-  auto output = at::empty_like(self);
-  if (output.numel() == 0)
-    return output;
-  auto iter = at::TensorIteratorConfig().add_output(output).add_const_input(self).build();
-  lib.exec_unary_kernel(iter, "relu");
-  return output;
-}
-
-Tensor& relu_mps_(Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
-  if (self.numel() == 0)
-    return self;
-  auto iter = at::TensorIteratorConfig().add_output(self).add_const_input(self).set_check_mem_overlap(false).build();
-  lib.exec_unary_kernel(iter, "relu");
-  return self;
-}
 
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
   lib.exec_unary_kernel(iter, "hardshrink", lambda);
@@ -159,6 +139,14 @@ static void gelu_backward_kernel(TensorIteratorBase& iter, GeluType approximate)
 
 static void sigmoid_backward_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "sigmoid_backward");
+}
+
+static void tanh_backward_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "tanh_backward");
+}
+
+static void logit_backward_kernel(TensorIteratorBase& iter, const Scalar& eps) {
+  lib.exec_binary_kernel(iter, "logit_backward", eps);
 }
 
 // Collapse a tensor around the split dim into [outer, 2*L], where
@@ -359,5 +347,7 @@ REGISTER_DISPATCH(mish_backward_stub, mish_backward_kernel);
 REGISTER_DISPATCH(GeluKernel, gelu_kernel);
 REGISTER_DISPATCH(GeluBackwardKernel, gelu_backward_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, sigmoid_backward_kernel);
+REGISTER_DISPATCH(tanh_backward_stub, tanh_backward_kernel);
+REGISTER_DISPATCH(logit_backward_stub, logit_backward_kernel);
 
 } // namespace at::native

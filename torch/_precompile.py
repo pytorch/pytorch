@@ -224,6 +224,7 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
 
 
@@ -994,7 +995,7 @@ _GENERATED_HEADER = """\
 """
 
 
-def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
+def _build_metadata_section(buf: PySourceBuilder, compiled: PrecompiledModule) -> None:
     if compiled._out_spec is None or compiled._in_spec is None:
         raise PrecompileError("internal: cannot build metadata before _compile()")
     # OUT_SPEC is load-bearing: the driver rebuilds fn's output via tree_unflatten, so
@@ -1023,54 +1024,51 @@ def _build_metadata_section(compiled: PrecompiledModule) -> list[str]:
         in_spec_str: str | None = pytree.treespec_dumps(compiled._in_spec)
     except (NotImplementedError, TypeError):
         in_spec_str = None
-    parts = [
-        "# " + "=" * 70,
-        "# 2. Calling-convention metadata",
-        "# " + "=" * 70,
-        "import torch as _torch",
-        "import torch.utils._pytree as _pytree",
-        "",
-        # python_code is the single source of truth for the calling convention; the
-        # cache holds ONLY the compiled/captured artifact. load() reads these
-        # constants back out of python_code (see _parse_artifact_metadata).
-        f"BACKEND = {compiled._backend!r}",
-        f"MODULE_POSITIONS = {compiled._module_positions!r}",
-        # Number of positional args the traced fn took (modules + runtime inputs); the
-        # driver checks the runtime call passes the same count up front, so a wrong
-        # arity raises a clear PrecompileError instead of a raw IndexError.
-        f"NUM_POSITIONAL_ARGS = {compiled._num_positional_args}",
-        f"PARAM_NAMES = {compiled._param_names!r}",
-        f"BUFFER_NAMES = {compiled._buffer_names!r}",
-        # Per interned param / buffer example shape / dtype / device (aligned to
-        # PARAM_NAMES / BUFFER_NAMES); the driver checks each runtime param/buffer against
-        # these for the structural contract (invariant 2).
-        f"PARAM_SHAPES = {compiled._param_shapes!r}",
-        f"BUFFER_SHAPES = {compiled._buffer_shapes!r}",
-        f"PARAM_DTYPES = {compiled._param_dtypes!r}",
-        f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}",
-        f"PARAM_DEVICES = {compiled._param_devices!r}",
-        f"BUFFER_DEVICES = {compiled._buffer_devices!r}",
-        # Which unique-param index each trailing grad output belongs to (see invariant 5);
-        # the driver scatters grad k onto params[GRAD_PARAM_INDICES[k]].
-        f"GRAD_PARAM_INDICES = {compiled._grad_param_indices!r}",
-        # The pytree structure of the runtime inputs, or None if not serializable (the
-        # driver validates against it when present, else skips the structure check).
-        f"IN_SPEC = {in_spec_str!r}",
-        f"OUT_SPEC = {out_spec_str!r}",
-        # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
-        # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
-        # Memory-format mismatches are caught by the inductor artifact's own
-        # assert_size_stride (pinned on at capture).
-        f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}",
-        f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}",
-        f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}",
-        # Per user-input-leaf mark_unbacked min/max bounds: None for a leaf with no bounded
-        # marked dim, else {dim: (lo, hi)} (either may be None). The drivers reject a
-        # runtime size outside the declared range (invariant 3); see the inlined drivers.
-        f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}",
-        "",
-    ]
-    return parts
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 2. Calling-convention metadata")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("import torch as _torch")
+    buf.writeline("import torch.utils._pytree as _pytree")
+    buf.writeline("")
+    # python_code is the single source of truth for the calling convention; the
+    # cache holds ONLY the compiled/captured artifact. load() reads these
+    # constants back out of python_code (see _parse_artifact_metadata).
+    buf.writeline(f"BACKEND = {compiled._backend!r}")
+    buf.writeline(f"MODULE_POSITIONS = {compiled._module_positions!r}")
+    # Number of positional args the traced fn took (modules + runtime inputs); the
+    # driver checks the runtime call passes the same count up front, so a wrong
+    # arity raises a clear PrecompileError instead of a raw IndexError.
+    buf.writeline(f"NUM_POSITIONAL_ARGS = {compiled._num_positional_args}")
+    buf.writeline(f"PARAM_NAMES = {compiled._param_names!r}")
+    buf.writeline(f"BUFFER_NAMES = {compiled._buffer_names!r}")
+    # Per interned param / buffer example shape / dtype / device (aligned to
+    # PARAM_NAMES / BUFFER_NAMES); the driver checks each runtime param/buffer against
+    # these for the structural contract (invariant 2).
+    buf.writeline(f"PARAM_SHAPES = {compiled._param_shapes!r}")
+    buf.writeline(f"BUFFER_SHAPES = {compiled._buffer_shapes!r}")
+    buf.writeline(f"PARAM_DTYPES = {compiled._param_dtypes!r}")
+    buf.writeline(f"BUFFER_DTYPES = {compiled._buffer_dtypes!r}")
+    buf.writeline(f"PARAM_DEVICES = {compiled._param_devices!r}")
+    buf.writeline(f"BUFFER_DEVICES = {compiled._buffer_devices!r}")
+    # Which unique-param index each trailing grad output belongs to (see invariant 5);
+    # the driver scatters grad k onto params[GRAD_PARAM_INDICES[k]].
+    buf.writeline(f"GRAD_PARAM_INDICES = {compiled._grad_param_indices!r}")
+    # The pytree structure of the runtime inputs, or None if not serializable (the
+    # driver validates against it when present, else skips the structure check).
+    buf.writeline(f"IN_SPEC = {in_spec_str!r}")
+    buf.writeline(f"OUT_SPEC = {out_spec_str!r}")
+    # Per user-input-leaf example shape / dtype / device (None for a non-tensor /
+    # subclass leaf); the drivers reject a runtime mismatch (invariants 3 and 6).
+    # Memory-format mismatches are caught by the inductor artifact's own
+    # assert_size_stride (pinned on at capture).
+    buf.writeline(f"USER_INPUT_SHAPES = {compiled._user_input_shapes!r}")
+    buf.writeline(f"USER_INPUT_DTYPES = {compiled._user_input_dtypes!r}")
+    buf.writeline(f"USER_INPUT_DEVICES = {compiled._user_input_devices!r}")
+    # Per user-input-leaf mark_unbacked min/max bounds: None for a leaf with no bounded
+    # marked dim, else {dim: (lo, hi)} (either may be None). The drivers reject a
+    # runtime size outside the declared range (invariant 3); see the inlined drivers.
+    buf.writeline(f"USER_INPUT_BOUNDS = {compiled._user_input_bounds!r}")
+    buf.writeline("")
 
 
 def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
@@ -1144,23 +1142,27 @@ def _build_python_source(
     compiled: PrecompiledModule,
     graph_python: str,
 ) -> str:
-    parts = [_GENERATED_HEADER, ""]
-    parts.append("# " + "=" * 70)
-    parts.append("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
-    parts.append("# " + "=" * 70)
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    buf = PySourceBuilder()
+    buf.writeline(_GENERATED_HEADER)
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. Compiled graph (AOTAutograd + Inductor): exposes ``call``")
+    buf.writeline("# " + "=" * 70)
     # The composed graph module from aot_autograd.compile_to_python: the inlined
     # Inductor kernels plus AOTAutograd's codegen'd prelude/epilogue, exposing
     # ``call(flat_inputs) -> outputs`` (subclass + mutation handled inside).
-    parts.append(graph_python)
-    parts.append("")
-    parts.extend(_build_metadata_section(compiled))
-    parts.append("# " + "=" * 70)
-    parts.append(
+    buf.writeline(graph_python)
+    buf.writeline("")
+    _build_metadata_section(buf, compiled)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(
         "# 3. Driver: module params/buffers + grad scatter + calling convention"
     )
-    parts.append("# " + "=" * 70)
-    parts.append(_emit_driver_source("_inductor_forward"))
-    return "\n".join(parts)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_driver_source("_inductor_forward"))
+    return buf.getvalue()
 
 
 _EAGER_GENERATED_HEADER = """\
@@ -1193,10 +1195,14 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     graph_src = gm.code.replace("def forward(", "def _graph_forward(", 1)
     in_spec_str = pytree.treespec_dumps(in_spec)
     out_spec_str = pytree.treespec_dumps(out_spec)
-    parts = [_EAGER_GENERATED_HEADER, ""]
-    parts.append("# " + "=" * 70)
-    parts.append("# 1. Captured ATen graph (eager backend) -- executable and readable")
-    parts.append("# " + "=" * 70)
+    from torch._functorch._aot_autograd.codegen import PySourceBuilder
+
+    buf = PySourceBuilder()
+    buf.writeline(_EAGER_GENERATED_HEADER)
+    buf.writeline("")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 1. Captured ATen graph (eager backend) -- executable and readable")
+    buf.writeline("# " + "=" * 70)
     # gm.code relies on fx's custom builtins (torch, device, inf, nan, NoneType,
     # fx_pytree, pytree) being in scope -- fx injects them when a real GraphModule
     # runs. Reproduce the FULL set (not just torch/pytree) so a graph that bakes a
@@ -1205,24 +1211,24 @@ def _build_eager_python_source(compiled: PrecompiledModule) -> str:
     from torch.fx.graph import _custom_builtins
 
     for _cb in _custom_builtins.values():
-        parts.append(_cb.import_str)
-    parts.append(graph_src)
-    parts.append("")
-    parts.append("class _GraphSelf:")
-    parts.append(f"    _in_spec = pytree.treespec_loads({in_spec_str!r})")
-    parts.append(f"    _out_spec = pytree.treespec_loads({out_spec_str!r})")
-    parts.append("")
-    parts.append("")
-    parts.append("def call(args):")
-    parts.append("    out = _graph_forward(_GraphSelf(), list(args))")
-    parts.append("    return list(out) if isinstance(out, (list, tuple)) else [out]")
-    parts.append("")
-    parts.extend(_build_metadata_section(compiled))
-    parts.append("# " + "=" * 70)
-    parts.append("# 3. Driver: run the inlined captured graph eagerly")
-    parts.append("# " + "=" * 70)
-    parts.append(_emit_driver_source("_eager_forward"))
-    return "\n".join(parts)
+        buf.writeline(_cb.import_str)
+    buf.writeline(graph_src)
+    buf.writeline("")
+    buf.writeline("class _GraphSelf:")
+    buf.writeline(f"    _in_spec = pytree.treespec_loads({in_spec_str!r})")
+    buf.writeline(f"    _out_spec = pytree.treespec_loads({out_spec_str!r})")
+    buf.writeline("")
+    buf.writeline("")
+    buf.writeline("def call(args):")
+    buf.writeline("    out = _graph_forward(_GraphSelf(), list(args))")
+    buf.writeline("    return list(out) if isinstance(out, (list, tuple)) else [out]")
+    buf.writeline("")
+    _build_metadata_section(buf, compiled)
+    buf.writeline("# " + "=" * 70)
+    buf.writeline("# 3. Driver: run the inlined captured graph eagerly")
+    buf.writeline("# " + "=" * 70)
+    buf.writeline(_emit_driver_source("_eager_forward"))
+    return buf.getvalue()
 
 
 _DRIVER_MAIN = """\

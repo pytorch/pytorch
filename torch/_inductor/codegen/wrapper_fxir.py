@@ -833,6 +833,9 @@ class FxConverter:
     def _generate_assert_size_stride(self, line: WrapperLine) -> None:
         pass
 
+    def _generate_assert_alignment(self, line: WrapperLine) -> None:
+        pass
+
     def _generate_comment(self, line: WrapperLine) -> None:
         if not isinstance(line, CommentLine):
             raise AssertionError(f"expected CommentLine, got {type(line)}")
