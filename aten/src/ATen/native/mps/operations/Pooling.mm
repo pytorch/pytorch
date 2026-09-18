@@ -523,6 +523,20 @@ static void adaptive_max_pool_out_mps_template(const Tensor& output,
   launch_max_pool_kernel(input, output, indices, params, op_name);
 }
 
+static int64_t pool_backward_num_threads(const Tensor& grad_output, int32_t dims, int32_t pooling_dims) {
+  auto numThreads = grad_output.numel();
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  if (numThreads > 0 && at::globalContext().deterministicAlgorithms()) {
+    for (const auto dim : c10::irange(dims - pooling_dims, dims)) {
+      numThreads /= grad_output.size(dim);
+    }
+  }
+  return numThreads;
+}
+
 static void max_pool_backward_out_mps_template(Tensor& grad_input,
                                                const Tensor& indices,
                                                const Tensor& input,
@@ -530,17 +544,13 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
                                                const int32_t dims,
                                                const int32_t pooling_dims,
                                                const std::string& op_name) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic(op_name);
-
   const auto memory_format = input.suggest_memory_format();
   grad_input.resize_(input.sizes(), memory_format);
   grad_input.fill_(0);
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto numThreads = grad_output.numel();
+  auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims);
   TORCH_CHECK_NOT_IMPLEMENTED(
       canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output) && canUse32BitIndexMath(indices),
       op_name,
@@ -549,6 +559,7 @@ static void max_pool_backward_out_mps_template(Tensor& grad_input,
 
   params.dims = dims;
   params.pooling_dims = pooling_dims;
+  params.grad_output_numel = safe_downcast<int32_t, int64_t>(grad_output.numel());
 
   for (const auto dim : c10::irange(dims)) {
     params.grad_input_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_input.size(dim));
@@ -846,10 +857,6 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
                                                const std::string& op_name) {
   TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
 
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic(op_name);
-
   auto [dims, _, kernel_size, stride, padding, __] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
 
@@ -859,7 +866,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  const auto numThreads = grad_output.numel();
+  auto numThreads = pool_backward_num_threads(grad_output, dims, pooling_dims);
   TORCH_CHECK_NOT_IMPLEMENTED(canUse32BitIndexMath(grad_input) && canUse32BitIndexMath(grad_output),
                               op_name,
                               ": MPS does not support tensors that require 64-bit indexing");
@@ -873,6 +880,7 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   if (divisor_override.has_value()) {
     params.divisor_override = safe_downcast<int32_t, int64_t>(divisor_override.value());
   }
+  params.output_numel = safe_downcast<int32_t, int64_t>(grad_output.numel());
 
   for (const auto dim : c10::irange(dims)) {
     params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(grad_output.size(dim));

@@ -232,23 +232,32 @@ kernel void scatter_reduce_dense(
     constant long& output_dim_size [[buffer(5)]],
     constant long& tid_offset [[buffer(6)]],
     device ErrorMessages* error_buf [[buffer(7)]],
+    constant bool& serial [[buffer(8)]],
     uint thread_index [[thread_position_in_grid]]) {
   const long tid = long(thread_index) + tid_offset;
-  long idx = long(index[tid]);
-  if (idx < 0 || idx >= output_dim_size) {
-    TORCH_REPORT_ERROR(
-        error_buf,
-        "scatter: index ",
-        idx,
-        " is out of bounds for dimension with size ",
-        output_dim_size);
-    return;
+  const long dim_count = serial ? index_dim_size : 1;
+  const long src_idx_base = serial
+      ? (tid / inner_size) * (inner_size * index_dim_size) + (tid % inner_size)
+      : tid;
+
+  for (long dim_pos = 0; dim_pos < dim_count; dim_pos++) {
+    const long src_idx = src_idx_base + dim_pos * inner_size;
+    long idx = long(index[src_idx]);
+    if (idx < 0 || idx >= output_dim_size) {
+      TORCH_REPORT_ERROR(
+          error_buf,
+          "scatter: index ",
+          idx,
+          " is out of bounds for dimension with size ",
+          output_dim_size);
+      return;
+    }
+    const long inner = src_idx % inner_size;
+    const long outer = src_idx / (inner_size * index_dim_size);
+    const long out_offset =
+        outer * (inner_size * output_dim_size) + idx * inner_size + inner;
+    ScatterAtomicApply<T, Op>::apply(output, out_offset, src[src_idx]);
   }
-  const long inner = tid % inner_size;
-  const long outer = tid / (inner_size * index_dim_size);
-  const long out_offset =
-      outer * (inner_size * output_dim_size) + idx * inner_size + inner;
-  ScatterAtomicApply<T, Op>::apply(output, out_offset, src[tid]);
 }
 
 // Strided atomic scatter. Generic for non-contiguous output/src/index.
@@ -265,32 +274,57 @@ kernel void scatter_reduce_strided(
     constant long& dim_size [[buffer(8)]],
     constant long& tid_offset [[buffer(9)]],
     device ErrorMessages* error_buf [[buffer(10)]],
+    constant bool& serial [[buffer(11)]],
     uint thread_index [[thread_position_in_grid]]) {
   const uint ndim = ndim_dim.x;
   const uint dim = ndim_dim.y;
   const long tid = long(thread_index) + tid_offset;
 
   ::metal::array<long, max_ndim> pos;
-  pos_from_thread_index<long>(tid, &pos[0], index_sizes, ndim);
-
-  const long index_offs = offset_from_coord<long>(&pos[0], index_strides, ndim);
-  long idx = long(index[index_offs]);
-  if (idx < 0 || idx >= dim_size) {
-    TORCH_REPORT_ERROR(
-        error_buf,
-        "scatter: index ",
-        idx,
-        " is out of bounds for dimension ",
-        long(dim),
-        " with size ",
-        dim_size);
-    return;
+  if (serial) {
+    // In serial mode, tid enumerates only the coordinates outside `dim` and
+    // each thread loops over every position along `dim`. Decode the outer
+    // coordinates by treating `dim` as size 1 then set `pos[dim]` explicitly
+    // per loop iteration below.
+    long idx_tmp = tid;
+    for (uint i = 0; i < ndim; i++) {
+      if (i == dim) {
+        pos[i] = 0;
+      } else {
+        pos[i] = idx_tmp % index_sizes[i];
+        idx_tmp /= index_sizes[i];
+      }
+    }
+  } else {
+    pos_from_thread_index<long>(tid, &pos[0], index_sizes, ndim);
   }
 
-  const long src_offs = offset_from_coord<long>(&pos[0], src_strides, ndim);
-  pos[dim] = idx;
-  const long out_offs = offset_from_coord<long>(&pos[0], output_strides, ndim);
-  ScatterAtomicApply<T, Op>::apply(output, out_offs, src[src_offs]);
+  const long dim_count = serial ? index_sizes[dim] : 1;
+  for (long dim_pos = 0; dim_pos < dim_count; dim_pos++) {
+    if (serial) {
+      pos[dim] = dim_pos;
+    }
+    const long index_offs =
+        offset_from_coord<long>(&pos[0], index_strides, ndim);
+    long idx = long(index[index_offs]);
+    if (idx < 0 || idx >= dim_size) {
+      TORCH_REPORT_ERROR(
+          error_buf,
+          "scatter: index ",
+          idx,
+          " is out of bounds for dimension ",
+          long(dim),
+          " with size ",
+          dim_size);
+      return;
+    }
+
+    const long src_offs = offset_from_coord<long>(&pos[0], src_strides, ndim);
+    pos[dim] = idx;
+    const long out_offs =
+        offset_from_coord<long>(&pos[0], output_strides, ndim);
+    ScatterAtomicApply<T, Op>::apply(output, out_offs, src[src_offs]);
+  }
 }
 
 // gather: for each coord in `index` (= output) shape, read input at
@@ -383,6 +417,7 @@ kernel void gather_strided(
           constant long& output_dim_size [[buffer(5)]],                       \
           constant long& tid_offset [[buffer(6)]],                            \
           device ErrorMessages* error_buf [[buffer(7)]],                      \
+          constant bool& serial [[buffer(8)]],                                \
           uint thread_index [[thread_position_in_grid]]);                     \
   template [[host_name("scatter_" #OP "_strided_" #DTYPE                      \
                        "_" #IDXTYPE)]] kernel void                            \
@@ -398,6 +433,7 @@ kernel void gather_strided(
       constant long& dim_size [[buffer(8)]],                                  \
       constant long& tid_offset [[buffer(9)]],                                \
       device ErrorMessages* error_buf [[buffer(10)]],                         \
+      constant bool& serial [[buffer(11)]],                                   \
       uint thread_index [[thread_position_in_grid]])
 
 #define REGISTER_SCATTER_SET_OP(DTYPE, IDXTYPE)                                \

@@ -241,21 +241,23 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/UpSample_metallib.h>
 #endif
 
-// Encode a forward/backward upsample kernel: bind the PSO, the two tensors and
-// the params struct, then launch one thread per output spatial element.
-template <typename params_t>
+// Encode a forward/backward upsample kernel: bind the PSO, the two tensors,
+// the params struct, and any extra args (e.g. the backward kernels' `serial`
+// flag), then launch one thread per job.
+template <typename params_t, typename... ExtraArgs>
 static void dispatch_upsample(const std::string& fname,
                               const Tensor& a,
                               const Tensor& b,
                               const params_t& params,
-                              int64_t njobs) {
+                              int64_t njobs,
+                              ExtraArgs&&... extra_args) {
   auto upsamplePSO = lib.getPipelineStateForFunc(fname);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:upsamplePSO];
-      mtl_setArgs(computeEncoder, a, b, params);
+      mtl_setArgs(computeEncoder, a, b, params, std::forward<ExtraArgs>(extra_args)...);
       mtl_dispatch1DJob(computeEncoder, upsamplePSO, njobs);
     }
   });
@@ -293,16 +295,21 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
     return;
   }
 
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic(fmt::format("upsample_{}_backward", name));
-
   UpsampleParams<N> params(grad_input, grad_output, align_corners, scales);
+
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms();
+  auto njobs = serial ? grad_output.size(0) * grad_output.size(1) : c10::multiply_integers(output_size);
+
   dispatch_upsample(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)),
                     grad_input,
                     grad_output,
                     params,
-                    c10::multiply_integers(output_size));
+                    njobs,
+                    serial);
 }
 
 } // anonymous namespace

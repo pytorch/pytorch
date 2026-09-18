@@ -5262,7 +5262,9 @@ def interpolate(  # noqa: F811
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
-            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+            if (
+                input.device.type != "cpu"
+            ) and torch.are_deterministic_algorithms_enabled():
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -5282,7 +5284,9 @@ def interpolate(  # noqa: F811
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
-            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+            if (
+                input.device.type not in ("cpu", "mps")
+            ) and torch.are_deterministic_algorithms_enabled():
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -5312,7 +5316,9 @@ def interpolate(  # noqa: F811
         if not torch.jit.is_scripting():
             # Select the decomposition during forward so autograd records its
             # deterministic backward. The native CPU backward is deterministic.
-            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+            if (
+                input.device.type not in ("cpu", "mps")
+            ) and torch.are_deterministic_algorithms_enabled():
                 # The decomposition accumulates through deterministic index_put.
                 # Import it lazily: a top-level import creates a cycle, while a
                 # nested import statement is unsupported by TorchScript.

@@ -15244,8 +15244,6 @@ class TestAdvancedIndexing(TestCaseMPS):
                 t.index_put_((idx,), src, accumulate=True)
             with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
                 torch.zeros(3, dtype=dtype, device=device).index_add_(0, idx, src)
-            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
-                torch.zeros(3, dtype=dtype, device=device).scatter_add_(0, idx, src)
         finally:
             torch.use_deterministic_algorithms(False)
 
@@ -15649,74 +15647,181 @@ class TestNondeterministic(TestCaseMPS):
 
     def _case_grid_sampler_2d_backward(self, device):
         input = torch.randn(1, 1, 4, 4, device=device, requires_grad=True)
-        grid = torch.rand(1, 3, 3, 2, device=device) * 2 - 1
+        grid = torch.rand(1, 8, 8, 2, device=device) * 2 - 1
         res = F.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
+
+    def _case_grid_sampler_2d_backward_nearest(self, device):
+        input = torch.randn(1, 1, 4, 4, device=device, requires_grad=True)
+        grid = torch.rand(1, 8, 8, 2, device=device) * 2 - 1
+        res = F.grid_sample(input, grid, mode="nearest", align_corners=False)
+        grad = torch.ones_like(res)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
+
+    def _case_grid_sampler_2d_backward_bicubic(self, device):
+        input = torch.randn(1, 1, 4, 4, device=device, requires_grad=True)
+        grid = torch.rand(1, 8, 8, 2, device=device) * 2 - 1
+        res = F.grid_sample(input, grid, mode="bicubic", align_corners=False)
+        grad = torch.ones_like(res)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_grid_sampler_3d_backward(self, device):
         input = torch.randn(1, 1, 4, 4, 4, device=device, requires_grad=True)
-        grid = torch.rand(1, 3, 3, 3, 3, device=device) * 2 - 1
+        grid = torch.rand(1, 6, 6, 6, 3, device=device) * 2 - 1
         res = F.grid_sample(input, grid, align_corners=False)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_max_pool3d_backward(self, device):
-        module = torch.nn.MaxPool3d(2)
-        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        module = torch.nn.MaxPool3d(kernel_size=3, stride=1)
+        input = torch.randn(1, 2, 6, 6, 6, device=device)
+        input[:, :, 2, 2, 2] = 100
+        input.requires_grad_(True)
         res = module(input)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_adaptive_max_pool2d_backward(self, device):
-        module = torch.nn.AdaptiveMaxPool2d(2)
-        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        module = torch.nn.AdaptiveMaxPool2d(12)
+        input = torch.randn(1, 2, 3, 3, device=device, requires_grad=True)
         res = module(input)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_avg_pool3d_backward(self, device):
-        module = torch.nn.AvgPool3d(2)
-        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
+        module = torch.nn.AvgPool3d(kernel_size=3, stride=1)
+        input = torch.randn(1, 2, 6, 6, 6, device=device, requires_grad=True)
         res = module(input)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
+
+    def _case_avg_pool2d_backward(self, device):
+        module = torch.nn.AvgPool2d(kernel_size=3, stride=1)
+        input = torch.randn(1, 2, 6, 6, device=device, requires_grad=True)
+        res = module(input)
+        grad = torch.ones_like(res)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_upsample_bilinear2d_aa_backward(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = F.interpolate(input, size=12, mode="bilinear", align_corners=False, antialias=True)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
+
+    def _case_upsample_bicubic2d_aa_backward(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        res = F.interpolate(input, size=12, mode="bicubic", align_corners=False, antialias=True)
+        grad = torch.ones_like(res)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_upsample_bicubic2d_backward(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = F.interpolate(input, size=12, mode="bicubic", align_corners=False)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_upsample_trilinear_backward(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = F.interpolate(input, size=12, mode="trilinear", align_corners=False)
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_upsample_nearest_3d_backward(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = F.interpolate(input, size=12, mode="nearest")
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_upsample_nearest_exact_3d_backward(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = F.interpolate(input, size=12, mode="nearest-exact")
         grad = torch.ones_like(res)
-        return lambda: res.backward(grad)
+
+        def f():
+            res.backward(grad, retain_graph=True)
+            return input.grad
+
+        return f
 
     def _case_scatter_reduce(self, device):
-        src = torch.tensor([1., 2., 3., 4., 5., 6.], device=device)
-        index = torch.tensor([0, 1, 0, 1, 2, 1], device=device)
-        input = torch.tensor([1., 2., 3., 4.], device=device)
+        n = 16
+        src = torch.randn(n, device=device)
+        index = torch.zeros(n, dtype=torch.long, device=device)
+        input = torch.randn(4, device=device)
         return lambda: input.scatter_reduce(0, index, src, reduce="sum")
+
+    def _case_scatter_reduce_strided(self, device):
+        n = 16
+        src = torch.randn(2, n, device=device)
+        index = torch.zeros(2, n, dtype=torch.long, device=device)
+        input = torch.randn(4, 4, device=device)
+        return lambda: input.scatter_reduce(1, index, src, reduce="sum")
 
     def _case_index_put_accumulate(self, device):
         input = torch.randn(10, device=device)
@@ -15725,9 +15830,11 @@ class TestNondeterministic(TestCaseMPS):
         return lambda: input.index_put(indices, values, accumulate=True)
 
     def _case_index_reduce(self, device):
-        input = torch.randn(10, device=device)
-        index = torch.randint(0, 10, (10,), device=device)
-        return lambda: input.index_reduce(0, index, input, reduce='prod')
+        n = 16
+        input = torch.randn(4, device=device)
+        src = torch.randn(n, device=device)
+        index = torch.zeros(n, dtype=torch.long, device=device)
+        return lambda: input.index_reduce(0, index, src, reduce='prod')
 
 
     def _case_kthvalue(self, device):
@@ -15748,42 +15855,8 @@ class TestNondeterministic(TestCaseMPS):
             _case_embedding_bag_per_sample_weights_backward,
             "_embedding_bag_per_sample_weights_backward_mps",
         ),
-        "grid_sampler_2d_backward": (
-            _case_grid_sampler_2d_backward, "grid_sampler_2d_backward_mps"
-        ),
-        "grid_sampler_3d_backward": (
-            _case_grid_sampler_3d_backward, "grid_sampler_3d_backward_mps"
-        ),
-        "max_pool3d_backward": (
-            _case_max_pool3d_backward, "max_pool3d_backward"
-        ),
-        "adaptive_max_pool2d_backward": (
-            _case_adaptive_max_pool2d_backward, "adaptive_max_pool2d_backward"
-        ),
-        "avg_pool3d_backward": (
-            _case_avg_pool3d_backward, "avg_pool3d_backward"
-        ),
-        "upsample_bilinear2d_aa_backward": (
-            _case_upsample_bilinear2d_aa_backward, "upsample_bilinear2d_aa_backward"),
-        "upsample_bicubic2d_backward": (
-            _case_upsample_bicubic2d_backward, "upsample_bicubic2d_backward"
-        ),
-        "upsample_trilinear_backward": (
-            _case_upsample_trilinear_backward, "upsample_trilinear_backward"
-        ),
-        "upsample_nearest_3d_backward": (
-            _case_upsample_nearest_3d_backward, "upsample_nearest_3d_backward"
-        ),
-        "upsample_nearest_exact_3d_backward": (
-            _case_upsample_nearest_exact_3d_backward, "upsample_nearest_exact_3d_backward"),
-        "scatter_reduce": (
-            _case_scatter_reduce, "scatter_reduce_mps"
-        ),
         "index_put_accumulate": (
             _case_index_put_accumulate, "index_put_with_accumulate_mps"
-        ),
-        "index_reduce": (
-            _case_index_reduce, "index_reduce_mps"
         ),
         "kthvalue": (
             _case_kthvalue, "kthvalue MPS"
@@ -15797,6 +15870,47 @@ class TestNondeterministic(TestCaseMPS):
         fn = case_fn(self, device)
         self.check_nondeterministic_alert(fn, caller_name)
 
+    # Maps a test case name to builder method. The builder method must return a
+    # callable which, when called, will exercise the alternative deterministic
+    # implementation of the operator when `use_deterministic_algorithms(True)`.
+    DETERMINISTIC_CASES = {
+        "max_pool3d_backward": _case_max_pool3d_backward,
+        "adaptive_max_pool2d_backward": _case_adaptive_max_pool2d_backward,
+        "grid_sampler_2d_backward": _case_grid_sampler_2d_backward,
+        "grid_sampler_2d_backward_nearest": _case_grid_sampler_2d_backward_nearest,
+        "grid_sampler_2d_backward_bicubic": _case_grid_sampler_2d_backward_bicubic,
+        "grid_sampler_3d_backward": _case_grid_sampler_3d_backward,
+        "avg_pool2d_backward": _case_avg_pool2d_backward,
+        "avg_pool3d_backward": _case_avg_pool3d_backward,
+        "upsample_bilinear2d_aa_backward": _case_upsample_bilinear2d_aa_backward,
+        "upsample_bicubic2d_aa_backward": _case_upsample_bicubic2d_aa_backward,
+        "upsample_bicubic2d_backward": _case_upsample_bicubic2d_backward,
+        "upsample_trilinear_backward": _case_upsample_trilinear_backward,
+        "upsample_nearest_3d_backward": _case_upsample_nearest_3d_backward,
+        "upsample_nearest_exact_3d_backward": _case_upsample_nearest_exact_3d_backward,
+        "scatter_reduce": _case_scatter_reduce,
+        "scatter_reduce_strided": _case_scatter_reduce_strided,
+        "index_reduce": _case_index_reduce,
+    }
+
+    @parametrize("case_name", list(DETERMINISTIC_CASES.keys()))
+    def test_deterministic(self, case_name, device="mps"):
+        case_fn = self.DETERMINISTIC_CASES[case_name]
+        fn = case_fn(self, device)
+        try:
+            torch.use_deterministic_algorithms(True)
+            res = fn()
+            self.assertNotEqual(res, None, "Test case function does not return a value")
+            # Run the case a few times and check for exact same result each time
+            for _ in range(5):
+                res_check = fn()
+                self.assertEqual(res_check, res, atol=0, rtol=0)
+        finally:
+            torch.use_deterministic_algorithms(False)
+
+        # The nondeterministic case should be approximately the same as well
+        res_nondet = fn()
+        self.assertEqual(res_nondet, res)
 
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
