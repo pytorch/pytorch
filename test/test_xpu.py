@@ -3038,8 +3038,8 @@ if __name__ == "__main__":
 )
 class TestXPUMultiprocessing(TestCase):
     @staticmethod
-    def _event_handle_importer_consumer(handle, p2c, c2p):
-        e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+    def _event_handle_importer_consumer(event_cls, handle, p2c, c2p):
+        e1 = event_cls.from_ipc_handle(torch.xpu.current_device(), handle)
         c2p.put(0)  # notify parent child is ready
         p2c.get()  # wait for record in parent
         e1.synchronize()
@@ -3047,10 +3047,10 @@ class TestXPUMultiprocessing(TestCase):
         p2c.get()  # wait for parent to finish
 
     @staticmethod
-    def _event_handle_exporter_consumer(handle, p2c, c2p):
+    def _event_handle_exporter_consumer(event_cls, handle, p2c, c2p):
         stream = torch.xpu.Stream()
         with stream:
-            e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
+            e1 = event_cls.from_ipc_handle(torch.xpu.current_device(), handle)
             torch.xpu._sleep(200_000_000)  # spin for about 200 ms
             e1.record()
             c2p.put(0)
@@ -3064,48 +3064,48 @@ class TestXPUMultiprocessing(TestCase):
         c2p.put(1)  # notify parent synchronization is done
 
     def test_event_handle_importer(self):
-        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
-        self.assertTrue(e0.query())
+        for event_cls in [torch.xpu.Event, torch.Event]:
+            e0 = event_cls(enable_timing=False, interprocess=True)
+            self.assertTrue(e0.query())
+            ctx = mp.get_context("spawn")
+            p2c = ctx.SimpleQueue()
+            c2p = ctx.SimpleQueue()
+            p = ctx.Process(
+                target=TestXPUMultiprocessing._event_handle_importer_consumer,
+                args=(event_cls, e0.ipc_handle(), p2c, c2p),
+            )
+            p.start()
+            c2p.get()  # wait for child to become ready
+            torch.xpu._sleep(200_000_000)  # spin for about 200 ms
+            e0.record()
+            p2c.put(0)  # notify child event is recorded
 
-        ctx = mp.get_context("spawn")
-        p2c = ctx.SimpleQueue()
-        c2p = ctx.SimpleQueue()
-        p = ctx.Process(
-            target=TestXPUMultiprocessing._event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
-        )
-        p.start()
-
-        c2p.get()  # wait for child to become ready
-        torch.xpu._sleep(200_000_000)  # spin for about 200 ms
-        e0.record()
-        p2c.put(0)  # notify child event is recorded
-
-        self.assertFalse(e0.query())
-        c2p.get()  # wait for synchronization in child
-        self.assertTrue(e0.query())
-        p2c.put(1)  # notify child to finish
-        p.join()
+            self.assertFalse(e0.query())
+            c2p.get()  # wait for synchronization in child
+            self.assertTrue(e0.query())
+            p2c.put(1)  # notify child to finish
+            p.join()
 
     def test_event_handle_exporter(self):
-        e0 = torch.xpu.Event(enable_timing=False, interprocess=True)
+        for event_cls in [torch.xpu.Event, torch.Event]:
+            e0 = event_cls(enable_timing=False, interprocess=True)
 
-        ctx = mp.get_context("spawn")
-        p2c = ctx.SimpleQueue()
-        c2p = ctx.SimpleQueue()
-        p = ctx.Process(
-            target=TestXPUMultiprocessing._event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p),
-        )
-        p.start()
+            ctx = mp.get_context("spawn")
+            p2c = ctx.SimpleQueue()
+            c2p = ctx.SimpleQueue()
+            p = ctx.Process(
+                target=TestXPUMultiprocessing._event_handle_exporter_consumer,
+                args=(event_cls, e0.ipc_handle(), p2c, c2p),
+            )
+            p.start()
 
-        c2p.get()  # wait for event in child process is recorded
+            c2p.get()  # wait for event in child process is recorded
 
-        self.assertFalse(e0.query())
-        e0.synchronize()
-        self.assertTrue(e0.query())
-        p2c.put(0)  # notify child to finish
-        p.join()
+            self.assertFalse(e0.query())
+            e0.synchronize()
+            self.assertTrue(e0.query())
+            p2c.put(0)  # notify child to finish
+            p.join()
 
     def test_event_multiprocess(self):
         event = torch.xpu.Event(enable_timing=False, interprocess=True)
