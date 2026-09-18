@@ -133,8 +133,9 @@ it.
 #    False``, so a branch on it bakes the unpinned side). Those three are deliberate
 #    narrowings of both paths, taken because the alternative is a silently wrong artifact
 #    on any backend, and they are applied to a traceable wrapper subclass's INNER tensors
-#    too (a strided-looking wrapper over sparse data would otherwise bake that 0 nnz); ``fn`` calling ``.pin_memory()`` is refused as well, as an op with no
-#    fake kernel. A NESTED tensor is refused too, on BOTH capture paths, but as a
+#    too (a strided-looking wrapper over sparse data would otherwise bake that 0 nnz);
+#    ``fn`` calling ``.pin_memory()`` is refused as well, as an op with no fake
+#    kernel. A NESTED tensor is refused too, on BOTH capture paths, but as a
 #    restriction rather than a claim about fakeification (the unbacked path's ShapeEnv
 #    could fakeify a jagged one; nothing downstream of the trace has a nested
 #    representation) -- and a real trace did not accept a STRIDED nested input either, it
@@ -760,9 +761,10 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     # dispatches). Without this a wrapper over sparse data passes every clause above and
     # then has that inner metadata dropped by the fake conversion exactly as the messages
     # describe, baking a wrong artifact where this function exists to leave none.
-    # Unwrapping rather than refusing wrappers wholesale keeps the subclasses capture does
-    # support (DTensor, MaskedTensor over dense data), and it is the same flattening the
-    # fake conversion performs.
+    # Unwrapping rather than refusing wrappers wholesale keeps DTensor working, and it is
+    # the same flattening the fake conversion performs. It is NOT what keeps MaskedTensor
+    # working: that is not a traceable wrapper subclass, so it never reaches this branch --
+    # the except clause on the is_pinned() probe above is what lets it through.
     if is_traceable_wrapper_subclass(a):
         attrs, _ = a.__tensor_flatten__()
         for name in attrs:
