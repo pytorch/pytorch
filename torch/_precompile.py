@@ -96,14 +96,16 @@ it.
 #    An UNBACKED capture traces under a fake mode IT built, so THAT path -- and only that
 #    path -- also refuses to run inside another trace: an ambient fake mode (a
 #    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
-#    outranks the mode capture built, and no foreign mode passes
+#    outranks the mode capture built, and no enclosing-trace mode passes
 #    ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted namespace would
 #    be run for real again. A mode built under DEFAULT config (an AOTAutograd / inductor
 #    one) lacks the data-ptr snapshot as well, so a ``.data_ptr()`` read would bake 0
 #    rather than raise; a torch.compile / export mode does build under that patch, so for
 #    those two only the fallback setting is lost. A STATIC capture has no mode of its own to
-#    lose (it traces on the real example tensors), so it runs inside another trace as usual.
-#    Call precompile outside the enclosing trace, or capture statically.
+#    lose (it traces on the real example tensors), so the refusal does not apply to it: with
+#    ``backend="eager"`` it captures inside another trace as it does outside one, while the
+#    inductor lowering itself refuses a foreign fake mode ("Mixing fake modes NYI"), a
+#    limitation that predates this note. Call precompile outside the enclosing trace.
 #
 #    You can opt specific user-input dims into being dynamic by marking them with
 #    ``torch._dynamo.decorators.mark_unbacked`` before calling: those dims are
@@ -832,13 +834,13 @@ def _capture(
     # of a precompile kwarg) keeps the precompile signature simple.
     marks = _read_unbacked_marks(user_flat)
     # An UNBACKED capture traces under a fake mode IT built, and an ambient one outranks
-    # that, carrying neither of the two settings _fakeify_with_unbacked gives it (invariant 3 in the
-    # Note has the details), so refuse rather than trace under someone else's contract. The
-    # STATIC path has no mode to lose: make_fx's "real" mode resolves none. Ask
-    # detect_fake_mode -- what make_fx itself resolves through -- so all three sources it
-    # ranks (an ambient TracingContext, the dispatch-mode stack, the inputs) are refused by
+    # that, carrying neither of the two settings _fakeify_with_unbacked gives it (invariant
+    # 3 in the Note has the details), so refuse rather than trace under someone else's
+    # contract. The STATIC path has no mode to lose: make_fx's "real" mode resolves none. Ask
+    # detect_fake_mode -- what make_fx itself resolves through -- so both sources it sees
+    # without arguments (an ambient TracingContext, the dispatch-mode stack) are refused by
     # name here instead of reaching its own mode-mismatch assertion once capture enters its
-    # mode.
+    # mode; a fake tensor handed in as an example input, its third source, is not covered.
     if any(marks) and detect_fake_mode() is not None:
         raise PrecompileError(
             "precompile: unbacked capture cannot run inside another trace -- a "
