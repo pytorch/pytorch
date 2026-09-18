@@ -834,11 +834,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
 # we should fix this too). We still want to get the test signals for the core
 # symmetric memory APIs when Async TP ops fail.
 @skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
-# The first AsyncTPTest case to execute hangs in its subprocess on the gfx950
-# CI distributed runners (whichever test that is), while the whole class passes
-# locally on gfx950 at world sizes 2/4/8 and on the mi300 CI shard with the same
-# ROCm image; skipped on that arch until it can be investigated on those runners.
-@skip_if_rocm_arch_multiprocess(MI350_ARCH)
 @skip_if_rocm_ver_lessthan_multiprocess((10, 2))
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
@@ -1085,7 +1080,6 @@ class AsyncTPTest(MultiProcContinuousTest):
             self.assertEqual(mm_output_0.stride(), mm_output_1.stride())
             self.assertEqual(mm_output_0.dtype, mm_output_1.dtype)
 
-    @skip_if_rocm_multiprocess  # unrelated to AsyncTP: fused_matmul_reduce_scatter fails at ws>=8 on ROCm (scatter_dim=2); under investigation
     @skip_if_lt_x_gpu(2)
     @parametrize("scatter_dim", [0, 1, 2])
     def test_fused_matmul_reduce_scatter(self, scatter_dim: int) -> None:
