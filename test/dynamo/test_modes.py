@@ -1102,12 +1102,12 @@ class outer_fn(torch.nn.Module):
             y = x.sin()
             return y.cos()
 
+        torch._dynamo.reset()
         compiled_fn = torch.compile(inner_fn, backend="invoke_subgraph")
 
         def outer_fn(x):
             return compiled_fn(x)
 
-        torch._dynamo.reset()
         x = torch.randn(3)
         traced = make_fx(outer_fn, tracing_mode="fake", record_stack_traces=True)(x)
 
