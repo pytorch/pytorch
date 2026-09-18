@@ -48,6 +48,13 @@ _EXTERNAL_DATA_HINT = (
     "Mark the value(s) as external data by using `external_data={'key': ...}`."
 )
 
+# Absent-name default for the two reads of a certified global out of the guard
+# scope. That scope can be a dict the CALLER passed as guard_globals, so a
+# subscript would run a __missing__ hook it defines, mutating the caller's
+# mapping and serving the graph a value no guard checked; dict.get takes this
+# default instead, in the one lookup a live scope needs.
+_UNBOUND = object()
+
 
 # A guard failure that is exactly a missing top-level global: the verbose code
 # part a guard tree reports for one ("KeyError on G['CONFIG']"). A trailing
@@ -58,7 +65,6 @@ _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
 # The G['NAME'] operands of a symbolic-shape guard installed as a Python lambda.
 # Anchored: shape exprs are source names, so L['self'].myG['k'] carries no global.
 _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
-_UNBOUND = object()
 
 # Names Dynamo mints into the scope the guards resolve against, rather than
 # names the caller wrote: the __import_* module aliases, the __builtins_dict___N
@@ -949,27 +955,31 @@ class AOTCompiledFunction:
         sub-path of it, which the guard does not certify -- is re-read from the
         guard scope here, so a rebind that scope took and the guards accepted (a
         same-metadata swap under a ``TENSOR_MATCH``, which checks metadata, not
-        values) is what the graph computes with. Every other global keeps the
-        value the bytecode's globals were built with at load, a container a
-        guard reaches only through a sub-path such as ``G['D']['a']`` included:
-        that guard certifies the one item, not the container's other members. A
-        name the scope does not bind is skipped rather than deleted, so it keeps
-        whatever it last held -- the serialized value if the scope never bound
-        it -- and, unless the check is disabled, the guard rooted at it refuses
-        the call. A global the graph itself rebinds is re-read from the scope on
-        the next call too: the replayed ``STORE_GLOBAL`` lands in the bytecode's
-        globals, not in the scope, so the stored value is one no guard certified
-        and the scope's is what the check before the call just passed. That is a
-        deliberate trade-off: a forward that accumulates into a guarded global
-        (``global W; W = W * 2``) serves the scope's value on every call, where
-        eager, whose store lands in the dict its guards read, counts up. Leaving
-        a stored name out of the re-read instead would serve the stored value
-        after a rebind of the scope the guards accepted -- the check certifying
-        one value while the graph reads another, which is the stale read this
-        re-read removes -- and writing the store back into the scope is a
-        behaviour neither load path has. Under the default filter, which drops
-        every guard whose own source is a global (a symbolic-shape guard on a
-        global with a dynamic dim survives it, but is rooted at the ShapeEnv),
+        values) is what the graph computes with. Every other global keeps
+        whatever the bytecode's globals hold -- the value they were built with
+        at load, unless the graph itself stores to it, which nothing here takes
+        back -- a container a guard reaches only through a sub-path such as
+        ``G['D']['a']`` included: that guard certifies the one item, not the
+        container's other members. A name the scope does not bind is skipped
+        rather than deleted, so it keeps whatever it last held -- the
+        serialized value if the scope never bound it -- and, unless the check
+        is disabled, the guard rooted at it refuses the call, and a mapping
+        that fabricates a missing name through ``__missing__`` is not asked to:
+        the read takes ``_UNBOUND`` instead. A global the graph itself rebinds
+        is re-read from the scope on the next call too: the replayed
+        ``STORE_GLOBAL`` lands in the bytecode's globals, not in the scope, so
+        the stored value is one no guard certified and the scope's is what the
+        check before the call just passed. That is a deliberate trade-off: a
+        forward that accumulates into a guarded global (``global W; W = W *
+        2``) serves the scope's value on every call, where eager, whose store
+        lands in the dict its guards read, counts up. Leaving a stored name out
+        of the re-read instead would serve the stored value after a rebind of
+        the scope the guards accepted -- the check certifying one value while
+        the graph reads another, which is the stale read this re-read removes
+        -- and writing the store back into the scope is a behaviour neither
+        load path has. Under the default filter, which drops every guard whose
+        own source is a global (a symbolic-shape guard on a global with a
+        dynamic dim survives it, but is rooted at the ShapeEnv),
         ``_live_global_names`` is empty, nothing is re-read and such a store
         accumulates in the bytecode's globals, unchecked.
 
@@ -991,7 +1001,8 @@ class AOTCompiledFunction:
         shares, so two threads serving one loaded artifact while either rebinds
         a guarded global race on that dict and one can run the graph on the
         value the other just wrote; a caller who needs isolation loads the
-        artifact once per thread, since each load builds its own dict."""
+        artifact once per thread, since each load builds one such dict per
+        compiled result."""
         if self._live_global_names:
             # Narrowing for pyrefly, not a live check: __post_init__ records the
             # set only under a supplied scope, and nothing nulls _guard_globals.
@@ -1000,6 +1011,11 @@ class AOTCompiledFunction:
                 raise AssertionError("_live_global_names recorded without a scope")
             f_globals = self.fn.__globals__
             for name in self._live_global_names:
+                # One read, not a membership test and then a read: the scope is
+                # live, and a del landing between the two would raise where an
+                # absent name is skipped. get() rather than a subscript under
+                # try/except, so a caller's mapping is never asked to fabricate
+                # a value through __missing__; see _UNBOUND.
                 value = scope.get(name, _UNBOUND)
                 if value is not _UNBOUND:
                     f_globals[name] = value
@@ -1821,11 +1837,12 @@ class AOTCompiledModel:
         namespace holds -- are inserted (never overwriting an existing key) so
         guards rooted at them resolve in a process that never traced. Every CALL
         writes as well, in the other direction: the certified names are written
-        into the globals of the artifact this returns, which all of its calls
-        share, so two threads calling one loaded artifact while either rebinds a
-        guarded global race on that dict and one can run the graph on the value
-        the other thread's guard check accepted. A caller who needs isolation
-        loads the artifact once per thread, since each load builds its own dict.
+        into the globals of the compiled result that serves the call, which every
+        call that result serves shares, so two threads whose calls land on one
+        result while either rebinds a guarded global race on that dict and one
+        can run the graph on the value the other thread's guard check accepted. A
+        caller who needs isolation loads the artifact once per thread, since each
+        load builds one such dict per serialized result.
 
         A symbolic-shape guard on a global with a dynamic dim resolves its
         operands in that live dict as well, whether it installs as a Python
