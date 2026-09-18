@@ -31,9 +31,9 @@ class XPUAllocator : public DeviceAllocator {
         device.get_info<sycl::ext::intel::info::device::free_memory>();
 
 #if SYCL_COMPILER_VERSION >= 20260200
-    const auto arch = device.get_info<sycl::info::device::architecture>();
-    if (arch <
-        sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21) {
+    namespace syclex = sycl::ext::oneapi::experimental;
+    const auto arch = device.get_info<syclex::info::device::architecture>();
+    if (arch < syclex::architecture::intel_gpu_bmg_g21) {
       return {free, total};
     }
     // See
@@ -48,7 +48,8 @@ class XPUAllocator : public DeviceAllocator {
         device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)
         ? kIntegratedGpuUsableFraction
         : kDiscreteGpuUsableFraction;
-    const size_t free_adjust = free + (1 - usable_fraction) * total;
+    const size_t free_adjust =
+        free + static_cast<size_t>((1 - usable_fraction) * total);
     TORCH_CHECK(
         free_adjust <= total, "Calculated free memory exceeds total memory.");
     return {free_adjust, total};
@@ -59,6 +60,15 @@ class XPUAllocator : public DeviceAllocator {
 };
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
+
+struct AllocatorState {
+  virtual ~AllocatorState() = default;
+};
+
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<c10::DataPtr> dataptrs_allocd;
+};
 
 struct AllocatorConfigInfo {
   bool expandable_segments;
@@ -169,6 +179,21 @@ C10_XPU_API void setUseOnOOM(
 C10_XPU_API int getPoolUseCount(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
+
+C10_XPU_API std::shared_ptr<AllocatorState> getCheckpointState(
+    c10::DeviceIndex device,
+    MempoolId_t id);
+
+C10_XPU_API CheckpointDelta setCheckpointPoolState(
+    c10::DeviceIndex device,
+    std::shared_ptr<AllocatorState> as);
+
+C10_XPU_API bool isHistoryEnabled();
+
+C10_XPU_API bool checkPoolLiveAllocations(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations);
 
 } // namespace c10::xpu::XPUCachingAllocator
 
