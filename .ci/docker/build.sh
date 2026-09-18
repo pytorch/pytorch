@@ -203,7 +203,7 @@ case "$tag" in
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3.11)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
-    ROCM_VERSION=10.1.0rc0
+    ROCM_VERSION=10.1.0rc1
     THEROCK_INDEX_URL="https://rc.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
