@@ -39,6 +39,7 @@ from ..exc import (
     unimplemented,
     Unsupported,
 )
+from ..source import is_constant_source
 from ..utils import (
     check_positional,
     cmp_name_to_op_mapping,
@@ -1527,6 +1528,13 @@ class DequeVariable(BaseListVariable):
         # Mirrors CPython deque->state: bumped on every structural mutation so
         # deque iterators can detect mutation during iteration.
         self.state = 0
+        if self.source is not None and not is_constant_source(self.source):
+            from ..guards import GuardBuilder, install_guard
+            from ..source import AttrSource
+
+            install_guard(
+                AttrSource(self.source, "maxlen").make_guard(GuardBuilder.EQUALS_MATCH)
+            )
 
     def python_type(self) -> type:
         return collections.deque

@@ -38,7 +38,7 @@ import time
 import traceback
 import types
 import typing
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Set as AbstractSet
 from types import CellType, FunctionType
 from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import Never
@@ -145,6 +145,7 @@ CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
 _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
+_ABSTRACT_SET_HASH = AbstractSet._hash
 
 _TIME_FUNCTION_NAMES = (
     "clock_gettime",
@@ -661,6 +662,22 @@ class BaseUserFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        call_args = [*self.self_args(), *args]
+        set_arg = None
+        if (
+            isinstance(self, (UserFunctionVariable, UserMethodVariable))
+            and self.get_function() is _ABSTRACT_SET_HASH
+        ):
+            if len(call_args) == 1 and not kwargs:
+                set_arg = call_args[0]
+            elif not call_args and len(kwargs) == 1 and "self" in kwargs:
+                set_arg = kwargs["self"]
+        if set_arg is not None and set_arg.python_type() is frozenset:
+            # Hashing an exact frozenset can contain identity-derived hashes,
+            # which cannot be used in Set._hash's Python control flow.
+            return variables.BuiltinVariable(builtins.hash).call_function(
+                tx, [set_arg], {}
+            )
         # Ignore patch_track_step_called from torch/optim/lr_scheduler.py - it just patches
         # the optimizer.step method and we don't need to trace it
         if (
@@ -670,7 +687,7 @@ class BaseUserFunctionVariable(VariableTracker):
             return ConstantVariable.create(None)
         return tx.inline_user_function_return(
             self,
-            [*self.self_args(), *args],
+            call_args,
             kwargs,
             allow_nested_graph_breaks=True,
         )
