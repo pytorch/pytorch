@@ -300,7 +300,6 @@ class AbstractFlightRecorderHookTest:
         dist.all_reduce(t)
         torch.cuda.synchronize()
         before = len(self._await_retired(1))
-        store = dist.distributed_c10d._get_default_store()
 
         if self.rank == 0:
             # Returns as soon as it is issued: a c10d wait() on CUDA only
@@ -317,9 +316,8 @@ class AbstractFlightRecorderHookTest:
             self.assertEqual(hung[0]["time_discovered_completed_ns"], 0)
             # ... and the healthy ones before it are unaffected.
             self.assertEqual(entries[before - 1]["state"], "completed")
-            store.set("hung_collective_checked", "1")
         else:
-            store.wait(["hung_collective_checked"], timedelta(seconds=60))
+            time.sleep(15)
             dist.all_reduce(t)
 
         torch.cuda.synchronize()
