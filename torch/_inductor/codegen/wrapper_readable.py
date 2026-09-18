@@ -11,13 +11,23 @@ level compiles serially, in process, on its first launch, instead of fanning out
 compile worker pool.
 """
 
+import re
 from typing_extensions import override
 
 import torch._inductor.config as config
-from torch.utils._indented_buffer import DeferredLineBase
+from torch.utils._indented_buffer import DeferredLineBase, IndentedBuffer
 
 from .. import ir
+from ..runtime import triton_heuristics
+from ..utils import cache_on_self
+from ..virtualized import V
 from .wrapper import PythonWrapperCodegen, SubgraphPythonWrapperCodegen
+
+
+# Emitted whatever the analysis says. `torch` is used by essentially every graph and is
+# what the rest of the preamble is written in terms of, so dropping it could only ever
+# be wrong.
+_ALWAYS_EMIT = frozenset({"torch"})
 
 
 class _LineIfAsyncCompileUsed(DeferredLineBase):
@@ -40,10 +50,129 @@ class _LineIfAsyncCompileUsed(DeferredLineBase):
         return _LineIfAsyncCompileUsed(line, self.wrapper)
 
 
+class _LineIfNamesUsed(DeferredLineBase):
+    """A preamble line that survives assembly only if the module uses what it binds.
+
+    Which bindings a graph needs is not known when the preamble is written, so the
+    question is asked at ``getvalue()`` time, against the finished module. Asking then
+    rather than at each use site is what makes this total: inductor emits these names
+    from many places, several by interpolation (``empty_strided_{device}``) or via
+    ``repr()`` (``device(...)``, ``inf``, ``nan``), which no registry of use sites would
+    catch.
+    """
+
+    def __init__(
+        self, line: str, names: tuple[str, ...], wrapper: "ReadablePythonWrapperCodegen"
+    ) -> None:
+        super().__init__(line)
+        self.names = names
+        self.wrapper = wrapper
+
+    def __call__(self) -> str | None:
+        if self.wrapper.scanning_for_uses:
+            # Reached while building the text to scan. Every preamble line reads as
+            # absent there, which is what makes `X = mod.X` not count as a use of X.
+            return None
+        return self.line if self.wrapper.preamble_names_used(self.names) else None
+
+    def _new_line(self, line: str) -> "_LineIfNamesUsed":
+        return _LineIfNamesUsed(line, self.names, self.wrapper)
+
+
 class ReadablePythonWrapperCodegen(PythonWrapperCodegen):
     """Emit kernels as code rather than as strings passed to AsyncCompile."""
 
     async_compiles_triton_kernels = False
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.scanning_for_uses = False
+        self._scan_text: str | None = None
+        self._kernel_texts: list[str] = []
+
+    @override
+    def _define_kernel_helper(self, kernel_name, kernel_body, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        # A kernel is a self-contained module -- that is why the default path can exec
+        # each one in its own namespace -- so it never reads a wrapper binding. Record
+        # it so the usage scan can leave it out: its own `math as tl_math` import and
+        # its `'device': 0` metadata are not uses of the wrapper's `math` or `device`.
+        self._kernel_texts.append(kernel_body)
+        super()._define_kernel_helper(kernel_name, kernel_body, *args, **kwargs)
+
+    @override
+    def write_preamble_line(
+        self, buf: IndentedBuffer, names: tuple[str, ...], line: str
+    ) -> None:
+        if any(name in _ALWAYS_EMIT for name in names):
+            buf.writeline(line)
+            return
+        buf.writeline(_LineIfNamesUsed(line, names, self))
+
+    def preamble_names_used(self, names: tuple[str, ...]) -> bool:
+        if self._scan_text is None:
+            self.scanning_for_uses = True
+            try:
+                # Every buffer that can hold a use, including header, which by now also
+                # holds the kernel definitions replayed into it.
+                text = "\n".join(
+                    buf.getrawvalue()
+                    for buf in (
+                        self.imports,
+                        self.header,
+                        self.subgraph_definitions,
+                        self.prefix,
+                        self.wrapper_call,
+                        self.suffix,
+                        self.kernel_declarations,
+                    )
+                )
+                for kernel_text in self._kernel_texts:
+                    text = text.replace(kernel_text, "")
+                # Inductor emits a provenance comment per kernel naming every source op
+                # ("Original ATen: [aten.mul, ...]"), so a comment-blind scan reads
+                # `aten` as used by every graph. A name mentioned in a comment is not a
+                # use.
+                self._scan_text = "\n".join(
+                    line
+                    for line in text.splitlines()
+                    if not line.lstrip().startswith("#")
+                )
+            finally:
+                self.scanning_for_uses = False
+        return any(
+            re.search(rf"\b{re.escape(name)}\b", self._scan_text) for name in names
+        )
+
+    @override
+    @cache_on_self
+    def write_triton_header_once(self) -> None:
+        if config.triton.autotune_at_compile_time or V.graph.cpp_wrapper:
+            # Those paths splice into buffers this mode does not prune; leave them be.
+            super().write_triton_header_once()
+            return
+        # `import triton` / `import triton.language as tl` are duplicated by every
+        # hoisted kernel's own import block, and `start_graph`/`end_graph` are only used
+        # under profile_bandwidth. Emit each only if the wrapper's own code wants it.
+        for names, line in (
+            (("triton",), "import triton"),
+            (("tl",), "import triton.language as tl"),
+            (
+                ("start_graph", "end_graph"),
+                f"from {triton_heuristics.__name__} import start_graph, end_graph",
+            ),
+        ):
+            self.write_preamble_line(self.imports, names, line)
+        self.imports.writeline(
+            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
+        )
+
+    @override
+    def add_benchmark_harness(self, output: IndentedBuffer) -> None:
+        # The harness (get_args/benchmark_compiled_module/__main__) is a runnable
+        # benchmark script bolted onto the module. This mode emits a module to be read
+        # and edited, and the harness is also written into the output buffer after the
+        # preamble has been scanned, so it could reference a binding already dropped.
+        return
 
     @override
     def emit_triton_kernel_definition(
