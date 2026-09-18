@@ -3,9 +3,9 @@
 import copy
 from collections import defaultdict
 
+import sympy as sp
 import torch
 import torch.fx as fx
-from torch._dynamo.source import LocalSource
 from torch.fx.experimental.shape_inference.infer_shape import infer_shape
 from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
@@ -18,24 +18,8 @@ class TestShapeInference(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_infer_symbol_values(self):
-        def mksym(shape_env, value, source, dynamic_dim) -> None:
-            return shape_env.create_symintnode(
-                shape_env.create_symbol(
-                    value,
-                    source=source,
-                    dynamic_dim=dynamic_dim,
-                ),
-                hint=value,
-                source=source,
-            )
-
-        shape_env = ShapeEnv()
         N = 8
-        sample = {f"s{i}": 2 for i in range(N)}
-        init_symints = [
-            mksym(shape_env, v, LocalSource(k), DimDynamic.DYNAMIC)
-            for k, v in sample.items()
-        ]
+        init_symints = [sp.Symbol(f"s{i}") for i in range(N)]
         symints = copy.deepcopy(init_symints)
         symbol_to_idx_dict = {f"s{i}": i for i in range(N)}
         padding_constraints = defaultdict(list)
