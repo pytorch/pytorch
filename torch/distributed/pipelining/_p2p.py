@@ -14,7 +14,9 @@ from torch._logging import warning_once
 logger = logging.getLogger(__name__)
 
 _StageRankAssignment = tuple[int, ...]
+_LogicalStageEdge = tuple[int, int]
 _DirectedRankEdge = tuple[int, int]
+_LogicalEdgeRound = tuple[_LogicalStageEdge, ...]
 _P2PSplitRound = tuple[_DirectedRankEdge, ...]
 _DirectedP2PGroupMap = dict[_DirectedRankEdge, dist.ProcessGroup]
 _P2PGroupCacheKey = tuple[_StageRankAssignment, str]
@@ -125,6 +127,51 @@ def _directed_edge_split_rounds(
             tuple((destination, source) for source, destination in matching_edges)
         )
     return tuple(split_rounds)
+
+
+def _logical_edge_preconnect_rounds(
+    stage_rank_assignment: _StageRankAssignment,
+) -> tuple[_LogicalEdgeRound, ...]:
+    """Partition cross-rank logical edges into disjoint preconnection rounds.
+
+    Unlike child-group construction, shared-parent setup retains repeated
+    logical edges. Repeated physical peers may use different local devices, so
+    collapsing them without a global stage-device map could initialize the
+    wrong device-specific communicator.
+
+    Args:
+        stage_rank_assignment: Physical pipeline-group rank for every logical
+            stage, indexed by logical stage.
+
+    Returns:
+        Ordered rounds of ``(source_stage, destination_stage)`` edges. No
+        physical rank occurs more than once within a round.
+    """
+    remaining_edges = [
+        (source_stage, source_stage + 1)
+        for source_stage in range(len(stage_rank_assignment) - 1)
+        if stage_rank_assignment[source_stage]
+        != stage_rank_assignment[source_stage + 1]
+    ]
+    rounds: list[_LogicalEdgeRound] = []
+    while remaining_edges:
+        used_ranks: set[int] = set()
+        matching: list[_LogicalStageEdge] = []
+        deferred: list[_LogicalStageEdge] = []
+        for edge in remaining_edges:
+            source_stage, destination_stage = edge
+            ranks = {
+                stage_rank_assignment[source_stage],
+                stage_rank_assignment[destination_stage],
+            }
+            if used_ranks & ranks:
+                deferred.append(edge)
+                continue
+            matching.append(edge)
+            used_ranks.update(ranks)
+        rounds.append(tuple(matching))
+        remaining_edges = deferred
+    return tuple(rounds)
 
 
 def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
@@ -329,3 +376,87 @@ def _preconnect_p2p_edge_groups(
         )
         for work in dist.batch_isend_irecv([op]):
             work.wait()
+
+
+def _preconnect_shared_p2p_edges(
+    parent: dist.ProcessGroup,
+    stage_index_to_group_rank: dict[int, int],
+    local_stage_devices: Mapping[int, torch.device],
+    synchronization_device: torch.device,
+) -> None:
+    """Preconnect the raw P2P paths used by the shared parent group.
+
+    The schedule's parent all-reduce initializes the device-keyed communicator
+    also used by batched P2P. Lazy native backends select a separate pairwise
+    communicator for raw P2P, so each cross-rank logical edge exercises that
+    path once. Logical edges are retained rather than collapsed by physical peer
+    because their endpoint stages may use different local devices.
+
+    Args:
+        parent: Shared pipeline process group.
+        stage_index_to_group_rank: Mapping from logical stage index to rank in
+            ``parent``.
+        local_stage_devices: Device for every logical stage owned by this rank.
+        synchronization_device: Device used for the between-round parent
+            collective.
+
+    Raises:
+        ValueError: If the stage assignment is invalid or the local endpoint of
+            an edge has no device entry.
+    """
+    assignment = _stage_rank_assignment(
+        stage_index_to_group_rank,
+        dist.get_world_size(parent),
+    )
+    group_rank = dist.get_rank(parent)
+    sync = torch.zeros(1, dtype=torch.int32, device=synchronization_device)
+    payloads: dict[torch.device, torch.Tensor] = {}
+
+    for round_edges in _logical_edge_preconnect_rounds(assignment):
+        local_edge = next(
+            (
+                edge
+                for edge in round_edges
+                if group_rank
+                in {
+                    assignment[edge[0]],
+                    assignment[edge[1]],
+                }
+            ),
+            None,
+        )
+        if local_edge is not None:
+            source_stage, destination_stage = local_edge
+            source_rank = assignment[source_stage]
+            destination_rank = assignment[destination_stage]
+            local_stage = (
+                source_stage if group_rank == source_rank else destination_stage
+            )
+            try:
+                device = local_stage_devices[local_stage]
+            except KeyError as error:
+                raise ValueError(
+                    f"Missing device for local pipeline stage {local_stage}"
+                ) from error
+            payload = payloads.get(device)
+            if payload is None:
+                payload = torch.zeros(1, dtype=torch.int32, device=device)
+                payloads[device] = payload
+            if group_rank == source_rank:
+                raw_work = dist.isend(
+                    payload,
+                    group=parent,
+                    group_dst=destination_rank,
+                )
+            else:
+                raw_work = dist.irecv(
+                    payload,
+                    group=parent,
+                    group_src=source_rank,
+                )
+            if raw_work is not None:
+                raw_work.wait()
+
+        # Non-participating ranks must not advance to a later pair while peers
+        # are still initializing a communicator in this round.
+        dist.all_reduce(sync, group=parent)
