@@ -13,6 +13,8 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import PrecompileError
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -46,6 +48,12 @@ _pytree.register_pytree_node(
     lambda children, _ctx: _UnserializableCtxInput(children[0], children[1]),
     serialized_type_name="test_precompile._UnserializableCtxInput",
 )
+
+
+def _precompile_pair(fn, *args, **kwargs):
+    """Public-API entry point for the tests added with the fake-tensor capture, behind one
+    indirection so the tracer/module switch above this commit re-points it in one place."""
+    return torch.compiler.precompile(fn, *args, **kwargs)
 
 
 def _strip_artifact(cache: bytes) -> bytes:
@@ -2069,6 +2077,98 @@ class TestPrecompile(TestCase):
         ref.load_state_dict(m.state_dict())
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
+
+    def test_nested_input_refused(self):
+        # A nested example input is refused up front with a named PrecompileError rather
+        # than the raw internal error one produces further down (a static capture has no
+        # ShapeEnv to mint the jagged ragged dim's symbolic nested int, and nothing below
+        # the trace has a nested representation on either path). The refusal runs
+        # ahead of the recorded-shape reads, so the strided layout (whose .shape read
+        # raises inside NestedTensorImpl) takes the same path. It is capture-WIDE, so the
+        # unbacked path -- whose ShapeEnv could fakeify a jagged input, but which has no
+        # nested representation downstream either -- gets the same refusal, and its
+        # message claims a restriction rather than that the tensor is unfakeifiable.
+        model = torch.nn.Linear(3, 3)
+        parts = [torch.randn(2, 3), torch.randn(4, 3)]
+        for layout in (torch.jagged, torch.strided):
+            nt = torch.nested.nested_tensor(parts, layout=layout)
+            with (
+                self.subTest(layout=layout),
+                self.assertRaisesRegex(
+                    PrecompileError, "user input 0 is a nested tensor"
+                ),
+            ):
+                _precompile_pair(lambda m, t: m(t), model, nt, backend="eager")
+        # Unbacked capture is inductor-only, so this case takes the default backend; the
+        # marked input is the dense one, the nested one is refused before any tracing.
+        x = torch.randn(4, 3)
+        mark_unbacked(x, 0)
+        nt = torch.nested.nested_tensor(parts, layout=torch.jagged)
+        with self.assertRaisesRegex(PrecompileError, "user input 1 is a nested tensor"):
+            _precompile_pair(lambda m, t, u: m(t), model, x, nt)
+
+        # A nested BUFFER is refused by name too, which is what pins the refusal ahead of
+        # the recorded param/buffer shape reads: those read t.shape, so a STRIDED nested
+        # buffer would otherwise escape as the raw NestedTensorImpl error.
+        class HasNestedBuffer(torch.nn.Module):
+            def __init__(self, nt):
+                super().__init__()
+                self.lin = torch.nn.Linear(3, 3)
+                self.register_buffer("nt", nt)
+
+            def forward(self, t):
+                return self.lin(t)
+
+        for layout in (torch.jagged, torch.strided):
+            mod = HasNestedBuffer(torch.nested.nested_tensor(parts, layout=layout))
+            with (
+                self.subTest(buffer_layout=layout),
+                self.assertRaisesRegex(PrecompileError, "buffer nt is a nested tensor"),
+            ):
+                _precompile_pair(
+                    lambda m, t: m(t), mod, torch.randn(2, 3), backend="eager"
+                )
+
+        # ... and a nested PARAMETER of either layout, the other half of input_labels'
+        # model side: param_shapes reads t.shape just as buffer_shapes does, so the
+        # strided one is the case that escaped before the refusal moved ahead of it.
+        class HasNestedParam(torch.nn.Module):
+            def __init__(self, nt):
+                super().__init__()
+                self.p = torch.nn.Parameter(nt)
+
+            def forward(self, t):
+                return t
+
+        for layout in (torch.jagged, torch.strided):
+            mod = HasNestedParam(torch.nested.nested_tensor(parts, layout=layout))
+            with (
+                self.subTest(param_layout=layout),
+                self.assertRaisesRegex(
+                    PrecompileError, "parameter p is a nested tensor"
+                ),
+            ):
+                _precompile_pair(
+                    lambda m, t: m(t), mod, torch.randn(2, 3), backend="eager"
+                )
+
+    def test_capture_inside_another_trace_refused(self):
+        # An ambient TracingContext.fake_mode outranks the mode capture hands make_fx, and
+        # no foreign mode passes allow_fallback_kernels=False, so a meta-less
+        # op would be run for real again; one built under DEFAULT config (as here, and as
+        # an AOTAutograd / inductor trace builds its own) also lacks the
+        # unsafe-data-ptr-access snapshot, so a .data_ptr() read bakes 0 instead of raising.
+        # So capture refuses up front, on a fn that captures cleanly on its own, rather than
+        # tracing under a foreign contract.
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with torch._guards.tracing(torch._guards.TracingContext(fake_mode)):
+            with self.assertRaisesRegex(
+                PrecompileError, "cannot run inside another trace"
+            ):
+                _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
+        _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
