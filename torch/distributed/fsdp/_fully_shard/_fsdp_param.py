@@ -283,7 +283,7 @@ class FSDPParam:
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
         # Snapshot before any rewrite of `param` (e.g. spmd_types -> DTensor).
-        self._has_sharded_grad_dtype_override = param._is_grad_dtype_explicit
+        self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
         self.sharded_grad_dtype = param.grad_dtype
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
@@ -1669,7 +1669,7 @@ class FSDPParam:
         param = self.sharded_param
         has_override = self._has_sharded_grad_dtype_override
         grad_dtype = self.sharded_grad_dtype
-        if not self._sharded_grad_dtype_initialized and param._is_grad_dtype_explicit:
+        if not self._sharded_grad_dtype_initialized and param._has_grad_dtype_override:
             has_override, grad_dtype = True, param.grad_dtype
         unsharded_param = getattr(self, "_unsharded_param", None)
         for owner in (param, unsharded_param):
@@ -1697,7 +1697,7 @@ class FSDPParam:
     def reset_sharded_param(self):
         if (
             not self._sharded_grad_dtype_initialized
-            and self.sharded_param._is_grad_dtype_explicit
+            and self.sharded_param._has_grad_dtype_override
         ):
             # Capture user overrides before a replacement can lose the metadata.
             self._has_sharded_grad_dtype_override = True
@@ -1723,7 +1723,7 @@ class FSDPParam:
         )
         if self.sharded_param.grad_dtype != grad_dtype or (
             self._has_sharded_grad_dtype_override
-            and not self.sharded_param._is_grad_dtype_explicit
+            and not self.sharded_param._has_grad_dtype_override
         ):
             self.sharded_param.grad_dtype = grad_dtype
 
