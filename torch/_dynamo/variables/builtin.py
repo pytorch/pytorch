@@ -2578,11 +2578,8 @@ class BuiltinVariable(BaseBuiltinVariable):
         # A non-constant hint (e.g. a symbolic int) cannot be type- or
         # range-checked at trace time; refuse it rather than return a value
         # CPython might reject for being negative or out of ssize_t range.
-        try:
-            hint_type = hint.python_type()
-        except NotImplementedError:
-            hint_type = None
-        if hint_type is not None and not issubclass(hint_type, int):
+        hint_type = maybe_get_python_type(hint)
+        if not issubclass(hint_type, int):
             raise_type_error(
                 tx, f"__length_hint__ must be an integer, not {hint_type.__name__}"
             )
