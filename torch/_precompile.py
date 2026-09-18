@@ -142,8 +142,8 @@ it.
 #    Every refusal above rests on capture tracing under a fake mode IT built, so capture
 #    refuses to run inside another trace, on BOTH paths: an ambient fake mode (a
 #    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
-#    outranks capture's own, and no foreign
-#    mode passes ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
+#    outranks capture's own, and no enclosing-trace mode passes
+#    ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
 #    namespace would be run for real again. A mode built under DEFAULT config (an
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a ``.data_ptr()``
 #    read would bake 0 rather than raise; a torch.compile / export mode does build under
@@ -876,8 +876,8 @@ def _capture(
     # someone else's contract. This runs first, ahead of the input scan below, whose
     # is_pinned() probe DISPATCHES: under an ambient mode a real example tensor trips that
     # mode's own non-fake-input assertion before any refusal of ours. Ask detect_fake_mode
-    # -- what make_fx itself resolves through -- so all three sources it ranks (an ambient
-    # TracingContext, the dispatch-mode stack, the inputs) are refused by name here instead
+    # -- what make_fx itself resolves through -- so both sources it sees without arguments
+    # (an ambient TracingContext, the dispatch-mode stack) are refused by name here instead
     # of reaching its own mode-mismatch assertion once capture enters its mode.
     if detect_fake_mode() is not None:
         raise PrecompileError(
