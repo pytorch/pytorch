@@ -27,6 +27,7 @@ struct XPUEvent {
     TORCH_CHECK(false, "XPU IPC events are not supported on Windows.");
 #endif
     auto& device = c10::xpu::get_raw_device(device_index);
+    // IPC is only supported for reusable events.
     reusable_ = device.has(sycl::aspect::ext_oneapi_ipc_event);
     TORCH_CHECK(
         reusable_,
@@ -243,8 +244,10 @@ struct XPUEvent {
     TORCH_CHECK(
         !enable_ipc_, "XPU IPC events require SYCL compiler 2026.2 or later.");
 #endif
-    // Only IPC-enabled events are backed by a reusable sycl::event; this
-    // requires SYCL compiler 2026.2 or later.
+    // Only IPC-enabled events are backed by a reusable sycl::event, which
+    // requires SYCL compiler 2026.2 or later. Reusable events conflict with
+    // SYCL host_task, so we restrict reusability to IPC events to preserve
+    // backward compatibility.
     reusable_ = enable_ipc_;
 #if SYCL_COMPILER_VERSION >= 20260200
     if (reusable_) {
