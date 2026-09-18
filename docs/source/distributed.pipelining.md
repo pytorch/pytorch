@@ -499,18 +499,25 @@ lookahead is `r + 2`, capped by `max_active_stages`.
 For PP4 with `max_active_stages=4`, `"auto"` resolves to `(2, 3, 4, 4)`:
 
 ```text
-interval             0..T        T..2T       2T..3T      3T..4T
-rank 0 compute                   F(first)
-rank 0 unshard       U0          U1                         lookahead 2
-
-rank 1 compute                               F(first)
-rank 1 unshard       U0          U1          U2             lookahead 3
-
-rank 2 compute                                            F(first)
-rank 2 unshard       U0          U1          U2           U3 lookahead 4
+interval           | 0..T    | T..2T   | 2T..3T  | 3T..4T  | 4T..5T
+-------------------+---------+----------+----------+----------+---------
+rank 0 forward     | blocked | F(first) |          |          |
+rank 0 preparation | U0      | U1       |          |          |  => 2
+-------------------+---------+----------+----------+----------+---------
+rank 1 forward     | blocked | blocked  | F(first) |          |
+rank 1 preparation | U0      | U1       | U2       |          |  => 3
+-------------------+---------+----------+----------+----------+---------
+rank 2 forward     | blocked | blocked  | blocked  | F(first) |
+rank 2 preparation | U0      | U1       | U2       | U3       |  => 4
+-------------------+---------+----------+----------+----------+---------
+rank 3 forward     | blocked | blocked  | blocked  | blocked  | F(first)
+rank 3 preparation | U0      | U1       | U2       | U3       |  => 4
 ```
 
 The diagram is an analytical starting point, not an exact CUDA-stream model.
+`Uk` denotes preparation of the kth upcoming rank-local stage, not a global
+stage index. Vertically aligned preparation and forward cells are intended to
+overlap.
 Real stages may be unbalanced, unshard phases may overlap only partially, and
 network or memory-bandwidth contention may change the best distance. Choose a
 policy accordingly:
