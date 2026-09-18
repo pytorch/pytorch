@@ -1895,9 +1895,10 @@ class AOTCompiledModel:
     an ``except SystemError`` no longer catches a boundary wrap whose cause is
     an ``Exception``; a wrap around a ``KeyboardInterrupt`` or ``SystemExit``
     still reaches the caller as itself. A raise only out of ``check_verbose``
-    here is quoted on its line and chained nowhere; so is one recorded in
-    dispatch that the next evaluation of the same tree answered: the caveat
-    names that tree and quotes its raise.
+    here is quoted on its line and chained nowhere. A raise recorded in
+    dispatch that a later evaluation of the same tree answered is quoted by the
+    advice's caveat, not on its entry line, which quotes the rejection, and it
+    is the ``__cause__`` when it was recorded first of all.
     """
 
     model: torch.nn.Module
@@ -2206,8 +2207,8 @@ class AOTCompiledModel:
         raiser = next((i for i in raised if enabled[i]), None)
         # An entry that answered in either dispatch pass rejected this call, so a
         # ModelInput could have covered it even where its line below is a raise.
-        coverable = any(results[i]._guard_check_enabled for i in answered)
-        trusted_rejection = any(results[i]._guard_check_enabled for i in trusted)
+        coverable = any(enabled[i] for i in answered)
+        trusted_rejection = any(enabled[i] for i in trusted)
         withheld = not all(enabled)
         for i, result in enumerate(results):
             if not enabled[i]:
@@ -2321,20 +2322,18 @@ class AOTCompiledModel:
                 # as on the entry line and joined with a semicolon: the quoted
                 # text is arbitrary user text that may hold commas, and
                 # _raise_text has a parenthetical of its own. Enabled in the
-                # `enabled` snapshot, as the entry lines are, not by a fresh
-                # read: nobody asked about an opted-out tree's guards, its
-                # withheld line already blames the raiser, and check_verbose ran
-                # user code under the loop above, so a fresh read could drop an
-                # entry this report printed as a rejection -- naming no tree at
-                # all when it was the only one. Read against the snapshot, an
-                # answered entry the gate above found enabled is here, so the
-                # list is never empty. `- trusted` keeps raised[i] populated for
-                # every entry here, by the recording in accepts(): the gate's
-                # read makes the term redundant only while no other thread
-                # stores the flag between the two reads.
+                # `enabled` snapshot, as the entry lines and both gates above
+                # are, not by a fresh read: nobody asked about an opted-out
+                # tree's guards, its withheld line already blames the raiser,
+                # and check_verbose ran user code under the loop above, so a
+                # fresh read could drop an entry this report printed as a
+                # rejection -- naming no tree at all when it was the only one.
+                # The gates read that same snapshot, so every answered entry
+                # enabled in it raised and is here: the list is never empty, and
+                # `trusted` need not be subtracted.
                 untrusted = [
                     f"[{i}] <{_raise_text(raised[i])}>"
-                    for i in sorted(answered - trusted)
+                    for i in sorted(answered)
                     if enabled[i]
                 ]
                 plural = "s" if len(untrusted) > 1 else ""
