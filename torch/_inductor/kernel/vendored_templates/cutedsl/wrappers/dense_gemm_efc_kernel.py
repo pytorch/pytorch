@@ -10,7 +10,14 @@ from cutlass.operators.arch import TargetSm  # noqa: TC002
 from cutlass.operators.arguments import GemmArguments
 from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
 from cutlass.operators.fusion.library import ActivationOp
-from cutlass.operators.providers.cutedsl.evt import common_efc
+
+
+try:
+    # `nvidia-cutlass-operators>=0.2.0` have `efc` not `common_efc`
+    from cutlass.operators.providers.cutedsl.evt import efc as common_efc
+except ImportError:
+    from cutlass.operators.providers.cutedsl.evt import common_efc
+
 from cutlass.operators.providers.cutedsl.evt.converter import (
     _build_source_mode_map,
     EFCConverter,

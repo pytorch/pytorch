@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import gc
 import operator
 from unittest import mock, skipIf
 
@@ -10,6 +9,7 @@ from functorch import make_fx
 from torch._guards import detect_fake_mode
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.fx_passes import slice_scatter_chunking
+from torch._inductor.fx_passes.memory_estimator import build_memory_profile
 from torch._inductor.fx_utils import FakeTensorUpdater
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -597,16 +597,18 @@ class TestSliceScatterChunking(TestCase):
         self.assertEqual(gm(x), fn(x))
 
     @onlyCUDA
-    @inductor_config.patch(force_disable_caches=True)
-    def test_mm_chunk_codegen_bounded_peak(self, device):
+    def test_functionalized_copy_chain_bounded_peak(self, device):
+        def write(out, src, start, end):
+            copied = aten.copy.default(out[start:end], src)
+            return aten.slice_scatter.default(out, copied, 0, start, end)
+
         def fn(a, b, c, d):
             rows = a.shape[0]
             out = torch.empty((rows * 2, b.shape[1]), device=a.device, dtype=a.dtype)
-            out[:rows].copy_(a @ b)
-            out[rows : rows * 2].copy_(c @ d)
-            return out
+            out = write(out, a @ b, 0, rows)
+            return write(out, c @ d, rows, rows * 2)
 
-        rows, width, inner = 2048, 4096, 8
+        rows, width, inner = 2, 3, 4
         args = tuple(
             torch.randn(shape, device=device)
             for shape in (
@@ -616,19 +618,25 @@ class TestSliceScatterChunking(TestCase):
                 (inner, width),
             )
         )
-        compiled = torch.compile(fn, fullgraph=True)
-        actual = compiled(*args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
 
-        self.assertEqual(actual, fn(*args))
-        del actual
-        gc.collect()
-        torch.cuda.empty_cache()
-        baseline = torch.cuda.memory_allocated()
-        torch.cuda.reset_peak_memory_stats()
-        compiled(*args)
-        torch.cuda.synchronize()
-        peak = torch.cuda.max_memory_allocated() - baseline
-        self.assertLessEqual(peak, 97 * 2**20)
+        def is_releasable(node: torch.fx.Node) -> bool:
+            return node.op not in ("placeholder", "get_attr")
+
+        before_peak = max(build_memory_profile(gm.graph, is_releasable))
+
+        fake_tensor_updater = FakeTensorUpdater(gm)
+        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            slice_scatter_chunking.slice_scatter_chunking_pass(gm.graph)
+            fake_tensor_updater.incremental_update()
+        after_peak = max(build_memory_profile(gm.graph, is_releasable))
+
+        input_bytes = sum(arg.numel() * arg.element_size() for arg in args)
+        chunk_bytes = rows * width * args[0].element_size()
+        output_bytes = 2 * chunk_bytes
+        self.assertGreater(before_peak, after_peak)
+        self.assertEqual(after_peak - input_bytes, output_bytes + chunk_bytes)
 
     @inductor_config.patch(force_disable_caches=True)
     def test_functionalized_copy_chain_compile(self, device):
@@ -759,7 +767,7 @@ class TestSliceScatterChunking(TestCase):
 
         gm.graph.lint()
         gm.recompile()
-        self.assertLessEqual(normalize.call_count, chain_length * 3)
+        self.assertEqual(normalize.call_count, chain_length)
         self.assertEqual(
             len(
                 gm.graph.find_nodes(

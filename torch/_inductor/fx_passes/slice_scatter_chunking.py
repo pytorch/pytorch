@@ -1,5 +1,4 @@
-# mypy: allow-untyped-defs
-"""
+r"""
 Rewrite slice_scatter chains that fill an entire tensor into cat or bounded copies.
 
 Functionalizing chunking results in a chain of slice_scatter nodes,
@@ -10,8 +9,19 @@ The goal is to remove the full-sized intermediates without regressing producer f
 Input:
 
     base = aten.empty(size)
-    out = aten.slice_scatter(base, chunk0, dim, 0, end0)
-    out = aten.slice_scatter(out, chunk1, dim, end0, size)
+    out0 = aten.slice_scatter(base, chunk0, dim, 0, end0)
+    out1 = aten.slice_scatter(out0, chunk1, dim, end0, size)
+
+At ``out1``, peak memory holds the old state, current chunk, and new state.
+
+Not supported:
+
+- Partial, overlapping, gapped, non-unit-stride, or mixed-dimension slices.
+- Initialized, derived, pinned, or internally overlapping bases.
+- Source shape, dtype, or device mismatches.
+- Different stream, memory-pool, or mutation regions within the chain.
+- Live aliases or external users of the base or intermediate states.
+- Direct chains over unrealized pointwise producers.
 
 Output:
 1. cat, when chunks are backed by graph inputs or supported nested regions.
@@ -30,7 +40,7 @@ behavior depends on IR-level decisions that are unavailable here.
 
 import operator
 from dataclasses import dataclass
-from typing import Any
+from typing import cast, TypedDict
 
 import torch
 from torch._inductor.fx_utils import get_node_storage, is_node_realized
@@ -43,6 +53,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.utils import is_gpu
 from torch._prims_common import make_contiguous_strides_for
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.node import Argument
 from torch.fx.operator_schemas import normalize_function
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._ordered_set import OrderedSet
@@ -56,6 +67,15 @@ _SUPPORTED_BASE_FACTORIES = (
 )
 
 
+class _SliceScatterArgs(TypedDict):
+    input: Argument
+    src: Argument
+    dim: Argument
+    start: Argument
+    end: Argument
+    step: Argument
+
+
 @dataclass
 class _SliceScatterChain:
     base: torch.fx.Node
@@ -64,10 +84,10 @@ class _SliceScatterChain:
     sources: list[torch.fx.Node]
     removable_nodes: OrderedSet[torch.fx.Node]
     functional_copies: list[torch.fx.Node]
-    non_blocking: list[Any]
+    non_blocking: list[bool]
 
 
-def _normalize_slice_scatter_args(node: torch.fx.Node) -> dict[str, Any]:
+def _normalize_slice_scatter_args(node: torch.fx.Node) -> _SliceScatterArgs:
     normalized = normalize_function(
         aten.slice_scatter.default,
         args=node.args,
@@ -76,14 +96,15 @@ def _normalize_slice_scatter_args(node: torch.fx.Node) -> dict[str, Any]:
     )
     if normalized is None:
         raise AssertionError(f"failed to normalize arguments for {node}")
-    return normalized.kwargs
+    return cast(_SliceScatterArgs, normalized.kwargs)
 
 
-def _get_val(value: Any) -> Any:
-    return value.meta.get("val") if isinstance(value, torch.fx.Node) else value
+def _get_val(value: Argument) -> int | torch.SymInt | None:
+    value = value.meta.get("val") if isinstance(value, torch.fx.Node) else value
+    return value if isinstance(value, (int, torch.SymInt)) else None
 
 
-def _statically_known_eq(lhs: Any, rhs: Any) -> bool:
+def _statically_known_eq(lhs: Argument, rhs: Argument) -> bool:
     lhs = _get_val(lhs)
     rhs = _get_val(rhs)
     if lhs is None or rhs is None:
@@ -98,7 +119,7 @@ def _statically_known_same_shape(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
     )
 
 
-def _custom_context(node: torch.fx.Node) -> tuple[Any, Any, Any]:
+def _custom_context(node: torch.fx.Node) -> tuple[object, object, object]:
     custom = node.meta.get("custom", {})
     return (
         custom.get("stream", 0),
@@ -107,32 +128,37 @@ def _custom_context(node: torch.fx.Node) -> tuple[Any, Any, Any]:
     )
 
 
-def _get_tensor_input(node: torch.fx.Node) -> Any:
+def _get_first_input(node: torch.fx.Node) -> torch.fx.Node | None:
     if node.args:
-        return node.args[0]
-    target = node.target
-    if not isinstance(target, torch._ops.OpOverload) or not target._schema.arguments:
-        return None
-    return node.kwargs.get(target._schema.arguments[0].name)
+        first_input = node.args[0]
+    else:
+        target = node.target
+        if (
+            not isinstance(target, torch._ops.OpOverload)
+            or not target._schema.arguments
+        ):
+            return None
+        first_input = node.kwargs.get(target._schema.arguments[0].name)
+    return first_input if isinstance(first_input, torch.fx.Node) else None
 
 
 def _strip_aliases(
-    node: Any,
+    node: Argument,
     removable_nodes: OrderedSet[torch.fx.Node],
     examined: OrderedSet[torch.fx.Node],
-) -> Any:
+) -> torch.fx.Node | None:
     while isinstance(node, torch.fx.Node) and node.target is aten.alias.default:
         if node in examined:
             return None
         examined.add(node)
         removable_nodes.add(node)
-        node = _get_tensor_input(node)
-    return node
+        node = _get_first_input(node)
+    return node if isinstance(node, torch.fx.Node) else None
 
 
 def _copy_source(
     node: torch.fx.Node,
-) -> tuple[torch.fx.Node, torch.fx.Node, Any] | None:
+) -> tuple[torch.fx.Node, torch.fx.Node, bool] | None:
     """Return the payload of a non-broadcasting, non-converting functional copy.
 
     A functional copy completely overwrites its first argument. When its payload
@@ -149,6 +175,7 @@ def _copy_source(
         raise AssertionError(f"failed to normalize arguments for {node}")
     copy_input = normalized.kwargs["input"]
     payload = normalized.kwargs["src"]
+    non_blocking = normalized.kwargs["non_blocking"]
     result_val = node.meta.get("val")
     payload_val = (
         payload.meta.get("val") if isinstance(payload, torch.fx.Node) else None
@@ -156,6 +183,7 @@ def _copy_source(
     if (
         not isinstance(payload, torch.fx.Node)
         or not isinstance(copy_input, torch.fx.Node)
+        or not isinstance(non_blocking, bool)
         or not isinstance(result_val, torch.Tensor)
         or not isinstance(payload_val, torch.Tensor)
         or result_val.dtype != payload_val.dtype
@@ -163,11 +191,11 @@ def _copy_source(
         or not _statically_known_same_shape(result_val, payload_val)
     ):
         return None
-    return payload, copy_input, normalized.kwargs["non_blocking"]
+    return payload, copy_input, non_blocking
 
 
 def _view_path_to_state(
-    node: Any,
+    node: torch.fx.Node | None,
     state_nodes: OrderedSet[torch.fx.Node],
     examined: OrderedSet[torch.fx.Node],
 ) -> list[torch.fx.Node] | None:
@@ -177,7 +205,7 @@ def _view_path_to_state(
             return None
         examined.add(node)
         path.append(node)
-        node = _get_tensor_input(node)
+        node = _get_first_input(node)
     return path if node in state_nodes else None
 
 
@@ -216,7 +244,8 @@ def _get_full_tensor_slice_scatter_chain(
 ) -> _SliceScatterChain | None:
     """Return a chain whose adjacent slices overwrite the entire base tensor."""
     removable_nodes = OrderedSet[torch.fx.Node]()
-    slice_scatters = []
+    slice_scatters: list[torch.fx.Node] = []
+    slice_scatter_args: list[_SliceScatterArgs] = []
     current = slice_scatter
     while (
         isinstance(current, torch.fx.Node)
@@ -227,10 +256,11 @@ def _get_full_tensor_slice_scatter_chain(
         examined.add(current)
         slice_scatters.append(current)
         removable_nodes.add(current)
-        current = _strip_aliases(
-            _normalize_slice_scatter_args(current)["input"], removable_nodes, examined
-        )
+        args = _normalize_slice_scatter_args(current)
+        slice_scatter_args.append(args)
+        current = _strip_aliases(args["input"], removable_nodes, examined)
     slice_scatters.reverse()
+    slice_scatter_args.reverse()
 
     if not isinstance(current, torch.fx.Node) or len(slice_scatters) < 2:
         return None
@@ -243,7 +273,7 @@ def _get_full_tensor_slice_scatter_chain(
     ):
         return None
 
-    dim = _normalize_slice_scatter_args(slice_scatters[0])["dim"]
+    dim = slice_scatter_args[0]["dim"]
     if not isinstance(dim, int):
         return None
     dim %= base_val.dim()
@@ -254,20 +284,22 @@ def _get_full_tensor_slice_scatter_chain(
     non_blocking = []
     state_nodes = OrderedSet([current, *slice_scatters[:-1]])
     copy_view_nodes = OrderedSet[torch.fx.Node]()
-    for matched_slice_scatter in slice_scatters:
-        args = _normalize_slice_scatter_args(matched_slice_scatter)
+    for matched_slice_scatter, args in zip(
+        slice_scatters, slice_scatter_args, strict=True
+    ):
         node_dim = args["dim"]
         start = args["start"]
         end = args["end"]
         step = args["step"]
         src = args["src"]
         if isinstance(src, torch.fx.Node) and src.target is aten.copy.default:
+            functional_copy = src
             copy_source = _copy_source(src)
             if copy_source is None:
                 return None
             src, copy_input, copy_non_blocking = copy_source
-            functional_copies.append(args["src"])
-            removable_nodes.add(args["src"])
+            functional_copies.append(functional_copy)
+            removable_nodes.add(functional_copy)
             view_path = _view_path_to_state(copy_input, state_nodes, copy_view_nodes)
             if view_path is None:
                 return None
@@ -484,7 +516,7 @@ def _can_fuse_as_cat(
 
 
 def slice_scatter_chunking_pass(graph: torch.fx.Graph) -> bool:
-    """Rewrite complete slice_scatter chains without full-sized intermediates."""
+    """Apply the rewrite described in the module docstring."""
     slice_scatters = graph.find_nodes(
         op="call_function", target=aten.slice_scatter.default
     )
@@ -532,7 +564,7 @@ def slice_scatter_chunking_pass(graph: torch.fx.Graph) -> bool:
 
         if _can_fuse_as_cat(result, graph_input_storages):
 
-            def replacement(*chunks):
+            def replacement(*chunks: torch.Tensor) -> torch.Tensor:
                 return torch.cat(chunks, dim=result.dim)
 
             match.replace_by_example(replacement, result.sources)
