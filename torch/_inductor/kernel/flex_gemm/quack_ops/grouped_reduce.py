@@ -117,7 +117,7 @@ import math
 import operator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import cutlass
 import cutlass.cute as cute
@@ -697,12 +697,13 @@ class GroupedReduceBase(EpiOp):
                 for plane, other in zip(planes, others):
                     plane[i] = combine_fn(plane[i], other[i])
             return
+        combine = cast("Callable[..., Any]", self.combine)
         lhs = tuple(plane.load() for plane in planes)
         rhs = tuple(other.load() for other in others)
         if const_expr(self.reduce_planes == 1):
-            result = (self.combine(lhs[0], rhs[0]),)
+            result = (combine(lhs[0], rhs[0]),)
         else:
-            result = self.combine(lhs, rhs)
+            result = combine(lhs, rhs)
             if const_expr(
                 not isinstance(result, tuple) or len(result) != self.reduce_planes
             ):
