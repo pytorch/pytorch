@@ -91,6 +91,9 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::permute
 ```
 
+```{doxygenfunction} torch::stable::flip
+```
+
 ```{doxygenfunction} torch::stable::flatten
 ```
 
