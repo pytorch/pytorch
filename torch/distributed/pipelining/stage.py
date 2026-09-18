@@ -948,7 +948,6 @@ class _PipelineStageBase(ABC):
 
         # If submod is a FSDP or replicate module
         elif isinstance(self.submod, FSDPModule):
-            self.submod.set_is_last_backward(False)
             self.submod.set_reshard_after_backward(False)
             self.submod.set_requires_gradient_sync(False)
             result = perform_backward(backward_type)()
@@ -985,6 +984,9 @@ class _PipelineStageBase(ABC):
             composite_args = self._retrieve_recv_activations(fwd_chunk_id)
 
         composite_kwargs = kwargs or {}
+
+        if isinstance(self.submod, FSDPModule):
+            self.submod.set_manual_backward_finalization(True)
 
         if self._runtime_validate:
             self._validate_stage_tensors(
@@ -1276,7 +1278,9 @@ class _PipelineStageBase(ABC):
     def perform_reduce_grad(self, grad_scale_factor: int):
         r"""Finalize FSDP gradient accumulation and scale stage gradients."""
         if isinstance(self.submod, FSDPModule):
-            self.submod.finalize_gradient_accumulation()
+            self.submod.set_requires_gradient_sync(True)
+            self.submod.set_reshard_after_backward(True)
+            self.submod.finalize_backward()
         # Call gradient scaling at the end of the backward pass
         # NOTE: this must happen after FSDP post_backward is FSDP is enabled
         if grad_scale_factor != 1:
