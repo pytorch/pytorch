@@ -81,7 +81,11 @@ class MooncakeMemory:
     ) -> MooncakeMutableMemoryView:
         return MooncakeMutableMemoryView(self, *self._range(offset, length))
 
-    def to_remote_buffer(self) -> MooncakeRemoteBuffer:
+    def to_remote_buffer(self, *, timeout: float | None = None) -> MooncakeRemoteBuffer:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._transport._ensure_open()
         return MooncakeRemoteBuffer(
             self._transport._endpoint, self._address, self._length
@@ -133,11 +137,19 @@ class MooncakeTransport(Transport):
             raise RuntimeError("transport is closed")
         return self._engine
 
-    def bind(self) -> bytes:
+    def bind(self, *, timeout: float | None = None) -> bytes:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._ensure_open()
         return self._endpoint.encode()
 
-    def connect(self, peer_url: bytes) -> int:
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         with self._operation_lock:
             self._ensure_open()
             if self._peer is not None:
@@ -152,7 +164,13 @@ class MooncakeTransport(Transport):
     def connected(self) -> bool:
         return self._peer is not None and self._engine is not None
 
-    def register_memory(self, tensor: torch.Tensor) -> MooncakeMemory:
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> MooncakeMemory:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         with self._operation_lock:
             engine = self._ensure_open()
             if not isinstance(tensor, torch.Tensor):
@@ -219,7 +237,12 @@ class MooncakeTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if not isinstance(local_buffer, MooncakeMemoryView):
             raise TypeError("local_buffer was not registered by this transport")
         return self._run_transfer(
@@ -234,7 +257,12 @@ class MooncakeTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if not isinstance(local_buffer, MooncakeMutableMemoryView):
             raise TypeError("local_buffer was not registered by this transport")
         return self._run_transfer(
@@ -243,7 +271,11 @@ class MooncakeTransport(Transport):
             async_op=async_op,
         )
 
-    def close(self) -> None:
+    def close(self, *, timeout: float | None = None) -> None:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._close_work()
         with self._operation_lock:
             if self._engine is None:

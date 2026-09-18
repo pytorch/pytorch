@@ -2249,3 +2249,56 @@ This module is experimental and subject to change.
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
 ```
+
+```{eval-rst}
+
+One-sided tensor transports (experimental)
+--------------------------------------------------
+
+``torch.distributed._transport`` moves registered tensor byte ranges between
+independently managed workers. It does not require a process group, global rank
+assignment, or matching receives. The initial backend is NIXL, installed separately
+with ``pip install nixl``. Its default UCX plugin supports CPU and CUDA memory,
+subject to the installed NIXL/UCX build and hardware.
+
+An endpoint connects to one peer. Exchange ``bind()`` bytes and remote memory
+descriptors through a trusted application control plane. Never unpickle descriptors
+from untrusted sources. A write copies from a local view to the remote base; a read
+copies from the remote base to a writable local view. Offsets and lengths are bytes;
+shape and dtype agreement is the application's responsibility.
+
+Synchronous reads/writes return zero; ``async_op=True`` returns
+:class:`torch.distributed.Work`. Successful completion means the transfer completed,
+not that the remote application consumed or acknowledged the data. Asyncio callers
+can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
+until close, and tensors must not be resized or have their storage replaced.
+
+NIXL's default wait timeout is 30 seconds. Blocking operations accept a ``timeout``
+keyword in seconds; ``None`` selects the backend default and zero polls without
+waiting. ``Work.wait`` instead takes a ``datetime.timedelta``, following the Work
+API; its zero default selects the transfer's timeout. A timed-out wait does not
+cancel DMA or permit buffer reuse. Wait for completion or successfully close the
+transport before releasing local buffers. Coordinate with peers before closing
+exposed memory; close only drains locally submitted operations.
+
+A timed-out close rejects new work and leaves cleanup queued behind pending
+operations. Retry close to wait for cleanup. A permanently stalled backend can
+retain resources indefinitely and prevent normal interpreter shutdown. Python
+wait deadlines cannot preempt a native call that holds the GIL. CUDA stream
+semantics, graph capture, tracing, batching, remote slicing, and rank-based
+bootstrap helpers are outside this initial API.
+
+.. autofunction:: torch.distributed._transport.new_transport
+.. autoclass:: torch.distributed._transport.Transport
+   :members:
+.. autoclass:: torch.distributed._transport.Memory
+   :members:
+.. autoclass:: torch.distributed._transport.MemoryView
+   :members:
+.. autoclass:: torch.distributed._transport.MutableMemoryView
+.. autoclass:: torch.distributed._transport.RemoteBuffer
+.. autofunction:: torch.distributed._transport.wait_all
+.. autofunction:: torch.distributed._transport.available_transports
+.. autofunction:: torch.distributed._transport.register_transport
+
+```

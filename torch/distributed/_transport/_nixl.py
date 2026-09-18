@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import operator
 import time
 import uuid
 from dataclasses import dataclass
 from importlib import import_module
-from threading import Lock
-from typing import Any
+from threading import get_ident, Lock
+from typing import Any, cast
 
 import torch
 
 from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from ._work import _validate_timeout
 
 
 def _load_backend() -> Any:
@@ -38,6 +40,7 @@ class NIXLRemoteBuffer:
 @dataclass
 class _Registration:
     tensor: torch.Tensor
+    storage: Any
     descs: Any
     address: int
     length: int
@@ -72,10 +75,14 @@ class NIXLMemory:
         self._reused = reused
 
     def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
-        offset = 0 if offset is None else int(offset)
+        offset = 0 if offset is None else operator.index(offset)
         if offset < 0 or offset > self._registration.length:
             raise ValueError("offset is outside the registered memory")
-        length = self._registration.length - offset if length is None else int(length)
+        length = (
+            self._registration.length - offset
+            if length is None
+            else operator.index(length)
+        )
         if length < 0 or length > self._registration.length - offset:
             raise ValueError("view exceeds the registered memory")
         return offset, length
@@ -90,8 +97,10 @@ class NIXLMemory:
     ) -> NIXLMutableMemoryView:
         return NIXLMutableMemoryView(self, *self._range(offset, length))
 
-    def to_remote_buffer(self) -> NIXLRemoteBuffer:
-        return self._transport._remote_buffer(self._registration)
+    def to_remote_buffer(self, *, timeout: float | None = None) -> NIXLRemoteBuffer:
+        return self._transport._call(
+            lambda: self._transport._remote_buffer(self._registration), timeout
+        )
 
     def reused_registration(self) -> bool:
         return self._reused
@@ -108,6 +117,8 @@ class NIXLTransport(Transport):
         agent_name: str | None = None,
         num_threads: int = 0,
         enable_prog_thread: bool = True,
+        capture_telemetry: bool = False,
+        backend_options: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> None:
         super().__init__(device)
@@ -117,26 +128,40 @@ class NIXLTransport(Transport):
             raise ValueError("plugin cannot be empty")
         if num_threads < 0:
             raise ValueError("num_threads must be nonnegative")
-        if timeout <= 0:
-            raise ValueError("timeout must be positive")
+        _validate_timeout(timeout)
+        if backend_options and num_threads:
+            raise ValueError(
+                "set plugin thread parameters in backend_options, not num_threads"
+            )
+        if backend_options is not None and not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in backend_options.items()
+        ):
+            raise TypeError("backend_options must map strings to strings")
         backend = _load_backend()
         self._plugin = plugin.upper()
         config = backend.nixl_agent_config(
-            backends=[self._plugin],
+            backends=[] if backend_options else [self._plugin],
             num_threads=num_threads,
             enable_prog_thread=enable_prog_thread,
+            capture_telemetry=capture_telemetry,
         )
         self._agent = backend.nixl_agent(
             agent_name or f"torch-{uuid.uuid4().hex}", config
         )
+        if backend_options:
+            self._agent.create_backend(self._plugin, dict(backend_options))
         if self._plugin not in self._agent.backends:
             raise RuntimeError(f"NIXL plugin {self._plugin!r} is unavailable")
         self._timeout = timeout
+        self._default_timeout = timeout
         self._peer_name: str | None = None
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
         self._transfers: dict[tuple[Any, ...], Any] = {}
         self._operation_lock = Lock()
         self._closed = False
+        self._close_lock = Lock()
+        self._shutdown_work: Work | None = None
 
     @staticmethod
     def supported() -> bool:
@@ -153,10 +178,21 @@ class NIXLTransport(Transport):
             raise RuntimeError("transport is closed")
         return self._agent
 
-    def bind(self) -> bytes:
-        return self._ensure_open().get_agent_metadata()
+    def _call(self, operation: Any, timeout: float | None) -> Any:
+        return self._work_queue.run(
+            operation,
+            torch.device("cpu"),
+            async_op=False,
+            timeout=self._timeout if timeout is None else timeout,
+        )
 
-    def connect(self, peer_url: bytes) -> int:
+    def bind(self, *, timeout: float | None = None) -> bytes:
+        return self._call(lambda: self._ensure_open().get_agent_metadata(), timeout)
+
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
+        return self._call(lambda: self._connect(peer_url), timeout)
+
+    def _connect(self, peer_url: bytes) -> int:
         if self._peer_name is not None:
             raise RuntimeError("transport is already connected")
         name = _agent_name(self._ensure_open().add_remote_agent(peer_url))
@@ -166,7 +202,12 @@ class NIXLTransport(Transport):
     def connected(self) -> bool:
         return self._peer_name is not None and not self._closed
 
-    def register_memory(self, tensor: torch.Tensor) -> NIXLMemory:
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> NIXLMemory:
+        return self._call(lambda: self._register_memory(tensor), timeout)
+
+    def _register_memory(self, tensor: torch.Tensor) -> NIXLMemory:
         agent = self._ensure_open()
         if not isinstance(tensor, torch.Tensor):
             raise TypeError("tensor must be a torch.Tensor")
@@ -184,6 +225,7 @@ class NIXLTransport(Transport):
         descs = agent.register_memory(tensor, backends=[self._plugin])
         registration = _Registration(
             tensor,
+            tensor.untyped_storage(),
             descs,
             tensor.data_ptr(),
             length,
@@ -229,6 +271,15 @@ class NIXLTransport(Transport):
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
         registration = local_buffer._memory._registration
+        if registration.tensor.data_ptr() != registration.address or (
+            registration.tensor.numel() * registration.tensor.element_size()
+            != registration.length
+        ):
+            raise RuntimeError(
+                "registered tensor was resized or its storage was replaced"
+            )
+        if local_buffer.size() == 0:
+            return 0
         key = (
             operation,
             id(registration),
@@ -239,6 +290,7 @@ class NIXLTransport(Transport):
             remote_buffer.length,
             remote_buffer.device_id,
             remote_buffer.memory_type,
+            remote_buffer.metadata,
         )
         with self._operation_lock:
             handle = self._transfers.get(key)
@@ -277,29 +329,25 @@ class NIXLTransport(Transport):
                 )
                 self._transfers[key] = handle
             try:
-                deadline = time.monotonic() + self._timeout
                 error: BaseException | None = None
-                timed_out = False
                 state = "PROC"
                 try:
                     state = agent.transfer(handle)
                 except BaseException as dispatch_error:
                     error = dispatch_error
                 while state == "PROC":
-                    timed_out |= time.monotonic() >= deadline
                     try:
                         state = agent.check_xfer_state(handle)
                     except BaseException as check_error:
                         # A failed query does not establish that DMA has stopped.
                         if error is None:
                             error = check_error
-                        time.sleep(0)
+                    if state == "PROC":
+                        time.sleep(0.001)
                 if error is not None:
                     raise error
                 if state != "DONE":
                     raise RuntimeError(f"NIXL {operation.lower()} failed")
-                if timed_out:
-                    raise TimeoutError(f"NIXL {operation.lower()} timed out")
             except BaseException:
                 self._transfers.pop(key, None)
                 try:
@@ -315,6 +363,7 @@ class NIXLTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
         if not isinstance(local_buffer, NIXLMemoryView):
             raise TypeError("local_buffer was not registered by this transport")
@@ -322,6 +371,7 @@ class NIXLTransport(Transport):
             lambda: self._transfer("WRITE", local_buffer, remote_buffer, mutable=False),
             local_buffer._memory._registration.tensor.device,
             async_op=async_op,
+            timeout=self._timeout if timeout is None else timeout,
         )
 
     def read(
@@ -330,6 +380,7 @@ class NIXLTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
         if not isinstance(local_buffer, NIXLMutableMemoryView):
             raise TypeError("local_buffer was not registered by this transport")
@@ -337,12 +388,28 @@ class NIXLTransport(Transport):
             lambda: self._transfer("READ", local_buffer, remote_buffer, mutable=True),
             local_buffer._memory._registration.tensor.device,
             async_op=async_op,
+            timeout=self._timeout if timeout is None else timeout,
         )
 
-    def close(self) -> None:
-        self._close_work()
+    def close(self, *, timeout: float | None = None) -> None:
+        timeout = self._timeout if timeout is None else timeout
+        _validate_timeout(timeout)
+        if get_ident() == self._work_queue.worker_ident:
+            raise RuntimeError("cannot close a transport from its worker")
+        with self._close_lock:
+            if self._shutdown_work is None:
+                self._shutdown_work = cast(
+                    Work,
+                    self._run_transfer(
+                        self._release_resources, torch.device("cpu"), async_op=True
+                    ),
+                )
+        self._close_work(timeout)
+        cast(Work, self._shutdown_work).wait()
+
+    def _release_resources(self) -> int:
         if self._closed:
-            return
+            return 0
         self._closed = True
         agent = self._agent
         peer_name = self._peer_name
@@ -356,6 +423,7 @@ class NIXLTransport(Transport):
         if peer_name is not None:
             agent.remove_remote_agent(peer_name)
         self._agent = None
+        return 0
 
 
 __all__ = ["NIXLTransport"]
