@@ -1,15 +1,17 @@
 diff --git a/quack/epilogue/ops.py b/quack/epilogue/ops.py
+index b846b40..32b59bb 100644
 --- a/quack/epilogue/ops.py
 +++ b/quack/epilogue/ops.py
-@@ -948,0 +949,4 @@
-+
+@@ -940,0 +941,4 @@ class TileStore(EpiOp):
 +    def min_epi_tile_n(self, arg_tensor):
 +        """Return a physical-N lower bound imposed by this store, if any."""
 +        return None
++
 diff --git a/quack/gemm_sm100.py b/quack/gemm_sm100.py
+index 5dd8bf1..0aace89 100644
 --- a/quack/gemm_sm100.py
 +++ b/quack/gemm_sm100.py
-@@ -518,6 +518,3 @@
+@@ -518,6 +518,3 @@ class GemmSm100(GemmTmaBase):
 -        # Quantized-output SF vectors must be produced within one epi subtile.
 -        # Widen the epi tile N when an active BlockScaleFactorStore needs a
 -        # larger run (e.g. fp4 D with a small tile may default to epi N below
@@ -19,7 +21,7 @@ diff --git a/quack/gemm_sm100.py b/quack/gemm_sm100.py
 +        # Quantized-output SF vectors and contracted narrow stores may require
 +        # a wider N run than the default epi subtile. The stage computation
 +        # below re-budgets smem after any widening.
-@@ -525,2 +522,10 @@
+@@ -525,2 +522,10 @@ class GemmSm100(GemmTmaBase):
 -        if sfd_min_n:
 -            epi_tile_n = self.epi_tile[1]
 +        store_min_n = 0
@@ -32,7 +34,7 @@ diff --git a/quack/gemm_sm100.py b/quack/gemm_sm100.py
 +        min_epi_n = max(sfd_min_n or 0, store_min_n)
 +        epi_tile_n = self.epi_tile[1]
 +        if cute.size(epi_tile_n) < min_epi_n:
-@@ -532,6 +537,6 @@
+@@ -532,6 +537,6 @@ class GemmSm100(GemmTmaBase):
 -            if (
 -                contiguous
 -                and cute.size(epi_tile_n) < sfd_min_n
