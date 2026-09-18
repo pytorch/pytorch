@@ -644,6 +644,20 @@ class TestMultiprocessing(_MultiprocessingTestMixin, TestCase):
         with self.assertRaisesRegex(mp.ProcessRaisedException, "KeyboardInterrupt"):
             mp.spawn(raise_keyboard_interrupt, nprocs=1, join=True)
 
+    def test_pool_module(self):
+        """Regression test for Pool being broken since Python 3.8.
+
+        Previously, Pool.__init__ would raise TypeError because _setup_queues
+        and _repopulate_pool didn't provide the required ctx argument.
+        This test verifies Pool can be instantiated and used.
+        """
+        from torch.multiprocessing.pool import Pool
+
+        with Pool(2) as p:
+            buffers = [torch.zeros(2, 2) for i in range(4)]
+            results = p.map(simple_pool_fill, buffers, 1)
+        self.assertEqual(results, [torch.ones(2, 2) * 5] * 4, atol=0, rtol=0)
+
     def _test_preserve_sharing(self, ctx=mp, repeat=1):
         def do_test():
             x = torch.randn(5, 5)
