@@ -14,6 +14,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -21,7 +22,7 @@ from torch.testing._internal.common_fsdp import (
     get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -33,12 +34,14 @@ device_type = torch.device(get_devtype())
 
 
 class TestFullyShardStateDictMultiProcess(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(8, torch.get_device_module(device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_dp_state_dict_save_load(self):
+    def test_dp_state_dict_save_load(self, device):
         fsdp_mesh = init_device_mesh(device_type.type, (self.world_size,))
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5], "mesh": [fsdp_mesh]},
@@ -117,7 +120,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             self.assertEqual(value, sharded_sd[key])
 
     @skip_if_lt_x_gpu(2)
-    def test_cached_state_dict(self):
+    def test_cached_state_dict(self, device):
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5], "mutate_after_state_dict": [True, False]},
             self._test_cached_state_dict,
@@ -161,7 +164,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
                 )
 
     @skip_if_lt_x_gpu(2)
-    def test_dp_state_dict_cpu_offload(self):
+    def test_dp_state_dict_cpu_offload(self, device):
         self.run_subtests(
             {
                 "offload_policy": [
@@ -221,7 +224,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
                 self.assertEqual(dtensor.device.type, "cpu")
 
     @skip_if_lt_x_gpu(2)
-    def test_2d_state_dict_correctness(self):
+    def test_2d_state_dict_correctness(self, device):
         dp_size = 2
         global_mesh = init_device_mesh(
             device_type.type,
@@ -263,7 +266,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
             self.assertEqual(tensor, dtensor.full_tensor())
 
     @skip_if_lt_x_gpu(2)
-    def test_dp_tp_state_dict_save_load(self):
+    def test_dp_tp_state_dict_save_load(self, device):
         dp_size = 2
         global_mesh = init_device_mesh(
             device_type.type,
@@ -297,7 +300,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         self._test_state_dict_save_load(model)
 
     @skip_if_lt_x_gpu(4)
-    def test_hsdp_tp_state_dict_save_load(self):
+    def test_hsdp_tp_state_dict_save_load(self, device):
         global_mesh = init_device_mesh(
             device_type.type,
             (2, 2, self.world_size // 4),
@@ -395,12 +398,14 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
 
 class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
 
     @skip_if_lt_x_gpu(1)
-    def test_rank0_offload_full_state_dict(self):
+    def test_rank0_offload_full_state_dict(self, device):
         # Construct a reference unsharded model on all ranks
         model_args = ModelArgs(dropout_p=0.0)
         torch.manual_seed(42)
@@ -446,6 +451,20 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
                 self.assertEqual(param, ref_param)
         else:
             self.assertEqual(len(full_sd), 0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardStateDictMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardStateDictMultiThread,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
