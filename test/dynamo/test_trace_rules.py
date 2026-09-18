@@ -29,14 +29,13 @@ from torch._dynamo.variables import (
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     skipIfWindows,
-    TEST_CUDA,
-    TEST_XPU,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 try:
@@ -316,6 +315,8 @@ def gen_allowed_objs_and_ids(record=False, c_binding_only=True) -> AllowedObject
 
 
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _check_set_equality(self, generated, used, rule_map, ignored_set):
         x = generated - used
         y = used - generated
@@ -347,19 +348,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     lambda msg: f"{msg}\n{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
                     "is not a python module, please check and correct it.",
                 )
-
-    @unittest.skipUnless(TEST_XPU or TEST_CUDA, "GPU is not available")
-    def test_gpu_manual_seed_functions_graph_break(self):
-        for name in (
-            f"torch.{GPU_TYPE}.manual_seed",
-            f"torch.{GPU_TYPE}.manual_seed_all",
-            f"torch.{GPU_TYPE}.random.manual_seed",
-            f"torch.{GPU_TYPE}.random.manual_seed_all",
-        ):
-            self.assertIs(
-                torch._dynamo.trace_rules.lookup(load_object(name)),
-                SkipFunctionVariable,
-            )
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/114831")
     @unittest.skip(
@@ -546,7 +534,26 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(lookup_inner(w, name=None, reasons=o), SkipFunctionVariable)
 
 
+class TraceRuleTestsDevice(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_manual_seed_functions_graph_break(self, device):
+        device_type = torch.device(device).type
+        for name in (
+            f"torch.{device_type}.manual_seed",
+            f"torch.{device_type}.manual_seed_all",
+            f"torch.{device_type}.random.manual_seed",
+            f"torch.{device_type}.random.manual_seed_all",
+        ):
+            self.assertIs(
+                torch._dynamo.trace_rules.lookup(load_object(name)),
+                SkipFunctionVariable,
+            )
+
+
 class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipIf(
         not torch.distributed.is_available(),
         "need to import MLP module from distributed",
@@ -569,6 +576,8 @@ class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
 
 
 class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_top_level_torch_exp_compiles_through_dynamo(self):
         x = torch.randn(4)
 
@@ -595,6 +604,9 @@ class SingleOpCompileTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(TraceRuleTests)
+instantiate_device_type_tests(
+    TraceRuleTestsDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
