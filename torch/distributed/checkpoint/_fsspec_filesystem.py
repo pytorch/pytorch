@@ -193,24 +193,20 @@ class FsspecReader(FileSystemReader):
     def _supports_batched_cat_ranges(self) -> bool:
         if not (self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges")):
             return False
-        # AsyncFileSystem subclasses (e.g., gcsfs, s3fs) execute cat_ranges
-        # concurrently via _cat_ranges and bind the sync wrapper onto the
-        # instance via mirror_sync_methods rather than overriding on the class.
+        # AsyncFileSystem subclasses (gcsfs, s3fs) bind the sync cat_ranges onto
+        # the instance via mirror_sync_methods, so it is not on the class.
         if isinstance(self.fs.fs, fsspec.asyn.AsyncFileSystem):
             return True
-        # Exclude the base AbstractFileSystem.cat_ranges fallback, which opens
-        # and closes the file sequentially per range item instead of reusing a
-        # single stream per shard file like FileSystemReader.read_data.
+        # The AbstractFileSystem fallback reopens the file per range, which is
+        # slower than the single stream per shard in FileSystemReader.read_data.
         cat_ranges_fn = getattr(
             self.fs.fs.cat_ranges, "__func__", self.fs.fs.cat_ranges
         )
         return cat_ranges_fn is not fsspec.AbstractFileSystem.cat_ranges
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        # The batched path resolves and writes into target tensors from several
-        # threads at once, so it is only correct for planners that declare the
-        # per-item hooks safe to call concurrently. See
-        # ``LoadPlanner.supports_parallel_load``.
+        # The batched path writes into target tensors from several threads, so
+        # it needs ``LoadPlanner.supports_parallel_load``.
         if (
             not plan.items
             or not getattr(planner, "supports_parallel_load", False)
@@ -254,22 +250,17 @@ class FsspecReader(FileSystemReader):
         if batch:
             batches.append((paths, starts, ends, batch))
 
-        # ``load_bytes`` mutates the planner's state_dict in place, so it still
-        # has to be serialized. The tensor path needs no lock: the planner
-        # declared ``supports_parallel_load``, which guarantees distinct items
-        # resolve to non-overlapping storage.
+        # ``load_bytes`` mutates the planner's state_dict, so it stays
+        # serialized. The tensor path is covered by ``supports_parallel_load``,
+        # which guarantees distinct items resolve to non-overlapping storage.
         load_bytes_lock = threading.Lock()
 
         def fetch_batch(b):
             bp, bs, be, br = b
             chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
-            # ``on_error`` is advisory: fsspec's AsyncFileSystem._cat_ranges
-            # only started honoring it recently, and other backends may ignore
-            # it entirely. Older implementations always pass
-            # ``return_exceptions=True`` down to ``_run_coros_in_chunks`` and
-            # hand the exception back in-band, which would otherwise surface as
-            # an opaque TypeError from ``io.BytesIO`` in a worker thread and
-            # hide the underlying storage failure.
+            # ``on_error`` is advisory: fsspec honors it only since 2026.7.0 and
+            # other backends may ignore it, returning exceptions in-band.
+            # Unchecked, they reach ``io.BytesIO`` as an opaque TypeError.
             for path, start, end, chunk in zip(bp, bs, be, chunks):
                 if isinstance(chunk, BaseException):
                     raise RuntimeError(
@@ -308,13 +299,10 @@ class FsspecReader(FileSystemReader):
                     for f in futures:
                         f.result()
             finally:
-                # ``cancel_futures`` is the part the enclosing ``with`` does not
-                # do: ThreadPoolExecutor.__exit__ calls ``shutdown(wait=True)``,
-                # which drains the queue rather than dropping it, so a failure
-                # in one item would still run every process_chunk behind it.
-                # Waiting is left to __exit__. The outstanding prefetch is
-                # cancelled for the same reason and so its result is not
-                # silently discarded.
+                # __exit__ calls shutdown(wait=True) without ``cancel_futures``,
+                # so on failure it would drain the queue instead of dropping it.
+                # Waiting is left to __exit__; the in-flight prefetch is
+                # cancelled so its result is not silently discarded.
                 if next_io is not None:
                     next_io.cancel()
                 cpu_executor.shutdown(wait=False, cancel_futures=True)

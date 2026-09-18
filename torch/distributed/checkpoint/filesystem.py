@@ -875,12 +875,10 @@ class FileSystemReader(StorageReader):
     ) -> None:
         """Load a single ``ReadItem`` into the tensor resolved by ``planner``.
 
-        ``load_bytes_lock`` serializes ``LoadPlanner.load_bytes`` when a reader
-        calls this concurrently, because that hook mutates the planner's
-        ``state_dict`` in place. The tensor path is deliberately left unlocked:
-        a lock around ``resolve_tensor`` and ``commit_tensor`` alone would not
-        make ``resolve_tensor`` -> ``copy_`` -> ``commit_tensor`` atomic and so
-        would only look safe. Readers must instead check
+        ``load_bytes_lock`` serializes ``LoadPlanner.load_bytes``, which mutates
+        the planner's ``state_dict`` in place. The tensor path is deliberately
+        unlocked: locking ``resolve_tensor`` and ``commit_tensor`` would not
+        make resolve/copy/commit atomic, only look safe. Readers must check
         ``LoadPlanner.supports_parallel_load`` before calling this from more
         than one thread.
         """

@@ -307,24 +307,15 @@ class DefaultLoadPlanner(LoadPlanner):
     def supports_parallel_load(self) -> bool:
         """See :attr:`LoadPlanner.supports_parallel_load`.
 
-        ``DefaultLoadPlanner`` itself qualifies: ``resolve_tensor`` performs a
-        read-only lookup into ``state_dict`` and narrows it to the region owned
-        by the ``ReadItem``, so distinct items never share storage, and
-        ``commit_tensor`` is a no-op.
+        ``DefaultLoadPlanner`` qualifies: ``resolve_tensor`` is a read-only
+        lookup narrowed to the region the ``ReadItem`` owns, so distinct items
+        never share storage, and ``commit_tensor`` is a no-op.
 
-        That reasoning does not carry over to a subclass that changes how
-        tensors are resolved -- the documented extension pattern of
-        materializing a tensor in ``resolve_tensor`` and writing it back in
-        ``commit_tensor`` is order-dependent, for instance. This checks
-        ``lookup_tensor`` and ``transform_tensor`` as well, because
-        ``resolve_tensor`` delegates to them and they are themselves
-        documented extension points, so overriding one changes what storage a
-        ``ReadItem`` resolves to just as much as overriding ``resolve_tensor``
-        would.
-
-        Such subclasses drop back to the sequential path automatically. A
-        subclass that has verified its own hooks are safe can opt back in with
-        a plain class attribute::
+        A subclass that changes how tensors are resolved does not. The check
+        covers ``lookup_tensor`` and ``transform_tensor`` too, since
+        ``resolve_tensor`` delegates to them and both are documented extension
+        points. Such subclasses fall back to the sequential path; one that has
+        verified its own hooks can opt back in::
 
             class MyPlanner(DefaultLoadPlanner):
                 supports_parallel_load = True
