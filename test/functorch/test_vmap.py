@@ -64,6 +64,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     markDynamoStrictTest,
@@ -71,7 +72,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     subtest,
-    TEST_MPS,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -109,6 +109,8 @@ class EnableVmapFallbackWarnings:
 
 @markDynamoStrictTest
 class TestVmapAPI(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
             vmap(lambda x: 3.14)(torch.ones(3))
@@ -1148,89 +1150,6 @@ class TestVmapAPI(TestCase):
                 o = torch.vmap(torch.square)(t)
         self.assertEqual(o, torch.square(t))
 
-    def _test_vmap_autocast(self, device):
-        if torch.device(device).type == "cpu":
-            amp_dtype = torch.bfloat16
-        else:
-            amp_dtype = torch.float16
-
-        a_float32 = torch.rand(4, 2, 3, device=device)
-        b_float32 = torch.rand(4, 3, 2, device=device)
-        c_float32 = torch.rand(4, 2, 2, device=device)
-        d_float32 = torch.rand(4, 3, 2, device=device)
-
-        # Case 1, autocast inside vmapped function
-        def func1(x, y, z, w):
-            with torch.autocast(dtype=amp_dtype, device_type=device):
-                e_float16 = torch.matmul(x, y)
-                if e_float16.dtype != amp_dtype:
-                    raise AssertionError(
-                        f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
-                    )
-                f_float16 = torch.matmul(z, e_float16)
-                if f_float16.dtype != amp_dtype:
-                    raise AssertionError(
-                        f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
-                    )
-            return torch.matmul(w, f_float16.float())
-
-        expected = func1(a_float32, b_float32, c_float32, d_float32)
-        out = vmap(func1)(a_float32, b_float32, c_float32, d_float32)
-        if not expected.allclose(out):
-            raise AssertionError("Expected func1 output to be close to vmap output")
-
-        # Case 2, autocast decorator inside vmapped function
-        @torch.autocast(dtype=amp_dtype, device_type=device)
-        def func2(x, y, z, w):
-            e_float16 = torch.matmul(x, y)
-            if e_float16.dtype != amp_dtype:
-                raise AssertionError(
-                    f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
-                )
-            f_float16 = torch.matmul(z, e_float16)
-            if f_float16.dtype != amp_dtype:
-                raise AssertionError(
-                    f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
-                )
-            return torch.matmul(w, f_float16)
-
-        expected = func2(a_float32, b_float32, c_float32, d_float32)
-        out = vmap(func2)(a_float32, b_float32, c_float32, d_float32)
-        if not expected.allclose(out):
-            raise AssertionError("Expected func2 output to be close to vmap output")
-
-        # Case 3, autocast is outside vmapped function
-        def func3(x, y, z, w):
-            e_float16 = torch.matmul(x, y)
-            if e_float16.dtype != amp_dtype:
-                raise AssertionError(
-                    f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
-                )
-            f_float16 = torch.matmul(z, e_float16)
-            if f_float16.dtype != amp_dtype:
-                raise AssertionError(
-                    f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
-                )
-            return torch.matmul(w, f_float16)
-
-        with torch.autocast(dtype=amp_dtype, device_type=device):
-            expected = func3(a_float32, b_float32, c_float32, d_float32)
-            out = vmap(func3)(a_float32, b_float32, c_float32, d_float32)
-
-        if not expected.allclose(out):
-            raise AssertionError("Expected func3 output to be close to vmap output")
-
-    def test_vmap_autocast_cpu(self):
-        self._test_vmap_autocast("cpu")
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_vmap_autocast_cuda(self):
-        self._test_vmap_autocast("cuda")
-
-    @unittest.skipIf(not TEST_MPS, "MPS is unavailable")
-    def test_vmap_autocast_mps(self):
-        self._test_vmap_autocast("mps")
-
     def test_restore_vmap_pytree_input_output(self):
         def f(x, y):
             output0 = x[0] + x[1]
@@ -1367,6 +1286,83 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0, return_nt=False):
         )
 
 
+@markDynamoStrictTest
+class TestVmapAutocast(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_vmap_autocast(self, device):
+        if torch.device(device).type == "cpu":
+            amp_dtype = torch.bfloat16
+        else:
+            amp_dtype = torch.float16
+
+        a_float32 = torch.rand(4, 2, 3, device=device)
+        b_float32 = torch.rand(4, 3, 2, device=device)
+        c_float32 = torch.rand(4, 2, 2, device=device)
+        d_float32 = torch.rand(4, 3, 2, device=device)
+
+        # Case 1, autocast inside vmapped function
+        def func1(x, y, z, w):
+            with torch.autocast(dtype=amp_dtype, device_type=device):
+                e_float16 = torch.matmul(x, y)
+                if e_float16.dtype != amp_dtype:
+                    raise AssertionError(
+                        f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
+                    )
+                f_float16 = torch.matmul(z, e_float16)
+                if f_float16.dtype != amp_dtype:
+                    raise AssertionError(
+                        f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
+                    )
+            return torch.matmul(w, f_float16.float())
+
+        expected = func1(a_float32, b_float32, c_float32, d_float32)
+        out = vmap(func1)(a_float32, b_float32, c_float32, d_float32)
+        if not expected.allclose(out):
+            raise AssertionError("Expected func1 output to be close to vmap output")
+
+        # Case 2, autocast decorator inside vmapped function
+        @torch.autocast(dtype=amp_dtype, device_type=device)
+        def func2(x, y, z, w):
+            e_float16 = torch.matmul(x, y)
+            if e_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
+                )
+            f_float16 = torch.matmul(z, e_float16)
+            if f_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
+                )
+            return torch.matmul(w, f_float16)
+
+        expected = func2(a_float32, b_float32, c_float32, d_float32)
+        out = vmap(func2)(a_float32, b_float32, c_float32, d_float32)
+        if not expected.allclose(out):
+            raise AssertionError("Expected func2 output to be close to vmap output")
+
+        # Case 3, autocast is outside vmapped function
+        def func3(x, y, z, w):
+            e_float16 = torch.matmul(x, y)
+            if e_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
+                )
+            f_float16 = torch.matmul(z, e_float16)
+            if f_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
+                )
+            return torch.matmul(w, f_float16)
+
+        with torch.autocast(dtype=amp_dtype, device_type=device):
+            expected = func3(a_float32, b_float32, c_float32, d_float32)
+            out = vmap(func3)(a_float32, b_float32, c_float32, d_float32)
+
+        if not expected.allclose(out):
+            raise AssertionError("Expected func3 output to be close to vmap output")
+
+
 class TensorFactory:
     @staticmethod
     def rand(size, device="cpu", dtype=torch.float):
@@ -1451,6 +1447,7 @@ def allowVmapFallbackUsage(fn):
 
 
 class Namespace:
+    # Helper base only -- no test_* methods (avoids leaking into ACCELERATOR subclasses).
     class TestVmapBase(TestCase):
         def __init__(self, method_name="runTest"):
             super().__init__(method_name)
@@ -1487,33 +1484,38 @@ class Namespace:
 
             return types.MethodType(wrapper, self)
 
-        @allowVmapFallbackUsage
-        def test_vmap_fallback_check_ok(self):
-            # One day we'll implement a batching rule for torch.var_mean.
-            # When that happens, please change the example to use an
-            # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
+
+@markDynamoStrictTest
+class TestVmapFallbackCheck(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @allowVmapFallbackUsage
+    def test_vmap_fallback_check_ok(self):
+        # One day we'll implement a batching rule for torch.var_mean.
+        # When that happens, please change the example to use an
+        # operator that doesn't have a batching rule implemented.
+        op_using_fallback = torch.var_mean
+        vmap(op_using_fallback)(torch.rand(3))
+
+    @unittest.expectedFailure
+    def test_vmap_fallback_check(self):
+        @self._wrap_method_with_vmap_fallback_check
+        def no_fallback(self):
+            pass
+
+        # One day we'll implement a batching rule for torch.var_mean.
+        # When that happens, please change the example to use an
+        # operator that doesn't have a batching rule implemented.
+        op_using_fallback = torch.var_mean
+
+        @self._wrap_method_with_vmap_fallback_check
+        def uses_fallback(self):
             vmap(op_using_fallback)(torch.rand(3))
 
-        @unittest.expectedFailure
-        def test_vmap_fallback_check(self):
-            @self._wrap_method_with_vmap_fallback_check
-            def no_fallback(self):
-                pass
+        no_fallback(self)
 
-            # One day we'll implement a batching rule for torch.var_mean.
-            # When that happens, please change the example to use an
-            # operator that doesn't have a batching rule implemented.
-            op_using_fallback = torch.var_mean
-
-            @self._wrap_method_with_vmap_fallback_check
-            def uses_fallback(self):
-                vmap(op_using_fallback)(torch.rand(3))
-
-            no_fallback(self)
-
-            with self.assertRaises(AssertionError):
-                uses_fallback(self)
+        with self.assertRaises(AssertionError):
+            uses_fallback(self)
 
 
 def _make_case(op, input_getter=TensorFactory.randn):
@@ -1522,6 +1524,8 @@ def _make_case(op, input_getter=TensorFactory.randn):
 
 @markDynamoStrictTest
 class TestVmapOperators(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -3722,6 +3726,8 @@ def _get_rand_no_zeros(*args, **kwargs):
 
 @markDynamoStrictTest
 class TestVmapBatchedGradient(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -4259,6 +4265,8 @@ def discover_variants(opinfo):
 # @markDynamoStrictTest
 @unMarkDynamoStrictTest
 class TestVmapOperatorsOpInfo(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def vmap_outplace_test(
         self,
         func,
@@ -5315,7 +5323,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             return fn(t, idx, v)
 
         N = 2
-        t = torch.zeros((N, 5), device="cuda")
+        t = torch.zeros((N, 5), device=device)
         idx = torch.tensor([1, 3])
         v = torch.tensor(1, dtype=t.dtype, device="cpu")
 
@@ -5525,6 +5533,29 @@ class TestVmapOperatorsOpInfo(TestCase):
             with self.assertRaisesRegex(RuntimeError, "dimension"):
                 return vmap(op_wrapper)(test_input)
 
+    def test_searchsorted_bucketize(self, device):
+        # OpInfo generates test with repeated samples in batch dim.
+        # Thus we test explicitly with different samples across a batch.
+
+        def test():
+            boundaries = torch.tensor(
+                [[1, 4, 5, 7, 9], [1, 2, 6, 8, 10]], device=device
+            )
+            v = torch.tensor(3, device=device)
+            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, None))
+            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (None, 0))
+            boundaries = torch.tensor([[1, 4, 5, 7, 9], [1, 2, 4, 8, 9]], device=device)
+            v = torch.tensor([3, 4], device=device)
+            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, 0))
+            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (0, 0))
+
+        test()
+
+
+@markDynamoStrictTest
+class TestVmapOperatorsOpInfoGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_vmap_multi_dot_failure_1D_input(self):
         # special exception for first and last tensors so making giving 3 items avoids special cases
         inputs = (torch.randn(3, 3), torch.randn(3), torch.randn(3, 3))
@@ -5613,27 +5644,11 @@ class TestVmapOperatorsOpInfo(TestCase):
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 vmap(grad(bad_fn))(x)
 
-    def test_searchsorted_bucketize(self, device):
-        # OpInfo generates test with repeated samples in batch dim.
-        # Thus we test explicitly with different samples across a batch.
-
-        def test():
-            boundaries = torch.tensor(
-                [[1, 4, 5, 7, 9], [1, 2, 6, 8, 10]], device=device
-            )
-            v = torch.tensor(3, device=device)
-            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, None))
-            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (None, 0))
-            boundaries = torch.tensor([[1, 4, 5, 7, 9], [1, 2, 4, 8, 9]], device=device)
-            v = torch.tensor([3, 4], device=device)
-            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, 0))
-            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (0, 0))
-
-        test()
-
 
 @markDynamoStrictTest
 class TestRandomness(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _reset_random(self, generator, orig_state, use_generator, seed):
         return (
             generator.set_state(orig_state)
@@ -6383,6 +6398,43 @@ class TestRandomness(TestCase):
 
             vmap(f, randomness="same")(z)
 
+    @parametrize("randomness", ["error", "same", "different"])
+    def test_dropout_unbatched(self, device, randomness):
+        x = torch.randn(3, device=device)
+        y = torch.randn(1, 3, device=device)
+
+        def fn(x, y):
+            # output from dropout should be a Tensor[B, 1, 3] (B=3)
+            return x + torch.nn.functional.dropout(y, p=0.5).mean(1)
+
+        # We just verify that this doesn't raise an error for
+        # `same` and `different` randomness.
+        # Ref: https://github.com/pytorch/pytorch/issues/92283
+        context = (
+            self.assertRaises(RuntimeError)
+            if randomness == "error"
+            else contextlib.nullcontext()
+        )
+        with context:
+            vmap(fn, in_dims=(0, None), randomness=randomness)(x, y)
+
+
+@markDynamoStrictTest
+class TestRandomnessGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def _assert_all_slices_unique(self, tensor):
+        B0 = tensor.shape[0]
+        slices_equal = vmap(vmap(lambda x, y: (x == y).all(), (0, None)), (None, 0))(
+            tensor, tensor
+        )
+        if slices_equal.shape != (B0, B0):
+            raise AssertionError(
+                f"Expected shape ({B0}, {B0}), got {slices_equal.shape}"
+            )
+        slices_equal.diagonal().zero_()
+        self.assertEqual(slices_equal, torch.zeros_like(slices_equal))
+
     @parametrize("in_dim", [0, 1, 2])
     @parametrize("out_dim", [0, 1, 2])
     def test_chunk_vmap(self, in_dim, out_dim):
@@ -6439,39 +6491,20 @@ class TestRandomness(TestCase):
         jacfwd(torch.bernoulli, randomness="same")(x)
         jacfwd(torch.bernoulli, randomness="different")(x)
 
-    @parametrize("randomness", ["error", "same", "different"])
-    def test_dropout_unbatched(self, device, randomness):
-        x = torch.randn(3, device=device)
-        y = torch.randn(1, 3, device=device)
-
-        def fn(x, y):
-            # output from dropout should be a Tensor[B, 1, 3] (B=3)
-            return x + torch.nn.functional.dropout(y, p=0.5).mean(1)
-
-        # We just verify that this doesn't raise an error for
-        # `same` and `different` randomness.
-        # Ref: https://github.com/pytorch/pytorch/issues/92283
-        context = (
-            self.assertRaises(RuntimeError)
-            if randomness == "error"
-            else contextlib.nullcontext()
-        )
-        with context:
-            vmap(fn, in_dims=(0, None), randomness=randomness)(x, y)
-
 
 @markDynamoStrictTest
 class TestTransformFailure(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo()
     @parametrize(
         "transform",
         ["vmap", "grad", "grad_and_value", "vjp", "jvp", "jacrev", "jacfwd"],
     )
-    def test_fails_with_autograd_function(self, device, transform):
+    def test_fails_with_autograd_function(self, transform):
         failed_build_envs = ("linux-focal-py3.8-clang10", "linux-focal-py3.11-clang10")
         if (
-            device == "cpu"
-            and transform in ["grad", "vmap"]
+            transform in ["grad", "vmap"]
             and TEST_WITH_TORCHDYNAMO
             and os.getenv("BUILD_ENVIRONMENT", "") in failed_build_envs
         ):
@@ -6513,6 +6546,8 @@ class TestTransformFailure(TestCase):
 
 @markDynamoStrictTest
 class TestVmapDeviceType(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -6611,6 +6646,8 @@ class TestVmapDeviceType(Namespace.TestVmapBase):
 
 @markDynamoStrictTest
 class TestVmapNestedTensor(Namespace.TestVmapBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -6783,6 +6820,12 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
 
 
 only_for = ("cpu", "cuda")
+instantiate_parametrized_tests(TestVmapOperatorsOpInfoGeneric)
+instantiate_parametrized_tests(TestRandomnessGeneric)
+instantiate_parametrized_tests(TestTransformFailure)
+instantiate_device_type_tests(
+    TestVmapAutocast, globals(), only_for=only_for, allow_mps=True
+)
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
 instantiate_device_type_tests(
@@ -6790,7 +6833,6 @@ instantiate_device_type_tests(
     globals(),
     only_for=only_for,
 )
-instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 instantiate_device_type_tests(TestRandomness, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapDeviceType, globals(), only_for=only_for)
 instantiate_device_type_tests(TestVmapNestedTensor, globals(), only_for=only_for)
