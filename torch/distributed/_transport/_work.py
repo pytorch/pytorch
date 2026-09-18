@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 from concurrent.futures import (
     Future,
@@ -33,13 +34,17 @@ def _asyncio_future(work: Work) -> asyncio.Future[None]:
     return asyncio.wrap_future(completion)
 
 
-async def wait_all(works: Iterable[Work]) -> None:
+async def wait_all(works: Iterable[Work], *, timeout: float | None = None) -> None:
     """Await every Work without blocking asyncio or cancelling transfers.
 
-    Drain all submitted operations before propagating cancellation or errors.
-    ``asyncio.wait_for`` therefore reports its timeout only after draining.
+    Without an explicit timeout, drain submitted operations before propagating
+    cancellation or errors. ``asyncio.wait_for`` then reports its timeout only
+    after draining.
     A generator may submit operations; if it raises, earlier work is drained.
+    An explicit ``timeout`` instead bounds this wait without draining or cancelling
+    transfers. Retain buffers and wait again before reusing them.
     """
+    _validate_timeout(timeout)
     pending = []
     dispatch_error: BaseException | None = None
     try:
@@ -48,6 +53,10 @@ async def wait_all(works: Iterable[Work]) -> None:
     except BaseException as error:
         dispatch_error = error
     completion = asyncio.gather(*pending, return_exceptions=True)
+    if timeout is not None:
+        done, _ = await asyncio.wait((completion,), timeout=timeout)
+        if not done:
+            raise TimeoutError("transport wait timed out; operations remain pending")
     cancelled = False
     while True:
         try:
@@ -64,11 +73,19 @@ async def wait_all(works: Iterable[Work]) -> None:
             raise result
 
 
+def _validate_timeout(timeout: float | None) -> None:
+    if timeout is not None and (not math.isfinite(timeout) or timeout < 0):
+        raise ValueError("timeout must be finite and nonnegative")
+
+
 class _FutureWork(Work):
-    def __init__(self, future: Future[int], queue: _WorkQueue) -> None:
+    def __init__(
+        self, future: Future[int], queue: _WorkQueue, timeout: float | None = None
+    ) -> None:
         super().__init__()
         self._future = future
         self._queue = queue
+        self._timeout = timeout
         self._torch_future: torch.futures.Future[Any] = torch.futures.Future()
         future.add_done_callback(self._finish)
 
@@ -99,7 +116,7 @@ class _FutureWork(Work):
         seconds = timeout.total_seconds()
         if seconds < 0:
             raise ValueError("timeout must be nonnegative")
-        self._result(seconds or None)
+        self._result(seconds or self._timeout)
         return True
 
     def is_completed(self) -> bool:
@@ -145,7 +162,9 @@ class _WorkQueue:
         device: torch.device,
         *,
         async_op: bool,
+        timeout: float | None = None,
     ) -> int | Work:
+        _validate_timeout(timeout)
         capturing = False
         if device.type == "cuda":
             with torch.cuda.device(device):
@@ -163,7 +182,7 @@ class _WorkQueue:
                 raise RuntimeError(
                     "wait for pending transport work before CUDA graph capture"
                 )
-            if capturing or (not async_op and self._executor is None):
+            if capturing:
                 self._pending += 1
                 future = None
             else:
@@ -185,7 +204,16 @@ class _WorkQueue:
                     self._condition.notify_all()
                     raise
         if future is not None:
-            return _FutureWork(future, self) if async_op else future.result()
+            if async_op:
+                return _FutureWork(future, self, timeout)
+            try:
+                return future.result(timeout)
+            except FutureTimeoutError as error:
+                if future.done():
+                    return future.result()
+                raise TimeoutError(
+                    "transport wait timed out; operation remains pending"
+                ) from error
         try:
             return operation()
         finally:
@@ -220,14 +248,16 @@ class _WorkQueue:
             self._pending -= 1
             self._condition.notify_all()
 
-    def close(self) -> None:
+    def close(self, timeout: float | None = None) -> None:
+        _validate_timeout(timeout)
         if threading.get_ident() == self.worker_ident:
             raise RuntimeError("cannot close a transport from its worker")
         with self._condition:
             self._closed = True
-            self._condition.wait_for(lambda: self._pending == 0)
+            if not self._condition.wait_for(lambda: self._pending == 0, timeout):
+                raise TimeoutError("transport close timed out; resources remain live")
             executor = self._executor
         if executor is not None:
-            executor.shutdown(wait=True)
+            executor.shutdown(wait=timeout is None)
         self.worker_ident = None
         self._streams.clear()

@@ -138,7 +138,11 @@ class IBVerbsMemory:
             self._registration, *self._range(offset, length)
         )
 
-    def to_remote_buffer(self) -> IBVerbsRemoteBuffer:
+    def to_remote_buffer(self, *, timeout: float | None = None) -> IBVerbsRemoteBuffer:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         return IBVerbsRemoteBuffer(
             self._registration.address,
             self._registration.length,
@@ -642,7 +646,11 @@ class IBVerbsTransport(Transport):
             return selected[1]
         raise RuntimeError(f"RDMA port {self._port} has no usable GID")
 
-    def bind(self) -> bytes:
+    def bind(self, *, timeout: float | None = None) -> bytes:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._ensure_open()
         if self._bound_url is not None:
             return self._bound_url
@@ -682,7 +690,11 @@ class IBVerbsTransport(Transport):
         ) + b"".join(infos)
         return self._bound_url
 
-    def connect(self, peer_url: bytes) -> int:
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._ensure_open()
         if self._connected:
             return 0
@@ -728,7 +740,13 @@ class IBVerbsTransport(Transport):
     def connected(self) -> bool:
         return self._connected and not self._closed
 
-    def register_memory(self, tensor: torch.Tensor) -> Memory:
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> Memory:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._ensure_open()
         if not tensor.is_contiguous():
             raise ValueError("tensor must be contiguous")
@@ -896,7 +914,12 @@ class IBVerbsTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         local, remote = self._validate_transfer(
             local_buffer, remote_buffer, mutable=False
         )
@@ -912,7 +935,12 @@ class IBVerbsTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         local, remote = self._validate_transfer(
             local_buffer, remote_buffer, mutable=True
         )
@@ -926,7 +954,11 @@ class IBVerbsTransport(Transport):
         if self._closed:
             raise RuntimeError("ibverbs transport is closed")
 
-    def close(self) -> None:
+    def close(self, *, timeout: float | None = None) -> None:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._close_work()
         if self._closed:
             return
