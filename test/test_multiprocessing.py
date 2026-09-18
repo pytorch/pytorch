@@ -132,7 +132,7 @@ def send_tensor_with_untyped_storage(queue, event):
             ref_counter_offset,
             event_handle,
             event_sync_required,
-        ) = storage._share_cuda_()
+        ) = storage._share_ipc_()
         specs.append(
             {
                 "tensor_cls": type(tensor),
@@ -871,6 +871,7 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
 
         for p in processes.values():
             self.assertFalse(p.is_alive())
+            self.assertEqual(p.exitcode, 0)
 
     @slowTest
     def test_cuda_send_many(self, name=None, size=5, count=100000):
@@ -948,6 +949,10 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         torch.cuda.ipc_collect()
 
     def test_rebuild_cuda_tensor(self):
+        reduce_fn, rebuild_fn = mp.reductions._ipc_tensor_reduce_registry["cuda"]
+        self.assertIs(reduce_fn, mp.reductions.reduce_cuda_tensor)
+        self.assertIs(rebuild_fn, mp.reductions.rebuild_cuda_tensor)
+
         ctx = mp.get_context("spawn")
         queue = ctx.Queue()
         event = ctx.Event()
@@ -961,7 +966,7 @@ class TestMultiprocessingCUDA(_MultiprocessingTestMixin, TestCase):
         specs = queue.get()
         tensors = []
         for spec in specs:
-            tensors.append(mp.reductions.rebuild_cuda_tensor(**spec))
+            tensors.append(rebuild_fn(**spec))
         self.assertEqual(tensors, [1, 1])
 
         del tensors, spec
