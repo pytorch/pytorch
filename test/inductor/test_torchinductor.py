@@ -6899,6 +6899,15 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
+    # From https://github.com/pytorch/pytorch/issues/197434
+    @skip_if_gpu_halide  # slow
+    def test_adaptive_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (2, 2))
+
+        self.common(fn, (torch.randn(2, 4, 12, 12).transpose(2, 3),))
+
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d1(self):
         def fn(x, samples):
@@ -6953,6 +6962,18 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(
             fn, (torch.randn(2, 4, 6, 6), torch.rand(2, 4, 2)), check_lowp=False
+        )
+
+    @xfail_if_mps_unimplemented
+    def test_fractional_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 36, 36).transpose(2, 3), torch.rand(2, 4, 2)),
+            check_lowp=False,
         )
 
     def test_multi_threading(self):
@@ -7256,6 +7277,17 @@ for dtype in (torch.int32, torch.int64):
             fn,
             (torch.randn([2, 2, 3, 6]),),
         )
+
+    # From https://github.com/pytorch/pytorch/issues/197434
+    def test_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x):
+            return (
+                aten.max_pool2d_with_indices(x, [6, 6]),
+                aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 12, 12]).transpose(2, 3),))
 
     def test_avg_pool2d1(self):
         def fn(x):
