@@ -4,7 +4,12 @@ artifact holding every frame Dynamo produces while the caller's calls run --
 the entry frame, the ``torch_dynamo_resume_in_*`` continuations graph breaks
 create, and the recompiled variants of each -- stored through CompilePackage
 (``torch/_dynamo/package.py``), a low-level component not meant to be used
-directly.
+directly. It is not ``torch.compiler.precompile``, the ahead-of-time capture
+API this repository already has (``torch/_precompile.py``), which does not call
+into this module; nor ``torch._dynamo.config.caching_precompile``, which caches
+``torch.compile`` artifacts transparently without an explicit capture and, when
+set, wraps every guard filter, this module's included (see
+``default_guard_filter_fn``).
 
 This module holds the guard filter for the serialized guards
 (``default_guard_filter_fn``), the lint over the identity guards it drops
@@ -14,11 +19,13 @@ an invariance policy may drop (``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the
 per-frame comparison of captured variants and the summary builder
 (``_varying_guard_slots``, ``_summarize``), and the compiler configuration and
 frame converter a capture runs under (``_capture_config``,
-``_AllowEmptyGraphsConvertFrame``). Everything here is internal. The
-multi-graph Dynamo capture session that drives them is a follow-up stack;
-nothing under ``torch/`` calls into this module yet. This precompile is
-distinct from ``torch._dynamo.config.caching_precompile``, which caches
-``torch.compile`` artifacts transparently without an explicit capture.
+``_AllowEmptyGraphsConvertFrame``). The filter lives here, with the rest of the
+capture's guard tooling, rather than beside the serializer's pre-check in
+``guards.py``: it is the capture's policy over that pre-check, not part of it.
+Everything here is internal; the filter alone is unprefixed because the
+capture session passes it as the default a caller may name. The multi-graph
+Dynamo capture session that drives them is a follow-up stack; nothing under
+``torch/`` calls into this module yet.
 """
 
 from __future__ import annotations
@@ -42,14 +49,14 @@ from .source import AttrSource, DictGetItemSource, GlobalSource, LocalSource
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from torch._guards import Source
 
     from .types import GuardFilterEntry
 
 
-def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[bool]:
+def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
     """
     Drop every guard ``CheckFunctionManager.serialize_guards`` would refuse for
     its type or a derived type, and keep everything else.
@@ -65,14 +72,18 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     slot is reported in ``PrecompileSummary.dropped_guards``, once however many
     variants dropped it.
 
-    The test is the serializer's own pre-check over the entry's type and
+    The criterion is the serializer's own pre-check over the entry's type and
     derived types: a guard is dropped if its type is refused or one of its
     derived types is (a CONSTANT_MATCH on a code object runs through
     ID_MATCH), and TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive,
     as the pre-check accepts them before it looks at derived types. That is
     what keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH; the
     loaded artifact checks the builtin against the loading process's builtins,
-    so it still notices one swapped after load. The one departure from the
+    so it still notices one swapped after load. Neither that keep nor the
+    DICT_KEYS_MATCH one below holds under
+    ``torch._dynamo.config.caching_precompile``: ``CheckFunctionManager``
+    wraps every guard filter under that setting and drops, with a warning, any
+    guard of or deriving ID_MATCH or DICT_VERSION. The one departure from the
     pre-check is a DICT_VERSION derived by a DICT_KEYS_MATCH, which is
     ignored: the entries this filter sees carry the derived types of the build
     ``CheckFunctionManager`` runs before filtering, with ``save_guards=False``,
@@ -94,11 +105,13 @@ def default_guard_filter_fn(entries: Sequence[GuardFilterEntry], /) -> Sequence[
     """
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     keep = []
-    for g in entries:
+    for g in guard_entries:
         derived = g.derived_guard_types
         if g.guard_type == "DICT_KEYS_MATCH":
             derived = tuple(d for d in derived if d != "DICT_VERSION")
         keep.append(
+            # The pre-check's accepted-by-type pair, a literal in serialize_guards
+            # too; a type added there is not seen here.
             g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
             or (
                 g.guard_type not in unsupported
@@ -139,11 +152,29 @@ def _is_dynamo_synthesized(source: Source) -> bool:
 def _norm(path: str) -> str:
     """
     realpath then normcase. A relative path resolves against the process cwd,
-    so a recorded ``__file__`` or a ``__path__`` entry is gated with isabs
-    before it gets here; this module's own ``__file__`` is not, the import
-    system having made it absolute.
+    so a recorded ``__file__`` is gated with isabs before it gets here and every
+    root candidate comes through ``_norm_absolute``; this module's own
+    ``__file__`` is taken as read because the path finder absolutizes the
+    location of anything it finds (bpo-43105, 3.10+). os is different: frozen
+    since 3.11, its ``__file__`` is spelled from sys._stdlib_dir, relative under
+    a relative home until site.abs_paths() re-anchors it at startup, which -S
+    skips.
     """
     return os.path.normcase(os.path.realpath(path))
+
+
+def _norm_absolute(paths: Iterable[object]) -> set[str]:
+    """
+    The ``_norm`` of every absolute str among ``paths``; anything else is
+    dropped rather than resolved. The interpreter's own metadata can be
+    relative: a venv whose pyvenv.cfg ``home`` is relative or a relative
+    PYTHONHOME leaves sys.base_prefix, sys._stdlib_dir and every sysconfig
+    path relative (os.__file__ alone is re-anchored, by site.abs_paths()),
+    a relative PYTHONUSERBASE the user site. Resolved, such a root would sit
+    wherever the process cwd was at the first call and stay cached there,
+    so a writer and a reader on one interpreter could classify differently.
+    """
+    return {_norm(p) for p in paths if isinstance(p, str) and os.path.isabs(p)}
 
 
 @functools.cache
@@ -155,28 +186,27 @@ def _stdlib_roots() -> tuple[str, ...]:
     one that stays right when the stdlib is a zip, where that root is the whole
     archive and a third party bundled into it is waived with the stdlib;
     sysconfig and sys._stdlib_dir cover a build where os is frozen with no
-    __file__. An install root can nest inside one of these (see
-    ``_install_roots``), so a path under both is third party: an install root
-    wins over a stdlib root.
+    __file__ (``_classify_file`` skips the stdlib arm under ``sys.frozen``, so
+    an app bundle does not use them). An install root can nest inside one of
+    these (see ``_install_roots``), so a path under both is third party: an
+    install root wins over a stdlib root.
     """
-    roots = []
+    roots: list[object] = []
     os_file = getattr(os, "__file__", None)
-    if os_file and os.path.isabs(os_file):
+    if isinstance(os_file, str) and os.path.isabs(os_file):
         # The directory the file resolves into, not the one it was imported
         # from: in a venv over a symlink-farm prefix (a Nix, Guix or Spack
         # profile) os.py is a per-file link into the store, sysconfig and
         # sys._stdlib_dir already name the farm, and every consumer normalizes
         # the file it asks about.
         roots.append(os.path.dirname(_norm(os_file)))
-    frozen_dir = getattr(sys, "_stdlib_dir", None)  # 3.11+
-    if frozen_dir:
-        roots.append(frozen_dir)
+    roots.append(getattr(sys, "_stdlib_dir", None))  # 3.11+
     paths = sysconfig.get_paths()
     roots += [paths["stdlib"], paths["platstdlib"]]
     if sys.platform == "win32":
         # The stdlib's C extensions live beside Lib, not under it.
         roots.append(os.path.join(sys.base_prefix, "DLLs"))
-    return tuple(sorted({_norm(p) for p in roots}))
+    return tuple(sorted(_norm_absolute(roots)))
 
 
 @functools.cache
@@ -189,14 +219,13 @@ def _install_roots() -> tuple[str, ...]:
     stdlib root.
     """
     paths = sysconfig.get_paths()
-    roots = [paths["purelib"], paths["platlib"]]
+    roots: list[object] = [paths["purelib"], paths["platlib"]]
     for name in ("getsitepackages", "getusersitepackages"):
         try:
             got = getattr(site, name)()
-            found = [got] if isinstance(got, str) else list(got)
+            roots += [got] if isinstance(got, str) else list(got)
         except Exception:
             continue  # an old-virtualenv site.py lacks it, or it cannot answer
-        roots += [p for p in found if isinstance(p, str)]
     # On Windows getsitepackages() lists the bare prefix, which the whole stdlib
     # sits under; a directory a stdlib root lies strictly under is not an
     # install root. A candidate that IS a stdlib root stays one, on purpose:
@@ -204,7 +233,7 @@ def _install_roots() -> tuple[str, ...]:
     # itself under no install root and waived with the stdlib, while keeping it
     # only reads the stdlib as third party.
     stdlib = _stdlib_roots()
-    normed = {_norm(p) for p in roots}
+    normed = _norm_absolute(roots)
     above = {r for r in normed for s in stdlib if s.startswith(r + os.sep)}
     return tuple(sorted(normed - above))
 
@@ -219,16 +248,20 @@ def _torch_roots() -> tuple[str, ...]:
     the torch package directory this file sits under (two levels up, past
     _dynamo) is among the entries, and then every absolute entry is adopted,
     one a third party appended to the real torch's included; a relative entry
-    would resolve against the process cwd and make it a torch root.
+    is dropped (``_norm_absolute``). That directory has two spellings, both of
+    them roots: resolved as a directory, and two levels up from where this file
+    resolves. They differ in a per-file symlink farm (see ``_stdlib_roots``),
+    where torch.__path__ names the farm and every consumer asks about a file
+    that resolves into the store.
     """
     own_file = globals().get("__file__")
     if not own_file:
         return ()  # frozen torch: no directory to anchor to
-    own = _norm(os.path.dirname(os.path.dirname(own_file)))
-    roots = {own}
+    own = os.path.dirname(os.path.dirname(own_file))
+    roots = {_norm(own), os.path.dirname(os.path.dirname(_norm(own_file)))}
     search = getattr(sys.modules.get("torch"), "__path__", None) or ()
-    listed = {_norm(p) for p in search if isinstance(p, str) and os.path.isabs(p)}
-    if own in listed:
+    listed = _norm_absolute(search)
+    if roots & listed:
         roots |= listed
     return tuple(sorted(roots))
 
@@ -250,13 +283,13 @@ def _classify_file(file: str, stdlib: bool) -> bool | None:
     """
     Shipped here (True), shipped elsewhere (False), or no evidence (None), for
     one ``__file__`` judged against the torch roots (``stdlib=False``) or the
-    stdlib roots minus the install roots (``stdlib=True``). None is only ever
-    a path that cannot be resolved; past those gates the torch arm never
-    answers None: with no torch root (a frozen torch) every path is elsewhere,
-    and ``_is_library_module`` waives torch names before asking. Cached on the
-    (file, flag) pair rather than on a module name: the roots are fixed for the
-    process, so the answer for a path never changes, while the module a name
-    resolves to can.
+    stdlib roots minus the install roots (``stdlib=True``). None is a path that
+    cannot be resolved, or any path asked about for the stdlib in a frozen app;
+    past those gates the torch arm never answers None: with no torch root (a
+    frozen torch) every path is elsewhere, and ``_is_library_module`` waives
+    torch names before asking. Cached on the (file, flag) pair rather than on a
+    module name: the roots are fixed for the process, so the answer for a path
+    never changes, while the module a name resolves to can.
     """
     # Before 3.13 ntpath.isabs accepts a driveless \Lib\x.py (its LEGACY BUG
     # comment), which realpath then resolves against the current drive.
@@ -273,6 +306,15 @@ def _classify_file(file: str, stdlib: bool) -> bool | None:
     path = _norm(file)
     if not stdlib:
         return _within(path, _torch_roots())
+    if getattr(sys, "frozen", False):
+        # A frozen app (PyInstaller, cx_Freeze, py2exe) bundles the stdlib and
+        # every third party under one root with no site-packages component
+        # between them, and PyInstaller names that root in sys._stdlib_dir and
+        # in the __file__ it gives the CPython-frozen modules (its
+        # _fixup_frozen_stdlib), so every bundled file would lie under a stdlib
+        # root: no path there says which of the two a file is. _located's
+        # loader arm still waives what the interpreter binary itself carries.
+        return None
     if _within(path, _install_roots()):
         return False
     # The roots are sorted, so the first match is the outermost and the part
@@ -315,8 +357,9 @@ def _located(module: object, name: str, stdlib: bool) -> bool | None:
     # included, while its dict already carries the seeded __file__, __spec__ and
     # __loader__. That read defeats a __getattr__ or a __getattribute__
     # override, not a __dict__ descriptor defined on the type. sys.modules can
-    # hold any object, so that read on a slotted proxy, and spec.loader on a
-    # hand-rolled spec, are user code, and are caught.
+    # hold any object, so such a descriptor, and spec.loader on a hand-rolled
+    # spec, are user code, and are caught, as is the AttributeError object
+    # itself raises for a slotted entry with no __dict__ at all.
     try:
         attrs = object.__getattribute__(module, "__dict__")
         file = attrs.get("__file__")
@@ -329,8 +372,10 @@ def _located(module: object, name: str, stdlib: bool) -> bool | None:
         # The loader rather than spec.origin: both importers' find_spec pass
         # origin=cls._ORIGIN to spec_from_loader, so the two never disagree,
         # and the class is the stronger signal. A truthy __loader__ skips the
-        # spec's loader, the only user-code half of this; ModuleType seeds
-        # __loader__ = None, so an ordinary module falls through to it.
+        # spec's loader, the only user-code half of this; a falsy one falls
+        # through to it, and a hand-made ModuleType has the None its __init__
+        # seeds (an imported module's dict carries spec.loader instead, copied
+        # in by _init_module_attrs).
         spec = attrs.get("__spec__")
         loader = attrs.get("__loader__") or getattr(spec, "loader", None)
     except Exception:
@@ -423,12 +468,21 @@ def _defined_where_read(
     takes only a conditional import in the reader, which no checksum sees, and
     ``act = _impl_a if cfg.fast else _impl_b`` is a slot however close to home
     the def is; so are ``op = Ops.op`` and a def returned by a factory, which is
-    why the name compared is ``__qualname__``. The file is read off the code
-    object, not off ``__module__``: functools.wraps copies ``__module__`` along
-    with ``__name__`` and ``__qualname__``, so ``op = torch.compile(op)`` behind
-    a flag claims the reader's module while its code lives in eval_frame.py.
-    The object does not tell that shape from an unconditional cross-file
-    decorator, so ``@torch.no_grad()`` on a same-file def is not waived either.
+    why the name compared is ``__qualname__``, backed by the code object's own
+    name: functools.wraps copies ``__qualname__`` onto a wrapper but cannot
+    forge its ``co_qualname``, so a same-file ``wraps`` decorator a flag turns
+    on is a slot in both arms (before 3.11 only ``co_name`` exists, so a
+    wrapper def named after what it wraps slips through there). Only a plain
+    function or a class is judged; a bound method or any other proxy that
+    forwards ``__qualname__`` and ``__code__`` is refused before an attribute
+    is read, which also keeps a proxy that answers reads by raising, such as
+    ``torch.classes.<ns>``, out of the value slot. The file is read off the
+    code object, not off ``__module__``: functools.wraps copies ``__module__``
+    along with ``__name__`` and ``__qualname__``, so ``op = torch.compile(op)``
+    behind a flag claims the reader's module while its code lives in
+    eval_frame.py. The object does not tell that shape from an unconditional
+    cross-file decorator, so ``@torch.no_grad()`` on a same-file def is not
+    waived either.
     A class has no code object, and its ``__module__`` is no better: namedtuple
     and ``type()`` stamp it from the calling frame (make_dataclass does from
     3.12) under a BARE ``__qualname__`` (a def or class statement inside the
@@ -445,10 +499,12 @@ def _defined_where_read(
     attribute such as ``torch.classes.<ns>`` answers by raising; a
     cached_property keeps its function under ``.func`` and does not count), was
     compiled in the reading file. A function attached afterwards keeps its bare
-    qualname, so an imported class the reader extends (``Point.extra =
-    _extra``) and a factory fed same-file methods (``type(name, bases, {"area":
-    _area})``, ``make_dataclass(..., namespace=...)``) are refused, and ``class
-    Marker: pass`` fails closed. So does a class statement whose only functions are
+    qualname, and one attached through functools.wraps keeps its code object's
+    own name, so an imported class the reader extends (``Point.extra =
+    _extra``) or patches (``Point.norm = wraps(Point.norm)(_norm)``) and a
+    factory fed same-file methods (``type(name, bases, {"area": _area})``,
+    ``make_dataclass(..., namespace=...)``) are refused, and ``class Marker:
+    pass`` fails closed. So does a class statement whose only functions are
     generated -- a fields-only ``@dataclass``, a ``NamedTuple``, an ``Enum``
     -- because those methods compile in ``<string>`` or the stdlib, so a plain
     config dataclass read as a global is reported. The one function the
@@ -470,8 +526,18 @@ def _defined_where_read(
     checksum; that is the conditional-bind KNOWN GAP recorded in
     ``_is_risky_drop``.
     """
-    if not user_stack or getattr(value, "__qualname__", None) != global_name:
+    if not user_stack or not isinstance(value, (type, types.FunctionType)):
         return False
+    if value.__qualname__ != global_name:
+        return False
+
+    # functools.wraps copies __qualname__ but not the code object's own name:
+    # co_qualname from 3.11, before that co_name, its last component only.
+    def compiled_as(fn: types.FunctionType, qualname: str) -> bool:
+        if sys.version_info >= (3, 11):
+            return fn.__code__.co_qualname == qualname
+        return fn.__code__.co_name == qualname.rpartition(".")[2]
+
     if isinstance(value, type):
         # 3.14 stores the PEP 649 annotate function under __annotate_func__
         # with qualname Cls.__annotate__, which the key rule refuses; the skip
@@ -485,11 +551,11 @@ def _defined_where_read(
                 attr = attr.fget
             if not isinstance(attr, types.FunctionType) or key in skip:
                 continue
-            if attr.__qualname__ == f"{global_name}.{key}":
+            qualname = f"{global_name}.{key}"
+            if attr.__qualname__ == qualname and compiled_as(attr, qualname):
                 files.append(attr.__code__.co_filename)
     else:
-        code = getattr(value, "__code__", None)
-        files = [code.co_filename] if isinstance(code, types.CodeType) else []
+        files = [value.__code__.co_filename] if compiled_as(value, global_name) else []
     read = user_stack[0].filename
     if not os.path.isabs(read):
         return False
@@ -605,27 +671,32 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
     ``builtins.__dict__``, not a table of the real builtins, so a shim's
     ``builtins.py2_sum = sum`` is a binding under it that another machine's
     shim can point elsewhere; only a builtin ``builtins`` itself owns, read
-    under its own name, is waived (``IOError``, CPython's alias of ``OSError``,
-    fails closed), and only one CPython built: functools.wraps copies
-    ``__module__`` and ``__name__`` onto ``builtins.sum =
+    under its own name, is waived (``IOError`` and ``EnvironmentError``,
+    CPython's aliases of ``OSError``, fail closed), and only one CPython built:
+    functools.wraps copies ``__module__`` and ``__name__`` onto ``builtins.sum =
     wraps(sum)(logged_sum)``, a Python function whose CLOSURE_MATCH is dropped,
     and a class statement exec'd with the builtins namespace as its globals (or
     handed ``__module__ = "builtins"``) claims the module outright, so the value
     must be a builtin function or a static type as well, one carrying
     ``Py_TPFLAGS_IMMUTABLETYPE``, which a class statement or a ``type()`` call
-    does not carry -- evidence rather than proof, since ``__flags__`` is read as
-    an ordinary attribute a metaclass can shadow, which an advisory lint over a
+    does not carry. The flag is read through ``type``'s own descriptor, so a
+    metaclass can neither shadow it nor make the read raise, and a static
+    type's ``__module__`` is derived from its C name; a builtin function's
+    ``__module__`` is a writable member, though, so ``builtins.getcwd =
+    os.getcwd`` plus ``os.getcwd.__module__ = "builtins"`` is waived -- evidence
+    rather than proof on that branch, which an advisory lint over a
     dropped-guard set does not defend against. Every callable in
     ``builtins.__dict__`` is one of the two kinds apart from the
-    ``_sitebuiltins`` objects, instances of neither, and beside ``IOError``
-    three of them fail closed: ``open``, the one builtin function ``builtins``
-    does not own (it is ``_io.open``, so a dropped guard on one of the most
-    mainstream builtins here is reported), and the heap types ``ExceptionGroup``
-    and ``__loader__``, the latter refused under a name that is not its own as
-    well. The exposure is narrow either way: a registered builtin is id-matched
-    into a BUILTIN_MATCH the serializer keeps, so only a deregistered,
-    polyfilled one (``sum``, ``enumerate``) or a shim reaches the dropped set
-    this lint examines.
+    ``_sitebuiltins`` objects, instances of neither, and beside the two
+    aliases three of them fail closed: ``open``, the one builtin function
+    ``builtins`` does not own (its ``__module__`` is ``_io``, ``io`` before
+    3.12, so a dropped guard on one of the most mainstream builtins here is
+    reported), and the heap types ``ExceptionGroup`` and ``__loader__``, the
+    latter refused under a name that is not its own as well. The exposure is
+    narrow either way: a registered builtin is id-matched into a BUILTIN_MATCH
+    the serializer keeps, so only a deregistered, polyfilled one (``sum``,
+    ``enumerate``, ``all``, ``any``) or a shim reaches the dropped set this
+    lint examines.
 
     A builtin parked in a slot -- ``self.act = abs``, straight out of an
     ACT2FN-style table -- is a slot like any other, so this deliberately keys
@@ -639,9 +710,11 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
             isinstance(value, types.BuiltinFunctionType)
             # Py_TPFLAGS_IMMUTABLETYPE: a static type CPython built, not a
             # class statement or type() call, whose __module__ is writable. Read
-            # as a plain attribute, so a metaclass can shadow it -- evidence,
-            # not proof, which is all an advisory lint needs.
-            or (isinstance(value, type) and bool(value.__flags__ & (1 << 8)))
+            # through type's descriptor, past any metaclass shadowing __flags__.
+            or (
+                isinstance(value, type)
+                and bool(vars(type)["__flags__"].__get__(value) & (1 << 8))
+            )
         )
         and _owning_module(value) == "builtins"
         and getattr(value, "__name__", None) == source.index
