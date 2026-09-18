@@ -15,16 +15,19 @@ Or use
 
 __all__ = ["NCCL4PyBackend"]
 
+from typing import Any
+
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import Backend as C10DBackend, ReduceOp
 from torch.distributed._watchdog import _get_watchdog, stream_complete, stream_timeout
 
 
+nccl: Any = None
 try:
-    import nccl.core as nccl
+    import nccl.core as nccl  # pyrefly: ignore [missing-import]
 except ModuleNotFoundError:
-    nccl = None  # type: ignore[assignment]
+    pass
 
 
 class _NcclWork(dist._Work):
@@ -76,7 +79,7 @@ class NCCL4PyBackend(C10DBackend):
 
     _UID_STORE_KEY = "nccl4py_uid"
 
-    def __init__(self, store, rank, size, timeout):
+    def __init__(self, store, rank, size, timeout, *, comm=None, device=None):
         if nccl is None:
             raise RuntimeError(
                 "nccl4py backend requires the 'nccl4py' package. "
@@ -91,24 +94,29 @@ class NCCL4PyBackend(C10DBackend):
         # the device from the default group. The proper fix is to migrate to the
         # extended_api=True, which supplies the resolved device directly
 
-        device_count = torch.cuda.device_count()
-        if dist.is_initialized():
-            default_pg = dist.distributed_c10d._get_default_group()
-            self._device = default_pg.bound_device_id or torch.device(
-                "cuda", default_pg.rank() % device_count
-            )
+        if device is not None:
+            self._device = device
         else:
-            self._device = torch.device("cuda", rank % device_count)
+            device_count = torch.cuda.device_count()
+            if dist.is_initialized():
+                default_pg = dist.distributed_c10d._get_default_group()
+                self._device = default_pg.bound_device_id or torch.device(
+                    "cuda", default_pg.rank() % device_count
+                )
+            else:
+                self._device = torch.device("cuda", rank % device_count)
         torch.cuda.set_device(self._device)
 
-        if rank == 0:
-            uid = nccl.get_unique_id()
-            store.set(self._UID_STORE_KEY, bytes(uid))
-        else:
-            store.wait([self._UID_STORE_KEY])
-            uid = nccl.UniqueId.from_bytes(bytes(store.get(self._UID_STORE_KEY)))
+        if comm is None:
+            if rank == 0:
+                uid = nccl.get_unique_id()
+                store.set(self._UID_STORE_KEY, bytes(uid))
+            else:
+                store.wait([self._UID_STORE_KEY])
+                uid = nccl.UniqueId.from_bytes(bytes(store.get(self._UID_STORE_KEY)))
+            comm = nccl.Communicator.init(nranks=size, rank=rank, unique_id=uid)
+        self._comm = comm
 
-        self._comm = nccl.Communicator.init(nranks=size, rank=rank, unique_id=uid)
         self._internal_stream = torch.cuda.Stream(device=self._device)
         self._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
         self._coalescing = False
@@ -181,17 +189,17 @@ class NCCL4PyBackend(C10DBackend):
         The caller must close custom_op after the NCCL call is enqueued.
         """
         op_type = reduce_op.op
-        if op_type == ReduceOp.RedOpType.SUM:
+        if op_type == ReduceOp.SUM:
             return nccl.SUM, None
-        if op_type == ReduceOp.RedOpType.PRODUCT:
+        if op_type == ReduceOp.PRODUCT:
             return nccl.PROD, None
-        if op_type == ReduceOp.RedOpType.MIN:
+        if op_type == ReduceOp.MIN:
             return nccl.MIN, None
-        if op_type == ReduceOp.RedOpType.MAX:
+        if op_type == ReduceOp.MAX:
             return nccl.MAX, None
-        if op_type == ReduceOp.RedOpType.AVG:
+        if op_type == ReduceOp.AVG:
             return nccl.AVG, None
-        if op_type == ReduceOp.RedOpType.PREMUL_SUM:
+        if op_type == ReduceOp.PREMUL_SUM:
             factor = reduce_op.factor
             if isinstance(factor, torch.Tensor):
                 scalar = factor
@@ -455,16 +463,12 @@ class NCCL4PyBackend(C10DBackend):
         if self.rank() not in ranks_list:
             return None
 
-        child = NCCL4PyBackend.__new__(NCCL4PyBackend)
-        C10DBackend.__init__(child, key, len(ranks_list))
-        child._store = store
-        child._options = opts if opts is not None else C10DBackend.Options("nccl4py")
-        child._device = self._device
-        child._comm = new_comm
-        child._internal_stream = torch.cuda.Stream(device=self._device)
-        child._barrier_tensor = torch.zeros(1, dtype=torch.float32, device=self._device)
-        child._coalescing = False
-        child._coalescing_stream = None
+        timeout = opts._timeout if opts is not None else self._options._timeout
+        child = NCCL4PyBackend(
+            store, key, len(ranks_list), timeout, comm=new_comm, device=self._device
+        )
+        if opts is not None:
+            child._options = opts
         return child
 
     def shutdown(self):
