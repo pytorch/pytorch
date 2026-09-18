@@ -13,8 +13,14 @@ from unittest import mock
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+import requests
+
 from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
-from tools.stats.upload_stats_lib import get_s3_resource, remove_nan_inf
+from tools.stats.upload_stats_lib import (
+    _get_with_retries,
+    get_s3_resource,
+    remove_nan_inf,
+)
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -277,6 +283,73 @@ class TestUploadStats(unittest.TestCase):
                 unclean,
                 f"Expected {unclean} when input is {unclean}, got {unclean_output}",
             )
+
+
+def _fake_response(status_code: int) -> mock.Mock:
+    response = mock.Mock(spec=requests.Response)
+    response.status_code = status_code
+    if status_code >= 400:
+        response.raise_for_status.side_effect = requests.HTTPError(str(status_code))
+    else:
+        response.raise_for_status.return_value = None
+    return response
+
+
+@mock.patch("tools.stats.upload_stats_lib.time.sleep")
+@mock.patch("tools.stats.upload_stats_lib._get_request_headers", return_value={})
+@mock.patch("tools.stats.upload_stats_lib.requests.get")
+class TestGetWithRetries(unittest.TestCase):
+    def test_returns_the_first_good_response(
+        self, mock_get: Any, _headers: Any, mock_sleep: Any
+    ) -> None:
+        ok = _fake_response(200)
+        mock_get.return_value = ok
+
+        self.assertIs(_get_with_retries("https://example.com"), ok)
+        self.assertEqual(mock_get.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    def test_retries_a_server_error_then_succeeds(
+        self, mock_get: Any, _headers: Any, mock_sleep: Any
+    ) -> None:
+        ok = _fake_response(200)
+        mock_get.side_effect = [_fake_response(503), ok]
+
+        self.assertIs(_get_with_retries("https://example.com"), ok)
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(mock_sleep.call_count, 1)
+
+    def test_raises_once_the_retries_are_exhausted(
+        self, mock_get: Any, _headers: Any, mock_sleep: Any
+    ) -> None:
+        # Regression test: returning a dud response here made the caller fail
+        # with an unrelated JSON decode error instead of the real HTTP error.
+        mock_get.return_value = _fake_response(500)
+
+        with self.assertRaises(RuntimeError):
+            _get_with_retries("https://example.com", retries=3)
+        self.assertEqual(mock_get.call_count, 3)
+        self.assertEqual(mock_sleep.call_count, 2)
+
+    def test_does_not_retry_a_client_error(
+        self, mock_get: Any, _headers: Any, mock_sleep: Any
+    ) -> None:
+        mock_get.return_value = _fake_response(404)
+
+        with self.assertRaises(requests.HTTPError):
+            _get_with_retries("https://example.com")
+        self.assertEqual(mock_get.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    def test_retries_a_dropped_connection(
+        self, mock_get: Any, _headers: Any, mock_sleep: Any
+    ) -> None:
+        ok = _fake_response(200)
+        mock_get.side_effect = [requests.ConnectionError("reset by peer"), ok]
+
+        self.assertIs(_get_with_retries("https://example.com"), ok)
+        self.assertEqual(mock_get.call_count, 2)
+        self.assertEqual(mock_sleep.call_count, 1)
 
 
 if __name__ == "__main__":

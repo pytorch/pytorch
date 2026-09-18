@@ -42,22 +42,37 @@ def _get_request_headers() -> dict[str, str]:
     }
 
 
+REQUEST_TIMEOUT_SECONDS = 60
+
+
 def _get_with_retries(url: str, retries: int = 3) -> requests.Response:
     """GET `url` with the GitHub auth headers, retrying transient failures.
 
     Listing artifacts intermittently fails with a 5xx or a dropped connection on
     runs with many artifacts, which fails the whole upload job for no good
-    reason. Retry with exponential backoff instead.
+    reason. Those are retried with exponential backoff. A 4xx is not retried --
+    a retry cannot fix a bad token or a bad run id -- and a request that never
+    succeeds raises, so a persistent failure is never mistaken for empty data.
     """
+    last_error: Exception | None = None
     for attempt in range(retries):
         try:
-            response = requests.get(url, headers=_get_request_headers())
-            response.raise_for_status()
-            return response
-        except requests.RequestException as e:
-            print(f"GET {url} failed (attempt {attempt + 1}/{retries}): {e}")
+            response = requests.get(
+                url, headers=_get_request_headers(), timeout=REQUEST_TIMEOUT_SECONDS
+            )
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_error = e
+        else:
+            if response.status_code < 500:
+                response.raise_for_status()
+                return response
+            last_error = requests.HTTPError(
+                f"{response.status_code} from {url}", response=response
+            )
+        print(f"GET {url} failed (attempt {attempt + 1}/{retries}): {last_error}")
+        if attempt < retries - 1:
             time.sleep(2**attempt)
-    return requests.Response()
+    raise RuntimeError(f"GET {url} failed after {retries} attempts") from last_error
 
 
 def _get_artifact_urls(prefix: str, workflow_run_id: int) -> dict[Path, str]:
