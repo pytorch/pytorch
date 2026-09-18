@@ -283,6 +283,8 @@ class TestCommon(TestCase):
                 return kernel
             if hasattr(torch.ops.aten, f"__{kernel}__"):
                 return f"__{kernel}__"
+            if hasattr(torch.ops.aten, f"_{kernel}"):
+                return f"_{kernel}"
             if hasattr(torch.ops.aten, f"special_{kernel}"):
                 return f"special_{kernel}"
             if "_" in kernel:
