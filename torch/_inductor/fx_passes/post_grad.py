@@ -7,6 +7,7 @@ import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, cast, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
@@ -24,7 +25,6 @@ from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
-from typing_extensions import ParamSpec
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
@@ -64,7 +64,6 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .fx_graph_traversal_analysis_helpers import (
-    _same_size_stride_and_storage_offset,
     collect_output_storage,
     same_tensor_meta,
 )
@@ -1384,23 +1383,21 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 graph.erase_node(node)
 
 
-def _same_dense_storage_region(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
-    lhs_val = cast(torch.Tensor, lhs.meta["val"])
-    rhs_val = cast(torch.Tensor, rhs.meta["val"])
-    return (
-        get_node_storage(lhs) is not None
-        and get_node_storage(lhs) == get_node_storage(rhs)
-        and torch._prims_common.is_non_overlapping_and_dense_or_false(lhs_val)
-        and torch._prims_common.is_non_overlapping_and_dense_or_false(rhs_val)
-        and statically_known_true(sym_eq(lhs_val.numel(), rhs_val.numel()))
-        and statically_known_true(
-            sym_eq(lhs_val.storage_offset(), rhs_val.storage_offset())
-        )
-        and not lhs_val.is_conj()
-        and not lhs_val.is_neg()
-        and not rhs_val.is_conj()
-        and not rhs_val.is_neg()
-    )
+# We can potentially generalize to arbitrary view ops by validating
+# compatible storage regions.
+_SUPPORTED_DTYPE_CONVERSION_VIEWS = OrderedSet(
+    [
+        aten.narrow.default,
+        aten.permute.default,
+        aten.select.int,
+        aten.slice.Tensor,
+        aten.squeeze.dim,
+        aten.t.default,
+        aten.transpose.int,
+        aten.unsqueeze.default,
+        aten.view.default,
+    ]
+)
 
 
 def _replay_view(
@@ -1424,18 +1421,36 @@ def _replay_view(
 
 
 def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
-    """Reuse dtype conversions of dense aliases covering the same storage region."""
+    """Reuse dtype conversions across supported direct views.
+
+    Finds:
+        base_conversion = convert(x, dtype)
+        conversion = convert(view_op(x, ...), dtype)
+
+    and replaces the second conversion with:
+        replacement = view_op(base_conversion, ...)
+    """
     # Skip if the graph contains mutation beyond the copy_ output epilogue.
     if graph.find_nodes(op="call_function", target=aten.set_.default):
         return
 
     output_storages = collect_output_storage(graph)
 
-    # Index all conversions by (input storage ID, source dtype, destination dtype).
-    conversions_by_storage: defaultdict[
+    # Index retained base conversions by
+    # (input storage ID, source dtype, destination dtype).
+    base_conversions_by_storage: defaultdict[
         tuple[int, torch.dtype, torch.dtype], list[torch.fx.Node]
     ] = defaultdict(list)
     convert = prims.convert_element_type.default
+
+    rewrites = 0
+    # For each conversion:
+    # identify bucket
+    # search earlier retained bases
+    # if compatible base exists:
+    #     remove conversion
+    # else:
+    #     retain conversion as another base
     for conversion in graph.find_nodes(op="call_function", target=convert):
         source = cast(torch.fx.Node, get_arg_value(conversion, 0, "a"))
         source_val = source.meta.get("val")
@@ -1447,90 +1462,82 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
             and isinstance(conversion_val, torch.Tensor)
             and source_storage is not None
             and conversion_storage is not None
-            # Skip conversions whose storage reaches a graph output.
-            and conversion_storage not in output_storages
-            # Replaying the source view after conversion requires the conversion
-            # to preserve the source's element layout.
-            and _same_size_stride_and_storage_offset(source_val, conversion_val)
         ):
             continue
-        conversions_by_storage[
-            (source_storage, source_val.dtype, conversion_val.dtype)
-        ].append(conversion)
+        key = (source_storage, source_val.dtype, conversion_val.dtype)
+        base_conversions = base_conversions_by_storage[key]
+        # find a previous conversion that this converson can reuse.
+        base_conversion = next(
+            (
+                base_conversion
+                for base_conversion in base_conversions
+                # first = convert(x, dtype)
+                # second = convert(x, dtype)
+                if source is get_arg_value(base_conversion, 0, "a")
+                # first = convert(x, dtype)
+                # second = convert(view_op(x,..), dtype)
+                or (
+                    source.op == "call_function"
+                    and source.target in _SUPPORTED_DTYPE_CONVERSION_VIEWS
+                    and source.args[0] is get_arg_value(base_conversion, 0, "a")
+                )
+            ),
+            None,
+        )
+        if base_conversion is None:
+            base_conversions.append(conversion)
+            continue
 
-    rewrites = 0
-    for conversions in conversions_by_storage.values():
-        base_conversions: list[torch.fx.Node] = []
-        for conversion in conversions:
-            source = cast(torch.fx.Node, get_arg_value(conversion, 0, "a"))
-            base_conversion = next(
-                (
-                    base_conversion
-                    for base_conversion in base_conversions
-                    if _same_dense_storage_region(
-                        cast(
-                            torch.fx.Node,
-                            get_arg_value(base_conversion, 0, "a"),
-                        ),
-                        source,
-                    )
-                    and (
-                        source is get_arg_value(base_conversion, 0, "a")
-                        or get_arg_value(base_conversion, 0, "a")
-                        in source.all_input_nodes
-                    )
-                ),
-                None,
-            )
-            if base_conversion is None:
+        base_storage = get_node_storage(base_conversion)
+        # Do not introduce new aliasing between graph outputs: if both storages
+        # reach outputs, reusing the base would merge them.
+        if conversion_storage in output_storages and base_storage in output_storages:
+            base_conversions.append(conversion)
+            continue
+
+        base_source = cast(torch.fx.Node, get_arg_value(base_conversion, 0, "a"))
+        if source is base_source:
+            # two identical converisons detected.
+            replacement = base_conversion
+        else:
+            base_conversion_val = cast(torch.Tensor, base_conversion.meta["val"])
+            # Replay view_op(base_conversion) and require its metadata to match
+            # the conversion being replaced, since it will replace it.
+            try:
+                replacement_val = _replay_view(source, base_source, base_conversion_val)
+            except (RuntimeError, ValueError):
+                # RuntimeError includes GuardOnDataDependentSymNode from symbolic
+                # views. ValueError occurs when the converted base layout cannot
+                # support the original view.
                 base_conversions.append(conversion)
                 continue
 
-            base_source = cast(torch.fx.Node, get_arg_value(base_conversion, 0, "a"))
-            if source is base_source:
-                replacement = base_conversion
-            else:
-                if not (
-                    source.op == "call_function"
-                    and isinstance(source.target, torch._ops.OpOverload)
-                    and source.target.namespace == "aten"
-                ):
-                    continue
-                base_conversion_val = cast(torch.Tensor, base_conversion.meta["val"])
-                replacement_val = _replay_view(source, base_source, base_conversion_val)
-                if (
-                    get_node_storage(base_conversion)
-                    != replacement_val.untyped_storage()._cdata
-                ):
-                    continue
-                replacement_args, replacement_kwargs = pytree.tree_map(
-                    lambda value: base_conversion if value is base_source else value,
-                    (source.args, source.kwargs),
-                )
-                with graph.inserting_before(conversion):
-                    replacement = graph.call_function(
-                        source.target, replacement_args, replacement_kwargs
-                    )
-                replacement.meta = conversion.meta.copy()
-                replacement.meta["val"] = replacement_val
-
-            if not same_tensor_meta(
-                cast(torch.Tensor, replacement.meta["val"]), conversion_val
-            ):
-                if replacement is not base_conversion:
-                    graph.erase_node(replacement)
+            if not same_tensor_meta(replacement_val, conversion_val):
+                base_conversions.append(conversion)
                 continue
-            conversion.replace_all_uses_with(replacement)
-            graph.erase_node(conversion)
 
-            pending = [source]
-            while pending:
-                unused = pending.pop()
-                if unused.op != "call_function" or unused.users:
-                    continue
-                pending.extend(unused.all_input_nodes)
-                graph.erase_node(unused)
-            rewrites += 1
+            replacement_args, replacement_kwargs = pytree.tree_map(
+                lambda value: base_conversion if value is base_source else value,
+                (source.args, source.kwargs),
+            )
+            with graph.inserting_before(conversion):
+                replacement = graph.call_function(
+                    source.target, replacement_args, replacement_kwargs
+                )
+            replacement.meta = conversion.meta.copy()
+            replacement.meta["val"] = replacement_val
+
+        conversion.replace_all_uses_with(replacement)
+        graph.erase_node(conversion)
+
+        pending = [source]
+        while pending:
+            unused = pending.pop()
+            if unused.op != "call_function" or unused.users:
+                continue
+            pending.extend(unused.all_input_nodes)
+            graph.erase_node(unused)
+        rewrites += 1
 
     if rewrites:
         counters["inductor"]["reuse_dtype_conversion_across_views"] += rewrites

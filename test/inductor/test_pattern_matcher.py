@@ -1000,10 +1000,10 @@ class TestPatternMatcher(TestCase):
             gm.graph
         )
 
-        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
         self.assertEqual(
             counters["inductor"]["reuse_dtype_conversion_across_views"],
-            1,
+            2,
         )
         replacement = next(
             node
@@ -1013,6 +1013,29 @@ class TestPatternMatcher(TestCase):
         )
         self.assertIs(replacement.args[0], safe_conversion)
         gm.recompile()
+        torch.testing.assert_close(gm(x), expected)
+
+    def test_reuse_dtype_conversion_across_views_allows_one_output_storage(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return base, aten.sum.default(viewed)
+
+        x = torch.randn(5, 7, device=GPU_TYPE)
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 1)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            1,
+        )
         torch.testing.assert_close(gm(x), expected)
 
     def test_reuse_dtype_conversion_across_views_preserves_output_aliasing(self):
@@ -1057,6 +1080,31 @@ class TestPatternMatcher(TestCase):
             counters["inductor"]["reuse_dtype_conversion_across_views"],
             0,
         )
+
+    def test_reuse_dtype_conversion_across_views_invalid_view_replay(self):
+        def fn(x):
+            base = convert(x, torch.bfloat16)
+            viewed = convert(aten.view.default(x, [2, 4]), torch.bfloat16)
+            return aten.sum.default(base), aten.sum.default(viewed)
+
+        x = torch.empty_strided(
+            (2, 2, 2), (1, 2, 1), device=GPU_TYPE, dtype=torch.float32
+        )
+        expected = fn(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        counters.clear()
+
+        torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
+            gm.graph
+        )
+        gm.recompile()
+
+        self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
+        self.assertEqual(
+            counters["inductor"]["reuse_dtype_conversion_across_views"],
+            0,
+        )
+        torch.testing.assert_close(gm(x), expected)
 
     def test_reuse_dtype_conversion_across_views_requires_matching_layout(self):
         def fn(x, lhs, lhs_t):
@@ -1119,9 +1167,21 @@ class TestPatternMatcher(TestCase):
                 (lambda x: aten.unsqueeze.default(x, 0), (5, 7)),
                 name="unsqueeze",
             ),
+            subtest(
+                (lambda x: aten.slice.Tensor(x, 0, 0, 4), (5, 7)),
+                name="slice",
+            ),
+            subtest(
+                (lambda x: aten.select.int(x, 0, 0), (5, 7)),
+                name="select",
+            ),
+            subtest(
+                (lambda x: aten.narrow.default(x, 0, 0, 3), (5, 7)),
+                name="narrow",
+            ),
         ],
     )
-    def test_reuse_dtype_conversion_across_views_full_coverage(self, view, input_shape):
+    def test_reuse_dtype_conversion_across_supported_views(self, view, input_shape):
         def fn(x):
             x_bf16 = convert(x, torch.bfloat16)
             viewed_bf16 = convert(view(x), torch.bfloat16)
@@ -3075,6 +3135,34 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(
             sum(node.target is aten.clone.default for node in gm.graph.nodes), 1
         )
+
+    def test_remove_noop_storage_offset_compile(self):
+        @torch.library.custom_op(
+            "remove_noop_storage_offset_test::as_tensor", mutates_args=()
+        )
+        def storage_offset_as_tensor(x: torch.Tensor) -> torch.Tensor:
+            return torch.tensor(x.storage_offset(), device=x.device, dtype=torch.int64)
+
+        @storage_offset_as_tensor.register_fake
+        def _(x):
+            return torch.empty((), device=x.device, dtype=torch.int64)
+
+        def fn(x):
+            return storage_offset_as_tensor(x[1:].clone())
+
+        x = torch.arange(8.0)
+        expected = fn(x)
+        actual = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "post_grad_custom_post_pass": (
+                    torch._inductor.fx_passes.post_grad.remove_noop_ops
+                )
+            },
+        )(x)
+
+        torch.testing.assert_close(actual, expected)
 
     @inductor_config.patch(is_predispatch=True)
     def test_remove_noop_pass_with_remove_passes(self):

@@ -33,9 +33,7 @@ from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 
-from .fx_graph_traversal_analysis_helpers import (
-    _same_size_stride_and_storage_offset,
-)
+from .fx_graph_traversal_analysis_helpers import _same_size_stride_and_storage_offset
 
 
 log = logging.getLogger(__name__)

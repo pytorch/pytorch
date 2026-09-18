@@ -14,7 +14,12 @@ The invariant about mutation we have is:
 
 For example, passes operating on the joint_graph and post_grad graph do not need to worry about mutation, except for the rare `aten.set_`. Its presence means the graph contains mutation, so passes that rely on the functional graph invariant may conservatively exit early when they encounter it.
 
-However, we do still have aliasing in the graph. This does not matter most of the time, but it does mean that **our passes are not allowed to cause any additional inputs/outputs to alias if they did not alias in the original graph**.
+Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
+
+## Input and output aliasing
+Although these graphs are mutation-free, they may still contain aliasing. Passes may change aliasing relationships among intermediate tensors because internal storage identity is not part of the functional operator contract. In particular, functional custom operators cannot rely on whether two intermediate inputs share storage; there is no schema or tag for declaring such a dependency.
+
+Passes must preserve aliasing relationships that escape the graph through inputs and outputs. They must neither introduce nor remove input-output or output-output aliases.
 
 For example
 ```python
@@ -37,5 +42,3 @@ alias if they did not alias in the original graph**. To check whether the
 inputs and outputs have any aliasing, it suffices to check whether the
 storages of the input and the storages of the output have any overlap. See
 `remove_noop_ops` for an example of how to do this.
-
-Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
