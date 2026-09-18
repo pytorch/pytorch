@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import collections
 import contextlib
 import copy
 import dataclasses
@@ -550,6 +551,52 @@ AOT_HERMETIC_WEIGHT = torch.eye(3) * 3
 class HermeticModule(torch.nn.Module):
     def forward(self, x):
         return x @ AOT_HERMETIC_WEIGHT
+
+
+class EpsOnlyModule(torch.nn.Module):
+    def forward(self, x):
+        return x * EPS
+
+
+AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
+
+
+class TwoGlobalsModule(torch.nn.Module):
+    # Under keep_tensor_guards_unsafe the TENSOR_MATCH on EPS, a plain tensor,
+    # is kept and the one on AOT_UNGUARDED_PARAM, a Parameter, is dropped.
+    def forward(self, x):
+        return x * EPS + AOT_UNGUARDED_PARAM
+
+
+AOT_LIVE_SCALE = torch.tensor(4.0)
+
+
+class TwoCertifiedModule(torch.nn.Module):
+    # Both globals are plain tensors, so keep_tensor_guards_unsafe keeps a
+    # TENSOR_MATCH on each and the certified set has two names in it, which
+    # every other fixture here leaves at one.
+    def forward(self, x):
+        return x * EPS + AOT_LIVE_SCALE
+
+
+class StoresEpsModule(torch.nn.Module):
+    # Reads a certified global and rebinds it, which Dynamo replays as a
+    # STORE_GLOBAL into the bytecode's globals rather than into the scope the
+    # guards read.
+    def forward(self, x):
+        global EPS
+        y = x * EPS
+        EPS = EPS * 2
+        return y
+
+
+class ReturnsEpsModule(torch.nn.Module):
+    # Returns a certified global instead of computing with it, so the graph input
+    # it was lifted into is pruned as unused and used_globals -- filled from the
+    # graph inputs' sources -- never records the name, while the generated
+    # bytecode still reads it. The shape the load-time merge exists for.
+    def forward(self, x):
+        return x + 1, EPS
 
 
 GLOBAL_POOLING_CONFIG = {"pooling": "sum"}
@@ -2270,9 +2317,8 @@ from user code:
         return probe, saved
 
     def test_module_dispatch_evaluates_a_matching_tree_once(self):
-        # The scan calls the matching result's declared `fn` field rather than the
-        # result, whose __call__ would evaluate the guards that just passed a
-        # second time.
+        # The scan calls the matching result's _serve rather than the result,
+        # whose __call__ would evaluate the guards that just passed a second time.
         mod = ScaleModule()
         model = torch.compile(mod, fullgraph=True, backend="eager")
         x = torch.randn(4, 8)
@@ -3130,11 +3176,12 @@ from user code:
         self._check_module_global_guard_dispatch(make_mod, _set_pooling)
 
     def test_aot_compile_module_reload_reads_the_live_global(self):
-        # A module artifact's bytecode reads a guarded global's LIVE value as of
-        # the load, not the value serialized at capture -- narrower than a
-        # function artifact loaded with an f_globals, which merges the whole
-        # dict. The load feeds the scope resolved from model.forward to the
-        # guards and substitutes name by name, skipping the recorded
+        # A module artifact's bytecode reads a guarded global's LIVE value, not
+        # the value serialized at capture -- narrower than a function artifact
+        # loaded with an f_globals, which merges the whole dict. The load feeds
+        # the scope resolved from model.forward to the guards and merges the
+        # certified names into the bytecode's globals, and _serve re-reads them
+        # out of that scope before every call, skipping the recorded
         # __builtins_dict___N key whether or not a guard reads it.
         # keep_global_guards is what makes that guard exist at all -- the default
         # aot_compile filter drops every global guard, which would leave nothing
@@ -3142,6 +3189,8 @@ from user code:
         # the capture leaks Dynamo's generated names into, and the load seeds
         # nothing into it: the only kept global guard is rooted at
         # AOT_HERMETIC_WEIGHT, not at an import alias or the builtins-dict key.
+        # What each call reads is pinned by
+        # test_aot_compile_module_rebind_after_load_is_served.
         global AOT_HERMETIC_WEIGHT
 
         self._hide_leaked_dynamo_globals()
@@ -3162,9 +3211,9 @@ from user code:
         try:
             # Shape and dtype survive the rebind, so the kept TENSOR_MATCH
             # passes either way: what makes the call follow the rebind is that
-            # the snapshot the bytecode reads is taken at load, so it picks up a
-            # rebind that happened before the load rather than serving the
-            # capture-time product.
+            # the bytecode reads the scope rather than the value serialized with
+            # the artifact, so it serves this tensor and not the capture-time
+            # product.
             AOT_HERMETIC_WEIGHT = saved * 2
             live = HermeticModule()(x)
             self.assertNotEqual(captured.tolist(), live.tolist())
@@ -3176,10 +3225,11 @@ from user code:
             )
             reloaded._load_aot_compiled_module(data)
             self.assertEqual(reloaded(x), live)
-            # A rebind after the load: the call still answers with the
-            # load-time value.
+            # The scope is re-read before every call, not once at load, so a
+            # rebind a kept TENSOR_MATCH accepts -- it checks metadata, not
+            # values -- is what the graph computes with.
             AOT_HERMETIC_WEIGHT = saved * 3
-            self.assertEqual(reloaded(x), live)
+            self.assertEqual(reloaded(x), x @ (saved * 3))
             # A rebind the graph cannot serve is refused rather than served.
             AOT_HERMETIC_WEIGHT = saved.to(torch.float64)
             with self.assertRaisesRegex(
@@ -3195,8 +3245,8 @@ from user code:
         # loaded redirects dispatch. A copy taken at load time would go on
         # serving whichever graph matched then, with no error and a wrong answer.
         # The graph specialized on this global rather than lifting it, so the
-        # bytecode never reads it: the load-time snapshot carries a copy of the
-        # name, but only the guards consult its value.
+        # bytecode never reads it: its globals carry the name, and every call
+        # refreshes it, but only the guards consult its value.
         #
         # _set_pool_mode REBINDS the global, which is what makes the helper's
         # post-load checks pin the by-reference read. The helper's other callers
@@ -4035,14 +4085,9 @@ from user code:
         global EPS, AOT_UNGUARDED_PARAM
 
         self._hide_leaked_dynamo_globals()
-        saved_eps = EPS
+        saved_eps, saved_param = EPS, AOT_UNGUARDED_PARAM
         self.addCleanup(globals().__setitem__, "EPS", saved_eps)
-        AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.ones(3))
-        saved_param = AOT_UNGUARDED_PARAM
-
-        class TwoGlobalsModule(torch.nn.Module):
-            def forward(self, x):
-                return x * EPS + AOT_UNGUARDED_PARAM
+        self.addCleanup(globals().__setitem__, "AOT_UNGUARDED_PARAM", saved_param)
 
         x = torch.randn(3)
         keep_tensors = torch.compiler.keep_tensor_guards_unsafe
@@ -4233,6 +4278,371 @@ from user code:
         self.assertEqual(actual, expected)
         live = x * AOT_NESTED_GLOBAL["a"] + AOT_NESTED_GLOBAL["b"]
         self.assertNotEqual(actual.tolist(), live.tolist())
+
+    def test_aot_compile_module_rebind_after_load_is_served(self):
+        # The pick is re-taken before every call, not once at load. A kept
+        # TENSOR_MATCH certifies metadata, so a rebind to a DIFFERENT tensor of
+        # identical metadata passes the check, and the graph has to compute with
+        # the new one: a load-time snapshot would pass that same check and
+        # silently serve the old data. The Parameter nothing checks is rebound
+        # the same way and must NOT be served, so the re-take covers exactly the
+        # certified set and no more.
+        global EPS, AOT_UNGUARDED_PARAM
+
+        load_time_param = AOT_UNGUARDED_PARAM
+        self.addCleanup(globals().__setitem__, "AOT_UNGUARDED_PARAM", load_time_param)
+        (x,), reloaded, _ = self._load_armed_module(TwoGlobalsModule, 3)
+        load_time_eps = EPS
+        self.assertEqual(reloaded(x), x * load_time_eps + load_time_param)
+
+        rebound = torch.tensor(2.0)
+        self.assertEqual(rebound.dtype, load_time_eps.dtype)
+        self.assertEqual(rebound.shape, load_time_eps.shape)
+        self.assertEqual(rebound.device, load_time_eps.device)
+        self.assertEqual(rebound.requires_grad, load_time_eps.requires_grad)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        EPS = rebound
+        AOT_UNGUARDED_PARAM = torch.nn.Parameter(torch.full((3,), 9.0))
+        self.assertEqual(reloaded(x), x * rebound + load_time_param)
+
+    def _load_armed_module(self, module_cls, *sizes, names=("EPS",)):
+        # module_cls compiled for one ModelInput per size, saved, and loaded
+        # under keep_tensor_guards_unsafe, which keeps the TENSOR_MATCH on each
+        # plain-tensor global it reads and so arms the re-read of `names` on
+        # every result: a served load-time value is then the caller's doing and
+        # not an unarmed artifact. EVERY name in `names` is bound away from its
+        # module-level value for the capture -- EPS's own 1e-7 leaves `x * EPS`
+        # inside assertEqual's tolerance of zero, where a baseline assertion
+        # about the served value would hold against a served zero too -- and
+        # restored at cleanup, so the caller rebinds them freely. Each is bound a
+        # second time between the save and the load, to a tensor of the same
+        # metadata and a different value, so the LOAD-time value the caller
+        # baselines against differs from the pickled one in value and not only in
+        # identity: a merge that read the artifact's own dict, that binds only
+        # the first name, or that does not run at all, then fails the assertion
+        # below instead of agreeing numerically.
+        scope = globals()
+
+        self._hide_leaked_dynamo_globals()
+        for i, name in enumerate(names):
+            self.addCleanup(scope.__setitem__, name, scope[name])
+            scope[name] = torch.tensor(5.0 + i)
+        xs = [torch.randn(n) for n in sizes]
+        options = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        model = torch.compile(
+            module_cls(), fullgraph=True, backend="eager", options=options
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+        load_time = {name: torch.tensor(6.0 + i) for i, name in enumerate(names)}
+        scope.update(load_time)
+        reloaded = torch.compile(
+            module_cls(), fullgraph=True, backend="eager", options=options
+        )
+        reloaded._load_aot_compiled_module(data)
+        results = reloaded.forward.compiled_results
+        self.assertEqual(len(results), len(sizes))
+        for result in results:
+            self.assertEqual(result._live_global_names, names)
+            # The load-time merge, which no call has had a chance to redo: the
+            # bytecode's globals hold the scope's tensor and not the pickled one,
+            # for every certified name and not just the first.
+            for name, value in load_time.items():
+                self.assertIs(result.fn.__globals__[name], value)
+        return xs, reloaded, results
+
+    def test_aot_compile_module_every_certified_global_is_re_read(self):
+        # Two certified names, which only the sort case below also loads: with
+        # one, a re-read that serves the first name and leaves the rest stale, or
+        # that abandons them at the first name the scope no longer binds, passes
+        # everything.
+        # The recorded set is sorted, so AOT_LIVE_SCALE comes first however the
+        # guards were collected -- the case below pins that -- and is the name
+        # deleted here. The helper binds both names twice and restores both, so
+        # the baselines are read after it, not before its pre-capture binding.
+        global EPS, AOT_LIVE_SCALE
+
+        (x,), reloaded, (result,) = self._load_armed_module(
+            TwoCertifiedModule, 3, names=("AOT_LIVE_SCALE", "EPS")
+        )
+        load_time_eps, load_time_scale = EPS, AOT_LIVE_SCALE
+        self.assertEqual(reloaded(x), x * load_time_eps + load_time_scale)
+
+        EPS, AOT_LIVE_SCALE = torch.tensor(2.0), torch.tensor(9.0)
+        self.assertEqual(reloaded(x), x * 2.0 + 9.0)
+        self.assertIs(result.fn.__globals__["EPS"], EPS)
+        self.assertIs(result.fn.__globals__["AOT_LIVE_SCALE"], AOT_LIVE_SCALE)
+
+        # A name the scope no longer binds is skipped rather than ending the
+        # re-read: the guard rooted at it refuses the call while the check is on,
+        # so the opt-out is what lets the names after it be observed. EPS sorts
+        # after the deleted name and has to be re-read all the same, while the
+        # deleted one keeps the last value read.
+        result.disable_guard_check()
+        del AOT_LIVE_SCALE
+        EPS = torch.tensor(3.0)
+        self.assertEqual(reloaded(x), x * 3.0 + 9.0)
+
+    def test_aot_compile_module_certified_names_are_sorted_at_load(self):
+        # _live_global_names is the SORTED certified set, which is what lets the
+        # case above name the global it deletes. _guard_source_globals hands back
+        # a set, whose two-element order follows string-hash randomization, so an
+        # assertion on the recorded tuple pins the sort only by luck of the seed;
+        # a stub that hands back the reverse-sorted order pins it under every
+        # seed instead, and the helper's own assertion is what fails when the
+        # sort goes. What this case owns is the stub's side: that the load was
+        # handed the reverse order, without which that assertion pins nothing.
+        real = torch._dynamo.aot_compile._guard_source_globals
+        handed = []
+
+        def reverse_sorted(output_graph):
+            handed.append(sorted(real(output_graph), reverse=True))
+            return handed[-1]
+
+        with patch("torch._dynamo.aot_compile._guard_source_globals", reverse_sorted):
+            _, _, _ = self._load_armed_module(
+                TwoCertifiedModule, 3, names=("AOT_LIVE_SCALE", "EPS")
+            )
+        self.assertEqual(handed, [["EPS", "AOT_LIVE_SCALE"]])
+
+    def test_aot_compile_module_store_global_does_not_accumulate(self):
+        # A forward that rebinds a certified global itself: the replayed
+        # STORE_GLOBAL lands in the bytecode's globals, so before this commit its
+        # store accumulated there call over call, the stored value walking
+        # EPS * 2, EPS * 4, EPS * 8 while the three calls answered x * EPS,
+        # x * 2 EPS, x * 4 EPS, and the guards went on passing on the scope,
+        # which the store never reaches.
+        # The re-read takes the scope's value back before each call, so three
+        # calls answer alike -- the one BC change here that needs no rebind by
+        # the caller to observe. Not writing the scope, which eager would, is
+        # pre-existing and unchanged.
+        (x,), reloaded, (result,) = self._load_armed_module(StoresEpsModule, 3)
+        load_time_eps = EPS
+        for _ in range(3):
+            self.assertEqual(reloaded(x), x * load_time_eps)
+        self.assertIs(globals()["EPS"], load_time_eps)
+        self.assertEqual(result.fn.__globals__["EPS"], load_time_eps * 2)
+
+    def test_aot_compile_module_load_binds_a_global_off_the_graph(self):
+        # The shape the load-time merge exists for, and the one the per-call
+        # re-read cannot cover on its own: EPS is returned rather than computed
+        # with, so the placeholder it was lifted into is pruned and
+        # used_globals, filled from the graph inputs' sources, never records the
+        # name, while the generated bytecode reads it. forward_callable builds
+        # fn.__globals__ out of import_sources and used_globals alone and runs
+        # _check_external_refs at load, before any call, so with the merge gone
+        # the load itself refuses this artifact.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(ReturnsEpsModule, 3)
+        env = result._artifacts.runtime_env
+        self.assertIn("EPS", env.external_refs)
+        self.assertNotIn("EPS", env.used_globals)
+        self.assertNotIn("EPS", env.import_sources)
+        # Bound before any call, so the merge is the only thing that can have.
+        self.assertIs(result.fn.__globals__["EPS"], EPS)
+        self.assertEqual(reloaded(x), (x + 1, EPS))
+
+        rebound = torch.tensor(2.0)
+        EPS = rebound
+        self.assertEqual(reloaded(x), (x + 1, rebound))
+        self.assertIs(result.fn.__globals__["EPS"], rebound)
+
+    def test_aot_compile_module_global_bound_to_none_is_re_read(self):
+        # A scope that binds a certified name to None BINDS it, so the graph has
+        # to answer None: the distinction _UNBOUND exists for, and the one thing
+        # separating it from an absent name. With None as the absent-name default
+        # the read cannot tell the two apart, skips the binding and leaves the
+        # value the last read wrote, so the graph computes with a value the scope
+        # no longer holds while every guard passes -- the failure class this
+        # commit exists to remove, on the one lookup the sentinel was added for.
+        # Observed on the forward that RETURNS the global, so None reaches the
+        # answer instead of an operator, and with the check off, since None is a
+        # binding no kept TENSOR_MATCH accepts: dispatch refuses it on both
+        # checked passes and the opted-out last resort is what serves the call.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(ReturnsEpsModule, 3)
+        rebound = torch.tensor(2.0)
+        EPS = rebound
+        self.assertEqual(reloaded(x), (x + 1, rebound))
+        self.assertIs(result.fn.__globals__["EPS"], rebound)
+
+        result.disable_guard_check()
+        EPS = None
+        answer = reloaded(x)
+        self.assertIsNone(answer[1])
+        self.assertIsNone(result.fn.__globals__["EPS"])
+
+    def test_aot_compile_module_sweep_rebind_is_served(self):
+        # Dispatch's sweep over results[1:] re-reads the guarded global as well.
+        # Two results compiled for different input shapes: the first pass
+        # refuses the (4,) call on [0], and the sweep serves it from [1], which
+        # has to compute with the rebind its own guards just accepted, not the
+        # value the load merged into its globals.
+        global EPS
+
+        (x3, x4), reloaded, results = self._load_armed_module(EpsOnlyModule, 3, 4)
+        load_time_eps = EPS
+        rebound = torch.tensor(2.0)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        EPS = rebound
+        served = reloaded(x4)
+        self.assertEqual(served, x4 * rebound)
+        self.assertNotEqual(served.tolist(), (x4 * load_time_eps).tolist())
+        # [1] served the call and re-read; [0] refused it and read nothing.
+        self.assertIs(results[1].fn.__globals__["EPS"], rebound)
+        self.assertIs(results[0].fn.__globals__["EPS"], load_time_eps)
+        # Called directly, AOTCompiledFunction.__call__ re-reads it as well.
+        self.assertEqual(results[0](reloaded.forward.model, x3), x3 * rebound)
+        self.assertIs(results[0].fn.__globals__["EPS"], rebound)
+
+    def test_aot_compile_module_second_pass_rebind_is_served(self):
+        # Dispatch's re-check pass re-reads the guarded global as well. A check()
+        # can reject from the recursive dict-tag fast path without running the
+        # tree, which answers nothing about the call, so the pass that rescues it
+        # serves a call whose guards did pass and owes the graph the same live
+        # value the first pass would have handed it -- not the value an EARLIER
+        # accepted call re-read into the bytecode's globals, which persists there
+        # between calls. Stubbing the scan's answer forces that pass on a LOADED
+        # artifact, the only kind the re-read is armed for.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        load_time_eps = EPS
+        # A call the first pass accepts leaves its re-read in fn.__globals__.
+        first_rebind = torch.tensor(3.0)
+        EPS = first_rebind
+        self.assertEqual(reloaded(x), x * first_rebind)
+        self.assertIs(result.fn.__globals__["EPS"], first_rebind)
+
+        rebound = torch.tensor(2.0)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        EPS = rebound
+        manager = result._artifacts.guard_manager
+        real_check, answers = manager.check, []
+
+        def rejects_the_scan(*args, **kwargs):
+            # False without running the tree, which is what the fast path this
+            # covers answers; every check() after the scan's runs the real tree,
+            # which the rebind above passes. Stubbed rather than forced with
+            # _install_global_probe, whose one miss is a budget ANY reader of the
+            # name spends: in whole-file order a reader that got there first left
+            # the scan accepting and the re-check pass, the thing under test,
+            # unexercised.
+            answers.append(None)
+            return len(answers) > 1 and real_check(*args, **kwargs)
+
+        with patch.object(manager, "check", side_effect=rejects_the_scan) as check:
+            served = reloaded(x)
+        # The scan's check() rejected the call and the re-check's accepted it.
+        self.assertEqual(check.call_count, 2)
+        self.assertEqual(served, x * rebound)
+        self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
+        self.assertNotEqual(served.tolist(), (x * first_rebind).tolist())
+
+    def test_aot_compile_module_opted_out_load_rebind_is_served(self):
+        # The re-read reaches the last resort too, the site that serves a result
+        # which opted out: the name set is recorded by the load, before
+        # disable_guard_check() flips anything, so the graph goes on following the
+        # guard scope -- here past a rebind the kept TENSOR_MATCH refuses, which
+        # is what pushes dispatch off both earlier passes onto that site.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        load_time_eps = EPS
+        self.assertEqual(reloaded(x), x * load_time_eps)
+
+        rebound = torch.nn.Parameter(torch.tensor(2.0), requires_grad=False)
+        self.assertNotEqual(rebound.item(), load_time_eps.item())
+        EPS = rebound
+        with self.assertRaises(RuntimeError) as ctx:
+            reloaded(x)
+        message = str(ctx.exception)
+        self.assertIn("No AOT compiled graph matched this call", message)
+        # EPS's own guard is the refusal, not a missing name or another guard.
+        self.assertIn(
+            "expected type of 'G['EPS']' to be <class 'torch.Tensor'>, "
+            "but found <class 'torch.nn.parameter.Parameter'>",
+            message,
+        )
+        result.disable_guard_check()
+        served = reloaded(x)
+        self.assertEqual(served, x * rebound)
+        self.assertNotEqual(served.tolist(), (x * load_time_eps).tolist())
+        # A name the scope no longer binds is skipped, not deleted, so the
+        # opted-out call serves the last value read.
+        del EPS
+        self.assertEqual(reloaded(x), x * rebound)
+
+    def test_aot_compile_module_global_deleted_under_the_re_read_is_skipped(self):
+        # The scope is live, so a del of the guarded name can land between the
+        # guard check and _serve's read of it. The read is one get() with a
+        # default, so the name is skipped and the bytecode's globals keep the
+        # last value read, where a membership test and then a read would let a
+        # bare KeyError out of a call whose guards passed. A dict that answers
+        # the membership test and raises from __getitem__ stands in for that
+        # window, and dict.get consults neither of the two; the guards hold the
+        # live module dict by reference and go on passing.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
+        rebound = torch.tensor(2.0)
+        EPS = rebound
+        self.assertEqual(reloaded(x), x * rebound)
+        self.assertIs(result.fn.__globals__["EPS"], rebound)
+
+        class DeletedBetweenTestAndRead(dict):
+            def __contains__(self, name):
+                return True
+
+            def __getitem__(self, name):
+                raise KeyError(name)
+
+        with patch.object(result, "_guard_globals", DeletedBetweenTestAndRead()):
+            self.assertEqual(reloaded(x), x * rebound)
+
+    def test_aot_compile_module_missing_hook_scope_is_not_asked_to_fabricate(self):
+        # guard_globals is the caller's own mapping, so neither read of a
+        # certified name out of it may go through __getitem__: a defaultdict
+        # would be MUTATED by the read and the graph would then compute with the
+        # value it fabricated, every guard passing on it -- the exact failure
+        # this commit exists to remove. Both reads take the dict.get default, so
+        # the load leaves the dict as the caller passed it and the name is
+        # skipped, the guard rooted at it refusing the call until the caller
+        # opts out, after which the bytecode's globals still hold the value the
+        # artifact was serialized with.
+        global EPS
+
+        self._hide_leaked_dynamo_globals()
+        self.addCleanup(globals().__setitem__, "EPS", EPS)
+        EPS = torch.tensor(5.0)
+        x = torch.randn(3)
+        options = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        model = torch.compile(
+            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+
+        fabricated = torch.tensor(99.0)
+        scope = collections.defaultdict(lambda: fabricated)
+        compiled = AOTCompiledModel.deserialize(
+            EpsOnlyModule(), data, guard_globals=scope
+        )
+        (result,) = compiled.compiled_results
+        self.assertEqual(result._live_global_names, ("EPS",))
+        # An unmutated dict is the pin: the only path that can bind `fabricated`
+        # in the bytecode's globals is a subscript of this one, which would leave
+        # the fabricated entry in it.
+        self.assertEqual(dict(scope), {})
+        with self.assertRaisesRegex(RuntimeError, r"KeyError on G\['EPS'\]"):
+            compiled(x)
+        result.disable_guard_check()
+        self.assertEqual(compiled(x), x * 5.0)
+        self.assertEqual(dict(scope), {})
 
     @torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True)
     def test_aot_compile_module_shape_only_global_arms_the_guard_scope(self):
@@ -5393,18 +5803,15 @@ from user code:
             # ModelInput would read the absent name; one captured for a branch
             # that does not is served with the name still absent.
             self.assertIn("Add a ModelInput", message)
-            # Taking the advice restores dispatch but not the value: the
-            # guards read the live scope, so the new binding passes the kept
-            # TENSOR_MATCH, which checks metadata and not values. The bytecode's
-            # globals are built once, at load, and substitute a live value only
-            # for a name the scope has then, so the value serialized with the
-            # artifact was never overwritten -- which is what asserting
-            # `x @ saved` here pins. That is the load-time snapshot as the code
-            # stands here, a limitation and not the intended end state: a later
-            # commit of this stack makes every call re-read the live value and
-            # flips this assertion to `x @ (saved * 2)`.
+            # Taking the advice restores dispatch AND the value: the guards
+            # read the live scope, so the new binding passes the kept
+            # TENSOR_MATCH -- which checks metadata, not values -- and every
+            # call re-reads the globals those guards' own sources are, whether or
+            # not the scope bound them at load. A name armed only by what the scope
+            # held then would leave this call computing with the value
+            # serialized with the artifact, which no guard ever compared.
             g["AOT_HERMETIC_WEIGHT"] = saved * 2
-            self.assertEqual(reloaded(x), x @ saved)
+            self.assertEqual(reloaded(x), x @ (saved * 2))
         finally:
             g["AOT_HERMETIC_WEIGHT"] = saved
 
@@ -6036,8 +6443,10 @@ from user code:
         )
         self.assertEqual(loaded(x), fn(x))
         # Re-checked after the call: the guard scope's binding is never copied
-        # over the bytecode's -- the load-time merge in __post_init__ excludes this
-        # key (`name != builtins_key`), and a call has nothing that copies it.
+        # over the bytecode's. A function-path load leaves _bytecode_reads_guard_scope
+        # off, so __post_init__ records no _live_global_names and _serve copies
+        # nothing; the module path that arms it certifies bare GlobalSource roots
+        # only, and every source under this key is a DictGetItemSource.
         self.assertTrue(
             loaded.fn.__globals__[builtins_key] is builtins.__dict__,
             "a call rewired the bytecode to the guard scope's binding",
