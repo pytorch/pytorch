@@ -211,7 +211,14 @@ struct Vectorized16 {
         &Vectorized<float>::exp_u20);
   }
   Derived fmod(const Derived& q) const {
-    // This function is questionable with a conversion, so we use map2
+    // Sleef_fmodf is only defined for abs(x / y) < 1e38. Half cannot reach
+    // that, its largest possible ratio is 65504 / 2^-24, about 1e12, so
+    // widening to float is exact. BFloat16 has float's exponent range, so it
+    // does reach the undefined range and has to stay per element.
+    if constexpr (std::is_same_v<value_type, c10::Half>) {
+      return static_cast<const Derived*>(this)->map2_with_vec_float_method(
+          q, &Vectorized<float>::fmod);
+    }
     return map2(q, std::fmod);
   }
   Derived hypot(const Derived& b) const {
