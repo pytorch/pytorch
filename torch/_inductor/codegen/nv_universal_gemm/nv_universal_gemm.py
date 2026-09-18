@@ -922,6 +922,23 @@ def _add_nv_gemm_choices_impl(
         candidate_source=candidate_source,
         classifier_key="nvgemm_efc_partition_v1",
     )
+    if config.nvgemm_pdl and variant == GemmVariant.SCALED_GEMM:
+        # The original A operand is the dynamic activation. swap_ab exchanges
+        # A/B before constructing the GEMM arguments, so the PDL wait must move
+        # to B for swapped kernels. Generate both specializations in the
+        # provider cache, then retain only the semantically correct one here.
+        wait_on_a = not swap_ab
+
+        def matching_pdl_operand(kernel) -> bool:
+            design = kernel.metadata.design
+            return (
+                not getattr(design, "use_pdl", False)
+                or getattr(design, "pdl_wait_before_loads", False)
+                or getattr(design, "pdl_wait_on_a", wait_on_a) == wait_on_a
+            )
+
+        non_efc_kernels = list(filter(matching_pdl_operand, non_efc_kernels))
+        efc_kernels = list(filter(matching_pdl_operand, efc_kernels))
     if not config.epilogue_fusion:
         efc_kernels = []
     if bias_node is not None:

@@ -49,6 +49,10 @@ _ONES_ALPHA: dict = {}
 @dataclasses.dataclass(kw_only=True)
 class InductorSm100DesignMetadata(Sm100DesignMetadata):
     use_prefetch: bool = False
+    use_pdl: bool = False
+    pdl_wait_before_loads: bool = False
+    pdl_wait_on_a: bool = True
+    pdl_release_k: int = 0
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
@@ -227,6 +231,12 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             mma_tiler_mn,
             cluster_shape_mn,
             use_prefetch=getattr(metadata.design, "use_prefetch", False),
+            use_pdl=getattr(metadata.design, "use_pdl", False),
+            pdl_wait_before_loads=getattr(
+                metadata.design, "pdl_wait_before_loads", False
+            ),
+            pdl_wait_on_a=getattr(metadata.design, "pdl_wait_on_a", True),
+            pdl_release_k=getattr(metadata.design, "pdl_release_k", 0),
         )
         self.cluster_shape_mn = cluster_shape_mn
         self.mma_tiler_mn = mma_tiler_mn
@@ -747,6 +757,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             "1": [True],
             "autotune": [False, True],
         }.get(prefetch_mode, [False])
+        pdl_wait_options = (
+            [True, False]
+            if config.nvgemm_pdl and not config.nvgemm_pdl_wait_before_loads
+            else [True]
+        )
 
         design_params: dict[str, list[Any]] = {
             "mma_instruction_type": [BlackwellTcgen05Mma],
@@ -756,6 +771,10 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
             "cluster_shape": [(M, N, 1) for M in [1, 2, 4] for N in [1, 2, 4]],
             "use_tma_store": [True],
             "use_prefetch": prefetch_options,
+            "use_pdl": [config.nvgemm_pdl],
+            "pdl_wait_before_loads": [config.nvgemm_pdl_wait_before_loads],
+            "pdl_wait_on_a": pdl_wait_options,
+            "pdl_release_k": [config.nvgemm_pdl_release_k],
         }
 
         param_names = list(design_params.keys())
@@ -766,13 +785,18 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
         for operands in cls._metadata_operand_combinations():
             for values in itertools.product(*param_values):
                 design = InductorSm100DesignMetadata(**dict(zip(param_names, values)))
+                pdl_wait = (
+                    "early"
+                    if design.pdl_wait_before_loads
+                    else ("a" if design.pdl_wait_on_a else "b")
+                )
 
                 operator_name = (
                     f"inductor_vendored.{cls.__name__}_sm100_"
                     "{layout}_A{A}_B{B}_out{out}_SFA{SFA}_SFB{SFB}_"
                     "acc{acc}_scale{scale_mode}_swizzle{scale_swizzle}_"
                     "{num_cta}cta_cluster{cluster}_tile{tile}"
-                    "{_tma_store}{_prefetch}"
+                    "{_tma_store}{_prefetch}{_pdl}"
                 ).format(
                     layout=strides_to_layout_string(
                         operands.A.stride,
@@ -792,6 +816,11 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
                     tile=tuple_to_string(design.tile_shape),
                     _tma_store="_tma_store" if design.use_tma_store else "",
                     _prefetch="_prefetch" if design.use_prefetch else "",
+                    _pdl=(
+                        f"_pdl{pdl_wait}_release{design.pdl_release_k}"
+                        if design.use_pdl
+                        else ""
+                    ),
                 )
 
                 metadata = OperatorMetadata(

@@ -197,6 +197,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         mma_tiler_mn: Tuple[int, int],
         cluster_shape_mn: Tuple[int, int],
         use_prefetch: bool = False,
+        use_pdl: bool = False,
+        pdl_wait_before_loads: bool = False,
+        pdl_wait_on_a: bool = True,
+        pdl_release_k: int = 0,
     ):
         """Initializes the configuration for a Blackwell dense GEMM kernel.
 
@@ -232,6 +236,10 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # TMA-prefetch tactic: prefetch A/B/SF tiles ahead in the K-loop to
         # hide latency; helps small-M large-K.
         self.use_prefetch = use_prefetch
+        self.use_pdl = use_pdl
+        self.pdl_wait_before_loads = pdl_wait_before_loads
+        self.pdl_wait_on_a = pdl_wait_on_a
+        self.pdl_release_k = pdl_release_k
 
         self.occupancy = 1
         # Set specialized warp ids
@@ -807,6 +815,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             cluster=(*self.cluster_shape_mn, 1),
             stream=stream,
             min_blocks_per_mp=1,
+            use_pdl=self.use_pdl,
         )
         return
 
@@ -1126,6 +1135,9 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         pipeline_init_wait(cluster_shape_mn=self.cluster_shape_mn)
 
+        if cutlass.const_expr(self.use_pdl and self.pdl_wait_before_loads):
+            cute.arch.griddepcontrol_wait()
+
         #
         # Specialized TMA load warp
         #
@@ -1202,35 +1214,134 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                         ab_producer_state, peek_ab_empty_status
                     )
 
-                    # TMA load A/B/SFA/SFB
-                    cute.copy(
-                        tma_atom_a,
-                        tAgA_slice[(None, ab_producer_state.count)],
-                        tAsA[(None, ab_producer_state.index)],
-                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
-                        mcast_mask=a_full_mcast_mask,
-                    )
-                    cute.copy(
-                        tma_atom_b,
-                        tBgB_slice[(None, ab_producer_state.count)],
-                        tBsB[(None, ab_producer_state.index)],
-                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
-                        mcast_mask=b_full_mcast_mask,
-                    )
-                    cute.copy(
-                        tma_atom_sfa,
-                        tAgSFA_slice[(None, ab_producer_state.count)],
-                        tAsSFA[(None, ab_producer_state.index)],
-                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
-                        mcast_mask=sfa_full_mcast_mask,
-                    )
-                    cute.copy(
-                        tma_atom_sfb,
-                        tBgSFB_slice[(None, ab_producer_state.count)],
-                        tBsSFB[(None, ab_producer_state.index)],
-                        tma_bar_ptr=ab_pipeline.producer_get_barrier(ab_producer_state),
-                        mcast_mask=sfb_full_mcast_mask,
-                    )
+                    # PDL may start this grid before its predecessor completes.
+                    # Load the static weight side first, then wait only before
+                    # reading the dynamic activation side.
+                    if cutlass.const_expr(
+                        self.use_pdl
+                        and not self.pdl_wait_before_loads
+                        and self.pdl_wait_on_a
+                    ):
+                        cute.copy(
+                            tma_atom_b,
+                            tBgB_slice[(None, ab_producer_state.count)],
+                            tBsB[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=b_full_mcast_mask,
+                        )
+                        cute.copy(
+                            tma_atom_sfb,
+                            tBgSFB_slice[(None, ab_producer_state.count)],
+                            tBsSFB[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=sfb_full_mcast_mask,
+                        )
+                        if k_tile == 0:
+                            cute.arch.griddepcontrol_wait()
+                        cute.copy(
+                            tma_atom_a,
+                            tAgA_slice[(None, ab_producer_state.count)],
+                            tAsA[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=a_full_mcast_mask,
+                        )
+                        cute.copy(
+                            tma_atom_sfa,
+                            tAgSFA_slice[(None, ab_producer_state.count)],
+                            tAsSFA[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=sfa_full_mcast_mask,
+                        )
+                    elif cutlass.const_expr(
+                        self.use_pdl and not self.pdl_wait_before_loads
+                    ):
+                        cute.copy(
+                            tma_atom_a,
+                            tAgA_slice[(None, ab_producer_state.count)],
+                            tAsA[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=a_full_mcast_mask,
+                        )
+                        cute.copy(
+                            tma_atom_sfa,
+                            tAgSFA_slice[(None, ab_producer_state.count)],
+                            tAsSFA[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=sfa_full_mcast_mask,
+                        )
+                        if k_tile == 0:
+                            cute.arch.griddepcontrol_wait()
+                        cute.copy(
+                            tma_atom_b,
+                            tBgB_slice[(None, ab_producer_state.count)],
+                            tBsB[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=b_full_mcast_mask,
+                        )
+                        cute.copy(
+                            tma_atom_sfb,
+                            tBgSFB_slice[(None, ab_producer_state.count)],
+                            tBsSFB[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=sfb_full_mcast_mask,
+                        )
+                    else:
+                        cute.copy(
+                            tma_atom_a,
+                            tAgA_slice[(None, ab_producer_state.count)],
+                            tAsA[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=a_full_mcast_mask,
+                        )
+                        cute.copy(
+                            tma_atom_b,
+                            tBgB_slice[(None, ab_producer_state.count)],
+                            tBsB[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=b_full_mcast_mask,
+                        )
+                        cute.copy(
+                            tma_atom_sfa,
+                            tAgSFA_slice[(None, ab_producer_state.count)],
+                            tAsSFA[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=sfa_full_mcast_mask,
+                        )
+                        cute.copy(
+                            tma_atom_sfb,
+                            tBgSFB_slice[(None, ab_producer_state.count)],
+                            tBsSFB[(None, ab_producer_state.index)],
+                            tma_bar_ptr=ab_pipeline.producer_get_barrier(
+                                ab_producer_state
+                            ),
+                            mcast_mask=sfb_full_mcast_mask,
+                        )
+
+                    if cutlass.const_expr(self.use_pdl and self.pdl_release_k >= 0):
+                        if k_tile == self.pdl_release_k:
+                            cute.arch.griddepcontrol_launch_dependents()
 
                     # Rolling prefetch: stay prefetch_dist tiles ahead each
                     # iteration to hide TMA latency
@@ -1265,6 +1376,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             #
             # Wait A/B buffer empty
             #
+            if cutlass.const_expr(self.use_pdl and self.pdl_release_k == -1):
+                cute.arch.griddepcontrol_launch_dependents()
             ab_pipeline.producer_tail(ab_producer_state)
 
         #
@@ -2217,6 +2330,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             # Wait for C store complete
             #
             c_pipeline.producer_tail()
+
+        # FlashInfer's conservative policy emits the PDL release at the common
+        # kernel tail rather than from the input-loading warp.  Keep this as a
+        # separate policy so graph-level measurements can compare it with the
+        # earlier release points above.
+        if cutlass.const_expr(self.use_pdl and self.pdl_release_k <= -2):
+            cute.arch.griddepcontrol_launch_dependents()
 
     def mainloop_s2t_copy_and_partition(
         self,

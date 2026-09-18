@@ -356,6 +356,9 @@ class TestNVUniversalGemm(TestCase):
                 _nvgemm_config(
                     nvgemm_swap_ab=True,
                     nvgemm_max_profiling_configs=1,
+                    nvgemm_pdl=True,
+                    nvgemm_pdl_wait_before_loads=True,
+                    nvgemm_pdl_release_k=-2,
                     benchmark_epilogue_fusion=False,
                     compile_threads=1,
                 )
@@ -382,6 +385,7 @@ class TestNVUniversalGemm(TestCase):
             graph_result, expected, equal_nan=True, atol=1.0, rtol=2e-2
         )
         self.assertIn("swap_ab=True", code)
+        self.assertIn("pdlearly_release-2", code)
         self.assertIn("output_scale=", code)
         self.assertNotIn("CuTeDSLEpilogueArguments", code)
         self.assertIn(
