@@ -48,6 +48,53 @@ check_regex
             test_string,
         )
 
+    def test_string_captures_and_substitutions(self):
+        test_string = """
+clone = torch.ops.aten.clone.default(t_1)
+generated_all_reduce_7 = torch.ops._c10d_functional.all_reduce.default(clone)
+wait = torch.ops._c10d_functional.wait_tensor.default(generated_all_reduce_7)
+"""
+        capture = r"[[ALL_REDUCE_NODE:[A-Za-z0-9_]+]]"
+        FileCheck().check(
+            capture + " = torch.ops._c10d_functional.all_reduce.default"
+        ).check(
+            "torch.ops._c10d_functional.wait_tensor.default([[ALL_REDUCE_NODE]])"
+        ).run(test_string)
+
+        FileCheck().run(
+            r"""
+# CHECK: [[ALL_REDUCE_NODE:[A-Za-z0-9_]+]] = torch.ops._c10d_functional.all_reduce.default
+# CHECK: torch.ops._c10d_functional.wait_tensor.default([[ALL_REDUCE_NODE]])
+""",
+            test_string,
+        )
+
+    def test_string_capture_same_line_and_redefinition(self):
+        FileCheck().check(r"op [[REGISTER:r[0-9]+]], [[REGISTER]]").check_next(
+            r"op [[REGISTER:r[0-9]+]]"
+        ).check_next("use [[REGISTER]]").run(
+            "op r12, r12\nop r7\nuse r7"
+        )
+
+    def test_string_capture_in_check_not(self):
+        FileCheck().check(r"[[REGISTER:r[0-9]+]]").check_not(
+            "clobber [[REGISTER]]"
+        ).check("done").run("r1\nclobber r2\ndone")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected to not find pattern"):
+            FileCheck().check(r"[[REGISTER:r[0-9]+]]").check_not(
+                "clobber [[REGISTER]]"
+            ).check("done").run("r1\nclobber r1\ndone")
+
+    def test_string_capture_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "Undefined FileCheck variable"):
+            FileCheck().check("use [[REGISTER]]").run("use r1")
+
+        with self.assertRaisesRegex(RuntimeError, "Expected to find pattern"):
+            FileCheck().check(r"def [[REGISTER:r[0-9]+]]").check_next(
+                "use [[REGISTER]]"
+            ).run("def r1\nuse r2")
+
 
 if __name__ == "__main__":
     run_tests()
