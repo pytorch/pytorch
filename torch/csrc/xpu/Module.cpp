@@ -10,6 +10,7 @@
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
