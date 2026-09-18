@@ -87,18 +87,19 @@ __global__ void upsample_linear1d_out_frame_unrolled(
   const int width1 = idata.size(2);
   const int width2 = odata.size(2);
 
-  const int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
-  const int num_total = batchsize * channels * width2;
+  const int64_t thread_id = threadIdx.x + static_cast<int64_t>(blockIdx.x) * blockDim.x;
+  const int64_t channels_width2 = static_cast<int64_t>(channels) * width2;
+  const int64_t num_total = batchsize * channels_width2;
   if (thread_id >= num_total) return;
 
   // Get a unique (n, c, index) from thread_id
-  const int n = thread_id / (channels * width2);
-  const int c = (thread_id - n*(channels * width2)) / width2;
-  const int index = thread_id - n*(channels * width2) - c*width2;
+  const int64_t n = thread_id / channels_width2;
+  const int64_t c = (thread_id - n*channels_width2) / width2;
+  const int64_t index = thread_id - n*channels_width2 - c*width2;
 
   // Do only one interpolation for the (n, c, index) coordinate
   if (index < num_kernels) {
-    const int w2 = index % width2;
+    const int w2 = static_cast<int>(index % width2);
     // special case: just copy
     if (width1 == width2) {
       const int w1 = w2;
@@ -188,18 +189,19 @@ __global__ void upsample_linear1d_out_frame_backward_unrolled(
   const int width1 = idata.size(2);
   const int width2 = odata.size(2);
 
-  const int thread_id = threadIdx.x + blockIdx.x * blockDim.x;
-  const int num_total = batchsize * channels * width2;
+  const int64_t thread_id = threadIdx.x + static_cast<int64_t>(blockIdx.x) * blockDim.x;
+  const int64_t channels_width2 = static_cast<int64_t>(channels) * width2;
+  const int64_t num_total = batchsize * channels_width2;
   if (thread_id >= num_total) return;
 
   // Get a unique (n, c, index) from thread_id
-  const int n = thread_id / (channels * width2);
-  const int c = (thread_id - n*(channels * width2)) / width2;
-  const int index = thread_id - n*(channels * width2) - c*width2;
+  const int64_t n = thread_id / channels_width2;
+  const int64_t c = (thread_id - n*channels_width2) / width2;
+  const int64_t index = thread_id - n*channels_width2 - c*width2;
 
   // Do only one backward interpolation for the (n, c, index) coordinate
   if (index < num_kernels) {
-    const int w2 = index % width2;
+    const int w2 = static_cast<int>(index % width2);
     // special case: just copy
     if (width1 == width2) {
       const int w1 = w2;
@@ -231,6 +233,10 @@ static void upsample_linear1d_out_cuda_template(
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(__func__, {input_arg, output_arg});
 
+  if (output.numel() == 0) {
+    return;
+  }
+
   int output_width = output_size[0];
 
   int input_width = input.size(2);
@@ -260,10 +266,10 @@ static void upsample_linear1d_out_cuda_template(
 
         const int batchsize = idata.size(0);
         const int channels  = idata.size(1);
-        const size_t num_total = batchsize * channels * output_width;
+        const int64_t num_total = static_cast<int64_t>(batchsize) * channels * output_width;
 
         upsample_linear1d_out_frame_unrolled<scalar_t, accscalar_t>
-            <<<ceil_div(num_total, (size_t)num_threads),
+            <<<ceil_div(num_total, static_cast<int64_t>(num_threads)),
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
@@ -311,6 +317,10 @@ static void upsample_linear1d_backward_out_cuda_template(
 
   grad_input.zero_();
 
+  if (grad_input.numel() == 0 || grad_output.numel() == 0) {
+    return;
+  }
+
   const int num_kernels = output_width;
   const int num_threads = 512;
   const int num_blocks = ceil_div(num_kernels, num_threads);
@@ -333,10 +343,10 @@ static void upsample_linear1d_backward_out_cuda_template(
 
         const int batchsize = idata.size(0);
         const int channels  = idata.size(1);
-        const size_t num_total = batchsize * channels * output_width;
+        const int64_t num_total = static_cast<int64_t>(batchsize) * channels * output_width;
 
         upsample_linear1d_out_frame_backward_unrolled<scalar_t, accscalar_t>
-            <<<ceil_div(num_total, (size_t)num_threads),
+            <<<ceil_div(num_total, static_cast<int64_t>(num_threads)),
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
