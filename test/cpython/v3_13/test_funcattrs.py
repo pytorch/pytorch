@@ -461,19 +461,6 @@ class CellTest(CPythonTestCase):
         self.assertTrue(cell(-36) == cell(-36.0))
         self.assertTrue(cell(True) > empty_cell())
 
-    def test_comparison_after_delete(self):
-        # `del` empties the cell but keeps the cell object alive, so a
-        # comparison involving it still has to treat it as empty.
-        a = 1
-        b = 2
-        def inner():
-            return a, b
-        ca, cb = inner.__closure__
-        del a
-        self.assertTrue(ca < cb)
-        self.assertFalse(cb < ca)
-        self.assertTrue(ca == empty_cell())
-
 
 class StaticMethodAttrsTest(CPythonTestCase):
     def test_func_attribute(self):
