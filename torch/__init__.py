@@ -2642,6 +2642,29 @@ for __name in dir(_C._VariableFunctions):
 
 del __name, __obj
 
+
+def clamp(
+    input: Tensor,
+    min: builtins.int | builtins.float | Tensor | None = None,
+    max: builtins.int | builtins.float | Tensor | None = None,
+    *,
+    out: Tensor | None = None,
+) -> Tensor:
+    """See :func:`torch.clamp`."""
+    # Handle mixed Tensor/Scalar min/max bounds (GH#188088)
+    if isinstance(min, Tensor) and isinstance(max, (int, float)):
+        max = _C._VariableFunctions.scalar_tensor(
+            max, dtype=min.dtype, device=min.device
+        )
+    elif isinstance(max, Tensor) and isinstance(min, (int, float)):
+        min = _C._VariableFunctions.scalar_tensor(
+            min, dtype=max.dtype, device=max.device
+        )
+    if isinstance(min, Tensor) or isinstance(max, Tensor):
+        return _C._VariableFunctions.clamp.Tensor(input, min=min, max=max, out=out)
+    return _C._VariableFunctions.clamp(input, min=min, max=max, out=out)
+
+
 ################################################################################
 # Add torch.dtype instances to the public API
 ################################################################################
