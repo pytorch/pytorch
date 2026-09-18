@@ -31,6 +31,7 @@ from torch._inductor.heuristics.template.flex_gemm import (
     flex_gemm_search_space,
 )
 from torch._inductor.kernel.flex_gemm import lowering
+from torch._inductor.kernel.flex_gemm.runtime import normalize_c
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import run_and_get_code
 from torch._subclasses.fake_tensor import is_fake
@@ -156,6 +157,24 @@ class TestFlexGemmRuntimeImport(TestCase):
         sys.modules.pop("torch._inductor.kernel.flex_gemm.runtime", None)
         importlib.import_module("torch._inductor.kernel.flex_gemm.runtime")
         self.assertNotIn("torch._vendor.quack", sys.modules)
+
+    def test_normalize_c_accepts_c_on_matching_device_type(self):
+        C = torch.randn(4, 8)
+        out = normalize_c(C, (4, 8), beta=1.0, device_type="cpu")
+        self.assertIsNotNone(out)
+        self.assertEqual(out.shape, (4, 8))
+
+    def test_normalize_c_rejects_c_on_mismatched_device_type(self):
+        C = torch.randn(4, 8)
+        with self.assertRaisesRegex(
+            RuntimeError, "requires C on the cuda device, got cpu"
+        ):
+            normalize_c(C, (4, 8), beta=1.0, device_type="cuda")
+
+    def test_normalize_c_none_and_zero_beta_passthrough_is_device_agnostic(self):
+        C = torch.randn(4, 8)
+        self.assertIsNone(normalize_c(None, (4, 8), 1.0, "cuda"))
+        self.assertIsNone(normalize_c(C, (4, 8), 0.0, "cuda"))
 
     @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
     def test_quack_cache_fingerprint_covers_quack_ops_before_any_cache_use(self):
