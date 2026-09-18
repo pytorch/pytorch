@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
@@ -3192,6 +3192,145 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         input_tensor = input_tensor.t()
         with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
             dist.all_to_all_single(output_tensor, input_tensor)
+
+
+@instantiate_parametrized_tests
+class CollectiveConfigTest(TestCase):
+    @contextmanager
+    def _group(self, backend="fake"):
+        if backend == "gloo" and not dist.is_gloo_available():
+            self.skipTest("Gloo is unavailable")
+        kwargs = {"store": dist.HashStore()} if backend == "gloo" else {}
+        dist.init_process_group(backend, rank=0, world_size=1, **kwargs)
+        try:
+            yield
+        finally:
+            dist.destroy_process_group()
+
+    @parametrize("backend", ["gloo", "fake"])
+    @parametrize("async_op", [False, True])
+    def test_unsupported_backend(self, backend, async_op):
+        with self._group(backend):
+            tensor = torch.ones(2)
+            dist.all_reduce(tensor)
+            dist.all_reduce(tensor, config=None)
+            with self.assertRaisesRegex(
+                RuntimeError, "only supported by the nccl2 backend"
+            ):
+                dist.all_reduce(tensor, config=object(), async_op=async_op)
+            self.assertEqual(tensor, torch.ones(2))
+
+    @parametrize("name", ["all_gather", "all_gather_single"])
+    @parametrize("async_op", [False, True])
+    @parametrize("config_kind", ["omitted", "none", "object"])
+    def test_direct_backend_config(self, name, async_op, config_kind):
+        with self._group("gloo"):
+            backend = c10d._get_default_group()._get_backend(torch.device("cpu"))
+            tensor = torch.ones(2)
+            output = torch.zeros_like(tensor)
+            args = ([output], tensor) if name == "all_gather" else (output, tensor)
+            kwargs = {}
+            if config_kind != "omitted":
+                kwargs["config"] = object() if config_kind == "object" else None
+            expected = (
+                self.assertRaisesRegex(
+                    RuntimeError, "only supported by the nccl2 backend"
+                )
+                if config_kind == "object"
+                else nullcontext()
+            )
+            with expected:
+                work = getattr(dist, name)(
+                    *args, group=backend, async_op=async_op, **kwargs
+                )
+                if work is not None:
+                    work.wait()
+            self.assertEqual(tensor, torch.ones(2))
+            self.assertEqual(
+                output, torch.zeros_like(tensor) if config_kind == "object" else tensor
+            )
+
+    @parametrize(
+        "name",
+        [
+            "all_reduce",
+            "all_gather",
+            "all_gather_single",
+            "all_gather_into_tensor",
+            "_all_gather_base",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "reduce_scatter_tensor",
+            "_reduce_scatter_base",
+            "all_to_all_single",
+        ],
+    )
+    @parametrize("frontend", ["compile", "export_strict", "export_nonstrict"])
+    @parametrize("config_kind", ["omitted", "none"])
+    def test_tracing(self, name, frontend, config_kind):
+        torch._dynamo.reset()
+        collective = getattr(dist, name)
+        kwargs = {}
+        if config_kind != "omitted":
+            kwargs["config"] = None
+
+        class Module(nn.Module):
+            def forward(self, tensor):
+                output = tensor.clone()
+                if name == "all_reduce":
+                    collective(output, **kwargs)
+                elif name == "all_gather":
+                    collective([output], tensor, **kwargs)
+                elif name == "reduce_scatter":
+                    collective(output, [tensor], **kwargs)
+                else:
+                    collective(output, tensor, **kwargs)
+                return output
+
+        with self._group():
+            module = Module()
+            tensor = torch.ones(2)
+            if frontend == "compile":
+                compiled = torch.compile(module, backend="eager", fullgraph=True)
+            else:
+                compiled = torch.export.export(
+                    module, (tensor,), strict=frontend == "export_strict"
+                ).module()
+            self.assertEqual(compiled(tensor), module(tensor))
+
+    @parametrize("frontend", ["make_fx", "fake", "meta", "functionalize", "remap"])
+    def test_raw_config_tracing(self, frontend):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.distributed._functional_collectives import (
+            _LegacyToFunctionalCollectiveMode,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with self._group():
+            group = c10d._get_default_group().boxed()
+            reduce_op = dist.ReduceOp(dist.ReduceOp.SUM).boxed()
+
+            def fn(tensor):
+                torch.ops.c10d.allreduce_.config(
+                    [tensor], group, reduce_op, None, False, config="test"
+                )
+                return tensor
+
+            with self.assertRaisesRegex(
+                NotImplementedError, "Raw c10d configuration overloads"
+            ):
+                if frontend == "make_fx":
+                    make_fx(fn)(torch.ones(2))
+                elif frontend == "fake":
+                    with FakeTensorMode():
+                        fn(torch.ones(2))
+                elif frontend == "meta":
+                    fn(torch.ones(2, device="meta"))
+                elif frontend == "functionalize":
+                    torch.func.functionalize(fn)(torch.ones(2))
+                else:
+                    with _LegacyToFunctionalCollectiveMode():
+                        fn(torch.ones(2))
 
 
 class ReduceOpTest(TestCase):

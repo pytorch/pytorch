@@ -109,12 +109,16 @@ static bool registered = registerGilChecker();
 ::c10d::nccl2::MaterializedCollectiveConfig materializeCollectiveConfig(
     const c10::IValue& config) {
   TORCH_CHECK_TYPE(
-      config.isPyObject(), "Collective config must be a Python object");
+      config.isPyObject() || config.isGenericDict(),
+      "Collective config must be a Python object or a value dictionary");
   pybind11::gil_scoped_acquire gil;
   py::module_::import("torch.distributed.distributed_c10d")
       .attr("_grouped_collective_context")
       .attr("check_config")();
-  auto config_obj = py::reinterpret_borrow<py::object>(config.toPyObject());
+  auto config_obj = config.isGenericDict()
+      ? py::module_::import("torch.distributed._collective_config")
+            .attr("_deserialize_nccl_config")(torch::jit::toPyObject(config))
+      : py::reinterpret_borrow<py::object>(config.toPyObject());
   auto nccl_core = py::module_::import("nccl.core.communicator");
   TORCH_CHECK_TYPE(
       py::isinstance(config_obj, nccl_core.attr("NCCLCollConfig")),
