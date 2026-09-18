@@ -96,7 +96,7 @@ C10_XPU_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id,
-    XPUAllocator* allocator = nullptr);
+    std::shared_ptr<XPUAllocator> allocator_ptr = nullptr);
 
 C10_XPU_API void beginAllocateToPool(
     c10::DeviceIndex device,
@@ -114,6 +114,17 @@ C10_XPU_API void markCaptureEnd(c10::DeviceIndex device);
 C10_XPU_API void releasePool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
+
+C10_XPU_API void setNoSplit(
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id);
+
+// Register/unregister a pool as an OOM fallback. Callers must explicitly
+// call setUseOnOOM(..., false) before releasing the pool.
+C10_XPU_API void setUseOnOOM(
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id,
+    bool use_on_oom);
 
 C10_XPU_API int getPoolUseCount(
     c10::DeviceIndex device,
