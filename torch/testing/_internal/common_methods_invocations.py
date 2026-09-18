@@ -8970,7 +8970,7 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     for dim in (2, 3):
 
-        modes_ = (*modes, "bicubic") if dim == 2 else modes
+        modes_ = (*modes, "bicubic")
 
         for mode, padding_mode, align_corners in itertools.product(modes_, padding_modes, align_cornerss):
             yield SampleInput(
@@ -16321,17 +16321,6 @@ op_db: list[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-               # Some negative padding cases cause a segfault on MPS
-               DecorateInfo(unittest.skip("Not fully supported on MPS"), 'TestConsistency'),
-               # RuntimeError: start == 0 || start < input_size
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32, torch.complex64)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.float32, torch.complex64)
-               ),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
@@ -22000,7 +21989,40 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=True,
-        gradcheck_nondet_tol=1e-15),
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            # mps and xpu refuse 5-D bicubic in eager. Not listed: test_dtypes, where a
+            # raising sample only marks a dtype partially supported, and test_out_warning,
+            # which returns on the first sample, a 4-D bilinear one.
+            # TODO: drop these when mps / xpu implement 5-D bicubic.
+            # MPS TestConsistency has its own entry in common_mps.py.
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_noncontiguous_samples", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_noncontiguous_samples", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_variant_consistency_eager", device_type="mps"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_variant_consistency_eager", device_type="xpu"),
+            # not instantiated on mps
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_operator", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_backward", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
+                         "test_view_replay", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMathBits",
+                         "test_neg_view", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_no_amp", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestFakeTensor",
+                         "test_fake_crossref_backward_amp", device_type="xpu"),
+            # the gradient suites run on xpu, which claims float64
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_grad", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestBwdGradients",
+                         "test_fn_gradgrad", device_type="xpu"),
+        )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
         "grid_sampler_2d",

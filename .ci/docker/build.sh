@@ -115,7 +115,7 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.2.1
+    CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
@@ -123,7 +123,7 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks)
-    CUDA_VERSION=13.2.1
+    CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
@@ -131,7 +131,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11)
-    CUDA_VERSION=13.2.1
+    CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
@@ -249,7 +249,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     XPU_VERSION=2026.1
-    OMIX_VERSION=0.3.0
+    OMIX_VERSION=0.4.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
