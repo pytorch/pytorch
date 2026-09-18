@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import builtins
+import collections
 import contextlib
 import copy
 import dataclasses
@@ -3729,10 +3730,19 @@ from user code:
     def test_aot_compile_module_raise_from_an_opted_out_result_withholds_nothing(self):
         # check() ignores the flag, so [0]'s tree still raises through the leaf in
         # both passes; nobody asked for its answer, so the raise vetoes nothing and
-        # the last resort serves [0]'s graph once [1] rejects the dict.
+        # the last resort serves [0]'s graph once [1] rejects the dict. The serve
+        # is warned about, and this raise arrives through the real pybind boundary,
+        # so the text pins the unwrap the stub-tree warning tests cannot reach:
+        # unwrapped it is the ValueError from __eq__, wrapped the boundary's
+        # SystemError over a repr of the check method.
         model, x = self._aot_compile_dict_branches({}, None)
         model.forward.compiled_results[0].disable_guard_check()
-        self.assertEqual(model(x, {RaisesOnCompare(): 1}), x * 2)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            self.assertEqual(model(x, {RaisesOnCompare(): 1}), x * 2)
+        self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
+        raised = "[0]'s guard check raised ValueError: boom from __eq__"
+        self.assertIn(raised, logs.output[0])
+        self.assertIn("dispatch served [0]", logs.output[0])
 
     def test_aot_compile_module_serves_a_later_match_over_a_raising_leaf(self):
         # The one place tolerating a raise changes an ANSWER: [0]'s tree raises
@@ -3740,12 +3750,18 @@ from user code:
         # served where the parent let the SystemError out (and eager raises the
         # ValueError, as the opted-out test above measures). [1] is patched to
         # accept because its real guards, traced on d=None, reject the dict.
+        # The warning quotes the unwrapped raise here too, from the scan's site.
         model, x = self._aot_compile_dict_branches({}, None)
         manager = model.forward.compiled_results[1]._live_guard_manager()
-        with patch.object(manager, "check", return_value=True) as check:
-            self.assertEqual(model(x, {RaisesOnCompare(): 1}), x * 5)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            with patch.object(manager, "check", return_value=True) as check:
+                self.assertEqual(model(x, {RaisesOnCompare(): 1}), x * 5)
         # Served from the scan: [1] was asked once.
         self.assertEqual(check.call_count, 1)
+        self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
+        raised = "[0]'s guard check raised ValueError: boom from __eq__"
+        self.assertIn(raised, logs.output[0])
+        self.assertIn("dispatch served [1]", logs.output[0])
 
     def test_aot_compile_module_wrapped_interrupt_out_of_a_guard_tree_propagates(self):
         # The pybind boundary wraps WHATEVER a leaf left set into SystemError, a
@@ -3800,22 +3816,41 @@ from user code:
 
     def test_aot_compile_module_serving_over_a_raise_frees_this_call_s_inputs(self):
         # A recorded raise keeps its traceback, and the traceback keeps this call's
-        # frame and args, so the serving exits clear the record: with the cycle
-        # collector off, an input of a call that recorded a raise and then served a
-        # graph dies at the return like any other call's. The opted-out shape above,
-        # unmocked: [0]'s tree raises through the leaf in both passes, [1] rejects
-        # the dict, and the last resort serves [0]'s graph.
-        model, x = self._aot_compile_dict_branches({}, None)
-        model.forward.compiled_results[0].disable_guard_check()
-        key = RaisesOnCompare()
-        ref = weakref.ref(key)
-        gc.disable()
-        try:
-            self.assertEqual(model(x, {key: 1}), x * 2)
-            del key
-            self.assertIsNone(ref())
-        finally:
-            gc.enable()
+        # frame and args, so all three serving exits clear the record: with the
+        # cycle collector off, an input of a call that recorded a raise and then
+        # served a graph dies at the return like any other call's. [0] raises
+        # through the leaf in both passes throughout and is opted out, so its raise
+        # vetoes no last resort; [1]'s patched answers pick which exit serves (its
+        # real guards, traced on d=None, reject the dict, as the last-resort case
+        # patches it to).
+        for exit_name, answers, scale in (
+            ("scan", [True], 5),
+            ("second pass", [False, True], 5),
+            ("last resort", [False, False], 2),
+        ):
+            with self.subTest(exit=exit_name):
+                model, x = self._aot_compile_dict_branches({}, None)
+                model.forward.compiled_results[0].disable_guard_check()
+                manager = model.forward.compiled_results[1]._live_guard_manager()
+                answered = iter(answers)
+                key = RaisesOnCompare()
+                ref = weakref.ref(key)
+                gc.disable()
+                try:
+                    # A plain function, not a Mock: a Mock would record the
+                    # f_locals it was called with, and so hold the very key here.
+                    # The serve warns, and the record holds formatted ints and
+                    # strings only, so reading it here does not keep the input
+                    # alive either.
+                    with (
+                        patch.object(manager, "check", lambda f_locals: next(answered)),
+                        self.assertLogs("torch._dynamo.aot_compile", level="WARNING"),
+                    ):
+                        self.assertEqual(model(x, {key: 1}), x * scale)
+                    del key
+                    self.assertIsNone(ref())
+                finally:
+                    gc.enable()
 
     def test_no_match_message_quotes_a_tree_that_raised_then_answered(self):
         # A raise still withholds the opted-out last resort: dispatch cannot tell
@@ -3950,6 +3985,11 @@ from user code:
         self.assertIn(f"dispatch served [{served_index}]", logs.output[0])
         if opted_out:
             self.assertIn("opted out of guard checks, but", logs.output[0])
+            # The raiser is the last of the two results here, so the stale accept
+            # has no later match to displace and the advice states the remedy alone.
+            remedy = "accept a call it does not fit; fix or drop it."
+            self.assertIn(remedy, logs.output[0])
+            self.assertNotIn("ahead of a later match", logs.output[0])
 
     def test_aot_compile_module_restores_torch_function_after_a_throw(self):
         # A tree that THROWS out of C++ returns through
@@ -4147,25 +4187,6 @@ from user code:
         self.assertIn("dispatch served [2]", logs.output[0])
         self.assertIn("Fix or drop input [0]", logs.output[0])
 
-    def test_aot_compile_module_last_resort_warning_names_the_index_served(self):
-        # [0] is enabled and rejects in both passes, [1] opted out and raises in
-        # both: no enabled tree raised, so the last resort serves the first
-        # opted-out result, [1], and its site logs that index, not [0].
-        self._hide_leaked_dynamo_globals()
-        x = torch.randn(3, 3)
-        model = self._model_with_stub_trees(Rejects(), RaisingTree("unhappy"))
-        model.forward.compiled_results[1].disable_guard_check()
-        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
-            self.assertEqual(model(x), x * 2)
-        self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
-        self.assertIn("[1]'s guard check raised RuntimeError: unhappy", logs.output[0])
-        self.assertIn("dispatch served [1]", logs.output[0])
-        self.assertIn("opted out of guard checks, but", logs.output[0])
-        # [1] is the last result, so the stale accept has no later match to
-        # displace and the advice states the remedy alone.
-        self.assertIn("accept a call it does not fit; fix or drop it.", logs.output[0])
-        self.assertNotIn("ahead of a later match", logs.output[0])
-
     def test_aot_compile_module_warns_once_per_model_not_per_process(self):
         # The dedup set is a field on the model, which is the whole reason it is
         # not torch._logging.warning_once: that cache is process-global, so the
@@ -4277,6 +4298,60 @@ from user code:
         self.assertIn("does not fit ahead of a later match", logs.output[0])
         with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
             self.assertEqual(model(x), x * 2)
+
+    def test_aot_compile_module_does_not_warn_again_when_the_serve_moves(self):
+        # The served index is in every warning but not in the key: the remedy is
+        # the raiser whichever result answered, so a defect whose serve moves is
+        # reported once. [0] raises in both passes, [1] matches in the scan; with
+        # [1] refusing afterwards the same defect is served by [2] and is silent.
+        self._hide_leaked_dynamo_globals()
+        x = torch.randn(3, 3)
+        stubs = (RaisingTree("unhappy"), Accepts(), Accepts())
+        model = self._model_with_stub_trees(*stubs)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            self.assertEqual(model(x), x * 2)
+        self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
+        self.assertIn("dispatch served [1]", logs.output[0])
+        second = model.forward.compiled_results[1]._live_guard_manager()
+        with patch.object(second, "check", return_value=False):
+            with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
+                self.assertEqual(model(x), x * 2)
+
+    def test_aot_compile_module_warning_not_spent_by_an_interrupt_from_str(self):
+        # _quoted catches Exception as the handlers do, so an interrupt out of the
+        # recorded exception's __str__ leaves the warning call and discards the
+        # graph whose guards passed. A key added before that call would spend the
+        # one-shot on a warning the log never saw, so the defect is reported on
+        # the next call instead: __str__ raises the interrupt once, and the call
+        # after it warns. Boom, not RuntimeError, so an interrupt read as an
+        # answer would fail assertRaises rather than the pin below.
+        self._hide_leaked_dynamo_globals()
+        x = torch.randn(3, 3)
+        interrupt = KeyboardInterrupt("interrupt from __str__")
+
+        class Boom(RuntimeError):
+            printed = 0
+
+            def __str__(self):
+                Boom.printed += 1
+                if Boom.printed == 1:
+                    raise interrupt
+                return "boom from __str__"
+
+        class RaisesBoom:
+            def check(self, f_locals):
+                raise Boom
+
+        model = self._model_with_stub_trees(RaisesBoom(), Accepts())
+        with self.assertRaises(KeyboardInterrupt) as ctx:
+            model(x)
+        self.assertIs(ctx.exception, interrupt)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING") as logs:
+            self.assertEqual(model(x), x * 2)
+        self.assertEqual(len(logs.output), 1, "\n".join(logs.output))
+        raised = "[0]'s guard check raised Boom: boom from __str__"
+        self.assertIn(raised, logs.output[0])
+        self.assertIn("dispatch served [1]", logs.output[0])
 
     def test_aot_compile_module_warning_is_not_spent_while_the_logger_drops_it(self):
         # The one-shot is spent only by a warning the logger would emit: a serve
@@ -5446,20 +5521,23 @@ from user code:
         # under keep_tensor_guards_unsafe, which keeps the TENSOR_MATCH on each
         # plain-tensor global it reads and so arms the re-read of `names` on
         # every result: a served load-time value is then the caller's doing and
-        # not an unarmed artifact. EPS is bound away from the module-level 1e-7
-        # for the capture, so `x * EPS` is far enough from zero for a baseline
-        # assertion about it to discriminate at assertEqual's tolerance, and
-        # restored at cleanup, so the caller rebinds it freely. It is bound a
+        # not an unarmed artifact. EVERY name in `names` is bound away from its
+        # module-level value for the capture -- EPS's own 1e-7 leaves `x * EPS`
+        # inside assertEqual's tolerance of zero, where a baseline assertion
+        # about the served value would hold against a served zero too -- and
+        # restored at cleanup, so the caller rebinds them freely. Each is bound a
         # second time between the save and the load, to a tensor of the same
         # metadata and a different value, so the LOAD-time value the caller
         # baselines against differs from the pickled one in value and not only in
-        # identity: a merge that read the artifact's own dict, or no merge at
-        # all, then fails the assertion below instead of agreeing numerically.
-        global EPS
+        # identity: a merge that read the artifact's own dict, that binds only
+        # the first name, or that does not run at all, then fails the assertion
+        # below instead of agreeing numerically.
+        scope = globals()
 
         self._hide_leaked_dynamo_globals()
-        self.addCleanup(globals().__setitem__, "EPS", EPS)
-        EPS = torch.tensor(5.0)
+        for i, name in enumerate(names):
+            self.addCleanup(scope.__setitem__, name, scope[name])
+            scope[name] = torch.tensor(5.0 + i)
         xs = [torch.randn(n) for n in sizes]
         options = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
         model = torch.compile(
@@ -5468,7 +5546,8 @@ from user code:
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[]) for x in xs])
         data = model._save_aot_compiled_module()
         torch._dynamo.reset()
-        EPS = torch.tensor(6.0)
+        load_time = {name: torch.tensor(6.0 + i) for i, name in enumerate(names)}
+        scope.update(load_time)
         reloaded = torch.compile(
             module_cls(), fullgraph=True, backend="eager", options=options
         )
@@ -5478,8 +5557,10 @@ from user code:
         for result in results:
             self.assertEqual(result._live_global_names, names)
             # The load-time merge, which no call has had a chance to redo: the
-            # bytecode's globals hold the scope's tensor and not the pickled one.
-            self.assertIs(result.fn.__globals__["EPS"], EPS)
+            # bytecode's globals hold the scope's tensor and not the pickled one,
+            # for every certified name and not just the first.
+            for name, value in load_time.items():
+                self.assertIs(result.fn.__globals__[name], value)
         return xs, reloaded, results
 
     def test_aot_compile_module_every_certified_global_is_re_read(self):
@@ -5487,19 +5568,19 @@ from user code:
         # that serves the first name and leaves the rest stale, or that abandons
         # them at the first name the scope no longer binds, passes everything.
         # The recorded set is sorted, so AOT_LIVE_SCALE comes first however the
-        # guards were collected, and is the name deleted below.
+        # guards were collected -- the case below pins that -- and is the name
+        # deleted here. The helper binds both names twice and restores both, so
+        # the baselines are read after it, not before its pre-capture binding.
         global EPS, AOT_LIVE_SCALE
 
-        load_time_scale = AOT_LIVE_SCALE
-        self.addCleanup(globals().__setitem__, "AOT_LIVE_SCALE", load_time_scale)
         (x,), reloaded, (result,) = self._load_armed_module(
             TwoCertifiedModule, 3, names=("AOT_LIVE_SCALE", "EPS")
         )
-        load_time_eps = EPS
+        load_time_eps, load_time_scale = EPS, AOT_LIVE_SCALE
         self.assertEqual(reloaded(x), x * load_time_eps + load_time_scale)
 
-        EPS, AOT_LIVE_SCALE = torch.tensor(2.0), torch.tensor(7.0)
-        self.assertEqual(reloaded(x), x * 2.0 + 7.0)
+        EPS, AOT_LIVE_SCALE = torch.tensor(2.0), torch.tensor(9.0)
+        self.assertEqual(reloaded(x), x * 2.0 + 9.0)
         self.assertIs(result.fn.__globals__["EPS"], EPS)
         self.assertIs(result.fn.__globals__["AOT_LIVE_SCALE"], AOT_LIVE_SCALE)
 
@@ -5511,7 +5592,26 @@ from user code:
         result.disable_guard_check()
         del AOT_LIVE_SCALE
         EPS = torch.tensor(3.0)
-        self.assertEqual(reloaded(x), x * 3.0 + 7.0)
+        self.assertEqual(reloaded(x), x * 3.0 + 9.0)
+
+    def test_aot_compile_module_certified_names_are_sorted_at_load(self):
+        # _live_global_names is the SORTED certified set, which is what lets the
+        # case above name the global it deletes. _guard_source_globals hands back
+        # a set, whose two-element order follows string-hash randomization, so an
+        # assertion on the recorded tuple pins the sort only by luck of the seed;
+        # a stub that hands back the reverse-sorted order pins it under every
+        # seed instead, and the helper's own assertion is what fails when the
+        # sort goes.
+        real = torch._dynamo.aot_compile._guard_source_globals
+
+        def reverse_sorted(output_graph):
+            return sorted(real(output_graph), reverse=True)
+
+        with patch("torch._dynamo.aot_compile._guard_source_globals", reverse_sorted):
+            _, _, (result,) = self._load_armed_module(
+                TwoCertifiedModule, 3, names=("AOT_LIVE_SCALE", "EPS")
+            )
+        self.assertEqual(result._live_global_names, ("AOT_LIVE_SCALE", "EPS"))
 
     def test_aot_compile_module_store_global_does_not_accumulate(self):
         # A forward that rebinds a certified global itself: the replayed
@@ -5657,12 +5757,13 @@ from user code:
 
     def test_aot_compile_module_global_deleted_under_the_re_read_is_skipped(self):
         # The scope is live, so a del of the guarded name can land between the
-        # guard check and _serve's read of it. The read is one lookup under
-        # try/except, so the name is skipped and the bytecode's globals keep the
+        # guard check and _serve's read of it. The read is one get() with a
+        # default, so the name is skipped and the bytecode's globals keep the
         # last value read, where a membership test and then a read would let a
         # bare KeyError out of a call whose guards passed. A dict that answers
-        # the membership test and fails the read stands in for that window; the
-        # guards hold the live module dict by reference and go on passing.
+        # the membership test and raises from __getitem__ stands in for that
+        # window, and dict.get consults neither of the two; the guards hold the
+        # live module dict by reference and go on passing.
         global EPS
 
         (x,), reloaded, (result,) = self._load_armed_module(EpsOnlyModule, 3)
@@ -5680,6 +5781,45 @@ from user code:
 
         with patch.object(result, "_guard_globals", DeletedBetweenTestAndRead()):
             self.assertEqual(reloaded(x), x * rebound)
+
+    def test_aot_compile_module_missing_hook_scope_is_not_asked_to_fabricate(self):
+        # guard_globals is the caller's own mapping, so neither read of a
+        # certified name out of it may go through __getitem__: a defaultdict
+        # would be MUTATED by the read and the graph would then compute with the
+        # value it fabricated, every guard passing on it -- the exact failure
+        # this commit exists to remove. Both reads take dict.get's default, so
+        # the load leaves the dict as the caller passed it and the name is
+        # skipped, the guard rooted at it refusing the call until the caller
+        # opts out, after which the bytecode's globals still hold the value the
+        # artifact was serialized with.
+        global EPS
+
+        self._hide_leaked_dynamo_globals()
+        self.addCleanup(globals().__setitem__, "EPS", EPS)
+        EPS = torch.tensor(5.0)
+        x = torch.randn(3)
+        options = {"guard_filter_fn": torch.compiler.keep_tensor_guards_unsafe}
+        model = torch.compile(
+            EpsOnlyModule(), fullgraph=True, backend="eager", options=options
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+        torch._dynamo.reset()
+
+        fabricated = torch.tensor(99.0)
+        scope = collections.defaultdict(lambda: fabricated)
+        compiled = AOTCompiledModel.deserialize(
+            EpsOnlyModule(), data, guard_globals=scope
+        )
+        (result,) = compiled.compiled_results
+        self.assertEqual(result._live_global_names, ("EPS",))
+        self.assertEqual(dict(scope), {})
+        self.assertIsNot(result.fn.__globals__["EPS"], fabricated)
+        with self.assertRaisesRegex(RuntimeError, r"KeyError on G\['EPS'\]"):
+            compiled(x)
+        result.disable_guard_check()
+        self.assertEqual(compiled(x), x * 5.0)
+        self.assertEqual(dict(scope), {})
 
     @torch._dynamo.config.patch(enable_cpp_symbolic_shape_guards=True)
     def test_aot_compile_module_shape_only_global_arms_the_guard_scope(self):
