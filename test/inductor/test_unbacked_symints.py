@@ -1414,6 +1414,52 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    @inductor_config.patch(
+        {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
+    )
+    @parametrize("dynamic", [False, True, None])
+    @parametrize("max_autotune", [False, True])
+    def test_cat_extern_kernel_inputs_unbacked_size(
+        self, device, dynamic, max_autotune
+    ):
+        # The mm outputs are written straight into the cat destination, whose
+        # size depends on every slice length, so all of them have to be in
+        # scope before the first mm allocates the destination. Lower both
+        # pointwise cat thresholds to force ConcatKernel path instead of
+        # pointwise_cat. max_autotune sends the mms through a template buffer
+        # instead of the extern kernel, which needs the same dependency.
+        if max_autotune and device == "cpu":
+            raise unittest.SkipTest("no Triton gemm template on CPU")
+
+        def fn(x, ends, w):
+            outputs = []
+            start = 0
+            for i in range(4):
+                end = ends[i].item()
+                outputs.append(x[start:end] @ w)
+                start = end
+            return torch.cat(outputs, dim=0)
+
+        # requires_grad is load bearing: the inference graph happens to schedule
+        # every item() before the allocation anyway, so only the training
+        # forward exposes the missing dependency.
+        example_inputs = (
+            make_tensor(64, 32, dtype=torch.float32, device=device, requires_grad=True),
+            torch.tensor([16, 32, 48, 64], dtype=torch.int64, device=device),
+            make_tensor(32, 32, dtype=torch.float32, device=device, requires_grad=True),
+        )
+
+        with inductor_config.patch(
+            {"max_autotune": max_autotune, "max_autotune_gemm_backends": "TRITON"}
+        ):
+            actual = torch.compile(fn, fullgraph=True, dynamic=dynamic)(*example_inputs)
+        expected = fn(*example_inputs)
+        # A Triton gemm template accumulates in a different order than eager, so
+        # default float32 tolerances are too tight here.
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
