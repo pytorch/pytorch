@@ -127,7 +127,12 @@ Ahead-of-time compiles the `torch.compile()`-wrapped function.
 original function but runs the pre-compiled code. It also exposes:
 
 - `save_compiled_function(path)` -- Serialize the compiled artifact to disk.
-- `disable_guard_check()` -- Disable runtime guard validation (advanced use).
+- `disable_guard_check()` -- Disable runtime guard validation (advanced use): the
+  compiled function then runs whatever it is called with, without evaluating its
+  guards. Called on one of a module's `compiled_results` (the private,
+  experimental `_aot_compile` path), it does not skip that module's dispatch:
+  the result is still guard-checked like the others, and its opt-out only makes
+  it, from any index, the one that serves a call no result's guards accept.
 
 **Requirements:**
 
@@ -144,9 +149,38 @@ Load a previously saved AOT-compiled function from a file.
 
 - **file** -- A file-like object (opened in binary read mode) containing the
   serialized compiled function.
-- **f_globals** (`dict | None`) -- Optional global scope for the compiled
-  function. Required when the original function references user-defined types
-  or other non-standard globals.
+- **f_globals** (`dict | None`) -- Optional global scope enclosing the
+  compiled function, and the scope the kept guards resolve against: it must
+  bind every global they read, with values that satisfy them. When a kept
+  guard reads a global -- which takes a `guard_filter_fn` that keeps global
+  guards, since the default drops them all -- that means `vars(my_module)` for
+  the module that defined the original function (as in the example below)
+  rather than a dict of a few extra names; under the default filter the only
+  kept guard that reads a global is a symbolic-shape guard on a global with a
+  dynamic dim, so otherwise the dict only widens what the bytecode merges over
+  (below) with nothing checking it, and only the names the load cannot
+  otherwise resolve belong in it. Guards
+  read this dict by reference, so a global rebound after loading is seen on
+  the next call, and a guarded global the dict lacks fails the guard until
+  that name is bound in it -- there is no fallback to the values serialized
+  with the artifact. That holds for a symbolic-shape guard too, whether it
+  installs as a Python lambda (the default) or as a C++ guard under
+  `enable_cpp_symbolic_shape_guards`: its global operands resolve here. Loading may
+  insert names of its own, never overwriting an existing key: the
+  Dynamo-generated globals a kept guard is rooted at, and
+  `__builtins__` when it has to build the builtins dict one of those names
+  holds. The bytecode does not read this dict: it reads a snapshot, taken at
+  load time, of the globals serialized with the artifact with this dict merged
+  over them, so a name the dict omits still resolves there. That the two can
+  disagree is a known limitation rather than a contract to rely on: a rebind
+  the guards accept leaves the call computing with the load-time value, so
+  only a rebind they reject changes what the call does, by raising. When
+  omitted, global guards are resolved against the scope rebuilt from the
+  artifact instead, where a rebinding in this process is invisible. Passing
+  `{}` is not that: it installs a live but empty guard scope, so every kept
+  guard rooted at a global the load does not seed itself fails with
+  `KeyError on G['NAME']` until that name is bound in the same dict, which the
+  load holds by reference.
 - **external_data** (`dict | None`) -- Optional data to be loaded into the
   runtime environment. Required when the original function captures objects
   that could not be serialized (e.g., `nn.Module` instances). The keys should
@@ -193,7 +227,10 @@ with open("scaled_add.pt", "rb") as f:
 ```
 
 When the function references user-defined types that cannot be found by the
-deserializer, pass `f_globals` to provide the necessary namespace:
+deserializer, pass `f_globals` to provide the necessary namespace. The same dict
+is what the kept guards resolve against, so an artifact that keeps global guards
+needs the defining module's namespace rather than a dict of the missing names
+alone:
 
 ```python
 with open("my_fn.pt", "rb") as f:
