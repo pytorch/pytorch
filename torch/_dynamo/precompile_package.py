@@ -1096,7 +1096,10 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "TENSOR_MATCH",
         "SEQUENCE_LENGTH",
         # Python values the graph specialized on: an int or bool argument,
-        # module.training, an .item() result, mask=None.
+        # module.training, an .item() result, mask=None. BOOL_MATCH is reached
+        # only through CONSTANT_MATCH, so it shows up in an entry's
+        # derived_guard_types and never as its guard_type; it is listed for
+        # the totality test over GuardBuilder methods.
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
         "BOOL_MATCH",
@@ -1123,8 +1126,19 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # Ambient state (installed on GlobalStateSource, not an input): the
         # graph specialized on utils_device.CURRENT_DEVICE; captured under the
         # default None and served under set_default_device("cuda"), it returns
-        # CPU tensors with no refusal.
+        # CPU tensors with no refusal. The next three are the same shape, and
+        # GlobalStateGuard::init snapshots none of the four. The vmap level the
+        # graph baked in (output_graph.functorch_layers, itself serialized)
+        # lives in BatchedTensorImpl, not in the keys TENSOR_MATCH compares.
         "DEFAULT_DEVICE",
+        "FUNCTORCH_STACK_MATCH",
+        # The traced level is a graph constant (_exit_dual_level(level=N));
+        # under another _current_level unpack_dual returns no tangent.
+        "DUAL_LEVEL",
+        # The predicate that installs it also bakes the pack/unpack subgraphs
+        # into the graph; a hook-free capture served under inlineable hooks
+        # skips them with no refusal.
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
         # Membership, key-set, length and iterator-position facts, each a branch
         # the graph specialized on.
         "COUNT_ITERATOR_MATCH",
@@ -1163,8 +1177,10 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "DISPATCH_KEY_SET_MATCH",
         "DTENSOR_SPEC_MATCH",
         # Its builder is a no-op like GRAD_MODE's, but GlobalStateGuard does not
-        # snapshot FSDP training state and the state is per param group, so
-        # nothing here can model or vouch for it.
+        # snapshot FSDP training state (the method's in-tree "we always guard on
+        # this via GlobalStateGuard()" comment is stale: GlobalStateGuard::init
+        # has no FSDP field) and the state is per param group, so nothing here
+        # can model or vouch for it.
         "FSDP_TRAINING_STATE",
         "GLOBAL_STATE",
         "OPAQUE_OBJ_GUARD_FN_MATCH",
@@ -1197,23 +1213,16 @@ def _is_noop_guard_type(guard_type: str) -> bool:
 
 # The ONLY guard types the invariance policy may drop, and only when proven
 # invariant across every captured variant: the identity guards the default
-# filter drops anyway as unserializable, and process-wide compiler state. The
-# four sets are a total, disjoint classification of GuardBuilder's guard
-# methods, pinned by test_guard_policy_classification_is_total: a guard type in
-# none of them -- any type added to GuardBuilder after this list -- is KEPT
-# unconditionally until someone classifies it, so a new value-pinning guard can
-# never become silently droppable. Guards installed outside GuardBuilder (the
-# root manager's DuplicateInputs and StorageOverlap exprs, the dimension-marking
-# lambda) never reach the guard filter and are outside the policy as well.
-_INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset(
-    {
-        "AUTOGRAD_SAVED_TENSORS_HOOKS",
-        # An identity match on a builtin, which the default filter keeps.
-        "BUILTIN_MATCH",
-        "DUAL_LEVEL",
-        "FUNCTORCH_STACK_MATCH",
-    }
-)
+# filter drops anyway as unserializable, plus BUILTIN_MATCH, an identity match
+# on a builtin that the default filter keeps. The four sets are a total,
+# disjoint classification of GuardBuilder's guard methods, pinned by
+# test_guard_policy_classification_is_total: a guard type in none of them --
+# any type added to GuardBuilder after this list -- is KEPT unconditionally
+# until someone classifies it, so a new value-pinning guard can never become
+# silently droppable. Guards installed outside GuardBuilder (the root manager's
+# DuplicateInputs and StorageOverlap exprs, the dimension-marking lambda) never
+# reach the guard filter and are outside the policy as well.
+_INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_MATCH"})
 
 
 def _saved_hooks_fingerprint() -> str:
@@ -1227,7 +1236,7 @@ def _saved_hooks_fingerprint() -> str:
     named by their rendered graph rather than by address, since an id cannot
     go in a committed, diffable file. KNOWN TRADEOFF: two distinct GraphModules
     with identical code read as one hook set here while the guard tells them
-    apart, so a policy may drop that guard on the strength of this fingerprint.
+    apart, so the report may call that guard invariant when it is not.
     """
     try:
         from torch._functorch._aot_autograd.utils import (
