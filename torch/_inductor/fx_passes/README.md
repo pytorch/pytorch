@@ -1,15 +1,18 @@
-# Implicit Invariants for writing FX Graph Passes
+# Implicit Invariants and Tips for Writing FX Graph Passes
 ## Fake Tensor metadata on node
 Each FX node has metadata on it, and in particular, stores a faketensor representing the metadata of that node `node.meta['val']`. This FakeTensor has properties like 1. shape, 2. stride, and 3. aliasing information. However, various passes may change the faketensor values, and so we need to maintain consistency.
 
 The current way we do this is through FakeTensorUpdater (in _inductor/fx_utils.py). Read it for more details, and run it if your pass needs accurate faketensor metadata.
+
+## Graph outputs
+After AOTDispatch, joint and post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes. Passes that need output storage identities can use `collect_output_storage` from `_inductor/fx_passes/fx_graph_traversal_analysis_helpers.py`.
 
 ## Mutations throughout the stack
 The invariant about mutation we have is:
 
 **After AOTDispatch tracing and before Inductor, we have no mutation in our graph, except for a copy_ epilogue at the end of the graph.**
 
-For example, passes operating on the joint_graph and post_grad graph do not need to worry about mutation at all.
+For example, passes operating on the joint_graph and post_grad graph do not need to worry about mutation, except for the rare `aten.set_`. Its presence means the graph contains mutation, so passes that rely on the functional graph invariant may conservatively exit early when they encounter it.
 
 However, we do still have aliasing in the graph. This does not matter most of the time, but it does mean that **our passes are not allowed to cause any additional inputs/outputs to alias if they did not alias in the original graph**.
 

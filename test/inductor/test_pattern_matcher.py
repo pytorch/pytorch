@@ -929,7 +929,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
         )
         expected = fn(*args)
-        gm = make_fx(fn)(*args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
         if keyword_dtype:
             for node in gm.graph.nodes:
                 if node.target is convert:
@@ -978,24 +978,16 @@ class TestPatternMatcher(TestCase):
             0,
         )
 
-    @parametrize("use", ["written", "returned"])
-    def test_reuse_dtype_conversion_across_views_preserves_observable_duplicate(
-        self, use
-    ):
+    def test_reuse_dtype_conversion_across_views_preserves_observable_duplicate(self):
         def fn(x):
             first = convert(x, torch.bfloat16)
             duplicate = convert(x, torch.bfloat16)
             permuted = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-            if use == "written":
-                aten.copy_.default(duplicate, torch.zeros_like(duplicate))
-                duplicate_result = aten.sum.default(duplicate)
-            else:
-                duplicate_result = duplicate
-            return aten.sum.default(first), duplicate_result, aten.sum.default(permuted)
+            return aten.sum.default(first), duplicate, aten.sum.default(permuted)
 
         x = torch.randn(5, 7, device=GPU_TYPE)
         expected = fn(x)
-        gm = make_fx(fn)(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
         base = next(node for node in gm.graph.nodes if node.op == "placeholder")
         safe_conversion, observable_conversion = [
             node
@@ -1023,101 +1015,14 @@ class TestPatternMatcher(TestCase):
         gm.recompile()
         torch.testing.assert_close(gm(x), expected)
 
-    def test_reuse_dtype_conversion_across_views_rejections(self):
-        with torch.library._scoped_library(
-            "_test_reuse_dtype_conversion", "FRAGMENT"
-        ) as lib:
-            lib.define("observes_storage(Tensor a, Tensor b) -> bool")
-            lib.impl(
-                "observes_storage",
-                lambda a, b: a.is_set_to(b),
-                "CompositeExplicitAutograd",
-            )
-
-            @torch.library.register_fake(
-                "_test_reuse_dtype_conversion::observes_storage", lib=lib
-            )
-            def _observes_storage_fake(a, b):
-                return False
-
-            def storage_observation(x):
-                base = convert(x, torch.bfloat16)
-                viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-                aten.is_set_to.default(base, viewed)
-                return aten.sum.default(base), aten.sum.default(viewed)
-
-            def custom_storage_observation(x):
-                base = convert(x, torch.bfloat16)
-                viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-                observes_storage = (
-                    torch.ops._test_reuse_dtype_conversion.observes_storage
-                )
-                return observes_storage.default(base, viewed)
-
-            def derived_view_write(x):
-                base = convert(x, torch.bfloat16)
-                viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-                derived_view = aten.transpose.int(viewed, 0, 1)
-                aten.copy_.default(derived_view, torch.zeros_like(derived_view))
-                return aten.sum.default(base), aten.sum.default(viewed)
-
-            def writable_use(x):
-                base = convert(x, torch.bfloat16)
-                viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-                aten.copy_.default(viewed, torch.zeros_like(viewed))
-                return aten.sum.default(base), aten.sum.default(viewed)
-
-            def wildcard_alias(x):
-                base = convert(x, torch.bfloat16)
-                viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-                pieces = aten.unbind.int(viewed, 0)
-                return aten.sum.default(base), aten.sum.default(pieces[0])
-
-            def graph_output(x):
-                base = convert(x, torch.bfloat16)
-                viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
-                return base, viewed
-
-            cases = [
-                ("storage_observation", storage_observation),
-                ("custom_storage_observation", custom_storage_observation),
-                ("derived_view_write", derived_view_write),
-                ("writable_use", writable_use),
-                ("wildcard_alias", wildcard_alias),
-                ("graph_output", graph_output),
-            ]
-
-            x = torch.randn(5, 7, device=GPU_TYPE)
-            for name, fn in cases:
-                with self.subTest(name=name):
-                    gm = make_fx(fn)(x.clone())
-                    counters.clear()
-
-                    torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
-                        gm.graph
-                    )
-
-                    self.assertEqual(
-                        sum(node.target is convert for node in gm.graph.nodes), 2
-                    )
-                    self.assertEqual(
-                        counters["inductor"]["reuse_dtype_conversion_across_views"],
-                        0,
-                    )
-
-    def test_reuse_dtype_conversion_across_views_rejects_missing_replay_metadata(
-        self,
-    ):
+    def test_reuse_dtype_conversion_across_views_preserves_output_aliasing(self):
         def fn(x):
             base = convert(x, torch.bfloat16)
-            size = aten.sym_size.int(x, 0)
-            viewed = convert(aten.view.default(x, [size, -1]), torch.bfloat16)
-            return aten.sum.default(base), aten.sum.default(viewed)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
+            return base, viewed
 
         x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn, tracing_mode="symbolic")(x)
-        size = next(node for node in gm.graph.nodes if node.target is aten.sym_size.int)
-        del size.meta["val"]
+        gm = make_fx(fn, tracing_mode="fake")(x)
         counters.clear()
 
         torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
@@ -1130,20 +1035,17 @@ class TestPatternMatcher(TestCase):
             0,
         )
 
-    def test_reuse_dtype_conversion_across_views_rejects_mutation_region(self):
+    def test_reuse_dtype_conversion_across_views_bails_on_set(self):
         def fn(x):
             base = convert(x, torch.bfloat16)
-            mutated = aten.add_.Tensor(x, 1)
-            viewed = convert(aten.permute.default(mutated, [1, 0]), torch.bfloat16)
+            viewed = convert(aten.permute.default(x, [1, 0]), torch.bfloat16)
             return aten.sum.default(base), aten.sum.default(viewed)
 
         x = torch.randn(5, 7, device=GPU_TYPE)
-        gm = make_fx(fn)(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
         placeholder = next(node for node in gm.graph.nodes if node.op == "placeholder")
-        permute = next(
-            node for node in gm.graph.nodes if node.target is aten.permute.default
-        )
-        permute.replace_input_with(permute.args[0], placeholder)
+        with gm.graph.inserting_before(gm.graph.output_node()):
+            gm.graph.call_function(aten.set_.default, (placeholder,))
         counters.clear()
 
         torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
@@ -1167,7 +1069,7 @@ class TestPatternMatcher(TestCase):
             torch.randn(4, 3, 5, device=GPU_TYPE, dtype=torch.bfloat16),
             torch.randn(4, 3, 7, device=GPU_TYPE, dtype=torch.bfloat16),
         )
-        gm = make_fx(fn)(*args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
         permuted_convert = next(
             node
             for node in gm.graph.nodes
@@ -1227,7 +1129,7 @@ class TestPatternMatcher(TestCase):
 
         x = torch.randn(*input_shape, device=GPU_TYPE)
         expected = fn(x)
-        gm = make_fx(fn)(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
         counters.clear()
 
         torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
@@ -1252,7 +1154,7 @@ class TestPatternMatcher(TestCase):
 
         x = torch.randn(5, 7, device=GPU_TYPE)
         expected = fn(x)
-        gm = make_fx(fn)(x)
+        gm = make_fx(fn, tracing_mode="fake")(x)
         counters.clear()
 
         torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
@@ -1312,7 +1214,7 @@ class TestPatternMatcher(TestCase):
             torch.empty(7, 5, device=GPU_TYPE, dtype=torch.bfloat16),
         )
         expected = fn(args[0], args[1].clone())
-        gm = make_fx(fn)(*args)
+        gm = make_fx(fn, tracing_mode="fake")(*args)
         counters.clear()
 
         torch._inductor.fx_passes.post_grad.reuse_dtype_conversion_across_views(
@@ -3144,6 +3046,35 @@ class TestPatternMatcher(TestCase):
         # Graph where gelu is decomposed (default decomps): no match.
         gm_decomposed = fwd_only(gelu_pattern, args=[x])
         self.assertEqual(my_patterns.apply(gm_decomposed.graph), 0)
+
+    def test_remove_noop_preserves_storage_offset(self):
+        def fn(x):
+            return aten.clone.default(aten.slice.Tensor(x, 0, 1))
+
+        x = torch.randn(8)
+        gm = make_fx(fn, tracing_mode="fake")(x)
+        clone = next(
+            node for node in gm.graph.nodes if node.target is aten.clone.default
+        )
+        output = gm.graph.output_node()
+        with gm.graph.inserting_before(output):
+            storage_offset = gm.graph.call_function(
+                aten.sym_storage_offset.default, (clone,)
+            )
+        storage_offset.meta["val"] = 0
+        output.args = (storage_offset,)
+        gm.graph.lint()
+        gm.recompile()
+
+        self.assertEqual(gm(x), 0)
+        torch._inductor.fx_passes.post_grad.remove_noop_ops(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        self.assertEqual(gm(x), 0)
+        self.assertEqual(
+            sum(node.target is aten.clone.default for node in gm.graph.nodes), 1
+        )
 
     @inductor_config.patch(is_predispatch=True)
     def test_remove_noop_pass_with_remove_passes(self):

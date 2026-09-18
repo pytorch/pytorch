@@ -6,10 +6,7 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
-from contextlib import nullcontext
-from enum import auto, Enum
 from typing import Any, cast, TypeVar
-from typing_extensions import ParamSpec
 
 import torch
 import torch._inductor as inductor
@@ -23,15 +20,11 @@ from torch._inductor.custom_graph_pass import (
     get_custom_graph_passes,
 )
 from torch._inductor.virtualized import ops  # noqa: F401
-from torch._library.utils import is_tensor_like_type, zip_schema
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import (
-    GuardOnDataDependentSymNode,
-    statically_known_true,
-    sym_eq,
-)
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import ParamSpec
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
@@ -70,6 +63,11 @@ from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
+from .fx_graph_traversal_analysis_helpers import (
+    _same_size_stride_and_storage_offset,
+    collect_output_storage,
+    same_tensor_meta,
+)
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
@@ -1196,29 +1194,6 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same metadata"""
-    val1 = node1.meta.get("val")
-    val2 = node2.meta.get("val")
-    return (
-        val1 is not None
-        and val2 is not None
-        and isinstance(val1, torch.Tensor)
-        and isinstance(val2, torch.Tensor)
-        and statically_known_true(sym_eq(val1.size(), val2.size()))
-        and val1.layout == val2.layout
-        and val1.dtype == val2.dtype
-        and val1.device == val2.device
-        and (
-            val1.layout != torch.strided
-            or statically_known_true(sym_eq(val1.stride(), val2.stride()))
-        )
-        # Check conjugate and negative bits - a clone that resolves these is not a no-op
-        and val1.is_conj() == val2.is_conj()
-        and val1.is_neg() == val2.is_neg()
-    )
-
-
 noop_registry: dict[Any, Any] = {}
 
 
@@ -1345,22 +1320,13 @@ def remove_noop_ops(graph: torch.fx.Graph):
     """
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
-    output_storages = OrderedSet[int | None]()
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
         input_storages.add(get_node_storage(node))
 
-    output_node = next(iter(reversed(graph.nodes)))
-    if output_node.op != "output":
-        raise AssertionError(f"expected output node, got {output_node.op}")
-    outputs = output_node.args[0]
-    if not isinstance(outputs, (list, tuple)):
-        # nested subgraphs can have singleton outputs
-        outputs = (outputs,)
-    for out in outputs:
-        if isinstance(out, torch.fx.Node):
-            output_storages.add(get_node_storage(out))
+    output_node = graph.output_node()
+    output_storages = collect_output_storage(graph)
 
     for node in graph.nodes:
         if node.target in noop_registry:
@@ -1406,165 +1372,41 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            if same_meta(node, src) and cond(*args, **kwargs):
+            node_val = node.meta.get("val")
+            src_val = src.meta.get("val")
+            if (
+                isinstance(node_val, torch.Tensor)
+                and isinstance(src_val, torch.Tensor)
+                and same_tensor_meta(node_val, src_val)
+                and cond(*args, **kwargs)
+            ):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
 
-def _fx_nodes(value: Any) -> list[torch.fx.Node]:
-    return [
-        leaf for leaf in pytree.tree_leaves(value) if isinstance(leaf, torch.fx.Node)
-    ]
-
-
-class _StorageUse(Enum):
-    VALUE_READ = auto()
-    ALIAS = auto()
-    HAZARD = auto()
-
-
-def _classify_storage_use(user: torch.fx.Node, node: torch.fx.Node) -> _StorageUse:
-    """Classify how ``user`` interacts with ``node``'s storage."""
-    if user.op != "call_function" or not isinstance(user.target, torch._ops.OpOverload):
-        return _StorageUse.HAZARD
-    # Custom operators can observe storage identity without expressing that in
-    # their schema, so only trust alias annotations from built-in operator sets.
-    if user.target.namespace not in ("aten", "prims"):
-        return _StorageUse.HAZARD
-    # This read-only predicate observes the storage sharing introduced by reuse.
-    if user.target is aten.is_set_to.default:
-        return _StorageUse.HAZARD
-
-    schema = user.target._schema
-    bound_args = list(zip_schema(schema, user.args, user.kwargs))
-    node_alias_sets: OrderedSet[str] = OrderedSet()
-    found_node = False
-    for schema_arg, actual_arg in bound_args:
-        if not any(actual_node is node for actual_node in _fx_nodes(actual_arg)):
-            continue
-        found_node = True
-        alias_info = schema_arg.alias_info
-        if alias_info is None:
-            continue
-        if alias_info.is_write:
-            return _StorageUse.HAZARD
-        # before_set labels the tracked argument entering the operation. Reject a
-        # wildcard on either side: ``Tensor(a -> *)`` has a known input label but
-        # unspecified outgoing aliases that this analysis cannot safely follow.
-        if "*" in alias_info.before_set or "*" in alias_info.after_set:
-            return _StorageUse.HAZARD
-        node_alias_sets.update(alias_info.before_set)
-
-    if not found_node:
-        log.warning(
-            "%s is registered as a user of %s but does not consume it; "
-            "skipping dtype-conversion reuse",
-            user,
-            node,
+def _same_dense_storage_region(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
+    lhs_val = cast(torch.Tensor, lhs.meta["val"])
+    rhs_val = cast(torch.Tensor, rhs.meta["val"])
+    return (
+        get_node_storage(lhs) is not None
+        and get_node_storage(lhs) == get_node_storage(rhs)
+        and torch._prims_common.is_non_overlapping_and_dense_or_false(lhs_val)
+        and torch._prims_common.is_non_overlapping_and_dense_or_false(rhs_val)
+        and statically_known_true(sym_eq(lhs_val.numel(), rhs_val.numel()))
+        and statically_known_true(
+            sym_eq(lhs_val.storage_offset(), rhs_val.storage_offset())
         )
-        return _StorageUse.HAZARD
-
-    node_storage = get_node_storage(node)
-    found_writable_arg = False
-    # Detect whether any other writable argument may share ``node``'s storage,
-    # either according to the schema alias labels or the concrete fake storages.
-    for schema_arg, actual_arg in bound_args:
-        alias_info = schema_arg.alias_info
-        if alias_info is None or not alias_info.is_write:
-            continue
-        found_writable_arg = True
-        if node_storage is None:
-            return _StorageUse.HAZARD
-        if "*" in alias_info.before_set or "*" in alias_info.after_set:
-            return _StorageUse.HAZARD
-        if node_alias_sets.intersection(alias_info.before_set):
-            return _StorageUse.HAZARD
-        for actual_node in _fx_nodes(actual_arg):
-            actual_storage = get_node_storage(actual_node)
-            if actual_storage is None or actual_storage == node_storage:
-                return _StorageUse.HAZARD
-
-    # A mutable schema without an annotated writable argument is not trustworthy
-    # enough for alias analysis (notably some Tensor-list out variants).
-    if schema.is_mutable and not found_writable_arg:
-        return _StorageUse.HAZARD
-    if not node_alias_sets:
-        return _StorageUse.VALUE_READ
-
-    aliasing_returns = []
-    for index, schema_return in enumerate(schema.returns):
-        alias_info = schema_return.alias_info
-        if alias_info is None:
-            continue
-        if "*" in alias_info.before_set or "*" in alias_info.after_set:
-            return _StorageUse.HAZARD
-        if node_alias_sets.intersection(alias_info.after_set):
-            aliasing_returns.append(index)
-
-    if not aliasing_returns:
-        return _StorageUse.VALUE_READ
-    # Alias traversal can follow only a single tensor-valued FX node. Tuple or
-    # list returns would require following the corresponding getitem users.
-    if len(schema.returns) != 1 or not is_tensor_like_type(schema.returns[0].type):
-        return _StorageUse.HAZARD
-    return _StorageUse.ALIAS
-
-
-def _conversion_results_with_unsafe_storage_uses(
-    roots: OrderedSet[torch.fx.Node],
-) -> OrderedSet[torch.fx.Node]:
-    """Find roots whose result or a derived view has a hazardous storage use.
-
-    A use is hazardous if it mutates or exposes the tracked storage, or cannot be
-    proven to be either a value-only read or supported alias propagation. Follow
-    storage-propagating uses forward while recording each alias's immediate sources,
-    then propagate discovered hazards backward to the conversion roots.
-    """
-    alias_sources: defaultdict[torch.fx.Node, OrderedSet[torch.fx.Node]] = defaultdict(
-        OrderedSet
+        and not lhs_val.is_conj()
+        and not lhs_val.is_neg()
+        and not rhs_val.is_conj()
+        and not rhs_val.is_neg()
     )
-    local_hazards: OrderedSet[torch.fx.Node] = OrderedSet()
-    pending = list(roots)
-    seen = OrderedSet[torch.fx.Node]()
-
-    # Follow uses that propagate each conversion result's storage.
-    while pending:
-        node = pending.pop()
-        if node in seen:
-            continue
-        seen.add(node)
-        for user in node.users:
-            storage_use = _classify_storage_use(user, node)
-            if storage_use is _StorageUse.HAZARD:
-                local_hazards.add(node)
-            elif storage_use is _StorageUse.ALIAS:
-                alias_sources[user].add(node)
-                pending.append(user)
-
-    # A hazard on a view also rejects every conversion result backing that view.
-    unsafe = OrderedSet(local_hazards)
-    pending = list(local_hazards)
-    while pending:
-        node = pending.pop()
-        for source in alias_sources[node]:
-            if source not in unsafe:
-                unsafe.add(source)
-                pending.append(source)
-    return roots.intersection(unsafe)
 
 
-def _replay_node_with_replacement(
-    node: torch.fx.Node, old: torch.fx.Node, new: torch.Tensor
-) -> Any:
-    # Skip replay if an unreplaced FX argument has no ``meta["val"]``.
-    if any(
-        isinstance(value, torch.fx.Node)
-        and value is not old
-        and "val" not in value.meta
-        for value in pytree.tree_leaves((node.args, node.kwargs))
-    ):
-        return None
-    fake_args, fake_kwargs = pytree.tree_map(
+def _replay_view(
+    view: torch.fx.Node, old: torch.fx.Node, new: torch.Tensor
+) -> torch.Tensor:
+    args, kwargs = pytree.tree_map(
         lambda value: (
             new
             if value is old
@@ -1572,230 +1414,126 @@ def _replay_node_with_replacement(
             if isinstance(value, torch.fx.Node)
             else value
         ),
-        (node.args, node.kwargs),
+        (view.args, view.kwargs),
     )
-    fake_mode = detect_fake_mode((fake_args, fake_kwargs))
-    if fake_mode is None or not isinstance(node.target, torch._ops.OpOverload):
-        return None
-    try:
-        with (
-            fake_mode,
-            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if fake_mode.shape_env
-            else nullcontext(),
-        ):
-            return node.target(*fake_args, **fake_kwargs)
-    except GuardOnDataDependentSymNode:
-        return None
-
-
-def _same_tensor_metadata(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
-    return (
-        statically_known_true(sym_eq(lhs.size(), rhs.size()))
-        and statically_known_true(sym_eq(lhs.stride(), rhs.stride()))
-        and lhs.dtype == rhs.dtype
-        and lhs.device == rhs.device
-        and lhs.layout == rhs.layout
-        and statically_known_true(sym_eq(lhs.storage_offset(), rhs.storage_offset()))
-        and lhs.is_conj() == rhs.is_conj()
-        and lhs.is_neg() == rhs.is_neg()
-    )
-
-
-_DTYPE_CONVERSION_REUSE_VIEW_OPS = OrderedSet(
-    [
-        aten.permute.default,
-        aten.squeeze.default,
-        aten.squeeze.dim,
-        aten.squeeze.dims,
-        aten.t.default,
-        aten.transpose.int,
-        aten.unsqueeze.default,
-        aten.view.default,
-    ]
-)
-
-
-def _supported_view_base(view: torch.fx.Node) -> torch.fx.Node | None:
-    """Return the immediate tensor input of a supported view op."""
-    if (
-        view.op != "call_function"
-        or view.target not in _DTYPE_CONVERSION_REUSE_VIEW_OPS
-    ):
-        return None
-    base = get_arg_value(view, 0, "self")
-    return base if isinstance(base, torch.fx.Node) else None
+    fake_mode = detect_fake_mode((args, kwargs))
+    if fake_mode is None:
+        raise AssertionError("expected FakeTensor inputs")
+    with fake_mode:
+        return view.target(*args, **kwargs)
 
 
 def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
-    """Reuse a dtype conversion across one supported view op.
+    """Reuse dtype conversions of dense aliases covering the same storage region."""
+    # Skip if the graph contains mutation beyond the copy_ output epilogue.
+    if graph.find_nodes(op="call_function", target=aten.set_.default):
+        return
 
-    This optimization does not currently support chains of view operations.
-    TODO: Replay the full view chain if production cases justify the complexity.
-    """
-    convert = prims.convert_element_type.default
+    output_storages = collect_output_storage(graph)
 
-    # a = convert(x, dtype)
-    # b = convert(view(x), dtype)
-    #
-    # Phase 1: index conversions by their direct FX source and target dtype.
-    # (x, dtype)       -> [a]
-    # (view(x), dtype) -> [b]
-    all_conversions_by_source: defaultdict[
-        tuple[torch.fx.Node, torch.dtype], list[torch.fx.Node]
+    # Index all conversions by (input storage ID, source dtype, destination dtype).
+    conversions_by_storage: defaultdict[
+        tuple[int, torch.dtype, torch.dtype], list[torch.fx.Node]
     ] = defaultdict(list)
-    for node in graph.nodes:
-        if node.op != "call_function" or node.target is not convert:
-            continue
-        source = get_arg_value(node, 0, "a")
-        target_dtype = get_arg_value(node, 1, "dtype")
-        if not isinstance(source, torch.fx.Node) or not isinstance(
-            target_dtype, torch.dtype
+    convert = prims.convert_element_type.default
+    for conversion in graph.find_nodes(op="call_function", target=convert):
+        source = cast(torch.fx.Node, get_arg_value(conversion, 0, "a"))
+        source_val = source.meta.get("val")
+        conversion_val = conversion.meta.get("val")
+        source_storage = get_node_storage(source)
+        conversion_storage = get_node_storage(conversion)
+        if not (
+            isinstance(source_val, torch.Tensor)
+            and isinstance(conversion_val, torch.Tensor)
+            and source_storage is not None
+            and conversion_storage is not None
+            # Skip conversions whose storage reaches a graph output.
+            and conversion_storage not in output_storages
+            # Replaying the source view after conversion requires the conversion
+            # to preserve the source's element layout.
+            and _same_size_stride_and_storage_offset(source_val, conversion_val)
         ):
             continue
-        all_conversions_by_source[(source, target_dtype)].append(node)
+        conversions_by_storage[
+            (source_storage, source_val.dtype, conversion_val.dtype)
+        ].append(conversion)
 
-    # Phase 2: for each conversion on a supported view, check whether its base
-    # has the exact same conversion and, if so, record the view conversion:
-    # a = convert(base, dtype), b = convert(view(base), dtype)
-    # view_conversion_candidates[(base, dtype)] = [b]
-
-    view_conversion_candidates: defaultdict[
-        tuple[torch.fx.Node, torch.dtype], list[torch.fx.Node]
-    ] = defaultdict(list)
-    for (
-        maybe_view,
-        target_dtype,
-    ), conversion_nodes in all_conversions_by_source.items():
-        base = _supported_view_base(maybe_view)
-        if base is None:
-            continue
-        base_conversion_key = (base, target_dtype)
-        # The base must already have a conversion to the exact same dtype.
-        if not all_conversions_by_source.get(base_conversion_key):
-            continue
-        for conversion in conversion_nodes:
-            if isinstance(conversion.meta.get("val"), torch.Tensor):
-                view_conversion_candidates[base_conversion_key].append(conversion)
-
-    if not view_conversion_candidates:
-        return
-
-    # Phase 3: collect involved conversions, find those whose result storage
-    # cannot safely be shared, and remove unsafe view-conversion candidates.
-
-    # Collect each existing convert(base, dtype) that a view conversion may reuse.
-    relevant_conversions = OrderedSet(
-        [
-            conversion
-            for base_conversion_key in view_conversion_candidates
-            for conversion in all_conversions_by_source[base_conversion_key]
-        ]
-    )
-    # Add each convert(view(base), dtype) that may be replaced by view(convert(base)).
-    relevant_conversions.update(
-        itertools.chain.from_iterable(view_conversion_candidates.values())
-    )
-    unsafe_conversions = _conversion_results_with_unsafe_storage_uses(
-        relevant_conversions
-    )
-    for base_conversion_key in list(view_conversion_candidates):
-        view_conversion_candidates[base_conversion_key] = [
-            conversion
-            for conversion in view_conversion_candidates[base_conversion_key]
-            if conversion not in unsafe_conversions
-        ]
-        if not view_conversion_candidates[base_conversion_key]:
-            del view_conversion_candidates[base_conversion_key]
-
-    if not view_conversion_candidates:
-        return
-
-    # Phase 4: map each view conversion to an earlier safe convert(base, dtype)
-    # that it may reuse. Requiring the base conversion to occur first avoids
-    # moving the view conversion's consumers across RNG or other effectful nodes.
-    # The two conversions must also have no mutation operation between them.
-    # NOTE: Reuse across unrelated mutations could be allowed by checking whether their
-    # writable arguments can alias base instead of treating every mutation as a boundary.
-    node_order = {node: index for index, node in enumerate(graph.nodes)}
-    base_conversion_for_view_conversion: dict[torch.fx.Node, torch.fx.Node] = {}
-    for base_conversion_key, view_conversions in view_conversion_candidates.items():
-        base_conversions = all_conversions_by_source[base_conversion_key]
-        for view_conversion in view_conversions:
-            view_conversion_region = get_mutation_region_id(graph, view_conversion)
+    rewrites = 0
+    for conversions in conversions_by_storage.values():
+        base_conversions: list[torch.fx.Node] = []
+        for conversion in conversions:
+            source = cast(torch.fx.Node, get_arg_value(conversion, 0, "a"))
             base_conversion = next(
                 (
-                    conversion
-                    for conversion in base_conversions
-                    if conversion not in unsafe_conversions
-                    and node_order[conversion] < node_order[view_conversion]
-                    and isinstance(conversion.meta.get("val"), torch.Tensor)
-                    and get_mutation_region_id(graph, conversion)
-                    == view_conversion_region
+                    base_conversion
+                    for base_conversion in base_conversions
+                    if _same_dense_storage_region(
+                        cast(
+                            torch.fx.Node,
+                            get_arg_value(base_conversion, 0, "a"),
+                        ),
+                        source,
+                    )
+                    and (
+                        source is get_arg_value(base_conversion, 0, "a")
+                        or get_arg_value(base_conversion, 0, "a")
+                        in source.all_input_nodes
+                    )
                 ),
                 None,
             )
-            if base_conversion is not None:
-                base_conversion_for_view_conversion[view_conversion] = base_conversion
+            if base_conversion is None:
+                base_conversions.append(conversion)
+                continue
 
-    # Selected base conversions must remain in the graph while rewrites are applied.
-    selected_base_conversions = OrderedSet(base_conversion_for_view_conversion.values())
-    view_rewrites: list[
-        tuple[
-            torch.fx.Node,
-            torch.fx.Node,
-            torch.fx.Node,
-            torch.fx.Node,
-            torch.Tensor,
-        ]
-    ] = []
+            base_source = cast(torch.fx.Node, get_arg_value(base_conversion, 0, "a"))
+            if source is base_source:
+                replacement = base_conversion
+            else:
+                if not (
+                    source.op == "call_function"
+                    and isinstance(source.target, torch._ops.OpOverload)
+                    and source.target.namespace == "aten"
+                ):
+                    continue
+                base_conversion_val = cast(torch.Tensor, base_conversion.meta["val"])
+                replacement_val = _replay_view(source, base_source, base_conversion_val)
+                if (
+                    get_node_storage(base_conversion)
+                    != replacement_val.untyped_storage()._cdata
+                ):
+                    continue
+                replacement_args, replacement_kwargs = pytree.tree_map(
+                    lambda value: base_conversion if value is base_source else value,
+                    (source.args, source.kwargs),
+                )
+                with graph.inserting_before(conversion):
+                    replacement = graph.call_function(
+                        source.target, replacement_args, replacement_kwargs
+                    )
+                replacement.meta = conversion.meta.copy()
+                replacement.meta["val"] = replacement_val
 
-    # Phase 5: prove that moving the view after the conversion preserves the
-    # result metadata and makes the result alias the selected base conversion.
-    # For example, given an expanded base with stride (0, 1),
-    # convert(permute(base)) can have stride (4, 1), while
-    # permute(convert(base)) has stride (1, 3). Replay rejects such candidates.
-    for view_conversion, base_conversion in base_conversion_for_view_conversion.items():
-        if view_conversion in selected_base_conversions:
-            continue
-        view_conversion_val = view_conversion.meta["val"]
-        base_conversion_val = base_conversion.meta["val"]
-        view = cast(torch.fx.Node, get_arg_value(view_conversion, 0, "a"))
-        base = cast(torch.fx.Node, _supported_view_base(view))
-        replacement_val = _replay_node_with_replacement(view, base, base_conversion_val)
-        if not (
-            isinstance(replacement_val, torch.Tensor)
-            and get_node_storage(base_conversion) is not None
-            and replacement_val.untyped_storage()._cdata
-            == get_node_storage(base_conversion)
-            and _same_tensor_metadata(replacement_val, view_conversion_val)
-        ):
-            continue
-        view_rewrites.append(
-            (view_conversion, view, base, base_conversion, replacement_val)
-        )
+            if not same_tensor_meta(
+                cast(torch.Tensor, replacement.meta["val"]), conversion_val
+            ):
+                if replacement is not base_conversion:
+                    graph.erase_node(replacement)
+                continue
+            conversion.replace_all_uses_with(replacement)
+            graph.erase_node(conversion)
 
-    # Phase 6: apply approved rewrites, then clean up the graph once.
-    for view_conversion, view, base, base_conversion, replacement_val in view_rewrites:
-        replacement_args, replacement_kwargs = pytree.tree_map(
-            lambda leaf: base_conversion if leaf is base else leaf,
-            (view.args, view.kwargs),
-        )
-        view_target = cast(torch._ops.OpOverload, view.target)
-        with graph.inserting_after(base_conversion):
-            replacement = graph.call_function(
-                view_target, replacement_args, replacement_kwargs
-            )
-        replacement.meta = view_conversion.meta.copy()
-        replacement.meta["val"] = replacement_val
-        view_conversion.replace_all_uses_with(replacement)
+            pending = [source]
+            while pending:
+                unused = pending.pop()
+                if unused.op != "call_function" or unused.users:
+                    continue
+                pending.extend(unused.all_input_nodes)
+                graph.erase_node(unused)
+            rewrites += 1
 
-    if view_rewrites:
-        counters["inductor"]["reuse_dtype_conversion_across_views"] += len(
-            view_rewrites
-        )
-        graph.eliminate_dead_code()
-        stable_topological_sort(graph)
+    if rewrites:
+        counters["inductor"]["reuse_dtype_conversion_across_views"] += rewrites
 
 
 def remove_assert_ops(graph: torch.fx.Graph):
