@@ -1,11 +1,25 @@
 import logging
 
 import torch
+from torch._dynamo.device_interface import AOTIStandaloneBuildConfig, get_interface_for_device
 from torch._inductor.utils import IndentedBuffer
 
 
 __all__ = []  # type: ignore[var-annotated]
 logger = logging.getLogger(__name__)
+
+
+def _get_aoti_build_config(device_type: str) -> AOTIStandaloneBuildConfig | None:
+    """Get AOTI standalone build config for a device type.
+
+    Returns None if the device is not registered or does not provide
+    AOTI standalone build configuration. Provider errors propagate.
+    """
+    try:
+        iface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        return None
+    return iface.get_aoti_standalone_build_config()
 
 
 def _get_main_cpp_file(
@@ -42,21 +56,9 @@ def _get_main_cpp_file(
             "#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>",
         ]
     )
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writelines(
-                [
-                    "#include <hip/hip_runtime.h>",
-                ]
-            )
-
-        else:
-            ib.writelines(
-                [
-                    "#include <cuda.h>",
-                    "#include <cuda_runtime_api.h>",
-                ]
-            )
+    config = _get_aoti_build_config(device_type)
+    if config is not None:
+        ib.writelines(config.cpp_includes)
     for model_name in model_names:
         ib.writeline(
             f'#include "{package_name}/data/aotinductor/{model_name}/{model_name}.h"'
@@ -206,33 +208,26 @@ def _get_make_file(package_name: str, model_names: list[str], device_type: str) 
     if test_configs.use_libtorch:
         ib.writeline("find_package(Torch REQUIRED)")
 
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writeline("find_package(hip REQUIRED)")
-        else:
-            ib.writeline("find_package(CUDA REQUIRED)")
+    config = _get_aoti_build_config(device_type)
+
+    if config is not None:
+        for path in config.cmake_prefix_paths:
+            ib.writeline(f'list(APPEND CMAKE_PREFIX_PATH "{path}")')
+        for pkg in config.cmake_find_packages:
+            ib.writeline(f"find_package({pkg} REQUIRED)")
 
     ib.newline()
     for model_name in model_names:
         ib.writeline(f"add_subdirectory({package_name}/data/aotinductor/{model_name}/)")
 
     ib.writeline("\nadd_executable(main main.cpp)")
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writeline("target_compile_definitions(main PRIVATE USE_HIP)")
-        else:
-            ib.writeline("target_compile_definitions(main PRIVATE USE_CUDA)")
-    elif device_type == "xpu":
-        ib.writeline("target_compile_definitions(main PRIVATE USE_XPU)")
+    if config is not None:
+        for definition in config.cmake_compile_definitions:
+            ib.writeline(f"target_compile_definitions(main PRIVATE {definition})")
 
     model_libs = " ".join(model_names)
     ib.writeline(f"target_link_libraries(main PRIVATE torch {model_libs})")
 
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writeline("target_link_libraries(main PRIVATE hip::host)")
-        else:
-            ib.writeline("target_link_libraries(main PRIVATE cuda ${CUDA_LIBRARIES})")
-    elif device_type == "xpu":
-        ib.writeline("target_link_libraries(main PRIVATE sycl ze_loader)")
+    if config is not None and config.cmake_link_libraries:
+        ib.writeline(f"target_link_libraries(main PRIVATE {' '.join(config.cmake_link_libraries)})")
     return ib.getvalue()
