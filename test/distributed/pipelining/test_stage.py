@@ -10,7 +10,7 @@ from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
 import torch.distributed as dist
-import torch.distributed.pipelining.stage as stage_module
+import torch.distributed.pipelining._p2p as p2p_module
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
@@ -72,9 +72,9 @@ class PipelineStageBackendWarningTest(TestCase):
     def test_eager_nccl_warning(self, backend, should_warn):
         with (
             mock.patch.object(dist, "get_backend", return_value=backend),
-            mock.patch.object(stage_module, "warning_once") as warning,
+            mock.patch.object(p2p_module, "warning_once") as warning,
         ):
-            stage_module._warn_if_eager_nccl(None)
+            p2p_module._warn_if_eager_nccl(None)
 
         if should_warn:
             warning.assert_called_once()
@@ -86,6 +86,34 @@ instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    def test_metadata_p2p_uses_directed_edge_groups(self):
+        with single_rank_process_group():
+            stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=0,
+                num_stages=2,
+                device=torch.device("cpu"),
+            )
+            send_group = mock.MagicMock()
+            recv_group = mock.MagicMock()
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = {0: 0, 1: 1}
+            stage._p2p_edge_groups = {
+                (0, 1): send_group,
+                (1, 0): recv_group,
+            }
+
+            with (
+                mock.patch.object(stage, "_resolve_peer_global_rank", return_value=1),
+                mock.patch.object(dist, "send_object_list") as send,
+                mock.patch.object(dist, "recv_object_list") as recv,
+            ):
+                stage._send_meta(object(), dst_stage=1)
+                stage._recv_meta(src_stage=1)
+
+            self.assertIs(send.call_args.kwargs["group"], send_group)
+            self.assertIs(recv.call_args.kwargs["group"], recv_group)
+
     def test_recv_metadata_reinit_rejects_owned_buffers(self):
         with single_rank_process_group():
             activation = torch.ones(1, requires_grad=True)
