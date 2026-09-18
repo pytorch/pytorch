@@ -70,3 +70,4 @@ class PyTypeSlots:
     TP_DESCR_SET: int
     TP_STR: int
     TP_INIT: int
+    TP_NEW: int
