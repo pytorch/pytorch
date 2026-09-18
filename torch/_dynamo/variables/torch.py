@@ -1237,6 +1237,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Modules/mathmodule.c#L1035-L1068
             from .object_protocol import pyfloat_as_double
 
+            # CPython uses the qualified name when rejecting keyword arguments,
+            # while FUNC2 passes the bare name to _PyArg_CheckPositional.
             name = self.value.__name__
             no_keywords(tx, f"math.{name}", kwargs)
             check_positional(tx, name, len(args), 2, 2)
