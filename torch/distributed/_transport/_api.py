@@ -6,7 +6,7 @@ from typing_extensions import Self
 
 import torch
 
-from ._work import _WorkQueue, wait_all, Work
+from ._work import _validate_timeout, _WorkQueue, wait_all, Work
 
 
 if TYPE_CHECKING:
@@ -42,7 +42,7 @@ class Memory(Protocol):
         self, offset: int | None = None, length: int | None = None
     ) -> MutableMemoryView: ...
 
-    def to_remote_buffer(self) -> RemoteBuffer: ...
+    def to_remote_buffer(self, *, timeout: float | None = None) -> RemoteBuffer: ...
 
     def reused_registration(self) -> bool: ...
 
@@ -56,20 +56,33 @@ class Transport(ABC):
     ``is_completed`` includes failed operations; ``get_future`` resolves to
     an empty list on success.
 
-    ``read_async`` and ``write_async`` are asyncio coroutines. They drain the
-    transfer before propagating cancellation, allowing callers to release
-    exposed buffers when the coroutine exits. Use ``wait_all`` for batches.
+    ``read_async`` and ``write_async`` are asyncio coroutines. With a finite
+    timeout, cancellation or timeout may leave transfers pending. Use
+    ``wait_all`` to await batches without blocking the event loop.
 
-    Built-in backends serialize asynchronous operations on a worker thread.
-    Local buffers are retained until completion and must not be modified or
-    resized meanwhile. CUDA operations wait for the submitting stream's prior
-    work; completion includes device work. Async CUDA graph capture is unsupported.
-    Peers must keep exposed buffers ready and alive until all accesses finish.
+    Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
+    one outgoing peer; no process group, ranks, or matching receives are needed.
+    Exchange connection bytes and remote descriptors through a trusted control
+    plane. Registration is valid until close, including after bind/connect.
+
+    ``timeout`` is a nonnegative, finite number of seconds; ``None`` selects the
+    backend default. A timeout bounds the caller's wait, not the transfer's
+    lifetime: it does not cancel DMA. Pending work retains its local buffers.
+    After a timeout, wait for the Work or successfully close the transport before
+    reusing buffers. A timed-out close rejects new operations but retains resources
+    until pending operations and cleanup finish; close may be retried.
+
+    Never resize, replace storage, or modify buffers while registered/exposed to
+    a peer. The application must coordinate remote access and notify peers before
+    close; local completion does not establish that a peer has stopped accessing
+    this endpoint. Descriptors are invalid after their owner closes.
+    CUDA stream, graph capture, and tracing semantics are not part of this API.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
         self.device = torch.device(device) if device is not None else None
         self._work_queue = _WorkQueue()
+        self._default_timeout: float | None = None
 
     def _run_transfer(
         self,
@@ -77,11 +90,14 @@ class Transport(ABC):
         device: torch.device,
         *,
         async_op: bool,
+        timeout: float | None = None,
     ) -> int | Work:
-        return self._work_queue.run(operation, device, async_op=async_op)
+        return self._work_queue.run(
+            operation, device, async_op=async_op, timeout=timeout
+        )
 
-    def _close_work(self) -> None:
-        self._work_queue.close()
+    def _close_work(self, timeout: float | None = None) -> None:
+        self._work_queue.close(timeout)
 
     def _check_device(self, device: torch.device) -> None:
         if self.device is not None and (
@@ -96,11 +112,11 @@ class Transport(ABC):
         """Return whether the transport can be used in this process."""
 
     @abstractmethod
-    def bind(self) -> bytes:
+    def bind(self, *, timeout: float | None = None) -> bytes:
         """Bind the endpoint and return its opaque connection URL."""
 
     @abstractmethod
-    def connect(self, peer_url: bytes) -> int:
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
         """Connect to a bound peer and return zero on success."""
 
     @abstractmethod
@@ -108,7 +124,9 @@ class Transport(ABC):
         """Return whether the endpoint is connected to its peer."""
 
     @abstractmethod
-    def register_memory(self, tensor: torch.Tensor) -> Memory:
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> Memory:
         """Register a contiguous tensor, including after bind/connect or transfers.
 
         Exchange its remote-buffer descriptor with the peer before remote access.
@@ -121,6 +139,7 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
         """Write a local view; return Work for async_op=True, otherwise zero."""
 
@@ -131,25 +150,40 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
         """Read into a local view; return Work for async_op=True, otherwise zero."""
 
     async def write_async(
-        self, local_buffer: MemoryView, remote_buffer: RemoteBuffer
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        timeout: float | None = None,
     ) -> None:
         """Write a local view, yielding to asyncio until the transfer finishes."""
+        _validate_timeout(timeout)
         work = cast(Work, self.write(local_buffer, remote_buffer, async_op=True))
-        await wait_all((work,))
+        await wait_all(
+            (work,), timeout=self._default_timeout if timeout is None else timeout
+        )
 
     async def read_async(
-        self, local_buffer: MutableMemoryView, remote_buffer: RemoteBuffer
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        timeout: float | None = None,
     ) -> None:
         """Read into a local view, yielding to asyncio until the transfer finishes."""
+        _validate_timeout(timeout)
         work = cast(Work, self.read(local_buffer, remote_buffer, async_op=True))
-        await wait_all((work,))
+        await wait_all(
+            (work,), timeout=self._default_timeout if timeout is None else timeout
+        )
 
     @abstractmethod
-    def close(self) -> None:
+    def close(self, *, timeout: float | None = None) -> None:
         """Drain outstanding operations and release transport resources."""
 
     def __enter__(self) -> Self:

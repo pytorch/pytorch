@@ -108,7 +108,11 @@ class UCXXMemory:
         offset, length = self._range(offset, length)
         return UCXXMutableMemoryView(self, offset, length)
 
-    def to_remote_buffer(self) -> UCXXRemoteBuffer:
+    def to_remote_buffer(self, *, timeout: float | None = None) -> UCXXRemoteBuffer:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         return self._remote
 
     def reused_registration(self) -> bool:
@@ -271,7 +275,11 @@ class UCXXTransport(Transport):
             {"address": address, "port": self._listener.port}, separators=(",", ":")
         ).encode()
 
-    def bind(self) -> bytes:
+    def bind(self, *, timeout: float | None = None) -> bytes:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if self._closed:
             raise RuntimeError("transport is closed")
         if self._url is not None:
@@ -309,7 +317,11 @@ class UCXXTransport(Transport):
             await endpoint.close()
             raise RuntimeError("transport closed while connecting")
 
-    def connect(self, peer_url: bytes) -> int:
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         address, port = self._parse_url(peer_url)
         self._run(self._connect(address, port), "connect")
         return 0
@@ -323,7 +335,13 @@ class UCXXTransport(Transport):
             endpoint is not None and not endpoint.closed for endpoint in endpoints
         )
 
-    def register_memory(self, tensor: torch.Tensor) -> UCXXMemory:
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> UCXXMemory:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if not isinstance(tensor, torch.Tensor):
             raise TypeError("tensor must be a torch.Tensor")
         if not tensor.is_contiguous():
@@ -359,7 +377,12 @@ class UCXXTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         local = self._local_view(local_buffer, mutable=False)
         remote = self._remote_buffer(remote_buffer)
         if local.size() > remote.length:
@@ -397,7 +420,12 @@ class UCXXTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         local = cast(
             UCXXMutableMemoryView, self._local_view(local_buffer, mutable=True)
         )
@@ -629,7 +657,11 @@ class UCXXTransport(Transport):
         if listener is not None:
             listener.close()
 
-    def close(self) -> None:
+    def close(self, *, timeout: float | None = None) -> None:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._close_work()
         with self._state_lock:
             thread = self._thread
