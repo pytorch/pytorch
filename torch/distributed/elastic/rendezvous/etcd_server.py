@@ -53,14 +53,17 @@ def find_free_port():
 
     for addr in addrs:
         family, type, proto, _, _ = addr
+        s = None
         try:
             s = socket.socket(family, type, proto)
             s.bind(("localhost", 0))
             s.listen(0)
             return s
         except OSError as e:
-            s.close()  # type: ignore[possibly-undefined]
+            if s is not None:
+                s.close()
             print(f"Socket creation attempt failed: {e}")
+            continue
     raise RuntimeError("Failed to create a socket")
 
 

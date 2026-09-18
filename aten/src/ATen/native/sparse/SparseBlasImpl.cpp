@@ -301,7 +301,6 @@ Tensor& _compressed_row_strided_addmm_out(
 namespace cpu {
 #if !AT_USE_MKL_SPARSE()
 namespace {
-template<typename scalar_t, typename idx_t>
 void addmv_sparse_csr(
     const scalar_t* mat_values,
     const idx_t* crow_index,
@@ -389,8 +388,238 @@ void addmv_out_sparse_csr(
         result.stride(0));
   }
 }
+
+template<typename scalar_t, typename idx_t>
+void triangular_solve_sparse_csr_cpu_kernel(
+    const scalar_t* A_values,
+    const idx_t* A_crow_indices,
+    const idx_t* A_col_indices,
+    const int64_t n,
+    scalar_t* X,
+    const int64_t ldx,
+    const int64_t nrhs,
+    const scalar_t* B,
+    const int64_t ldb,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+  at::parallel_for(0, nrhs, 0, [&](int64_t rhs_start, int64_t rhs_end) {
+    for (const auto j : c10::irange(rhs_start, rhs_end)) {
+      if (!transpose) {
+        if (upper) {
+          for (int64_t i = n - 1; i >= 0; i--) {
+            scalar_t sum = B[i * ldb + j];
+            scalar_t diag = 1;
+            bool diag_found = false;
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col == i) {
+                diag = A_values[k];
+                diag_found = true;
+              } else if (col > i) {
+                sum -= A_values[k] * X[col * ldx + j];
+              }
+            }
+            if (!unitriangular && !diag_found) diag = 0;
+            X[i * ldx + j] = unitriangular ? sum : (sum / diag);
+          }
+        } else {
+          for (int64_t i = 0; i < n; i++) {
+            scalar_t sum = B[i * ldb + j];
+            scalar_t diag = 1;
+            bool diag_found = false;
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col == i) {
+                diag = A_values[k];
+                diag_found = true;
+              } else if (col < i) {
+                sum -= A_values[k] * X[col * ldx + j];
+              }
+            }
+            if (!unitriangular && !diag_found) diag = 0;
+            X[i * ldx + j] = unitriangular ? sum : (sum / diag);
+          }
+        }
+      } else {
+        for (int64_t i = 0; i < n; i++) X[i * ldx + j] = B[i * ldb + j];
+        if (upper) {
+          for (int64_t i = 0; i < n; i++) {
+            scalar_t diag = 1;
+            bool diag_found = false;
+            if (!unitriangular) {
+              for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+                if (A_col_indices[k] == i) { diag = A_values[k]; diag_found = true; break; }
+              }
+              if (!diag_found) diag = 0;
+            }
+            X[i * ldx + j] /= diag;
+            scalar_t val = X[i * ldx + j];
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col > i) X[col * ldx + j] -= A_values[k] * val;
+            }
+          }
+        } else {
+          for (int64_t i = n - 1; i >= 0; i--) {
+            scalar_t diag = 1;
+            bool diag_found = false;
+            if (!unitriangular) {
+              for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+                if (A_col_indices[k] == i) { diag = A_values[k]; diag_found = true; break; }
+              }
+              if (!diag_found) diag = 0;
+            }
+            X[i * ldx + j] /= diag;
+            scalar_t val = X[i * ldx + j];
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col < i) X[col * ldx + j] -= A_values[k] * val;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+template<typename scalar_t, typename idx_t>
+void triangular_solve_sparse_bsr_cpu_kernel(
+    const scalar_t* A_values,
+    const idx_t* A_crow_indices,
+    const idx_t* A_col_indices,
+    const int64_t mb,
+    const int64_t block_size,
+    scalar_t* X,
+    const int64_t ldx,
+    const int64_t nrhs,
+    const scalar_t* B,
+    const int64_t ldb,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+  at::parallel_for(0, nrhs, 0, [&](int64_t rhs_start, int64_t rhs_end) {
+    for (const auto j : c10::irange(rhs_start, rhs_end)) {
+      if (!transpose) {
+        if (upper) {
+          for (int64_t i = mb - 1; i >= 0; i--) {
+            for (int64_t r = 0; r < block_size; r++) {
+                X[(i * block_size + r) * ldx + j] = B[(i * block_size + r) * ldb + j];
+            }
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col > i) {
+                for (int64_t r = 0; r < block_size; r++) {
+                  for (int64_t c = 0; c < block_size; c++) {
+                    X[(i * block_size + r) * ldx + j] -= A_values[(k * block_size + r) * block_size + c] * X[(col * block_size + c) * ldx + j];
+                  }
+                }
+              }
+            }
+            const scalar_t* diag_block = nullptr;
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              if (A_col_indices[k] == i) { diag_block = &A_values[k * block_size * block_size]; break; }
+            }
+            for (int64_t r = block_size - 1; r >= 0; r--) {
+              scalar_t sum = X[(i * block_size + r) * ldx + j];
+              for (int64_t c = r + 1; c < block_size; c++) {
+                sum -= (diag_block ? diag_block[r * block_size + c] : 0) * X[(i * block_size + c) * ldx + j];
+              }
+              scalar_t d = (unitriangular || !diag_block) ? 1 : diag_block[r * block_size + r];
+              X[(i * block_size + r) * ldx + j] = sum / d;
+            }
+          }
+        } else {
+          for (int64_t i = 0; i < mb; i++) {
+            for (int64_t r = 0; r < block_size; r++) {
+                X[(i * block_size + r) * ldx + j] = B[(i * block_size + r) * ldb + j];
+            }
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col < i) {
+                for (int64_t r = 0; r < block_size; r++) {
+                  for (int64_t c = 0; c < block_size; c++) {
+                    X[(i * block_size + r) * ldx + j] -= A_values[(k * block_size + r) * block_size + c] * X[(col * block_size + c) * ldx + j];
+                  }
+                }
+              }
+            }
+            const scalar_t* diag_block = nullptr;
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              if (A_col_indices[k] == i) { diag_block = &A_values[k * block_size * block_size]; break; }
+            }
+            for (int64_t r = 0; r < block_size; r++) {
+              scalar_t sum = X[(i * block_size + r) * ldx + j];
+              for (int64_t c = 0; c < r; c++) {
+                sum -= (diag_block ? diag_block[r * block_size + c] : 0) * X[(i * block_size + c) * ldx + j];
+              }
+              scalar_t d = (unitriangular || !diag_block) ? 1 : diag_block[r * block_size + r];
+              X[(i * block_size + r) * ldx + j] = sum / d;
+            }
+          }
+        }
+      } else {
+        const int64_t n = mb * block_size;
+        for (int64_t i = 0; i < n; i++) X[i * ldx + j] = B[i * ldb + j];
+        if (upper) {
+          for (int64_t i = 0; i < mb; i++) {
+            const scalar_t* diag_block = nullptr;
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              if (A_col_indices[k] == i) { diag_block = &A_values[k * block_size * block_size]; break; }
+            }
+            for (int64_t r = 0; r < block_size; r++) {
+              scalar_t d = (unitriangular || !diag_block) ? 1 : diag_block[r * block_size + r];
+              X[(i * block_size + r) * ldx + j] /= d;
+              scalar_t val = X[(i * block_size + r) * ldx + j];
+              for (int64_t c = r + 1; c < block_size; c++) {
+                X[(i * block_size + c) * ldx + j] -= (diag_block ? diag_block[r * block_size + c] : 0) * val;
+              }
+            }
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col > i) {
+                for (int64_t r = 0; r < block_size; r++) {
+                  scalar_t val = X[(i * block_size + r) * ldx + j];
+                  for (int64_t c = 0; c < block_size; c++) {
+                    X[(col * block_size + c) * ldx + j] -= A_values[(k * block_size + r) * block_size + c] * val;
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          for (int64_t i = mb - 1; i >= 0; i--) {
+            const scalar_t* diag_block = nullptr;
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              if (A_col_indices[k] == i) { diag_block = &A_values[k * block_size * block_size]; break; }
+            }
+            for (int64_t r = block_size - 1; r >= 0; r--) {
+              scalar_t d = (unitriangular || !diag_block) ? 1 : diag_block[r * block_size + r];
+              X[(i * block_size + r) * ldx + j] /= d;
+              scalar_t val = X[(i * block_size + r) * ldx + j];
+              for (int64_t c = 0; c < r; c++) {
+                X[(i * block_size + c) * ldx + j] -= (diag_block ? diag_block[r * block_size + c] : 0) * val;
+              }
+            }
+            for (idx_t k = A_crow_indices[i]; k < A_crow_indices[i + 1]; k++) {
+              idx_t col = A_col_indices[k];
+              if (col < i) {
+                for (int64_t r = 0; r < block_size; r++) {
+                  scalar_t val = X[(i * block_size + r) * ldx + j];
+                  for (int64_t c = 0; c < block_size; c++) {
+                    X[(col * block_size + c) * ldx + j] -= A_values[(k * block_size + r) * block_size + c] * val;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
 } // anonymous namespace
-#endif // !AT_USE_MKL_SPARSE()
 
 /*
   Computes a sparse matrix-dense vector product defined as
@@ -461,15 +690,90 @@ void triangular_solve_out_sparse_csr(
     bool transpose,
     bool unitriangular) {
 #if !AT_USE_MKL_SPARSE()
-  TORCH_CHECK(
-      false,
-      "Calling triangular_solve on a sparse CPU tensor requires compiling PyTorch with MKL. ",
-      "Please use PyTorch built MKL support.");
+  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    X.fill_(NAN);
+    return;
+  }
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(X.scalar_type(), "triangular_solve_out_sparse_csr_cpu_impl", [&] {
+    const auto A_values = A.values().contiguous();
+    const auto A_crow_indices = A.crow_indices();
+    const auto A_col_indices = A.col_indices();
+    const auto B_ = B.contiguous();
+    const int64_t nrhs = B.size(-1);
+    const int64_t ldb = B_.stride(-2);
+    const int64_t ldx = X.stride(-2);
+
+    if (A.layout() == kSparseCsr) {
+      if (A_crow_indices.scalar_type() == kLong) {
+        triangular_solve_sparse_csr_cpu_kernel<scalar_t, int64_t>(
+            A_values.data_ptr<scalar_t>(),
+            A_crow_indices.data_ptr<int64_t>(),
+            A_col_indices.data_ptr<int64_t>(),
+            A.size(0),
+            X.data_ptr<scalar_t>(),
+            ldx,
+            nrhs,
+            B_.data_ptr<scalar_t>(),
+            ldb,
+            upper,
+            transpose,
+            unitriangular);
+      } else {
+        triangular_solve_sparse_csr_cpu_kernel<scalar_t, int32_t>(
+            A_values.data_ptr<scalar_t>(),
+            A_crow_indices.data_ptr<int32_t>(),
+            A_col_indices.data_ptr<int32_t>(),
+            A.size(0),
+            X.data_ptr<scalar_t>(),
+            ldx,
+            nrhs,
+            B_.data_ptr<scalar_t>(),
+            ldb,
+            upper,
+            transpose,
+            unitriangular);
+      }
+    } else if (A.layout() == kSparseBsr) {
+      const int64_t block_size = A.values().size(1);
+      if (A_crow_indices.scalar_type() == kLong) {
+        triangular_solve_sparse_bsr_cpu_kernel<scalar_t, int64_t>(
+            A_values.data_ptr<scalar_t>(),
+            A_crow_indices.data_ptr<int64_t>(),
+            A_col_indices.data_ptr<int64_t>(),
+            A.size(0) / block_size,
+            block_size,
+            X.data_ptr<scalar_t>(),
+            ldx,
+            nrhs,
+            B_.data_ptr<scalar_t>(),
+            ldb,
+            upper,
+            transpose,
+            unitriangular);
+      } else {
+        triangular_solve_sparse_bsr_cpu_kernel<scalar_t, int32_t>(
+            A_values.data_ptr<scalar_t>(),
+            A_crow_indices.data_ptr<int32_t>(),
+            A_col_indices.data_ptr<int32_t>(),
+            A.size(0) / block_size,
+            block_size,
+            X.data_ptr<scalar_t>(),
+            ldx,
+            nrhs,
+            B_.data_ptr<scalar_t>(),
+            ldb,
+            upper,
+            transpose,
+            unitriangular);
+      }
+    }
+  });
 #else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseCsr || A.layout() == kSparseBsr);
   sparse::impl::mkl::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
 #endif
 }
+
 
 } // namespace cpu
 } // namespace at::native::sparse::impl
