@@ -7618,7 +7618,10 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertEqual(len(leftovers), 1, leftovers)
         self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
         self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
-        self.assertTrue(any(leftovers[0] in m for m in logs.output), logs.output)
+        # The warning names that file and the one rename that recovers from either shape.
+        joined = "\n".join(logs.output)
+        self.assertIn(leftovers[0], joined)
+        self.assertIn("moved back over the first path", joined)
 
     def _replacing(self, *names, exc, after=False, once=True, by_src=False):
         """Patch os.replace so a rename INTO one of ``names`` (or OUT of one, with
@@ -7749,21 +7752,51 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
         self.assertEqual(self._leftovers(), [])
 
-    def test_save_writes_before_exit_and_exit_rewrites_the_same_pair(self):
+    def test_save_writes_before_exit_and_the_exit_does_not_rewrite(self):
         with self._capture() as cap:
             with self.assertRaisesRegex(PrecompileError, "before calling save"):
                 cap.save()
             cap(self.model, self.x)
             cap.save()
             saved = (self._read(self.artifact), self._read(self.cache))
-            # The rewrite repeats the same bytes, so pin the inodes instead: each write
-            # renames fresh temps in, and skipping the exit write leaves save()'s.
+            # A rewrite would repeat the same bytes, so the inodes are what shows it did
+            # not happen: a write renames fresh temps in, and these are save()'s files.
             inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
             self._assert_serves()
         self.assertEqual((self._read(self.artifact), self._read(self.cache)), saved)
-        rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
-        self.assertNotEqual(rewritten, inodes)
+        self.assertEqual(
+            (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino), inodes
+        )
         self.assertEqual(self._leftovers(), [])
+
+    def test_a_raise_after_a_successful_save_keeps_the_saved_pair(self):
+        # The documented save()-then-raise state: the exception leaves the block, so the
+        # exit writes nothing at all and both halves are still the ones save() renamed in.
+        cap = self._capture()
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with cap:
+                cap(self.model, self.x)
+                cap.save()
+                saved = (self._read(self.artifact), self._read(self.cache))
+                inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
+                raise RuntimeError("boom")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), saved)
+        self.assertEqual(
+            (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino), inodes
+        )
+        self._assert_serves()
+
+    def test_a_manual_exit_after_the_block_is_refused(self):
+        # __exit__ is a door like the others: a second, MANUAL one on a spent capture
+        # would otherwise write the pair the block that raised deliberately left alone.
+        cap = self._capture()
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with cap:
+                cap(self.model, self.x)
+                raise RuntimeError("boom")
+        with self.assertRaisesRegex(PrecompileError, r"Call capture\(\) again"):
+            cap.__exit__(None, None, None)
+        self.assertEqual(os.listdir(self.dir), [])
 
     def test_same_file_for_both_halves_is_refused(self):
         # Also when the two halves are two SPELLINGS of one path, one of them bytes: the
