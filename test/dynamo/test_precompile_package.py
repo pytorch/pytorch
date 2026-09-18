@@ -31,14 +31,17 @@ from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local
 from torch._dynamo.package import load_guards_state
 from torch._dynamo.source import (
     AttrSource,
+    CellContentsSource,
+    ClosureSource,
     DictGetItemSource,
     get_global_source_name,
     GetItemSource,
     GlobalSource,
     LocalSource,
+    TypeSource,
 )
 from torch._dynamo.types import GuardFilterEntry
-from torch._guards import Guard
+from torch._guards import ChainedSource, Guard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -192,13 +195,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         verdicts = dict(zip(unsupported, filter_fn(refused)))
         self.assertEqual(verdicts, dict.fromkeys(unsupported, False))
         # A refused derived type drops the guard too (a CONSTANT_MATCH on a code
-        # object runs through ID_MATCH). The DICT_VERSION exemption is for a
+        # object and a TENSOR_MATCH under match_on_id_for_tensor both run through
+        # ID_MATCH); the TENSOR_MATCH row also pins the accepted-by-type pair as
+        # exactly TYPE_MATCH and BUILTIN_MATCH. The DICT_VERSION exemption is for a
         # DICT_KEYS_MATCH only, and only for that derived type, so both halves of
         # its condition have a row here. Mixed verdicts in one call: the filter
         # returns them positionally, and a table of one verdict cannot tell a
         # misordered list from a right one.
         rows = [
             ("CONSTANT_MATCH", ("ID_MATCH",), False),
+            ("TENSOR_MATCH", ("ID_MATCH",), False),
             ("DICT_KEYS_MATCH", ("ID_MATCH",), False),
             ("DICT_CONTAINS", ("DICT_VERSION",), False),
             ("DICT_KEYS_MATCH", ("DICT_VERSION",), True),
@@ -218,11 +224,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # they derive. That branch is not an unconditional accept: it refuses
             # these two for a local-scope type, which is what
             # test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal
-            # covers.
+            # covers; the rows are on a local source since that is where the kept
+            # TYPE_MATCH the refusal needs sits, and the filter reads no scope.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
             ("TYPE_MATCH", ("ID_MATCH",)),
         ]
-        entries = [_entry(GlobalSource("g"), None, t, derived=d) for t, d in rows]
+        entries = [_entry(LocalSource("obj"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(zip(rows, keep)), [(row, True) for row in rows])
 
@@ -547,7 +554,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # platform however early this test primed it.
         stdlib_roots, norm = precompile_package._stdlib_roots, precompile_package._norm
         sysconfig.get_paths()
-        base = os.path.join(os.sep, "winbase")
+        # abspath here and in the fabricated roots below: drive-qualified on
+        # Windows, where 3.13's isabs rejects a bare \x and the code drops it.
+        base = os.path.abspath(os.path.join(os.sep, "winbase"))
         with (
             mock.patch.object(sys, "platform", "win32"),
             mock.patch.object(sys, "base_prefix", base),
@@ -566,9 +575,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # sys.platform is patched off win32 as well: the DLLs root is the one
         # input that is not a path, and a Windows runner would add it to the
         # exact tuple below.
-        base = os.path.join(os.sep, "base", "lib", "python3.12")
-        venv = os.path.join(os.sep, "venv", "lib", "python3.12")
-        frozen = os.path.join(os.sep, "frozen", "stdlib")
+        base = os.path.abspath(os.path.join(os.sep, "base", "lib", "python3.12"))
+        venv = os.path.abspath(os.path.join(os.sep, "venv", "lib", "python3.12"))
+        frozen = os.path.abspath(os.path.join(os.sep, "frozen", "stdlib"))
         purelib = os.path.join(venv, "site-packages")
         paths = dict(sysconfig.get_paths())
         paths.update(stdlib=base, platstdlib=venv, purelib=purelib, platlib=purelib)
@@ -614,7 +623,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # at /usr/lib/python3.12, the parent of a /usr/lib purelib, and a
         # merged-lib host resolves /usr/lib64 onto /usr/lib; sys.platform is
         # patched off win32, or a Windows runner's DLLs root joins the stdlib.
-        prefix = os.path.join(os.sep, "lib64build")
+        prefix = os.path.abspath(os.path.join(os.sep, "lib64build"))
         stdlib = os.path.join(prefix, "lib64", "python3.12")
         purelib = os.path.join(prefix, "lib", "python3.12", "site-packages")
         platlib = os.path.join(stdlib, "site-packages")
@@ -679,7 +688,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # one with purelib at stdlib, and no preferred scheme is home), so the
         # layout is fabricated: every stdlib source and every install source
         # names the one directory.
-        eq = os.path.join(os.sep, "eqbuild", "lib", "python3.12")
+        eq = os.path.abspath(os.path.join(os.sep, "eqbuild", "lib", "python3.12"))
         paths = dict(sysconfig.get_paths())
         paths.update(stdlib=eq, platstdlib=eq, purelib=eq, platlib=eq)
         norm, within = precompile_package._norm, precompile_package._within
@@ -727,6 +736,39 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             functional = norm(os.path.join(farm, "nn", "functional.py"))
             self.assertTrue(precompile_package._within(functional, roots))
 
+    def test_torch_roots_drop_a_link_that_flattens_this_files_depth(self):
+        # The resolved spelling is two levels up from where this file resolves,
+        # which is the torch directory only while the link keeps the file at
+        # <root>/_dynamo/<file>. A link to a flat patch directory would make its
+        # grandparent, which holds unrelated code, a torch root and waive every
+        # dropped guard over that code; the spelling is skipped instead, so the
+        # patched file lies under no torch root and its guards are kept.
+        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "exp")
+            farm = os.path.join(base, "site-packages", "torch")
+            for sub in ((farm, "_dynamo"), (base, "patchdir"), (base, "my_project")):
+                os.makedirs(os.path.join(*sub))
+            target = os.path.join(base, "patchdir", "precompile_package.py")
+            open(target, "w").close()
+            own = os.path.join(farm, "_dynamo", "precompile_package.py")
+            try:
+                os.symlink(target, own)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+            mymod = os.path.join(base, "my_project", "mymod.py")
+            open(mymod, "w").close()
+            stub = types.SimpleNamespace(__path__=[farm])
+            with (
+                mock.patch.object(precompile_package, "__file__", own),
+                mock.patch.dict(sys.modules, {"torch": stub}),
+            ):
+                self._clear_root_caches()
+                roots = torch_roots()
+            self.assertEqual(roots, (norm(farm),))
+            self.assertFalse(precompile_package._within(norm(mymod), roots))
+            self.assertFalse(precompile_package._within(norm(own), roots))
+
     def test_roots_drop_a_relative_interpreter_path(self):
         # A venv whose pyvenv.cfg home is relative, or a relative PYTHONHOME,
         # leaves sys.base_prefix, sys._stdlib_dir and every sysconfig path
@@ -762,7 +804,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # inside save()'s lint, which must not abort the capture. sysconfig's
         # purelib is read outside the try and the other accessor is still
         # consulted, so what a failing accessor loses is only its own extras.
-        user_site = os.path.join(os.sep, "elsewhere", "user-site")
+        user_site = os.path.abspath(os.path.join(os.sep, "elsewhere", "user-site"))
         with (
             mock.patch.object(site, "getsitepackages", side_effect=RuntimeError),
             mock.patch.object(site, "getusersitepackages", return_value=user_site),
@@ -777,7 +819,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # A non-string entry is dropped rather than handed to realpath outside
         # the try, and the None getusersitepackages returns where there is no
         # home directory (WASI) is skipped like a raise.
-        extra = os.path.join(os.sep, "elsewhere", "site")
+        extra = os.path.abspath(os.path.join(os.sep, "elsewhere", "site"))
         with (
             mock.patch.object(site, "getsitepackages", return_value=[None, extra]),
             mock.patch.object(site, "getusersitepackages", return_value=None),
@@ -818,12 +860,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         patch_module = functools.partial(mock.patch.object, precompile_package)
         paths = sysconfig.get_paths()
         stdlib_root = paths["stdlib"]
+        stdlib_graphlib = os.path.join(stdlib_root, "graphlib.py")
         torch_in_stdlib = os.path.join(stdlib_root, "torch", "__init__.py")
         # The verdict is cached per (file, flag), and files below are judged
         # under more than one root set.
+        self._clear_root_caches()
         self.addCleanup(classify.cache_clear)
         classify.cache_clear()
-        self.assertIs(classify(os.path.join(stdlib_root, "graphlib.py"), True), True)
+        self.assertIs(classify(stdlib_graphlib, True), True)
         # The torch arm reads the torch roots, not the stdlib ones, and the
         # stdlib dir itself is never a pip target.
         self.assertIs(classify(torch.__file__, False), True, "torch arm")
@@ -840,16 +884,20 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         classify.cache_clear()
         with patch_module("_torch_roots", return_value=(norm(platlib_torch),)):
             self.assertIs(classify(installed_torch, False), True)
-        # A frozen app (sys.frozen: PyInstaller, cx_Freeze, py2exe) bundles the
-        # stdlib and every third party under one root, which PyInstaller also
-        # names in sys._stdlib_dir and in the __file__ it gives the
-        # CPython-frozen modules, so no path is evidence for the stdlib arm;
-        # the torch arm keeps its root, torch's own package directory.
+        # A frozen app bundles the stdlib and every third party under one root,
+        # which PyInstaller also names in sys._stdlib_dir and in the __file__ it
+        # gives the CPython-frozen modules, so no path is evidence for the
+        # stdlib arm; the torch arm keeps its root, torch's own package
+        # directory, and still tells torch from the rest of the bundle. The flag
+        # is True under PyInstaller and cx_Freeze and a string under py2exe.
+        for flag in (True, "console_exe"):
+            classify.cache_clear()
+            with mock.patch.object(sys, "frozen", flag, create=True):
+                self.assertIsNone(classify(stdlib_graphlib, True), flag)
+                self.assertIs(classify(torch.__file__, False), True, flag)
+                self.assertIs(classify(stdlib_graphlib, False), False, flag)
         classify.cache_clear()
-        with mock.patch.object(sys, "frozen", True, create=True):
-            self.assertIsNone(classify(os.path.join(stdlib_root, "graphlib.py"), True))
-            self.assertIs(classify(torch.__file__, False), True)
-        classify.cache_clear()
+        self.assertIs(classify(stdlib_graphlib, True), True, "after the clear")
         # Evidence in neither direction: a relative path would resolve against
         # a cwd it was not recorded under, and no file has a NUL in its name
         # (posixpath.realpath raises ValueError on one; from 3.11.5/3.12 on,
@@ -942,6 +990,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         builtin, frozen = machinery.BuiltinImporter, machinery.FrozenImporter
         stdlib_root = sysconfig.get_paths()["stdlib"]
         installed = os.path.join(stdlib_root, "site-packages", "graphlib.py")
+        self._clear_root_caches()
         self.addCleanup(precompile_package._classify_file.cache_clear)
         precompile_package._classify_file.cache_clear()
         graphlib = types.ModuleType("graphlib")
@@ -1178,8 +1227,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # "builtins" outright; it is read through type's descriptor, so a
         # metaclass property cannot shadow it or raise into the predicate.
         # Among the real builtin types it costs the heap type ExceptionGroup
-        # alone (__loader__ is a heap type too, but its __name__ is not the
-        # key). The __module__ test is what refuses open, the one builtin
+        # (3.11+) alone (__loader__ is a heap type too, but its __name__ is not
+        # the key). The __module__ test is what refuses open, the one builtin
         # function builtins does not own: io before 3.12, _io since.
         class UserError(Exception):
             pass
@@ -1238,8 +1287,19 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
     def test_dynamo_synthesized_covers_only_the_resume_function_list(self):
         synthesized = precompile_package._is_dynamo_synthesized
         resume_fns = LocalSource("__nested_resume_fns")
+        entry = GetItemSource(resume_fns, 0)
         self.assertTrue(synthesized(resume_fns))
-        self.assertTrue(synthesized(GetItemSource(resume_fns, 0)))
+        self.assertTrue(synthesized(entry))
+        # Past an entry the value is the user's: a resume function's closure
+        # cells carry the resumed frame's cell variables, and Dynamo guards a
+        # callable an inner def captured as type(act).__call__ through one.
+        closure = ClosureSource(entry)
+        cell = CellContentsSource(
+            GetItemSource(closure, 0), "cell_contents", freevar_name="act"
+        )
+        self.assertFalse(synthesized(closure))
+        self.assertFalse(synthesized(cell))
+        self.assertFalse(synthesized(AttrSource(TypeSource(cell), "__call__")))
         # The frame values are the live stack and locals of the frames nested
         # inside the one resuming, so a guard rooted there is judged like the
         # value it stands for.
@@ -1259,6 +1319,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertIsNone(alias_module("imported_torch"))
         self.assertIsNone(alias_module("__import_not_a_module"))
         self.assertIsNone(alias_module("_torch_package_0__dot_mypkg_dot_impl"))
+        # The unmangling collides for a module whose name contains _dot_:
+        # mypkg.sub_dot_mod is aliased exactly like mypkg.sub.mod, which is
+        # what comes back when it is loaded (documented, fails open).
+        collided = types.ModuleType("mypkg.sub.mod")
+        alias = "__import_" + "mypkg.sub_dot_mod".replace(".", "_dot_")
+        self.assertEqual(alias, "__import_mypkg_dot_sub_dot_mod")
+        with mock.patch.dict(sys.modules, {"mypkg.sub.mod": collided}):
+            self.assertIs(alias_module(alias), collided)
         owning_module = precompile_package._owning_module
         self.assertEqual(owning_module(F), "torch.nn.functional")
         self.assertEqual(owning_module(F.gelu), "torch._C._nn")
@@ -1361,21 +1429,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         defined_where_read = precompile_package._defined_where_read
 
         # A co_filename is not always a path: an exec-generated frame records
-        # <string>, which realpath would resolve against the cwd, so it would
-        # compare equal to the <string> a fields-only dataclass compiles
-        # __init__ in and waive the one class the lint must report. Only
+        # <string>, and so does a def exec'd under it, so realpath would resolve
+        # both against the cwd and waive a def whose bind no checksum covers
+        # (on 3.10 the <string> a fields-only dataclass compiles __init__ in
+        # collides the same way; from 3.11 co_qualname refuses it first). Only
         # absolute filenames compare; a relative one, spelled so that it does
         # resolve to this file from the cwd, and an embedded NUL on either side
         # fail closed instead of raising.
-        @dataclasses.dataclass
-        class Cfg:
-            x: int
-
         pseudo = _stack("<string>")
-        self.assertEqual(Cfg.__init__.__code__.co_filename, "<string>")
-        self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, pseudo))
         exec_ns = {}
         exec(compile("def op(x):\n    return x\n", "<string>", "exec"), exec_ns)
+        self.assertEqual(exec_ns["op"].__code__.co_filename, "<string>")
         self.assertFalse(defined_where_read(exec_ns["op"], "op", pseudo))
         relative = os.path.relpath(__file__)
         self.assertTrue(os.path.samefile(relative, __file__))
@@ -1405,12 +1469,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # one whose only def is a property (the fget arm); a cached_property
         # keeps its function under .func and is not unwrapped, so a class with
         # nothing else fails closed, as does a class with no method of its own
-        # and one whose only methods are generated (a fields-only dataclass
-        # compiles __init__ and __eq__ in <string> and takes __repr__ from the
-        # stdlib, an Enum and a NamedTuple theirs from the stdlib or <string>).
-        # Members are unwrapped by type, never
-        # probed with getattr: a torch.classes proxy answers any attribute
-        # read by raising RuntimeError, and a class holding one is still judged.
+        # and one whose only methods are generated: a fields-only dataclass's
+        # and a NamedTuple's are defs of a factory (__create_fn__, namedtuple),
+        # so their code objects' own qualname carries <locals>. (on 3.10, where
+        # only co_name exists, the <string> or stdlib file they compile in
+        # refuses them), and an Enum's arrive under Enum. qualnames the key
+        # rule refuses. Members are unwrapped by type, never probed with
+        # getattr: a torch.classes proxy answers any attribute read by raising
+        # RuntimeError, and a class holding one is still judged.
         class Ops:
             @staticmethod
             def op(x):
@@ -1578,11 +1644,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             seen.extend(entries)
             return [True] * len(entries)
 
-        def roots():
-            return {
-                precompile_package._source_root(e.orig_guard.originating_source)
-                for e in seen
-            }
+        def root(entry):
+            source = entry.orig_guard.originating_source
+            return source.get_base() if isinstance(source, ChainedSource) else source
 
         lin = torch.nn.Linear(2, 2)
 
@@ -1599,7 +1663,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         aliases = {
             r.global_name
-            for r in roots()
+            for r in map(root, seen)
             if isinstance(r, GlobalSource) and r.global_name.startswith("__import_")
         }
         alias = "__import_torch_dot_nn_dot_modules_dot_linear"
@@ -1608,31 +1672,48 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             precompile_package._dynamo_alias_module(alias), torch.nn.modules.linear
         )
 
-        def callee(y):
-            torch._dynamo.graph_break()
-            return y + 1
+        class Act:
+            def __call__(self, v):
+                return v + 1
 
-        def nested(x):
-            z = x * 2
-            return callee(z) + z
+        def mid(x, act):
+            def inner(v):
+                return act(v)
+
+            torch._dynamo.graph_break()
+            return inner(x)
+
+        def outer(x, act):
+            return mid(x, act) + 1
 
         seen.clear()
         # The harness runs every test under nested_graph_breaks=True (the config
         # default is off).
         compiled = torch.compile(
-            nested, backend="eager", options={"guard_filter_fn": record}
+            outer, backend="eager", options={"guard_filter_fn": record}
         )
-        compiled(torch.ones(2))
-        synthesized = {
-            r.local_name: precompile_package._is_dynamo_synthesized(r)
-            for r in roots()
-            if isinstance(r, LocalSource) and r.local_name.startswith("__nested")
-        }
+        compiled(torch.ones(2), Act())
+        synthesized = precompile_package._is_dynamo_synthesized
+        verdicts: dict[str, dict[str, bool]] = collections.defaultdict(dict)
+        for e in seen:
+            r = root(e)
+            if isinstance(r, LocalSource) and r.local_name.startswith("__nested"):
+                source = e.orig_guard.originating_source
+                verdicts[r.local_name][source.name] = synthesized(source)
         # Both lists are passed into every resume function and both are guard
-        # roots; only the first is synthesized.
-        self.assertTrue(synthesized["__nested_resume_fns"])
-        self.assertIn("__nested_frame_values", synthesized)
-        self.assertFalse(synthesized["__nested_frame_values"])
+        # roots; only the first is synthesized, and of what hangs off it only
+        # the list and its entry: mid's resume function closes over act, and
+        # the guard on its __call__ Dynamo mints through that cell is the
+        # user's.
+        waived = {name for name, ok in verdicts["__nested_resume_fns"].items() if ok}
+        self.assertEqual(
+            waived, {"L['__nested_resume_fns']", "L['__nested_resume_fns'][0]"}
+        )
+        past = "type(L['__nested_resume_fns'][0].__closure__[0].cell_contents).__call__"
+        self.assertIn(past, verdicts["__nested_resume_fns"])
+        self.assertFalse(verdicts["__nested_resume_fns"][past])
+        self.assertTrue(verdicts["__nested_frame_values"])
+        self.assertFalse(any(verdicts["__nested_frame_values"].values()))
 
     def test_module_namespaces_trust_only_bindings_config_cannot_repoint(self):
         mypkg = types.ModuleType("mypkg")
