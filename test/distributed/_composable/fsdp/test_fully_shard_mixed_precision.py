@@ -265,7 +265,8 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
-    def test_reduce_dtype_after_frozen_first_forward(self):
+    @parametrize("reshard_after_backward", [False, True])
+    def test_reduce_dtype_after_frozen_first_forward(self, reshard_after_backward):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -283,6 +284,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         )
         model = Model().to(device_type)
         fully_shard(model, mp_policy=mp_policy)
+        model.set_reshard_after_backward(reshard_after_backward)
         model.requires_grad_(False)
 
         inp = torch.randn((4, 16), device=device_type.type)
@@ -304,11 +306,16 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        with patch_reduce_scatter(reduce_scatter):
-            model(inp).sum().backward()
-        for param in model.parameters():
-            if param.grad is not None:
+        for _ in range(2):
+            model.zero_grad(set_to_none=True)
+            with patch_reduce_scatter(reduce_scatter):
+                model(inp).sum().backward()
+            for param in model.layers.parameters():
+                self.assertTrue(param.requires_grad)
+                self.assertIsNotNone(param.grad)
                 self.assertEqual(param.grad.dtype, torch.float32)
+            self.assertFalse(model.non_float.requires_grad)
+            self.assertIsNone(model.non_float.grad)
 
     def _test_reduce_dtype_bf16_reduce(
         self, reshard_after_forward: bool | int, use_shard_placement_fn: bool
