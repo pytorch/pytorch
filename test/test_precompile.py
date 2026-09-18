@@ -143,9 +143,8 @@ def _precompile_pair(fn, *args, **kwargs):
 
 def _strip_artifact(cache: bytes) -> bytes:
     """Return the cache envelope with its compiled artifact removed, forcing
-    precompile.load() onto the inlined (no-cache) path that JIT-compiles from
-    python_code. Many tests reload the same artifact both cache-primed and stripped to
-    check they agree."""
+    precompile.load() onto the inlined (no-cache) path that JIT-compiles from python_code.
+    Many tests reload the same artifact both cache-primed and stripped to check they agree."""
     blob = torch.load(io.BytesIO(cache), weights_only=True)
     blob["artifact"] = None
     buf = io.BytesIO()
@@ -170,20 +169,23 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
-    def test_guard_fact_render(self):
+    def test_guard_fact_pickle_and_hash(self):
         from torch.compiler._precompile_types import GuardFact
 
-        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
-        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
-        # No rendered code falls back to <guard_type>, a value is appended, and
-        # the dropped label pads to the width of "enforced" so lines align.
-        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
-        self.assertEqual(
-            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        # A fact is a value: pickle round-trips it and equal facts hash equal.
+        fact = GuardFact(
+            guard_type="ID_MATCH",
+            source="G['fn']",
+            code=("___check_obj_id(G['fn'], <id>), type=<class 'function'>",),
+            value="is @m.py:3#abc mod.fn",
+            enforced=False,
         )
-        # Several code parts are joined; no source drops the " on ..." suffix.
-        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
-        self.assertEqual(joined.render(), "[enforced] a ; b")
+        clone = pickle.loads(pickle.dumps(fact))
+        self.assertEqual(clone, fact)
+        self.assertEqual(hash(clone), hash(fact))
+        # Keyword-only: three str fields in a row would otherwise transpose silently.
+        with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
+            GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc mod.fn", False)
 
     def test_constant_tensor_is_rejected(self):
         captured = torch.randn(3)
@@ -362,8 +364,7 @@ class TestPrecompile(TestCase):
             self.assertIn("__tensor_unflatten__", code)
             self.assertNotIn("subclass_wrapper", code)
 
-            # precompile.load() takes the bundled-artifact path (real AOTAutograd
-            # runtime).
+            # precompile.load() takes the bundled-artifact path (real AOTAutograd runtime).
             f_c = _load_pair(code, cache)
             self.assertEqual(f_c(m, x).to_local(), ref.to_local())
 
@@ -384,10 +385,9 @@ class TestPrecompile(TestCase):
     def test_cache_holds_only_artifact(self):
         # The cache is purely an acceleration: the only COMPILED blob it carries is the
         # ``artifact`` (no weights, no calling-convention metadata -- that lives in
-        # python_code, the single source of truth, and precompile.load() parses it back
-        # from there). The envelope additionally carries a lightweight
-        # format/version/backend integrity tag (plain str/int), which precompile.load()
-        # verifies.
+        # python_code, the single source of truth, and precompile.load() parses it back from
+        # there). The envelope additionally carries a lightweight format/version/backend
+        # integrity tag (plain str/int), which precompile.load() verifies.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         with _CaptureToFiles(lambda model, x: model(x)) as cap:
@@ -398,8 +398,7 @@ class TestPrecompile(TestCase):
 
         blob = torch.load(io.BytesIO(cache), weights_only=False)
         # The artifact is the only compiled blob; the rest is the integrity tag (the
-        # format/version/backend tag plus a code_hash binding the cache to its
-        # python_code).
+        # format/version/backend tag plus a code_hash binding the cache to its python_code).
         self.assertEqual(
             set(blob), {"artifact", "format", "version", "backend", "code_hash"}
         )
@@ -414,8 +413,7 @@ class TestPrecompile(TestCase):
         self.assertEqual(meta["BACKEND"], "inductor")
         self.assertEqual(meta["MODULE_POSITIONS"], [0])
 
-        # precompile.load() works using metadata from python_code + artifact from the
-        # cache.
+        # precompile.load() works using metadata from python_code + artifact from the cache.
         f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
@@ -440,10 +438,9 @@ class TestPrecompile(TestCase):
         # The cache is a plain {"artifact": bytes, "format"/"version"/"backend": ...}
         # envelope of only str/int/bytes: it loads with the safe unpickler
         # (weights_only=True). The executable part is the inner artifact bytes, fed to
-        # load_cache_artifacts inside precompile.load() to prime the inductor cache --
-        # that (plus the subsequent exec of python_code) is the code-execution step, not
-        # this outer load. The integrity tag is present and correct (and itself
-        # weights_only-safe).
+        # load_cache_artifacts inside precompile.load() to prime the inductor cache -- that
+        # (plus the subsequent exec of python_code) is the code-execution step, not this
+        # outer load. The integrity tag is present and correct (and itself weights_only-safe).
         from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
 
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
@@ -482,9 +479,8 @@ class TestPrecompile(TestCase):
 
     def test_wrong_param_count_rejected_inlined(self):
         # The same guard fires on the inlined (no-cache) path with the same exception
-        # type as the cached path (PrecompileError): strip the artifact so
-        # precompile.load() execs python_code, then call with a structurally different
-        # model.
+        # type as the cached path (PrecompileError): strip the artifact so precompile.load()
+        # execs python_code, then call with a structurally different model.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         with _CaptureToFiles(lambda model, x: model(x)) as cap:
@@ -883,8 +879,7 @@ class TestPrecompile(TestCase):
                 f"cached load did not warn about untrusted input: {cm.output}",
             )
         # Eager backend (empty cache, nothing to prime): precompile.load() still EXECs
-        # python_code via _make_inlined_forward, which warns about exec'ing untrusted
-        # code every load.
+        # python_code via _make_inlined_forward, warning about untrusted code every load.
         with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
             cap(m, x)
         ecode, ecache = cap.result()
@@ -1643,8 +1638,7 @@ class TestPrecompile(TestCase):
     def test_cache_integrity_tampered_backend_rejected(self):
         # The cache envelope's backend tag is an integrity check: a tampered backend
         # (here flipped to a value that does not match python_code's BACKEND) makes
-        # precompile.load() raise a clear PrecompileError rather than reconstruct a
-        # foreign cache.
+        # precompile.load() raise a PrecompileError rather than reconstruct a foreign cache.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         with _CaptureToFiles(lambda model, t: model(t)) as cap:
@@ -1660,11 +1654,10 @@ class TestPrecompile(TestCase):
     @parametrize("tag", ("format", "version"))
     def test_cache_format_version_mismatch_degrades(self, tag):
         # The cache is acceleration-only, so a FORMAT or VERSION mismatch (a foreign or
-        # different-build envelope) is NOT fatal: precompile.load() DEGRADES to JIT'ing
-        # from python_code rather than hard-failing. The reloaded callable must still
-        # run and match eager, and precompile.load() must emit a degrade WARNING on the
-        # torch._precompile logger. (A BACKEND or CODE_HASH mismatch still hard-fails --
-        # see test_cache_integrity_tampered_backend_rejected and
+        # different-build envelope) is NOT fatal: precompile.load() DEGRADES to JIT'ing from
+        # python_code. The reloaded callable must still match eager, and precompile.load()
+        # must log a degrade WARNING on the torch._precompile logger. (A BACKEND or CODE_HASH
+        # mismatch still hard-fails -- see test_cache_integrity_tampered_backend_rejected and
         # test_load_rejects_mismatched_code_cache_pair.)
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
@@ -1686,8 +1679,7 @@ class TestPrecompile(TestCase):
 
     def test_missing_calling_convention_metadata_rejected(self):
         # Syntactically valid python_code that lacks a required metadata global is not a
-        # precompile artifact; precompile.load() raises a clear PrecompileError naming
-        # the gap.
+        # precompile artifact; precompile.load() raises a clear PrecompileError naming the gap.
         buf = io.BytesIO()
         torch.save(
             {
@@ -1805,11 +1797,10 @@ class TestPrecompile(TestCase):
             self.assertNotIn("shape or memory format", str(e))
 
     def test_public_identity_module_and_qualname(self):
-        # PrecompileError is exported as torch.compiler.PrecompileError, so it
-        # reports that location; load reports the precompile module it is
-        # re-exported from, where introspection (Sphinx, help()) resolves it.
-        # Assert the halves separately: this commit forces both __module__ values, so
-        # a joined string would also pass on the parent's spelling of load (__module__
+        # PrecompileError is exported as torch.compiler.PrecompileError, so it reports that
+        # location; load reports the precompile module it is re-exported from, where
+        # introspection (Sphinx, help()) resolves it. Assert the halves separately: a joined
+        # string would also pass on the parent's spelling of load (__module__
         # "torch.compiler" plus __qualname__ "precompile.load").
         err = torch.compiler.precompile.PrecompileError
         self.assertEqual(err.__module__, "torch.compiler")
@@ -2155,10 +2146,9 @@ class TestPrecompile(TestCase):
 
     def test_single_trust_warning_on_inlined_load(self):
         # On the inlined load path (an eager artifact has an empty cache, so there is
-        # nothing to prime and precompile.load() just EXECs python_code) the
-        # untrusted-input / EXEC warning must fire EXACTLY ONCE -- only
-        # _make_inlined_forward warns. Asserting "exactly once" guards against the EXEC
-        # warning being duplicated on this load.
+        # nothing to prime and precompile.load() just EXECs python_code) the untrusted-input
+        # / EXEC warning must fire EXACTLY ONCE -- only _make_inlined_forward warns, so
+        # "exactly once" guards against the EXEC warning being duplicated on this load.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
         with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
@@ -2710,22 +2700,37 @@ class TestPrecompile(TestCase):
         self.assertIn("aten.sum", code)
 
     def test_capture_inside_another_trace_refused(self):
-        # An ambient TracingContext.fake_mode outranks both mode sources capture hands
-        # make_fx, and no foreign mode passes allow_fallback_kernels=False, so a meta-less
-        # op would be run for real again; one built under DEFAULT config (as here, and as
-        # an AOTAutograd / inductor trace builds its own) also lacks the
-        # unsafe-data-ptr-access snapshot, so a .data_ptr() read bakes 0 instead of raising
-        # (test_capture_refuses_a_data_ptr_read pins the refusal outside a trace). So
-        # capture refuses up front, on a fn that captures cleanly on its own, rather than
-        # tracing under a foreign contract.
+        # An ambient fake mode outranks the one capture builds, and no foreign mode passes
+        # allow_fallback_kernels=False, so a meta-less op would be run for real again; one
+        # built under DEFAULT config (as here, and as an AOTAutograd / inductor trace builds
+        # its own) also lacks the unsafe-data-ptr-access snapshot, so a .data_ptr() read bakes
+        # 0 instead of raising. So capture refuses up front, on a fn that captures cleanly on
+        # its own, rather than tracing under a foreign contract. BOTH paths are refused as of
+        # this commit: the static one now traces on a fake mode of its own, which an ambient
+        # one displaces just as it does the unbacked one's (below this commit the static path
+        # traced on the real example tensors, so it had nothing to lose and was allowed).
         model = torch.nn.Linear(4, 4)
         x = torch.randn(3, 4)
+        marked = torch.randn(3, 4)
+        mark_unbacked(marked, 0)
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         with torch._guards.tracing(torch._guards.TracingContext(fake_mode)):
             with self.assertRaisesRegex(
                 PrecompileError, "cannot run inside another trace"
             ):
+                _precompile_pair(lambda m, t: m(t), model, marked)
+            with self.assertRaisesRegex(
+                PrecompileError, "cannot run inside another trace"
+            ):
                 _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
+        # detect_fake_mode also ranks the dispatch-mode stack, so an enclosing
+        # `with FakeTensorMode()` -- no TracingContext at all -- gets the same named refusal
+        # rather than the mode-mismatch AssertionError inside detect_fake_mode.
+        with FakeTensorMode():
+            with self.assertRaisesRegex(
+                PrecompileError, "cannot run inside another trace"
+            ):
+                _precompile_pair(lambda m, t: m(t), model, marked)
         _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
 
     def test_unbacked_capture_refuses_an_unfakeifiable_input(self):
@@ -3033,16 +3038,17 @@ class TestPrecompilePublicSurface(TestCase):
         # These reports get stashed next to an artifact (a torch.save'd diagnostics
         # record, a capture farm). A previous revision pointed their __module__ at
         # torch.compiler, which does not export them, so pickle could not resolve them.
-        from torch.compiler._precompile_types import (
-            FrameInvariants,
-            GuardFact,
-            PrecompileSummary,
-        )
+        from torch.compiler._precompile_types import GuardFact, PrecompileSummary
 
-        fact = GuardFact("TYPE_MATCH", "L['x']", ("code",), "is int", True)
-        inv = FrameInvariants("f", "f.py", 1, 2, (fact,), (), ())
+        fact = GuardFact(
+            guard_type="TYPE_MATCH",
+            source="L['x']",
+            code=("code",),
+            value="is int",
+            enforced=True,
+        )
         summary = PrecompileSummary(1, 0, 1, 1)
-        for obj in (fact, inv, summary):
+        for obj in (fact, summary):
             self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
 
     def test_tracer_annotations_resolve_after_the_re_home(self):
@@ -3084,9 +3090,8 @@ class TestPrecompilePublicSurface(TestCase):
         for name in ("PrecompiledRunnable", "PrecompiledCallable"):
             self.assertIn(name, torch.compiler.__all__)
             self.assertEqual(getattr(torch.compiler, name).__module__, "torch.compiler")
-        # The module's __all__ IS the surface this commit freezes: pin it exactly, and
-        # resolve every name through the public module -- one dropped from the list, or
-        # listed but missing, fails here, and each reports the re-homed __module__.
+        # __all__ IS the frozen surface: pin it exactly, resolve every name through the
+        # module (dropped or listed-but-missing fails here), and check the re-homed __module__.
         self.assertEqual(
             torch.compiler.precompile.__all__,
             [
@@ -3096,7 +3101,6 @@ class TestPrecompilePublicSurface(TestCase):
                 "MakeFxTracer",
                 "DynamoTracer",
                 "PrecompileSummary",
-                "FrameInvariants",
                 "GuardFact",
             ],
         )
@@ -3161,9 +3165,8 @@ class TestPrecompilePublicSurface(TestCase):
             def serve_time_compiles(self):
                 raise self._exc
 
-        # This is the whole enforcement of the translation: every public entry point
-        # goes through _call, and both dynamo-private types it converts are exercised --
-        # PackageError is the arm the class exists for.
+        # The whole enforcement of the translation: every public entry point goes through
+        # _call, and both dynamo-private types it converts are exercised.
         for exc in (PackageError("bad package"), RecompileError("guard miss")):
             with self.subTest(exc=type(exc).__name__):
                 broken = torch.compiler.PrecompiledCallable(_Raises(exc))
@@ -3409,6 +3412,19 @@ class TestPrecompileCaptureFiles(TestCase):
         )
         self.assertEqual(self._leftovers(), [])
 
+    def test_a_raise_after_a_successful_save_keeps_the_saved_pair(self):
+        # The state both docstrings promise: an in-block save() wrote the pair and the block
+        # then raised, so the exit writes nothing and both halves keep save()'s bytes.
+        cap, saved = self._capture(), None
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with cap:
+                cap(self.model, self.x)
+                cap.save()
+                saved = (self._read(self.artifact), self._read(self.cache))
+                raise RuntimeError("boom")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), saved)
+        self._assert_serves()
+
     def test_a_save_closes_the_writes_after_it(self):
         # What the written flag is for: the pair on disk is already THIS render, so neither a
         # second save() nor the clean exit re-enters the write -- a rename patched to fail
@@ -3439,6 +3455,18 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertRaisesRegex(PrecompileError, r"Call capture\(\) again"):
             cap.__exit__(None, None, None)
         self.assertEqual(os.listdir(self.dir), [])
+
+    def test_a_raise_after_a_manual_exit_surfaces_the_blocks_exception(self):
+        # That refusal sits BELOW the raise-return: the implicit exit of a block that already
+        # finished itself carries the caller's exception, which must surface rather than be
+        # replaced by the refusal (PrecompileError IS a RuntimeError, hence the regex).
+        cap = self._capture()
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with cap:
+                cap(self.model, self.x)
+                cap.__exit__(None, None, None)
+                raise RuntimeError("boom")
+        self._assert_serves()
 
     def test_same_file_for_both_halves_is_refused(self):
         # Also when the two halves are two SPELLINGS of one path, one of them bytes: the
@@ -3515,9 +3543,9 @@ class TestPrecompileCaptureFiles(TestCase):
     )
     def test_served_extern_kernel_ignores_ambient_autocast(self):
         # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
-        # CPU autocast and which the inductor artifact calls as a fallback: without
-        # _autocast_off the served call casts a second time and comes back in
-        # bfloat16 (or, as here, fails inside oneDNN on the mixed-dtype primitive).
+        # CPU autocast and which the inductor artifact calls as a fallback: without the
+        # disable the served call casts a second time and comes back in bfloat16 (or,
+        # as here, fails inside oneDNN on the mixed-dtype primitive).
         # Inductor only: the eager driver has no extern kernels, so on that backend
         # this is test_served_output_ignores_ambient_autocast with a bigger graph.
         model = torch.nn.LSTM(8, 8, batch_first=True)
@@ -3553,195 +3581,16 @@ class TestPrecompileCaptureFiles(TestCase):
         with torch.autocast("cpu", dtype=torch.float16):
             self.assertEqual(served(self.model, self.x), y)
 
-    def test_a_served_call_enters_no_autocast_when_none_is_on(self):
-        # The disable is entered only where there is something to disable: with no
-        # ambient autocast a served call must not enter one per supported device at all.
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        served = torch.compiler.precompile.load(self.artifact, self.cache)
-        real_autocast = torch.amp.autocast
-        constructed = []
-
-        def autocast(device_type, **kwargs):
-            constructed.append(device_type)
-            return real_autocast(device_type, **kwargs)
-
-        with mock.patch("torch.amp.autocast", autocast):
-            served(self.model, self.x)
-            self.assertEqual(constructed, [])
-            with torch.autocast("cpu", dtype=torch.bfloat16):
-                served(self.model, self.x)
-        self.assertEqual(constructed, ["cpu"])
-
-    def test_a_device_the_captured_graph_never_names_is_neutralized_too(self):
-        # The device list is the SERVING build's, not the captured graph's, so a device
-        # an op reaches only inside its own body is covered as well. Stood in for here
-        # with a second supported device whose autocast bit is on: this graph is
-        # entirely cpu and the disable is still entered for that device. A per-artifact
-        # device tag scanned off the graph cannot do this.
-        self.addCleanup(torch.set_autocast_enabled, "mtia", False)
-        torch.set_autocast_enabled("mtia", True)
-        with self._capture() as cap:
-            cap(self.model, self.x)
-        served = torch.compiler.precompile.load(self.artifact, self.cache)
-        real_autocast = torch.amp.autocast
-        constructed = []
-
-        def autocast(device_type, **kwargs):
-            constructed.append(device_type)
-            return real_autocast(device_type, **kwargs)
-
-        # The premise: nothing in the artifact names the second device.
-        self.assertNotIn("mtia", self._read(self.artifact).decode())
-        with mock.patch(
-            "torch._C._autocast_supported_devices", return_value=("cpu", "mtia")
-        ):
-            with mock.patch("torch.amp.autocast", autocast):
-                served(self.model, self.x)
-        self.assertEqual(constructed, ["mtia"])
-
-    def test_a_supported_device_this_build_has_no_module_for_is_ignored(self):
-        # hasattr(torch, dev) -- the guard graph_capture_wrappers.disable_autocast uses
-        # -- filters a device the autocast list advertises but this build has no module
-        # for, before anything can raise on it: the probe rejects an unparsable device
-        # type with a RuntimeError that _autocast_off deliberately does not catch.
-        with self._capture() as cap:
-            y = cap(self.model, self.x)
-        served = torch.compiler.precompile.load(self.artifact, self.cache)
-        with mock.patch(
-            "torch._C._autocast_supported_devices", return_value=("cpu", "notadevice")
-        ):
-            with self.assertNoLogs("torch._precompile_driver", "WARNING"):
-                self.assertEqual(served(self.model, self.x), y)
-
-    def test_a_device_that_refuses_the_disable_is_a_reported_skip(self):
-        # The one skip that costs something: the device passes the hasattr guard,
-        # REPORTS autocast enabled, and torch.amp.autocast then refuses to construct
-        # the disable -- what a module registered under the privateuse1 backend name and
-        # missing get_amp_supported_dtype does, raising AssertionError out of the
-        # constructor. That name is the only device whose module the constructor
-        # consults, which is why the refusal is mocked here rather than real (a real
-        # mtia without autocast support constructs fine). The served call goes through
-        # and the skip is announced instead, through logging rather than warnings so
-        # that an error filter cannot fail the very call the skip keeps alive; the
-        # device's own region is left casting, which is the divergence the report is
-        # for, and the caller's cpu region is untouched.
-        self.addCleanup(torch.set_autocast_enabled, "mtia", False)
-        torch.set_autocast_enabled("mtia", True)
-        real_autocast = torch.amp.autocast
-
-        def autocast(device_type, **kwargs):
-            if device_type == "mtia":
-                raise AssertionError("Tried to use AMP with the `mtia` backend")
-            return real_autocast(device_type, **kwargs)
-
-        with self._capture() as cap:
-            y = cap(self.model, self.x)
-        served = torch.compiler.precompile.load(self.artifact, self.cache)
-        with mock.patch("torch.amp.autocast", autocast):
-            with torch.autocast("cpu", dtype=torch.bfloat16):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("error")
-                    with self.assertLogs("torch._precompile_driver", "WARNING") as logs:
-                        z = served(self.model, self.x)
-                    self.assertIn("cannot construct the disable", "".join(logs.output))
-                    # Not once per served call.
-                    with self.assertNoLogs("torch._precompile_driver", "WARNING"):
-                        self.assertEqual(served(self.model, self.x), z)
-                # ...and not once per PROCESS either: the report-once set is emitted
-                # into the artifact, so a second load of the same pair reports again.
-                with self.assertLogs("torch._precompile_driver", "WARNING"):
-                    torch.compiler.precompile.load(self.artifact, self.cache)(
-                        self.model, self.x
-                    )
-                self.assertTrue(torch.is_autocast_enabled("mtia"))
-                self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
-        self.assertEqual(z.dtype, torch.float32)
-        self.assertEqual(z, y)
-
-    def test_an_autocast_that_refuses_to_enter_is_not_a_skip(self):
-        # Only the probe and the constructor are inside the catch. ExitStack registers
-        # its unwind only AFTER __enter__ returns, so an __enter__ that raises partway
-        # has left state nothing can undo: swallowing it as a skip would return with
-        # the caller's own region switched off, the opposite of what the skip reports.
-        # It propagates instead, and the disables already entered come back out.
-        #
-        # And the earlier device here is one that refuses to CONSTRUCT, so this also
-        # pins the report-once bookkeeping: the propagating __enter__ means the warning
-        # is never emitted, so that skip must not be left recorded as reported -- doing
-        # so would silence it for the rest of this loaded artifact's life.
-        from torch import _precompile_driver
-
-        real_autocast = torch.amp.autocast
-
-        class _RefusesToEnter:
-            def __enter__(self):
-                raise AssertionError("refused inside __enter__")
-
-            def __exit__(self, *exc):
-                return False
-
-        def autocast(device_type, **kwargs):
-            if device_type == "cpu":
-                return real_autocast(device_type, **kwargs)
-            if device_type == "xpu":
-                raise AssertionError("Tried to use AMP with the `xpu` backend")
-            return _RefusesToEnter()
-
-        reported: set[str] = set()
-        with mock.patch.object(
-            _precompile_driver, "_AUTOCAST_SKIPS_REPORTED", reported
-        ):
-            with torch.autocast("cpu", dtype=torch.bfloat16):
-                with mock.patch(
-                    "torch._C._autocast_supported_devices",
-                    return_value=("cpu", "xpu", "mtia"),
-                ):
-                    with mock.patch("torch.is_autocast_enabled", return_value=True):
-                        with mock.patch("torch.amp.autocast", autocast):
-                            with self.assertNoLogs(
-                                "torch._precompile_driver", "WARNING"
-                            ):
-                                with self.assertRaises(AssertionError):
-                                    _precompile_driver._autocast_off()
-                self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
-        self.assertEqual(reported, set())
-
-    def test_autocast_off_unwinds_a_failure_partway_through(self):
-        # The disables already entered have to come back out if the stack is not
-        # built to the end: the emitted driver hands the stack to the caller's
-        # `with`, so a leaked entry silently stops the caller autocasting.
-        from torch import _precompile_driver
-
-        real_autocast = torch.amp.autocast
-        constructed = []
-
-        def autocast(device_type, **kwargs):
-            constructed.append(device_type)
-            if len(constructed) == 2:
-                raise KeyboardInterrupt("interrupted partway through")
-            return real_autocast(device_type, **kwargs)
-
-        with torch.autocast("cpu", dtype=torch.bfloat16):
-            # Every supported device has to report autocast on, or the disable this
-            # asks to be unwound is never entered: the loop skips a device with
-            # nothing on.
-            with mock.patch("torch.is_autocast_enabled", return_value=True):
-                with mock.patch("torch.amp.autocast", autocast):
-                    with self.assertRaises(KeyboardInterrupt):
-                        _precompile_driver._autocast_off()
-            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
-
-    @parametrize("backend", ("eager", "inductor"))
     @unittest.skipUnless(TEST_CUDA, "CUDA has its own autocast policy and dtype")
-    def test_served_output_ignores_ambient_cuda_autocast(self, backend):
+    def test_served_output_ignores_ambient_cuda_autocast(self):
         # Autocast is per device -- CUDA picks float16 and has its own op allowlist --
-        # so the neutralization is covered there too, on both drivers. The graph's
-        # aten.addmm.default IS registered for CUDA autocast, so without it the
-        # served call would come back in float16.
+        # so the neutralization is covered there too. Eager only, for the same reason
+        # as the CPU test: the eager driver calls aten.addmm.default, which IS
+        # registered for CUDA autocast, while the inductor artifact calls the out=
+        # overload, which is not.
         model = _FilesModel().cuda()
         x = torch.randn(2, 4, device="cuda")
-        with self._capture(backend=backend) as cap:
+        with self._capture() as cap:
             y = cap(model, x)
         served = torch.compiler.precompile.load(self.artifact, self.cache)
         with torch.autocast("cuda", dtype=torch.float16):
