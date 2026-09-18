@@ -108,7 +108,8 @@ def _names_a_missing_global(text: str) -> bool:
 
 
 def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
-    """What a guard tree meant to raise, as ``(type name, exception)``."""
+    """What a guard tree meant to raise, as ``(type name, exception)``. The
+    report line and the warning both read it, so the two cannot drift."""
     # A tree returning to pybind with an exception still set arrives as a
     # SystemError whose str() is the bound method's repr, so report what
     # _PyErr_FormatFromCause chained behind it. __cause__, not __context__: that
@@ -145,10 +146,13 @@ def _meant_an_exception(e: Exception) -> bool:
 
 def _quoted(reason: BaseException) -> str:
     # The exception is the tree's, so its __str__ is user code: one that raises
-    # must not take the report with it. Every Exception is caught, one wrapping
-    # an interrupt included: nothing is unwrapped here, so a bare
+    # must not take the report or the warning with it. Every Exception is caught,
+    # one wrapping an interrupt included: nothing is unwrapped here, so a bare
     # KeyboardInterrupt or SystemExit out of __str__ propagates while a
-    # SystemError raised from one is quoted as the raise it is.
+    # SystemError raised from one is quoted as the raise it is. What a bare
+    # interrupt costs differs by caller: the report path was already failing,
+    # while the warning's quote is built over a graph whose guards passed, so
+    # the warning spends its one-shot only after the record is out.
     try:
         return str(reason)
     except Exception as exc:
@@ -1654,6 +1658,13 @@ def _binding_key(artifacts: CompileArtifacts) -> _BindingKey:
     )
 
 
+def _same_results(
+    prior: tuple[weakref.ref[AOTCompiledFunction], ...],
+    results: tuple[AOTCompiledFunction, ...],
+) -> bool:
+    return len(prior) == len(results) and all(w() is r for w, r in zip(prior, results))
+
+
 @dataclass
 class AOTCompiledModel:
     """A module's forward compiled for several calls, with dispatch over them.
@@ -1693,20 +1704,61 @@ class AOTCompiledModel:
     input that raised in dispatch chained as its ``__cause__`` and the report
     naming the first that raised of the inputs nobody opted out -- first in
     recording order, which is the lowest index only when no input raises for
-    the first time on the second pass. A raise beside an input whose guards did
-    match is served over: the matching graph runs, and at this commit nothing
-    surfaces the raise on that path -- no report is built where a graph is
-    served, so the serve is deliberately silent until a follow-up change
-    adds the warning it logs. A ``KeyboardInterrupt`` or ``SystemExit``
-    anywhere on an unbroken chain of ``SystemError`` causes that reaches dispatch
-    is never read as an answer and propagates -- as itself from a Python-level
-    guard manager, or as the ``SystemError`` the pybind boundary wrapped it in
-    when a leaf left it set. An interrupt behind a link of any other kind is not
-    read: one the tree's own code caught and re-raised sits on ``__context__``,
-    which the unwrap does not follow, and one an ordinary exception was raised
-    ``from`` is that exception's own answer, which the walk stops on. One leaf
-    keeps an interrupt from reaching dispatch at all, and every artifact's tree
-    holds it:
+    the first time on the second pass. A raise beside an input whose
+    guards did match -- the raiser's own second-pass accept included -- or from
+    an opted-out input when the last resort serves one, is served over: the
+    graph runs, and the raise is logged on the ``torch._dynamo.aot_compile``
+    logger with the advice to fix or drop the input that raised. The raise says
+    nothing about the result that did answer, and refusing would repair
+    nothing: a tree that raises rejects nothing, and a C++ throw out of it
+    leaves its relational guard state stale -- wherever the tree guards more
+    than one tensor against aliasing, a ``NO_TENSOR_ALIASING`` set still
+    holding the throwing evaluation's tensors, and under
+    ``enable_cpp_symbolic_shape_guards`` (off by default) a
+    ``SYMBOLIC_SHAPE_GUARD`` keeping its ``_args_seen`` count across the throw
+    -- so its NEXT check can reject a call it fits, and with that config on
+    accept one it does not, with no raise on record to veto. The advice names
+    both directions either way: a tree that threw is untrustworthy in both. An
+    opted-out input's warning names only the accept: ``check()`` ignores the
+    flag, so a stale accept is served in index order, displacing a later result
+    that fits -- so the warning names a later match only when a later result
+    exists. From the last index the warning states the remedy alone: what the
+    accept displaces there depends on the results ahead of it -- an earlier
+    opted-out result the last resort would have served, or the no-match report
+    an enabled input's raise leaves in its place -- and nothing at all where
+    the last resort would have served this result anyway. A stale rejection
+    forfeits only the calls the last resort does not then hand it (those an
+    opted-out result ahead of it takes, or an enabled input's raise withholds);
+    and its raise leaves its graph reachable only through its own later accept
+    or the last resort, which any enabled input's raise withholds.
+
+    The warning is logged once per ``(input index, exception type name,
+    opt-out state)`` per model, starting over when a serve that warns finds
+    ``compiled_results`` holding results other than the ones last warned about
+    -- so a list changed and changed back keeps the old keys in force -- and is
+    not spent while the logger's level would drop it. The index served
+    is named in every warning but is not part of the key, so a defect whose
+    serve moves is reported once, for whichever serve came first. The type name
+    tells two defects at one index apart only when they raise different
+    types, which real trees seldom do -- a ``TORCH_CHECK`` that fires in a
+    guard reaches ``check()`` as ``RuntimeError`` -- so in practice it is one
+    warning per index and opt-out state.
+
+    A ``KeyboardInterrupt`` or ``SystemExit`` anywhere on an unbroken chain of
+    ``SystemError`` causes that reaches dispatch is never read as an answer and
+    propagates -- as itself from a Python-level guard manager, or as the
+    ``SystemError`` the pybind boundary wrapped it in when a leaf left it set.
+    An interrupt behind a link of any other kind is not read: one the tree's
+    own code caught and re-raised sits on ``__context__``, which the unwrap
+    does not follow, and one an ordinary exception was raised ``from`` is that
+    exception's own answer, which the walk stops on. Quoting a raise for the
+    warning reaches user code once more, so an interrupt out of the recorded
+    exception's ``__str__`` propagates from there too and discards the graph
+    the warning was about to serve over: that serve neither runs the graph nor
+    logs anything, and the defect is reported on the next call, which is why
+    the one-shot is spent only after the warning is out. One leaf keeps an
+    interrupt from reaching dispatch at all, and every artifact's tree holds
+    it:
     ``LAMBDA_GUARD::check_nopybind`` (``guards.cpp:1918-1928``) clears whatever
     its lambda raised, of whatever type, and answers false, so an interrupt
     raised under a kept lambda guard is read as an ordinary mismatch and
@@ -1760,10 +1812,25 @@ class AOTCompiledModel:
     _binding_verdict: tuple[tuple[weakref.ref[AOTCompiledFunction], ...], bool] = (
         dataclasses.field(default=((), False), init=False, compare=False, repr=False)
     )
+    # The results _warn_swallowed last logged about and the (index, exception type
+    # name, opt-out state) triples it logged, so a hot loop over a broken artifact
+    # logs once per defect. Per model, not torch._logging.warning_once, whose
+    # cache is process-global. Kept beside the results because a changed
+    # compiled_results can put another artifact at a warned-about index; judged
+    # where the warning is logged, since a one-result model never re-decides the
+    # binding verdict. The opt-out state is in the key because
+    # disable_guard_check() flips it on the same result, which no reset sees,
+    # and the advice differs. One field, as above; a race here repeats a
+    # warning, never loses one.
+    _warned: tuple[
+        tuple[weakref.ref[AOTCompiledFunction], ...], set[tuple[int, str, bool]]
+    ] = dataclasses.field(
+        default_factory=lambda: ((), set()), init=False, compare=False, repr=False
+    )
 
     def _binds_alike(self, results: tuple[AOTCompiledFunction, ...]) -> bool:
         prior, shared = self._binding_verdict
-        if len(results) == len(prior) and all(w() is r for w, r in zip(prior, results)):
+        if _same_results(prior, results):
             return shared
         key = _binding_key(results[0]._artifacts) if results else None
         shared = key is not None and all(
@@ -1771,6 +1838,57 @@ class AOTCompiledModel:
         )
         self._binding_verdict = (tuple(weakref.ref(r) for r in results), shared)
         return shared
+
+    def _warn_swallowed(
+        self,
+        results: tuple[AOTCompiledFunction, ...],
+        raised: dict[int, Exception],
+        served: int,
+    ) -> None:
+        # No report is built on a serving path, so nothing else records the
+        # raise; the class docstring says why it is served over and what the
+        # advice rests on. Checked first so a level that drops the warning does
+        # not spend the one-shot: log.warning itself cannot say whether it emitted.
+        if not log.isEnabledFor(logging.WARNING):
+            return
+        over, warned = self._warned
+        if not _same_results(over, results):
+            warned = set()
+            self._warned = (tuple(weakref.ref(r) for r in results), warned)
+        for i, e in raised.items():
+            kind, reason = _unwrapped_raise(e)
+            enabled = results[i]._guard_check_enabled
+            if (i, kind, enabled) in warned:
+                continue
+            if enabled:
+                advice = (
+                    f"Fix or drop input [{i}]: its next check can reject a call "
+                    "it fits or accept one it does not."
+                )
+            else:
+                # The displaced later match is positional: from the last
+                # index there is none, and what a stale accept displaces there
+                # depends on the results ahead of it -- an earlier opted-out
+                # result's serve, or the no-match report -- so the line drops
+                # the clause and states the remedy alone.
+                later = " ahead of a later match" if i + 1 < len(results) else ""
+                advice = (
+                    f"Input [{i}] opted out of guard checks, but its next check "
+                    f"can accept a call it does not fit{later}; fix or drop it."
+                )
+            log.warning(
+                "AOT compiled input [%d]'s guard check raised %s: %s; "
+                "dispatch served [%d] rather than propagating it. %s",
+                i,
+                kind,
+                _quoted(reason),
+                served,
+                advice,
+            )
+            # Spent last: _quoted catches Exception as the handlers do, so an
+            # interrupt out of the raise's __str__ leaves from the call above,
+            # and a key added ahead of it would silence the defect for good.
+            warned.add((i, kind, enabled))
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         # compiled_results is public, so read it once: every stage below judges
@@ -1860,8 +1978,10 @@ class AOTCompiledModel:
 
         for i, result in enumerate(results[1:], 1):
             if accepts(i, result):
-                # Nothing reads the record on a serving exit, and holding it
-                # holds this call's args through the raise's traceback.
+                if raised:
+                    self._warn_swallowed(results, raised, i)
+                # Nothing reads the record once the warning is out, and holding
+                # it holds this call's args through the raise's traceback.
                 raised.clear()
                 unanswered.clear()
                 return result._serve(self.model, *args, **kwargs)
@@ -1876,6 +1996,8 @@ class AOTCompiledModel:
         # boundary's SystemError, a second TORCH_CHECK.
         for i, result in enumerate(results):
             if accepts(i, result):
+                if raised:
+                    self._warn_swallowed(results, raised, i)
                 raised.clear()
                 unanswered.clear()
                 return result._serve(self.model, *args, **kwargs)
@@ -1900,6 +2022,8 @@ class AOTCompiledModel:
         if not any(map(enabled.__getitem__, raised)):
             for i, result in enumerate(results):
                 if not enabled[i]:
+                    if raised:
+                        self._warn_swallowed(results, raised, i)
                     raised.clear()
                     unanswered.clear()
                     return result._serve(self.model, *args, **kwargs)
