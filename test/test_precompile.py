@@ -109,8 +109,8 @@ class TestPrecompile(TestCase):
     def test_summary_digest_and_guard_type_counts(self):
         from torch.compiler._precompile_types import PrecompileSummary
 
-        # Slots arrive sorted, as the builder emits them; the tallies keep
-        # that order. A value-pinned source is one a kept value-equality guard
+        # The fixtures list slots sorted; the tallies render in first-appearance
+        # order. A value-pinned source is one a kept value-equality guard
         # on a bare name pins, so each such fixture keeps that guard too.
         policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
         plain = PrecompileSummary(
