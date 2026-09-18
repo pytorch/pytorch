@@ -1218,6 +1218,7 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         buf0, buf1 = find_buffer_assignments(code)
+        (reused_buf,) = re.findall(rf"(buf\d+) = {buf0}; del {buf0}  # reuse", code)
         (
             FileCheck()
             # Expect allocation
@@ -1228,10 +1229,10 @@ class CompileTest(TestCase):
             .check(f"{buf1} = empty")
             .check(f"extern_kernels.mm(arg0_1, {buf0}, out={buf1}")
             # Expect {buf0} to be reused
-            .check(f"buf8 = {buf0}; del {buf0}  # reuse")
-            .check(f"extern_kernels.mm(arg0_1, {buf1}, out=buf8")
+            .check(f"{reused_buf} = {buf0}; del {buf0}  # reuse")
+            .check(f"extern_kernels.mm(arg0_1, {buf1}, out={reused_buf}")
             # Expect no extra copy on return
-            .check(f"return ({buf1}, buf8, )")
+            .check(f"return ({buf1}, {reused_buf}, )")
             .run(code)
         )
         if "= torch.ops._c10d_functional.wait_tensor.default" in code:

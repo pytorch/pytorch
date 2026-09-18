@@ -132,90 +132,6 @@ def _check_structure(pb, names):
             )
 
 
-# Device names _autocast_off has already reported: reporting on every served call
-# would make a documented caveat a line of log noise per call. Not in a function
-# body, so _emit_driver_source emits the artifact's own copy -- which is what makes
-# the scope per LOADED ARTIFACT: load() execs python_code into a fresh namespace, so
-# each loaded handle starts with this set empty.
-_AUTOCAST_SKIPS_REPORTED: set[str] = set()
-
-
-def _autocast_off():
-    """Neutralize this process's ambient autocast while a served call runs.
-
-    Whatever the capture ran under is already baked into the artifact -- ATen casts
-    for make_fx, generated kernels for inductor -- but the graph still re-dispatches
-    (an inductor artifact calls extern_kernels, which hit the autocast key), so a
-    serving process with autocast on would cast a second time.
-
-    Every autocast-capable device of the SERVING build is covered, taken from
-    ``torch._C._autocast_supported_devices()`` behind the same ``hasattr(torch, dev)``
-    guard that ``torch._functorch._aot_autograd.graph_capture_wrappers.disable_autocast``
-    uses -- the precedent this mirrors, and which AOTAutograd (the subsystem precompile
-    lowers through) applies for its backward_pass_autocast policy. Inlined rather than
-    imported because the artifact is self-contained and must not depend on a private
-    torch name. From the build rather than from the captured graph so that an op whose
-    body moves work to a device the traced tensors never name is covered too.
-
-    Nothing is entered for a device that has no autocast on it, which is the
-    overwhelmingly common case: ``is_autocast_enabled(dev)`` is exactly the bit
-    ``autocast(dev, enabled=False)`` clears, so gating on it keeps a served call from
-    paying a context construct plus enter/exit per supported device to disable what is
-    already off.
-
-    A device that passes the guard, REPORTS autocast enabled and then still refuses to
-    construct the disable is SKIPPED with a logged warning rather than failed on: a module
-    registered under the privateuse1 backend name and missing ``get_amp_supported_dtype``
-    raises ``AssertionError`` out of the ``autocast`` constructor (an explicit ``raise``,
-    not a bare assert, so ``python -O`` cannot strip it out from under the catch), and
-    that name is the only device whose module the constructor consults. That is the
-    one case where a served call really does cast a second time on top of the casts
-    already baked in, which is what the report is for. Only the probe and the construct
-    are inside the catch: a failure to ENTER propagates instead, since a swallowed
-    ``__enter__`` would return with the caller's own region switched off -- the opposite
-    of what the skip reports. Reported through ``logging`` rather than ``warnings`` (a
-    ``UserWarning`` would fail the very call this skip keeps working under ``-W error``)
-    and once per device per LOADED artifact (_AUTOCAST_SKIPS_REPORTED is the artifact's
-    own copy, so a second ``load`` reports again). The stack is built inside a ``with``
-    and handed back with ``pop_all`` so a propagating failure unwinds the disables
-    already entered, not leaving the caller's autocast off.
-    """
-    import contextlib as _contextlib
-    import logging as _logging
-
-    with _contextlib.ExitStack() as stack:
-        _skipped = []
-        for _dev in _torch._C._autocast_supported_devices():
-            if not hasattr(_torch, _dev):
-                continue
-            try:
-                if not _torch.is_autocast_enabled(_dev):
-                    continue
-                _cm = _torch.amp.autocast(_dev, enabled=False)
-            except AssertionError:
-                if _dev not in _AUTOCAST_SKIPS_REPORTED:
-                    _skipped.append(_dev)
-                continue
-            stack.enter_context(_cm)
-        if _skipped:
-            # Marked reported only where the report is actually emitted, so a later
-            # iteration's propagating __enter__ leaves nothing recorded as reported
-            # that never was (which would silence it for this artifact for good).
-            _AUTOCAST_SKIPS_REPORTED.update(_skipped)
-            # The logger named literally, not from __name__: this body is inlined
-            # into the artifact, which is not this module.
-            _logging.getLogger("torch._precompile_driver").warning(
-                "precompile: this build reports autocast enabled on device(s) %s but "
-                "cannot construct the disable for them (e.g. a device module registered "
-                "without get_amp_supported_dtype), so their autocast is left ON for this "
-                "served call: it casts a second time on top of the casts already "
-                "baked into the artifact and returns a different dtype than the "
-                "capture did.",
-                _skipped,
-            )
-        return stack.pop_all()
-
-
 def _eager_forward(*args):
     """Run the captured ATen graph eagerly. Pass the same args the traced fn took --
     the module(s) in the same positions plus the runtime inputs. The module(s) must
@@ -285,7 +201,10 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    with _autocast_off(), _torch.no_grad():
+    # The capture's casts are already baked into the graph, so re-dispatching it under
+    # the serving process's ambient autocast would cast a second time. One dispatch-key
+    # guard, the same one AOTAutograd emits into its own generated runtime source.
+    with _torch._C._DisableAutocast(), _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -396,10 +315,9 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        # The generated code re-dispatches through extern_kernels for anything
-        # inductor did not fuse, so ambient autocast reaches it even though the
-        # casts the capture ran under are already baked into the kernels.
-        with _autocast_off():
+        # As in the eager driver: the casts are baked into the kernels, and anything
+        # inductor did not fuse re-dispatches through extern_kernels under autocast.
+        with _torch._C._DisableAutocast():
             out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
