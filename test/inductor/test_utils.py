@@ -37,6 +37,7 @@ from torch._inductor.fx_utils import (
 from torch._inductor.utils import (
     _get_device_dram_gbps,
     _get_device_info_key,
+    _get_device_tflops,
     _gpu_types,
     _infer_scale_swizzle_impl,
     device_need_guard,
@@ -81,7 +82,7 @@ class _TestDeviceInterface(DeviceInterface):
             return cls.properties[device]
 
 
-class TestDeviceDramBandwidth(TestCase):
+class _TestDeviceInfoTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.device = torch.device("privateuseone:0")
@@ -96,6 +97,11 @@ class TestDeviceDramBandwidth(TestCase):
         device_mapping_patcher = mock.patch.dict(_device_mapping)
         device_mapping_patcher.start()
         self.addCleanup(device_mapping_patcher.stop)
+
+
+class TestDeviceDramBandwidth(_TestDeviceInfoTestCase):
+    def setUp(self):
+        super().setUp()
 
         _get_device_dram_gbps.cache_clear()
         get_gpu_dram_gbps.cache_clear()
@@ -219,6 +225,7 @@ class TestDeviceDramBandwidth(TestCase):
         "requires Triton",
     )
     def test_get_gpu_dram_gbps_preserves_triton_fallback(self):
+        """Use Triton's active-device bandwidth query when no datasheet value exists."""
         with (
             mock.patch(
                 "torch._inductor.utils.datasheet_dram_bw_gbs",
@@ -562,7 +569,12 @@ class TestLoadTemplate(TestCase):
         self.assertIn("bad.py.jinja", str(cm.exception))
 
 
-class TestRuntimeEstimation(TestCase):
+class TestRuntimeEstimation(_TestDeviceInfoTestCase):
+    def setUp(self):
+        super().setUp()
+        _get_device_tflops.cache_clear()
+        self.addCleanup(_get_device_tflops.cache_clear)
+
     def test_roofline_estimate_uses_exported_tuple_metadata(self):
         from torch._functorch._aot_autograd.streams import get_roofline_estimate
 
@@ -586,13 +598,205 @@ class TestRuntimeEstimation(TestCase):
             mock.patch(
                 "torch._functorch._aot_autograd.streams.get_compute_time",
                 return_value=2.0,
-            ),
+            ) as get_compute_time,
         ):
             self.assertEqual(get_roofline_estimate(node), 2.0 / 1e6)
 
         self.assertEqual(
             get_transfer_time.call_args.kwargs["device"], torch.device("cpu")
         )
+        self.assertEqual(
+            get_compute_time.call_args.kwargs["device"], torch.device("cpu")
+        )
+
+    def test_get_device_tflops_uses_registered_device_info(self):
+        _TestDeviceInterface.Worker.properties = {self.device: {"arch": "test_arch"}}
+        register_device_info(
+            "test_arch",
+            DeviceInfo(
+                tops={torch.bfloat16: 321.0},
+                dram_bw_gbs=1.0,
+                dram_gb=1.0,
+            ),
+        )
+        self.assertEqual(
+            get_device_tflops(torch.bfloat16, device=self.device),
+            321.0,
+        )
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_get_device_tflops_cuda_fallback_uses_device_index(self):
+        device = torch.device("cuda:1")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
+
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123.0, 1)
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_get_device_tflops_cuda_fallback_uses_current_device(self):
+        device = torch.device("cuda")
+        with (
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                return_value=None,
+            ),
+            mock.patch("torch.cuda.get_device_capability", return_value=(8, 0)),
+            mock.patch("torch.cuda.current_device", return_value=1) as current_device,
+            mock.patch(
+                "torch._inductor.utils.inspect.signature",
+                return_value=types.SimpleNamespace(parameters={"clock_rate": object()}),
+            ),
+            mock.patch(
+                "torch._utils_internal.max_clock_rate", return_value=123.0
+            ) as max_clock_rate,
+            mock.patch(
+                "triton.testing.get_max_tensorcore_tflops", return_value=456.0
+            ) as get_max_tensorcore_tflops,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float16, device=device),
+                456.0,
+            )
+
+        current_device.assert_called_once_with()
+        max_clock_rate.assert_called_once_with(1)
+        get_max_tensorcore_tflops.assert_called_once_with(torch.float16, 123.0, 1)
+
+    def test_get_device_tflops_unindexed_device_tracks_current_device(self):
+        device_interface = mock.Mock()
+        device_interface.Worker.current_device.side_effect = [0, 1]
+        with (
+            mock.patch(
+                "torch._inductor.utils.get_interface_for_device",
+                return_value=device_interface,
+            ),
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                side_effect=["gpu 0", "gpu 1"],
+            ) as get_device_info_key,
+            mock.patch(
+                "torch._inductor.utils.datasheet_tops",
+                side_effect=[100.0, 101.0],
+            ),
+        ):
+            device = torch.device("cuda")
+            self.assertEqual(get_device_tflops(torch.float16, device), 100.0)
+            self.assertEqual(get_device_tflops(torch.float16, device), 101.0)
+
+        self.assertEqual(
+            [call.args[0] for call in get_device_info_key.call_args_list],
+            [
+                torch.device("cuda:0"),
+                torch.device("cuda:1"),
+            ],
+        )
+
+    def test_get_device_tflops_none_tracks_current_accelerator(self):
+        with (
+            mock.patch(
+                "torch._inductor.utils._current_accelerator_device",
+                side_effect=[torch.device("mtia:0"), torch.device("mtia:1")],
+            ),
+            mock.patch(
+                "torch._inductor.utils._get_device_info_key",
+                side_effect=["mtia:0", "mtia:1"],
+            ),
+        ):
+            register_device_info(
+                "mtia:0",
+                DeviceInfo(
+                    tops={torch.bfloat16: 100.0},
+                    dram_bw_gbs=1.0,
+                    dram_gb=1.0,
+                ),
+            )
+            register_device_info(
+                "mtia:1",
+                DeviceInfo(
+                    tops={torch.bfloat16: 101.0},
+                    dram_bw_gbs=1.0,
+                    dram_gb=1.0,
+                ),
+            )
+            self.assertEqual(get_device_tflops(torch.bfloat16), 100.0)
+            self.assertEqual(get_device_tflops(torch.bfloat16), 101.0)
+
+    def test_get_device_tflops_unknown_device_returns_zero(self):
+        with mock.patch("torch._inductor.utils.datasheet_tops") as datasheet_tops:
+            self.assertEqual(
+                get_device_tflops(torch.float32, device=torch.device("meta")),
+                0.0,
+            )
+
+        datasheet_tops.assert_not_called()
+
+    def test_get_device_tflops_unavailable_cuda_returns_zero(self):
+        with (
+            mock.patch("torch._inductor.utils._get_device_info_key", return_value=None),
+            mock.patch("torch.cuda.is_available", return_value=False),
+            mock.patch("torch.cuda.get_device_capability") as get_capability,
+        ):
+            self.assertEqual(
+                get_device_tflops(torch.float32, device=torch.device("cuda")),
+                0.0,
+            )
+
+        get_capability.assert_not_called()
+
+    def test_flops_to_ns_gpu_type_takes_precedence_over_device(self):
+        from torch.utils._runtime_estimation import flops_to_ns
+
+        with (
+            mock.patch(
+                "torch.utils._runtime_estimation.datasheet_tops",
+                return_value=100.0,
+            ) as datasheet_tops,
+            mock.patch(
+                "torch.utils._runtime_estimation.get_device_tflops"
+            ) as get_tflops,
+        ):
+            result_ns = flops_to_ns(
+                150_000.0,
+                torch.float32,
+                gpu_type="NVIDIA H100",
+                device=torch.device("mtia"),
+            )
+
+        datasheet_tops.assert_called_once_with(
+            torch.float32,
+            is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32",
+            device_name="NVIDIA H100",
+        )
+        get_tflops.assert_not_called()
+        self.assertEqual(result_ns, 1.0)
 
     def test_get_transfer_time_uses_requested_device(self):
         from torch.utils._runtime_estimation import get_transfer_time
@@ -641,6 +845,29 @@ class TestRuntimeEstimation(TestCase):
         expected_macs = 2 * M * K * N / 2
         expected_ns = (expected_macs / (0.75 * known_tflops * 1e12)) * 1e9
         self.assertAlmostEqual(result_ns, expected_ns)
+
+    def test_get_compute_time_uses_requested_device(self):
+        from torch.utils._runtime_estimation import get_compute_time
+
+        device = torch.device("mtia:1")
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        out = torch.mm(a, b)
+
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_tflops",
+            return_value=1000.0,
+        ) as get_tflops:
+            get_compute_time(
+                torch.ops.aten.mm,
+                (a, b),
+                {},
+                out,
+                {torch.float32},
+                device=device,
+            )
+
+        get_tflops.assert_called_once_with(torch.float32, device=device)
 
 
 class TestFP4Support(TestCase):
