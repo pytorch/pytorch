@@ -42,17 +42,32 @@ def _get_request_headers() -> dict[str, str]:
     }
 
 
+def _get_with_retries(url: str, retries: int = 3) -> requests.Response:
+    """GET `url` with the GitHub auth headers, retrying transient failures.
+
+    Listing artifacts intermittently fails with a 5xx or a dropped connection on
+    runs with many artifacts, which fails the whole upload job for no good
+    reason. Retry with exponential backoff instead.
+    """
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, headers=_get_request_headers())
+            response.raise_for_status()
+            return response
+        except requests.RequestException as e:
+            print(f"GET {url} failed (attempt {attempt + 1}/{retries}): {e}")
+            time.sleep(2**attempt)
+    return requests.Response()
+
+
 def _get_artifact_urls(prefix: str, workflow_run_id: int) -> dict[Path, str]:
     """Get all workflow artifacts with 'test-report' in the name."""
-    response = requests.get(
+    response = _get_with_retries(
         f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
-        headers=_get_request_headers(),
     )
     artifacts = response.json()["artifacts"]
     while "next" in response.links:
-        response = requests.get(
-            response.links["next"]["url"], headers=_get_request_headers()
-        )
+        response = _get_with_retries(response.links["next"]["url"])
         artifacts.extend(response.json()["artifacts"])
 
     artifact_urls = {}
