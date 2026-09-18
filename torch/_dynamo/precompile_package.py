@@ -11,22 +11,16 @@ into this module; nor ``torch._dynamo.config.caching_precompile``, which caches
 set, wraps every guard filter, this module's included (see
 ``default_guard_filter_fn``).
 
-Over the stack that adds it, this module comes to hold the guard filter for
-the serialized guards (``default_guard_filter_fn``), the lint over the identity
-guards it drops (``_is_risky_drop``), the fingerprints and the guard-type
-classification behind the ``PrecompileSummary`` report -- which also decides
-the only guards an invariance policy may drop
-(``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the per-frame comparison of captured
-variants and the summary builder (``_varying_guard_slots``, ``_summarize``),
-and the compiler configuration and frame converter a capture runs under
-(``_capture_config``, ``_AllowEmptyGraphsConvertFrame``). The filter lives
-here, with the rest of the capture's guard tooling, rather than beside the
-serializer's pre-check in ``guards.py``: it is the capture's policy over that
-pre-check, not part of it.
-Everything here is internal; the filter alone is unprefixed because the
-capture session passes it as the default a caller may name. The multi-graph
-Dynamo capture session that drives them is a follow-up stack; nothing under
-``torch/`` calls into this module yet.
+``default_guard_filter_fn`` is the guard filter a capture's serialized guards
+are written under. The rest of this module, added by the following commits of
+this stack, is the guard tooling that reports what that filter dropped and the
+configuration a capture runs under. The filter lives here, with that tooling,
+rather than beside the serializer's pre-check in ``guards.py``: it is the
+capture's policy over that pre-check, not part of it. Everything here is
+internal; the filter alone is unprefixed because the capture session passes it
+as the default a caller may name. The multi-graph Dynamo capture session that
+drives it is a follow-up stack; nothing under ``torch/`` calls into this module
+yet.
 """
 
 from __future__ import annotations
@@ -171,40 +165,39 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     Drop every guard ``CheckFunctionManager.serialize_guards`` would refuse for
     its type or a derived type, and keep everything else.
 
-    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: ID_MATCH,
-    FUNCTION_MATCH, MODULE_MATCH, NN_MODULE and CLASS_MATCH, which check the
-    guarded object's identity, CLOSURE_MATCH, which checks a function by its
-    ``__code__`` id, plus DICT_VERSION and WEAKREF_ALIVE. Dropping one gives up
-    on noticing that the guarded object was rebound, mutated or collected:
-    rebind a global function between capture and load and the artifact serves
-    the graph traced against the old one, with no error
+    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
+    identity guards ID_MATCH, FUNCTION_MATCH, MODULE_MATCH, NN_MODULE,
+    CLASS_MATCH and CLOSURE_MATCH (a function by its ``__code__`` id), plus
+    DICT_VERSION and WEAKREF_ALIVE. Dropping one gives up on noticing that the
+    guarded object was rebound, mutated or collected: rebind a global function
+    between capture and load and the artifact serves the graph traced against
+    the old one, with no error
     (``test_default_guard_filter_through_serialize_guards``). Every dropped
     slot is reported in ``PrecompileSummary.dropped_guards``, once however many
     variants dropped it.
 
-    The criterion is the serializer's own pre-check over the entry's type and
-    derived types: a guard is dropped if its type is refused or one of its
-    derived types is (a CONSTANT_MATCH on a code object runs through
-    ID_MATCH), and TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive,
-    as the pre-check accepts them before it looks at derived types. That is
-    what keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH; the
-    loaded artifact checks the builtin against the loading process's builtins,
-    so it still notices one swapped after load. Neither that accepted-by-type
-    branch nor the DICT_KEYS_MATCH keep below holds under
-    ``torch._dynamo.config.caching_precompile``: ``CheckFunctionManager``
-    wraps every guard filter under that setting and drops, with a warning, any
-    guard of type ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE or DICT_VERSION and
-    any guard deriving ID_MATCH or DICT_VERSION. The one departure from the
-    pre-check is a DICT_VERSION derived by a DICT_KEYS_MATCH, which is
-    ignored: the entries this filter sees carry the derived types of the build
-    ``CheckFunctionManager`` runs before filtering, with ``save_guards=False``,
-    where a DICT_KEYS_MATCH on ``torch.utils._pytree.SUPPORTED_NODES`` is
-    promoted to a DICT_VERSION, while the save build pins it to the keys-match
-    the pre-check accepts
-    (``test_default_guard_filter_keeps_the_pytree_registry_keys_match``). That
-    pair only: a DICT_KEYS_MATCH deriving another refused type, and any other
-    type deriving DICT_VERSION, are dropped as the pre-check would refuse them
-    (``test_default_guard_filter_drops_the_unserializable_types``).
+    The criterion is the pre-check's own: a guard is dropped if its type is
+    refused or a derived type is (a CONSTANT_MATCH on a code object runs
+    through ID_MATCH), and TYPE_MATCH and BUILTIN_MATCH are kept whatever they
+    derive, as the pre-check accepts them before it looks at derived types.
+    That keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH that
+    the loaded artifact still checks against the loading process's builtins.
+
+    A DICT_VERSION derived by a DICT_KEYS_MATCH is ignored. That compensates
+    for a ``CheckFunctionManager`` artifact, not a property of the serializer:
+    a filter sees the derived types of the pre-filter build, which runs with
+    ``save_guards=False`` and so promotes the DICT_KEYS_MATCH on
+    ``torch.utils._pytree.SUPPORTED_NODES`` to DICT_VERSION, while the save
+    build keeps the DICT_KEYS_MATCH the pre-check accepts
+    (``test_default_guard_filter_keeps_the_pytree_registry_keys_match``). A
+    ``guards.py`` fix giving both builds one verdict would delete the two
+    lines below. A DICT_KEYS_MATCH deriving another refused type, and any other
+    type deriving DICT_VERSION, are dropped. Neither this keep nor the
+    accepted-by-type branch holds under
+    ``torch._dynamo.config.caching_precompile``: its wrapper around every guard
+    filter trips over the same artifact and drops, with a warning, any guard
+    of type ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE or DICT_VERSION or deriving
+    ID_MATCH or DICT_VERSION.
 
     Passing this filter does not mean the artifact serializes: the pre-check
     also refuses a kept TYPE_MATCH on a local-scope type, which cannot be
@@ -501,8 +494,10 @@ def _located(module: object, name: str, stdlib: bool) -> bool | None:
     # hold any object, so such a descriptor, and spec.loader on a hand-rolled
     # spec, are user code, and are caught, as is the AttributeError object
     # itself raises for a slotted entry with no __dict__ at all. The try also
-    # spans _classify_file, so a raise out of the classifier's own gates lands
-    # here as None rather than escaping a lint.
+    # spans _classify_file and the loader arms, so a raise out of the
+    # classifier's own gates or out of FrozenImporter.find_spec (ImportError on
+    # an excluded or invalid frozen table entry) lands here as None rather than
+    # escaping a lint.
     try:
         attrs = object.__getattribute__(module, "__dict__")
         file = attrs.get("__file__")
@@ -514,27 +509,28 @@ def _located(module: object, name: str, stdlib: bool) -> bool | None:
                 return verdict
         # The loader rather than spec.origin: both importers' find_spec pass
         # origin=cls._ORIGIN to spec_from_loader, so the two never disagree,
-        # and the class is the stronger signal. A truthy __loader__ skips the
-        # spec's loader, the only user-code half of this; a falsy one falls
-        # through to it, and a hand-made ModuleType has the None its __init__
-        # seeds (an imported module's dict carries spec.loader instead, copied
-        # in by _init_module_attrs).
-        spec = attrs.get("__spec__")
-        loader = attrs.get("__loader__") or getattr(spec, "loader", None)
+        # and the class is the stronger signal. A __loader__ in the dict skips
+        # the spec's loader, the only user-code half of this; compared with None
+        # rather than for truth, so no __bool__ of user code runs. A hand-made
+        # ModuleType has the None its __init__ seeds and falls through (an
+        # imported module's dict carries spec.loader instead, copied in by
+        # _init_module_attrs).
+        loader = attrs.get("__loader__")
+        if loader is None:
+            loader = getattr(attrs.get("__spec__"), "loader", None)
+        # Both arms compare by identity: under == a __loader__ whose __eq__
+        # answers true for anything would take the waiver.
+        if loader is importlib.machinery.BuiltinImporter:
+            # Statically linked, and BuiltinImporter precedes PathFinder on
+            # sys.meta_path, so on import no file on sys.path is reachable
+            # under this name; a spec assigned straight into sys.modules is
+            # taken at its word. The inittab is keyed on the full dotted name.
+            return name in sys.builtin_module_names
+        if loader is importlib.machinery.FrozenImporter:
+            # frozen also precedes the path finder
+            return importlib.machinery.FrozenImporter.find_spec(name) is not None
     except Exception:
         return None
-    # Both arms compare by identity: under == a __loader__ whose __eq__ answers
-    # true for anything would take the waiver, and one whose __eq__ raises would
-    # escape this function, the catch being closed above.
-    if loader is importlib.machinery.BuiltinImporter:
-        # Statically linked, and BuiltinImporter precedes PathFinder on
-        # sys.meta_path, so on import no file on sys.path is reachable under
-        # this name; a spec assigned straight into sys.modules is taken at its
-        # word. The inittab is keyed on the full dotted name.
-        return name in sys.builtin_module_names
-    if loader is importlib.machinery.FrozenImporter:
-        # frozen also precedes the path finder
-        return importlib.machinery.FrozenImporter.find_spec(name) is not None
     return None  # namespace package, or exec'd in memory with no loader
 
 
