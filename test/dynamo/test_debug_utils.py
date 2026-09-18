@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import ast
+import itertools
 import math
 import os
 from unittest.mock import patch
@@ -173,6 +174,44 @@ def forward(self, x_1):
     return (convert_element_type, _to_copy, full, empty)
     """,
         )
+
+    def test_cast_model_to_fp64_disables_half_to_float(self):
+        for op_name, overload, use_kwargs in itertools.product(
+            ("_softmax", "_log_softmax"),
+            ("default", "out"),
+            (False, True),
+        ):
+            with self.subTest(
+                op_name=op_name, overload=overload, use_kwargs=use_kwargs
+            ):
+                graph = torch.fx.Graph()
+                x = graph.placeholder("x")
+                op = getattr(getattr(torch.ops.aten, op_name), overload)
+                kwargs = {}
+                inputs = [torch.randn(2, 4, dtype=torch.float16)]
+                if overload == "out":
+                    kwargs["out"] = graph.placeholder("out")
+                    inputs.append(torch.empty(2, 4, dtype=torch.float16))
+                if use_kwargs:
+                    kwargs["half_to_float"] = True
+                    output = graph.call_function(op, args=(x, 1), kwargs=kwargs)
+                else:
+                    output = graph.call_function(op, args=(x, 1, True), kwargs=kwargs)
+                graph.output(output)
+                model = torch.fx.GraphModule({}, graph)
+
+                fp64_model, fp64_inputs = debug_utils.cast_to_fp64(model, inputs)
+                softmax = next(
+                    node
+                    for node in fp64_model.graph.nodes
+                    if node.op == "call_function"
+                )
+                half_to_float = (
+                    softmax.kwargs["half_to_float"] if use_kwargs else softmax.args[2]
+                )
+
+                self.assertFalse(half_to_float)
+                self.assertEqual(fp64_model(*fp64_inputs).dtype, torch.float64)
 
     @patch.dict(
         os.environ,

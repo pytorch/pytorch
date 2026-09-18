@@ -3,6 +3,7 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <set>
 #include <thread>
@@ -106,23 +107,19 @@ struct Block {
 
 bool BlockComparatorSize::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
-    return reinterpret_cast<uintptr_t>(a->queue) <
-        reinterpret_cast<uintptr_t>(b->queue);
+    return std::less<>{}(a->queue, b->queue);
   }
   if (a->size != b->size) {
     return a->size < b->size;
   }
-  return reinterpret_cast<uintptr_t>(a->ptr) <
-      reinterpret_cast<uintptr_t>(b->ptr);
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 bool BlockComparatorAddress::operator()(const Block* a, const Block* b) const {
   if (a->queue != b->queue) {
-    return reinterpret_cast<uintptr_t>(a->queue) <
-        reinterpret_cast<uintptr_t>(b->queue);
+    return std::less<>{}(a->queue, b->queue);
   }
-  return reinterpret_cast<uintptr_t>(a->ptr) <
-      reinterpret_cast<uintptr_t>(b->ptr);
+  return std::less<>{}(a->ptr, b->ptr);
 }
 
 // Represents a contiguous virtual memory segment mapped for allocation.
@@ -390,9 +387,9 @@ struct AllocParams {
 // Internal implementation that manages actual memory blocks.
 // high level MemPool interface wraps PrivatePool via MempoolId.
 struct PrivatePool {
-  PrivatePool(MempoolId_t id, XPUAllocator* allocator = nullptr)
+  PrivatePool(MempoolId_t id, std::shared_ptr<XPUAllocator> allocator = nullptr)
       : id(std::move(id)),
-        allocator_(allocator),
+        allocator_(std::move(allocator)),
         large_blocks(/*small=*/false, this),
         small_blocks(/*small=*/true, this) {}
   PrivatePool(const PrivatePool&) = delete;
@@ -409,13 +406,13 @@ struct PrivatePool {
   // allocation_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
   int allocation_count{0};
-  XPUAllocator* allocator_;
+  std::shared_ptr<XPUAllocator> allocator_;
   BlockPool large_blocks;
   BlockPool small_blocks;
 
  public:
   XPUAllocator* allocator() {
-    return allocator_;
+    return allocator_.get();
   }
 };
 
@@ -1451,18 +1448,19 @@ class DeviceCachingAllocator {
 
   void create_or_incref_pool(
       MempoolId_t mempool_id,
-      XPUAllocator* allocator = nullptr) {
+      std::shared_ptr<XPUAllocator> allocator = nullptr) {
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool.
       // Make a new pool for XPU graph capture or memory pool usage.
       graph_pools.emplace(
-          mempool_id, std::make_unique<PrivatePool>(mempool_id, allocator));
+          mempool_id,
+          std::make_unique<PrivatePool>(mempool_id, std::move(allocator)));
     } else {
       // mempool_id references an existing pool, which the current XPU graph
       // capture will share.
       TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
-      TORCH_INTERNAL_ASSERT(allocator == nullptr);
+      TORCH_INTERNAL_ASSERT(!allocator);
       it->second->use_count++;
     }
   }
@@ -1517,20 +1515,8 @@ class DeviceCachingAllocator {
              alloc_block(params, true, context))));
     }
     if (!block_found) {
-      const auto& raw_device = c10::xpu::get_raw_device(device);
-      const auto device_total =
-          raw_device.get_info<sycl::info::device::global_mem_size>();
-      // Estimate the available device memory when the SYCL runtime does not
-      // support the corresponding aspect (ext_intel_free_memory).
-      size_t device_free = device_total -
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current;
-      // TODO: Remove the aspect check once the SYCL runtime bug is fixed on
-      // affected devices.
-      if (raw_device.has(sycl::aspect::ext_intel_free_memory)) {
-        device_free =
-            raw_device.get_info<sycl::ext::intel::info::device::free_memory>();
-      }
+      const auto [device_free, device_total] = getMemoryInfo();
+
       std::string allowed_info;
       if (set_fraction) {
         allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
@@ -1851,7 +1837,32 @@ class DeviceCachingAllocator {
         "to help us prioritize its implementation.");
     const size_t free =
         device.get_info<sycl::ext::intel::info::device::free_memory>();
+
+#if SYCL_COMPILER_VERSION >= 20260200
+    const auto arch = device.get_info<sycl::info::device::architecture>();
+    if (arch <
+        sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21) {
+      return {free, total};
+    }
+    // See
+    // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
+    constexpr double kIntegratedGpuUsableFraction = 0.94;
+#ifdef _WIN32
+    constexpr double kDiscreteGpuUsableFraction = 0.98;
+#else
+    constexpr double kDiscreteGpuUsableFraction = 0.95;
+#endif
+    const double usable_fraction =
+        device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)
+        ? kIntegratedGpuUsableFraction
+        : kDiscreteGpuUsableFraction;
+    const size_t free_adjust = free + (1 - usable_fraction) * total;
+    TORCH_CHECK(
+        free_adjust <= total, "Calculated free memory exceeds total memory.");
+    return {free_adjust, total};
+#else
     return {free, total};
+#endif
   }
 
   double getMemoryFraction() {
@@ -1877,9 +1888,9 @@ class DeviceCachingAllocator {
 
   void createOrIncrefPool(
       MempoolId_t mempool_id,
-      XPUAllocator* allocator = nullptr) {
+      std::shared_ptr<XPUAllocator> allocator = nullptr) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    create_or_incref_pool(mempool_id, allocator);
+    create_or_incref_pool(mempool_id, std::move(allocator));
   }
 
   void setNoSplit(MempoolId_t mempool_id) {
@@ -2363,10 +2374,10 @@ class NativeCachingAllocator : public XPUAllocator {
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      XPUAllocator* allocator) {
+      std::shared_ptr<XPUAllocator> allocator) {
     assertValidDevice(device);
     device_allocators[device]->createOrIncrefPool(
-        std::move(mempool_id), allocator);
+        mempool_id, std::move(allocator));
   }
 
   void beginAllocateToPool(
@@ -2375,7 +2386,7 @@ class NativeCachingAllocator : public XPUAllocator {
       std::function<bool(sycl::queue*)> filter) {
     assertValidDevice(device);
     device_allocators[device]->beginAllocateToPool(
-        std::move(mempool_id), std::move(filter));
+        mempool_id, std::move(filter));
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -2395,7 +2406,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
-    device_allocators[device]->releasePool(std::move(mempool_id));
+    device_allocators[device]->releasePool(mempool_id);
   }
 
   void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -2413,7 +2424,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
-    return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
+    return device_allocators[device]->getPoolUseCount(mempool_id);
   }
 };
 
@@ -2481,7 +2492,7 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    XPUAllocator* allocator_ptr) {
+    std::shared_ptr<XPUAllocator> allocator_ptr) {
   return native_allocator.createOrIncrefPool(device, mempool_id, allocator_ptr);
 }
 
