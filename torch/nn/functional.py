@@ -5063,6 +5063,11 @@ def interpolate(  # noqa: F811
         For ``uint8`` inputs, it already performs saturating cast operation. So, no manual `clamp` operation is needed.
 
     .. note::
+        On CPU, ``uint8`` trilinear interpolation uses fixed-point separable
+        interpolation. Each spatial pass rounds to nearest with halfway values
+        rounded upward and saturates the result to ``[0, 255]``.
+
+    .. note::
         Mode ``mode='lanczos'`` uses a Lanczos-3 windowed sinc filter (6 taps) and requires
         ``antialias=True``. It only supports 4-D input (i.e. 2D spatial) and CPU. With ``antialias=True``
         and ``align_corners=False``, the result matches PIL's ``Image.LANCZOS`` resampling filter.
