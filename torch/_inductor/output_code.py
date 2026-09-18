@@ -233,6 +233,9 @@ def prepare_cudagraph_post_compile(
 def _get_runtime_cudagraph_fail_reason(
     compiled_graph: CompiledFxGraph,
 ) -> str | None:
+    if config.cudagraph_policy is not None:
+        return None
+
     device_types = [
         device_type
         for device_type in compiled_graph.device_types
@@ -279,8 +282,6 @@ def cudagraph_post_compile(
         raise AssertionError("compiled_graph.cudagraph_info must not be None")
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = list(cached_info.cudagraph_fail_reasons)
-    if runtime_reason := _get_runtime_cudagraph_fail_reason(compiled_graph):
-        cudagraph_fail_reasons.append(runtime_reason)
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
 
@@ -290,6 +291,9 @@ def cudagraph_post_compile(
         maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
         log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
         return
+
+    if runtime_reason := _get_runtime_cudagraph_fail_reason(compiled_graph):
+        cudagraph_fail_reasons.append(runtime_reason)
 
     if not cudagraph_fail_reasons:
         fx_kwargs = compiled_graph.fx_kwargs

@@ -2382,7 +2382,7 @@ def cudagraphify_impl(
         raise RuntimeError("Expected a current accelerator, but found none")
 
     torch.accelerator.synchronize()
-    stream = torch.Stream()
+    stream = torch.cuda.Stream() if accelerator.type == "cuda" else torch.Stream()
     stream.wait_stream(torch.accelerator.current_stream())
     with stream:
         model(list(static_inputs))
@@ -2391,17 +2391,23 @@ def cudagraphify_impl(
     torch.accelerator.synchronize()
 
     if accelerator.type == "cuda":
+        if not isinstance(stream, torch.cuda.Stream):
+            raise AssertionError("Expected a CUDA stream for CUDA graph capture")
         num_rng_states = max(
             8, 1 + sum(isinstance(x, torch.Generator) for x in static_inputs)
         )
         graph = torch.cuda.CUDAGraph(num_rng_states=num_rng_states)
         graph_context = torch.cuda.graph(
-            graph, stream=stream, capture_error_mode="thread_local"
+            graph,
+            stream=stream,
+            capture_error_mode="thread_local",
         )
+        stream_context = contextlib.nullcontext()
     else:
         graph = torch.accelerator.Graph(capture_error_mode="thread_local")
         graph_context = graph
-    with stream, graph_context:
+        stream_context = stream
+    with stream_context, graph_context:
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
