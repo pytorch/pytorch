@@ -119,6 +119,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MACOS_VERSION,
+    MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
     parametrize,
@@ -13434,6 +13435,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @skip_if_halide  # compiles for 5+ minutes
+    @skipIfRocmArch(MI200_ARCH)  # exceeds the inductor compile-worker timeout
     def test_avg_pool3d_backward2(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(

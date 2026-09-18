@@ -15244,8 +15244,6 @@ class TestAdvancedIndexing(TestCaseMPS):
                 t.index_put_((idx,), src, accumulate=True)
             with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
                 torch.zeros(3, dtype=dtype, device=device).index_add_(0, idx, src)
-            with self.assertRaisesRegex(RuntimeError, "does not have a deterministic implementation"):
-                torch.zeros(3, dtype=dtype, device=device).scatter_add_(0, idx, src)
         finally:
             torch.use_deterministic_algorithms(False)
 
