@@ -36,7 +36,7 @@ from ..exc import (
     UnhandledDescriptorError,
     unimplemented,
 )
-from ..source import AttrSource, Source
+from ..source import AttrSource, Source, TypeSource
 from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
@@ -90,7 +90,12 @@ def vt_identity_compare(
     from .functions import UserMethodVariable
     from .lists import ListVariable
     from .misc import ExceptionVariable, TracebackVariable
-    from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
+    from .sets import (
+        DictKeySetVariable,
+        FrozensetVariable,
+        OrderedSetVariable,
+        SetVariable,
+    )
 
     if isinstance(
         left,
@@ -100,6 +105,7 @@ def vt_identity_compare(
             SetVariable,
             FrozensetVariable,
             DictKeySetVariable,
+            OrderedSetVariable,
             TracebackVariable,
             ExceptionVariable,
             UserMethodVariable,
@@ -2186,6 +2192,7 @@ def _resolve_descriptor_get(
     obj: VariableTracker,
     class_vt: VariableTracker,
     source: "Source | None",
+    name: str,
 ) -> "VariableTracker | None":
     """Invoke tp_descr_get on a type attribute if it's a descriptor.
 
@@ -2196,7 +2203,11 @@ def _resolve_descriptor_get(
     import types as _types
 
     if isinstance(type_attr, property):
-        prop_vt = variables.PropertyVariable(type_attr, source=source)
+        # The property object lives on the type, not the instance: anchoring it at
+        # obj.source would make PropertyVariable's fget source read the *result* of
+        # the getter and then ask an int for .fget.
+        prop_source = obj.source and AttrSource(TypeSource(obj.source), name)
+        prop_vt = variables.PropertyVariable(type_attr, source=prop_source)
         return prop_vt.tp_descr_get_impl(tx, obj, class_vt)
     if isinstance(type_attr, _types.MemberDescriptorType):
         md_vt = variables.MemberDescriptorVariable(type_attr, source=source)
@@ -2295,7 +2306,7 @@ def object_generic_getattr(
     # Step 2: Data descriptor takes priority over instance dict.
     if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
         class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
         raise _UnhandledDescriptorError(
@@ -2323,7 +2334,7 @@ def object_generic_getattr(
             return variables.CallMethodVariable(obj, name, source=source)
 
         class_vt = VariableTracker.build(tx, py_type)
-        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source)
+        result = _resolve_descriptor_get(tx, type_attr, obj, class_vt, source, name)
         if result is not None:
             return result
         raise _UnhandledDescriptorError(
