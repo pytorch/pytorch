@@ -1374,6 +1374,28 @@ class TestInplacePointwise(DTensorOpTestBase):
                     self.assertEqual(grad.to_local(), expected, rtol=0, atol=0)
                     self.assertEqual(grad.full_tensor(), expected)
 
+    @with_comms
+    @dtypes(torch.bfloat16, torch.float32)
+    @parametrize("grad_dtype", [torch.bfloat16, torch.float32])
+    def test_foreach_add_version(self, device, dtype, grad_dtype):
+        mesh = self.build_device_mesh()
+        param = distribute_tensor(
+            torch.ones(8, device=device, dtype=dtype, requires_grad=True),
+            mesh,
+            [Shard(0)],
+        )
+        grad = DTensor.from_local(
+            torch.ones(8, device=device, dtype=grad_dtype), mesh, [Partial("avg")]
+        )
+        loss = param.square().sum()
+        version = param._version
+        with torch.no_grad():
+            torch._foreach_add_([param], [grad], alpha=-0.5)
+        self.assertEqual(param._version, version + 1)
+        self.assertEqual(param.to_local(), torch.full_like(param.to_local(), 0.5))
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
+            loss.backward()
+
 
 instantiate_device_type_tests(TestInplacePointwise, globals())
 
