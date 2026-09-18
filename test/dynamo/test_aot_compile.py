@@ -552,11 +552,14 @@ class RaisesOnCompare:
     # below reaches a raise through that leaf on purpose, so restoring its dead
     # `result == -1` branch turns their raises into ordinary mismatches and the
     # tests using them have to be rewritten.
+    def __init__(self, message="boom from __eq__"):
+        self.message = message
+
     def __hash__(self):
         return hash("foo")
 
     def __eq__(self, other):
-        raise ValueError("boom from __eq__")
+        raise ValueError(self.message)
 
 
 class InterruptsOnCompare:
@@ -2461,17 +2464,9 @@ from user code:
         # splitlines() breaks on splits an entry over lines, which the count and
         # whole-line read below fail on. None of the four is \n and the text
         # holds no space, so that read says all four arrived and were collapsed.
-        class OddSepOnCompare:
-            # RaisesOnCompare's slot, raising four separators and no space.
-            def __hash__(self):
-                return hash("foo")
-
-            def __eq__(self, other):
-                raise ValueError("page\x0cbreak\rrec\x1esep\u2028line")
-
         model, x = self._aot_compile_dict_branches({})
         with self.assertRaises(RuntimeError) as ctx:
-            model(x, {OddSepOnCompare(): 1})
+            model(x, {RaisesOnCompare("page\x0cbreak\rrec\x1esep\u2028line"): 1})
         message = str(ctx.exception)
         lines = message.splitlines()
         # Header, entry, fix-or-drop advice, ModelInput advice.
@@ -3232,6 +3227,29 @@ from user code:
         entries = [line for line in message.splitlines() if line.startswith("  [")]
         self.assertEqual(len(entries), 2)
         self.assertIn("[0] L['mode'] == 0", message)
+
+    def test_no_match_report_reads_the_opt_out_flags_the_veto_read(self):
+        # disable_guard_check() is a store any thread can make, and the report
+        # runs user code -- [0]'s check_verbose here -- between the veto's read
+        # and its own entry lines, so a fresh read would report an opt-out
+        # dispatch never acted on, [1] withheld by a raise that is its own.
+        model, x = self._aot_compile_dict_branches(None, {})
+        results = model.forward.compiled_results
+        manager = results[0]._live_guard_manager()
+        check_verbose = manager.check_verbose
+
+        def opt_out_then_check(f_locals):
+            results[1].disable_guard_check()
+            return check_verbose(f_locals)
+
+        with patch.object(manager, "check_verbose", side_effect=opt_out_then_check):
+            with self.assertRaises(RuntimeError) as ctx:
+                model(x, {RaisesOnCompare(): 1})
+        message = str(ctx.exception)
+        raised = "  [1] <guard check raised ValueError: boom from __eq__ (through the guard tree's pybind boundary)>"
+        self.assertIn(raised, message.splitlines())
+        self.assertNotIn("opted out of guard checks", message)
+        self.assertNotIn("[None]", message)
 
     def test_no_match_message_hint_covers_a_rebound_forward(self):
         # The load resolves the guard scope from model.forward, the INSTANCE
