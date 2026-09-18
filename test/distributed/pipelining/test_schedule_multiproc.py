@@ -55,6 +55,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     DeterministicGuard,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -321,6 +322,7 @@ def create_packed_document_block_mask(
 
 
 class ScheduleTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     @classmethod
@@ -1287,6 +1289,7 @@ instantiate_parametrized_tests(ScheduleTest)
 
 
 class ScheduleTestCUDA(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
     world_size = 4
 
     @classmethod
@@ -1445,6 +1448,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
     The schedules test weird and unconventional schedules for edge cases
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 2
 
     @classmethod
@@ -1650,6 +1654,7 @@ class PerDirectionScheduleTest(MultiProcContinuousTest):
     than relying on the shared MultiProcContinuousTest path.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
     world_size = 4
 
     @classmethod
