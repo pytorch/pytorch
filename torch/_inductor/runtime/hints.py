@@ -157,7 +157,7 @@ class HeuristicType(Enum):
 
 class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
-    SCALAR_ONLINE_SOFTMAX = 1
+    SCALAR_ACCUMULATORS = 1
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
@@ -170,7 +170,9 @@ class DeviceProperties(typing.NamedTuple):
     """Copy device properties into a data structure not requiring torch to be imported"""
 
     type: str  # type: ignore[assignment]
-    index: int  # type: ignore[assignment]
+    # None is a sentinel, not "unknown": it marks a device-agnostic kernel whose real
+    # device is resolved at load time (see _resolve_load_device in triton_heuristics.py).
+    index: int | None  # type: ignore[assignment]
     multi_processor_count: int
     cc: int
     major: int | None = None
@@ -234,9 +236,10 @@ class TritonMeta(typing.TypedDict, total=False):
     (signature/device/constants/configs first, then backend/ROCm/tlx extras)
     and the whole bag is forwarded verbatim to external Triton APIs, which
     tolerate and ignore keys they do not recognize. `device` is typed as the
-    codegen-time DeviceProperties; CachingAutotuner rewrites it to the integer
-    device index before reaching Triton, and the runtime read sites that expect
-    that int narrow it with an explicit cast.
+    codegen-time DeviceProperties; CachingAutotuner rewrites it to
+    DeviceProperties.index before reaching Triton -- an int, or None for a
+    device-agnostic kernel -- and the runtime read sites that expect an int
+    narrow it with an explicit cast.
     """
 
     signature: dict[str, typing.Any]

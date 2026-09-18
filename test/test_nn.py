@@ -50,7 +50,7 @@ from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, onlyOn, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipCUDAIfRocm, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, expectedFailureMPS, \
-    expectedFailureMPSPre27, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
+    skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
 
 from hypothesis import given
@@ -3365,6 +3365,36 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    def test_pixel_shuffle_unshuffle_non_positive_factor(self):
+        """The meta and decomposition paths must reject a non-positive factor
+        the same way eager does, rather than dividing by it."""
+        from torch._refs.nn.functional import (
+            pixel_shuffle as pixel_shuffle_decomp,
+            pixel_unshuffle as pixel_unshuffle_decomp,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        x = torch.randn(1, 4, 4, 4)
+
+        for factor in (0, -2):
+            # eager, for reference
+            with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                torch.pixel_shuffle(x, factor)
+            with self.assertRaisesRegex(RuntimeError, "positive downscale_factor"):
+                torch.pixel_unshuffle(x, factor)
+
+            # decompositions
+            with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                pixel_shuffle_decomp(x, factor)
+            with self.assertRaisesRegex(RuntimeError, "positive downscale_factor"):
+                pixel_unshuffle_decomp(x, factor)
+
+            # meta registration
+            with FakeTensorMode():
+                fake = torch.randn(1, 4, 4, 4)
+                with self.assertRaisesRegex(RuntimeError, "positive upscale_factor"):
+                    torch.ops.aten.pixel_shuffle(fake, factor)
+
     @set_default_dtype(torch.double)
     def test_pixel_shuffle_nhwc_cpu(self):
         input = torch.randn(3, 18, 4, 4, device='cpu')
@@ -6661,7 +6691,7 @@ class TestAddRelu(TestCase):
         self.assertEqual(broadcasted_res, res)
 
 
-def add_test(test, decorator=None):
+def add_test(test, decorator=None, tf32_decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
@@ -6691,6 +6721,8 @@ def add_test(test, decorator=None):
                 with tf32_on(self, test.tf32_precision):
                     test.test_cuda(self, dtype=torch.float, **kwargs)
 
+            if tf32_decorator is not None:
+                with_tf32_on = tf32_decorator(with_tf32_on)
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name + '_float', lambda self,
@@ -6729,6 +6761,8 @@ def add_test(test, decorator=None):
                 with tf32_on(self, test.tf32_precision):
                     test.test_cuda(self, **kwargs)
 
+            if tf32_decorator is not None:
+                with_tf32_on = tf32_decorator(with_tf32_on)
             add(cuda_test_name + '_tf32', with_tf32_on)
         else:
             add(cuda_test_name, with_tf32_off)
@@ -6739,8 +6773,9 @@ for test_params in module_tests + get_new_module_tests():
         name = test_params.pop('module_name')
         test_params['constructor'] = getattr(nn, name)
     decorator = test_params.pop('decorator', None)
+    tf32_decorator = test_params.pop('tf32_decorator', None)
     test = NewModuleTest(**test_params)
-    add_test(test, decorator)
+    add_test(test, decorator, tf32_decorator)
     if 'check_eval' in test_params:
         # create a new test that is identical but that sets module.training to False
         desc = test_params.get('desc', None)
@@ -6756,7 +6791,7 @@ for test_params in module_tests + get_new_module_tests():
 
         test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
         test = NewModuleTest(**test_params)
-        add_test(test, decorator)
+        add_test(test, decorator, tf32_decorator)
     if 'check_with_long_tensor' in test_params:
         fullname = test_params.get('fullname', None)
         if fullname:
@@ -6903,7 +6938,10 @@ add_test(NewModuleTest(
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax',
     with_tf32=True,
-    tf32_precision=0.005,
+    # ROCm: gfx942 XF32 param-grad error 0.0056 (1.24 x 2^-10, a single TF32-class gemm)
+    # against a tolerance with no headroom. 0.012 is 2x the measurement, see
+    # https://github.com/pytorch/pytorch/issues/196605.
+    tf32_precision=0.012 if TEST_WITH_ROCM else 0.005,
     default_dtype=torch.double))
 
 
@@ -8739,19 +8777,19 @@ class TestNNDeviceType(NNTestCase):
                 padding=[0, 0, 0, 0, -2, -2])
 
     @onlyNativeDeviceTypes
-    @skipMPS  # MPS routes through a separate kernel (mps::pad_out_template) that does not validate the channel dim
-    def test_ReplicationPad_backward_channel_mismatch(self, device):
+    def test_Pad_backward_channel_mismatch(self, device):
         # regression test for https://github.com/pytorch/pytorch/issues/142834: a
         # gradOutput whose channel dim doesn't match the input used to segfault in
         # the backward pass instead of raising a clear error.
-        for backward, inp, grad_output, padding in [
-            (torch.ops.aten.replication_pad1d_backward,
-             torch.ones(2, 2, 4, device=device), torch.ones(2, 0, 8, device=device), [2, 2]),
-            (torch.ops.aten.replication_pad2d_backward,
-             torch.ones(2, 2, 4, 4, device=device), torch.ones(2, 0, 6, 8, device=device), [2, 2, 1, 1]),
-        ]:
-            with self.assertRaisesRegex(RuntimeError, "gradOutput channel unexpected"):
-                backward(grad_output, inp, padding)
+        for name in ["reflection", "replication"]:
+            for inp, grad_output, padding in [
+                ((2, 2, 4), (2, 0, 8), [2, 2]),
+                ((2, 2, 4, 4), (2, 0, 6, 8), [2, 2, 1, 1]),
+                ((2, 2, 4, 4, 4), (2, 0, 6, 6, 8), [2, 2, 1, 1, 1, 1]),
+            ]:
+                backward = getattr(torch.ops.aten, f"{name}_pad{len(padding) // 2}d_backward")
+                with self.assertRaisesRegex(RuntimeError, "grad_output channel unexpected"):
+                    backward(torch.ones(grad_output, device=device), torch.ones(inp, device=device), padding)
 
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
@@ -8777,7 +8815,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
             self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
 
-    @expectedFailureMPSPre27  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad2d_large(self, device):
         shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
         pl, pr, pt, pb = 3, 4, 5, 6
@@ -9000,6 +9037,25 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6, but got: 7'):
             inp = torch.randn(1, 1, 3, 3, 3, device=device)
             torch.ops.aten.reflection_pad3d(inp, (1, 1, 1, 1, 1, 1, 1))
+
+    @parametrize_test("mode,pad", (("reflect", 1024), ("replicate", 1)))
+    @parametrize_test("ndim", (1, 2, 3))
+    @parametrize_test("length", (65537, 95520, 200000))
+    @parametrize_test("batched", (False, True))
+    def test_pad_large_width(self, device, mode, pad, ndim, length, batched):
+        # https://github.com/pytorch/pytorch/issues/196949
+        dtype = torch.bfloat16
+        shape = ((2, 3) if batched else (3,)) + (2,) * (ndim - 1) + (length,)
+        padding = (pad, pad) + (0, 0) * (ndim - 1)
+        x = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        ref_x = x.detach().cpu().double().requires_grad_()
+        out = F.pad(x, padding, mode=mode)
+        ref_out = F.pad(ref_x, padding, mode=mode)
+        self.assertEqual(out, ref_out.to(dtype), atol=0, rtol=0)
+        grad = torch.randn_like(out)
+        out.backward(grad)
+        ref_out.backward(grad.cpu().double())
+        self.assertEqual(x.grad, ref_x.grad.to(dtype), atol=0, rtol=0)
 
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad2d_large(self, device):
