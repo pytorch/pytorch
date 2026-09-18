@@ -67,6 +67,13 @@ if(WIN32 AND BUILD_PYTHON)
     endif()
   endif()
 
+  # MSVC OpenMP (libomp140) - TheRock copies this into torch/lib/ before the
+  # wheel build when using MSVC OpenMP instead of MKL libiomp.
+  set(_libomp140 "${TORCH_SRC_DIR}/lib/libomp140.x86_64.dll")
+  if(EXISTS "${_libomp140}")
+    install(FILES "${_libomp140}" DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
+
   # libuv (uv.dll) - required by torch distributed (gloo transport).
   # libuv_DLL_PATH is an optional CI hint (forwarded via EnvVarForwarding.cmake);
   # fall back to libuv_ROOT/bin/uv.dll which Windows CI sets.
