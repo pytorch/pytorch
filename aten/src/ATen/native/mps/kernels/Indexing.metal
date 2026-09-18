@@ -304,31 +304,47 @@ kernel void index_reduce(
     device IT* index [[buffer(1)]],
     device T* source [[buffer(2)]],
     constant IndexReduceParams<>& params [[buffer(3)]],
+    constant bool& serial [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   uint32_t tid_ = tid;
   long source_offset = 0;
   long self_offset = 0;
+  long source_reduce_stride = 0;
+  long self_reduce_stride = 0;
+  uint32_t reduce_size = 1;
+  uint32_t reduce_dim_idx = 0;
 
   for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
-    auto source_size = params.source_sizes[dim];
+    auto full_size = params.source_sizes[dim];
+    bool is_reduce_dim = (dim == params.reduce_dim);
+    auto source_size = (is_reduce_dim && serial) ? 1u : full_size;
     auto dim_idx = tid_ % source_size;
 
-    source_offset += dim_idx * params.source_strides[dim];
-
-    if (dim == params.reduce_dim) {
-      uint32_t self_dim_idx =
-          static_cast<uint32_t>(index[dim_idx * params.index_stride]);
-      self_offset += self_dim_idx * params.self_strides[dim];
+    if (is_reduce_dim) {
+      source_reduce_stride = params.source_strides[dim];
+      self_reduce_stride = params.self_strides[dim];
+      reduce_size = full_size;
+      reduce_dim_idx = dim_idx;
     } else {
+      source_offset += dim_idx * params.source_strides[dim];
       self_offset += dim_idx * params.self_strides[dim];
     }
 
     tid_ /= source_size;
   }
 
-  T source_elem = source[source_offset];
-
-  AtomicType<T>::atomic_binary_op(self, self_offset, source_elem, ReduceOp);
+  uint32_t dim_count = serial ? reduce_size : 1;
+  for (uint32_t dim_pos = 0; dim_pos < dim_count; dim_pos++) {
+    uint32_t pos = serial ? dim_pos : reduce_dim_idx;
+    uint32_t self_dim_idx =
+        static_cast<uint32_t>(index[pos * params.index_stride]);
+    T source_elem = source[source_offset + pos * source_reduce_stride];
+    AtomicType<T>::atomic_binary_op(
+        self,
+        self_offset + self_dim_idx * self_reduce_stride,
+        source_elem,
+        ReduceOp);
+  }
 }
 
 #define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)                  \
@@ -338,6 +354,7 @@ kernel void index_reduce(
       device IT * index [[buffer(1)]],                             \
       device T * source [[buffer(2)]],                             \
       constant IndexReduceParams<> & params [[buffer(3)]],         \
+      constant bool& serial [[buffer(4)]],                         \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, IT) \
