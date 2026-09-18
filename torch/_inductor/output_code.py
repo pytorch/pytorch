@@ -201,14 +201,19 @@ def maybe_handle_backward_generation(
         device_index = boxed_forward_device_index.value
         compiled_graph_callable = compiled_graph.current_callable
 
+        # Bind the lookup here rather than reaching through torch._inductor in
+        # the closure: a forward device index does not imply the cudagraph
+        # machinery was ever imported (standalone_compile hands us a hardcoded
+        # index alongside cudagraphs=False), so the attribute form raises on a
+        # CPU-only run.
+        from torch._inductor.cudagraph_trees import get_manager
+
         def compiled_artifact(new_inputs: Sequence[InputType]) -> object:
             # Look the manager up per call rather than at compile time: the
             # backward can be lowered before the forward has ever run (eager
             # backward lowering), and cudagraphify only creates the manager on
             # the forward's first invocation.
-            manager = torch._inductor.cudagraph_trees.get_manager(
-                device_index, create_if_none_exists=False
-            )
+            manager = get_manager(device_index, create_if_none_exists=False)
             if manager is not None:
                 manager.set_to_running_backward()
             return compiled_graph_callable(new_inputs)
