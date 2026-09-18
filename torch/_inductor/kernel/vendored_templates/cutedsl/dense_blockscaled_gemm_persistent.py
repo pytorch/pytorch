@@ -169,7 +169,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         - Float8E4M3FN/Float8E5M2
     :note: Constraints:
         - MMA tiler M must be 128 or 256 (use_2cta_instrs)
-        - MMA tiler N must be 64/128/192/256
+        - MMA tiler N must be 8/16/32/64/128/192/256. Tiles below 64 are
+          restricted to a single N tile and cluster-N of one.
         - Cluster shape M must be multiple of 2 if Mma tiler M is 256
         - Cluster shape M/N must be positive and power of 2, total cluster size <= 16
         - Also, Cluster shape M/N must be <= 4 for scale factor multicasts due to limited size of scale factors
@@ -361,21 +362,21 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             if self.local_reduce_feeds_main and self.local_reduce_axis == 0
             else 3
         )
-        self.local_reduce_smem_shape = (
-            (self.cta_tile_shape_mnk[1], self.local_reduce_smem_cols)
-            if self.has_cross_warp_local_reduce
-            else 1
-        )
-        self.local_reduce_smem_stride = (
-            (self.local_reduce_smem_cols, 1)
-            if self.has_cross_warp_local_reduce
-            else None
-        )
-        local_reduce_smem_layout = cute.make_layout(
-            self.local_reduce_smem_shape,
-            stride=self.local_reduce_smem_stride,
-        )
-        self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
+        if cutlass.const_expr(self.has_cross_warp_local_reduce):
+            self.local_reduce_smem_shape = (
+                self.cta_tile_shape_mnk[1],
+                self.local_reduce_smem_cols,
+            )
+            self.local_reduce_smem_stride = (self.local_reduce_smem_cols, 1)
+            local_reduce_smem_layout = cute.make_layout(
+                self.local_reduce_smem_shape,
+                stride=self.local_reduce_smem_stride,
+            )
+            self.local_reduce_elements = cute.cosize(local_reduce_smem_layout)
+        else:
+            self.local_reduce_smem_shape = None
+            self.local_reduce_smem_stride = None
+            self.local_reduce_elements = 0
         self.num_acc_stage, self.num_ab_stage, self.num_c_stage = self._compute_stages(
             tiled_mma,
             self.mma_tiler,
@@ -845,6 +846,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         """
         GPU device kernel performing the Persistent batched GEMM computation.
         """
+        # Alpha is always supplied by the wrapper (one when output scaling is
+        # absent). Load it once so every epilogue subtile reuses the same FP32
+        # register instead of rebuilding the tensor load in the inner loop.
+        alpha_value = alpha_tensor[0].to(cutlass.Float32)
+
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
 
@@ -884,11 +890,14 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         #
         smem = utils.SmemAllocator()
         storage = smem.allocate(self.shared_storage)
-        local_reduce_smem_layout = cute.make_layout(
-            self.local_reduce_smem_shape,
-            stride=self.local_reduce_smem_stride,
-        )
-        sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
+        if cutlass.const_expr(self.has_cross_warp_local_reduce):
+            local_reduce_smem_layout = cute.make_layout(
+                self.local_reduce_smem_shape,
+                stride=self.local_reduce_smem_stride,
+            )
+            sLocalReduce = storage.sLocalReduce.get_tensor(local_reduce_smem_layout)
+        else:
+            sLocalReduce = None
 
         # Initialize mainloop ab_pipeline (barrier) and states
         ab_pipeline_producer_group = pipeline.CooperativeGroup(pipeline.Agent.Thread)
@@ -1648,17 +1657,13 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # Convert to C type
                     #
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
-                    # Fused global scale: multiply by runtime alpha[0] (a traced
-                    # kernel-arg scalar) when provided. Closure capture cannot
-                    # read a runtime tensor here, so alpha must be a kernel arg.
+                    # Fused global scale. Closure capture cannot read a runtime
+                    # tensor here, so alpha is a kernel argument.
                     # Apply in fp32 (acc_dtype) BEFORE the downcast to c_dtype so
                     # low-range outputs (fp8/fp16) don't overflow/saturate on the
                     # cast before alpha (typically < 1) restores range, and before
                     # epilogue_op so the epilogue sees the true scaled value.
-                    # const_expr makes this a compile-time branch (skipped when
-                    # alpha_tensor is None) rather than device control flow.
-                    if cutlass.const_expr(alpha_tensor is not None):
-                        acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
+                    acc_vec = alpha_value * acc_vec
                     has_epilogue_tensors = cutlass.const_expr(
                         len(epilogue_inputs.values) > 0
                     )
@@ -2740,7 +2745,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # Skip invalid mma tile shape
         if mma_tiler_mn[0] not in [128, 256]:
             is_valid = False
-        if mma_tiler_mn[1] not in [64, 128, 192, 256]:
+        if mma_tiler_mn[1] not in [8, 16, 32, 64, 128, 192, 256]:
             is_valid = False
         # Skip illegal cluster shape
         if cluster_shape_mn[0] % (2 if mma_tiler_mn[0] == 256 else 1) != 0:
@@ -2883,6 +2888,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         if not Sm100BlockScaledPersistentDenseGemmKernel.is_valid_tensor_alignment(
             m, n, k, l, ab_dtype, c_dtype, a_major, b_major, c_major
         ):
+            can_implement = False
+        # Narrow-N MMA instructions cannot cover multiple N tiles and do not
+        # support multicast along N.  They are nevertheless ideal for the
+        # transposed small-M inference shape, where the swapped problem's N is
+        # exactly the original token count (typically 8/16/32).
+        if mma_tiler_mn[1] < 64 and (n > mma_tiler_mn[1] or cluster_shape_mn[1] > 1):
             can_implement = False
         return can_implement
 
