@@ -545,9 +545,10 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(fs.num_keys(), 5)
         fs.delete_key("key")
         self.assertEqual(fs.num_keys(), 4)
-        fs.set_timeout(timedelta(seconds=2))
+        fs.set_timeout(timedelta(milliseconds=1))
         with self.assertRaises(RuntimeError):
             fs.get("key")
+        fs.set_timeout(timedelta(seconds=2))
         fs.delete_key("key0")
         fs.delete_key("key3")
         self.assertEqual(fs.num_keys(), 2)
