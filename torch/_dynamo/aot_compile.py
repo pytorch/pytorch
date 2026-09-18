@@ -769,12 +769,14 @@ class AOTCompiledFunction:
                     self._live_global_names = tuple(sorted(certified))
                     # Bound at load as well as re-taken per call in _serve: a
                     # certified name the bytecode reads but the graph never
-                    # lifted -- a global the forward mutates or returns -- is in
-                    # external_refs but in neither import_sources nor
-                    # used_globals, the only dicts forward_callable builds
-                    # fn.__globals__ from, so its check fails unless it is bound
-                    # here or by f_globals. Taken with .get, as in _serve, so a
-                    # del racing the load cannot raise KeyError out of it.
+                    # lifted -- a global the forward mutates or returns -- is
+                    # in external_refs but not in import_sources, and in
+                    # used_globals only when its name shadows a builtin, which
+                    # get_runtime_env binds there to the builtin object; so
+                    # unless it is bound here or by f_globals, its check fails,
+                    # or for such a name the graph reads the builtin instead.
+                    # Taken with .get, as in _serve, so a del racing the load
+                    # cannot raise KeyError out of it.
                     live = {
                         n: v
                         for n in certified
