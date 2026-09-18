@@ -5,15 +5,9 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     infer_has_k_tail,
     make_gemm_param_and_validate,
 )
-{% if IS_MXFP %}
 from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
-    gemm_mxfp_gfx950 as _kernel,
+    {% if IS_MXFP %}gemm_mxfp_gfx950{% else %}gemm_gfx950{% endif %} as _kernel,
 )
-{% else %}
-from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
-    gemm_gfx950 as _kernel,
-)
-{% endif %}
 from torch._inductor.runtime.flydsl_cache import (
     configure_flydsl_cache_dir,
     run_cached_flydsl,
@@ -23,42 +17,12 @@ from torch._inductor.runtime.flydsl_cache import (
 {{gen_defines()}}
 
 
-_param = None
-_param_lock = threading.Lock()
+_gemm_param = None
+_gemm_param_lock = threading.Lock()
 
 
 def _inductor_tensor_arg(tensor):
     return flyc.from_torch_tensor(tensor).mark_layout_dynamic()
-
-
-def _make_param():
-    has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
-    if USE_HALF_TILE_INTERLEAVED:
-        k_tiles = (GEMM_K + TILE_K - 1) // TILE_K
-        has_k_tail = has_k_tail or k_tiles % 2 != 0
-    return make_gemm_param_and_validate(
-        GEMM_M,
-        GEMM_N,
-        GEMM_K,
-        {
-            "dtype_id": GEMM_DTYPE_ID,
-{% if IS_MXFP %}
-            "out_dtype_id": OUT_DTYPE_ID,
-{% endif %}
-            "tile_m": TILE_M,
-            "tile_n": TILE_N,
-            "tile_k": TILE_K,
-            "stages": STAGES,
-            "m_waves": M_WAVES,
-            "n_waves": N_WAVES,
-            "group_m": GROUP_M,
-            "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
-            "a_is_transposed": A_IS_TRANSPOSED,
-            "b_is_transposed": B_IS_TRANSPOSED,
-            "has_bias": {% if IS_MXFP and HAS_BIAS %}True{% else %}False{% endif %},
-            "has_k_tail": has_k_tail,
-        },
-    )
 
 
 {% if IS_MXFP and HAS_BIAS %}
@@ -76,22 +40,44 @@ def _make_param():
     scale_b = scale_b.view(torch.uint8)
 {% endif %}
 
-    global _param
-    param = _param
+    global _gemm_param
+    param = _gemm_param
     if param is None:
-        with _param_lock:
-            param = _param
+        with _gemm_param_lock:
+            param = _gemm_param
             if param is None:
-                param = _make_param()
+                has_k_tail = infer_has_k_tail(GEMM_K, TILE_K, STAGES)
+                if USE_HALF_TILE_INTERLEAVED:
+                    has_k_tail = has_k_tail or (((GEMM_K + TILE_K - 1) // TILE_K) % 2 != 0)
+                param = make_gemm_param_and_validate(
+                    GEMM_M,
+                    GEMM_N,
+                    GEMM_K,
+                    {
+                        "dtype_id": GEMM_DTYPE_ID,
+{% if IS_MXFP %}
+                        "out_dtype_id": OUT_DTYPE_ID,
+{% endif %}
+                        "tile_m": TILE_M,
+                        "tile_n": TILE_N,
+                        "tile_k": TILE_K,
+                        "stages": STAGES,
+                        "m_waves": M_WAVES,
+                        "n_waves": N_WAVES,
+                        "group_m": GROUP_M,
+                        "use_half_tile_interleaved": USE_HALF_TILE_INTERLEAVED,
+                        "a_is_transposed": A_IS_TRANSPOSED,
+                        "b_is_transposed": B_IS_TRANSPOSED,
+                        "has_bias": {% if IS_MXFP and HAS_BIAS %}True{% else %}False{% endif %},
+                        "has_k_tail": has_k_tail,
+                    },
+                )
                 if param is None:
                     raise RuntimeError(
-                        f"unsupported FlyDSL GEMM shape/config: "
-                        f"M={GEMM_M}, N={GEMM_N}, K={GEMM_K}, "
-                        f"tile=({TILE_M}, {TILE_N}, {TILE_K}), "
-                        f"stages={STAGES}"
+                        f"unsupported FlyDSL GEMM shape/config: M={GEMM_M}, N={GEMM_N}, "
+                        f"K={GEMM_K}, tile=({TILE_M}, {TILE_N}, {TILE_K}), stages={STAGES}"
                     )
-                _param = param
-
+                _gemm_param = param
     configure_flydsl_cache_dir()
     tensor_args = (
         output,
