@@ -1386,14 +1386,12 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            node_val = node.meta.get("val")
-            src_val = src.meta.get("val")
-            if (
-                isinstance(node_val, torch.Tensor)
-                and isinstance(src_val, torch.Tensor)
-                and same_tensor_meta(node_val, src_val)
-                and cond(*args, **kwargs)
-            ):
+            if same_tensor_meta(
+                node,
+                src,
+                skip_strides=node_storage not in output_storages,
+                skip_storage_offset=node_storage not in output_storages,
+            ) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
@@ -1533,7 +1531,14 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
                 base_conversions.append(conversion)
                 continue
 
-            if not same_tensor_meta(replacement_val, conversion_val):
+            # Intermediate strides and storage offsets may change, but preserve
+            # them when the conversion is visible in the graph outputs.
+            if not same_tensor_meta(
+                replacement_val,
+                conversion_val,
+                skip_strides=conversion_storage not in output_storages,
+                skip_storage_offset=conversion_storage not in output_storages,
+            ):
                 base_conversions.append(conversion)
                 continue
 

@@ -7,27 +7,10 @@ Passes may assume that FakeTensor metadata is consistent when they begin. If a p
 ## Alias analysis
 Passes should determine tensor aliasing from FakeTensor storage identity rather than operator schema alias annotations. Two tensor nodes with the same non-`None` storage ID alias. A `None` storage ID means aliasing is unknown and must not be used to establish an alias relationship.
 
-## Graph outputs
-After AOTDispatch, joint and post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes.
-
-## Mutations throughout the stack
-The invariant about mutation we have is:
-
-**After AOTDispatch tracing and before Inductor, we have no mutation in our graph, except for a `copy_` epilogue at the end of the graph and the rare `aten.set_`.**
-
-Passes operating on the joint_graph and post_grad graph do not need to account for other mutations. Pass authors that do not support the rare `aten.set_` may conservatively exit early if it exists in the graph:
-
-```python
-if graph.find_nodes(op="call_function", target=aten.set_.default):
-    return
-```
-
-Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
-
-## Input and output aliasing
+## Aliasing
 Although these graphs are mutation-free, they may still contain aliasing. Passes may change aliasing relationships among intermediate tensors because internal storage identity is not part of the functional operator contract. In particular, functional custom operators cannot rely on whether two intermediate inputs share storage; there is no schema or tag for declaring such a dependency.
 
-Passes must preserve aliasing relationships that escape the graph through inputs and outputs. They must neither introduce nor remove input-output or output-output aliases.
+Passes must preserve aliasing relationships that escape through user-visible inputs and outputs. They must neither introduce nor remove user-visible input-output or output-output aliases. Saved activations that appear as inputs to backward graphs are internal compiler values and are not subject to these boundary aliasing constraints.
 
 For example
 ```python
@@ -50,3 +33,30 @@ alias if they did not alias in the original graph**. To check whether the
 inputs and outputs have any aliasing, it suffices to check whether the
 storages of the input and the storages of the output have any overlap. See
 `remove_noop_ops` for an example of how to do this.
+
+## Graph outputs
+After AOTDispatch, joint and post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes.
+
+## Mutations throughout the stack
+The invariant about mutation we have is:
+
+**After AOTDispatch tracing and before Inductor, we have no mutation in our graph, except for a `copy_` epilogue at the end of the graph and the rare `aten.set_`.**
+
+Passes operating on the joint_graph and post_grad graph do not need to account for other mutations. Pass authors that do not support the rare `aten.set_` may conservatively exit early if it exists in the graph:
+
+```python
+if graph.find_nodes(op="call_function", target=aten.set_.default):
+    return
+```
+
+Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
+
+## Tensor layouts
+The following invariants apply to intermediate tensors when Inductor is the backend; they are not general FX graph invariants:
+
+- The exact storage offset of an intermediate tensor is not part of its semantic contract. Passes do not need to preserve it, and operators must not depend on its value.
+- The exact strides of an intermediate tensor are not part of its semantic contract. During lowering, Inductor determines the input strides required by each consumer and ensures that the consumer receives them, restriding or materializing the input as needed.
+
+These invariants do not apply to user-visible graph inputs and outputs, whose externally visible metadata and aliasing relationships must be preserved.
+
+Saved activations are internal compiler values that appear as inputs to backward graphs, so they follow the intermediate-tensor rules instead. A plain FX graph does not reliably identify saved activations; passes that need this distinction require information propagated from the AOTAutograd graph signature rather than graph-structure heuristics.
