@@ -4012,6 +4012,39 @@ from user code:
         self.assertTrue(hints[0].startswith("For [0]: "), hints[0])
         self.assertIn("missing from the scope rebuilt from the artifact", hints[0])
 
+    def test_no_match_report_resolves_forward_at_the_first_supplied_entry(self):
+        # The gate is the first SUPPLIED entry, not index 0: [0] here is CAPTURED.
+        x = torch.randn(4, 8)
+        loaded = AOTCompiledModel.deserialize(
+            GlobalConfigModule(), self._two_input_global_guard_artifact(x)
+        )
+        captured = torch.compile(
+            GlobalConfigModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        captured._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        results = captured.forward.compiled_results + loaded.compiled_results[:1]
+        self.assertEqual(
+            [r._guard_scope for r in results],
+            [_GuardScope.CAPTURED, _GuardScope.SUPPLIED],
+        )
+        inst = GlobalConfigModule()
+        mixed = AOTCompiledModel(inst, results)
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        g = globals()
+        saved = g.pop("GLOBAL_POOLING_CONFIG")
+        try:
+            with resolve as resolves, self.assertRaises(RuntimeError):
+                mixed(x)
+        finally:
+            g["GLOBAL_POOLING_CONFIG"] = saved
+        self.assertEqual(resolves.call_count, 1)
+        self.assertIs(resolves.call_args.args[0], inst)
+
     def test_no_match_report_resolves_forward_once_past_a_resolve_that_raises(self):
         # A count, not the wording: both entries read alike whether [1] re-ran.
         self._hide_leaked_dynamo_globals()
