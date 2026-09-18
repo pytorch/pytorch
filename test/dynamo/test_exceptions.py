@@ -2,6 +2,7 @@
 
 import contextlib
 import dataclasses
+import gc
 import operator
 import sys
 import unittest
@@ -13,10 +14,11 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import get_dynamo_observed_exception, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
+    disable_gc,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -1936,6 +1938,33 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
         self.assertIsNone(got.__cause__)
         self.assertIsNone(got.__context__)
+
+    def test_observed_exception_no_reference_cycle(self):
+        # An ObservedException unwinding out of an inlined frame owns a
+        # traceback spanning the whole Python stack, so a cycle through it pins
+        # arbitrary user frames (and everything they reference) until the next
+        # gc pass. Refcounting alone must be enough to reclaim it.
+        class Boom(Exception):
+            pass
+
+        def inner():
+            raise Boom
+
+        def fn(x):
+            inner()
+            return x + 1
+
+        observed_cls = get_dynamo_observed_exception(Boom)
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+
+        torch._dynamo.reset()
+        gc.collect()
+        with disable_gc():
+            with self.assertRaises(Boom):
+                opt_fn(x)
+            alive = sum(type(o) is observed_cls for o in gc.get_objects())
+        self.assertEqual(alive, 0)
 
 
 instantiate_parametrized_tests(ExceptionTests)

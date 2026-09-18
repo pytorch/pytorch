@@ -2907,157 +2907,170 @@ class InstructionTranslatorBase(
         self.call_function(fn, args, {})
 
     def exception_handler(self, raised_exception: ObservedException) -> None:
-        observed_exn_gb_explanation = (
-            "Dynamo found no exception handler at the top-level compiled function "
-            "when encountering an exception. Exception will propagate outside the compiled region."
-        )
-
-        def bubble_exception_to_interpreter() -> None:
-            # Bubble the exception to the interpreter
-            if isinstance(raised_exception, FakeTensorObservedException):
-                from .exc import format_graph_break_message
-
-                msg = format_graph_break_message(
-                    "RuntimeError when making fake tensor call",
-                    "",
-                    str(raised_exception),
-                    [*graph_break_hints.USER_ERROR],
-                )
-                e = exc.TorchRuntimeError(
-                    msg, getattr(raised_exception, "real_stack", None)
-                )
-                raise e.with_traceback(raised_exception.__traceback__) from None
-
-            curr_exc = self.exn_vt_stack.get_raised_exception()
-            exc_python_type = curr_exc.python_type()
-            if (self.one_graph or self.error_on_graph_break) and issubclass(
-                exc_python_type, unittest.SkipTest
-            ):
-                try:
-                    skip_args: list[Any] = [
-                        a.as_python_constant() for a in curr_exc.args
-                    ]
-                except NotImplementedError:
-                    skip_args = []
-                skip_exc = exc_python_type(*skip_args)
-                raise skip_exc from None
-
-            dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
-            if not isinstance(raised_exception, dynamo_exc):
-                raise AssertionError(
-                    "expected isinstance(raised_exception, dynamo_exc) to be true"
-                )  # sanity check
-            unimplemented(
-                gb_type="Observed exception",
-                context=f"raised exception {curr_exc.debug_repr()}",
-                explanation=observed_exn_gb_explanation,
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-                from_exc=raised_exception,
+        try:
+            observed_exn_gb_explanation = (
+                "Dynamo found no exception handler at the top-level compiled function "
+                "when encountering an exception. Exception will propagate outside the compiled region."
             )
 
-        if sys.version_info >= (3, 11):
-            exn_tab_entry = self.current_instruction.exn_tab_entry
-            if exn_tab_entry:
-                # Implementation is based on https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
+            # Takes the exception as an argument rather than closing over it,
+            # so that the `del` below actually drops the only reference.
+            def bubble_exception_to_interpreter(
+                raised_exception: ObservedException,
+            ) -> None:
+                # Bubble the exception to the interpreter
+                if isinstance(raised_exception, FakeTensorObservedException):
+                    from .exc import format_graph_break_message
 
-                # 1) pop values from the stack until it matches the stack depth
-                # for the handler
-                while len(self.stack) > exn_tab_entry.depth:
-                    self.pop()
-
-                # 2) if 'lasti' is true, then push the offset that the exception was raised at
-                if exn_tab_entry.lasti:
-                    self.push(
-                        VariableTracker.build(self, self.current_instruction.offset)
+                    msg = format_graph_break_message(
+                        "RuntimeError when making fake tensor call",
+                        "",
+                        str(raised_exception),
+                        [*graph_break_hints.USER_ERROR],
                     )
+                    # Raised without binding to a local: a local would put this
+                    # frame on the new exception's traceback and keep the
+                    # exception alive from it, forming a cycle.
+                    raise exc.TorchRuntimeError(
+                        msg, getattr(raised_exception, "real_stack", None)
+                    ).with_traceback(raised_exception.__traceback__) from None
 
-                # 3) push the exception to the stack
-                self.push(self.exn_vt_stack.get_raised_exception())
-
-                # 4) jump to the handler
-                self.jump(exn_tab_entry)  # type: ignore[arg-type]
-            else:
-                # No handler found. Bubble the exception to the parent
-                # instruction translator. We use special exception for this.
-                self.stack.clear()
-
-                # attach traceback to the exception and set it as current exception
                 curr_exc = self.exn_vt_stack.get_raised_exception()
-                self._attach_traceback_to_exception(curr_exc)
+                exc_python_type = curr_exc.python_type()
+                if (self.one_graph or self.error_on_graph_break) and issubclass(
+                    exc_python_type, unittest.SkipTest
+                ):
+                    try:
+                        skip_args: list[Any] = [
+                            a.as_python_constant() for a in curr_exc.args
+                        ]
+                    except NotImplementedError:
+                        skip_args = []
+                    raise exc_python_type(*skip_args) from None
 
-                if type(self) is InstructionTranslator:
-                    bubble_exception_to_interpreter()
-                raise raised_exception
-        else:
-            if len(self.block_stack):
-                # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
-
-                block_stack_entry = self.block_stack.pop()
-
-                while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
-                    # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
-                    self.popn(3)
-                    self.exn_vt_stack.pop()
-                    if len(self.block_stack) == 0:
-                        # No handler found in this frame. Bubble the exception to the parent
-                        # instruction translator.
-                        self.stack.clear()
-                        if type(self) is InstructionTranslator:
-                            bubble_exception_to_interpreter()
-
-                        raise raised_exception
-                    block_stack_entry = self.block_stack.pop()
-
-                exception_var = self.exn_vt_stack.get_raised_exception()
-                self.exn_vt_stack.move_current_exception_to_stack()
-
-                # 1) pop values from the stack until it matches the stack depth
-                # for the handler
-                while len(self.stack) > block_stack_entry.stack_index:
-                    self.pop()
-
-                # Push a dummy block stack entry of EXCEPT_HANDLER
-                # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
-                except_handler_inst = Instruction(int(1e6), "EXCEPT_HANDLER", None, 0)
-                self.block_stack.append(
-                    BlockStackEntry(except_handler_inst, None, len(self.stack))
+                dynamo_exc = exc.get_dynamo_observed_exception(exc_python_type)
+                if not isinstance(raised_exception, dynamo_exc):
+                    raise AssertionError(
+                        "expected isinstance(raised_exception, dynamo_exc) to be true"
+                    )  # sanity check
+                unimplemented(
+                    gb_type="Observed exception",
+                    context=f"raised exception {curr_exc.debug_repr()}",
+                    explanation=observed_exn_gb_explanation,
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                    from_exc=raised_exception,
                 )
 
-                # Push old exception
-                if len(self.exn_vt_stack) >= 2:
-                    old_exception = self.exn_vt_stack[-2]
+            if sys.version_info >= (3, 11):
+                exn_tab_entry = self.current_instruction.exn_tab_entry
+                if exn_tab_entry:
+                    # Implementation is based on https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
 
-                    # Push the old exception on to stack - tb, value, type
+                    # 1) pop values from the stack until it matches the stack depth
+                    # for the handler
+                    while len(self.stack) > exn_tab_entry.depth:
+                        self.pop()
+
+                    # 2) if 'lasti' is true, then push the offset that the exception was raised at
+                    if exn_tab_entry.lasti:
+                        self.push(
+                            VariableTracker.build(self, self.current_instruction.offset)
+                        )
+
+                    # 3) push the exception to the stack
+                    self.push(self.exn_vt_stack.get_raised_exception())
+
+                    # 4) jump to the handler
+                    self.jump(exn_tab_entry)  # type: ignore[arg-type]
+                else:
+                    # No handler found. Bubble the exception to the parent
+                    # instruction translator. We use special exception for this.
+                    self.stack.clear()
+
+                    # attach traceback to the exception and set it as current exception
+                    curr_exc = self.exn_vt_stack.get_raised_exception()
+                    self._attach_traceback_to_exception(curr_exc)
+
+                    if type(self) is InstructionTranslator:
+                        bubble_exception_to_interpreter(raised_exception)
+                    raise raised_exception
+            else:
+                if len(self.block_stack):
+                    # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
+
+                    block_stack_entry = self.block_stack.pop()
+
+                    while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
+                        # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
+                        self.popn(3)
+                        self.exn_vt_stack.pop()
+                        if len(self.block_stack) == 0:
+                            # No handler found in this frame. Bubble the exception to the parent
+                            # instruction translator.
+                            self.stack.clear()
+                            if type(self) is InstructionTranslator:
+                                bubble_exception_to_interpreter(raised_exception)
+
+                            raise raised_exception
+                        block_stack_entry = self.block_stack.pop()
+
+                    exception_var = self.exn_vt_stack.get_raised_exception()
+                    self.exn_vt_stack.move_current_exception_to_stack()
+
+                    # 1) pop values from the stack until it matches the stack depth
+                    # for the handler
+                    while len(self.stack) > block_stack_entry.stack_index:
+                        self.pop()
+
+                    # Push a dummy block stack entry of EXCEPT_HANDLER
+                    # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
+                    handler_inst = Instruction(int(1e6), "EXCEPT_HANDLER", None, 0)
+                    self.block_stack.append(
+                        BlockStackEntry(handler_inst, None, len(self.stack))
+                    )
+
+                    # Push old exception
+                    if len(self.exn_vt_stack) >= 2:
+                        old_exception = self.exn_vt_stack[-2]
+
+                        # Push the old exception on to stack - tb, value, type
+                        # Traceback is currently mapped to UnknownVariable
+                        self.push(variables.UnknownVariable())
+                        self.push(old_exception)
+
+                        self.push(variables.BuiltinVariable(old_exception.exc_type))
+                    else:
+                        # Push empty exception tb, value, type
+                        self.push(ConstantVariable.create(None))
+                        self.push(ConstantVariable.create(None))
+                        self.push(ConstantVariable.create(None))
+
+                    # Push new exception - tb, val, type
                     # Traceback is currently mapped to UnknownVariable
                     self.push(variables.UnknownVariable())
-                    self.push(old_exception)
+                    self.push(exception_var)
 
-                    self.push(variables.BuiltinVariable(old_exception.exc_type))
+                    self.push(variables.BuiltinVariable(exception_var.exc_type))
+
+                    # Jump to target
+                    self.jump(block_stack_entry)
                 else:
-                    # Push empty exception tb, value, type
-                    self.push(ConstantVariable.create(None))
-                    self.push(ConstantVariable.create(None))
-                    self.push(ConstantVariable.create(None))
-
-                # Push new exception - tb, val, type
-                # Traceback is currently mapped to UnknownVariable
-                self.push(variables.UnknownVariable())
-                self.push(exception_var)
-
-                self.push(variables.BuiltinVariable(exception_var.exc_type))
-
-                # Jump to target
-                self.jump(block_stack_entry)
-            else:
-                # No handler found. Bubble the exception to the parent
-                # instruction translator. We use special exception for this.
-                self.stack.clear()
-                if type(self) is InstructionTranslator:
-                    bubble_exception_to_interpreter()
-                raise raised_exception
+                    # No handler found. Bubble the exception to the parent
+                    # instruction translator. We use special exception for this.
+                    self.stack.clear()
+                    if type(self) is InstructionTranslator:
+                        bubble_exception_to_interpreter(raised_exception)
+                    raise raised_exception
+        finally:
+            # This frame is on `raised_exception`'s traceback whenever the
+            # exception escapes, so holding the argument here would form a
+            # reference cycle that pins every frame on the stack (including
+            # user frames) until the next gc pass. CPython does the same
+            # implicit cleanup for `except ... as e`.
+            del raised_exception
 
     def PUSH_EXC_INFO(self, inst: Instruction) -> None:
         # https://docs.python.org/3/library/dis.html#opcode-PUSH_EXC_INFO
