@@ -9,9 +9,11 @@ from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
+from torch.testing._internal.common_fsdp import FSDPTest, MLPStack
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     MI350_ARCH,
     run_tests,
     skipIfRocmArch,
@@ -25,12 +27,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = torch.device(get_devtype())
-
-
 class _TestClipGradNormBase(FSDPTest):
     def _test_clip_grad_norm(
         self,
+        device_type: str,
         max_norm: float | int,
         norm_type: float | int,
         ref_model: nn.Module,
@@ -41,7 +41,7 @@ class _TestClipGradNormBase(FSDPTest):
         dp_mesh: DeviceMesh | None = None,
     ):
         vector_norm_fn = functools.partial(torch.linalg.vector_norm, ord=norm_type)
-        dp_mesh = dp_mesh or init_device_mesh(device_type.type, (self.world_size,))
+        dp_mesh = dp_mesh or init_device_mesh(device_type, (self.world_size,))
         torch.manual_seed(42 + dp_mesh.get_local_rank() + 1)
         for _ in range(10):
             ref_optim.zero_grad()
@@ -97,12 +97,17 @@ class _TestClipGradNormBase(FSDPTest):
 
 
 class TestClipGradNormWorldSize2(_TestClipGradNormBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(torch.get_device_module(device_type).device_count(), 2)
+        return min(torch.get_device_module(self.device_type).device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_clip_grad_norm_1d(self):
+    def test_clip_grad_norm_1d(self, device):
+        # A bare device type (without index) resolves to each rank's current
+        # device, while the injected `device` is the primary device on every rank.
+        device_type = torch.device(device).type
         for norm_type in (2, 1, float("inf")):
             torch.manual_seed(42)
             model_args = ModelArgs(dropout_p=0.0)
@@ -118,23 +123,26 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
                 0, model.model_args.vocab_size, (3, 16), device=device_type
             )
             self._test_clip_grad_norm(
-                1, norm_type, ref_model, ref_optim, model, optim, inp
+                device_type, 1, norm_type, ref_model, ref_optim, model, optim, inp
             )
 
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(torch.get_device_module(device_type).device_count(), 4)
+        return min(torch.get_device_module(self.device_type).device_count(), 4)
 
     @skip_if_lt_x_gpu(4)
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     @skipIfRocmArch(MI350_ARCH)
-    def test_clip_grad_norm_2d(self):
+    def test_clip_grad_norm_2d(self, device):
+        device_type = torch.device(device).type
         for norm_type in (2, 1, 3, float("inf")):
             dp_size = 2
             global_mesh = init_device_mesh(
-                device_type.type,
+                device_type,
                 (dp_size, self.world_size // dp_size),
                 mesh_dim_names=("dp", "tp"),
             )
@@ -156,9 +164,31 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
             inp = torch.randn(2, 16, device=device_type)
             self._test_clip_grad_norm(
-                0.5, norm_type, ref_model, ref_optim, model, optim, inp, dp_mesh
+                device_type,
+                0.5,
+                norm_type,
+                ref_model,
+                ref_optim,
+                model,
+                optim,
+                inp,
+                dp_mesh,
             )
 
+
+instantiate_device_type_tests(
+    TestClipGradNormWorldSize2,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
+instantiate_device_type_tests(
+    TestClipGradNormWorldSize4,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
