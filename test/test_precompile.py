@@ -53,6 +53,7 @@ class TestPrecompile(TestCase):
         # A fully populated summary round-trips through pickle (which resolves
         # the class through its __module__) and hashes equal to its copy.
         risky = (("ID_MATCH", "self.act"),)
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
         summary = PrecompileSummary(
             frames=3,
             resume_functions=1,
@@ -65,7 +66,7 @@ class TestPrecompile(TestCase):
             dropped_guards=(("HASATTR", "m"),) + risky,
             kept_guards=(("TENSOR_MATCH", "x"),),
             risky_dropped_guards=risky,
-            policy_dropped_guards=(("CONSTANT_MATCH", "flag"),),
+            policy_dropped_guards=(policy,),
             dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
             capture_errors=("RuntimeError: boom",),
         )
@@ -108,6 +109,7 @@ class TestPrecompile(TestCase):
 
         # Slots arrive sorted, as the builder emits them; the tallies keep
         # that order.
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
         plain = PrecompileSummary(
             frames=2,
             resume_functions=1,
@@ -119,7 +121,7 @@ class TestPrecompile(TestCase):
                 ("ID_MATCH", "G['g']"),
             ),
             kept_guards=(("TENSOR_MATCH", "x"), ("TYPE_MATCH", "x")),
-            policy_dropped_guards=(("CONSTANT_MATCH", "flag"),),
+            policy_dropped_guards=(policy,),
             # For programmatic consumers: the digest below does not mention it.
             dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
             wont_generalize=("scale",),
@@ -182,12 +184,15 @@ class TestPrecompile(TestCase):
     def test_summary_guard_lists_aggregate_over_frames(self):
         from torch.compiler._precompile_types import PrecompileSummary
 
-        # Two frames' L['self'].act are one slot once the scope is stripped. One
-        # frame's caller filter rejected it (and it varied there, so it is
-        # risky), the other frame's invariance policy dropped it: the slot sits
-        # in all three lists. The relations hold per frame and the type checks
-        # nothing, so the report still constructs and counts the slot once.
-        act = ("HASATTR", "self.act")
+        # Two frames' guards on the builtin len are one slot (the producer
+        # normalizes the per-compile counter out of the builtins-dict key). One
+        # frame's caller filter rejected it (and the lint flagged it, so it is
+        # risky), the other frame's invariance policy dropped it, which the
+        # policy may do to a BUILTIN_MATCH: the slot sits in all three lists.
+        # The relations hold per frame and the type checks nothing, so the
+        # report still constructs and counts the slot once.
+        act = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        check = "___check_obj_id(G['__builtins_dict___<n>']['len'], <id>), type=<class 'builtin_function_or_method'>"
         summary = PrecompileSummary(
             frames=2,
             resume_functions=0,
@@ -196,12 +201,12 @@ class TestPrecompile(TestCase):
             dropped_guards=(act,),
             risky_dropped_guards=(act,),
             policy_dropped_guards=(act,),
-            dropped_guard_code=(act + ("hasattr(L['self'].act, 'inplace')",),),
+            dropped_guard_code=(act + (check,),),
         )
-        self.assertEqual(summary.dropped_guard_types, {"HASATTR": 1})
+        self.assertEqual(summary.dropped_guard_types, {"BUILTIN_MATCH": 1})
         self.assertExpectedInline(
             str(summary),
-            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1} (0 kept), RISKY drops ['HASATTR self.act'], 1 policy-dropped guard""",
+            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'BUILTIN_MATCH': 1} (0 kept), RISKY drops ["BUILTIN_MATCH G['__builtins_dict___<n>']['len']"], 1 policy-dropped guard""",
         )
 
     @parametrize("mode", ["make_fx", "dynamo", "installed"])
