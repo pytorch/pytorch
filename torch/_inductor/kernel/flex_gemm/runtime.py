@@ -11,8 +11,6 @@ import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
-    INDEXED_OUTPUT_INDICES_ARG_NAME,
-    INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_RUNTIME_OUT_ERROR,
     LOCAL_REDUCE_STORE_ARG_NAME,
@@ -137,11 +135,9 @@ class FlexGemmRuntimeLocalReducePlan:
     stores: bool = False
     out: torch.Tensor | None = None
     feeds_main: bool = False
-    combine: Callable[..., Any] | str | None = None
+    combine: str | None = None
     finalize: Callable[..., Any] | str | None = None
     finalize_operands: tuple[str, ...] = ()
-    reduce_planes: int = 1
-    fragment_reduced: bool = False
     store_finalize: Callable[..., Any] | str | None = None
     binary_store_finalize: bool = False
     prepass: Callable[..., Any] | None = None
@@ -191,8 +187,6 @@ class FlexGemmRuntimeLocalReducePlan:
             self.combine,
             self.finalize,
             self.finalize_operands,
-            self.reduce_planes,
-            self.fragment_reduced,
             self.store_finalize,
             self.prepass,
             self.prepass_combine,
@@ -211,7 +205,6 @@ def flex_gemm_epimod(
     epilogue_arg_dtypes: tuple[torch.dtype, ...],
     epilogue_arg_kinds: tuple[str, ...],
     aux_output_count: int,
-    indexed_dtypes: tuple[torch.dtype, torch.dtype] | None,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     output_contraction: FlexGemmOutputContraction | None,
     *,
@@ -227,7 +220,6 @@ def flex_gemm_epimod(
         epilogue_arg_kinds,
         epilogue_arg_dtypes,
         aux_output_count,
-        indexed_dtypes,
         None if local_reduce is None else local_reduce.cache_key,
         output_contraction,
         varlen_m,
@@ -265,21 +257,6 @@ def flex_gemm_epimod(
     else:
         outputs = tuple(f"output{index}" for index in range(aux_output_count))
     sinks: dict[str, Any] = {}
-    extra_ops = ()
-    if indexed_dtypes is not None:
-        from torch._inductor.kernel.flex_gemm.quack_ops.gathers import ExactColVecSelect
-
-        out_dtype, index_dtype = indexed_dtypes
-        index_op = epi_ops.ColVecLoad(
-            INDEXED_OUTPUT_INDICES_ARG_NAME,
-            dtype=cute_dsl_utils.torch2cute_dtype_map[index_dtype],
-        )
-        sinks[INDEXED_OUTPUT_STORE_ARG_NAME] = ExactColVecSelect(
-            INDEXED_OUTPUT_STORE_ARG_NAME,
-            idx_op=index_op,
-            output_dtype=cute_dsl_utils.torch2cute_dtype_map[out_dtype],
-        )
-        extra_ops = (index_op,)
     prepass = None
     prepass_outs: tuple[str, ...] = ()
     if local_reduce is not None:
@@ -327,8 +304,6 @@ def flex_gemm_epimod(
                         finalize=store_finalize,
                         finalize_operands=local_reduce.finalize_operands,
                         output_layout=output_layout,
-                        reduce_planes=local_reduce.reduce_planes,
-                        fragment_reduced=local_reduce.fragment_reduced,
                     )
                 sinks[LOCAL_REDUCE_STORE_ARG_NAME] = sink
         else:
@@ -353,8 +328,6 @@ def flex_gemm_epimod(
                     finalize=finalize,
                     finalize_operands=local_reduce.finalize_operands,
                     output_layout=output_layout,
-                    reduce_planes=local_reduce.reduce_planes,
-                    fragment_reduced=local_reduce.fragment_reduced,
                 )
             if local_reduce.feeds_main:
                 ops[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
@@ -364,7 +337,6 @@ def flex_gemm_epimod(
         outputs=outputs,
         ops=ops,
         outs=sinks,
-        extra_ops=extra_ops,
         prepass=prepass,
         prepass_outs=prepass_outs,
     )(epilogue_fn)
@@ -387,8 +359,6 @@ def gemm_epilogue(
     aux_outs: tuple[torch.Tensor, ...] = (),
     epilogue_args: tuple[torch.Tensor, ...] = (),
     epilogue_arg_kinds: tuple[str, ...] = (),
-    indexed_out: torch.Tensor | None = None,
-    indexed_indices: torch.Tensor | None = None,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
     cu_seqlens_m: torch.Tensor | None = None,
@@ -414,15 +384,6 @@ def gemm_epilogue(
         SFB = quack_blockscaled_scale_view(
             SFB, b.shape[1], b.shape[0], blockscaled_format
         )
-    if (indexed_out is None) != (indexed_indices is None):
-        raise RuntimeError(
-            "FlexGEMM indexed outputs require both indexed_out and indexed_indices"
-        )
-    if indexed_out is not None and indexed_indices is not None:
-        indexed_out = quack_epilogue_arg(indexed_out)
-        indexed_dtypes = (indexed_out.dtype, indexed_indices.dtype)
-    else:
-        indexed_dtypes = None
     if (
         output_contraction is not None
         and output_contraction.chunked
@@ -437,7 +398,6 @@ def gemm_epilogue(
         tuple(arg.dtype for arg in quack_epilogue_args),
         epilogue_arg_kinds,
         len(aux_outs),
-        indexed_dtypes,
         local_reduce,
         output_contraction,
         varlen_m=cu_seqlens_m is not None,
@@ -454,9 +414,6 @@ def gemm_epilogue(
         if kind in ("row", "col"):
             arg = arg.squeeze(0 if kind == "row" else -1)
         operands[f"operand{index}"] = arg
-    if indexed_out is not None:
-        operands[INDEXED_OUTPUT_INDICES_ARG_NAME] = indexed_indices
-        operands[INDEXED_OUTPUT_STORE_ARG_NAME] = indexed_out
     initialize_local_reduce_out = None
     if local_reduce is not None:
         # QuACK's host_validate checks the compressed buffer against the GEMM

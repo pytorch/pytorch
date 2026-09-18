@@ -15,6 +15,8 @@ framework guarantees inactive ops are never iterated.
 
 import math
 import operator
+import hashlib
+import inspect
 from functools import partial
 from typing import NamedTuple, Optional
 
@@ -30,7 +32,6 @@ import torch
 
 from torch._vendor.quack.compile_utils import div_for_dtype, fake_batched, make_fake_tensor
 from torch._vendor.quack.cute_dsl_utils import torch2cute_dtype_map
-from torch._vendor.quack.gemm_runtime.identity import semantic_value_key
 import torch._vendor.quack.sm90_utils as sm90_utils
 from torch._vendor.quack.rounding import (
     SR_STORE_DTYPES,
@@ -101,8 +102,19 @@ def setup_epi_tensor(gemm, tensor, epi_tile=None, op_type="store", stage=None):
 
 
 def _callable_config_key(fn):
-    """Fail-closed semantic identity for a callable stored in an EpiOp config."""
-    return None if fn is None else semantic_value_key(fn, set(), force_source=True)
+    """Stable, picklable identity for a callable stored in an EpiOp config."""
+    if fn is None:
+        return None
+    try:
+        source = inspect.getsource(fn).encode()
+    except (OSError, TypeError):
+        code = getattr(fn, "__code__", None)
+        source = code.co_code if code is not None else repr(fn).encode()
+    return (
+        getattr(fn, "__module__", ""),
+        getattr(fn, "__qualname__", repr(fn)),
+        hashlib.sha256(source).hexdigest(),
+    )
 
 
 class EpiContext:
@@ -306,7 +318,6 @@ class EpiOp:
     #            one rescale per subtile instead of per element).
     #   None: not usable from the fn frontend (hand-written mixins only).
     fn_port = None
-    sink_arity = 1
     supports_swap_ab = False
     # Tensorless ops (a None host argument) stay active and keep their smem
     # budget instead of being filtered out by ComposableEpiMixin.
@@ -320,12 +331,10 @@ class EpiOp:
     def fn_apply(self, gemm, pstate, i, value):
         raise NotImplementedError
 
-    def fn_sink_flush(self, gemm, state, *fragments):
-        """Fold the declared sink value planes into this op's accumulator.
-
-        ``state`` is the begin_loop result. Each fragment is elementwise-congruent
-        with the accumulator tile and corresponds to one of ``sink_arity`` planes.
-        """
+    def fn_sink_flush(self, gemm, state, frag):
+        """Fold a fragment of fn-produced values into this op's accumulator.
+        ``state`` is the begin_loop result; ``frag`` is elementwise-congruent
+        with the accumulator tile fragment."""
         raise NotImplementedError
 
     def __init__(self, name):
@@ -381,10 +390,6 @@ class EpiOp:
     def host_call_arg(self, value, key):
         """Per-call runtime argument matching the compiled signature."""
         return value
-
-    def sink_alloc_dtype(self):
-        """Return the torch dtype for graph-owned sink storage."""
-        return torch.float32
 
     def arg_spec_type(self, const=False):
         """Type annotation for this op's EpilogueArguments field. ``const``
@@ -1474,11 +1479,6 @@ class VecReduce(EpiOp):
         # product directly into the accumulator, and one FFMA instead of
         # FMUL+FADD per pair.
         self.scaled = scaled
-
-    @property
-    def sink_arity(self):
-        """Number of value planes returned to this sink by the epilogue fn."""
-        return 2 if self.scaled else 1
 
     def config_key(self):
         return (self.combine, self.scaled, self.check_oob)
