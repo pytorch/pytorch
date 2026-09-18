@@ -4,11 +4,13 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
+from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
 
 from ...ir import get_free_symbols
 from ...kernel.mm import decompose_k_subgraph_template
 from ...kernel_inputs import KernelInputs, MMKernelInputs
+from ...runtime.hints import DeviceProperties
 from ...utils import get_k_splits
 from ...virtualized import V
 from .base import TemplateConfigHeuristics
@@ -63,7 +65,25 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        k_splits = get_k_splits(m, n, k)
+        output_tile_size = config.triton.decompose_k_min_output_tile_size
+        m_is_static = not isinstance(m, sympy.Expr) or bool(m.is_number)
+        n_is_static = not isinstance(n, sympy.Expr) or bool(n.is_number)
+        if output_tile_size > 0 and m_is_static and n_is_static:
+            device_properties = DeviceProperties.create(kernel_inputs.device())
+            m_hint = int(m)
+            n_hint = int(n)
+            output_ctas = (
+                2
+                * ((m_hint + output_tile_size - 1) // output_tile_size)
+                * ((n_hint + output_tile_size - 1) // output_tile_size)
+            )
+            min_k_split = (
+                device_properties.multi_processor_count + output_ctas - 1
+            ) // output_ctas
+            k_splits = get_k_splits(m, n, k, min_k_split=min_k_split)
+        else:
+            k_splits = get_k_splits(m, n, k)
+
         for k_split in k_splits:
             if not V.graph.sizevars.statically_known_true(
                 sympy.Eq(sympy.Mod(k, k_split), 0)
