@@ -297,6 +297,7 @@ XPU_BLOCKLIST = [
 
 XPU_TEST = [
     "test_xpu",
+    "test_xpu_expandable_segments",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -1918,7 +1919,9 @@ def get_selected_tests(options) -> list[str]:
         ]
     )
 
-    selected_tests = exclude_tests(options.exclude, selected_tests)
+    # Exact match: a caller asking to exclude "inductor/test_torchinductor" means
+    # that file, not every file whose name starts with it.
+    selected_tests = exclude_tests(options.exclude, selected_tests, exact_match=True)
 
     if IS_WINDOWS and not options.ignore_win_blocklist:
         from torch.testing._internal.common_cuda import SM120OrLater, SM89OrLater
