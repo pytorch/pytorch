@@ -23,7 +23,11 @@ from torch._inductor.runtime.triton_heuristics import (
     generate_lookup_hash_from_source_code,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_nv_universal_gemm_available, fresh_cache
+from torch._inductor.utils import (
+    ensure_nv_universal_gemm_available,
+    fresh_cache,
+    is_big_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -169,6 +173,8 @@ class TestAsyncCompile(TestCase):
     @requires_gpu()
     @requires_triton()
     def test_template_kernel_single_submission(self):
+        if not is_big_gpu():
+            self.skipTest("Need big GPU for Triton mm templates")
         # Template kernels are submitted eagerly to the warm pool and again from
         # the wrapper; both submissions must carry the same source so the second
         # is a cache hit instead of a second compile racing on the cache file.
