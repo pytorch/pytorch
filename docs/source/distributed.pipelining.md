@@ -583,6 +583,14 @@ pipeline rank.
   :members:
 ```
 
+The multi-stage runtime schedules below accept ``reuse_recv_buffers=True`` to
+allocate schedule-colored receive buffers once and reuse their stable addresses.
+Compatible pools grow when switching between training and inference and remain
+allocated for the schedule lifetime. Custom forward or backward compute handlers
+must consume the corresponding stage receive descriptors before returning. A
+stage belongs to one active schedule; constructing another schedule for that
+stage releases an idle pool configuration from the previous schedule.
+
 ```{eval-rst}
 .. automodule:: torch.distributed.pipelining.schedules
 ```
