@@ -137,6 +137,20 @@ def _check_mxfp_gemm_config(
     )
 
 
+def is_gemm_config_worth_tuning(
+    m: int, n: int, k: int, gemm_config: dict[str, int | bool]
+) -> bool:
+    """Restrict large GEMMs to the largest M/N tile with eight-wave HTI."""
+    if not config.flydsl_enable_autotuning or min(m, n, k) < 4096:
+        return True
+    return (
+        gemm_config["TILE_M"] == gemm_config["TILE_N"] == 256
+        and bool(gemm_config.get("USE_HALF_TILE_INTERLEAVED", False))
+        and gemm_config["M_WAVES"] == 2
+        and gemm_config["N_WAVES"] == 4
+    )
+
+
 def is_gemm_config_valid_for_shape(
     m: int,
     n: int,

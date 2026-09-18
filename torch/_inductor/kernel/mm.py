@@ -356,6 +356,7 @@ def get_flydsl_mm_template_kwargs(
     from ..heuristics.template.flydsl import (
         get_gemm_configs,
         is_gemm_config_valid_for_shape,
+        is_gemm_config_worth_tuning,
     )
 
     if not (static_shape and is_nonzero and use_flydsl_gemm_template(layout)):
@@ -404,7 +405,8 @@ def get_flydsl_mm_template_kwargs(
             "HAS_BIAS": False,
         }
         for gemm_config in get_gemm_configs()
-        if is_gemm_config_valid_for_shape(
+        if is_gemm_config_worth_tuning(m_static, n_static, k_static, gemm_config)
+        and is_gemm_config_valid_for_shape(
             m_static,
             n_static,
             k_static,
@@ -1271,6 +1273,7 @@ def get_flydsl_mxfp_template_kwargs(
     from ..heuristics.template.flydsl import (
         get_gemm_configs,
         is_gemm_config_valid_for_shape,
+        is_gemm_config_worth_tuning,
     )
 
     if not use_flydsl_gemm_template(layout):
@@ -1399,7 +1402,8 @@ def get_flydsl_mxfp_template_kwargs(
             "HAS_BIAS": bias is not None,
         }
         for gemm_config in get_gemm_configs(mxfp_format)
-        if is_gemm_config_valid_for_shape(
+        if is_gemm_config_worth_tuning(m, n, k, gemm_config)
+        and is_gemm_config_valid_for_shape(
             m,
             n,
             k,
