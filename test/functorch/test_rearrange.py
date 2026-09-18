@@ -29,7 +29,12 @@ import numpy as np
 
 import torch
 from functorch.einops import rearrange
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 identity_patterns: list[str] = [
@@ -53,7 +58,9 @@ equivalent_rearrange_patterns: list[tuple[str, str]] = [
 ]
 
 
-class TestRearrange(TestCase):
+class TestRearrangeGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_collapsed_ellipsis_errors_out(self) -> None:
         x = torch.zeros([1, 1, 1, 1, 1])
         rearrange(x, "a b c d ... ->  a b c ... d")
@@ -64,8 +71,25 @@ class TestRearrange(TestCase):
         with self.assertRaises(ValueError):
             rearrange(x, "(...) -> (...)")
 
-    def test_ellipsis_ops(self) -> None:
-        x = torch.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    def test_dimension_mismatch_no_ellipsis(self) -> None:
+        x = torch.randn((1, 2, 3))
+        with self.assertRaises(ValueError):
+            rearrange(x, "a b -> b a")
+
+        with self.assertRaises(ValueError):
+            rearrange(x, "a b c d -> c d b a")
+
+    def test_dimension_mismatch_with_ellipsis(self) -> None:
+        x = torch.tensor(1)
+        with self.assertRaises(ValueError):
+            rearrange(x, "a ... -> ... a")
+
+
+class TestRearrange(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def test_ellipsis_ops(self, device) -> None:
+        x = torch.arange(2 * 3 * 4 * 5 * 6, device=device).reshape([2, 3, 4, 5, 6])
         for pattern in identity_patterns:
             torch.testing.assert_close(rearrange(x, pattern), x, msg=pattern)
 
@@ -76,9 +100,9 @@ class TestRearrange(TestCase):
                 msg=f"{pattern1} vs {pattern2}",
             )
 
-    def test_rearrange_consistency(self) -> None:
+    def test_rearrange_consistency(self, device) -> None:
         shape = [1, 2, 3, 5, 7, 11]
-        x = torch.arange(int(np.prod(shape, dtype=int))).reshape(shape)
+        x = torch.arange(int(np.prod(shape, dtype=int)), device=device).reshape(shape)
         for pattern in [
             "a b c d e f -> a b c d e f",
             "b a c d e f -> a b d e f c",
@@ -87,7 +111,7 @@ class TestRearrange(TestCase):
             "a b c d e f -> (f e d c b a)",
         ]:
             result = rearrange(x, pattern)
-            self.assertEqual(len(np.setdiff1d(x, result)), 0)
+            self.assertEqual(len(np.setdiff1d(x.cpu(), result.cpu())), 0)
             self.assertIs(result.dtype, x.dtype)
 
         result = rearrange(x, "a b c d e f -> a (b) (c d e) f")
@@ -113,15 +137,15 @@ class TestRearrange(TestCase):
         result = rearrange(temp, "(f d) c (e b) a -> a b c d e f", **sizes)
         torch.testing.assert_close(x, result)
 
-        x2 = torch.arange(2 * 3 * 4).reshape([2, 3, 4])
+        x2 = torch.arange(2 * 3 * 4, device=device).reshape([2, 3, 4])
         result = rearrange(x2, "a b c -> b c a")
         self.assertEqual(x2[1, 2, 3], result[2, 3, 1])
         self.assertEqual(x2[0, 1, 2], result[1, 2, 0])
 
-    def test_rearrange_permutations(self) -> None:
+    def test_rearrange_permutations(self, device) -> None:
         # tests random permutation of axes against two independent numpy ways
         for n_axes in range(1, 10):
-            input = torch.arange(2**n_axes).reshape([2] * n_axes)
+            input = torch.arange(2**n_axes, device=device).reshape([2] * n_axes)
             permutation = np.random.permutation(n_axes)
             left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
             right_expression = " ".join("i" + str(axis) for axis in permutation)
@@ -132,7 +156,7 @@ class TestRearrange(TestCase):
                 self.assertEqual(input[tuple(pick)], result[tuple(pick[permutation])])
 
         for n_axes in range(1, 10):
-            input = torch.arange(2**n_axes).reshape([2] * n_axes)
+            input = torch.arange(2**n_axes, device=device).reshape([2] * n_axes)
             permutation = np.random.permutation(n_axes)
             left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
             right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
@@ -145,66 +169,59 @@ class TestRearrange(TestCase):
 
             torch.testing.assert_close(result, expected_result)
 
-    def test_concatenations_and_stacking(self) -> None:
+    def test_concatenations_and_stacking(self, device) -> None:
         for n_arrays in [1, 2, 5]:
             shapes: list[list[int]] = [[], [1], [1, 1], [2, 3, 5, 7], [1] * 6]
             for shape in shapes:
                 arrays1 = [
-                    torch.arange(i, i + np.prod(shape, dtype=int)).reshape(shape)
+                    torch.arange(
+                        i, i + np.prod(shape, dtype=int), device=device
+                    ).reshape(shape)
                     for i in range(n_arrays)
                 ]
                 result0 = torch.stack(arrays1)
                 result1 = rearrange(arrays1, "...->...")
                 torch.testing.assert_close(result0, result1)
 
-    def test_unsqueeze(self) -> None:
-        x = torch.randn((2, 3, 4, 5))
+    def test_unsqueeze(self, device) -> None:
+        x = torch.randn((2, 3, 4, 5), device=device)
         actual = rearrange(x, "b h w c -> b 1 h w 1 c")
         expected = x.unsqueeze(1).unsqueeze(-2)
         torch.testing.assert_close(actual, expected)
 
-    def test_squeeze(self) -> None:
-        x = torch.randn((2, 1, 3, 4, 1, 5))
+    def test_squeeze(self, device) -> None:
+        x = torch.randn((2, 1, 3, 4, 1, 5), device=device)
         actual = rearrange(x, "b 1 h w 1 c -> b h w c")
         expected = x.squeeze()
         torch.testing.assert_close(actual, expected)
 
-    def test_0_dim_tensor(self) -> None:
-        x = expected = torch.tensor(1)
+    def test_0_dim_tensor(self, device) -> None:
+        x = expected = torch.tensor(1, device=device)
         actual = rearrange(x, "->")
         torch.testing.assert_close(actual, expected)
 
         actual = rearrange(x, "... -> ...")
         torch.testing.assert_close(actual, expected)
 
-    def test_dimension_mismatch_no_ellipsis(self) -> None:
-        x = torch.randn((1, 2, 3))
-        with self.assertRaises(ValueError):
-            rearrange(x, "a b -> b a")
+    def test_torch_func_rearrange_basic(self, device) -> None:
+        from torch.func import rearrange as torch_func_rearrange
 
-        with self.assertRaises(ValueError):
-            rearrange(x, "a b c d -> c d b a")
-
-    def test_dimension_mismatch_with_ellipsis(self) -> None:
-        x = torch.tensor(1)
-        with self.assertRaises(ValueError):
-            rearrange(x, "a ... -> ... a")
+        x = torch.randn((2, 3, 4), device=device)
+        result = torch_func_rearrange(x, "b h w -> h (b w)")
+        self.assertEqual(result.shape, torch.Size([3, 8]))
 
 
 class TestRearrangeTorchFuncExport(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_torch_func_rearrange_import(self) -> None:
         from torch.func import rearrange as torch_func_rearrange
 
         # Verify the import works and is the same function
         self.assertIs(torch_func_rearrange, rearrange)
 
-    def test_torch_func_rearrange_basic(self) -> None:
-        from torch.func import rearrange as torch_func_rearrange
 
-        x = torch.randn((2, 3, 4))
-        result = torch_func_rearrange(x, "b h w -> h (b w)")
-        self.assertEqual(result.shape, torch.Size([3, 8]))
-
+instantiate_device_type_tests(TestRearrange, globals(), except_for="meta")
 
 if __name__ == "__main__":
     run_tests()
