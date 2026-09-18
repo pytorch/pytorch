@@ -200,7 +200,9 @@ class ReplicateTest(MultiProcContinuousTest):
         This tests that a user can pass in a device mesh to replicate a module
         """
 
-        device = torch.device(device_type, self.rank % torch.accelerator.device_count())
+        device = torch.device(
+            f"{device_type}:{self.rank % torch.accelerator.device_count()}"
+        )
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -226,7 +228,9 @@ class ReplicateTest(MultiProcContinuousTest):
         Tests that replicate_model has the same behavior as original model when training
         """
 
-        device = torch.device(device_type, self.rank % torch.accelerator.device_count())
+        device = torch.device(
+            f"{device_type}:{self.rank % torch.accelerator.device_count()}"
+        )
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
