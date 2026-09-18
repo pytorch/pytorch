@@ -23,10 +23,17 @@ import torch
 import torch._functorch.config
 from functorch.compile import nop
 from torch._functorch.aot_autograd import aot_function
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestCodegenMutationEpilogue(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _capture_codegen_source(self, artifact_name):
         return capture_codegen_source(artifact_name)
 
