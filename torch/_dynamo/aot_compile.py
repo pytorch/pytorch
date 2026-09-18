@@ -1786,10 +1786,14 @@ class AOTCompiledModel:
     withheld. Then one ``For [i, j]:`` line per distinct missing-global hint
     naming the entries whose guards failed on a global the process does not
     define; a ``fix or drop that artifact`` line naming the first input that
-    raised of those nobody opted out, when one did; and the advice to add a
-    ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When some
-    guard tree raised in dispatch, the last raise of the first input that
-    raised is the
+    raised of those nobody opted out, when one did; and -- when some checked
+    tree reached an answer, or the artifact holds no input at all -- the advice
+    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When
+    no checked tree ever answered and two or more trees raised, a line saying
+    every guard tree raised replaces it, unless an opted-out result's line has
+    already said the raise withheld it; a single raiser's own line already says
+    as much. When some guard tree raised in dispatch, the last raise of the
+    first input that raised is the
     ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
     sees: an ``except RuntimeError`` (a ``TORCH_CHECK``) catches the report
     with the tree's raise one hop down, and an ``except SystemError`` no longer
@@ -1910,7 +1914,9 @@ class AOTCompiledModel:
         # finds an index unanswered with no exception recorded for it.
         raised: dict[int, Exception] = {}
         unanswered: set[int] = set()
-        # Per-result bindings by index, kept for the re-check and the report.
+        # Indices that ever reached an answer, which a ModelInput could have covered.
+        answered: set[int] = set()
+        # Per-result bindings, filled on first use, kept for the re-check and report.
         bound: dict[int, dict[str, object]] = {}
         # The first result is bound and checked inline, as at a single-result
         # model, so a call it serves builds no accepts() closure and calls
@@ -1937,6 +1943,8 @@ class AOTCompiledModel:
                 raised[0] = e
                 unanswered.add(0)
                 answer = False
+            else:
+                answered.add(0)
             if answer:
                 # The guard manager already passed; go through _serve rather
                 # than result(), which would re-run the ~0.85us guard eval on
@@ -1973,8 +1981,12 @@ class AOTCompiledModel:
                 raised[i] = e
                 unanswered.add(i)
                 return False
+            if answer:
+                return True
+            # Recorded on a rejection only: an accept serves and builds no report.
             unanswered.discard(i)
-            return answer
+            answered.add(i)
+            return False
 
         for i, result in enumerate(results[1:], 1):
             if accepts(i, result):
@@ -2028,7 +2040,12 @@ class AOTCompiledModel:
                     unanswered.clear()
                     return result._serve(self.model, *args, **kwargs)
         report = self._no_match_report(
-            results, raised=raised, unanswered=unanswered, bound=bound, enabled=enabled
+            results,
+            raised=raised,
+            unanswered=unanswered,
+            answered=answered,
+            bound=bound,
+            enabled=enabled,
         )
         if raised:
             # `raised` is in recording order, so this chains the index that
@@ -2046,6 +2063,7 @@ class AOTCompiledModel:
         *,
         raised: dict[int, Exception],
         unanswered: set[int],
+        answered: set[int],
         bound: dict[int, dict[str, object]],
         enabled: list[bool],
     ) -> str:
@@ -2083,6 +2101,9 @@ class AOTCompiledModel:
         # opted out, the lowest index only when none raised for the first time on
         # the second pass.
         raiser = next((i for i in raised if enabled[i]), None)
+        # An entry that answered in either dispatch pass rejected this call, so a
+        # ModelInput could have covered it even where its line below is a raise.
+        coverable = any(results[i]._guard_check_enabled for i in answered)
         withheld = not all(enabled)
         for i, result in enumerate(results):
             if not enabled[i]:
@@ -2177,12 +2198,25 @@ class AOTCompiledModel:
                 f"[{raiser}]'s guard check raised while checking this call; fix "
                 "or drop that artifact."
             )
-        lines.append(
-            "Add a ModelInput covering this call, or check whether "
-            "guard_filter_fn kept a guard this call cannot satisfy -- both "
-            "belong to the process that compiles the artifacts, which need not "
-            "be the one that loaded them."
-        )
+        # An artifact holding no inputs at all -- which deserialize() accepts --
+        # has no entry to answer, and adding an input is exactly the advice for it.
+        if coverable or not results:
+            lines.append(
+                "Add a ModelInput covering this call, or check whether "
+                "guard_filter_fn kept a guard this call cannot satisfy -- both "
+                "belong to the process that compiles the artifacts, which need "
+                "not be the one that loaded them."
+            )
+        if len(raised) > 1 and not withheld and not coverable:
+            # `not coverable`: no checked tree answered, so every entry line above
+            # is a raise and the advice above is off. Not beside a withheld line,
+            # which has already said what the raise cost, and only where the
+            # raiser line above names one raiser of several: for a single entry
+            # it already says all of this.
+            lines.append(
+                "Every guard tree raised while checking this call; the reasons "
+                "above are those raises, not guards this call failed."
+            )
         return "\n".join(lines)
 
     def serialize(self) -> bytes:
