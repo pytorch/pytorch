@@ -1,8 +1,10 @@
 # Owner(s): ["oncall: pt2"]
 import copy
+import errno
 import io
 import os
 import pickle
+import stat
 import subprocess
 import sys
 import tempfile
@@ -14,7 +16,7 @@ from unittest import mock
 import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
-from torch._precompile import PrecompileError
+from torch._precompile import _write_artifact, PrecompileError
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
@@ -2843,6 +2845,307 @@ class TestPrecompile(TestCase):
         step(ref, x, t)
         self.assertEqual(model.weight.grad, ref.weight.grad)
         self.assertEqual(model.bias.grad, ref.bias.grad)
+
+
+class _FilesModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin = torch.nn.Linear(4, 4)
+
+    def forward(self, x):
+        return torch.relu(self.lin(x))
+
+
+def _files_fn(model, x):
+    return model(x)
+
+
+@skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileCaptureFiles(TestCase):
+    """The on-disk artifact pair writer, through its failure shapes."""
+
+    def setUp(self):
+        super().setUp()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.artifact = os.path.join(self.dir, "m.py")
+        self.cache = os.path.join(self.dir, "m.cache")
+        self.model = _FilesModel()
+        self.x = torch.randn(2, 4)
+
+    def _leftovers(self):
+        return sorted(n for n in os.listdir(self.dir) if n not in ("m.py", "m.cache"))
+
+    def _read(self, path):
+        with open(path, "rb") as f:
+            return f.read()
+
+    def _rewrite_raises(self, exc_type, regex, backend="inductor"):
+        # Rewrite the same paths from a freshly rendered pair, expecting the write to fail
+        # with the patched-in exception.
+        python_code, cache = _precompile_pair(
+            _files_fn, self.model, self.x, backend=backend
+        )
+        with self.assertRaisesRegex(exc_type, regex):
+            _write_artifact(self.artifact, self.cache, python_code, cache)
+
+    def _write_pair(self):
+        # The "previous artifact" the recovery tests want on disk, with both halves' bytes.
+        python_code, cache = _precompile_pair(
+            _files_fn, self.model, self.x, backend="eager"
+        )
+        _write_artifact(self.artifact, self.cache, python_code, cache)
+        return self._read(self.artifact), self._read(self.cache)
+
+    def _assert_serves(self):
+        # Both halves of what a writer test wants: no scratch file or backup left behind,
+        # and the named pair reading back and serving.
+        self.assertEqual(self._leftovers(), [])
+        python_code, cache = torch._precompile._read_artifact(self.artifact, self.cache)
+        f = torch.compiler.precompile.load(python_code, cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
+
+    def _assert_kept_backup(self, before, logs):
+        # The previous source survived as the only leftover, a .bak the warning names.
+        leftovers = self._leftovers()
+        self.assertEqual(len(leftovers), 1, leftovers)
+        self.assertTrue(leftovers[0].endswith(".bak"), leftovers)
+        self.assertEqual(self._read(os.path.join(self.dir, leftovers[0])), before)
+        # The warning names that file and the one rename that recovers from either shape.
+        joined = "\n".join(logs.output)
+        self.assertIn(leftovers[0], joined)
+        self.assertIn("moved back over the first path", joined)
+
+    def _replacing(self, *names, exc, after=False, once=True, by_src=False):
+        """Patch os.replace so a rename INTO one of ``names`` (or OUT of one, with
+        ``by_src``) raises ``exc``: before performing it, or (``after``) once it has,
+        which is where a KeyboardInterrupt lands. ``once`` fails only the first one."""
+        real, fired = os.replace, []
+
+        def replace(src, dst):
+            if (src if by_src else dst) not in names or (once and fired):
+                return real(src, dst)
+            fired.append(dst)
+            if after:
+                real(src, dst)
+            raise exc
+
+        return mock.patch("os.replace", replace)
+
+    def test_a_failed_cache_rename_restores_the_previous_pair(self):
+        # The first rename landed, so the undo renames the backup back over the new source,
+        # which consumes the .bak and leaves the trailing unlink a no-op. The other shape, a
+        # failing FIRST rename with the artifact still the hard-linked previous source, is
+        # the read-only-first-rename test below.
+        before = self._write_pair()
+        with self._replacing(self.cache, exc=OSError("disk full")):
+            self._rewrite_raises(OSError, "disk full")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    @parametrize("half", ("artifact", "cache"))
+    def test_a_failed_rename_on_a_first_write_leaves_nothing_named(self, half):
+        # No previous pair to restore, so the undo takes the new artifact back out from under
+        # its name: a first write cannot leave a named source with no cache beside it.
+        no_space = OSError(errno.ENOSPC, "no space left")
+        with self._replacing(getattr(self, half), exc=no_space):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "no space left", backend="eager")
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_double_failure_without_hard_links_keeps_the_previous_source(self):
+        # No hard links, so the previous source was MOVED to the backup; the rename into place
+        # then fails AND so does the undo, so the backup holds its only copy.
+        before = self._write_pair()[0]
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with self._replacing(self.artifact, exc=OSError("disk full"), once=False):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    self._rewrite_raises(OSError, "disk full")
+        self.assertFalse(os.path.exists(self.artifact))
+        self._assert_kept_backup(before, logs)
+
+    def test_a_read_only_first_rename_leaves_the_previous_pair_intact(self):
+        # A read-only remount: the artifact rename fails, and so would the undo. The backup is
+        # a hard LINK, so the name still IS the previous source: nothing to undo, no report.
+        before = self._write_pair()
+        read_only = OSError(errno.EROFS, "read-only file system")
+        with self._replacing(self.artifact, self.cache, exc=read_only, once=False):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(OSError, "read-only file system")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    def test_a_first_write_that_cannot_be_undone_warns_about_the_orphan(self):
+        # A FIRST write whose cache rename failed and whose undo then failed leaves a named
+        # artifact with no matching cache beside it, the state the report exists to announce.
+        real_unlink = os.unlink
+        no_space = OSError(errno.ENOSPC, "no space left")
+
+        def unlink(path):
+            if path == self.artifact:
+                raise OSError(errno.EPERM, "cannot unlink")
+            return real_unlink(path)
+
+        with self._replacing(self.cache, exc=no_space), mock.patch("os.unlink", unlink):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                self._rewrite_raises(OSError, "no space left", backend="eager")
+        self.assertTrue(os.path.exists(self.artifact))
+        self.assertFalse(os.path.exists(self.cache))
+        self.assertTrue(
+            any("no cache beside it matches" in m for m in logs.output), logs.output
+        )
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupted_undo_keeps_the_previous_source(self):
+        # The undo can be cut short by a KeyboardInterrupt rather than an OSError, and the
+        # rename is then just as undone; without hard links the backup is the only source.
+        before = self._write_pair()[0]
+        real_replace = os.replace
+        installs = []
+
+        def replace(src, dst):
+            if dst != self.artifact:
+                return real_replace(src, dst)
+            installs.append(src)
+            if len(installs) == 1:
+                raise OSError("disk full")
+            raise KeyboardInterrupt("interrupted during the undo")
+
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with mock.patch("os.replace", replace):
+                with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertFalse(os.path.exists(self.artifact))
+        self._assert_kept_backup(before, logs)
+
+    def test_an_interrupt_after_the_move_aside_restores_the_name(self):
+        # Taking the backup has that window too: without hard links the previous source is
+        # MOVED aside, so an interrupt after os.replace returned leaves the artifact NAME
+        # gone -- a flag set after that call left the caller's path empty, silently.
+        before = self._write_pair()
+        cut = KeyboardInterrupt("interrupted after the move aside")
+        with mock.patch("os.link", side_effect=OSError(errno.EXDEV, "no hard links")):
+            with self._replacing(self.artifact, exc=cut, after=True, by_src=True):
+                with self.assertNoLogs("torch._precompile", level="WARNING"):
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupt_after_the_hard_link_drops_the_backup(self):
+        # The same window on the hard-link path: the .bak is already a link to the previous
+        # source, and a flag that read "no backup" skipped the cleanup and left it pinning
+        # that inode forever. The named pair is untouched, so it just goes.
+        before = self._write_pair()
+        real_link = os.link
+
+        def link(src, dst):
+            real_link(src, dst)
+            raise KeyboardInterrupt("interrupted after the hard link")
+
+        with mock.patch("os.link", link):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
+
+    def test_an_interrupt_after_the_first_rename_restores_the_previous_source(self):
+        # A KeyboardInterrupt is raised at the bytecode after os.replace RETURNED, so the
+        # first rename can have landed with a flag that records it still unset. Reading that
+        # flag called this a write that never started and unlinked the backup -- with hard
+        # links, the previous source's last link.
+        before = self._write_pair()
+        before_ino = os.stat(self.artifact).st_ino
+        cut = KeyboardInterrupt("interrupted after the first rename")
+        with self._replacing(self.artifact, exc=cut, after=True):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(os.stat(self.artifact).st_ino, before_ino)
+        self._assert_serves()
+
+    def test_an_interrupt_after_the_second_rename_keeps_the_new_pair(self):
+        # The same window one rename later: both halves are already under their names, so the
+        # write SUCCEEDED and there is nothing to undo -- undoing anyway puts the previous
+        # source back beside the new cache, an unloadable pair.
+        before = self._write_pair()
+        cut = KeyboardInterrupt("interrupted after the second rename")
+        with self._replacing(self.cache, exc=cut, after=True):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertNotEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    def test_an_interrupt_among_the_probes_keeps_the_previous_source(self):
+        # The undo's own reads have that window: an interrupt between the backup read (the
+        # True below) and the flag saying the reads RAN dropped the previous source's .bak.
+        before = self._write_pair()[0]
+        cut = mock.patch("os.path.lexists", side_effect=[True, KeyboardInterrupt()])
+        with self._replacing(self.cache, exc=OSError(errno.ENOSPC, "no space")), cut:
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                with self.assertRaises(KeyboardInterrupt):
+                    _write_artifact(self.artifact, self.cache, "new", b"new-cache")
+        kept = [self._read(os.path.join(self.dir, n)) for n in self._leftovers()]
+        self.assertEqual(kept, [before])
+
+    def test_an_interrupt_after_the_undos_rename_reports_nothing(self):
+        # The undo's OWN os.replace has that window too: the previous source is back under
+        # its name and the .bak it came from is consumed, while the flag that records the
+        # undo still reads False. Reporting off that flag named a gone .bak.
+        before = self._write_pair()
+        before_ino = os.stat(self.artifact).st_ino
+        real_replace = os.replace
+        installs = []
+
+        def replace(src, dst):
+            if dst == self.cache:
+                raise OSError(errno.ENOSPC, "no space left")
+            real_replace(src, dst)
+            if installs:
+                raise KeyboardInterrupt("interrupted after the undo's rename")
+            installs.append(dst)
+
+        with mock.patch("os.replace", replace):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(os.stat(self.artifact).st_ino, before_ino)
+        self._assert_serves()
+
+    def test_an_interrupt_after_the_undos_unlink_reports_nothing(self):
+        # The same window on a FIRST write, whose undo unlinks the orphan artifact instead:
+        # the file the report would name is already gone, so there is nothing to announce.
+        real_unlink = os.unlink
+        no_space = OSError(errno.ENOSPC, "no space left")
+
+        def unlink(path):
+            real_unlink(path)
+            if path == self.artifact:
+                raise KeyboardInterrupt("interrupted after the undo's unlink")
+
+        with self._replacing(self.cache, exc=no_space), mock.patch("os.unlink", unlink):
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                self._rewrite_raises(KeyboardInterrupt, "interrupted", backend="eager")
+        self.assertFalse(os.path.exists(self.artifact))
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_a_failed_temp_fsync_leaves_no_scratch_files(self):
+        # The fsync of a scratch file is NOT best effort: unflushed bytes would be renamed
+        # into place, so it propagates -- with every scratch file removed and both named
+        # halves untouched, which is why this one rewrites a previous pair.
+        before = self._write_pair()
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(errno.EIO, "fsync failed")
+            return real_fsync(fd)
+
+        with mock.patch("os.fsync", fsync):
+            self._rewrite_raises(OSError, "fsync failed", backend="eager")
+        self.assertEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self.assertEqual(self._leftovers(), [])
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
