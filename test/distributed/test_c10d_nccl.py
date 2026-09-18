@@ -4335,6 +4335,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_PROPAGATE_ERROR"] = "1"
+        os.environ["TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC"] = "0"
         # set heartbeat timeout to a small value so that we don't wait too long for things to shutdown
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
         store = c10d.FileStore(self.file_name, self.world_size)
