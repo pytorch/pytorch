@@ -657,11 +657,11 @@ pipeline rank.
 ```
 
 ```{eval-rst}
-.. autofunction:: analyze_pipeline_activation_liveness
+.. autofunction:: torch.distributed.pipelining.schedules.analyze_pipeline_activation_liveness
 ```
 
 ```{eval-rst}
-.. autoclass:: PipelineActivationLiveness
+.. autoclass:: torch.distributed.pipelining.schedules.PipelineActivationLiveness
   :members:
 ```
 
