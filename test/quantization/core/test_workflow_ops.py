@@ -1100,6 +1100,24 @@ class TestFakeQuantizeOps(TestCase):
 
 
 class TestFusedObsFakeQuant(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_fused_obs_fake_quant_empty_flags(self) -> None:
+        # An empty observer_on / fake_quant_on flag tensor must be rejected on
+        # the host instead of dereferencing a null data_ptr on device (gh-189671).
+        device = "cuda"
+        x = torch.ones(2, 3, dtype=torch.bfloat16, device=device)
+        empty = torch.empty(0, dtype=torch.int64, device=device)
+        one = torch.ones(1, dtype=torch.int64, device=device)
+        running_min = torch.zeros(1, dtype=torch.bfloat16, device=device)
+        running_max = torch.zeros(1, dtype=torch.bfloat16, device=device)
+        scale = torch.ones(1, dtype=torch.float32, device=device)
+        zero_point = torch.zeros(1, dtype=torch.int32, device=device)
+        for observer_on, fake_quant_on in ((empty, one), (one, empty)):
+            with self.assertRaisesRegex(RuntimeError, "must each have exactly one element"):
+                torch.fused_moving_avg_obs_fake_quant(
+                    x, observer_on, fake_quant_on, running_min, running_max,
+                    scale, zero_point, 0.0, 0, 255, 0, False, False)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']),
            symmetric_quant=st.booleans(), use_bool=st.booleans())
