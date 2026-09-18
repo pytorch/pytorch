@@ -151,6 +151,66 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return fsdp_param_group
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_output_storage(self):
+        orig_params = self._init_params(
+            [torch.Size([4, 2]), torch.Size([3]), torch.Size([2])]
+        )
+        param_group = self._init_fsdp_param_group(orig_params, True)
+        borrowed_params = param_group.fsdp_params[:2]
+        numels = [
+            param.all_gather_inputs[0].numel() * self.world_size
+            for param in borrowed_params
+        ]
+        buffer = torch.full((sum(numels) + 2,), -1.0, device=self.device)
+        buffer_nbytes = buffer.untyped_storage().nbytes()
+        outputs = buffer[1:-1].split(numels)
+        for param, orig_param, output in zip(borrowed_params, orig_params, outputs):
+            output[: orig_param.numel()].copy_(orig_param.detach().flatten())
+            param.set_all_gather_outputs([output], owns_storage=False)
+            param.init_unsharded_param()
+            self.assertEqual(param.unsharded_param, orig_param)
+        expected_buffer = buffer.clone()
+        for param, output in zip(borrowed_params, outputs):
+            unsharded_param = param.unsharded_param
+            unsharded_param.sum().backward()
+            grad = unsharded_param.grad
+            param.free_unsharded_param()
+            self.assertEqual(buffer.untyped_storage().nbytes(), buffer_nbytes)
+            param.alloc_all_gather_outputs()
+            self.assertEqual(buffer.untyped_storage().nbytes(), buffer_nbytes)
+            param.set_all_gather_outputs([output.view_as(output)], owns_storage=False)
+            param.init_unsharded_param()
+            self.assertIs(param.unsharded_param, unsharded_param)
+            self.assertIs(param.unsharded_param.grad, grad)
+            for replacement in (output.clone(), output.view(torch.int32)):
+                with self.assertRaisesRegex(
+                    NotImplementedError, "Changing initialized"
+                ):
+                    param.set_all_gather_outputs([replacement], owns_storage=False)
+        self.assertEqual(buffer, expected_buffer)
+
+        owned_param = param_group.fsdp_params[-1]
+        owned_param.init_all_gather_outputs(
+            [owned_param.all_gather_inputs[0].numel()],
+            [torch.float32],
+            self.world_size,
+            self.device,
+        )
+        owned_param.init_unsharded_param()
+        output = owned_param.all_gather_outputs[0]
+        owned_param.free_unsharded_param()
+        self.assertEqual(output.untyped_storage().nbytes(), 0)
+        owned_param.alloc_all_gather_outputs()
+        self.assertEqual(
+            output.untyped_storage().nbytes(), output.numel() * output.element_size()
+        )
+        with unittest.mock.patch.object(
+            owned_param._sharded_local_tensor, "fsdp_post_all_gather", create=True
+        ):
+            with self.assertRaisesRegex(NotImplementedError, "tensor all-gather"):
+                owned_param.set_all_gather_outputs([output], owns_storage=False)
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_fp32(self):
         param_sizes = self._get_param_sizes()
         default_stream = device_module.current_stream()

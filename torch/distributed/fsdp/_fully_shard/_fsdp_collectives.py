@@ -26,6 +26,7 @@ class AllGatherInput(NamedTuple):
     param_all_gather_input_dtypes: list[list[torch.dtype]]
     param_all_gather_input_numels: list[list[int]]
     all_gather_input_split_sizes: list[int]
+    output_metadata: object | None = None
 
 
 class AllGatherResult(NamedTuple):
@@ -39,6 +40,7 @@ class AllGatherResult(NamedTuple):
     # 1D flattened version of `param_all_gather_input_numels` saved to avoid
     # CPU overhead from recomputing
     all_gather_input_split_sizes: list[int]
+    output_metadata: object | None = None
 
 
 lib = torch.library.Library("fsdp", "FRAGMENT")
@@ -403,6 +405,7 @@ def foreach_all_gather(
             all_gather_input.param_all_gather_input_dtypes,
             all_gather_input.param_all_gather_input_numels,
             all_gather_input.all_gather_input_split_sizes,
+            all_gather_input.output_metadata,
         )
 
 
@@ -468,6 +471,7 @@ def _default_all_gather_output_fn(
         param_all_gather_input_dtypes,
         param_all_gather_input_numels,
         all_gather_input_split_sizes,
+        _,
     ) = all_gather_result
     device = all_gather_output.device
     split_with_sizes_out: list[torch.Tensor] = []

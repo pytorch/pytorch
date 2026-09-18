@@ -30,6 +30,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_input_fn,
+    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     foreach_all_gather,
     foreach_reduce,
@@ -434,9 +435,12 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_all_gather_input_fn(self):
-        self.run_subtests({"recurse": [False, True]}, self._test_all_gather_input_fn)
+        self.run_subtests(
+            {"recurse": [False, True], "use_output_metadata": [False, True]},
+            self._test_all_gather_input_fn,
+        )
 
-    def _test_all_gather_input_fn(self, recurse: bool):
+    def _test_all_gather_input_fn(self, recurse: bool, use_output_metadata: bool):
         torch.manual_seed(42)
         model = MLP(16)
         ref_model = copy.deepcopy(model)
@@ -446,21 +450,40 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         calls = defaultdict(int)
+        pending_metadata = {}
 
         def all_gather_input_fn(fsdp_params, group, device, all_gather_comm):
             self.assertFalse(torch.is_grad_enabled())
             calls[tuple(fsdp_params)] += 1
-            return _default_all_gather_input_fn(
+            inputs = _default_all_gather_input_fn(
                 fsdp_params, group, device, all_gather_comm
             )
+            self.assertIsNone(inputs.output_metadata)
+            metadata = object() if use_output_metadata else None
+            pending_metadata[tuple(fsdp_params)] = metadata
+            return inputs._replace(output_metadata=metadata)
+
+        def all_gather_output_fn(fsdp_params, result, world_size):
+            self.assertIs(
+                result.output_metadata, pending_metadata.pop(tuple(fsdp_params))
+            )
+            _default_all_gather_output_fn(fsdp_params, result, world_size)
 
         model.set_all_gather_input_fn(all_gather_input_fn, recurse=recurse)
+        model.set_all_gather_output_fn(all_gather_output_fn, recurse=recurse)
         hooked_modules = [model] + ([model.in_proj] if recurse else [])
         expected_params = [
             tuple(param_group.fsdp_params)
             for module in hooked_modules
             for param_group in module._get_fsdp_state()._fsdp_param_groups
         ]
+        handles = [module.unshard(async_op=True) for module in hooked_modules]
+        self.assertEqual(len(pending_metadata), len(expected_params))
+        for handle in reversed(handles):
+            handle.wait()
+        self.assertFalse(pending_metadata)
+        for module in hooked_modules:
+            module.reshard()
         torch.manual_seed(42 + self.rank + 1)
         for iter_idx in range(3):
             inp = torch.randn((4, 16), device=device_type.type)
@@ -478,7 +501,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 self.assertEqual(
                     ref_param.grad.to_local(), param.grad.to_local(), atol=0, rtol=0
                 )
-            self.assertEqual(calls, dict.fromkeys(expected_params, 2 * (iter_idx + 1)))
+            self.assertEqual(calls, dict.fromkeys(expected_params, 2 * iter_idx + 3))
+            self.assertFalse(pending_metadata)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(

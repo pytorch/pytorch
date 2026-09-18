@@ -205,6 +205,7 @@ class FSDPParam:
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
+    _owns_all_gather_output_storage: bool
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
@@ -236,6 +237,7 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
+        self._owns_all_gather_output_storage = True
         self.unsharded_accumulated_grad = None
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
@@ -872,10 +874,43 @@ class FSDPParam:
     ):
         if len(self.all_gather_outputs) > 0:
             return  # already initialized
-        self.all_gather_outputs = [
+        outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
         ]
+        self.set_all_gather_outputs(outputs, owns_storage=True)
+
+    def set_all_gather_outputs(
+        self, outputs: list[torch.Tensor], *, owns_storage: bool
+    ) -> None:
+        """Install outputs whose storage is managed by FSDP or their caller.
+
+        FSDP-owned outputs must have independently resizable storage.
+        Caller-owned storage must remain valid while parameters or saved autograd
+        views use it. Once the unsharded parameter is initialized, the output
+        storage, dtype, shape, stride, offset, and ownership must remain unchanged.
+        """
+        if not owns_storage and hasattr(
+            self._sharded_local_tensor, "fsdp_post_all_gather"
+        ):
+            raise NotImplementedError(
+                "Caller-owned all-gather output storage is not supported with "
+                "tensor all-gather extensions"
+            )
+        if hasattr(self, "_unsharded_param") and (
+            owns_storage != self._owns_all_gather_output_storage
+            or len(outputs) != len(self.all_gather_outputs)
+            or any(
+                output.dtype != current.dtype or not output.is_set_to(current)
+                for output, current in zip(outputs, self.all_gather_outputs)
+            )
+        ):
+            raise NotImplementedError(
+                "Changing initialized all-gather output storage or ownership is "
+                "not supported because autograd may retain views of the storage"
+            )
+        self.all_gather_outputs = outputs
+        self._owns_all_gather_output_storage = owns_storage
 
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):  # after the 1st all-gather
@@ -918,7 +953,7 @@ class FSDPParam:
             unsharded_tensor,
             self._orig_size,
             self._contiguous_orig_stride,
-            storage_offset=0,
+            storage_offset=unsharded_tensor.storage_offset(),
         )
         if self.is_spmd_types:
             pass  # keep as plain tensor; spmd_types restored before module compute
@@ -1085,10 +1120,14 @@ class FSDPParam:
             self.unsharded_param.grad = None
 
     def alloc_all_gather_outputs(self) -> None:
+        if not self._owns_all_gather_output_storage:
+            return
         for tensor in self.all_gather_outputs:
             alloc_storage(tensor)
 
     def free_all_gather_outputs(self) -> None:
+        if not self._owns_all_gather_output_storage:
+            return
         for tensor in self.all_gather_outputs:
             free_storage(tensor)
 
