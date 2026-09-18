@@ -21,6 +21,7 @@ from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
+    _default_all_gather_input_fn,
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     AllGather,
@@ -211,6 +212,7 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
+        self._all_gather_input_fn: Callable = _default_all_gather_input_fn
         self._all_gather_output_fn: Callable = _default_all_gather_output_fn
         self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._param_group_index: int = 0
@@ -425,6 +427,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                all_gather_input_fn=self._all_gather_input_fn,
             )
 
     @_disable_functorch_if_active
