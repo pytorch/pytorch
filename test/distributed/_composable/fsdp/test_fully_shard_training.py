@@ -42,7 +42,6 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
-    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
@@ -739,7 +738,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         "Sleep is not supported on this device",
     )
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
@@ -2612,6 +2610,18 @@ class TestFullyShardShareCommContext(FSDPTest):
         self.assertEqual(len(reduce_scatter_streams), 1)
         self.assertEqual(len(shared_comm_ctx._last_post_reduce_events), 0)
         check_sharded_parity(self, ref_model, model)
+
+
+class TestFullyShardInference(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_inference(self):
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, shard_placement_fn=lambda _: Shard(1))
+        with torch.inference_mode():
+            model(torch.ones((2, 8), device=device_type))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
