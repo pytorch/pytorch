@@ -3955,11 +3955,7 @@ from user code:
         self.assertIn("Add a ModelInput", lines[-1])
 
     def test_no_match_report_resolves_forward_only_for_a_supplied_scope(self):
-        # An in-process capture keeps the CAPTURED scope, whose hint never names
-        # forward, so the report has no reason to resolve it -- and resolving it
-        # runs user code (get_traced_fn formats a forward it refuses). Since the
-        # CAPTURED wording reads the same whether or not the resolve ran, the
-        # gate is pinned by counting resolves rather than by the wording.
+        # A count, not the wording: the CAPTURED hint never names forward.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(
             HermeticModule(),
@@ -3969,31 +3965,55 @@ from user code:
         )
         x = torch.randn(3, 3)
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        self.assertIs(
+            model.forward.compiled_results[0]._guard_scope, _GuardScope.CAPTURED
+        )
         resolve = patch(
             "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
         )
         g = globals()
         saved = g.pop("AOT_HERMETIC_WEIGHT")
         try:
-            with resolve as resolved, self.assertRaises(RuntimeError) as ctx:
+            with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
                 model(x)
             message = str(ctx.exception)
         finally:
             g["AOT_HERMETIC_WEIGHT"] = saved
-        resolved.assert_not_called()
+        resolves.assert_not_called()
         self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
-        self.assertIn("the module the compiled function was traced in", message)
+        hints = [line for line in message.splitlines() if line.startswith("For [")]
+        self.assertEqual(len(hints), 1, message)
+        self.assertTrue(hints[0].startswith("For [0]: "), hints[0])
+        self.assertIn("the module the compiled function was traced in", hints[0])
         self.assertNotIn("instance's forward", message)
         self.assertIn("Add a ModelInput", message)
 
+    def test_no_match_report_resolves_no_forward_for_a_reconstructed_scope(self):
+        # The gate is SUPPLIED, not "not CAPTURED": a count again, since the
+        # RECONSTRUCTED hint ignores forward too.
+        x = torch.randn(4, 8)
+        data = self._two_input_global_guard_artifact(x)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            loaded = AOTCompiledModel.deserialize(
+                self._unresolvable_forward_module(), data
+            )
+        results = loaded.compiled_results[:1]
+        self.assertIs(results[0]._guard_scope, _GuardScope.RECONSTRUCTED)
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
+            AOTCompiledModel(loaded.model, results)(x)
+        resolves.assert_not_called()
+        hints = [
+            line for line in str(ctx.exception).splitlines() if line.startswith("For [")
+        ]
+        self.assertEqual(len(hints), 1, hints)
+        self.assertTrue(hints[0].startswith("For [0]: "), hints[0])
+        self.assertIn("missing from the scope rebuilt from the artifact", hints[0])
+
     def test_no_match_report_resolves_forward_once_past_a_resolve_that_raises(self):
-        # Two SUPPLIED results loaded without guard_globals=, so both hold this
-        # module's dict, on a RaisingReprModule whose forward is then rebound to
-        # a partial: get_traced_fn formats the forward it refuses into its
-        # error, and that repr raises the module's ValueError past what
-        # _resolve_guard_scope catches. The report marks the attempt before it
-        # tries, so [1] does not re-run that user code for a second raise. Both
-        # entries read neutral whether it re-ran or not, so the count pins it.
+        # A count, not the wording: both entries read alike whether [1] re-ran.
         self._hide_leaked_dynamo_globals()
         x = torch.randn(3, 3)
         model = torch.compile(
@@ -6144,14 +6164,21 @@ from user code:
     def test_aot_compile_module_deserialize_refuses_a_targetless_dynamo_wrapper(
         self,
     ):
-        # error_on_graph_break, patch_dynamo_config, disable_nested_graph_breaks
-        # and override_cudagraphs bind wrap_dunder_call_ctx_manager's inner, which
-        # skips functools.wraps: no __wrapped__ to follow, so the hop stops and
-        # the reason names those decorators instead of "inner resolves to inner".
+        # error_on_graph_break, patch_dynamo_config, dont_skip_tracing,
+        # disable_nested_graph_breaks and override_cudagraphs bind
+        # wrap_dunder_call_ctx_manager's inner, which skips functools.wraps: no
+        # __wrapped__ to follow, so the hop stops and the reason names those
+        # decorators instead of "inner resolves to inner".
         mod = GlobalConfigModule()
         mod.forward = torch._dynamo.error_on_graph_break(True)(mod.forward)
         self.assertIs(mod.forward.__globals__, vars(torch._dynamo.external_utils))
         self.assertFalse(hasattr(mod.forward, "__wrapped__"))
+        # dont_skip_tracing is patch_dynamo_config underneath, so it binds that
+        # same wrapper: torch/export/_unlift.py already writes this shape.
+        dont_skip = torch._dynamo.dont_skip_tracing(GlobalConfigModule.forward)
+        self.assertEqual(dont_skip.__qualname__, mod.forward.__qualname__)
+        self.assertIs(dont_skip.__globals__, mod.forward.__globals__)
+        self.assertFalse(hasattr(dont_skip, "__wrapped__"))
         self._assert_forward_refused(
             mod,
             torch._dynamo.external_utils,
@@ -6160,9 +6187,9 @@ from user code:
             "torch._dynamo.external_utils function with no __wrapped__ to see "
             "through to the forward it wraps -- the wrapper "
             "torch._dynamo.error_on_graph_break, patch_dynamo_config, "
-            "disable_nested_graph_breaks and override_cudagraphs return skips "
-            "functools.wraps; bind the forward that decorator wrapped as "
-            "model.forward instead",
+            "dont_skip_tracing, disable_nested_graph_breaks and "
+            "override_cudagraphs return skips functools.wraps; bind the "
+            "forward that decorator wrapped as model.forward instead",
         )
 
     def test_aot_compile_module_deserialize_refuses_a_class_body_wrap_numpy_forward(
