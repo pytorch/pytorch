@@ -1058,37 +1058,37 @@ class TestSparse(TestSparseBase):
         self.assertEqual(expected_grad.to_dense(), x2.grad.to_dense())
         self.assertEqual(None, x1.grad)
 
+    @onlyOn(["cuda", "xpu"])
     @coalescedonoff
     @unittest.skipIf(not TEST_MULTIACCELERATOR, "multi-GPU not supported")
     @dtypes(torch.double, torch.cdouble)
     def test_Sparse_to_Sparse_copy_multi_gpu(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
-        device_type = torch.device(device).type
         sparse_dims = 3
         nnz = 10
         sizes = [2, 3, 4, 5]  # hybrid sparse
         x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes, dtype, device, coalesced)
         x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes, dtype, device, coalesced)
-        x1 = x1.to(f"{device_type}:0")
+        x1 = x1.to(f"{device}:0")
 
         def test_cross_device(x1, x2):
             x1_device = x1.device
             x1.copy_(x2)
-            self.assertEqual(x2.to(f"{device_type}:0").to_dense(), x1.to_dense())
+            self.assertEqual(x2.to(f"{device}:0").to_dense(), x1.to_dense())
             self.assertEqual(x1_device, x1.device)
 
-        test_cross_device(x1, x2.to(f"{device_type}:1"))  # test across gpu devices
+        test_cross_device(x1, x2.to(f"{device}:1"))  # test across gpu devices
         test_cross_device(x1, x2.to('cpu'))  # test between cpu and gpu
 
         # test autograd
-        x2 = x2.to(f"{device_type}:1")
+        x2 = x2.to(f"{device}:1")
         x2.requires_grad_(True)
         x1.copy_(x2)
         y = x1 * 2
-        x2_clone = x2.clone().to(f"{device_type}:0")
+        x2_clone = x2.clone().to(f"{device}:0")
         y.backward(x2_clone)
         expected_grad = x2_clone * 2
-        self.assertEqual(expected_grad.to_dense(), x2.grad.to(f"{device_type}:0").to_dense())
+        self.assertEqual(expected_grad.to_dense(), x2.grad.to(f"{device}:0").to_dense())
         self.assertEqual(None, x1.grad)
 
     @onlyOn(["cuda", "xpu"])
