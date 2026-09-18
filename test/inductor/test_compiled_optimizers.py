@@ -44,6 +44,7 @@ from torch.optim.lr_scheduler import (
     MultiplicativeLR,
     MultiStepLR,
     OneCycleLR,
+    PlateauLR,
     PolynomialLR,
     ReduceLROnPlateau,
     SequentialLR,
@@ -166,6 +167,7 @@ LR_SCHEDULER_TO_KWARGS = {
     },
     ConstantLR: {"factor": 0.001},
     LinearLR: {},
+    PlateauLR: {"factor": 0.99, "patience": 0},
     ReduceLROnPlateau: {"factor": 0.99, "patience": 1},
     PolynomialLR: {},
 }
@@ -363,10 +365,7 @@ except (unittest.SkipTest, ImportError) as e:
 
 
 def call_scheduler(scheduler):
-    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-        scheduler.step(1.0)  # we won't reduce the metric over two iters anyway
-    else:
-        scheduler.step()
+    scheduler.step(metrics=1.0)
 
 
 def compile_opt(opt_compiled, closure=None, fullgraph=True):
