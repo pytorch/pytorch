@@ -127,7 +127,11 @@ class TCPMemory:
         offset, length = self._range(offset, length)
         return TCPMutableMemoryView(self, offset, length)
 
-    def to_remote_buffer(self) -> TCPRemoteBuffer:
+    def to_remote_buffer(self, *, timeout: float | None = None) -> TCPRemoteBuffer:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         return self._remote
 
     def reused_registration(self) -> bool:
@@ -218,7 +222,11 @@ class TCPTransport(Transport):
     def supported() -> bool:
         return True
 
-    def bind(self) -> bytes:
+    def bind(self, *, timeout: float | None = None) -> bytes:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         with self._state_lock:
             if self._closed.is_set():
                 raise RuntimeError("transport is closed")
@@ -244,7 +252,11 @@ class TCPTransport(Transport):
         ).start()
         return url
 
-    def connect(self, peer_url: bytes) -> int:
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         host, port, flow_count, remote_id = self._parse_url(peer_url)
         with self._state_lock:
             if self._closed.is_set():
@@ -272,7 +284,13 @@ class TCPTransport(Transport):
     def connected(self) -> bool:
         return self._connected.is_set() and not self._closed.is_set()
 
-    def register_memory(self, tensor: torch.Tensor) -> TCPMemory:
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> TCPMemory:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         if not isinstance(tensor, torch.Tensor):
             raise TypeError("tensor must be a torch.Tensor")
         if not tensor.is_contiguous():
@@ -303,7 +321,12 @@ class TCPTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         local = self._local_view(local_buffer, mutable=False)
         remote = self._remote_buffer(remote_buffer)
         if local.size() > remote.length:
@@ -345,7 +368,12 @@ class TCPTransport(Transport):
         remote_buffer: RemoteBuffer,
         *,
         async_op: bool = False,
+        timeout: float | None = None,
     ) -> int | Work:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         local = cast(TCPMutableMemoryView, self._local_view(local_buffer, mutable=True))
         remote = self._remote_buffer(remote_buffer)
         if local.size() > remote.length:
@@ -376,7 +404,11 @@ class TCPTransport(Transport):
             raise
         return 0
 
-    def close(self) -> None:
+    def close(self, *, timeout: float | None = None) -> None:
+        if timeout is not None:
+            raise NotImplementedError(
+                "per-call timeout is not supported by this prototype"
+            )
         self._close_work()
         if self._closed.is_set():
             return
