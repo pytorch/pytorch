@@ -550,6 +550,14 @@ inline void validate_sdpa_input(
       query_.dim() >= 2 && key.dim() >= 2 && value.dim() >= 2,
       "Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: ",
       query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
+  // Nested tensors carry an irregular sequence dimension, so the sizes are not
+  // comparable this way for them.
+  if (!key.is_nested() && !value.is_nested()) {
+    TORCH_CHECK(
+        key.sym_size(-2) == value.sym_size(-2),
+        "Expected key and value to have the same sequence length, but got key.size(-2): ",
+        key.sym_size(-2), " and value.size(-2): ", value.sym_size(-2), " instead.");
+  }
   if (attn_mask_.has_value()){
     TORCH_CHECK(
       !is_causal,
@@ -999,6 +1007,8 @@ _scaled_dot_product_flash_attention_cpu(
     "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
   TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
     "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
+  TORCH_CHECK(key.size(2) == value.size(2),
+    "scaled_dot_product_attention_flash_attention: K/V should have the same sequence length");
   TORCH_CHECK(!attn_mask.has_value() ||
           attn_mask.value().scalar_type() == at::kFloat ||
           dtype == attn_mask.value().scalar_type(),
