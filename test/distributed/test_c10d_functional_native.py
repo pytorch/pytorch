@@ -999,9 +999,8 @@ class CompileTestCPU(TestCase):
             for op in include_ops:
                 self.assertIn(op, code)
 
-        # AOTI uses the same configuration for both wrapper variants.
-        if not cpp_wrapper:
-            AOTIRunnerUtil.run(func, (arg,))
+        # Test aoti
+        AOTIRunnerUtil.run(func, (arg,))
         torch.cpu.synchronize()
 
     def test_inductor_all_reduce_cpu(self):
