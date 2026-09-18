@@ -406,6 +406,30 @@ For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineSched
 Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, and `ScheduleZBVZeroBubble`
 are subclasses of `PipelineScheduleMulti`.
 
+### Passing Stage and Microbatch Indices
+
+Manual pipeline stages can receive their execution indices as keyword arguments
+without storing schedule state on the stage. Enable
+`pass_stage_and_microbatch_indices` when constructing the schedule:
+
+```python
+schedule = ScheduleInterleaved1F1B(
+    stages,
+    n_microbatches,
+    pass_stage_and_microbatch_indices=True,
+)
+```
+
+Every built-in schedule forward then receives `stage_idx`, the global logical
+stage index, and `mb_idx`, the microbatch index within the current step. These
+names are reserved while the option is enabled. Dynamic shape-metadata
+inference uses the actual stage index and microbatch index zero because it runs
+with the first microbatch as its representative input.
+
+This option supports manually constructed `PipelineStage` instances. The
+indices are Python integers, so compiled stage code may specialize if it uses
+them in control flow or shape computation.
+
 ## Logging
 
 You can turn on additional logging using the `TORCH_LOGS` environment variable from [torch.\_logging](https://pytorch.org/docs/main/logging.html#module-torch._logging):

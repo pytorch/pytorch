@@ -12,12 +12,7 @@ from .schedules import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from .stage import (
-    build_stage,
-    PIPELINE_MICROBATCH_INDEX_KEY,
-    PIPELINE_STAGE_INDEX_KEY,
-    PipelineStage,
-)
+from .stage import build_stage, PipelineStage
 
 
 __all__ = [
@@ -26,8 +21,6 @@ __all__ = [
     "pipe_split",
     "SplitPoint",
     "pipeline",
-    "PIPELINE_MICROBATCH_INDEX_KEY",
-    "PIPELINE_STAGE_INDEX_KEY",
     "PipelineStage",
     "PipelineActivationLiveness",
     "build_stage",
