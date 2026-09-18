@@ -44,6 +44,8 @@ class TestTopologicalSort(CPythonTestCase):
         for group in expected:
             tsgroup = {next(it) for element in group}
             self.assertEqual(set(group), tsgroup)
+        # Exhaust the generator so Dynamo does not need to close a suspended yield from.
+        self.assertEqual(list(it), [])
 
     def _assert_cycle(self, graph, cycle):
         ts = graphlib.TopologicalSorter()
