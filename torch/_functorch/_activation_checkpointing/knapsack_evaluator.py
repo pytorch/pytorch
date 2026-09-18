@@ -54,7 +54,25 @@ class KnapsackEvaluator:
             (peak_memory_after_forward_pass, "Initial Peak/Current Memory")
         ]
         already_computed = set()
-        sorted_nodes = list(reversed(list(nx.topological_sort(node_graph))))
+
+        # Tie-break topological ordering using the original FX node order so the
+        # backward-memory simulation does not depend on NetworkX insertion order.
+        # FX order is topological for this graph, so reversing it gives the
+        # reverse-FX order used by the backward simulation.
+        original_order = {
+            name: i
+            for i, name in enumerate(self._graph_info_provider.graph_nodes_in_order)
+        }
+        sorted_nodes = list(
+            reversed(
+                list(
+                    nx.lexicographical_topological_sort(
+                        node_graph,
+                        key=lambda n: original_order[n],
+                    )
+                )
+            )
+        )
         dependencies_computed = set()
 
         for node in sorted_nodes:
