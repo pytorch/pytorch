@@ -20,7 +20,6 @@ from unittest import mock
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-
 import torch
 import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
@@ -691,13 +690,13 @@ class ElasticLaunchTest(TestCase):
             self.assertTrue(f"[rank{i}]: creating " in captured_out.getvalue())
 
 
-class ElasticLaunchTestCUDA(TestCase):
+class ElasticLaunchVirtualRankTest(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    # ElasticLaunchTestCUDA uses instantiate_device_type_tests(only_for="cuda"),
+    # ElasticLaunchVirtualRankTest uses instantiate_device_type_tests(only_for="cuda"),
     # but this test launches `torchrun --nproc-per-node=2` which needs 2 GPUs.
     # That process spawning happens via torchrun, not MultiProcessTestCase, so
     # the conftest heuristic (see test/conftest.py) can't detect it; mark it
@@ -792,7 +791,7 @@ class ElasticLaunchTestCUDA(TestCase):
 
 
 instantiate_device_type_tests(
-    ElasticLaunchTestCUDA,
+    ElasticLaunchVirtualRankTest,
     globals(),
     only_for="cuda",
 )
