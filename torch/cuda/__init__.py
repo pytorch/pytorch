@@ -143,9 +143,10 @@ try:
             except ModuleNotFoundError as err:
                 _AMDSMI_ERR = err
                 raise
-            except (KeyError, OSError) as err:
+            except (AttributeError, KeyError, OSError) as err:
                 # The amdsmi python package is installed but its native library
-                # (libamd_smi.so) could not be discovered/loaded -- e.g. TheRock
+                # (libamd_smi.so) could not be discovered/loaded or has an
+                # incompatible wrapper ABI -- e.g. TheRock
                 # ROCm wheels lay amdsmi out so that its own find_smi_library()
                 # misses the versioned libamd_smi.so.* and raises KeyError. Treat
                 # this like a missing optional dependency (degrade to
