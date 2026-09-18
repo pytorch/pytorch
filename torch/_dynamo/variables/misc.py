@@ -731,10 +731,6 @@ class ExceptionVariable(VariableTracker):
             return variables.ConstantVariable.create(None)
         elif name == "__delattr__":
             attr = args[0].as_python_constant()
-            getset = self.lookup_tp_getset_member(attr)
-            if getset is not None:
-                return getset.setter(self, tx, None)
-
             se = tx.output.side_effects
             if se.has_pending_mutation_of_attr(self, attr):
                 value = se.load_attr(self, attr, deleted_ok=True)
@@ -884,9 +880,13 @@ class ExceptionVariable(VariableTracker):
     ) -> VariableTracker:
         [note] = args
         if not issubclass(note.python_type(), str):
-            raise_type_error(
-                tx, f"note must be a str, not '{note.python_type_name()}'"
-            )
+            if sys.version_info >= (3, 14):
+                msg = (
+                    f"add_note() argument must be str, not {note.python_type_name()}"
+                )
+            else:
+                msg = f"note must be a str, not '{note.python_type_name()}'"
+            raise_type_error(tx, msg)
 
         se = tx.output.side_effects
         notes: VariableTracker | None = None

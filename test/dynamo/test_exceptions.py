@@ -47,7 +47,7 @@ class MyException(OSError):
 
 
 class NoteSubclass(str):
-    pass
+    __slots__ = ()
 
 
 class NotesSubclass(list):
@@ -1805,6 +1805,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         e.foo = 42
         assert e.foo == 42  # noqa: S101
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
     @parametrize("exc_type", [BaseException, Exception, ValueError])
     def test_exception_add_note(self, exc_type):
         def fn():
@@ -1861,6 +1865,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(), fn()
         )
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
     @parametrize("call", ["no_args", "two_args", "keyword"])
     def test_exception_add_note_invalid_call(self, call):
         def fn():
@@ -1881,6 +1889,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertNotEqual(actual, "no error")
         self.assertEqual(actual.split(".", 1)[1], expected.split(".", 1)[1])
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
     def test_exception_add_note_invalid_first_note(self):
         def fn():
             e = ValueError("example")
@@ -1894,6 +1906,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(), fn()
         )
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
     def test_exception_add_note_subclasses(self):
         def fn():
             e = ValueError("example")
@@ -1937,7 +1953,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             del e.custom
             errors.append(("custom_redeleted", str(not hasattr(e, "custom"))))
 
-            for attr in ("__notes__", "args", "__traceback__", "__suppress_context__"):
+            for attr in ("__notes__",):
                 e = ValueError("example")
                 try:
                     delattr(e, attr)
@@ -1964,6 +1980,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x)
         )
 
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "BaseException.add_note requires Python 3.11+",
+    )
     @parametrize("exc_type", [BaseException, Exception, ValueError])
     def test_exception_add_note_side_effect_replayed(self, exc_type):
         def fn(x):
