@@ -247,9 +247,9 @@ def pad_tensor(
     # guard_or_false creating a guard that concretizes symbolic pad sizes
     # during make_fx tracing.
     if isinstance(pad_size, int):
-        # Fast path: avoids _are_we_tracing() which is costly at compile
-        # time due to multiple C++ dispatch mode checks.
-        if pad_size == 0:
+        # Fast path: avoids guard_or_false for concrete values. During tracing,
+        # still emit the no-op pad to preserve SPMD graph structure.
+        if pad_size == 0 and not _are_we_tracing():
             return tensor
     elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor
@@ -277,9 +277,9 @@ def unpad_tensor(
     # guard_or_false creating a guard that concretizes symbolic pad sizes
     # during make_fx tracing.
     if isinstance(pad_size, int):
-        # Fast path: avoids _are_we_tracing() which is costly at compile
-        # time due to multiple C++ dispatch mode checks.
-        if pad_size == 0:
+        # Fast path: avoids guard_or_false for concrete values. During tracing,
+        # still emit the no-op narrow to preserve SPMD graph structure.
+        if pad_size == 0 and not _are_we_tracing():
             return tensor
     elif not _are_we_tracing() and guard_or_false(pad_size == 0):
         return tensor

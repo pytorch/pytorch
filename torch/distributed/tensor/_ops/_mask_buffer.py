@@ -38,7 +38,5 @@ class MaskBuffer:
         # For gather, the mask has the same dimension as the output tensor, whereas
         # the output of the embedding op has an additional dimension compare to the input,
         # hence the output masking logic below having two different cases.
-        if tensor.ndim == self.data.ndim:
-            tensor[self.data] = 0.0
-        else:
-            tensor[self.data, :] = 0.0
+        mask = self.data if tensor.ndim == self.data.ndim else self.data.unsqueeze(-1)
+        tensor.masked_fill_(mask, 0.0)

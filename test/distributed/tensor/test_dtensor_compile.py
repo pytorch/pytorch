@@ -2734,6 +2734,36 @@ class outer_fn(torch.nn.Module):
             "Placeholder dim should be symbolic",
         )
 
+    def test_noop_pad_unpad_preserved_during_tracing(self):
+        from torch.distributed.tensor._collective_utils import pad_tensor, unpad_tensor
+
+        def has_op(gm, op):
+            return any(
+                node.op == "call_function" and node.target == op
+                for node in gm.graph.nodes
+            )
+
+        x = torch.randn(4, 8)
+        pad_op = torch.ops.aten.constant_pad_nd.default
+        slice_op = torch.ops.aten.slice.Tensor
+
+        pad_graph = make_fx(lambda t: pad_tensor(t, 1, 0))(x)
+        self.assertTrue(has_op(pad_graph, pad_op))
+
+        unpad_graph = make_fx(lambda t: unpad_tensor(t, 1, 0))(x)
+        self.assertTrue(has_op(unpad_graph, slice_op))
+
+        maybe_unpad_graph = make_fx(
+            lambda t: Shard._maybe_unpad_tensor_with_sizes(1, t, [0, 1], 0, False)
+        )(x)
+        self.assertTrue(has_op(maybe_unpad_graph, slice_op))
+
+        strided_shard = _StridedShard(0, split_factor=2)
+        strided_pad_graph = make_fx(
+            lambda t: strided_shard._pad_for_new_shard_dim([10, 8], t, 4, 0, 1, 2)
+        )(torch.randn(4, 8))
+        self.assertTrue(has_op(strided_pad_graph, pad_op))
+
     def test_make_fx_tp_embedding_no_shadow_nodes(self):
         """make_fx through a TP-sharded embedding must not produce dead shadow nodes.
 
