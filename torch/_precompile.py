@@ -85,44 +85,42 @@ it.
 # 3. PYTHON control flow (and, by default, shapes) is specialized to the example. A
 #    non-strict trace follows the single path taken for the example inputs: Python
 #    ``if``/``for`` over a static (Python ``int``) value and shape-dependent branching on
-#    a static size are resolved at trace time and baked. A control-flow HOP is the
-#    exception: ``torch.cond`` / ``torch.while_loop`` is REFUSED outright rather than
-#    specialized, because neither backend can lower the captured subgraph it traces into.
-#    Shapes are static BY DEFAULT (capture runs make_fx in its "fake" mode, so each size is
-#    baked as a concrete constant). What is NOT silently baked is a data-dependent op --
+#    a static size are resolved at trace time and baked. Shapes are static BY DEFAULT
+#    (capture runs make_fx in its "fake" mode, so each size is baked as a concrete
+#    constant). What is NOT silently baked is a data-dependent op --
 #    ``.item()``, ``.nonzero()``, a Python ``if`` over a TENSOR VALUE: under fake tracing
 #    the value is unknown. (A ``for`` over a tensor is not data-dependent -- it iterates
 #    dim 0 at its static size, so it unrolls and bakes like the static-``int`` case above.)
-#    A STATIC capture REFUSES such a data-dependent op: the fake trace raises
-#    DataDependentOutputException or DynamicOutputShapeException, surfaced as a
-#    PrecompileError. The op need not be in ``fn``'s own code -- in ``train()`` mode
-#    ``nn.BatchNorm*(momentum=None)`` reads ``float(num_batches_tracked)``, so the refusal
-#    names the underlying ATen op. What a real (non-fake) trace did with these was not one
-#    thing: it RAISED on ``.item()`` and on a branch over a tensor value, so for those the
-#    refusal is only an error-quality win; it CAPTURED ``.nonzero()`` / masked_select into
-#    a graph whose output size varies with the data, so refusing that one is a deliberate
-#    narrowing of the STATIC path. It has to be: minting a size the fake kernel cannot know
+#    A STATIC capture cannot record such a data-dependent op: the fake trace FAILS on it,
+#    with DataDependentOutputException or DynamicOutputShapeException. The op need not be in
+#    ``fn``'s own code -- in ``train()`` mode ``nn.BatchNorm*(momentum=None)`` reads
+#    ``float(num_batches_tracked)``, so the failure comes from an op inside a module rather
+#    than from a line of ``fn``. What a real (non-fake) trace did with these was not one
+#    thing: it RAISED on ``.item()`` and on a branch over a tensor value, so for those
+#    nothing is lost; it CAPTURED ``.nonzero()`` / masked_select into a graph whose output
+#    size varies with the data, so failing on that one is a deliberate narrowing of the
+#    STATIC path. It has to be: minting a size the fake kernel cannot know
 #    needs a ShapeEnv, which a static capture deliberately does not have. An UNBACKED
 #    capture (mark_unbacked, below) is the only path with a ShapeEnv, so it can instead
 #    CAPTURE ``.item()`` as an unbacked value -- and likewise a ``.nonzero()``-sized
 #    intermediate, which captures and serves at any runtime size -- and fails if the
 #    computation must GUARD on one, or if the op is one no ShapeEnv can fake at all (e.g.
-#    ``aten.equal``), which BOTH paths refuse.
+#    ``aten.equal``), which BOTH paths fail on.
 #    Tracing on fake tensors also needs a meta/fake kernel for every op ``fn`` calls: an
 #    op without one (a custom op missing ``torch.library.register_fake``, but also a
 #    built-in one -- capture turns FakeTensorMode's unsafe fallback OFF, so no op is ever
-#    run for real on zero-filled substitutes) is refused with a PrecompileError, UNLESS
+#    run for real on zero-filled substitutes) FAILS the trace, UNLESS
 #    one can be synthesized for it -- a ``torch.library.custom_op`` tagged
 #    ``torch.Tag.inplace`` or ``torch.Tag.out``, or one that only mutates its arguments and
 #    returns nothing, gets a trivial fake impl and captures without a ``register_fake``, so
-#    declare the mutation (``mutates_args``) and the tags accurately. Also refused
-#    is a ``fn`` that reads a tensor's DATA -- ``.data_ptr()``, or a NumPy conversion
-#    (``.numpy()``, ``np.asarray(t)``, ``t.__array__()``) -- since a fake tensor has no
-#    real memory behind it, where a real trace would have run the kernel. Fake tracing also
+#    declare the mutation (``mutates_args``) and the tags accurately. A ``fn`` that reads a
+#    tensor's DATA -- ``.data_ptr()``, or a NumPy conversion
+#    (``.numpy()``, ``np.asarray(t)``, ``t.__array__()``) -- fails too, since a fake tensor
+#    has no real memory behind it, where a real trace would have run the kernel. Fake tracing also
 #    constrains the example INPUTS themselves: every example tensor (user input, param or
 #    buffer) must be representable as a fake tensor, so one the meta converter cannot
 #    represent -- a quantized tensor, a lazy-device tensor, a legacy batched tensor, a
-#    view out of a sparse tensor -- is refused at capture. A real trace accepted a view out
+#    view out of a sparse tensor -- fails at capture. A real trace accepted a view out
 #    of a sparse tensor; it did NOT accept a quantized input, it crashed on one with a raw
 #    NotImplementedError out of make_fx's own placeholder fakeification. Three kinds of
 #    input are refused for the opposite reason -- fakeification SUCCEEDS but silently drops
@@ -134,7 +132,7 @@ it.
 #    narrowings of both paths, taken because the alternative is a silently wrong artifact
 #    on any backend, and they are applied to a traceable wrapper subclass's INNER tensors
 #    too (a strided-looking wrapper over sparse data would otherwise bake that 0 nnz);
-#    ``fn`` calling ``.pin_memory()`` is refused as well, as an op with no fake
+#    ``fn`` calling ``.pin_memory()`` fails as well, as an op with no fake
 #    kernel. A NESTED tensor is refused too, on BOTH capture paths, but as a
 #    restriction rather than a claim about fakeification (the unbacked path's ShapeEnv
 #    could fakeify a jagged one; nothing downstream of the trace has a nested
@@ -142,8 +140,9 @@ it.
 #    crashed on it with a raw internal error.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
 #    Every refusal above rests on capture tracing under a fake mode IT built, so capture
-#    also refuses to run inside another trace: an ambient ``TracingContext.fake_mode`` (a
-#    torch.compile / export / AOTAutograd trace) outranks capture's own mode, and no foreign
+#    refuses to run inside another trace, on BOTH paths: an ambient fake mode (a
+#    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
+#    outranks capture's own, and no foreign
 #    mode passes ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
 #    namespace would be run for real again. A mode built under DEFAULT config (an
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a ``.data_ptr()``
@@ -278,7 +277,7 @@ from typing import Any, cast, NewType, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -338,18 +337,10 @@ class PrecompileError(RuntimeError):
 
     Raised when capture, lowering, ``load``, or a runtime call violates the precompile
     contract -- e.g. a tensor baked as a constant (invariant 1), an unsupported /
-    effectful op, a data-dependent op the fake-tensor capture cannot know (``.item()``,
-    ``.nonzero()``, a branch over a tensor value), an op with no meta/fake kernel and none
-    that can be synthesized (a ``torch.library.custom_op`` tagged ``torch.Tag.inplace`` /
-    ``torch.Tag.out``, or one that only mutates its arguments and returns nothing, gets a
-    trivial one, so it needs no ``register_fake``), a read of a traced tensor's data
-    (``.data_ptr()``, ``.numpy()`` / ``np.asarray()``), an
-    example input that cannot be represented as a fake tensor (a quantized tensor) or whose
-    metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
-    input, none of which capture supports on either path (invariant 3), a control-flow HOP
-    (``torch.cond`` / ``torch.while_loop``), whose captured subgraph neither backend can
-    lower, a capture attempted inside another trace (an ambient ``TracingContext``
-    fake mode, which does not carry capture's fallback-off setting), a non-tensor output the
+    effectful op, an example input whose metadata a fake tensor silently drops (a pinned,
+    mkldnn or sparse tensor), a nested example input, neither of which capture supports on
+    either path (invariant 3), a capture attempted inside another trace (invariant 3),
+    a non-tensor output the
     inductor backend cannot lower, or a runtime input whose shape or memory format differs
     from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -562,10 +553,7 @@ def _detect_memory_format(t: torch.Tensor) -> torch.memory_format:
 
 
 def _fakeify_with_unbacked(
-    pb_flat: list[Tensor],
-    user_flat: list[object],
-    marks: list[dict[int, _MarkSpec]],
-    labels: list[str],
+    pb_flat: list[Tensor], user_flat: list[object], marks: list[dict[int, _MarkSpec]]
 ) -> tuple[list[object], FakeTensorMode]:
     """Fakeify the flat capture inputs for an unbacked dynamic-shape capture.
 
@@ -574,7 +562,6 @@ def _fakeify_with_unbacked(
     graph that needs to guard on it fails at capture). Dims sharing a ``shape_id`` reuse
     one symbol; ``min``/``max`` add runtime asserts. Returns ``(flat_fake, fake_mode)``;
     the fake_mode (ShapeEnv) is threaded to the lowering via from_tracing_context.
-    ``labels`` (aligned to ``[*pb_flat, *user_flat]``) names an input in a refusal.
     """
     import torch._functorch.config as functorch_config
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -594,23 +581,15 @@ def _fakeify_with_unbacked(
         )
     # shape_id -> unbacked symint (a dynamic SymInt); untyped so grouped dims share one symbol.
     shared: dict[object, Any] = {}
-    user_labels = labels[len(pb_flat) :]
     with fake_mode:
-        fake_pb = [_fakeify_input(fake_mode, t, lbl) for t, lbl in zip(pb_flat, labels)]
+        fake_pb = [fake_mode.from_tensor(t, static_shapes=True) for t in pb_flat]
         fake_user: list[object] = []
-        for leaf, per, label in zip(user_flat, marks, user_labels):
+        for leaf, per in zip(user_flat, marks):
             if not isinstance(leaf, torch.Tensor):
                 fake_user.append(leaf)
             elif not per:
-                fake_user.append(_fakeify_input(fake_mode, leaf, label))
+                fake_user.append(fake_mode.from_tensor(leaf, static_shapes=True))
             else:
-                # Validate the marked leaf through the same helper -- the fake it returns
-                # is discarded, since the leaf is rebuilt at its unbacked sizes below --
-                # so an unfakeifiable input is named whether or not it is the marked one.
-                # Without this it escapes as a raw meta-kernel error (for a marked
-                # quantized input: "SymIntArrayRef expected to contain only concrete
-                # integers"), because the rebuild never consults the meta converter.
-                _fakeify_input(fake_mode, leaf, label)
                 sizes: list[Any] = []  # mix of static ints and unbacked SymInts
                 for i, s in enumerate(leaf.shape):
                     if i not in per:
@@ -654,38 +633,6 @@ def _fakeify_with_unbacked(
     return [*fake_pb, *fake_user], fake_mode
 
 
-def _fakeify_input(fake_mode: FakeTensorMode, t: Tensor, label: str) -> Tensor:
-    """from_tensor for one static example tensor, naming it if it cannot be fakeified.
-
-    ``label`` is one of ``_capture``'s ``input_labels`` ("parameter w", "buffer nt",
-    "user input 0"), so the refusal names what the caller has to change.
-
-    Shared by BOTH capture paths, so the same input is refused the same way whether or not
-    any dim is marked: the unbacked path fakeifies its params/buffers and its unmarked
-    inputs through this helper, and calls it on a MARKED leaf too (discarding the result)
-    to validate a leaf it then rebuilds at unbacked sizes.
-    An input the meta converter cannot represent -- a quantized tensor, a lazy-device
-    tensor, a legacy batched tensor or a view out of a sparse tensor (fake_tensor.py
-    raises this for the first, and meta_utils returns NotImplemented on the rest) --
-    cannot be traced on either path; this buys error quality, a PrecompileError that names
-    the input instead of a raw converter error. Narrow on purpose: any other failure in
-    from_tensor is an internal bug and must surface as itself. The inputs from_tensor
-    accepts but cannot faithfully REPRESENT (nested, mkldnn, sparse, pinned) are refused
-    before this, by ``_reject_unfakeifiable_input`` over every example input.
-    """
-    from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
-
-    try:
-        return fake_mode.from_tensor(t, static_shapes=True)
-    except UnsupportedFakeTensorException as e:
-        raise PrecompileError(
-            f"precompile: example {label} cannot be represented as a fake tensor, which "
-            "capture traces on. Make it a plain dense tensor (or a supported subclass) -- "
-            "on the model for a parameter/buffer, at the call site for a user input. "
-            f"Underlying: {(str(e).splitlines() or [''])[0]}"
-        ) from e
-
-
 def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     """Refuse an example tensor a fake tensor cannot faithfully stand in for.
 
@@ -702,7 +649,9 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     with 0 nnz, a pinned one comes back unpinned -- where the real-tensor trace this commit
     replaces baked the right thing. None of the three can be repaired on the fake side, so
     they are refused rather than left to bake a wrong artifact with nothing downstream able
-    to notice. The clause order is for diagnosis quality: mkldnn precedes the generic-layout
+    to notice. Running before the fake conversion is what makes the refusal possible at all:
+    once from_tensor has run there is no metadata left to test. The clause order is for
+    diagnosis quality: mkldnn precedes the generic-layout
     test so an mkldnn input gets the layout-conversion diagnosis rather than the nnz one, and
     the dispatched is_pinned() probe comes last.
     """
@@ -808,23 +757,6 @@ def _check_no_constant_tensors(gm: torch.fx.GraphModule) -> None:
         )
 
 
-def _control_flow_refusal(detail: str) -> PrecompileError:
-    return PrecompileError(
-        "precompile cannot lower a captured control-flow subgraph (e.g. from "
-        f"torch.cond / torch.while_loop); not supported yet. {detail}"
-    )
-
-
-def _missing_fake_kernel_refusal(detail: str) -> PrecompileError:
-    return PrecompileError(
-        "precompile: fn calls an operator that has no meta/fake kernel, which the "
-        "fake-tensor trace needs to compute output shapes. For a custom op, register "
-        "one with torch.library.register_fake. A built-in ATen op has no fake kernel you "
-        "are expected to register -- registering one overrides it process-wide -- so avoid "
-        f"the op inside fn instead. {detail}"
-    )
-
-
 def _assert_no_control_flow_subgraphs(gm: torch.fx.GraphModule) -> None:
     """Reject captured control-flow HOP subgraphs (e.g. from ``torch.cond``).
 
@@ -840,7 +772,11 @@ def _assert_no_control_flow_subgraphs(gm: torch.fx.GraphModule) -> None:
         if isinstance(attr, torch.fx.GraphModule)
     ]
     if offending:
-        raise _control_flow_refusal(f"Offending get_attr targets: {offending}.")
+        raise PrecompileError(
+            "precompile cannot lower a captured control-flow subgraph (e.g. from "
+            f"torch.cond / torch.while_loop); not supported yet. Offending get_attr "
+            f"targets: {offending}."
+        )
 
 
 def _intern_param_buffers(
@@ -935,22 +871,21 @@ def _capture(
     import contextlib
 
     args = tuple(args)
-    # An ambient TracingContext.fake_mode OUTRANKS both mode sources this capture offers
-    # make_fx (see the trace site below), and no foreign mode passes
-    # allow_fallback_kernels=False, so a meta-less op in an allowlisted namespace would run
-    # for real on zero-filled substitutes again. A mode built under DEFAULT config (an
-    # AOTAutograd / inductor one) also lacks the
-    # fake_tensor_allow_unsafe_data_ptr_access=False snapshot, so a .data_ptr() read bakes 0
-    # instead of raising; dynamo and export do build theirs inside that patch, so there only
-    # the fallback setting is lost. Refuse rather than trace under someone else's contract.
-    tc = TracingContext.try_get()
-    if tc is not None and tc.fake_mode is not None:
+    # BOTH capture paths trace under a fake mode capture builds, and an ambient one outranks
+    # it (invariant 3 in the Note has the details), so refuse rather than trace under
+    # someone else's contract. This runs first, ahead of the input scan below, whose
+    # is_pinned() probe DISPATCHES: under an ambient mode a real example tensor trips that
+    # mode's own non-fake-input assertion before any refusal of ours. Ask detect_fake_mode
+    # -- what make_fx itself resolves through -- so all three sources it ranks (an ambient
+    # TracingContext, the dispatch-mode stack, the inputs) are refused by name here instead
+    # of reaching its own mode-mismatch assertion once capture enters its mode.
+    if detect_fake_mode() is not None:
         raise PrecompileError(
-            "precompile: capture cannot run inside another trace -- a TracingContext with "
-            "a FakeTensorMode is active (e.g. precompile called from inside torch.compile "
-            "or an export/AOTAutograd trace). make_fx would adopt that mode and its "
-            "ShapeEnv, so capture's own safety settings would not apply. Capture outside "
-            "the enclosing trace."
+            "precompile: capture cannot run inside another trace -- a FakeTensorMode is "
+            "already active (e.g. precompile called from inside torch.compile or an "
+            "export/AOTAutograd trace). make_fx would adopt that mode and its ShapeEnv, so "
+            "capture's own safety settings would not apply. Capture outside the enclosing "
+            "trace."
         )
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
@@ -976,9 +911,9 @@ def _capture(
     # owns and what a backward in fn populates), not the throwaway fakes. list() snapshots
     # the real tensors here, so the later flat_args rebind does not affect real_flat.
     real_flat = list(flat_args)
-    # Labels for the per-input refusals here and below, aligned with flat_args. Each names
-    # its KIND, because the model half is not an argument the caller can swap out: a
-    # refusal saying "buffer nt" sends them to the model, "user input 0" to the call site.
+    # Labels for the per-input refusal below, aligned with flat_args. Each names its KIND,
+    # because the model half is not an argument the caller can swap out: a refusal saying
+    # "buffer nt" sends them to the model, "user input 0" to the call site.
     input_labels = [
         *(f"parameter {n}" for n in param_names),
         *(f"buffer {n}" for n in buffer_names),
@@ -1050,12 +985,7 @@ def _capture(
     for a in real_flat:
         if isinstance(a, torch.Tensor):
             a.grad = None
-    from torch._subclasses.fake_tensor import (
-        DataDependentOutputException,
-        DynamicOutputShapeException,
-        FakeTensorMode,
-        UnsupportedOperatorException,
-    )
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     # flat_fn (traced by make_fx) writes these back so _capture can thread the output
     # structure and the harvested-grad param indices into the _Capture result.
@@ -1147,9 +1077,7 @@ def _capture(
     # that clear (just above) is the only clobber left to undo.
     try:
         if any(marks):
-            flat_args, fake_mode = _fakeify_with_unbacked(
-                pb_flat, user_flat, marks, input_labels
-            )
+            flat_args, fake_mode = _fakeify_with_unbacked(pb_flat, user_flat, marks)
             capture_cm = fake_mode
             user_input_shapes = [
                 None
@@ -1171,8 +1099,8 @@ def _capture(
             # node metadata and the converter represents neither layout.
             # allow_fallback_kernels defaults to True, which would run a meta-less op in
             # an allowlisted namespace (aten, prims, quantized, ...) for real on zero-filled
-            # substitutes and bake whatever shape that produced; off, a meta-less op takes
-            # the UnsupportedOperatorException path refused below -- unless it is
+            # substitutes and bake whatever shape that produced; off, a meta-less op fails
+            # the trace with UnsupportedOperatorException instead -- unless it is
             # trivially fakeifiable (a mutating op with no returns, for which
             # can_generate_trivial_fake_impl synthesizes one). The mode is built inside
             # the config patch for the reason _fakeify_with_unbacked gives (the config is
@@ -1183,10 +1111,10 @@ def _capture(
                 )
             with capture_cm:
                 flat_args = [
-                    _fakeify_input(capture_cm, a, label)
+                    capture_cm.from_tensor(a, static_shapes=True)
                     if isinstance(a, torch.Tensor)
                     else a
-                    for a, label in zip(flat_args, input_labels)
+                    for a in flat_args
                 ]
 
         # Trace on FAKE tensors either way, so no real compute runs on the flattened
@@ -1203,19 +1131,19 @@ def _capture(
         # pre-fakeified above). Dropping either alone still refuses everything below;
         # dropping BOTH (handing make_fx real tensors with no "with") is what silently gives
         # it its own mode with a fresh ShapeEnv and allow_fallback_kernels back on, turning
-        # the value- and shape-producing refusals below (.item(), .nonzero()) into unbacked
-        # symints; a tensor-value branch instead surfaces as GuardOnDataDependentSymNode, so
-        # that one stays refused, with the unbacked-guard wording. Both are kept, with
+        # the value- and shape-producing ops a static capture must NOT bake (.item(),
+        # .nonzero()) into unbacked symints; a tensor-value branch instead surfaces as
+        # GuardOnDataDependentSymNode, so that one still fails. Both are kept, with
         # the "with" as the primary: it also covers a call whose flat_args hold no tensor at
         # all, where there is nothing to detect a mode from. Neither source outranks an
         # ambient TracingContext.fake_mode, which detect_fake_mode takes authoritatively, so
         # a capture inside another trace would run under that mode and none of the settings
         # below -- which is why _capture refuses one up front. What the
-        # pre-fakeify loop buys on top is the named per-input refusal above (which reports
-        # WHICH example input cannot be fakeified) and the fake flat_args handed to the
+        # pre-fakeify loop buys on top is the fake flat_args handed to the
         # lowering. The unbacked path keeps its symbolic ShapeEnv ("symbolic"); a static
         # capture uses concrete fake shapes ("fake"). A data-dependent op the fake trace
-        # cannot know is refused below rather than leaking the fake exception: a real trace
+        # cannot know fails inside the trace with the fake mode's own exception, which is
+        # the narrowing this switch buys: a real trace
         # RAISED on .item() and on a tensor-value branch, and CAPTURED .nonzero() into a
         # dynamically-sized graph that a shape_env-less capture cannot express at all
         # (mark_unbacked is the path that can). The conditional is load-bearing the other
@@ -1232,139 +1160,18 @@ def _capture(
                     decomposition_table=decompositions,
                     tracing_mode=tracing_mode,
                 )(flat_args)
-            except PrecompileError:
-                # precompile's own refusals (invariant-5 checks inside flat_fn) are
-                # already explained; re-raise them before the clauses below, so the
-                # RuntimeError clause cannot re-wrap one on a substring accident
-                # (PrecompileError subclasses RuntimeError).
-                raise
             except GuardOnDataDependentSymNode as e:
-                # An unbacked capture holds both a mark_unbacked dim and a
-                # data-dependent value (.item(), .nonzero()) as an unbacked symbol with
-                # no hint, so a computation that must guard on one (a branch, a reshape
-                # that pins a size) cannot be captured. Unbacked symbols cannot be
-                # guarded, so rather than bake a silently-wrong artifact, fail here.
+                # A mark_unbacked dim was captured as an unbacked symint (no hint), but
+                # the computation needs to guard on / specialize its size (e.g. a
+                # shape-dependent branch or a reshape that pins it). Unbacked dims cannot
+                # be guarded, so rather than bake a silently-wrong artifact, fail here.
                 raise PrecompileError(
-                    "precompile: fn needs to guard on a value this capture holds as "
-                    "unbacked -- a dim marked with mark_unbacked, or a data-dependent "
-                    "value (.item(), .nonzero()) -- which is not allowed. Do not mark "
-                    "that dim (capture it static), or restructure fn to avoid the "
-                    f"branch. Underlying: {(str(e).splitlines() or [''])[0]}"
+                    "precompile: fn needs to guard on a dim marked with mark_unbacked "
+                    "(it branches on or specializes that size), which is not allowed for "
+                    "an unbacked dynamic dim. Do not mark that dim (capture it static), "
+                    "or restructure fn to avoid the size-dependent operation. Underlying: "
+                    f"{str(e).splitlines()[0]}"
                 ) from e
-            except (DataDependentOutputException, DynamicOutputShapeException) as e:
-                # A static capture has no ShapeEnv, so a value the fake trace cannot
-                # know surfaces as one of these rather than as
-                # GuardOnDataDependentSymNode: .item() and a branch over a tensor
-                # raise the first, .nonzero()/masked_select and other shape-producing
-                # ops the second. Refuse cleanly instead of leaking either. The
-                # mark_unbacked advice is for a STATIC capture only: an unbacked capture
-                # already has the ShapeEnv, so the op that reached here (e.g. aten.equal)
-                # is one no ShapeEnv can help with, and telling the caller to mark a dim
-                # they may already have marked would be a dead end.
-                mark_hint = (
-                    " A shape-producing op (.nonzero(), masked_select) can be captured by "
-                    "marking a user-input dim with torch._dynamo.decorators.mark_unbacked, "
-                    "which gives capture the ShapeEnv it needs."
-                    if fake_mode is None
-                    else ""
-                )
-                raise PrecompileError(
-                    "precompile: fn performs a data-dependent operation (.item(), "
-                    ".nonzero(), masked_select, a Python branch over a tensor value) "
-                    "whose result cannot be known while tracing on fake tensors, so it "
-                    "cannot be captured; make_fx specializes only static (Python int) "
-                    "control flow. The op may be inside a module fn calls rather than in "
-                    "fn's own code -- nn.BatchNorm*(momentum=None) in train() mode reads "
-                    "float(num_batches_tracked) -- so go by the underlying op named below."
-                    f"{mark_hint} Underlying: {(str(e).splitlines() or [''])[0]}"
-                ) from e
-            except AttributeError as e:
-                # torch.while_loop's fake kernel unconditionally enters
-                # mode.shape_env.ignore_fresh_unbacked_symbols(), so on a static capture
-                # (whose fake mode deliberately has no ShapeEnv) it dies here instead of
-                # reaching _assert_no_control_flow_subgraphs below, which is what refuses
-                # the torch.cond form. Give it that same refusal; any other AttributeError
-                # comes from fn and is not ours to explain.
-                if "ignore_fresh_unbacked_symbols" not in str(e):
-                    raise
-                raise _control_flow_refusal(
-                    f"Underlying: {(str(e).splitlines() or [''])[0]}"
-                ) from e
-            except AssertionError as e:
-                # The control-flow HOPs assert a ShapeEnv on the mode they trace under,
-                # BEFORE the fake kernel the clause above relabels: an int while_loop carry
-                # (the spelling in its own docstring) takes the proxy path, which
-                # unspecializes it into an unbacked symint, and torch.cond merges differing
-                # int values or output sizes across its branches the same way. Same refusal
-                # as the get_attr check below; only while_loop/cond raise these messages.
-                first = (str(e).splitlines() or [""])[0]
-                if first in (
-                    "Must provide a fake_mode with shape_env.",
-                    "mode.shape_env is None",
-                ):
-                    raise _control_flow_refusal(f"Underlying: {first}") from e
-                # FakeTensorMode declines a small set of device/pinning ops
-                # (aten._pin_memory, aten._resize_output) with a bare
-                # AssertionError("NYI: <op>") instead of UnsupportedOperatorException, so
-                # e.g. the usual "pin if not pinned" idiom in fn escaped raw. It is the
-                # missing-fake-kernel condition wearing a different exception type; give it
-                # that refusal. The prefix match is exact (one raise site reachable inside
-                # make_fx, in fake_impls), so an AssertionError matching neither this
-                # prefix nor the two messages above is an internal bug or fn's own and is
-                # re-raised; an fn that itself raises AssertionError("NYI: ...") is
-                # relabeled, an accepted collision.
-                if not first.startswith("NYI: "):
-                    raise
-                raise _missing_fake_kernel_refusal(f"Underlying: {first}") from e
-            except RuntimeError as e:
-                # Tracing on fake tensors needs a meta/fake kernel for every op, and no
-                # op may read a fake tensor's data pointer. A library op with no kernel
-                # raises UnsupportedOperatorException (a RuntimeError subclass, so this
-                # clause catches it); a torch.library.custom_op without
-                # register_fake raises a RuntimeError naming the missing fake impl; a
-                # .data_ptr() read raises one of the two FAKE data-pointer messages matched
-                # below (that is what the config patch above buys us). Anything else is not
-                # ours to explain.
-                first = (str(e).splitlines() or [""])[0]
-                # Match the fake-specific texts, not the generic "Cannot access data
-                # pointer" prefix: a REAL tensor with no storage (e.g. a sparse tensor fn
-                # closes over) raises "...of Tensor that doesn't have storage" from the same
-                # c10 code and must reach the caller unrelabeled. The match stops at
-                # StorageImpl's "(e.g." rather than spelling out its example list, which is
-                # already unambiguous against every sibling message and does not silently
-                # stop matching if that list is reordered or extended. Two sites report a fake
-                # pointer read: StorageImpl names FakeTensor, while TensorImpl's typed
-                # data_ptr_impl (reached by a kernel that dereferences a fake tensor -- e.g.
-                # tensor_split with tensor indices) reports uninitialized storage instead.
-                # A NumPy conversion (t.numpy(), np.asarray(t), t.__array__(); everyday
-                # logging/metric code) is the same read, but tensor_numpy.cpp rejects it
-                # earlier and blames "tensor subclasses", which under capture is usually
-                # precompile's own FakeTensor and not anything the caller wrote -- so match
-                # that text too rather than send them after a subclass that does not exist.
-                # The blamed subclass CAN be the caller's (the check is is_python_dispatch(),
-                # so any python-dispatch subclass fn builds trips it), which is why the
-                # refusal points at Underlying: rather than asserting whose it is. That
-                # string has one raise site.
-                reads_fake_data = (
-                    "Cannot access data pointer of Tensor (e.g." in str(e)
-                    or "its data is not allocated yet" in str(e)
-                    or ".numpy() is not supported for tensor subclasses" in str(e)
-                )
-                if reads_fake_data:
-                    raise PrecompileError(
-                        "precompile: fn reads a tensor's data -- its data pointer "
-                        "(.data_ptr(), or a kernel that dereferences one) or a NumPy "
-                        "conversion (.numpy(), np.asarray(), __array__) -- which the "
-                        "fake-tensor trace cannot provide: the traced tensors have no data "
-                        "behind them, and the tensor subclass a NumPy conversion blames may "
-                        "be capture's own FakeTensor rather than one you wrote -- check "
-                        "Underlying:. Move the read out of fn, or wrap that kernel in a "
-                        f"custom op with a registered fake impl. Underlying: {first}"
-                    ) from e
-                no_fake_impl = "no fake impl registered" in str(e)
-                if not isinstance(e, UnsupportedOperatorException) and not no_fake_impl:
-                    raise
-                raise _missing_fake_kernel_refusal(f"Underlying: {first}") from e
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -2211,21 +2018,11 @@ class _PrecompileApi:
         here (see the Note): the runtime model must be structurally identical to the
         example, and Python control flow / shapes are specialized to ``example_inputs``
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
-        tensor baked as a constant (invariant 1), effectful ops (invariant 4), a
-        data-dependent op a static (fake-tensor) capture cannot know -- ``.item()``,
-        ``.nonzero()``, a Python branch over a tensor value -- an op with no meta/fake
-        kernel and none that can be synthesized (a ``torch.library.custom_op`` tagged
-        ``torch.Tag.inplace`` / ``torch.Tag.out``, or one that only mutates its arguments
-        and returns nothing, gets a trivial one, so it captures without a
-        ``register_fake``), a read of a traced tensor's data (``.data_ptr()``,
-        ``.numpy()`` / ``np.asarray()``), an example input the fake trace cannot represent
-        (a quantized tensor) or whose metadata it silently drops (a pinned, mkldnn or
-        sparse tensor), a nested example input, none of which capture supports on either
-        path (invariant 3), a control-flow HOP (``torch.cond`` / ``torch.while_loop``),
-        which is refused rather than specialized because neither backend can lower the
-        subgraph it captures, a capture attempted inside another trace (an ambient
-        ``TracingContext`` fake mode outranks capture's own and does not carry its
-        fallback-off setting), and -- for the inductor backend -- a runtime input whose
+        tensor baked as a constant (invariant 1), effectful ops (invariant 4), an example
+        input whose metadata the fake trace silently drops (a pinned, mkldnn or sparse
+        tensor), a nested example input, neither of which capture supports on either path
+        (invariant 3), a capture attempted inside another trace (invariant 3 in the
+        Note has the reason), and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")

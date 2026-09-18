@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
+     runOnRocmArch, MI200_ARCH, MI300_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
@@ -3010,8 +3010,8 @@ class TestLinalg(TestCase):
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
-        if torch.version.hip and isRocmArchAnyOf(MI200_ARCH) and dtype is torch.complex128:
-            self.skipTest("Currently failing on rocm mi200")
+        if torch.version.hip and torch.device(device).type == "cuda" and dtype is torch.complex128:
+            self.skipTest("linalg.svd of the projected complex128 matrix fails to converge on ROCm")
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
@@ -11707,8 +11707,6 @@ class TestLinalgCudaOnly(TestCase):
     @tf32_on_and_off(0.05)
     @reduced_f32_on_and_off(0.05)
     def test_addmm_relu_tunableop(self, device, dtype):
-        if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
-            self.skipTest("Currently failing on rocm mi350, hipblaslt mem fault")
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_iterations(1)
