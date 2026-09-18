@@ -1800,8 +1800,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(precompile_package._is_risky_drop(entry, namespaces), risky)
 
     def test_risky_drop_sees_the_slot_behind_a_nested_resume(self):
-        # With nested_graph_breaks the callee's locals reach its resume frame
-        # as L['__nested_frame_values'][0][k] rather than as L['act']; a slot
+        # With nested_graph_breaks the callee's locals reach the caller's resume
+        # frame as positional entries of L['__nested_frame_values'][0] rather
+        # than as L['act']; a slot
         # filled by a call config could repoint must be flagged either way,
         # and the def read inside pick() waived either way.
         def pick():
