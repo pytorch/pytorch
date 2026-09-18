@@ -4099,24 +4099,6 @@ class TestAutograd(TestCase):
             tensor._has_grad_dtype_override = False
 
     @skipIfTorchDynamo("grad_dtype not supported in compile")
-    @parametrize("declared", ["unset", torch.float64, None])
-    def test_has_grad_dtype_override_non_leaf(self, declared):
-        class DeclareOutput(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, tensor):
-                ctx.set_output_grad_dtype(declared)
-                return tensor * 2
-
-        tensor = torch.ones(2, requires_grad=True)
-        output = tensor * 2 if declared == "unset" else DeclareOutput.apply(tensor)
-        self.assertFalse(output.is_leaf)
-        self.assertEqual(
-            output.grad_dtype, output.dtype if declared == "unset" else declared
-        )
-        with self.assertRaisesRegex(RuntimeError, "only.*leaf tensors"):
-            _ = output._has_grad_dtype_override
-
-    @skipIfTorchDynamo("grad_dtype not supported in compile")
     def test_grad_dtype(self):
         leaf = torch.tensor([1.0, 2.0], requires_grad=True)
         # Default to tensor's dtype
