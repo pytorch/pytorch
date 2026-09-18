@@ -25,9 +25,11 @@ from torch.distributed.pipelining import (
 )
 from torch.distributed.pipelining._p2p import (
     _build_p2p_edge_groups,
-    _p2p_edge_matchings,
-    _p2p_topology,
+    _directed_edge_split_rounds,
+    _logical_edge_preconnect_rounds,
     _PP_EDGE_GROUP_CACHE,
+    _preconnect_shared_p2p_edges,
+    _stage_rank_assignment,
 )
 from torch.distributed.pipelining._recv_buffers import _RecvInfo
 from torch.distributed.pipelining._utils import (
@@ -84,28 +86,110 @@ logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
 
-class P2PTopologyTest(TestCase):
-    def test_neighbor_warmup_uses_pipeline_group_ranks(self):
-        stage = MockPipelineStage(num_stages=2, group_size=2, group_rank=1)
-        stage.stage_index = 0
-        stage.stage_index_to_group_rank = {0: 1, 1: 0}
-        stage.device = torch.device("cpu")
+class P2PInitializationTest(TestCase):
+    def test_schedule_builds_and_preconnects_one_shared_edge_group_map(self):
+        parent = MagicMock()
+        assignment = dict(enumerate((0, 1, 2, 3, 0, 1, 2, 3)))
+        stages = []
+        for stage_index in (0, 4):
+            stage = MockPipelineStage(
+                num_stages=8,
+                group_size=4,
+                group_rank=0,
+                group=parent,
+            )
+            stage.stage_index = stage_index
+            stage.device = torch.device("cpu")
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = assignment
+            stages.append(stage)
 
-        with patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p:
-            stage._get_init_p2p_neighbors_ops()
+        groups = {(0, 1): MagicMock(), (1, 0): MagicMock()}
+        split_rounds = (((0, 1),), ((1, 0),))
+        with (
+            patch(
+                "torch.distributed.pipelining.schedules.dist.get_backend",
+                return_value="gloo",
+            ),
+            patch(
+                "torch.distributed.pipelining.schedules.dist.all_reduce"
+            ) as initialize_parent,
+            patch(
+                "torch.distributed.pipelining.schedules._build_p2p_edge_groups",
+                return_value=(groups, split_rounds),
+            ) as build_groups,
+            patch(
+                "torch.distributed.pipelining.schedules._preconnect_p2p_edge_groups"
+            ) as preconnect_groups,
+        ):
+            _PipelineSchedule._initialize_pipeline_distributed_state(
+                MagicMock(), stages, has_backward=True, initialize_p2p=True
+            )
 
-        self.assertEqual(
-            [call.kwargs["group_peer"] for call in p2p.call_args_list], [0, 0]
+        initialize_parent.assert_called_once()
+        build_groups.assert_called_once_with(parent, assignment, torch.device("cpu"))
+        preconnect_groups.assert_called_once_with(
+            parent, groups, split_rounds, torch.device("cpu")
         )
-        del stage.stage_index_to_group_rank[1]
-        with self.assertRaisesRegex(PipeliningMetadataError, "neighboring stage 1"):
-            stage._get_init_p2p_neighbors_ops()
+        self.assertTrue(all(stage._p2p_edge_groups is groups for stage in stages))
 
-    def test_loop_topology_uses_four_disjoint_split_rounds(self):
-        topology = _p2p_topology({stage: stage % 4 for stage in range(8)}, group_size=4)
+    def test_per_edge_setup_requires_consistent_local_stage_metadata(self):
+        parent = MagicMock()
+        assignment = {0: 0, 1: 1}
+
+        def make_stage(stage_index: int) -> MockPipelineStage:
+            stage = MockPipelineStage(
+                num_stages=2,
+                group_size=2,
+                group_rank=0,
+                group=parent,
+            )
+            stage.stage_index = stage_index
+            stage.device = torch.device("cpu")
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = assignment
+            return stage
+
+        stages = [make_stage(0), make_stage(1)]
+        stages[1].stage_index_to_group_rank = {0: 1, 1: 0}
+        with self.assertRaisesRegex(ValueError, "stage-to-rank assignment"):
+            _PipelineSchedule._initialize_pipeline_distributed_state(
+                MagicMock(), stages, has_backward=True, initialize_p2p=True
+            )
+
+        stages = [make_stage(0), make_stage(1)]
+        stages[1].device = torch.device("cuda", 1)
+        with self.assertRaisesRegex(ValueError, "use one device"):
+            _PipelineSchedule._initialize_pipeline_distributed_state(
+                MagicMock(), stages, has_backward=True, initialize_p2p=True
+            )
+
+    def test_p2p_initialization_state_is_independent_from_metadata(self):
+        stage = MockPipelineStage(num_stages=1, group_size=1)
+        stage.stage_index = 0
+        stage.device = torch.device("cpu")
+        stage._prepare_forward_infra = MagicMock(return_value=None)
+        schedule = ScheduleGPipe(stage, n_microbatches=1)
+
+        with patch.object(
+            schedule,
+            "_initialize_pipeline_distributed_state",
+        ) as initialize_distributed_state:
+            schedule._initialize_stage((), {})
+            schedule._stage_forward_initialized = False
+            schedule._initialize_stage((), {})
 
         self.assertEqual(
-            _p2p_edge_matchings(topology),
+            [call.args[2] for call in initialize_distributed_state.call_args_list],
+            [True, False],
+        )
+
+    def test_loop_assignment_uses_four_disjoint_split_rounds(self):
+        assignment = _stage_rank_assignment(
+            {stage: stage % 4 for stage in range(8)}, group_size=4
+        )
+        self.assertEqual(
+            _directed_edge_split_rounds(assignment),
             (
                 ((0, 1), (2, 3)),
                 ((1, 0), (3, 2)),
@@ -114,13 +198,66 @@ class P2PTopologyTest(TestCase):
             ),
         )
 
-    def test_v_topology_excludes_same_rank_turn_and_wraparound(self):
-        topology = _p2p_topology(
+    def test_shared_preconnect_rounds_preserve_repeated_logical_edges(self):
+        assignment = (0, 1, 2, 3, 0, 1, 2, 3)
+
+        rounds = _logical_edge_preconnect_rounds(assignment)
+
+        self.assertEqual(
+            rounds,
+            (
+                ((0, 1), (2, 3)),
+                ((1, 2), (3, 4)),
+                ((4, 5), (6, 7)),
+                ((5, 6),),
+            ),
+        )
+        self.assertTrue(
+            all(
+                len({assignment[stage] for edge in round_edges for stage in edge})
+                == 2 * len(round_edges)
+                for round_edges in rounds
+            )
+        )
+
+    def test_shared_preconnect_exercises_raw_path(self):
+        parent = MagicMock()
+        raw_work = MagicMock()
+        with (
+            patch(
+                "torch.distributed.pipelining._p2p.dist.get_world_size",
+                return_value=2,
+            ),
+            patch(
+                "torch.distributed.pipelining._p2p.dist.get_rank",
+                return_value=0,
+            ),
+            patch(
+                "torch.distributed.pipelining._p2p.dist.isend",
+                return_value=raw_work,
+            ) as isend,
+            patch("torch.distributed.pipelining._p2p.dist.all_reduce") as sync,
+        ):
+            _preconnect_shared_p2p_edges(
+                parent,
+                {0: 0, 1: 1},
+                {0: torch.device("cpu")},
+                torch.device("cpu"),
+            )
+
+        isend.assert_called_once()
+        self.assertIs(isend.call_args.kwargs["group"], parent)
+        self.assertEqual(isend.call_args.kwargs["group_dst"], 1)
+        raw_work.wait.assert_called_once()
+        sync.assert_called_once()
+
+    def test_v_assignment_excludes_same_rank_turn_and_wraparound(self):
+        assignment = _stage_rank_assignment(
             dict(enumerate((0, 1, 2, 3, 3, 2, 1, 0))),
             group_size=4,
         )
 
-        rounds = _p2p_edge_matchings(topology)
+        rounds = _directed_edge_split_rounds(assignment)
         edges = {edge for round_edges in rounds for edge in round_edges}
         self.assertEqual(
             edges,
@@ -136,11 +273,11 @@ class P2PTopologyTest(TestCase):
             )
         )
 
-    def test_topology_requires_contiguous_valid_stage_mapping(self):
+    def test_assignment_requires_contiguous_valid_stage_mapping(self):
         with self.assertRaisesRegex(ValueError, "contiguous indices"):
-            _p2p_topology({0: 0, 2: 1}, group_size=2)
+            _stage_rank_assignment({0: 0, 2: 1}, group_size=2)
         with self.assertRaisesRegex(ValueError, "outside"):
-            _p2p_topology({0: 0, 1: 2}, group_size=2)
+            _stage_rank_assignment({0: 0, 1: 2}, group_size=2)
 
     def test_edge_groups_inherit_timeout_and_filter_only_mixed_backends(self):
         cases = (
@@ -366,9 +503,6 @@ def _make_adjacency_stage(
             )
             self.stage_index = stage_index
             self.device = "cpu"
-
-        def _get_init_p2p_neighbors_ops(self):
-            return []
 
         def _prepare_forward_infra(self, *args, **kwargs):
             self.args_recv_info = args_recv_info
@@ -1199,6 +1333,56 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    @parametrize("enabled", [False, True])
+    def test_schedule_passes_stage_and_microbatch_indices(self, enabled):
+        class IndexModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.calls: list[tuple[int | None, int | None]] = []
+
+            def forward(self, x, *, scale, stage_idx=None, mb_idx=None):
+                self.calls.append((stage_idx, mb_idx))
+                return x * scale
+
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            module = IndexModule()
+            stage = PipelineStage(module, 0, 1, torch.device("cpu"))
+            schedule_kwargs = (
+                {"pass_stage_and_microbatch_indices": True} if enabled else {}
+            )
+            schedule = ScheduleGPipe(
+                stage,
+                2,
+                loss_fn=lambda output, target: (output - target).square().sum(),
+                scale_grads=False,
+                **schedule_kwargs,
+            )
+            x = torch.ones(2, requires_grad=True)
+            scale = torch.full((2,), 3.0, requires_grad=True)
+
+            self.assertEqual(
+                schedule.step(x, scale=scale, target=torch.zeros(2)), x * scale
+            )
+            expected = [(0, 0), (0, 0), (0, 1)] if enabled else [(None, None)] * 3
+            self.assertEqual(module.calls, expected)
+            self.assertEqual(x.grad, torch.full_like(x, 18))
+            self.assertEqual(scale.grad, torch.full_like(scale, 6))
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_stage_and_microbatch_indices_require_manual_stages(self):
+        stage = MockPipelineStage(num_stages=1)
+        with self.assertRaisesRegex(ValueError, "manually constructed PipelineStage"):
+            ScheduleGPipe(
+                stage,
+                1,
+                pass_stage_and_microbatch_indices=True,
+            )
+
     def test_schedule_pre_split_validation(self):
         store = FakeStore()
         torch.distributed.init_process_group(
@@ -1253,6 +1437,25 @@ class ScheduleTest(TestCase):
                     arg_mbs=[(x0,), (x1,)],
                     target_mbs=[x0],
                 )
+
+            indexed_schedule = ScheduleGPipe(
+                stage,
+                2,
+                pass_stage_and_microbatch_indices=True,
+            )
+            for name in ("stage_idx", "mb_idx"):
+                for pre_split in (False, True):
+                    with (
+                        self.subTest(name=name, pre_split=pre_split),
+                        self.assertRaisesRegex(ValueError, f"reserves.*{name}"),
+                    ):
+                        if pre_split:
+                            indexed_schedule.step(
+                                arg_mbs=[(x0,), (x1,)],
+                                kwarg_mbs=[{name: -1}, {}],
+                            )
+                        else:
+                            indexed_schedule.step(x0, **{name: -1})
         finally:
             torch.distributed.destroy_process_group()
 
@@ -2857,7 +3060,7 @@ class TestBatchP2P(TestCase):
         p.tensor = torch.zeros(1)
         # Ops in a single _batch_p2p call normally share one group; tests pass an
         # explicit shared group. _batch_p2p splits a list spanning multiple groups
-        # into one batch per group (per-direction PP comms), covered separately.
+        # into one batch per communicator, covered separately.
         p.group = group if group is not None else MagicMock()
         # _batch_p2p groups/orders ops by group_name, so give each group a stable
         # string name (identity-derived) rather than a MagicMock attribute.
@@ -2929,9 +3132,12 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.irecv")
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_mixed_ops_split_per_group(self, mock_isend, mock_irecv, mock_batch):
-        """A mixed op list spanning multiple groups (per-direction PP comms) is
-        issued as one batch_isend_irecv per group, so each direction runs on its
-        own communicator instead of sharing one FIFO."""
+        """Issue a mixed operation list once per communicator.
+
+        Directed-edge P2P can place one fused schedule batch on several child
+        groups. Splitting by group lets each edge use its own communicator
+        instead of sharing one FIFO.
+        """
         mock_batch.side_effect = lambda ops: [MagicMock() for _ in ops]
         g_fwd, g_bwd = MagicMock(), MagicMock()
         ops = [
