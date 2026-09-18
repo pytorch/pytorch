@@ -618,7 +618,9 @@ class TestFlyDSLTemplate(TestCase):
                 code = self._assert_compiled_mm(a, b)
                 self.assertIn(".mark_layout_dynamic()", code)
                 self.assertNotIn("mat2.transpose(0, 1)", code)
-                self.assertIn("tensor_args = (output, mat1, mat2)", code)
+                self.assertRegex(
+                code, r"tensor_args\s*=\s*\(\s*output\s*,\s*mat1\s*,\s*mat2\s*\)"
+            )
                 self.assertIn("_inductor_tensor_arg(arg) for arg in tensor_args", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
@@ -1284,7 +1286,7 @@ def _run_mxfp_tile(
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
         make_gemm_param_and_validate,
     )
-    from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
+    from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
         gemm_mxfp_gfx950,
     )
 
@@ -1746,6 +1748,140 @@ class TestFlyDSLMXFPDevice(TestCase):
                     bias=bias,
                 )
                 self._assert_close(actual, reference + bias, torch.bfloat16)
+
+    @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
+    @parametrize("out_dtype", (torch.bfloat16, torch.float16))
+    @parametrize("shape", ((65, 104, 384), (256, 256, 1152)))
+    @parametrize("tile", ((128, 128, 128, 2, 2, 2, 0, True),
+                         (256, 256, 256, 2, 2, 4, 0, True)))
+    def test_mxfp_hti_store(self, device, mxfp_format, out_dtype, shape, tile):
+        self._skip_unless_supported(device)
+        if mxfp_format == "mxfp8":
+            tile = (*tile[:2], 128, *tile[3:])
+        inputs, reference = _mxfp_case(mxfp_format, shape, device)
+        bias = torch.randn(shape[1], device=device, dtype=torch.float32)
+        for has_bias in (False, True):
+            with self.subTest(has_bias=has_bias):
+                actual = _run_mxfp_tile(
+                    mxfp_format, shape, tile, out_dtype, inputs,
+                    bias=bias if has_bias else None,
+                )
+                expected = reference + bias if has_bias else reference
+                self._assert_close(actual, expected, out_dtype)
+
+    @parametrize(
+        "shape",
+        (
+            (256, 512, 512),
+            (512, 256, 1024),
+            (256, 256, 1536),
+            (256, 256, 8192),
+            (65, 104, 512),
+            (256, 256, 640),
+        ),
+    )
+    @parametrize("out_dtype", (torch.bfloat16, torch.float16))
+    def test_mxfp4_interleaved_dma(self, device, shape, out_dtype):
+        import flydsl.compiler as flyc
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            make_gemm_param_and_validate,
+        )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+            gemm_mxfp_gfx950,
+        )
+
+        self._skip_unless_supported(device)
+        torch.manual_seed(2026)
+        m, n, k = shape
+        inputs, reference = _mxfp_case("mxfp4", shape, device)
+        kwargs = _mxfp_param_kwargs(
+            "mxfp4",
+            asdict(FlyDSLGemmConfig(256, 256, 256, 2, 2, 4, 0, True)),
+            k=k,
+            out_dtype="bfloat16" if out_dtype == torch.bfloat16 else "float16",
+        )
+        for padded, has_bias in ((False, False), (True, True)):
+            with self.subTest(padded=padded, has_bias=has_bias):
+                tensors = [t.view(torch.uint8) for t in inputs]
+                tensors[2:] = [t.clone() for t in tensors[2:]]
+                if padded:
+                    for i, t in enumerate(tensors):
+                        stride = (
+                            (t.stride(0) + 16, 1) if i != 1 else (1, t.stride(1) + 16)
+                        )
+                        tensors[i] = torch.empty_strided(
+                            t.shape, stride, device=device, dtype=t.dtype
+                        ).copy_(t)
+                arena = torch.full((m * n + 32,), -317, device=device, dtype=out_dtype)
+                out = arena[16:-16].view(m, n)
+                bias = torch.randn(n, device=device) if has_bias else out
+                kwargs["has_bias"] = has_bias
+                param = make_gemm_param_and_validate(m, n, k, kwargs)
+                self.assertIsNotNone(param)
+                args = (out, *tensors, bias)
+                stream = torch.cuda.current_stream().cuda_stream
+                # Match the layout-dynamic arguments used by every Inductor path.
+                compiled = flyc.compile(
+                    gemm_mxfp_gfx950,
+                    *(flyc.from_torch_tensor(t).mark_layout_dynamic() for t in args),
+                    param,
+                    stream,
+                )
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    compiled(*args, param, torch.cuda.current_stream().cuda_stream)
+                expected = reference + bias if has_bias else reference
+                for scale_shift in (0, 1):
+                    if scale_shift:
+                        tensors[2].add_(1)  # Reuse Graph with changed E8M0 scales.
+                        expected = reference * 2 + bias if has_bias else reference * 2
+                    out.fill_(float("nan"))
+                    graph.replay()
+                    self.assertEqual(out, expected.to(out_dtype), atol=3e-2, rtol=3e-2)
+                    self.assertEqual(arena[:16], torch.full_like(arena[:16], -317))
+                    self.assertEqual(arena[-16:], torch.full_like(arena[-16:], -317))
+
+    def test_mxfp4_dynamic_dispatch_reuse(self, device):
+        import flydsl.compiler as flyc
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
+            make_gemm_param_and_validate,
+        )
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
+            gemm_mxfp_gfx950,
+        )
+
+        self._skip_unless_supported(device)
+        tile = asdict(FlyDSLGemmConfig(256, 256, 256, 2, 2, 4, 0, True))
+        param = make_gemm_param_and_validate(
+            256, 512, 512, _mxfp_param_kwargs("mxfp4", tile, k=512)
+        )
+        compiler = mock.Mock(wraps=flyc.compile)
+        shapes = ((256, 512, 512), (65, 104, 1024), (512, 256, 1536), (256, 512, 512))
+        with mock.patch.object(gemm_mxfp_gfx950, "_compiled_cache", {}, create=True):
+            for i, shape in enumerate(shapes):
+                with self.subTest(shape=shape, padded=bool(i % 2)):
+                    inputs, reference = _mxfp_case("mxfp4", shape, device)
+                    tensors = [t.view(torch.uint8) for t in inputs]
+                    if i % 2:
+                        for j, t in enumerate(tensors):
+                            stride = (1, t.stride(1) + 16) if j == 1 else (t.stride(0) + 16, 1)
+                            tensors[j] = torch.empty_strided(t.shape, stride, device=device, dtype=t.dtype).copy_(t)
+                    out = torch.empty_strided(
+                        shape[:2], (shape[1] + 8 * (i % 2), 1),
+                        device=device, dtype=torch.bfloat16,
+                    )
+                    args = (out, *tensors, out)
+                    stream = torch.cuda.current_stream().cuda_stream
+                    run_cached_flydsl(
+                        gemm_mxfp_gfx950,
+                        *(flyc.from_torch_tensor(t).mark_layout_dynamic() for t in args),
+                        param, stream, constexpr_param=param, compiler=compiler,
+                        dispatch_args=(*args, param, stream),
+                    )
+                    self.assertEqual(out, reference.to(out.dtype), atol=3e-2, rtol=3e-2)
+        self.assertEqual(compiler.call_count, 1)
 
     def test_unsupported_signature_falls_back(self, device):
         self._skip_unless_supported(device)

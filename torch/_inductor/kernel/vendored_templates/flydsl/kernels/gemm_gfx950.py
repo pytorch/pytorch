@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: MIT AND BSD-3-Clause
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 from dataclasses import dataclass
@@ -9,6 +9,7 @@ import flydsl.expr as fx
 from flydsl._mlir import ir
 from flydsl._mlir.dialects import llvm
 from flydsl.expr import const_expr, range_constexpr, rocdl
+from flydsl.expr.typing import Vector
 from flydsl.runtime.device import get_rocm_arch
 
 
@@ -229,8 +230,12 @@ def make_gemm_gfx950_param(
         scale_bytes_per_pass = block_threads * GFX950_SCALE_DMA_BYTES
         scale_rows_a = block_m // 2 if use_half_tile_interleaved else block_m
         scale_rows_b = block_n // 2 if use_half_tile_interleaved else block_n
-        scale_a_bytes = mxfp_scale_stage_bytes(scale_rows_a, scale_block_k, block_threads)
-        scale_b_bytes = mxfp_scale_stage_bytes(scale_rows_b, scale_block_k, block_threads)
+        scale_a_bytes = mxfp_scale_stage_bytes(
+            scale_rows_a, scale_block_k, block_threads
+        )
+        scale_b_bytes = mxfp_scale_stage_bytes(
+            scale_rows_b, scale_block_k, block_threads
+        )
         # Chunk DMA is fenced separately from the per-tile A/B loads.
         if not use_scale_chunk:
             scale_a_iters = scale_a_bytes // scale_bytes_per_pass
@@ -555,18 +560,19 @@ def make_gemm_ab_load_context(elem_dtype, tiled_mma, tid, k, param: GemmGfx950Pa
     uni_copy_atom = fx.make_copy_atom(fx.UniversalCopy128b(), elem_dtype)
     buffer_copy_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), elem_dtype)
 
+    lds_read = (
+        fx.rocdl.cdna4.LDSReadTrans8_64b
+        if param.dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
+        else fx.rocdl.cdna4.LDSReadTrans16_64b
+    )
     if const_expr(param.a_is_transposed):
-        a_s2r_copy_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
-        )
+        a_s2r_copy_atom = fx.make_copy_atom(lds_read(), elem_dtype)
         a_tiled_copy_atom = a_s2r_copy_atom
     else:
         a_s2r_copy_atom = uni_copy_atom
         a_tiled_copy_atom = buffer_copy_atom
     if const_expr(not param.b_is_transposed):
-        b_s2r_copy_atom = fx.make_copy_atom(
-            fx.rocdl.cdna4.LDSReadTrans16_64b(), elem_dtype
-        )
+        b_s2r_copy_atom = fx.make_copy_atom(lds_read(), elem_dtype)
         b_tiled_copy_atom = b_s2r_copy_atom
     else:
         b_s2r_copy_atom = uni_copy_atom
@@ -677,6 +683,191 @@ def _make_gemm_gfx950_tiled_mma(param: GemmGfx950Param):
     )
 
 
+_FP8_KCONTIG_SWIZZLE_MASK = 3
+_FP8_KCONTIG_SWIZZLE_BASE = 4
+_FP8_KCONTIG_SWIZZLE_SHIFT = 4
+
+
+def _fp8_kcontig_swizzle(block_k):
+    """K-contiguous ds_read_b128 XOR. Dest bits must stay inside K."""
+    if const_expr(block_k >= 128):
+        return fx.SwizzleType.get(
+            _FP8_KCONTIG_SWIZZLE_MASK,
+            _FP8_KCONTIG_SWIZZLE_BASE,
+            _FP8_KCONTIG_SWIZZLE_SHIFT,
+        )
+    if const_expr(block_k == 64):
+        return fx.SwizzleType.get(2, 4, 3)
+    return None
+
+
+def make_fp8_lds_layout(rows, block_k, is_k_major):
+    """LDS layout for gfx950 FP8 / MXFP8.
+
+    K-contiguous uses a block_k-dependent XOR swizzle. K-major uses the same
+    16-element XOR groups as ``ds_read_tr16``: ``ds_read_tr8`` is still a
+    16-lane cooperative op.
+    """
+    if const_expr(is_k_major):
+        return make_lds_layout(rows, block_k, is_transposed=True)
+    base_layout = fx.make_ordered_layout((rows, block_k), (1, 0))
+    swizzle = _fp8_kcontig_swizzle(block_k)
+    if swizzle is None:
+        return base_layout
+    return fx.make_composed_layout(fx.static(swizzle), base_layout)
+
+
+def _use_direct_store(param):
+    return param.dtype_id == GEMM_DTYPE_MXFP4 and param.use_half_tile_interleaved
+
+
+def make_mxfp_tiled_mma(param):
+    if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4):
+        # FP4 uses the same byte fragments with half the storage K.
+        op = fx.rocdl.MFMA(param.mma_m, param.mma_n, param.mma_k // 2, fx.Float8E4M3FN)
+        k_layout = fx.make_layout((16, 4), (1, 16))
+    else:
+        op = fx.rocdl.cdna4.MFMA_Scale(
+            param.mma_m, param.mma_n, param.mma_k, fx.Float8E4M3FN
+        )
+        k_layout = fx.make_layout((16, 2, 4), (1, 64, 16))
+    m_layout = n_layout = None
+    if const_expr(_use_direct_store(param)):
+        mr = param.block_m // 2 // param.m_waves // param.mma_m
+        nr = param.block_n // 2 // param.n_waves // param.mma_n
+        m_layout = fx.make_layout(
+            (param.mma_m, param.m_waves, mr), (1, param.mma_m * mr, param.mma_m)
+        )
+        n_layout = fx.make_layout(
+            (param.mma_n, param.n_waves, nr), (1, param.mma_n * nr, param.mma_n)
+        )
+    return fx.make_tiled_mma(
+        fx.make_mma_atom(op),
+        fx.make_layout((param.m_waves, param.n_waves, 1), (param.n_waves, 1, 0)),
+        fx.make_tile(m_layout, n_layout, k_layout),
+    )
+
+
+def async_load_mxfp8_scales(
+    scale,
+    lds_base,
+    tid,
+    outer_offset,
+    outer_bound,
+    k_begin,
+    rows,
+    block_k,
+    block_threads,
+    has_k_tail,
+    k_bound,
+):
+    """Stage four E8M0 bytes/lane with the same waitcnt protocol as A/B."""
+    scale_k = block_k // MXFP_SCALE_BLOCK_K
+    words_per_row = scale_k // 4
+    stage_bytes = mxfp_scale_stage_bytes(rows, block_k, block_threads)
+    load_iters = stage_bytes // (block_threads * GFX950_SCALE_DMA_BYTES)
+    rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(scale))
+    lds_ptr = make_wave_lds_ptr(
+        lds_base, get_wave_lds_offset(tid, GFX950_SCALE_DMA_BYTES)
+    )
+    stride = fx.Int32(fx.get_scalar(scale.stride[0]))
+    for i in range_constexpr(load_iters):
+        word = i * block_threads + tid
+        row = outer_offset + (word // words_per_row) % rows
+        safe_row = (row < outer_bound).select(row, 0)
+        sk = k_begin // MXFP_SCALE_BLOCK_K + word % words_per_row * 4
+        if const_expr(has_k_tail):
+            sk = (sk < k_bound // MXFP_SCALE_BLOCK_K).select(sk, 0)
+        buffer_load_lds_inline(
+            rsrc, lds_ptr, safe_row * stride + sk, GFX950_SCALE_DMA_BYTES
+        )
+        if i < load_iters - 1:
+            lds_ptr = lds_ptr + block_threads * GFX950_SCALE_DMA_BYTES
+
+
+def mxfp8_gemm(
+    frag_C,
+    frag_A,
+    frag_B,
+    scale_a,
+    scale_b,
+    tid,
+    m_offset,
+    n_offset,
+    k_offset,
+    m,
+    n,
+    param: GemmGfx950Param,
+    scales_are_fragments=False,
+):
+    """Apply one MMA K step with unshuffled [outer, K // 32] E8M0 scales.
+
+    lane % mma_m selects the row/column and lane // mma_m selects its
+    32-element K scale group. opsel=0 consumes the low byte of each
+    lane's i32 scale operand.
+    """
+    dtype = (
+        fx.Float4E2M1FN
+        if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4)
+        else fx.Float8E4M3FN
+    )
+    mma_atom = fx.make_mma_atom(
+        fx.rocdl.cdna4.MFMA_Scale(param.mma_m, param.mma_n, param.mma_k, dtype)
+    )
+    lane = tid % GFX950_WAVE_SIZE
+    wave = tid // GFX950_WAVE_SIZE
+    wave_m = wave // param.n_waves
+    wave_n = wave % param.n_waves
+    scale_lane = lane % param.mma_m
+    scale_group = lane // param.mma_m
+    scale_k = k_offset // MXFP_SCALE_BLOCK_K + scale_group
+
+    a_scales = []
+    for mi in range_constexpr(fx.size(frag_A.shape[1]).unpack()):
+        if const_expr(scales_are_fragments):
+            a_scales.append(scale_a[mi])
+        else:
+            row = m_offset + (mi * param.m_waves + wave_m) * param.mma_m + scale_lane
+            safe_row = (row < m).select(row, 0)
+            a_scales.append(scale_a[safe_row, scale_k].to(fx.Int32))
+    b_scales = []
+    for ni in range_constexpr(fx.size(frag_B.shape[1]).unpack()):
+        if const_expr(scales_are_fragments):
+            b_scales.append(scale_b[ni])
+        else:
+            col = n_offset + (ni * param.n_waves + wave_n) * param.mma_n + scale_lane
+            safe_col = (col < n).select(col, 0)
+            b_scales.append(scale_b[safe_col, scale_k].to(fx.Int32))
+
+    for ni in range_constexpr(fx.size(frag_B.shape[1]).unpack()):
+        for mi in range_constexpr(fx.size(frag_A.shape[1]).unpack()):
+            a = fx.coalesce(frag_A[None, mi])
+            b = fx.coalesce(frag_B[None, ni])
+            sa, sb = a_scales[mi], b_scales[ni]
+            if const_expr(_use_direct_store(param)):
+                a, b, sa, sb = b, a, sb, sa
+            fx.gemm(
+                mma_atom,
+                fx.coalesce(frag_C[None, mi, ni]),
+                a,
+                b,
+                fx.coalesce(frag_C[None, mi, ni]),
+                scale_a=sa,
+                scale_b=sb,
+            )
+
+
+def make_ab_lds_layouts(rows_a, rows_b, storage_k, param):
+    if const_expr(param.dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)):
+        return (
+            make_fp8_lds_layout(rows_a, storage_k, param.a_is_transposed),
+            make_fp8_lds_layout(rows_b, storage_k, not param.b_is_transposed),
+        )
+    return make_gemm_ab_lds_layouts(
+        rows_a, rows_b, storage_k, param.a_is_transposed, param.b_is_transposed
+    )
+
+
 @flyc.kernel
 def gemm_gfx950_kernel(
     out: fx.Tensor,
@@ -690,7 +881,13 @@ def gemm_gfx950_kernel(
     b_leading_stride: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
+    # Empty tuples have no device ABI operands for the unscaled dtypes.
+    scale_a=(),
+    scale_b=(),
 ):
+    is_mxfp = param.dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
+    block_k_storage = param.block_k // (2 if param.dtype_id == GEMM_DTYPE_MXFP4 else 1)
+    shuffle_dtype = fx.BFloat16 if param.out_dtype_id == GEMM_DTYPE_BF16 else fx.Float16
     block_m = param.block_m
     block_n = param.block_n
     block_k = param.block_k
@@ -699,32 +896,52 @@ def gemm_gfx950_kernel(
     block_threads = param.block_threads
     ldg_a_iters = param.ldg_a_iters
     ldg_b_iters = param.ldg_b_iters
-    ldg_wait_count = ldg_a_iters + ldg_b_iters
-    elem_dtype = _elem_dtype(param)
+    ldg_wait_count = (
+        ldg_a_iters + ldg_b_iters + param.scale_a_iters + param.scale_b_iters
+    )
+    elem_dtype = fx.Float8E4M3FN if is_mxfp else _elem_dtype(param)
 
     tid = fx.thread_idx.x
     num_pid_m = (m - 1) // block_m + 1
     num_pid_n = (n - 1) // block_n + 1
+    if const_expr(is_mxfp):
+        num_pid_m = (m + block_m - 1) // block_m
+        num_pid_n = (n + block_n - 1) // block_n
     block_swizzle = BlockSwizzle(
         NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
     )
     bid_m, bid_n = block_swizzle.swizzle(num_pid_m, num_pid_n, fx.block_idx.x)
     k_tiles = (k - 1) // block_k + 1
 
-    @fx.struct
-    class SharedABStorage:
-        a: fx.Array[elem_dtype, stages * block_m * block_k, 16]
-        b: fx.Array[elem_dtype, stages * block_n * block_k, 16]
+    if const_expr(is_mxfp):
+
+        @fx.struct
+        class SharedABStorage:
+            a: fx.Array[elem_dtype, stages * block_m * block_k_storage, 16]
+            b: fx.Array[elem_dtype, stages * block_n * block_k_storage, 16]
+            sa: fx.Array[fx.Uint8, stages * param.scale_a_bytes, 16]
+            sb: fx.Array[fx.Uint8, stages * param.scale_b_bytes, 16]
+    else:
+
+        @fx.struct
+        class SharedABStorage:
+            a: fx.Array[elem_dtype, stages * block_m * block_k_storage, 16]
+            b: fx.Array[elem_dtype, stages * block_n * block_k_storage, 16]
 
     @fx.union
     class SharedStorage:
         ab: SharedABStorage
-        c: fx.Array[elem_dtype, block_m * block_n, 16]
+        c: fx.Array[shuffle_dtype, block_m * block_n, 16]
 
     storage = fx.SharedAllocator().allocate(SharedStorage)
     smem_a = storage.ab.a.peek().ptr
     smem_b = storage.ab.b.peek().ptr
     smem_c = storage.c.peek().ptr
+    if const_expr(is_mxfp):
+        smem_sa = storage.ab.sa.peek().ptr
+        smem_sb = storage.ab.sb.peek().ptr
+        scale_a_buf = fx.rocdl.make_buffer_tensor(scale_a, max_size=True)
+        scale_b_buf = fx.rocdl.make_buffer_tensor(scale_b, max_size=True)
 
     a_buf = fx.rocdl.make_buffer_tensor(a, max_size=True)
     b_buf = fx.rocdl.make_buffer_tensor(b, max_size=True)
@@ -740,18 +957,22 @@ def gemm_gfx950_kernel(
     gC = fx.flat_divide(out_buf, (block_m, block_n))[None, None, bid_m, bid_n]
     thr_mma = tiled_mma.thr_slice(tid)
     ab_load_context = make_gemm_ab_load_context(elem_dtype, tiled_mma, tid, k, param)
-    uni_copy_atom = ab_load_context.uni_copy_atom
-    buffer_copy_atom = ab_load_context.buffer_copy_atom
+    uni_copy_atom = (
+        fx.make_copy_atom(fx.UniversalCopy128b(), shuffle_dtype)
+        if is_mxfp
+        else ab_load_context.uni_copy_atom
+    )
+    buffer_copy_atom = (
+        fx.make_copy_atom(fx.rocdl.BufferCopy128b(), shuffle_dtype)
+        if is_mxfp
+        else ab_load_context.buffer_copy_atom
+    )
     a_s2r_copy_atom = ab_load_context.a_s2r_copy_atom
     b_s2r_copy_atom = ab_load_context.b_s2r_copy_atom
     thr_copy_A = ab_load_context.thr_copy_a
     thr_copy_B = ab_load_context.thr_copy_b
-    a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
-        block_m,
-        block_n,
-        block_k,
-        param.a_is_transposed,
-        param.b_is_transposed,
+    a_lds_layout, b_lds_layout = make_ab_lds_layouts(
+        block_m, block_n, block_k_storage, param
     )
     a_load_operand = AsyncLoadOperand(
         context=ab_load_context,
@@ -815,7 +1036,7 @@ def gemm_gfx950_kernel(
     pred_C = fx.make_fragment_like(thr_cRow, dtype=fx.Boolean)
 
     frag_C.fill(0.0)
-    if const_expr(param.has_bias):
+    if const_expr(param.has_bias and not is_mxfp):
         for i in range_constexpr(fx.size(frag_C.shape).unpack()):
             col_idx = fx.get_scalar(thr_mma_cCol[i])
             global_n_idx = bid_n * block_n + col_idx
@@ -837,24 +1058,69 @@ def gemm_gfx950_kernel(
     def async_load_a_to_lds(k_tile, stage):
         async_load_operand(
             a_load_operand,
-            lds_base=smem_a + stage * block_m * block_k,
+            lds_base=smem_a + stage * block_m * block_k_storage,
             global_outer_offset=bid_m * block_m,
             k_tile=k_tile,
         )
+        if const_expr(is_mxfp):
+            async_load_mxfp8_scales(
+                scale_a_buf,
+                smem_sa + stage * param.scale_a_bytes,
+                tid,
+                bid_m * block_m,
+                m,
+                k_tile * block_k,
+                block_m,
+                block_k,
+                block_threads,
+                has_k_tail,
+                k,
+            )
 
     def async_load_b_to_lds(k_tile, stage):
         async_load_operand(
             b_load_operand,
-            lds_base=smem_b + stage * block_n * block_k,
+            lds_base=smem_b + stage * block_n * block_k_storage,
             global_outer_offset=bid_n * block_n,
             k_tile=k_tile,
         )
+        if const_expr(is_mxfp):
+            async_load_mxfp8_scales(
+                scale_b_buf,
+                smem_sb + stage * param.scale_b_bytes,
+                tid,
+                bid_n * block_n,
+                n,
+                k_tile * block_k,
+                block_n,
+                block_k,
+                block_threads,
+                has_k_tail,
+                k,
+            )
 
     def compute_stage(read_stage, k_tile):
-        sA_stage = fx.make_view(smem_a + read_stage * block_m * block_k, a_lds_layout)
-        sB_stage = fx.make_view(smem_b + read_stage * block_n * block_k, b_lds_layout)
+        sA_stage = fx.make_view(
+            smem_a + read_stage * block_m * block_k_storage, a_lds_layout
+        )
+        sB_stage = fx.make_view(
+            smem_b + read_stage * block_n * block_k_storage, b_lds_layout
+        )
         thr_sA_s2r = thr_copy_A.partition_S(sA_stage)
         thr_sB_s2r = thr_copy_B.partition_S(sB_stage)
+        if const_expr(is_mxfp):
+            scale_a_view = fx.make_view(
+                smem_sa + read_stage * param.scale_a_bytes,
+                fx.make_layout(
+                    (block_m, param.scale_row_bytes), (param.scale_row_bytes, 1)
+                ),
+            )
+            scale_b_view = fx.make_view(
+                smem_sb + read_stage * param.scale_b_bytes,
+                fx.make_layout(
+                    (block_n, param.scale_row_bytes), (param.scale_row_bytes, 1)
+                ),
+            )
 
         def compute_k_chunk(block_k_iter):
             fx.copy(
@@ -867,14 +1133,30 @@ def gemm_gfx950_kernel(
                 thr_sA_s2r[None, None, block_k_iter],
                 frag_A_retile[None, None, block_k_iter],
             )
-            fx.gemm(
-                tiled_mma,
-                frag_C,
-                frag_A[None, None, block_k_iter],
-                frag_B[None, None, block_k_iter],
-                frag_C,
-                traversal_order=fx.GemmTraversalOrder.KNM,
-            )
+            if const_expr(is_mxfp):
+                mxfp8_gemm(
+                    frag_C,
+                    frag_A[None, None, block_k_iter],
+                    frag_B[None, None, block_k_iter],
+                    scale_a_view,
+                    scale_b_view,
+                    tid,
+                    0,
+                    0,
+                    block_k_iter * param.mma_k,
+                    block_m,
+                    block_n,
+                    param,
+                )
+            else:
+                fx.gemm(
+                    tiled_mma,
+                    frag_C,
+                    frag_A[None, None, block_k_iter],
+                    frag_B[None, None, block_k_iter],
+                    frag_C,
+                    traversal_order=fx.GemmTraversalOrder.KNM,
+                )
 
         for block_k_iter in range_constexpr(block_k // param.mma_k):
             if const_expr(has_k_tail):
@@ -907,8 +1189,16 @@ def gemm_gfx950_kernel(
         compute_stage(current_stage, main_loop_end + s)
         current_stage = (current_stage + 1) % stages
 
-    frag_C_out = fx.make_fragment_like(frag_C, elem_dtype)
-    frag_C_out.store(frag_C.load().to(elem_dtype))
+    frag_C_out = fx.make_fragment_like(frag_C, shuffle_dtype)
+    if const_expr(is_mxfp):
+        for i in range_constexpr(fx.size(frag_C.shape).unpack()):
+            acc = frag_C[i]
+            if const_expr(param.has_bias):
+                col = bid_n * block_n + fx.get_scalar(thr_mma_cCol[i])
+                acc = acc + bias_buf[(col < n).select(col, 0)].to(fx.Float32)
+            frag_C_out[i] = acc.to(shuffle_dtype)
+    else:
+        frag_C_out.store(frag_C.load().to(shuffle_dtype))
 
     fx.gpu.barrier()
     for i in range_constexpr(fx.size(frag_C_out.shape).unpack()):
@@ -934,132 +1224,241 @@ def gemm_hti_gfx950_kernel(
     b_leading_stride: fx.Int32,
     tiled_mma: fx.TiledMma,
     param: GemmGfx950Param,
+    # Empty tuples have no device ABI operands for the unscaled dtypes.
+    scale_a=(),
+    scale_b=(),
 ):
+    is_mxfp = param.dtype_id in (GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8)
+    elem_dtype = fx.Float8E4M3FN if is_mxfp else _elem_dtype(param)
+    elements_per_byte = 2 if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4) else 1
+    shuffle_dtype = (
+        fx.BFloat16 if const_expr(param.out_dtype_id == GEMM_DTYPE_BF16) else fx.Float16
+    )
     block_m = param.block_m
     block_n = param.block_n
     block_k = param.block_k
+    block_k_storage = block_k // elements_per_byte
     half_block_m = block_m // 2
     half_block_n = block_n // 2
     stages = param.stages
     has_k_tail = param.has_k_tail
     block_threads = param.block_threads
     n_waves = param.n_waves
-    half_ldg_a_iters = param.ldg_a_iters // 2
-    half_ldg_b_iters = param.ldg_b_iters // 2
-    elem_dtype = _elem_dtype(param)
+    scale_chunk_tiles = (
+        param.scale_row_bytes * MXFP_SCALE_BLOCK_K // block_k if is_mxfp else 1
+    )
+    use_scale_chunk = scale_chunk_tiles > 1
+    scale_stages = MXFP8_HTI_SCALE_BUFFERS if const_expr(use_scale_chunk) else stages
+    scale_k = param.scale_row_bytes
+    scale_a_stage_bytes = param.scale_a_bytes
+    scale_b_stage_bytes = param.scale_b_bytes
+    scale_a_iters = param.scale_a_iters
+    scale_b_iters = param.scale_b_iters
+    a_load_iters = param.ldg_a_iters // 2
+    b_load_iters = param.ldg_b_iters // 2
+    half_ldg_a_iters = a_load_iters + scale_a_iters
+    half_ldg_b_iters = b_load_iters + scale_b_iters
 
     tid = fx.thread_idx.x
     wid = tid // GFX950_WAVE_SIZE
     num_pid_m = (m - 1) // block_m + 1
     num_pid_n = (n - 1) // block_n + 1
-    block_swizzle = BlockSwizzle(
+    bid_m, bid_n = BlockSwizzle(
         NUM_XCDS=8, NUM_PIDS_THRESHOLD=256, GROUP_M=param.group_m
-    )
-    bid_m, bid_n = block_swizzle.swizzle(num_pid_m, num_pid_n, fx.block_idx.x)
+    ).swizzle(num_pid_m, num_pid_n, fx.block_idx.x)
     k_tiles = (k - 1) // block_k + 1
+    block_m_offset = bid_m * block_m
+    block_n_offset = bid_n * block_n
 
-    @fx.struct
-    class SharedABStorage:
-        a: fx.Array[elem_dtype, stages * block_m * block_k, 16]
-        b: fx.Array[elem_dtype, stages * block_n * block_k, 16]
+    if const_expr(is_mxfp):
+
+        @fx.struct
+        class SharedABStorage:
+            a: fx.Array[elem_dtype, stages * block_m * block_k_storage, 16]
+            b: fx.Array[elem_dtype, stages * block_n * block_k_storage, 16]
+            sa: fx.Array[fx.Uint8, scale_stages * 2 * scale_a_stage_bytes, 16]
+            sb: fx.Array[fx.Uint8, scale_stages * 2 * scale_b_stage_bytes, 16]
+    else:
+
+        @fx.struct
+        class SharedABStorage:
+            a: fx.Array[elem_dtype, stages * block_m * block_k_storage, 16]
+            b: fx.Array[elem_dtype, stages * block_n * block_k_storage, 16]
 
     @fx.union
     class SharedStorage:
         ab: SharedABStorage
-        c: fx.Array[elem_dtype, block_m * block_n, 16]
+        c: fx.Array[
+            shuffle_dtype,
+            (half_block_m * half_block_n if is_mxfp else block_m * block_n),
+            16,
+        ]
 
     storage = fx.SharedAllocator().allocate(SharedStorage)
     smem_a = storage.ab.a.peek().ptr
     smem_b = storage.ab.b.peek().ptr
+    if const_expr(is_mxfp):
+        smem_sa = storage.ab.sa.peek().ptr
+        smem_sb = storage.ab.sb.peek().ptr
     smem_c = storage.c.peek().ptr
 
     a_buf = fx.rocdl.make_buffer_tensor(a, max_size=True)
     b_buf = fx.rocdl.make_buffer_tensor(b, max_size=True)
-    out = fx.rocdl.make_buffer_tensor(out, max_size=False)
+    out_buf = fx.rocdl.make_buffer_tensor(out, max_size=is_mxfp)
+    if const_expr(is_mxfp):
+        scale_a_buf = fx.rocdl.make_buffer_tensor(scale_a, max_size=True)
+        scale_b_buf = fx.rocdl.make_buffer_tensor(scale_b, max_size=True)
     if const_expr(param.has_bias):
         bias_buf = fx.rocdl.make_buffer_tensor(bias, max_size=True)
     else:
         bias_buf = None
 
-    a_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(a_buf))
-    b_rsrc = fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf))
-
-    thr_mma = tiled_mma.thr_slice(tid)
     ab_load_context = make_gemm_ab_load_context(elem_dtype, tiled_mma, tid, k, param)
-    uni_copy_atom = ab_load_context.uni_copy_atom
-    buffer_copy_atom = ab_load_context.buffer_copy_atom
     a_s2r_copy_atom = ab_load_context.a_s2r_copy_atom
     b_s2r_copy_atom = ab_load_context.b_s2r_copy_atom
     thr_copy_A = ab_load_context.thr_copy_a
     thr_copy_B = ab_load_context.thr_copy_b
-    a_lds_layout, b_lds_layout = make_gemm_ab_lds_layouts(
-        half_block_m,
-        half_block_n,
-        block_k,
-        param.a_is_transposed,
-        param.b_is_transposed,
+    thr_mma = tiled_mma.thr_slice(tid)
+    a_lds_layout, b_lds_layout = make_ab_lds_layouts(
+        half_block_m, half_block_n, block_k_storage, param
     )
     a_load_operand = AsyncLoadOperand(
         context=ab_load_context,
-        rsrc=a_rsrc,
+        rsrc=fx.rocdl.get_buffer_rsrc(fx.get_iter(a_buf)),
         lds_layout=a_lds_layout,
         outer_tile_size=half_block_m,
         outer_bound=m,
         leading_stride=a_leading_stride,
-        load_iters=half_ldg_a_iters,
+        load_iters=a_load_iters,
         is_k_major=param.a_is_transposed,
     )
     b_load_operand = AsyncLoadOperand(
         context=ab_load_context,
-        rsrc=b_rsrc,
+        rsrc=fx.rocdl.get_buffer_rsrc(fx.get_iter(b_buf)),
         lds_layout=b_lds_layout,
         outer_tile_size=half_block_n,
         outer_bound=n,
         leading_stride=b_leading_stride,
-        load_iters=half_ldg_b_iters,
+        load_iters=b_load_iters,
         is_k_major=not param.b_is_transposed,
     )
-    c_lds_layout = fx.make_layout((half_block_m, half_block_n), (half_block_n, 1))
 
     def half_a_base(stage, m_part):
-        return smem_a + (stage * block_m + m_part * half_block_m) * block_k
+        return smem_a + (stage * block_m + m_part * half_block_m) * block_k_storage
 
     def half_b_base(stage, n_part):
-        return smem_b + (stage * block_n + n_part * half_block_n) * block_k
+        return smem_b + (stage * block_n + n_part * half_block_n) * block_k_storage
 
-    def async_load_a_to_lds(m_part, k_tile, stage):
+    def async_load_half(part, k_tile, stage, is_a):
+        operand, lds_base, outer_offset, rows = (
+            (a_load_operand, half_a_base(stage, part), block_m_offset, half_block_m)
+            if is_a
+            else (
+                b_load_operand,
+                half_b_base(stage, part),
+                block_n_offset,
+                half_block_n,
+            )
+        )
         async_load_operand(
-            a_load_operand,
-            lds_base=half_a_base(stage, m_part),
-            global_outer_offset=bid_m * block_m + m_part * half_block_m,
+            operand,
+            lds_base=lds_base,
+            global_outer_offset=outer_offset + part * rows,
             k_tile=k_tile,
         )
+        if const_expr(is_mxfp and not use_scale_chunk):
+            issue_scale_piece(k_tile, part, is_a, stage)
 
-    def async_load_b_to_lds(n_part, k_tile, stage):
-        async_load_operand(
-            b_load_operand,
-            lds_base=half_b_base(stage, n_part),
-            global_outer_offset=bid_n * block_n + n_part * half_block_n,
-            k_tile=k_tile,
+    def async_load_a_to_lds(part, k_tile, stage):
+        async_load_half(part, k_tile, stage, True)
+
+    def async_load_b_to_lds(part, k_tile, stage):
+        async_load_half(part, k_tile, stage, False)
+
+    def issue_scale_piece(k_tile, part, is_a, slot=0):
+        if const_expr(use_scale_chunk):
+            slot = k_tile // scale_chunk_tiles % MXFP8_HTI_SCALE_BUFFERS
+        base, stage_bytes, buf, offset, bound, rows = (
+            (smem_sa, scale_a_stage_bytes, scale_a_buf, block_m_offset, m, half_block_m)
+            if is_a
+            else (
+                smem_sb,
+                scale_b_stage_bytes,
+                scale_b_buf,
+                block_n_offset,
+                n,
+                half_block_n,
+            )
         )
+        async_load_mxfp8_scales(
+            buf,
+            base + (slot * 2 + part) * stage_bytes,
+            tid,
+            offset + part * rows,
+            bound,
+            k_tile * block_k,
+            rows,
+            block_k * scale_chunk_tiles,
+            block_threads,
+            has_k_tail or use_scale_chunk,
+            k,
+        )
+
+    def issue_scale_chunk(k_tile):
+        for part in range_constexpr(2):
+            issue_scale_piece(k_tile, part, True)
+            issue_scale_piece(k_tile, part, False)
+
+    def prefetch_scale_chunk(k_tile):
+        if const_expr(use_scale_chunk):
+            if k_tile % scale_chunk_tiles == 0:
+                # Align staggered M-wave groups before recycling a chunk slot.
+                rocdl.sched_barrier(0)
+                if wid // n_waves == 0:
+                    rocdl.s_barrier()
+                __barrier(0)
+                issue_scale_chunk(k_tile + scale_chunk_tiles)
+                if wid // n_waves == 1:
+                    rocdl.s_barrier()
+                rocdl.sched_barrier(0)
 
     def make_gC(m_part, n_part):
-        return fx.flat_divide(out, (half_block_m, half_block_n))[
+        return fx.flat_divide(out_buf, (half_block_m, half_block_n))[
             None, None, bid_m * 2 + m_part, bid_n * 2 + n_part
         ]
 
     def make_c_fragment(m_part, n_part):
-        gC = make_gC(m_part, n_part)
-        frag_C = thr_mma.make_fragment_C(gC)
+        frag_C = thr_mma.make_fragment_C(make_gC(m_part, n_part))
         frag_C.fill(0.0)
         return frag_C
+
+    def load_scale_fragment(base, stage_bytes, part, stage, rows, waves, wave, k_tile):
+        if const_expr(use_scale_chunk):
+            stage = k_tile // scale_chunk_tiles % MXFP8_HTI_SCALE_BUFFERS
+            offset = k_tile % scale_chunk_tiles * (block_k // MXFP_SCALE_BLOCK_K)
+        else:
+            offset = 0
+        scale_view = fx.make_view(
+            base + (stage * 2 + part) * stage_bytes,
+            fx.make_layout((rows, scale_k), (scale_k, 1)),
+        )
+        repeats = rows // waves // param.mma_m
+        frag = fx.make_rmem_tensor((repeats, block_k // param.mma_k), fx.Int32)
+        lane = tid % GFX950_WAVE_SIZE
+        for ki in range_constexpr(block_k // param.mma_k):
+            for ri in range_constexpr(repeats):
+                row = (ri * waves + wave) * param.mma_m + lane % param.mma_m
+                if const_expr(_use_direct_store(param)):
+                    row = (wave * repeats + ri) * param.mma_m + lane % param.mma_m
+                col = ki * (param.mma_k // MXFP_SCALE_BLOCK_K) + lane // param.mma_m
+                frag[ri, ki] = scale_view[row, offset + col].to(fx.Int32)
+        return frag
 
     def load_a_fragment(m_part, read_stage, k_tile):
         sA = fx.make_view(half_a_base(read_stage, m_part), a_lds_layout)
         frag_A = thr_mma.make_fragment_A(sA)
         frag_A_retile = thr_copy_A.retile(frag_A)
         thr_sA_s2r = thr_copy_A.partition_S(sA)
-
         for block_k_iter in range_constexpr(block_k // param.mma_k):
             if const_expr(has_k_tail):
                 global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
@@ -1075,14 +1474,26 @@ def gemm_hti_gfx950_kernel(
                     thr_sA_s2r[None, None, block_k_iter],
                     frag_A_retile[None, None, block_k_iter],
                 )
-        return frag_A
+        # Preserve scales with the data before prefetch reuses this LDS half.
+        scales = None
+        if const_expr(is_mxfp):
+            scales = load_scale_fragment(
+                smem_sa,
+                scale_a_stage_bytes,
+                m_part,
+                read_stage,
+                half_block_m,
+                param.m_waves,
+                wid // n_waves,
+                k_tile,
+            )
+        return frag_A, scales
 
     def load_b_fragment(n_part, read_stage, k_tile):
         sB = fx.make_view(half_b_base(read_stage, n_part), b_lds_layout)
         frag_B = thr_mma.make_fragment_B(sB)
         frag_B_retile = thr_copy_B.retile(frag_B)
         thr_sB_s2r = thr_copy_B.partition_S(sB)
-
         for block_k_iter in range_constexpr(block_k // param.mma_k):
             if const_expr(has_k_tail):
                 global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
@@ -1098,23 +1509,42 @@ def gemm_hti_gfx950_kernel(
                     thr_sB_s2r[None, None, block_k_iter],
                     frag_B_retile[None, None, block_k_iter],
                 )
-        return frag_B
+        scales = None
+        if const_expr(is_mxfp):
+            scales = load_scale_fragment(
+                smem_sb,
+                scale_b_stage_bytes,
+                n_part,
+                read_stage,
+                half_block_n,
+                param.n_waves,
+                wid % n_waves,
+                k_tile,
+            )
+        return frag_B, scales
 
-    def consume(k_tile, frag_C, frag_A, frag_B, emit_sched_barrier):
-        if const_expr(emit_sched_barrier):
-            rocdl.sched_barrier(0)
-        for block_k_iter in range_constexpr(block_k // param.mma_k):
-            if const_expr(has_k_tail):
-                global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
-                if global_k_iter < k:
-                    fx.gemm(
-                        tiled_mma,
-                        frag_C,
-                        frag_A[None, None, block_k_iter],
-                        frag_B[None, None, block_k_iter],
-                        frag_C,
-                        traversal_order=fx.GemmTraversalOrder.KNM,
-                    )
+    def consume(k_tile, frag_C, frag_A, frag_B):
+        frag_A, scales_a = frag_A
+        frag_B, scales_b = frag_B
+        rocdl.sched_barrier(0)
+
+        def mma_k_chunk(block_k_iter):
+            if const_expr(is_mxfp):
+                mxfp8_gemm(
+                    frag_C,
+                    frag_A[None, None, block_k_iter],
+                    frag_B[None, None, block_k_iter],
+                    scales_a[None, block_k_iter],
+                    scales_b[None, block_k_iter],
+                    tid,
+                    0,
+                    0,
+                    block_k_iter * param.mma_k,
+                    half_block_m,
+                    half_block_n,
+                    param,
+                    scales_are_fragments=True,
+                )
             else:
                 fx.gemm(
                     tiled_mma,
@@ -1124,15 +1554,21 @@ def gemm_hti_gfx950_kernel(
                     frag_C,
                     traversal_order=fx.GemmTraversalOrder.KNM,
                 )
-        if const_expr(emit_sched_barrier):
-            rocdl.sched_barrier(0)
 
-    def store_half_tile(m_part, n_part, frag_C):
-        gC = fx.flat_divide(out, (half_block_m, half_block_n))[
-            None, None, bid_m * 2 + m_part, bid_n * 2 + n_part
-        ]
+        for block_k_iter in range_constexpr(block_k // param.mma_k):
+            if const_expr(has_k_tail):
+                global_k_iter = k_tile * block_k + block_k_iter * param.mma_k
+                if global_k_iter < k:
+                    mma_k_chunk(block_k_iter)
+            else:
+                mma_k_chunk(block_k_iter)
+        rocdl.sched_barrier(0)
+
+    if const_expr(is_mxfp):
+        c_lds_layout = fx.make_layout((half_block_m, half_block_n), (half_block_n, 1))
         sC = fx.make_view(smem_c, c_lds_layout)
-
+        cshuffle_s2r_atom = fx.make_copy_atom(fx.UniversalCopy128b(), shuffle_dtype)
+        cshuffle_r2g_atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), shuffle_dtype)
         row_coords = fx.make_view(
             0, fx.make_layout((half_block_m, half_block_n), (1, 0))
         )
@@ -1141,68 +1577,219 @@ def gemm_hti_gfx950_kernel(
         )
         thr_mma_cRow = thr_mma.partition_C(row_coords)
         thr_mma_cCol = thr_mma.partition_C(col_coords)
-
         cshuffle_vec_size = GFX950_DMA_BYTES // param.out_data_bytes
         cshuffle_x_threads = half_block_n // cshuffle_vec_size
-        cshuffle_thr_layout = fx.make_layout(
-            (block_threads // cshuffle_x_threads, cshuffle_x_threads),
-            (cshuffle_x_threads, 1),
-        )
-        cshuffle_val_layout = fx.make_layout((1, cshuffle_vec_size), (1, 1))
         cshuffle_tile, cshuffle_tv_layout = fx.make_layout_tv(
-            cshuffle_thr_layout,
-            cshuffle_val_layout,
+            fx.make_layout(
+                (block_threads // cshuffle_x_threads, cshuffle_x_threads),
+                (cshuffle_x_threads, 1),
+            ),
+            fx.make_layout((1, cshuffle_vec_size), (1, 1)),
         )
-        tiled_copy_cshuffle = fx.make_tiled_copy(
-            buffer_copy_atom,
-            cshuffle_tv_layout,
-            cshuffle_tile,
-        )
-        thr_copy_cshuffle = tiled_copy_cshuffle.get_slice(tid)
+        thr_copy_cshuffle = fx.make_tiled_copy(
+            cshuffle_r2g_atom, cshuffle_tv_layout, cshuffle_tile
+        ).get_slice(tid)
         thr_sC = thr_copy_cshuffle.partition_S(sC)
-        thr_gC = thr_copy_cshuffle.partition_D(gC)
         thr_cRow = thr_copy_cshuffle.partition_S(row_coords)[(0, None), None, None]
         thr_cCol = thr_copy_cshuffle.partition_S(col_coords)[(0, None), None, None]
-        frag_C_cshuffle = fx.make_fragment_like(thr_sC)
-        pred_C = fx.make_fragment_like(thr_cRow, dtype=fx.Boolean)
 
-        for i in range_constexpr(fx.size(pred_C.shape).unpack()):
-            local_row = fx.get_scalar(thr_cRow[i])
-            local_col = fx.get_scalar(thr_cCol[i])
-            row_idx = bid_m * block_m + m_part * half_block_m + local_row
-            col_idx = bid_n * block_n + n_part * half_block_n + local_col
-            pred_C[i] = (
-                (local_row < half_block_m)
-                & (local_col < half_block_n)
-                & (row_idx < m)
-                & (col_idx < n)
+    def store_half_tile_row(m_part, n_part, frag_C, mi):
+        if const_expr(_use_direct_store(param)):
+            lane = tid % GFX950_WAVE_SIZE
+            rows_per_wave = half_block_m // param.m_waves
+            row = (
+                block_m_offset
+                + m_part * half_block_m
+                + wid // n_waves * rows_per_wave
+                + mi * param.mma_m
+                + lane % param.mma_m
+            )
+            col_base = block_n_offset + n_part * half_block_n + wid % n_waves * 32
+            stride = fx.Int32(fx.get_scalar(out.stride[0]))
+            halves = []
+            for ni in range_constexpr(2):
+                acc = fx.coalesce(frag_C[None, mi, ni])
+                if const_expr(param.has_bias):
+                    for vi in range_constexpr(4):
+                        col = col_base + ni * 16 + lane // 16 * 4 + vi
+                        safe_col = (col < n).select(col, 0)
+                        acc[vi] = acc[vi] + bias_buf[safe_col].to(fx.Float32)
+                halves.append(acc.load().to(shuffle_dtype).bitcast(fx.Int32))
+            words = []
+            for j in range_constexpr(2):
+                pair = rocdl.permlane16_swap(
+                    ir.Type.parse("!llvm.struct<(i32, i32)>"),
+                    fx.as_ir_value(halves[0][j]),
+                    fx.as_ir_value(halves[1][j]),
+                    False,
+                    False,
+                )
+                words.append(
+                    (
+                        fx.Int32(llvm.extractvalue(fx.Int32.ir_type, pair, [0])),
+                        fx.Int32(llvm.extractvalue(fx.Int32.ir_type, pair, [1])),
+                    )
+                )
+            reg = fx.make_rmem_tensor(fx.make_layout(8, 1), shuffle_dtype)
+            reg.store(
+                Vector.from_elements(
+                    [words[0][0], words[1][0], words[0][1], words[1][1]],
+                    fx.Int32,
+                ).bitcast(shuffle_dtype)
+            )
+            col = col_base + (lane // 16 % 2) * 16 + (lane // 32) * 8
+            dst = fx.make_view(
+                fx.get_iter(out_buf) + row * stride + col,
+                fx.make_layout(8, 1),
+            )
+            pred = fx.make_rmem_tensor(fx.make_layout(1, 1), fx.Boolean)
+            pred[0] = (row < m) & (col + 8 <= n)
+            fx.copy(cshuffle_r2g_atom, reg, dst, pred=pred)
+
+    def store_half_tile(m_part, n_part, frag_C):
+        if const_expr(_use_direct_store(param)):
+            for mi in range_constexpr(half_block_m // param.m_waves // param.mma_m):
+                store_half_tile_row(m_part, n_part, frag_C, mi)
+        elif const_expr(not is_mxfp):
+            dense_gC = fx.flat_divide(out_buf, (half_block_m, half_block_n))[
+                None, None, bid_m * 2 + m_part, bid_n * 2 + n_part
+            ]
+            dense_sC = fx.make_view(
+                smem_c, fx.make_layout((half_block_m, half_block_n), (half_block_n, 1))
             )
 
-        frag_C_out = fx.make_fragment_like(frag_C, elem_dtype)
-        for i in range_constexpr(fx.size(frag_C.shape).unpack()):
-            val = frag_C[i]
-            if const_expr(param.has_bias):
-                col = fx.get_scalar(thr_mma_cCol[i])
-                global_n_idx = bid_n * block_n + n_part * half_block_n + col
-                safe_global_n_idx = (global_n_idx < n).select(global_n_idx, 0)
-                val = val + bias_buf[safe_global_n_idx].to(fx.Float32)
-            frag_C_out[i] = val.to(elem_dtype)
+            dense_row_coords = fx.make_view(
+                0, fx.make_layout((half_block_m, half_block_n), (1, 0))
+            )
+            dense_col_coords = fx.make_view(
+                0, fx.make_layout((half_block_m, half_block_n), (0, 1))
+            )
+            dense_thr_mma_cRow = thr_mma.partition_C(dense_row_coords)
+            dense_thr_mma_cCol = thr_mma.partition_C(dense_col_coords)
 
-        fx.gpu.barrier()
-        for i in range_constexpr(fx.size(frag_C_out.shape).unpack()):
-            row = fx.get_scalar(thr_mma_cRow[i])
-            col = fx.get_scalar(thr_mma_cCol[i])
-            sC[row, col] = frag_C_out[i]
+            dense_cshuffle_vec_size = GFX950_DMA_BYTES // param.out_data_bytes
+            dense_cshuffle_x_threads = half_block_n // dense_cshuffle_vec_size
+            dense_cshuffle_thr_layout = fx.make_layout(
+                (block_threads // dense_cshuffle_x_threads, dense_cshuffle_x_threads),
+                (dense_cshuffle_x_threads, 1),
+            )
+            dense_cshuffle_val_layout = fx.make_layout(
+                (1, dense_cshuffle_vec_size), (1, 1)
+            )
+            dense_cshuffle_tile, dense_cshuffle_tv_layout = fx.make_layout_tv(
+                dense_cshuffle_thr_layout,
+                dense_cshuffle_val_layout,
+            )
+            dense_tiled_copy_cshuffle = fx.make_tiled_copy(
+                ab_load_context.buffer_copy_atom,
+                dense_cshuffle_tv_layout,
+                dense_cshuffle_tile,
+            )
+            dense_thr_copy_cshuffle = dense_tiled_copy_cshuffle.get_slice(tid)
+            dense_thr_sC = dense_thr_copy_cshuffle.partition_S(dense_sC)
+            dense_thr_gC = dense_thr_copy_cshuffle.partition_D(dense_gC)
+            dense_thr_cRow = dense_thr_copy_cshuffle.partition_S(dense_row_coords)[
+                (0, None), None, None
+            ]
+            dense_thr_cCol = dense_thr_copy_cshuffle.partition_S(dense_col_coords)[
+                (0, None), None, None
+            ]
+            dense_frag_C_cshuffle = fx.make_fragment_like(dense_thr_sC)
+            dense_pred_C = fx.make_fragment_like(dense_thr_cRow, dtype=fx.Boolean)
 
-        fx.gpu.barrier()
-        fx.copy(uni_copy_atom, thr_sC, frag_C_cshuffle)
-        fx.copy(buffer_copy_atom, frag_C_cshuffle, thr_gC, pred=pred_C)
-        fx.gpu.barrier()
+            for dense_i in range_constexpr(fx.size(dense_pred_C.shape).unpack()):
+                dense_local_row = fx.get_scalar(dense_thr_cRow[dense_i])
+                dense_local_col = fx.get_scalar(dense_thr_cCol[dense_i])
+                dense_row_idx = (
+                    bid_m * block_m + m_part * half_block_m + dense_local_row
+                )
+                dense_col_idx = (
+                    bid_n * block_n + n_part * half_block_n + dense_local_col
+                )
+                dense_pred_C[dense_i] = (
+                    (dense_local_row < half_block_m)
+                    & (dense_local_col < half_block_n)
+                    & (dense_row_idx < m)
+                    & (dense_col_idx < n)
+                )
+
+            dense_frag_C_out = fx.make_fragment_like(frag_C, elem_dtype)
+            for dense_i in range_constexpr(fx.size(frag_C.shape).unpack()):
+                dense_val = frag_C[dense_i]
+                if const_expr(param.has_bias):
+                    dense_col = fx.get_scalar(dense_thr_mma_cCol[dense_i])
+                    dense_global_n_idx = (
+                        bid_n * block_n + n_part * half_block_n + dense_col
+                    )
+                    dense_safe_global_n_idx = (dense_global_n_idx < n).select(
+                        dense_global_n_idx, 0
+                    )
+                    dense_val = dense_val + bias_buf[dense_safe_global_n_idx].to(
+                        fx.Float32
+                    )
+                dense_frag_C_out[dense_i] = dense_val.to(elem_dtype)
+
+            fx.gpu.barrier()
+            for dense_i in range_constexpr(fx.size(dense_frag_C_out.shape).unpack()):
+                dense_row = fx.get_scalar(dense_thr_mma_cRow[dense_i])
+                dense_col = fx.get_scalar(dense_thr_mma_cCol[dense_i])
+                dense_sC[dense_row, dense_col] = dense_frag_C_out[dense_i]
+
+            fx.gpu.barrier()
+            fx.copy(ab_load_context.uni_copy_atom, dense_thr_sC, dense_frag_C_cshuffle)
+            fx.copy(
+                ab_load_context.buffer_copy_atom,
+                dense_frag_C_cshuffle,
+                dense_thr_gC,
+                pred=dense_pred_C,
+            )
+            fx.gpu.barrier()
+        else:
+            gC = make_gC(m_part, n_part)
+            thr_gC = thr_copy_cshuffle.partition_D(gC)
+            frag_C_cshuffle = fx.make_fragment_like(thr_sC)
+            pred_C = fx.make_fragment_like(thr_cRow, dtype=fx.Boolean)
+            for i in range_constexpr(fx.size(pred_C.shape).unpack()):
+                local_row = fx.get_scalar(thr_cRow[i])
+                local_col = fx.get_scalar(thr_cCol[i])
+                row_idx = block_m_offset + m_part * half_block_m + local_row
+                col_idx = block_n_offset + n_part * half_block_n + local_col
+                pred_C[i] = (
+                    (local_row < half_block_m)
+                    & (local_col < half_block_n)
+                    & (row_idx < m)
+                    & (col_idx < n)
+                )
+            frag_C_out = fx.make_fragment_like(frag_C, shuffle_dtype)
+            for i in range_constexpr(fx.size(frag_C.shape).unpack()):
+                acc = frag_C[i]
+                if const_expr(param.has_bias):
+                    global_n_idx = (
+                        block_n_offset
+                        + n_part * half_block_n
+                        + fx.get_scalar(thr_mma_cCol[i])
+                    )
+                    safe_n = (global_n_idx < n).select(global_n_idx, 0)
+                    acc = acc + bias_buf[safe_n].to(fx.Float32)
+                frag_C_out[i] = acc.to(shuffle_dtype)
+            fx.gpu.barrier()
+            for i in range_constexpr(fx.size(frag_C_out.shape).unpack()):
+                sC[fx.get_scalar(thr_mma_cRow[i]), fx.get_scalar(thr_mma_cCol[i])] = (
+                    frag_C_out[i]
+                )
+            fx.gpu.barrier()
+            fx.copy(cshuffle_s2r_atom, thr_sC, frag_C_cshuffle)
+            fx.copy(cshuffle_r2g_atom, frag_C_cshuffle, thr_gC, pred=pred_C)
+            fx.gpu.barrier()
 
     c00 = make_c_fragment(0, 0)
     c01 = make_c_fragment(0, 1)
     c10 = make_c_fragment(1, 0)
     c11 = make_c_fragment(1, 1)
+
+    if const_expr(use_scale_chunk):
+        issue_scale_chunk(0)
+        __barrier(0)
 
     async_load_b_to_lds(0, 0, 0)
     async_load_a_to_lds(0, 0, 0)
@@ -1220,34 +1807,35 @@ def gemm_hti_gfx950_kernel(
     __barrier(half_ldg_b_iters + half_ldg_a_iters)
 
     def compute_double_tile(k_tile, prefetch_next):
+        prefetch_scale_chunk(k_tile)
         next_k_tile = k_tile + 2
 
         b0 = load_b_fragment(0, 0, k_tile)
         a0 = load_a_fragment(0, 0, k_tile)
         async_load_a_to_lds(1, k_tile + 1, 1)
         rocdl.s_barrier()
-        consume(k_tile, c00, a0, b0, True)
+        consume(k_tile, c00, a0, b0)
         rocdl.s_barrier()
 
         b1 = load_b_fragment(1, 0, k_tile)
         if const_expr(prefetch_next):
             async_load_b_to_lds(0, next_k_tile, 0)
             rocdl.s_barrier()
-        consume(k_tile, c01, a0, b1, True)
+        consume(k_tile, c01, a0, b1)
         rocdl.s_barrier()
 
         a1 = load_a_fragment(1, 0, k_tile)
         if const_expr(prefetch_next):
             async_load_a_to_lds(0, next_k_tile, 0)
             rocdl.s_barrier()
-        consume(k_tile, c10, a1, b0, True)
+        consume(k_tile, c10, a1, b0)
         rocdl.s_barrier()
 
         b0 = load_b_fragment(0, 1, k_tile + 1)
         if const_expr(prefetch_next):
             async_load_b_to_lds(1, next_k_tile, 0)
             __barrier(2 * half_ldg_b_iters + half_ldg_a_iters)
-        consume(k_tile, c11, a1, b1, True)
+        consume(k_tile, c11, a1, b1)
         if const_expr(not prefetch_next):
             __waitcnt(0)
         rocdl.s_barrier()
@@ -1256,27 +1844,33 @@ def gemm_hti_gfx950_kernel(
         if const_expr(prefetch_next):
             async_load_a_to_lds(1, next_k_tile, 0)
             rocdl.s_barrier()
-        consume(k_tile + 1, c00, a0, b0, True)
+        consume(k_tile + 1, c00, a0, b0)
+        if const_expr(_use_direct_store(param) and not prefetch_next):
+            store_half_tile(0, 0, c00)
         rocdl.s_barrier()
 
         b1 = load_b_fragment(1, 1, k_tile + 1)
         if const_expr(prefetch_next):
             async_load_b_to_lds(0, next_k_tile + 1, 1)
             rocdl.s_barrier()
-        consume(k_tile + 1, c01, a0, b1, True)
+        consume(k_tile + 1, c01, a0, b1)
+        if const_expr(_use_direct_store(param) and not prefetch_next):
+            store_half_tile(0, 1, c01)
         rocdl.s_barrier()
 
         a1 = load_a_fragment(1, 1, k_tile + 1)
         if const_expr(prefetch_next):
             async_load_a_to_lds(0, next_k_tile + 1, 1)
             rocdl.s_barrier()
-        consume(k_tile + 1, c10, a1, b0, True)
+        consume(k_tile + 1, c10, a1, b0)
+        if const_expr(_use_direct_store(param) and not prefetch_next):
+            store_half_tile(1, 0, c10)
         rocdl.s_barrier()
 
         if const_expr(prefetch_next):
             async_load_b_to_lds(1, next_k_tile + 1, 1)
             __barrier(half_ldg_b_iters + half_ldg_a_iters)
-        consume(k_tile + 1, c11, a1, b1, True)
+        consume(k_tile + 1, c11, a1, b1)
         rocdl.s_barrier()
 
     final_double_tile = ((k_tiles % 2) == 0).select(k_tiles - 2, k_tiles - 1)
@@ -1286,9 +1880,10 @@ def gemm_hti_gfx950_kernel(
 
     compute_double_tile(main_loop_end, False)
 
-    store_half_tile(0, 0, c00)
-    store_half_tile(0, 1, c01)
-    store_half_tile(1, 0, c10)
+    if const_expr(not _use_direct_store(param)):
+        store_half_tile(0, 0, c00)
+        store_half_tile(0, 1, c01)
+        store_half_tile(1, 0, c10)
     store_half_tile(1, 1, c11)
 
 
@@ -1383,3 +1978,55 @@ def make_gemm_param_and_validate(m, n, k, kwargs):
         if k_tiles < 2:
             return None
     return result
+
+
+@flyc.jit
+def gemm_mxfp_gfx950(
+    out: fx.Tensor,
+    a: fx.Tensor,
+    b: fx.Tensor,
+    scale_a: fx.Tensor,
+    scale_b: fx.Tensor,
+    bias: fx.Tensor,
+    param: GemmGfx950Param,
+    stream: fx.Stream = fx.Stream(None),
+):
+    elements_per_byte = 2 if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4) else 1
+    m = fx.Int32(fx.get_scalar(a.shape[0]))
+    n = fx.Int32(fx.get_scalar(b.shape[1]))
+    k = fx.Int32(fx.get_scalar(a.shape[1])) * fx.Int32(elements_per_byte)
+    a_leading_stride = fx.Int32(
+        fx.get_scalar(a.stride[1] if const_expr(param.a_is_transposed) else a.stride[0])
+    )
+    b_leading_stride = fx.Int32(
+        fx.get_scalar(b.stride[1] if const_expr(param.b_is_transposed) else b.stride[0])
+    )
+    num_pid_m = (m - 1) // param.block_m + 1
+    num_pid_n = (n - 1) // param.block_n + 1
+    tiled_mma = make_mxfp_tiled_mma(param)
+    kernel = (
+        gemm_hti_gfx950_kernel
+        if param.use_half_tile_interleaved
+        else gemm_gfx950_kernel
+    )
+    kernel._known_block_size = [param.block_threads, 1, 1]
+    kernel._func.__name__ = make_gemm_gfx950_kernel_name(param)
+    kernel(
+        out,
+        a,
+        b,
+        bias,
+        m,
+        n,
+        k,
+        a_leading_stride,
+        b_leading_stride,
+        tiled_mma,
+        param,
+        scale_a,
+        scale_b,
+    ).launch(
+        grid=(num_pid_m * num_pid_n, 1, 1),
+        block=(param.block_threads, 1, 1),
+        stream=stream,
+    )

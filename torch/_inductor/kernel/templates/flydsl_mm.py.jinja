@@ -6,7 +6,7 @@ from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     make_gemm_param_and_validate,
 )
 {% if IS_MXFP %}
-from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_mxfp_gfx950 import (
+from torch._inductor.kernel.vendored_templates.flydsl.kernels.gemm_gfx950 import (
     gemm_mxfp_gfx950 as _kernel,
 )
 {% else %}
