@@ -110,7 +110,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         filter_fn = precompile_package.default_guard_filter_fn
         unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
         # Spelled out: the filter reads the same constant, so on a shrunk one the
-        # two would agree on less.
+        # two would agree on less. The entries are bare; the builder gives most
+        # of these a derived ID_MATCH, which the next table drops too, so the
+        # verdicts are the same either way.
         refused_types = {
             "ID_MATCH",
             "FUNCTION_MATCH",
@@ -152,14 +154,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ("TYPE_MATCH", ()),
             # BUILTIN_MATCH is an id_match_unchecked deriving ID_MATCH; the
             # pre-check takes TYPE_MATCH and BUILTIN_MATCH on their own type,
-            # before it looks at derived types, so the filter keeps them whatever
-            # they derive. That branch is not an unconditional accept: it refuses
-            # these two for a local-scope type, which is what
+            # before it looks at derived types, so the filter keeps it (no
+            # GuardBuilder path gives a TYPE_MATCH a refused derived type). That
+            # branch is not an unconditional accept: it refuses these two for a
+            # local-scope type, which is what
             # test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal
             # covers; the rows are on a local source since that is where the kept
             # TYPE_MATCH the refusal needs sits, and the filter reads no scope.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
-            ("TYPE_MATCH", ("ID_MATCH",)),
         ]
         entries = [_entry(LocalSource("obj"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
