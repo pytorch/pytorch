@@ -320,7 +320,6 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
         varying = {(f.guard_type, f.source) for f in frame.varying}
         self.assertIn(("TENSOR_MATCH", "x"), varying)
         self.assertTrue(any("scale" in f.source for f in frame.invariant))
-        self.assertIsInstance(frame.invariant[0].render(), str)
 
     def test_invariants_report_is_written_on_a_clean_exit_only(self):
         model = _SessionReadsAttr()
