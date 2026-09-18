@@ -27,7 +27,9 @@ _rng_tracker: Optional["_RNGStateTracker"] = None
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
-    Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
+    Currently DTensor Random APIs only support cuda/cuda-like devices. Third-party
+    backends can register a RNG state handler (see
+    :func:`register_rng_state_handler`) to opt in. We suggest
     users call this API to test the availability before using our random APIs.
 
     Args:
@@ -38,10 +40,13 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
         A bool value. True if ``device_mesh`` supports DTensor Random APIs; False otherwise.
 
     .. warning::
-        Currently we only support correct RNG on cuda/cuda-like devices.
+        Currently we only support correct RNG on cuda/cuda-like devices, or on
+        devices with a registered RNG state handler.
     """
     device_handle = _get_device_handle(device_mesh.device_type)
     if device_handle and hasattr(device_handle, "set_rng_state"):
+        return True
+    if device_mesh.device_type in _rng_state_handlers:
         return True
     else:
         # TODO: Logs way too much
@@ -146,6 +151,100 @@ class _PhiloxState:
         self._state[:8] = seed.view(torch.uint8)
 
 
+# The default (philox-based) RNG state layout requires offsets to be aligned to
+# multiples of 4. See aten/src/ATen/cuda/CUDAGeneratorImpl.cpp.
+_DEFAULT_RNG_OFFSET_ALIGNMENT = 4
+
+
+class _RNGStateHandler:
+    """
+    Per-device hooks that adapt the offset-based RNG tracking to a device's
+    generator implementation. The default implementation matches the
+    philox-based generators used by CUDA and CUDA-like devices (e.g. XPU),
+    whose RNG state is a 16-byte uint8 tensor holding (seed: uint64,
+    offset: uint64), interpreted by :class:`_PhiloxState`.
+
+    Third-party backends whose generators do not follow this layout can
+    subclass this handler and register it via
+    :func:`register_rng_state_handler`.
+
+    Args:
+        device_handle: the device module (e.g. ``torch.cuda``).
+    """
+
+    def __init__(self, device_handle):
+        self._device_handle = device_handle
+
+    @property
+    def offset_alignment(self) -> int:
+        """The alignment requirement (in elements) of the RNG offset."""
+        return _DEFAULT_RNG_OFFSET_ALIGNMENT
+
+    def decode_state(self, state: torch.Tensor) -> _PhiloxState:
+        """Wrap a raw RNG state tensor into a view exposing ``seed``/``offset``."""
+        return _PhiloxState(state)
+
+    def get_state(self) -> torch.Tensor:
+        return self._device_handle.get_rng_state()
+
+    def set_state(self, state: torch.Tensor) -> None:
+        self._device_handle.set_rng_state(state)
+
+    def enter_ctx(self) -> None:
+        """Called before the RNG state is accessed within a distribute region."""
+
+    def exit_ctx(self) -> None:
+        """Called after the distribute region finishes accessing the RNG state."""
+
+
+class _HpuRNGStateHandler(_RNGStateHandler):
+    """Gaudi (hpu) generators require the philox RNG context to be set while
+    the RNG state is being accessed."""
+
+    def enter_ctx(self) -> None:
+        self._device_handle.set_rng_ctx("philox")
+
+    def exit_ctx(self) -> None:
+        self._device_handle.unset_rng_ctx("philox")
+
+
+# Registry of RNG state handlers for third-party backends, keyed by device type.
+_rng_state_handlers: dict[str, _RNGStateHandler] = {}
+
+
+def register_rng_state_handler(device_type: str, handler: _RNGStateHandler) -> None:
+    """Register a RNG state handler for ``device_type``.
+
+    Third-party backends whose generators do not follow the default philox
+    state layout (see :class:`_RNGStateHandler`) should register a handler in
+    their initialization code so that DTensor's offset-based random operators
+    work on their devices. Devices without a registered handler fall back to
+    the default philox-based handling.
+    """
+    _rng_state_handlers[device_type] = handler
+
+
+def _get_rng_state_handler(device_type: str, device_handle) -> _RNGStateHandler:
+    """Return the RNG state handler for ``device_type``.
+
+    Handlers explicitly registered via :func:`register_rng_state_handler` take
+    precedence. In-tree and unregistered backends fall back to the default
+    philox-based handler; the in-tree hpu special case is kept for backward
+    compatibility.
+    """
+    handler = _rng_state_handlers.get(device_type)
+    if handler is not None:
+        return handler
+    if device_type == "hpu":
+        return _HpuRNGStateHandler(device_handle)
+    return _RNGStateHandler(device_handle)
+
+
+def _align_up(value: IntLikeType, alignment: int) -> IntLikeType:
+    """Round ``value`` up to the nearest multiple of ``alignment``."""
+    return (value + alignment - 1) // alignment * alignment
+
+
 class _RNGStateTracker:
     """
     _RNGStateTracker stores Random Number Generator (RNG) state (a ByteTensor object)
@@ -163,6 +262,9 @@ class _RNGStateTracker:
                 f"{self.__class__.__name__} instantiation requires the presence of "
                 f"{device.type} device but couldn't find."
             )
+        self._rng_state_handler = _get_rng_state_handler(
+            self._device.type, self._device_handle
+        )
         self._use_distribute_region = True
 
     @property
@@ -188,7 +290,9 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
     should be shared and synchronized among all ranks to respect the semantics of DTensor
     random operators.
 
-    note: _RNGStateTracker only supports cuda/cuda-like device.
+    note: _RNGStateTracker only supports cuda/cuda-like devices and third-party
+    backends with a registered RNG state handler (see
+    :func:`register_rng_state_handler`).
     """
 
     def __init__(
@@ -203,7 +307,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self._device.type == "cpu":
             raise RuntimeError(
                 f"{self.__class__.__name__} instantiation requires the presence of "
-                f"CUDA/CUDA-like/XPU device. Got {self._device.type} instead."
+                f"an accelerator device (CUDA/CUDA-like/XPU or a third-party backend "
+                f"with a registered RNG state handler). Got {self._device.type} instead."
             )
 
         if run_state_sync:
@@ -222,22 +327,23 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             self._set_device_state(rng_state)
 
     def _get_device_state(self) -> torch.Tensor:
-        if self._device.type == "hpu":
-            self._device_handle.set_rng_ctx("philox")
-        rng_state = self._device_handle.get_rng_state().to(self._device)
-        if self._device.type == "hpu":
-            self._device_handle.unset_rng_ctx("philox")
-        return rng_state
+        handler = self._rng_state_handler
+        handler.enter_ctx()
+        try:
+            return handler.get_state().to(self._device)
+        finally:
+            handler.exit_ctx()
 
     def _set_device_state(self, state: torch.Tensor):
         # It seems that the underlying generator wants a cpu tensor but the dtensor code expects `_get_device_state`
         # to convert to a 'device' tensor, probably because we may use it with our backend comms for sync/debug
         # for now, we just convert back to cpu here to make sure it always works.
-        if self._device.type == "hpu":
-            self._device_handle.set_rng_ctx("philox")
-        self._device_handle.set_rng_state(state.to("cpu"))
-        if self._device.type == "hpu":
-            self._device_handle.unset_rng_ctx("philox")
+        handler = self._rng_state_handler
+        handler.enter_ctx()
+        try:
+            handler.set_state(state.to("cpu"))
+        finally:
+            handler.exit_ctx()
 
     @contextlib.contextmanager
     def _distribute_region(
@@ -257,28 +363,28 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             # This is a little hacky, but for any user-passed generator, we store its state under a unique key,
             # not because we need to keep a copy of it but because its the easiest way to make it work with the
             # existing set/get APIs. We also ensure we remove it from rng_states after each _distribute_region.
-            state = _PhiloxState(generator.get_state())
+            state = self._rng_state_handler.decode_state(generator.get_state())
         else:
-            state = _PhiloxState(self._get_device_state())
+            state = self._rng_state_handler.decode_state(self._get_device_state())
 
         if self.distribute_region_enabled:
-            if self._device.type == "hpu":
-                self._device_handle.set_rng_ctx("philox")
-            old_offset = state.offset.clone()
-            self._set_pre_op_offset(state, spec)
-            with torch.random.fork_rng(
-                devices=[self._device], device_type=self._device.type
-            ):
-                if self._device_handle is None:
-                    raise AssertionError
-                self._device_handle.set_rng_state(state.state)
-                try:
-                    yield  # execute the region code
-                finally:
-                    # update offset to synchronize among ranks
-                    self._set_post_op_offset(state, spec, old_offset)
-            if self._device.type == "hpu":
-                self._device_handle.unset_rng_ctx("philox")
+            self._rng_state_handler.enter_ctx()
+            try:
+                old_offset = state.offset.clone()
+                self._set_pre_op_offset(state, spec)
+                with torch.random.fork_rng(
+                    devices=[self._device], device_type=self._device.type
+                ):
+                    if self._device_handle is None:
+                        raise AssertionError
+                    self._rng_state_handler.set_state(state.state)
+                    try:
+                        yield  # execute the region code
+                    finally:
+                        # update offset to synchronize among ranks
+                        self._set_post_op_offset(state, spec, old_offset)
+            finally:
+                self._rng_state_handler.exit_ctx()
         else:
             yield
 
@@ -368,7 +474,9 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         as integer constants rather than keeping the DTensorSpec around at runtime.
 
         Returns:
-            (start_offset_incr, end_offset_incr) — both aligned to multiples of 4.
+            (start_offset_incr, end_offset_incr) -- both aligned to the offset
+            alignment required by the device's generator (multiples of 4 for
+            philox-based generators).
         """
         from torch.distributed.tensor._ops.utils import prod
 
@@ -382,10 +490,12 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             shard_idx_by_dim, total_num_shards_by_dim
         )
         local_size = prod(_calc_first_shard_size(spec))
-        # pytorch: offset must be multiple of 4
-        # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
-        start_offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-        end_offset_incr = (prod(spec.shape) + 3) // 4 * 4
+        # The RNG offset must be aligned to the granularity required by the device
+        # generator (philox-based generators require multiples of 4;
+        # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp).
+        alignment = self._rng_state_handler.offset_alignment
+        start_offset_incr = _align_up(shard_linear_idx * local_size, alignment)
+        end_offset_incr = _align_up(prod(spec.shape), alignment)
 
         return start_offset_incr, end_offset_incr  # type: ignore[bad-return]
 
