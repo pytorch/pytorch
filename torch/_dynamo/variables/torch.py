@@ -84,6 +84,7 @@ from ..source import (
 from ..utils import (
     _is_tensorify_enabled,
     check_unspec_or_constant_args,
+    fqn,
     guard_if_dyn,
     has_torch_function,
     hashable,
@@ -110,7 +111,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import vt_is_iterable
+from .object_protocol import pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1267,6 +1268,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 # Use math.fma if constants
                 return None
+
+        @register(math.gcd)
+        def handle_gcd(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
+
+        @register(math.lcm)
+        def handle_lcm(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
@@ -3642,6 +3671,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
+
+        if self.can_constant_fold_through():
+            from .tensor import CurrentDeviceVariable
+
+            if any(
+                isinstance(a, CurrentDeviceVariable) for a in (*args, *kwargs.values())
+            ):
+                # Under CooR the current device's index is only known at runtime, so
+                # there is no constant to fold to. Breaking is correct rather than
+                # merely conservative: get_device_properties mixes rank-invariant
+                # hardware facts with per-card identity (uuid, pci_bus_id), so the
+                # compiling rank's answer is not right for every rank. The eager
+                # fallback reads the running rank's.
+                unimplemented(
+                    gb_type="Constant fold with a rank-relative device",
+                    context=fqn(self.value),
+                    explanation=(
+                        f"`{fqn(self.value)}` was called with the current device, "
+                        "whose index is only known at runtime under "
+                        "compile_on_one_rank, so the result cannot be folded into "
+                        "the graph."
+                    ),
+                    hints=[
+                        "This graph break is expected under compile_on_one_rank.",
+                        "The resumed eager call observes the running rank's device.",
+                        "Pass an explicit device if the value is the same on every rank.",
+                    ],
+                )
 
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
