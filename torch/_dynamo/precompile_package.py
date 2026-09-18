@@ -25,7 +25,6 @@ yet.
 
 from __future__ import annotations
 
-import collections
 import contextlib
 import functools
 import hashlib
@@ -1195,7 +1194,10 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "TENSOR_MATCH",
         "SEQUENCE_LENGTH",
         # Python values the graph specialized on: an int or bool argument,
-        # module.training, an .item() result, mask=None.
+        # module.training, an .item() result, mask=None. BOOL_MATCH is reached
+        # only through CONSTANT_MATCH, so it shows up in an entry's
+        # derived_guard_types and never as its guard_type; it is listed for
+        # the totality test over GuardBuilder methods.
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
         "BOOL_MATCH",
@@ -1222,8 +1224,19 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # Ambient state (installed on GlobalStateSource, not an input): the
         # graph specialized on utils_device.CURRENT_DEVICE; captured under the
         # default None and served under set_default_device("cuda"), it returns
-        # CPU tensors with no refusal.
+        # CPU tensors with no refusal. The next three are the same shape, and
+        # GlobalStateGuard::init snapshots none of the four. The vmap level the
+        # graph baked in (output_graph.functorch_layers, itself serialized)
+        # lives in BatchedTensorImpl, not in the keys TENSOR_MATCH compares.
         "DEFAULT_DEVICE",
+        "FUNCTORCH_STACK_MATCH",
+        # The traced level is a graph constant (_exit_dual_level(level=N));
+        # under another _current_level unpack_dual returns no tangent.
+        "DUAL_LEVEL",
+        # The predicate that installs it also bakes the pack/unpack subgraphs
+        # into the graph; a hook-free capture served under inlineable hooks
+        # skips them with no refusal.
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
         # Membership, key-set, length and iterator-position facts, each a branch
         # the graph specialized on.
         "COUNT_ITERATOR_MATCH",
@@ -1262,8 +1275,10 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "DISPATCH_KEY_SET_MATCH",
         "DTENSOR_SPEC_MATCH",
         # Its builder is a no-op like GRAD_MODE's, but GlobalStateGuard does not
-        # snapshot FSDP training state and the state is per param group, so
-        # nothing here can model or vouch for it.
+        # snapshot FSDP training state (the method's in-tree "we always guard on
+        # this via GlobalStateGuard()" comment is stale: GlobalStateGuard::init
+        # has no FSDP field) and the state is per param group, so nothing here
+        # can model or vouch for it.
         "FSDP_TRAINING_STATE",
         "GLOBAL_STATE",
         "OPAQUE_OBJ_GUARD_FN_MATCH",
@@ -1296,23 +1311,16 @@ def _is_noop_guard_type(guard_type: str) -> bool:
 
 # The ONLY guard types the invariance policy may drop, and only when proven
 # invariant across every captured variant: the identity guards the default
-# filter drops anyway as unserializable, and process-wide compiler state. The
-# four sets are a total, disjoint classification of GuardBuilder's guard
-# methods, pinned by test_guard_policy_classification_is_total: a guard type in
-# none of them -- any type added to GuardBuilder after this list -- is KEPT
-# unconditionally until someone classifies it, so a new value-pinning guard can
-# never become silently droppable. Guards installed outside GuardBuilder (the
-# root manager's DuplicateInputs and StorageOverlap exprs, the dimension-marking
-# lambda) never reach the guard filter and are outside the policy as well.
-_INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset(
-    {
-        "AUTOGRAD_SAVED_TENSORS_HOOKS",
-        # An identity match on a builtin, which the default filter keeps.
-        "BUILTIN_MATCH",
-        "DUAL_LEVEL",
-        "FUNCTORCH_STACK_MATCH",
-    }
-)
+# filter drops anyway as unserializable, plus BUILTIN_MATCH, an identity match
+# on a builtin that the default filter keeps. The four sets are a total,
+# disjoint classification of GuardBuilder's guard methods, pinned by
+# test_guard_policy_classification_is_total: a guard type in none of them --
+# any type added to GuardBuilder after this list -- is KEPT unconditionally
+# until someone classifies it, so a new value-pinning guard can never become
+# silently droppable. Guards installed outside GuardBuilder (the root manager's
+# DuplicateInputs and StorageOverlap exprs, the dimension-marking lambda) never
+# reach the guard filter and are outside the policy as well.
+_INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_MATCH"})
 
 
 def _saved_hooks_fingerprint() -> str:
@@ -1326,7 +1334,7 @@ def _saved_hooks_fingerprint() -> str:
     named by their rendered graph rather than by address, since an id cannot
     go in a committed, diffable file. KNOWN TRADEOFF: two distinct GraphModules
     with identical code read as one hook set here while the guard tells them
-    apart, so a policy may drop that guard on the strength of this fingerprint.
+    apart, so the report may call that guard invariant when it is not.
     """
     try:
         from torch._functorch._aot_autograd.utils import (
@@ -1471,31 +1479,35 @@ def _varying_guard_slots(
 ) -> frozenset[tuple[str, str]]:
     """The guard slots that actually discriminate between captured variants.
 
-    A slot is ``(guard_type, normalized source)``. It varies when two variants
-    of one frame recorded DIFFERENT facts for it, and also when it is present in
-    some variants and absent in others -- a guard only one variant carries is
-    what tells that variant apart, and comparing values alone would call it
+    A slot is ``(guard_type, source)``, the source as ``GuardFact.source``
+    spells it: the ``GuardFilterEntry.name`` with local scope stripped
+    (``L['x']`` -> ``x``). It varies when two variants of one frame
+    recorded DIFFERENT facts for it, and also when it is present in some
+    variants and absent in others -- a guard only one variant carries is what
+    tells that variant apart, and comparing values alone would call it
     invariant and drop it. That present-in-some case is the majority of what is
     kept, not an edge. A fact is its rendered code and value; ``enforced`` says
     whether the serialized copy keeps the guard, not what it checks, so two
-    variants that differ only there agree.
+    variants that differ only there agree. One variant can hold several facts
+    on one slot (a ``HASATTR`` per attribute name, all on the parent source),
+    so what is compared across variants is each variant's SET of facts for the
+    slot, never one fact against another inside a variant.
 
     Everything else held identically in every variant, which is what licenses a
     caller to leave it out of the serialized copy.
     """
     varying: set[tuple[str, str]] = set()
     for variants in guard_sets.values():
-        seen: dict[tuple[str, str], set[tuple[tuple[str, ...], str]]] = {}
-        present: collections.Counter[tuple[str, str]] = collections.Counter()
+        seen: dict[tuple[str, str], list[frozenset[tuple[tuple[str, ...], str]]]] = {}
         for facts in variants:
-            slots: set[tuple[str, str]] = set()
+            rendered: dict[tuple[str, str], set[tuple[tuple[str, ...], str]]] = {}
             for f in facts:
                 slot = (f.guard_type, f.source)
-                slots.add(slot)
-                seen.setdefault(slot, set()).add((f.code, f.value))
-            present.update(slots)
-        for slot, rendered in seen.items():
-            if len(rendered) > 1 or present[slot] != len(variants):
+                rendered.setdefault(slot, set()).add((f.code, f.value))
+            for slot, facts_here in rendered.items():
+                seen.setdefault(slot, []).append(frozenset(facts_here))
+        for slot, per_variant in seen.items():
+            if len(per_variant) != len(variants) or len(set(per_variant)) > 1:
                 varying.add(slot)
     return frozenset(varying)
 
@@ -1520,9 +1532,13 @@ def _summarize(
     ``co_name`` per frame, so a repeated name is two frames and both lists are
     subsets of ``frames`` by construction. Uncovered is the coverage gap: the
     frame entered Dynamo (``has_compile_id``) and holds no guarded code, and was
-    not bypassed. ``install()`` ``skip_code()``s a superset, every entry with no
-    guarded codes, so a generated-but-never-executed resume entry is skipped
-    there and is not a gap here. ``truncated`` comes from the compile
+    not bypassed. ``install()`` ``skip_code()``s a superset, every entry that is
+    not bypassed and has no guarded codes whether or not it entered Dynamo, so a
+    generated-but-never-executed resume entry is skipped there and is not a gap
+    here. ``backend_graphs`` counts the backend ids of the entries that are not
+    bypassed, the ones ``install()`` loads: a save-time bypass
+    (``PrecompileCacheEntry.from_cache_entry``, backend artifact missing) marks
+    the entry and leaves its ids in place. ``truncated`` comes from the compile
     path, which sees a frame hit the limit once and records it as ``co_name
     (filename:firstlineno)``, so that set cannot merge two frames.
     """
@@ -1530,7 +1546,9 @@ def _summarize(
         frames=len(entry.codes),
         resume_functions=sum(1 for c in entry.codes if c.install_to_global),
         guarded_codes=sum(len(c.guarded_codes) for c in entry.codes),
-        backend_graphs=len(entry.backend_ids),
+        backend_graphs=len(
+            {b for c in entry.codes if not c.bypassed for b in c.backend_ids}
+        ),
         bypassed=tuple(c.python_code.co_name for c in entry.codes if c.bypassed),
         truncated=tuple(sorted(truncated)),
         uncovered_frames=tuple(
