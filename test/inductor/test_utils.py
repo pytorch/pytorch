@@ -2,6 +2,7 @@
 
 import builtins
 import importlib.util
+import math
 import os
 import sys
 import tempfile
@@ -20,6 +21,11 @@ from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config as inductor_config, utils as inductor_utils
+from torch._inductor.analysis.device_info import (
+    _device_mapping,
+    DeviceInfo,
+    register_device_info,
+)
 from torch._inductor.compile_fx import _get_subgraph_names
 from torch._inductor.fx_utils import (
     _is_fake_tensor_same,
@@ -29,9 +35,14 @@ from torch._inductor.fx_utils import (
     get_fake,
 )
 from torch._inductor.utils import (
+    _get_device_dram_gbps,
+    _get_device_info_key,
     _gpu_types,
+    _infer_scale_swizzle_impl,
     device_need_guard,
+    get_device_dram_gbps,
     get_device_tflops,
+    get_gpu_dram_gbps,
     get_gpu_type,
     is_gpu,
     load_template,
@@ -41,18 +52,183 @@ from torch._inductor.utils import (
 )
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
 from torch.utils import _triton as triton_utils
 from torch.utils._sympy.functions import Identity
+
+
+class _TestDeviceInterface(DeviceInterface):
+    class Worker(DeviceInterface.Worker):
+        properties: dict[torch.device, object] = {}
+        error: Exception | None = None
+
+        @classmethod
+        def get_device_properties(cls, device=None):
+            if cls.error is not None:
+                raise cls.error
+            return cls.properties[device]
+
+
+class TestDeviceDramBandwidth(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.device = torch.device("privateuseone:0")
+        _TestDeviceInterface.Worker.properties = {}
+        _TestDeviceInterface.Worker.error = None
+
+        device_interfaces_patcher = mock.patch.dict(di.device_interfaces)
+        device_interfaces_patcher.start()
+        self.addCleanup(device_interfaces_patcher.stop)
+        di.register_interface_for_device("privateuseone", _TestDeviceInterface)
+
+        device_mapping_patcher = mock.patch.dict(_device_mapping)
+        device_mapping_patcher.start()
+        self.addCleanup(device_mapping_patcher.stop)
+
+        _get_device_dram_gbps.cache_clear()
+        get_gpu_dram_gbps.cache_clear()
+        self.addCleanup(_get_device_dram_gbps.cache_clear)
+        self.addCleanup(get_gpu_dram_gbps.cache_clear)
+
+    def test_get_device_info_key_uses_mapping_arch_then_name(self):
+        for properties, expected in (
+            ({"name": "test_device", "arch": "test_arch"}, "test_arch"),
+            ({"name": None, "arch": "test_arch"}, "test_arch"),
+            ({"name": "test_device", "arch": None}, "test_device"),
+        ):
+            with self.subTest(properties=properties):
+                _TestDeviceInterface.Worker.properties = {self.device: properties}
+                self.assertEqual(_get_device_info_key(self.device), expected)
+
+    def test_get_device_dram_gbps_uses_registered_device_info(self):
+        _TestDeviceInterface.Worker.properties = {self.device: {"arch": "test_arch"}}
+        register_device_info(
+            "test_arch", DeviceInfo(tops={}, dram_bw_gbs=123.0, dram_gb=1.0)
+        )
+        self.assertEqual(get_device_dram_gbps(self.device), 123.0)
+
+    def test_get_device_dram_gbps_none_tracks_current_accelerator(self):
+        other_device = torch.device("privateuseone:1")
+        _TestDeviceInterface.Worker.properties = {
+            self.device: {"arch": "test_arch_0"},
+            other_device: {"arch": "test_arch_1"},
+        }
+        register_device_info(
+            "test_arch_0", DeviceInfo(tops={}, dram_bw_gbs=100.0, dram_gb=1.0)
+        )
+        register_device_info(
+            "test_arch_1", DeviceInfo(tops={}, dram_bw_gbs=101.0, dram_gb=1.0)
+        )
+        with mock.patch(
+            "torch._inductor.utils._current_accelerator_device",
+            side_effect=[self.device, other_device],
+        ):
+            self.assertEqual(get_device_dram_gbps(), 100.0)
+            self.assertEqual(get_device_dram_gbps(), 101.0)
+
+    def test_get_device_dram_gbps_missing_name_skips_datasheet(self):
+        _TestDeviceInterface.Worker.properties = {self.device: {}}
+        with (
+            mock.patch(
+                "torch._inductor.utils.datasheet_dram_bw_gbs"
+            ) as datasheet_dram_bw_gbs,
+            self.assertLogs("torch._inductor.utils", level="WARNING"),
+        ):
+            bandwidth = get_device_dram_gbps(self.device)
+
+        self.assertIsNone(bandwidth)
+        datasheet_dram_bw_gbs.assert_not_called()
+
+    def test_get_device_dram_gbps_property_query_not_implemented_returns_none(self):
+        _TestDeviceInterface.Worker.error = NotImplementedError("unavailable")
+        with (
+            mock.patch(
+                "torch._inductor.utils.datasheet_dram_bw_gbs"
+            ) as datasheet_dram_bw_gbs,
+            self.assertLogs("torch._inductor.utils", level="WARNING"),
+        ):
+            bandwidth = get_device_dram_gbps(self.device)
+
+        self.assertIsNone(bandwidth)
+        datasheet_dram_bw_gbs.assert_not_called()
+
+    def test_get_device_dram_gbps_warns_for_unknown_device(self):
+        _TestDeviceInterface.Worker.properties = {
+            self.device: {"arch": "unknown_test_arch"}
+        }
+        with self.assertLogs("torch._inductor.utils", level="WARNING") as logs:
+            bandwidth = get_device_dram_gbps(self.device)
+
+        self.assertIsNone(bandwidth)
+        self.assertIn("reported key: unknown_test_arch", logs.output[0])
+        self.assertIn("returning None", logs.output[0])
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    def test_get_device_dram_gbps_triton_fallback_uses_device_index(self):
+        with mock.patch(
+            "torch._inductor.utils._get_device_info_key",
+            return_value=None,
+        ):
+            for device_name, expected_index in (
+                ("cuda", None),
+                ("cuda:0", 0),
+                ("cuda:1", 1),
+                ("xpu", None),
+                ("xpu:0", 0),
+                ("xpu:1", 1),
+            ):
+                with (
+                    self.subTest(device=device_name),
+                    mock.patch(
+                        "triton.testing.get_dram_gbps", return_value=321.0
+                    ) as fallback,
+                ):
+                    self.assertEqual(
+                        get_device_dram_gbps(torch.device(device_name)),
+                        321.0,
+                    )
+                    fallback.assert_called_once_with(expected_index)
+
+    def test_get_gpu_dram_gbps_is_cached(self):
+        with mock.patch(
+            "torch._inductor.utils.datasheet_dram_bw_gbs",
+            return_value=123.0,
+        ) as datasheet_dram_bw_gbs:
+            self.assertEqual(get_gpu_dram_gbps(), 123.0)
+            self.assertEqual(get_gpu_dram_gbps(), 123.0)
+
+        datasheet_dram_bw_gbs.assert_called_once_with()
+
+    @unittest.skipIf(
+        not triton_utils.has_triton_package(),
+        "requires Triton",
+    )
+    def test_get_gpu_dram_gbps_preserves_triton_fallback(self):
+        with (
+            mock.patch(
+                "torch._inductor.utils.datasheet_dram_bw_gbs",
+                return_value=None,
+            ),
+            mock.patch("triton.testing.get_dram_gbps", return_value=321.0) as fallback,
+        ):
+            self.assertEqual(get_gpu_dram_gbps(), 321.0)
+
+        fallback.assert_called_once_with()
 
 
 class TestUtils(TestCase):
@@ -387,6 +563,60 @@ class TestLoadTemplate(TestCase):
 
 
 class TestRuntimeEstimation(TestCase):
+    def test_roofline_estimate_uses_exported_tuple_metadata(self):
+        from torch._functorch._aot_autograd.streams import get_roofline_estimate
+
+        class MaxDimModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.max(x, dim=0)
+
+        exported = torch.export.export(MaxDimModule(), (torch.randn(2, 2),))
+        node = next(
+            node
+            for node in exported.graph_module.graph.nodes
+            if node.target == torch.ops.aten.max.dim
+        )
+        self.assertIsInstance(node.meta["val"], tuple)
+
+        with (
+            mock.patch(
+                "torch._functorch._aot_autograd.streams.get_transfer_time",
+                return_value=1.0,
+            ) as get_transfer_time,
+            mock.patch(
+                "torch._functorch._aot_autograd.streams.get_compute_time",
+                return_value=2.0,
+            ),
+        ):
+            self.assertEqual(get_roofline_estimate(node), 2.0 / 1e6)
+
+        self.assertEqual(
+            get_transfer_time.call_args.kwargs["device"], torch.device("cpu")
+        )
+
+    def test_get_transfer_time_uses_requested_device(self):
+        from torch.utils._runtime_estimation import get_transfer_time
+
+        device = torch.device("mtia")
+        tensor = torch.ones(2)
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_dram_gbps",
+            return_value=4.0,
+        ) as get_bandwidth:
+            result_ns = get_transfer_time([tensor], [], device=device)
+
+        get_bandwidth.assert_called_once_with(device)
+        self.assertEqual(result_ns, 2.0)
+
+    def test_get_transfer_time_missing_bandwidth_returns_zero(self):
+        from torch.utils._runtime_estimation import get_transfer_time
+
+        with mock.patch(
+            "torch.utils._runtime_estimation.get_device_dram_gbps",
+            return_value=None,
+        ):
+            self.assertEqual(get_transfer_time([torch.ones(2)], []), 0.0)
+
     def test_get_compute_time_units(self):
         """TFLOPS-to-FLOPS/s conversion must use 1e12, not 1e15."""
         from unittest.mock import patch
@@ -1488,6 +1718,74 @@ class TestDeviceClassification(TestCase):
         self.assertFalse(device_need_guard("mps"))
         self.assertFalse(is_gpu("cpu"))
         self.assertFalse(is_gpu("cuda:0"))
+
+
+@instantiate_parametrized_tests
+class TestScaleSwizzleInference(TestCase):
+    """`_infer_scale_swizzle_impl` names a scale layout from a scale's shape and count.
+
+    The two ROCm MX layouts hold the same number of scales wherever their
+    paddings coincide, so a tie has to resolve to NO_SWIZZLE: that is what v1
+    `_scaled_mm` and every pre-gfx950 arch take, and 32x8 callers pass the
+    swizzle explicitly. Runs on any host; the gfx950 probe is mocked.
+
+    Unswizzled scales keep the (rows, k_blocks) shape they are computed in;
+    `to_blocked` hands back the 32x8 buffer flattened.
+    """
+
+    def _infer(self, mat_size, scale_size, mat_dtype, prefers_32_8):
+        with (
+            mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch(
+                "torch._inductor.utils._prefers_swizzle_32_8",
+                return_value=prefers_32_8,
+            ),
+        ):
+            return _infer_scale_swizzle_impl(
+                mat_size=mat_size,
+                scale_size=scale_size,
+                scale_numel=math.prod(scale_size),
+                mat_dtype=mat_dtype,
+                scale_dtype=torch.float8_e8m0fnu,
+                eq_fn=lambda a, b: a == b,
+            )
+
+    # fp4 packs two values per element, so its mat sizes are half of fp8's for
+    # the same K in elements.
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_layout_tie_is_no_swizzle(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # K in elements = 256, where both layouts hold 1024 scales, so neither
+        # shape a caller can arrive with is enough to pick 32x8.
+        mat_size = (128, 128 if packed else 256)
+        for scale_size in [(128, 8), (1024,)]:
+            with self.subTest(scale_size=scale_size):
+                self.assertEqual(
+                    self._infer(mat_size, scale_size, mat_dtype, prefers_32_8=True),
+                    (ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE),
+                )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_32_8_inferred_when_counts_differ(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # K in elements = 128: 512 scales unswizzled, 1024 in the 32x8 layout.
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(mat_size, (128, 4), mat_dtype, prefers_32_8=True),
+            (ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE),
+        )
+        self.assertEqual(
+            self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=True),
+            (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8),
+        )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_32_8_count_is_no_layout_off_gfx950(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=False), (None, None)
+        )
 
 
 if __name__ == "__main__":

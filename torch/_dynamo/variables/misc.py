@@ -89,7 +89,11 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .object_protocol import generic_str
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
@@ -171,7 +175,12 @@ class SuperVariable(VariableTracker):
             TypeSource(self.objvar.source) if self.objvar.source else None
         )
         if issubclass(type_to_use, type):
-            type_to_use = self.objvar.value  # type: ignore[attr-defined]
+            # objvar itself is a type (e.g. `super(Base, cls)` or
+            # `super(Base, list)`); as_python_constant() works uniformly here
+            # since objvar must be a type-representing VariableTracker
+            # (UserDefinedClassVariable, BaseBuiltinVariable, ...), unlike
+            # `.value` which only some of those define.
+            type_to_use = self.objvar.as_python_constant()
             type_to_use_source = self.objvar.source
 
         source = None
@@ -182,10 +191,20 @@ class SuperVariable(VariableTracker):
         except ValueError:
             # Corner case where the typevar is not in the mro of the objvar
             # https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8843-L8844
-            return getattr(super(search_type, type_to_use), name), None
+            # Use the original objvar value (not type_to_use, which is always
+            # a type) so the raised TypeError's message matches CPython's
+            # "instance of X" vs "type X" wording.
+            obj_for_check = getattr(self.objvar, "value", type_to_use)
+            try:
+                resolved = getattr(super(search_type, obj_for_check), name)
+            except TypeError as e:
+                raise_type_error(tx, str(e))
+            else:
+                return resolved, None
         # Implemented based on https://github.com/python/cpython/blob/3.11/Objects/typeobject.c#L8812
         # super has its getattro implementation. The key point is that instead of calling getattr, it checks the
         # attribute in the class __dict__
+        # pyrefly: ignore [unbound-name]
         for index in range(start_index, len(search_mro)):
             # Don't call getattr, just check the __dict__ of the class
             if resolved_getattr := search_mro[index].__dict__.get(name, NO_SUCH_SUBOBJ):
@@ -342,7 +361,12 @@ class SuperVariable(VariableTracker):
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source
+                variables.UserFunctionVariable(
+                    inner_fn.__func__,
+                    source=source and AttrSource(source, "__func__"),
+                ),
+                self.objvar,
+                source=source,
             ).call_function(tx, args, kwargs)
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
@@ -1066,6 +1090,10 @@ class ComptimeVariable(VariableTracker):
         fn = args[0]
         if isinstance(fn, UserFunctionVariable):
             fn.get_function()(ComptimeContext(tx))
+        elif isinstance(fn, UserMethodVariable):
+            # Bind the receiver: get_function() is the plain function, so
+            # calling it would pass the ComptimeContext as `self`.
+            fn.guard_as_python_constant()(ComptimeContext(tx))
         elif isinstance(fn, NestedUserFunctionVariable):
             # We have to manually bind the freevars ourselves
             code = fn.get_code()
@@ -1324,7 +1352,9 @@ class AutogradFunctionVariable(VariableTracker):
             return fn_vt.call_function(tx, args, kwargs)
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
-                fn.__func__,
+                variables.UserFunctionVariable(
+                    fn.__func__, source=source and AttrSource(source, "__func__")
+                ),
                 variables.UserDefinedClassVariable(self.fn_cls),
                 source=source,
             ).call_function(tx, args, kwargs)
@@ -1553,7 +1583,9 @@ class AutogradFunctionVariable(VariableTracker):
                 install_guard(func_source.make_guard(GuardBuilder.ID_MATCH))
                 install_guard(func_source.make_guard(GuardBuilder.CLOSURE_MATCH))
                 return variables.UserMethodVariable(
-                    obj.__func__, self, source_fn=func_source, source=source
+                    variables.UserFunctionVariable(obj.__func__, source=func_source),
+                    self,
+                    source=source,
                 ).call_function(tx, args, kwargs)
 
         self._unsupported_method(name)
