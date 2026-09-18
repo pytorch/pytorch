@@ -262,7 +262,8 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
             M.view({batch_size, num_heads, seqlen_q}), seed_t, offset_t, softmax_fa_t};
   }
 
-  using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_input_aotensor;
+  using sdp::aotriton_adapter::mk_output_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
   using sdp::aotriton_adapter::mk_atomictensor;
@@ -276,12 +277,12 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
   using aotriton::v3::flash::CausalType;
   aotriton::v3::flash::attn_fwd_params params;
-  params.Q = mk_aotensor(q_t, "q");
-  params.K = mk_aotensor(k_t, "k");
-  params.V = mk_aotensor(v_t, "v");
+  params.Q = mk_input_aotensor(q_t, "q");
+  params.K = mk_input_aotensor(k_t, "k");
+  params.V = mk_input_aotensor(v_t, "v");
   params.Sm_scale = softmax_scale;
-  params.L = mk_aotensor<2>(M, "M");
-  params.Out = mk_aotensor(output_t, "Out");
+  params.L = mk_output_aotensor<2>(M, "M");
+  params.Out = mk_output_aotensor(output_t, "Out");
   params.Max_seqlen_q = seqlen_q;    // Unused if seqinfo_q0 is empty
   params.Max_seqlen_k = seqlen_k;    // Unused if seqinfo_k0 is empty
   params.dropout_p = p_dropout;
@@ -290,7 +291,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   params.philox_offset2 = offset2;
   params.philox_seed_output = seed_output;
   params.philox_offset_output = offset_output;
-  params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+  params.encoded_softmax = mk_output_aotensor(softmax_fa_t, "encoded_softmax");
   params.persistent_atomic_counter = persistent_counter;
   params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
 #if !AOTRITON_VARLEN_BITS_API
@@ -451,7 +452,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     prepare_philox_arguments(p_dropout, batch_size * num_heads * 32);
 
   if (max_seqlen_k > 0) {
-    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_input_aotensor;
+    using sdp::aotriton_adapter::mk_output_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
     using sdp::aotriton_adapter::mk_atomictensor;
@@ -475,12 +477,12 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     using aotriton::v3::flash::VarlenType;
 #endif
     aotriton::v3::flash::attn_fwd_params params;
-    params.Q = mk_aotensor(q_padded, "q");
-    params.K = mk_aotensor(k_padded, "k");
-    params.V = mk_aotensor(v_padded, "v");
+    params.Q = mk_input_aotensor(q_padded, "q");
+    params.K = mk_input_aotensor(k_padded, "k");
+    params.V = mk_input_aotensor(v_padded, "v");
     params.Sm_scale = softmax_scale;
-    params.L = mk_aotensor<2>(M, "logsumexp");
-    params.Out = mk_aotensor(out_padded, "Out");
+    params.L = mk_output_aotensor<2>(M, "logsumexp");
+    params.Out = mk_output_aotensor(out_padded, "Out");
     params.Max_seqlen_q = max_seqlen_q;    // Unused if seqinfo_q0 is empty
     params.Max_seqlen_k = max_seqlen_k;    // Unused if seqinfo_k0 is empty
     params.dropout_p = p_dropout;
@@ -489,7 +491,7 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     params.philox_offset2 = offset2;
     params.philox_seed_output = seed_output;
     params.philox_offset_output = offset_output;
-    params.encoded_softmax = mk_aotensor(softmax_fa_t, "encoded_softmax");
+    params.encoded_softmax = mk_output_aotensor(softmax_fa_t, "encoded_softmax");
     params.persistent_atomic_counter = persistent_counter;
     params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
 #if AOTRITON_VARLEN_BITS_API
@@ -502,13 +504,13 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
       const int num_seqs = seqused.size(0);
       at::Tensor cu_seqlens_k_from_seqused = at::zeros({num_seqs + 1}, seqused.options());
       cu_seqlens_k_from_seqused.slice(0, 1).copy_(seqused.cumsum(0));
-      params.seqinfo_q0 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
-      params.seqinfo_k0 = mk_aotensor<1>(cu_seqlens_k_from_seqused, "seqinfo_k0");
-      params.seqinfo_q1 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q1");
-      params.seqinfo_k1 = mk_aotensor<1>(cu_seqlens_k, "seqinfo_k1");
+      params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+      params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k_from_seqused, "seqinfo_k0");
+      params.seqinfo_q1 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q1");
+      params.seqinfo_k1 = mk_input_aotensor<1>(cu_seqlens_k, "seqinfo_k1");
     } else {
-      params.seqinfo_q0 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
-      params.seqinfo_k0 = mk_aotensor<1>(cu_seqlens_k, "seqinfo_k0");
+      params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+      params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k, "seqinfo_k0");
     }
 #else
     params.varlen_type = strided_varlen ? VarlenType::StridedVarlen : VarlenType::CompactVarlen;
@@ -520,13 +522,13 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
       const int num_seqs = seqused.size(0);
       at::Tensor cu_seqlens_k_from_seqused = at::zeros({num_seqs + 1}, seqused.options());
       cu_seqlens_k_from_seqused.slice(0, 1).copy_(seqused.cumsum(0));
-      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k_from_seqused, "cu_seqlens_k");
-      params.seq_strides_q = mk_aotensor<1>(cu_seqlens_q, "seq_strides_q");
-      params.seq_strides_k = mk_aotensor<1>(cu_seqlens_k, "seq_strides_k");
+      params.cu_seqlens_q = mk_input_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+      params.cu_seqlens_k = mk_input_aotensor<1>(cu_seqlens_k_from_seqused, "cu_seqlens_k");
+      params.seq_strides_q = mk_input_aotensor<1>(cu_seqlens_q, "seq_strides_q");
+      params.seq_strides_k = mk_input_aotensor<1>(cu_seqlens_k, "seq_strides_k");
     } else {
-      params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
-      params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+      params.cu_seqlens_q = mk_input_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+      params.cu_seqlens_k = mk_input_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
     }
 #endif
     params.window_left = window_left;
@@ -670,21 +672,22 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
 
   int d_head = head_size_og;
   bool use_fused_bwd = d_head <= 192 && d_head * seqlen_q < 64 * 512;
-  using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::mk_input_aotensor;
+  using sdp::aotriton_adapter::mk_output_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   // Fused BWD does not support SWA
   using aotriton::v3::flash::CausalType;
   aotriton::v3::flash::attn_bwd_params params;
-  params.Q = mk_aotensor(q_t, "q");
-  params.K = mk_aotensor(k_t, "k");
-  params.V = mk_aotensor(v_t, "v");
+  params.Q = mk_input_aotensor(q_t, "q");
+  params.K = mk_input_aotensor(k_t, "k");
+  params.V = mk_input_aotensor(v_t, "v");
   params.Sm_scale = softmax_scale;
-  params.Out = mk_aotensor(out_t, "out");
-  params.DO = mk_aotensor(dout_t, "dout");
-  params.DQ = mk_aotensor(dq_t, "dq");
-  params.DK = mk_aotensor(dk_t, "dk");
-  params.DV = mk_aotensor(dv_t, "dv");
-  params.L = mk_aotensor<2>(softmax_lse_cont, "L");
+  params.Out = mk_input_aotensor(out_t, "out");
+  params.DO = mk_input_aotensor(dout_t, "dout");
+  params.DQ = mk_output_aotensor(dq_t, "dq");
+  params.DK = mk_output_aotensor(dk_t, "dk");
+  params.DV = mk_output_aotensor(dv_t, "dv");
+  params.L = mk_input_aotensor<2>(softmax_lse_cont, "L");
   params.Max_seqlen_q = seqlen_q;        // Unused if seqinfo_q0 is empty
   params.Max_seqlen_k = seqlen_k;        // Unused if seqinfo_k0 is empty
   params.dropout_p = p_dropout;
@@ -875,7 +878,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     }
   }
   if (max_seqlen_q > 0) {
-    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_input_aotensor;
+    using sdp::aotriton_adapter::mk_output_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using aotriton::v3::flash::CausalType;
 #if AOTRITON_VARLEN_BITS_API
@@ -884,22 +888,22 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     using aotriton::v3::flash::VarlenType;
 #endif
     aotriton::v3::flash::attn_bwd_params params;
-    params.Q = mk_aotensor(q_padded, "q");
-    params.K = mk_aotensor(k_padded, "k");
-    params.V = mk_aotensor(v_padded, "v");
+    params.Q = mk_input_aotensor(q_padded, "q");
+    params.K = mk_input_aotensor(k_padded, "k");
+    params.V = mk_input_aotensor(v_padded, "v");
     params.Sm_scale = softmax_scale;
-    params.Out = mk_aotensor(out_t, "out");
-    params.DO = mk_aotensor(dout_t, "dout");
-    params.DK = mk_aotensor(dk_padded, "dk");
-    params.DV = mk_aotensor(dv_padded, "dv");
-    params.DQ = mk_aotensor(dq_padded, "dq");
-    params.L = mk_aotensor<2>(softmax_lse_cont, "L");
+    params.Out = mk_input_aotensor(out_t, "out");
+    params.DO = mk_input_aotensor(dout_t, "dout");
+    params.DK = mk_output_aotensor(dk_padded, "dk");
+    params.DV = mk_output_aotensor(dv_padded, "dv");
+    params.DQ = mk_output_aotensor(dq_padded, "dq");
+    params.L = mk_input_aotensor<2>(softmax_lse_cont, "L");
 #if AOTRITON_VARLEN_BITS_API
-    params.seqinfo_q0 = mk_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
-    params.seqinfo_k0 = mk_aotensor<1>(cu_seqlens_k, "seqinfo_k0");
+    params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+    params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k, "seqinfo_k0");
 #else
-    params.cu_seqlens_q = mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
-    params.cu_seqlens_k = mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
+    params.cu_seqlens_q = mk_input_aotensor<1>(cu_seqlens_q, "cu_seqlens_q");
+    params.cu_seqlens_k = mk_input_aotensor<1>(cu_seqlens_k, "cu_seqlens_k");
 #endif
     params.Max_seqlen_q = max_seqlen_q;        // Unused if seqinfo_q0 is empty
     params.Max_seqlen_k = max_seqlen_k;        // Unused if seqinfo_k0 is empty
