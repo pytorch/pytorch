@@ -2261,15 +2261,18 @@ class TestPrecompile(TestCase):
 
         # A kernel that dereferences a fake tensor hits the TYPED data-pointer check
         # instead, whose message is about uninitialized storage rather than FakeTensor;
-        # both are refused (tensor_split reads its index tensor's values).
+        # both are refused (tensor_split reads its index tensor's values). The __cause__
+        # assertion pins that this is the arm that matches that message, which is the only
+        # matched text a real tensor could in principle also produce.
         def splits_on_tensor_indices(m, x):
             a, b = torch.tensor_split(x, torch.tensor([1]))
             return m(x) + a.sum() + b.sum()
 
-        with self.assertRaisesRegex(PrecompileError, "data pointer"):
+        with self.assertRaisesRegex(PrecompileError, "data pointer") as cm:
             _precompile_pair(
                 splits_on_tensor_indices, model, torch.randn(3, 4), backend="eager"
             )
+        self.assertIn("its data is not allocated yet", str(cm.exception.__cause__))
 
         # Conversely, a REAL tensor with no storage raises "Cannot access data pointer of
         # Tensor that doesn't have storage" from the same c10 code. It has data (it is
@@ -2639,8 +2642,10 @@ class TestPrecompile(TestCase):
 
         # Including when the unfakeifiable input is the MARKED one: its unbacked rebuild
         # never consults the meta converter, so the marked branch validates the leaf
-        # through the same helper -- without that it escapes as a raw meta-kernel error
-        # ("SymIntArrayRef expected to contain only concrete integers").
+        # through the same helper (on a throwaway fake mode, to keep the probe's static
+        # fake out of the capture mode's converter memo) -- without that it escapes as a
+        # raw meta-kernel error ("SymIntArrayRef expected to contain only concrete
+        # integers").
         marked_q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
         mark_unbacked(marked_q, 0)
         with self.assertRaisesRegex(
@@ -2746,15 +2751,12 @@ class TestPrecompile(TestCase):
         def raises(m, x):
             raise RuntimeError("my own capture-time failure")
 
-        try:
+        with self.assertRaises(RuntimeError) as cm:
             _precompile_pair(raises, model, torch.randn(3, 4), backend="eager")
-        except RuntimeError as e:
-            self.assertIn("my own capture-time failure", str(e))
-            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped
-            # (the only producer of the relabeled text raises one, so this covers it).
-            self.assertNotIsInstance(e, PrecompileError)
-        else:
-            self.fail("expected fn's RuntimeError to propagate out of capture")
+        self.assertIn("my own capture-time failure", str(cm.exception))
+        # PrecompileError subclasses RuntimeError, so pin that it was not wrapped
+        # (the only producer of the relabeled text raises one, so this covers it).
+        self.assertNotIsInstance(cm.exception, PrecompileError)
 
         # The three defensive guards in that same except chain, each otherwise unpinned:
         # an AttributeError from fn must be re-raised (only while_loop's
@@ -2786,7 +2788,7 @@ class TestPrecompile(TestCase):
         # matched substrings. An explicit "except PrecompileError: raise" sits ahead of that
         # clause; without it this message comes back as "... no meta/fake kernel ...".
         model = torch.nn.Linear(4, 4)
-        message = "precompile: my own refusal, no fake impl registered for t::op"
+        message = "precompile: my own refusal: There was no fake impl registered for op"
 
         def raises(m, x):
             raise PrecompileError(message)
