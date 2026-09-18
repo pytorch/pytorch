@@ -11,9 +11,8 @@ from .conv import Conv1d
 from .linear import Linear
 from .module import Module
 from .normalization import RMSNorm
-from .parameter import Parameter
+from torch.nn.parameter import Parameter
 from .sparse import Embedding
-from .. import init as init
 
 
 def _dist_world(group) -> int:
@@ -191,6 +190,8 @@ class TinyGatedDeltaModel(Module):
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
+        from torch.nn import init
+
         for module in self.modules():
             if isinstance(module, Linear):
                 init.normal_(module.weight, mean=0.0, std=0.02)
