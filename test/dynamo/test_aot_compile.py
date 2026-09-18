@@ -793,8 +793,10 @@ class RejectsOnceThenRaises(NeverReChecked):
         raise RuntimeError(self.message)
 
 
-# The sentence the no-match report appends to its ModelInput advice when every
-# rejection that advice rests on followed a raise from its own tree; the
+# The tail of the no-match report's ModelInput advice, from the advice's own last
+# clause through the caveat appended after it when every rejection the advice
+# rests on followed a raise from its own tree: spliced together so an endswith()
+# over it pins the junction of the two, which a caveat-only golden would not. The
 # placeholders are the plural of `raise` and the trees it names, each as
 # `[i] <Kind: reason>`, joined with `; `.
 CAVEAT_AFTER_A_RAISE = "which need not be the one that loaded them. Fix the raise{} out of {} first: every rejection this advice rests on followed a raise from its own tree, and a C++ throw out of a tree can leave that tree's relational guard state stale, so its next check can reject a call it fits or accept one it does not."
@@ -2644,9 +2646,13 @@ from user code:
         # splitlines() breaks on splits an entry over lines, which the count and
         # whole-line read below fail on. None of the five is \n and the text
         # holds no space, so that read says all five arrived and were collapsed.
+        # The kind is user text too -- a class built with type() names itself
+        # whatever it likes -- so it is collapsed with the reason, not
+        # interpolated raw.
         model, x = self._aot_compile_dict_branches({})
+        text = "page\x0cbreak\rrec\x1esep\u2028line\u2029"
         with self.assertRaises(RuntimeError) as ctx:
-            model(x, {RaisesOnCompare("page\x0cbreak\rrec\x1esep\u2028line\u2029"): 1})
+            model(x, {RaisesOnCompare(text, type("Odd\nKind", (ValueError,), {})): 1})
         message = str(ctx.exception)
         lines = message.splitlines()
         # Header, entry, fix-or-drop advice: one raiser and no answer, so neither
@@ -2659,7 +2665,7 @@ from user code:
         # vacuous; none of the five is \n, so a \n replace would cover none of
         # them. The last ends the text: collapsed before the boundary clause is
         # appended, it leaves no stray space before it.
-        raised = "  [0] <guard check raised ValueError: page break rec sep line (through the guard tree's pybind boundary)>"
+        raised = "  [0] <guard check raised Odd Kind: page break rec sep line (through the guard tree's pybind boundary)>"
         self.assertEqual(lines[1], raised)
 
     def test_no_match_message_survives_a_raising_guard(self):
@@ -2824,24 +2830,9 @@ from user code:
             def check(self, f_locals):
                 raise RuntimeError("the first tree is unhappy")
 
-        class RaisesThenRejects:
-            def __init__(self):
-                self.checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                if self.checks == 1:
-                    raise RuntimeError("the second tree's first pass is unhappy")
-                return False
-
-            def check_verbose(self, f_locals):
-                return types.SimpleNamespace(
-                    result=False, verbose_code_parts=["the second tree's guard"]
-                )
-
         results = model.forward.compiled_results
         results[0]._artifacts.guard_manager = Raises()
-        stub = RaisesThenRejects()
+        stub = RaisesOnceThenRejects("the second tree's first pass is unhappy")
         results[1]._artifacts.guard_manager = stub
         with self.assertRaises(RuntimeError) as ctx:
             model(x)
@@ -2850,7 +2841,7 @@ from user code:
         self.assertEqual(stub.checks, 2)
         raised = "  [0] <guard check raised RuntimeError: the first tree is unhappy>"
         self.assertIn(raised, lines)
-        self.assertIn("  [1] the second tree's guard", lines)
+        self.assertIn("  [1] stub guard rejected", lines)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
         # [1]'s rejection followed its own raise, so the advice is qualified.
@@ -2870,6 +2861,10 @@ from user code:
         self.assertIn("Tried 0 compiled input(s):", message)
         self.assertNotIn("Every guard tree raised", message)
         self.assertIn("Add a ModelInput", message)
+        # No entry answered, so there is no rejection for the advice to rest on:
+        # the caveat's `coverable` term is what keeps it off this report, where
+        # the advice itself is printed by the no-results disjunct beside it.
+        self.assertNotIn("every rejection this advice rests on", message)
 
     def test_no_match_message_when_only_the_report_raises(self):
         # The other of _raised_line's two call sites: the report's own handler
