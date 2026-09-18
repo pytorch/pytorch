@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     slowTest,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -305,16 +306,53 @@ class TestSortAndSelectDevice(TestCase):
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
+    def _check_sort_1d(self, orig, vals, idxs, descending, stable):
+        # Values/indices/ordering (NaN-tolerant); unsqueeze to a batch of 1.
+        self.assertIsOrdered(
+            "descending" if descending else "ascending",
+            orig.unsqueeze(0),
+            vals.unsqueeze(0),
+            idxs.unsqueeze(0),
+            "1d parallel",
+        )
+        # assertIsOrdered doesn't check NaN/zero sign fidelity against orig.
+        self.assertEqual(torch.signbit(vals), torch.signbit(orig[idxs]))
+
+        if not stable:
+            return
+        is_nan = vals.isnan()
+        # Equal elements (incl. -0.0/0.0 and NaN/NaN) must keep their order.
+        equal = (vals[:-1] == vals[1:]) | (is_nan[:-1] & is_nan[1:])
+        self.assertTrue(torch.all(idxs[:-1][equal] < idxs[1:][equal]))
+
     @slowTest  # this test is slow on CPU
     @onlyCPU
-    @dtypes(*integral_types())
-    def test_sort_1d_parallel(self, device, dtype):
-        low = 0 if dtype == torch.uint8 else -128
-        tensor = torch.randint(
-            low=low, high=127, size=(100000,), device=device, dtype=dtype
-        )
-        vals, _ = torch.sort(tensor, stable=True)
-        self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @parametrize("descending", [False, True])
+    @parametrize("stable", [False, True])
+    def test_sort_1d_parallel(self, device, dtype, descending, stable):
+        # Large enough that the kernel takes its parallel path.
+        size = 100000
+        if dtype.is_floating_point:
+            tensor = torch.randint(
+                low=-128, high=127, size=(size,), device=device, dtype=torch.int8
+            ).to(dtype)
+            # Values random data won't produce but the fast paths must handle.
+            specials = torch.tensor(
+                [nan, -nan, 0.0, -0.0, float("inf"), -float("inf")],
+                device=device,
+                dtype=dtype,
+            )
+            tensor[: len(specials)] = specials
+            tensor[size // 2 : size // 2 + len(specials)] = specials
+        else:
+            low = 0 if dtype == torch.uint8 else -128
+            tensor = torch.randint(
+                low=low, high=127, size=(size,), device=device, dtype=dtype
+            )
+
+        vals, idxs = torch.sort(tensor, descending=descending, stable=stable)
+        self._check_sort_1d(tensor, vals, idxs, descending, stable)
 
     @dtypes(torch.float32)
     def test_sort_1d_output_discontiguous(self, device, dtype):
@@ -1386,6 +1424,9 @@ class TestSortAndSelectCUDA(TestCase):
         - GPU: ~72 GB (data ~16GB + values ~16GB + indices ~32GB + other ~8GB)
         - CPU: ~170 GB (indices copy ~32GB + torch.unique extra memory ~130GB + other ~8GB)
         """
+        if TEST_WITH_ROCM and dtype in (torch.float16, torch.bfloat16):
+            self.skipTest("half dtypes take the ROCm sort path, capped at INT_MAX")
+
         extra = random.randint(500, 2000)
         n = 2**32 + extra
         k = random.randint(2**32 + 100, n - 100)
