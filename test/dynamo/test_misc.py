@@ -11,6 +11,7 @@ import enum
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import json
 import logging
@@ -15621,6 +15622,13 @@ fn
         self.assertEqual(f(torch.randn(0)).shape, (1,))
         self.assertEqual(f(torch.randn(2)).shape, (2,))
 
+    def _clear_inspect_mro_cache(self):
+        # Some Python 3.12 builds cache classes in inspect.getattr_static.
+        cache = getattr(inspect, "_shadowed_dict_from_mro_tuple", None)
+        cache_clear = getattr(cache, "cache_clear", None)
+        if cache_clear is not None:
+            cache_clear()
+
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         """
         Args:
@@ -15643,6 +15651,7 @@ fn
             torch.compile(mod, backend="eager")(inp)
 
         run()
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
@@ -15711,6 +15720,7 @@ fn
 
         run()
         # del fc  # This should delete all the references
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
