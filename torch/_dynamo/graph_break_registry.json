@@ -423,6 +423,14 @@
       ]
     }
   ],
+  "GB8811": [
+    {
+      "Gb_type": "Non-constant property __isabstractmethod__",
+      "Context": "property accessor {attr}: {accessor}",
+      "Explanation": "Property accessor abstractness must be statically known.",
+      "Hints": []
+    }
+  ],
   "GB0030": [
     {
       "Gb_type": "ComptimeContext graph break",
