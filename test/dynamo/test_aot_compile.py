@@ -5925,7 +5925,7 @@ from user code:
         # certified name out of it may go through __getitem__: a defaultdict
         # would be MUTATED by the read and the graph would then compute with the
         # value it fabricated, every guard passing on it -- the exact failure
-        # this commit exists to remove. Both reads take dict.get's default, so
+        # this commit exists to remove. Both reads take the dict.get default, so
         # the load leaves the dict as the caller passed it and the name is
         # skipped, the guard rooted at it refusing the call until the caller
         # opts out, after which the bytecode's globals still hold the value the
