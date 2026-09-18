@@ -5,7 +5,6 @@ import functools
 import logging
 import random
 import re
-import tempfile
 import unittest
 from contextlib import contextmanager
 from datetime import timedelta
@@ -657,11 +656,11 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
             "DDPOptimizer should activate for compiled regions inside nested DDP",
         )
 
+    @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_float_output_from_graph_split(self):
         # Float module attrs (e.g. drop probability) can become partition outputs
-        # when DDPOptimizer splits the graph. Real DDP required because FakeDDP
-        # constant-folds the float and hides the bug.
+        # when DDPOptimizer splits the graph.
 
         class DropPath(nn.Module):
             def __init__(self, p: float):
@@ -697,15 +696,14 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
                     x = block(x)
                 return x
 
-        with tempfile.TemporaryDirectory() as tmp:
-            dist.init_process_group(
-                "gloo", init_method=f"file://{tmp}/store", rank=0, world_size=1
-            )
-            try:
-                model = DDP(torch.compile(Model()))
-                model(torch.randn(2, 3, 512)).sum().backward()
-            finally:
-                dist.destroy_process_group()
+        model = Model()
+        inp = torch.randn(2, 3, 512)
+        torch.manual_seed(0)
+        expected = model(inp)
+        torch.manual_seed(0)
+        actual = torch.compile(FakeDDP(model))(inp)
+        self.assertEqual(expected, actual)
+        actual.sum().backward()
 
 
 # These tests aren't really distributed, but need multiple GPUs to run
