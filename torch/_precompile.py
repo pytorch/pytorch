@@ -142,8 +142,9 @@ it.
 #    crashed on it with a raw internal error.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
 #    Every refusal above rests on capture tracing under a fake mode IT built, so capture
-#    also refuses to run inside another trace: an ambient ``TracingContext.fake_mode`` (a
-#    torch.compile / export / AOTAutograd trace) outranks capture's own mode, and no foreign
+#    refuses to run inside another trace, on BOTH paths: an ambient fake mode (a
+#    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
+#    outranks capture's own, and no foreign
 #    mode passes ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
 #    namespace would be run for real again. A mode built under DEFAULT config (an
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a ``.data_ptr()``
@@ -269,16 +270,20 @@ it.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
 import logging
+import os
+import stat
+import uuid
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -348,8 +353,7 @@ class PrecompileError(RuntimeError):
     metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
     input, none of which capture supports on either path (invariant 3), a control-flow HOP
     (``torch.cond`` / ``torch.while_loop``), whose captured subgraph neither backend can
-    lower, a capture attempted inside another trace (an ambient ``TracingContext``
-    fake mode, which does not carry capture's fallback-off setting), a non-tensor output the
+    lower, a capture attempted inside another trace (invariant 3), a non-tensor output the
     inductor backend cannot lower, or a runtime input whose shape or memory format differs
     from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -935,22 +939,21 @@ def _capture(
     import contextlib
 
     args = tuple(args)
-    # An ambient TracingContext.fake_mode OUTRANKS both mode sources this capture offers
-    # make_fx (see the trace site below), and no foreign mode passes
-    # allow_fallback_kernels=False, so a meta-less op in an allowlisted namespace would run
-    # for real on zero-filled substitutes again. A mode built under DEFAULT config (an
-    # AOTAutograd / inductor one) also lacks the
-    # fake_tensor_allow_unsafe_data_ptr_access=False snapshot, so a .data_ptr() read bakes 0
-    # instead of raising; dynamo and export do build theirs inside that patch, so there only
-    # the fallback setting is lost. Refuse rather than trace under someone else's contract.
-    tc = TracingContext.try_get()
-    if tc is not None and tc.fake_mode is not None:
+    # BOTH capture paths trace under a fake mode capture builds, and an ambient one outranks
+    # it (invariant 3 in the Note has the details), so refuse rather than trace under
+    # someone else's contract. This runs first, ahead of the input scan below, whose
+    # is_pinned() probe DISPATCHES: under an ambient mode a real example tensor trips that
+    # mode's own non-fake-input assertion before any refusal of ours. Ask detect_fake_mode
+    # -- what make_fx itself resolves through -- so all three sources it ranks (an ambient
+    # TracingContext, the dispatch-mode stack, the inputs) are refused by name here instead
+    # of reaching its own mode-mismatch assertion once capture enters its mode.
+    if detect_fake_mode() is not None:
         raise PrecompileError(
-            "precompile: capture cannot run inside another trace -- a TracingContext with "
-            "a FakeTensorMode is active (e.g. precompile called from inside torch.compile "
-            "or an export/AOTAutograd trace). make_fx would adopt that mode and its "
-            "ShapeEnv, so capture's own safety settings would not apply. Capture outside "
-            "the enclosing trace."
+            "precompile: capture cannot run inside another trace -- a FakeTensorMode is "
+            "already active (e.g. precompile called from inside torch.compile or an "
+            "export/AOTAutograd trace). make_fx would adopt that mode and its ShapeEnv, so "
+            "capture's own safety settings would not apply. Capture outside the enclosing "
+            "trace."
         )
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
@@ -2066,6 +2069,262 @@ def _make_inlined_forward(python_code: str) -> Callable[..., object]:
     return cast("Callable[..., object]", module_ns["forward"])
 
 
+def _check_path_pair(
+    who: str,
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+) -> None:
+    """Refuse an artifact_path / cache_path pair no entry point can use.
+
+    Two ways it can be unusable: one file named for both halves after resolving links
+    (the write would clobber the source), and a path that exists but is not a regular
+    file.
+    """
+    if os.path.normcase(os.path.realpath(artifact_path)) == os.path.normcase(
+        os.path.realpath(cache_path)
+    ):
+        raise ValueError(
+            f"{who} got the same file for artifact_path and cache_path "
+            f"({os.fspath(artifact_path)!r}); the two halves are separate files."
+        )
+    for name, path in (("artifact_path", artifact_path), ("cache_path", cache_path)):
+        if os.path.exists(path) and not os.path.isfile(path):
+            raise ValueError(
+                f"{who} got {name}={os.fspath(path)!r}, which is not a regular "
+                f"file; each half of the pair is a plain file."
+            )
+
+
+# The os.link failures that mean "this filesystem does not do hard links" (a
+# FAT/exFAT mount, a container overlay, a cross-device target), as opposed to one
+# about the path itself, which must not be papered over with a move.
+_NO_HARD_LINK_ERRNOS = frozenset(
+    {errno.EPERM, errno.EOPNOTSUPP, errno.EMLINK, errno.EXDEV}
+)
+
+
+def _same_inode(
+    path: str | os.PathLike[str], other: str | os.PathLike[str] | os.stat_result
+) -> bool:
+    """True when ``path`` resolves now to ``other`` (a path or a recorded stat)."""
+    try:
+        st = other if isinstance(other, os.stat_result) else os.stat(other)
+        return os.path.samestat(os.stat(path), st)
+    except OSError:
+        return False
+
+
+def _unlink_quietly(path: str | os.PathLike[str]) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _write_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+    python_code: str,
+    cache: bytes,
+) -> None:
+    """Write the matched (python_code, cache) pair, creating parent directories.
+
+    Each half is written beside its target and renamed into place, so neither named file
+    is ever truncated or half-written. The two renames are not one atomic step: the
+    previous source is hard-linked to a backup first and put back if the second rename
+    raises, so a Python exception (a full disk, a permission error) leaves the previous
+    pair intact. Without hard links the previous source is MOVED aside instead, so an
+    interrupt before the undo's probes have run leaves the artifact NAME empty with that
+    source only in the ``.bak``, unreported and one rename from recovered. Which undo
+    runs, and whether it is reported, is read off the DISK, not from flags (the comment
+    on the undo has the reasoning). Process death between the renames is not covered, nor
+    a reader or a second writer racing them: that can leave one source beside the other's
+    cache, which ``load`` refuses on the cache's sha256, and can cost the previous source.
+    The parent directory is fsync'd after, best effort.
+    """
+    written = []
+    new_stats: list[os.stat_result] = []
+    try:
+        for path, payload in ((artifact_path, python_code), (cache_path, cache)):
+            parent = os.path.dirname(os.fspath(path))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # A unique name per writer: two captures targeting one path must not share a
+            # scratch file. Beside the target, so the rename stays on one filesystem.
+            tmp = f"{os.fspath(path)}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+            written.append((tmp, path))
+            # The rename repoints the name at the temp's inode and carries its mode over, so
+            # the temp is CREATED with the mode of the file it replaces: chmod'ing it down
+            # only after the write would publish the whole new payload at the umask mode, in
+            # a directory the caller chose. Permission bits only: setuid/setgid on a new inode
+            # owned by the WRITING user name a different principal. No previous file means that
+            # default. O_BINARY: os.open on Windows translates the newlines code_hash covers.
+            try:
+                mode: int | None = stat.S_IMODE(os.stat(path).st_mode) & 0o777
+            except OSError:
+                mode = None
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+            perm = 0o666 if mode is None else mode
+            # opener=, not a bare os.open: an fd is unowned until open() wraps it.
+            with open(tmp, "wb", opener=lambda p, _: os.open(p, flags, perm)) as f:
+                f.write(payload.encode() if isinstance(payload, str) else payload)
+                f.flush()
+                os.fsync(f.fileno())
+            if mode is not None:
+                # O_CREAT's mode is umask-masked, so the exact bits need this too; best
+                # effort, a filesystem that drops modes must not fail the write.
+                try:
+                    os.chmod(tmp, mode)
+                except OSError:
+                    pass
+            # Name the bytes about to be renamed in by inode, for the undo below.
+            new_stats.append(os.stat(tmp))
+    except BaseException:
+        for tmp, _ in written:
+            _unlink_quietly(tmp)
+        raise
+    (artifact_tmp, _), (cache_tmp, _) = written
+    backup = f"{os.fspath(artifact_path)}.{os.getpid()}.{uuid.uuid4().hex}.bak"
+    try:
+        # A hard link, not a move: the named path must resolve to the previous or the new
+        # source at every instant, for a racing reader or a crash between the renames.
+        try:
+            os.link(artifact_path, backup)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            # No hard links here: fall back to moving aside, only for the errnos that mean
+            # unsupported and only for a regular file (os.link on a DIRECTORY also fails EPERM).
+            if e.errno not in _NO_HARD_LINK_ERRNOS or not os.path.isfile(artifact_path):
+                raise
+            os.replace(artifact_path, backup)
+        os.replace(artifact_tmp, artifact_path)
+        os.replace(cache_tmp, cache_path)
+        # Any backup taken above is superseded; inside the try, so an interrupt here is handled.
+        _unlink_quietly(backup)
+    except BaseException:
+        # Put the previous source back (or remove the new one on a first write) so the named
+        # files stay loadable, best effort; then drop every temp and re-raise. Every predicate
+        # that CHOOSES the undo is read off the DISK, never from a flag set after its own
+        # syscall, and ``probed`` says all four reads RAN: an interrupt among them leaves the
+        # rest half-set, so neither the report nor the drop below may consult one. ``kept``:
+        # the backup name carries this call's pid and a uuid, so its existing is this call's.
+        # ``complete`` (both names are this call's temps) means written even though this block
+        # ran; ``aside`` (a backup with the artifact NAME gone) is the move-aside fallback
+        # holding the previous source's only copy; ``landed`` says the FIRST rename happened.
+        # ``undone`` says the undo RETURNED, the finally's unlink safe under it.
+        complete = kept = landed = aside = probed = undone = False
+        try:
+            complete = all(map(_same_inode, (artifact_path, cache_path), new_stats))
+            kept = os.path.lexists(backup)
+            landed = _same_inode(artifact_path, new_stats[0])
+            aside = kept and not os.path.lexists(artifact_path)
+            probed = True
+            try:
+                if complete or not (landed or kept):
+                    undone = True
+                elif kept and (landed or aside):
+                    os.replace(backup, artifact_path)
+                    undone = True
+                elif kept:
+                    # The artifact name is neither this call's new source nor gone, so it
+                    # cannot tell the previous source still under the hard link (a failed FIRST
+                    # rename) from one a second WRITER repointed here. Neither wants a restore:
+                    # the first already IS the previous pair, the second a THIRD, older source.
+                    undone = True
+                elif landed:
+                    # A first write, so there is no previous pair to restore: drop the new
+                    # source rather than leave it named with no cache beside it. An unlink, not
+                    # a rename: a rename needs a directory entry, which ENOSPC just exhausted.
+                    os.unlink(artifact_path)
+                    undone = True
+            except OSError:
+                pass
+        finally:
+            # Keyed on that same on-disk outcome: a report NAMES a file, so it fires only
+            # while that file is there and ``probed`` says the reads that chose it ran.
+            named = backup if kept else artifact_path
+            if probed and not undone and os.path.lexists(named):
+                if kept:
+                    # Reached from both shapes the undo's rename serves -- the previous
+                    # source moved aside (the artifact name is GONE) and this call's source
+                    # renamed in over it -- so the wording names only what holds in both:
+                    # the .bak, and that renaming it back is the recovery.
+                    log.warning(
+                        "precompile could not put the previous artifact back at %s; that "
+                        "previous source is kept at %s, and the pair does not load until "
+                        "that file is moved back over the first path (the cache at %s is "
+                        "the one that matches it).",
+                        os.fspath(artifact_path),
+                        backup,
+                        os.fspath(cache_path),
+                    )
+                else:
+                    log.warning(
+                        "precompile wrote the artifact at %s and then failed to write "
+                        "its cache at %s, and could not remove the artifact again; no "
+                        "cache beside it matches that file, so the pair does not load.",
+                        os.fspath(artifact_path),
+                        os.fspath(cache_path),
+                    )
+            elif kept if probed else _same_inode(artifact_path, backup):
+                # Reached only where the named pair came out loadable, so the backup is not a
+                # copy anyone still needs: an undo rename consumed it, or nothing needed undoing
+                # because the previous source is still under its own name -- a failed FIRST
+                # rename, or an interrupt among the reads, which never consults ``kept`` and
+                # drops only while that name still resolves to the backup's inode.
+                _unlink_quietly(backup)
+            for tmp, _ in written:
+                _unlink_quietly(tmp)
+        raise
+    parents = {os.path.dirname(os.fspath(path)) or "." for _, path in written}
+    # Durably record the renames: without an fsync of the containing directory a crash
+    # just after os.replace returns can still lose the new entry and resurrect the old.
+    for parent in parents:
+        try:
+            fd = os.open(parent, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            # Best effort like the os.open above, close included: fsync on a DIRECTORY fd is
+            # not supported everywhere, and by here both renames have returned, so an error
+            # out of either would fail a write whose pair is already loadable.
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def _read_artifact(
+    artifact_path: str | os.PathLike[str],
+    cache_path: str | os.PathLike[str],
+) -> tuple[str, bytes]:
+    r"""Read back a pair written by :func:`_write_artifact`.
+
+    Bytes, then decoded: the exact inverse of the byte-mode write, so a ``\r`` in
+    python_code survives the round trip instead of being translated to ``\n`` by a
+    text-mode read and failing the cache's code_hash. An ``OSError`` from either open (a
+    missing half, a path the filesystem cannot open) or a ``UnicodeDecodeError`` from the
+    decode (a readable file that is not the source half -- transposed arguments, say) is
+    a ``PrecompileError`` naming both paths, with the original as its ``__cause__``.
+    """
+    try:
+        with open(artifact_path, "rb") as f:
+            python_code = f.read().decode()
+        with open(cache_path, "rb") as f:
+            cache = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise PrecompileError(
+            f"precompile could not read the artifact pair (artifact_path="
+            f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
+        ) from e
+    return python_code, cache
+
+
 class _PrecompileApi:
     """Callable namespace implementing ``torch.compiler.precompile`` and ``.load``.
 
@@ -2223,9 +2482,8 @@ class _PrecompileApi:
         sparse tensor), a nested example input, none of which capture supports on either
         path (invariant 3), a control-flow HOP (``torch.cond`` / ``torch.while_loop``),
         which is refused rather than specialized because neither backend can lower the
-        subgraph it captures, a capture attempted inside another trace (an ambient
-        ``TracingContext`` fake mode outranks capture's own and does not carry its
-        fallback-off setting), and -- for the inductor backend -- a runtime input whose
+        subgraph it captures, a capture attempted inside another trace (invariant 3 in the
+        Note has the reason), and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
