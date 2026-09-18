@@ -96,6 +96,7 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "divide",
       "divide_",
       "divide_out", // alias of div
+      "divmod",
       "mul",
       "mul_",
       "mul_out",
