@@ -860,15 +860,6 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
 
   auto reduction_type = index_reduce_type(reduce);
-  // Atomic prod/mean are non-associative for floating-point; alert unless we're
-  // on an order-invariant reduction (amin/amax) or an integer dtype. Mirrors
-  // CUDA's index_reduce_func_cuda_impl alert, narrowed to dtypes/ops that
-  // actually produce non-deterministic output on MPS.
-  const auto dtype = self.scalar_type();
-  if ((reduction_type == ReductionType::PROD || reduction_type == ReductionType::MEAN) &&
-      (at::isFloatingType(dtype) || at::isComplexType(dtype))) {
-    at::globalContext().alertNotDeterministic("index_reduce_mps");
-  }
 
   if (!result.is_same(self)) {
     result.copy_(self);
@@ -899,7 +890,15 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
 
   MPSStream* stream = getCurrentMPSStream();
 
+  // See Note [Enabling Deterministic Operations]
+  // The operation is normally nondeterministic because of atomic accumulation
+  // across multiple threads. To make it deterministic, dispatch only one thread
+  // per batch, so the accumulations are serialized.
+  bool serial = at::globalContext().deterministicAlgorithms();
   auto num_threads = source.numel();
+  if (num_threads > 0 && serial) {
+    num_threads /= source.size(dim);
+  }
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -908,7 +907,7 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
           "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
       [compute_encoder setComputePipelineState:pipeline_state];
-      mps::mtl_setArgs(compute_encoder, result, index, source, params);
+      mps::mtl_setArgs(compute_encoder, result, index, source, params, serial);
       mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
       getMPSProfiler().endProfileKernel(pipeline_state, stream);
     }

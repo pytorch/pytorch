@@ -233,10 +233,6 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
                                                         int64_t _padding_mode,
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic("grid_sampler_2d_backward_mps");
-
   check_grid_sampler_2d_backward(input, grid, grad_output);
 
   TORCH_CHECK(input.scalar_type() == grid.scalar_type(),
@@ -305,7 +301,13 @@ std::tuple<Tensor, Tensor> grid_sampler_2d_backward_mps(const Tensor& grad_outpu
             input_pso, "grid_sampler_2d_backward_input", {grad_output, grid}, mpsStream);
         [computeEncoder setComputePipelineState:input_pso];
         set_args(computeEncoder, grad_input, grad_output, grid);
-        mtl_dispatch1DJob(computeEncoder, input_pso, num_threads);
+        // See Note [Enabling Deterministic Operations]
+        // The operation is normally nondeterministic because of atomic
+        // accumulation across multiple threads. To make it deterministic,
+        // dispatch only one thread per batch, so the accumulations are
+        // serialized.
+        auto numThreadsInput = at::globalContext().deterministicAlgorithms() ? N : num_threads;
+        mtl_dispatch1DJob(computeEncoder, input_pso, numThreadsInput);
         getMPSProfiler().endProfileKernel(input_pso, mpsStream);
       }
 
@@ -335,10 +337,6 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
                                                         bool align_corners,
                                                         std::array<bool, 2> output_mask) {
   using namespace mps;
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic due to atomic_add
-  at::globalContext().alertNotDeterministic("grid_sampler_3d_backward_mps");
-
   check_grid_sampler_3d_backward(input, grid, grad_output);
 
   TORCH_CHECK_NOT_IMPLEMENTED(interpolation_mode == 0 || interpolation_mode == 1,
@@ -431,8 +429,19 @@ std::tuple<Tensor, Tensor> grid_sampler_3d_backward_mps(const Tensor& grad_outpu
         dispatch(int64_t{});
       }
 
-      MTLSize threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
-      MTLSize threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
+      MTLSize threadsPerGrid, threadsPerThreadgroup;
+      if (run_grad_input && at::globalContext().deterministicAlgorithms()) {
+        // See Note [Enabling Deterministic Operations]
+        // The operation is normally nondeterministic because of atomic
+        // accumulation across multiple threads. To make it deterministic,
+        // dispatch only one thread per batch, so the accumulations are
+        // serialized.
+        threadsPerGrid = MTLSizeMake(1, 1, N);
+        threadsPerThreadgroup = MTLSizeMake(1, 1, std::clamp<NSUInteger>(N, 1, [pso maxTotalThreadsPerThreadgroup]));
+      } else {
+        threadsPerGrid = MTLSizeMake(out_W, out_H * out_D, N);
+        threadsPerThreadgroup = MTLSizeMake(16, 16, 1);
+      }
       [computeEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
 
       getMPSProfiler().endProfileKernel(pso, mpsStream);

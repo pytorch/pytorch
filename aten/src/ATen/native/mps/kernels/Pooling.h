@@ -37,6 +37,7 @@ struct AvgPoolingParams {
   int32_t divisor_override;
   bool count_include_pad;
   bool has_divisor_override;
+  int32_t output_numel;
 };
 
 template <unsigned N = 5, typename idx_type_t = int32_t>
@@ -48,6 +49,7 @@ struct PoolingBackwardParams {
   ::c10::metal::array<idx_type_t, N> grad_output_sizes;
   ::c10::metal::array<idx_type_t, N> grad_output_strides;
   ::c10::metal::array<idx_type_t, N> indices_strides;
+  int32_t grad_output_numel;
 };
 
 template <unsigned N = 5, typename idx_type_t = int32_t>
