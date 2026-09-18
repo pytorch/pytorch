@@ -17,7 +17,13 @@ from torch._logging import warning_once
 from torch.nn.attention.flex_attention import _Backend
 from torch.utils._sympy.functions import FloorDiv
 
-from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
+from ...ir import (
+    ComputedBuffer,
+    ExternKernel,
+    FixedLayout,
+    is_dense_contiguous_storage_and_layout,
+    TensorBox,
+)
 from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...runtime.runtime_utils import is_power_of_2
 from ...select_algorithm import (
@@ -441,13 +447,39 @@ def flex_attention(
 
     dtype = query.get_dtype()
     head_dim = V.graph.sizevars.guard_int(query.get_size()[-1])
-    configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
-        head_dim, seq_len_q, dtype, query.get_device().type
-    )
-
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
+
+    unfiltered_configs: list[FlexConfig] = V.choices.get_flex_attention_fwd_configs(
+        head_dim, seq_len_q, dtype, query.get_device().type
+    )
+    is_noop_block_mask = (
+        not has_full_blocks
+        and SPARSE_Q_BLOCK_SIZE == 1 << 30
+        and SPARSE_KV_BLOCK_SIZE == 1 << 30
+        and is_trivial_mask_graph(mask_graph.graph_module)
+    )
+    configs = V.choices.filter_flex_attention_fwd_configs(
+        unfiltered_configs,
+        batch_size=B,
+        kv_batch_size=Bkv,
+        num_heads=Hq,
+        num_kv_heads=Hkv,
+        seq_len_q=seq_len_q,
+        seq_len_kv=seq_len_kv,
+        qk_head_dim=qk_head_dim,
+        v_head_dim=v_head_dim,
+        qk_head_dim_rounded=kernel_options["QK_HEAD_DIM_ROUNDED"],
+        v_head_dim_rounded=kernel_options["V_HEAD_DIM_ROUNDED"],
+        dtype=dtype,
+        device=query.get_device(),
+        inputs_contiguous=all(
+            is_dense_contiguous_storage_and_layout(node) for node in (query, key, value)
+        ),
+        is_noop_block_mask=is_noop_block_mask,
+        kernel_options=kernel_options,
+    )
 
     original_kernel_options = kernel_options.copy()
     # Default config for warp specialization
@@ -548,7 +580,7 @@ def flex_attention(
     # template choices (e.g. TLX on Blackwell in fbcode). No-op by default.
     choices = V.choices.append_flex_attention_choices(
         choices,
-        configs,
+        unfiltered_configs,
         [
             query,
             key,

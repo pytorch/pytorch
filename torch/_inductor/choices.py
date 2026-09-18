@@ -21,6 +21,7 @@ from .heuristics.template.triton import (
     BaseConfigHeuristic,
     CPUConfigHeuristic,
     CUDAConfigHeuristic,
+    FlexAttentionConfigContext,
     IS_ROCM,
     MTIAConfigHeuristic,
     ROCmConfigHeuristic,
@@ -173,6 +174,51 @@ class InductorChoices:
     ) -> list[Any]:
         flex_heuristics = self.get_config_heuristics(device_type)
         return flex_heuristics.get_flex_attn_fwd_configs(head_dim, seq_len, dtype)
+
+    def filter_flex_attention_fwd_configs(
+        self,
+        configs: list[Any],
+        *,
+        batch_size: int | sympy.Expr,
+        kv_batch_size: int | sympy.Expr,
+        num_heads: int | sympy.Expr,
+        num_kv_heads: int | sympy.Expr,
+        seq_len_q: int | sympy.Expr,
+        seq_len_kv: int | sympy.Expr,
+        qk_head_dim: int | sympy.Expr,
+        v_head_dim: int | sympy.Expr,
+        qk_head_dim_rounded: int,
+        v_head_dim_rounded: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        inputs_contiguous: bool,
+        is_noop_block_mask: bool,
+        kernel_options: dict[str, Any],
+    ) -> list[Any]:
+        """Refine forward configs using facts unavailable to the base lookup."""
+        # Origami's import decision is intentionally load-time-only, matching
+        # the existing GEMM path. The ROCm heuristic checks that cached binding.
+        if not IS_ROCM or not config.max_autotune:
+            return configs
+        context = FlexAttentionConfigContext(
+            batch_size=batch_size,
+            kv_batch_size=kv_batch_size,
+            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
+            seq_len_q=seq_len_q,
+            seq_len_kv=seq_len_kv,
+            qk_head_dim=qk_head_dim,
+            v_head_dim=v_head_dim,
+            qk_head_dim_rounded=qk_head_dim_rounded,
+            v_head_dim_rounded=v_head_dim_rounded,
+            dtype=dtype,
+            device=device,
+            inputs_contiguous=inputs_contiguous,
+            is_noop_block_mask=is_noop_block_mask,
+            kernel_options=kernel_options,
+        )
+        flex_heuristics = self.get_config_heuristics(device.type)
+        return flex_heuristics.filter_flex_attn_fwd_configs(configs, context)
 
     def get_flex_attention_bwd_configs(
         self, head_dim: int, dtype: torch.dtype, device_type: str | None = "cuda"
