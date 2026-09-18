@@ -350,8 +350,8 @@ function install_nccl4py() {
     extra=cu13
     cutlass_dsl="nvidia-cutlass-dsl[cu13]==4.6.2"
   fi
-  # Keep CuTeDSL compatible with PyTorch's vendored QuACK and cutlass.operators.
-  pip_install "nccl4py[${extra}]==0.5.0" "$cutlass_dsl"
+  # Keep CuTeDSL and TVM FFI compatible with PyTorch's vendored QuACK and cutlass.operators.
+  pip_install "nccl4py[${extra}]==0.5.0" "$cutlass_dsl" apache-tvm-ffi==0.1.11
 }
 
 function install_spmd_types() {
