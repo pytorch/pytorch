@@ -146,8 +146,9 @@ it.
 #    crashed on it with a raw internal error.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
 #    Every refusal above rests on capture tracing under a fake mode IT built, so capture
-#    also refuses to run inside another trace: an ambient ``TracingContext.fake_mode`` (a
-#    torch.compile / export / AOTAutograd trace) outranks capture's own mode, and no foreign
+#    refuses to run inside another trace, on BOTH paths: an ambient fake mode (a
+#    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
+#    outranks capture's own, and no foreign
 #    mode passes ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
 #    namespace would be run for real again. A mode built under DEFAULT config (an
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a ``.data_ptr()``
@@ -265,26 +266,18 @@ it.
 # (artifact=None) but is still a full integrity-tagged envelope (python_code is the
 # whole runnable artifact).
 #
-# autocast: a served call IGNORES the serving process's ambient autocast -- the emitted
-# drivers neutralize it, for the duration of the call, on every autocast-capable device
-# of the SERVING build (torch._C._autocast_supported_devices(), the device list
-# torch._functorch._aot_autograd.graph_capture_wrappers.disable_autocast neutralizes
-# over, whose loop the driver inlines) -- because whatever the capture ran under is
-# already baked in (ATen casts for make_fx, compiled kernels for inductor), so
-# re-dispatching under an ambient autocast would cast a second time. A served call
-# returns the capture's dtypes, not the dtypes the same eager call returns inside that
-# region, so capture under the autocast you want baked in. From the serving build rather
-# than from a per-artifact device tag: the captured graph does not name the devices an
-# op reaches only inside its own body, and there is no metadata field or parse path to
-# keep compatible. The disable is entered only for a device that actually has autocast
-# on, so a served call with no ambient region constructs nothing and pays one probe per
-# supported device (a few microseconds per served call, against well under one for a
-# one-device artifact tag). A device that reports autocast enabled and then refuses to
-# construct the disable (a
-# module registered under the privateuse1 backend name and missing
-# get_amp_supported_dtype -- the only device whose module the autocast constructor
-# consults) is skipped, with one logged warning per device per loaded artifact: that is
-# the one case where a served call still casts twice.
+# autocast: a served call IGNORES the serving process's ambient autocast, because
+# whatever the capture ran under is already baked in (ATen casts for make_fx, compiled
+# kernels for inductor) and re-dispatching under an ambient autocast would cast a second
+# time. A served call returns the capture's dtypes, not the dtypes the same eager call
+# returns inside that region, so capture under the autocast you want baked in. Both
+# drivers do it with torch._C._DisableAutocast, the one guard that excludes the whole
+# autocast dispatch keyset -- the same guard AOTAutograd emits into its own generated
+# runtime source for the same reason. Excluding the keys, rather than clearing a
+# per-device autocast bit, covers every autocast-capable device of the serving build at
+# once, including a device an op reaches only inside its own body -- which the captured
+# graph never names, so a per-artifact device tag could not cover it. Invariant 7 still
+# holds: torch._C._DisableAutocast is a name in the artifact's text, not an import.
 #
 # tracer: the capture front-end, orthogonal to backend, passed to capture() as a tracer
 # object. MakeFxTracer() (the default) is a non-strict trace and is the only tracer
@@ -311,7 +304,7 @@ from typing_extensions import Self
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -382,8 +375,7 @@ class PrecompileError(RuntimeError):
     metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
     input, none of which capture supports on either path (invariant 3), a control-flow HOP
     (``torch.cond`` / ``torch.while_loop``), whose captured subgraph neither backend can
-    lower, a capture attempted inside another trace (an ambient ``TracingContext``
-    fake mode, which does not carry capture's fallback-off setting), a non-tensor output the
+    lower, a capture attempted inside another trace (invariant 3), a non-tensor output the
     inductor backend cannot lower, or a runtime input whose shape or memory format differs
     from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -428,10 +420,9 @@ class DynamoTracer:
     The fields configure the multi-variant capture: ``guard_filter_fn`` filters the guards
     kept in the SERIALIZED artifact (runtime capture guards are always retained);
     ``recompile_limit`` caps recompilations; ``dynamic`` forces dynamic shapes;
-    ``invariants`` names an optional file receiving the multi-graph invariant report; and
-    the ``require_*`` gates refuse known coverage gaps and risky dropped guards
-    (``require_no_dropped_guards`` is off by default, since every model drops identity
-    guards that cannot be serialized).
+    ``invariants`` names a file receiving the invariant report; and the ``require_*`` gates
+    refuse known coverage gaps and risky dropped guards (``require_no_dropped_guards`` is
+    off by default, since every model drops unserializable identity guards).
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -487,16 +478,15 @@ class PrecompiledRunnable:
 class PrecompiledCallable(PrecompiledRunnable):
     """Callable handle for one loaded multi-graph precompile artifact.
 
-    The handle :func:`torch.compiler.precompile.load` will return for an
-    artifact that serves by installing; it is never constructed directly, and
-    nothing in this build constructs it -- the installing artifacts arrive with
-    the dynamo front-end. ``compiled`` must be callable and expose ``__enter__``,
-    ``unload()`` and ``serve_time_compiles()``, with an ``unload()`` that is
-    idempotent and lets a call already in flight on another thread finish: teardown
-    goes through :meth:`unload`, which is what exiting this object as a context
-    manager calls, so ``compiled.__exit__`` is never invoked and need not exist. Part of the
-    prototype ``torch.compiler.precompile`` API, so it may change without a
-    deprecation cycle.
+    The handle :func:`torch.compiler.precompile.load` will return for an artifact that
+    serves by installing; it is never constructed directly, and nothing in this build
+    constructs it -- the installing artifacts arrive with the dynamo front-end.
+    ``compiled`` must be callable and expose ``__enter__``, ``unload()`` and
+    ``serve_time_compiles()``, with an ``unload()`` that is idempotent and lets a call
+    already in flight on another thread finish: teardown goes through :meth:`unload`,
+    which is what exiting this object as a context manager calls, so
+    ``compiled.__exit__`` is never invoked and need not exist. Part of the prototype
+    ``torch.compiler.precompile`` API, so it may change without a deprecation cycle.
     """
 
     __module__ = "torch.compiler"
@@ -564,9 +554,10 @@ class Capture:
     :class:`DynamoTracer` that checkpoints the calls made so far, while a
     :class:`MakeFxTracer` capture records a single call, so after a ``save()``
     that succeeded the block exit writes nothing more. The object is single-shot:
-    the block is entered once, and calling, entering, exiting and saving are all
-    refused after it -- saving only while the LAST write attempt is one that
-    FAILED, until a retry of it SUCCEEDS.
+    the block is entered once, and calling, entering, saving and a CLEAN exit are
+    all refused after it (an exit carrying the block's own exception is a no-op)
+    -- saving only while the LAST write attempt is one that FAILED, until a retry
+    of it SUCCEEDS.
     """
 
     __module__ = "torch.compiler.precompile"
@@ -1418,22 +1409,21 @@ def _capture(
     import contextlib
 
     args = tuple(args)
-    # An ambient TracingContext.fake_mode OUTRANKS both mode sources this capture offers
-    # make_fx (see the trace site below), and no foreign mode passes
-    # allow_fallback_kernels=False, so a meta-less op in an allowlisted namespace would run
-    # for real on zero-filled substitutes again. A mode built under DEFAULT config (an
-    # AOTAutograd / inductor one) also lacks the
-    # fake_tensor_allow_unsafe_data_ptr_access=False snapshot, so a .data_ptr() read bakes 0
-    # instead of raising; dynamo and export do build theirs inside that patch, so there only
-    # the fallback setting is lost. Refuse rather than trace under someone else's contract.
-    tc = TracingContext.try_get()
-    if tc is not None and tc.fake_mode is not None:
+    # BOTH capture paths trace under a fake mode capture builds, and an ambient one outranks
+    # it (invariant 3 in the Note has the details), so refuse rather than trace under
+    # someone else's contract. This runs first, ahead of the input scan below, whose
+    # is_pinned() probe DISPATCHES: under an ambient mode a real example tensor trips that
+    # mode's own non-fake-input assertion before any refusal of ours. Ask detect_fake_mode
+    # -- what make_fx itself resolves through -- so all three sources it ranks (an ambient
+    # TracingContext, the dispatch-mode stack, the inputs) are refused by name here instead
+    # of reaching its own mode-mismatch assertion once capture enters its mode.
+    if detect_fake_mode() is not None:
         raise PrecompileError(
-            "precompile: capture cannot run inside another trace -- a TracingContext with "
-            "a FakeTensorMode is active (e.g. precompile called from inside torch.compile "
-            "or an export/AOTAutograd trace). make_fx would adopt that mode and its "
-            "ShapeEnv, so capture's own safety settings would not apply. Capture outside "
-            "the enclosing trace."
+            "precompile: capture cannot run inside another trace -- a FakeTensorMode is "
+            "already active (e.g. precompile called from inside torch.compile or an "
+            "export/AOTAutograd trace). make_fx would adopt that mode and its ShapeEnv, so "
+            "capture's own safety settings would not apply. Capture outside the enclosing "
+            "trace."
         )
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
@@ -1958,10 +1948,9 @@ _GENERATED_HEADER = """\
 #      exposing ``call(flat_inputs) -> outputs``.
 #   2. Calling-convention metadata.
 #   3. A small driver that extracts each runtime module's params/buffers (in the
-#      same order as capture), passes them with the runtime inputs to ``call`` with
-#      the caller's autocast neutralized on every autocast-capable device, and
-#      scatters any harvested gradients onto the model's .grad fields. No model
-#      weights are embedded (you bring the model).
+#      same order as capture), passes them with the runtime inputs to ``call`` with the
+#      caller's autocast neutralized, and scatters any harvested gradients onto the
+#      model's .grad fields. No model weights are embedded (you bring the model).
 #
 # The companion ``cache`` written beside this file by torch.compiler.precompile.capture
 # is purely an ACCELERATION used by torch.compiler.precompile.load: it primes the
@@ -2100,12 +2089,10 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
                     f"malformed; it must be a Python literal."
                 ) from e
         else:
-            # Not a metadata name we consume: the inlined graph section declares
-            # module-level names of its own (aten, async_compile, the kernel handles,
-            # call), as does the driver section (_AUTOCAST_SKIPS_REPORTED), so this
-            # fires many times on an inductor artifact. Skipped by design, but logged
-            # at debug so a malformed / renamed artifact is diagnosable rather than
-            # silently lost.
+            # Not a metadata name we consume: the inlined graph section declares module-level
+            # names of its own (aten, async_compile, the kernel handles, call), so this fires
+            # many times on an inductor artifact. Skipped by design, but logged at debug so a
+            # malformed / renamed artifact is diagnosable rather than silently lost.
             log.debug(
                 "precompile: ignoring unrecognized top-level assignment %r while "
                 "parsing artifact calling-convention metadata",
@@ -2160,8 +2147,8 @@ _EAGER_GENERATED_HEADER = """\
 #
 # The runtime model must be structurally identical to the traced one (only weight
 # VALUES may differ), and control flow / shapes are specialized to the example inputs.
-# The driver below neutralizes any autocast the calling process has on, on every
-# autocast-capable device, so a call returns the capture's dtypes.
+# The driver below neutralizes any autocast the calling process has on, so a call
+# returns the capture's dtypes.
 # See Note [precompile programming model] in torch/_precompile.py for the full contract.
 """
 
@@ -2237,13 +2224,9 @@ def _emit_driver_source(forward_fn_name: str) -> str:
 
     forward_fn = getattr(driver, forward_fn_name)
     blocks = [
-        # _autocast_off's report-once state: module level, so out of getsource's
-        # reach. The name must match the one the driver declares.
-        "_AUTOCAST_SKIPS_REPORTED = set()",
         inspect.getsource(driver._extract_param_buffers),
         inspect.getsource(driver._fail),
         inspect.getsource(driver._check_structure),
-        inspect.getsource(driver._autocast_off),
         inspect.getsource(forward_fn).replace(
             f"def {forward_fn_name}(", "def forward(", 1
         ),
