@@ -65,8 +65,8 @@ class PrecompileSummary:
     between the lists hold within one frame variant, where the producer applies
     them, and are stated here rather than checked:
 
-    * ``kept_guards`` and ``dropped_guards`` are disjoint: a guard is
-      serialized or it is not.
+    * ``kept_guards`` and ``dropped_guards`` are disjoint: the filter gives a
+      slot one verdict, keep or reject.
     * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
     * ``policy_dropped_guards`` is disjoint from both: a policy drop is taken
       out of the serialized copy the filter kept, once the slot held
@@ -141,16 +141,18 @@ class PrecompileSummary:
             source without pinning it, so as captured no variant served another
             value. Observed, not proven: a variant that never guarded the source
             does not count as serving other values of it.
-        dropped_guards: Slots the serialized copy's guard filter rejected, so the
-            artifact does not check them and a load cannot notice whatever they
-            checked. Which guards a filter rejects is that filter's own
+        dropped_guards: Slots the serialized copy's guard filter rejected; a
+            variant that dropped a slot does not check it, so a load through that
+            variant cannot notice whatever it checked. Which guards a filter
+            rejects is that filter's own
             contract, stated in its docstring and not repeated here: the default
             is ``default_guard_filter_fn`` in
             ``torch._dynamo.precompile_package``, and a caller-supplied filter
             decides its own set. A slot is listed under the guard's own type
             whatever the reason for the drop, so a ``TENSOR_MATCH`` rejected for
             what its check derives is a dropped ``TENSOR_MATCH``.
-        kept_guards: Slots the serialized copy's guard filter kept.
+        kept_guards: Slots the serialized copy's guard filter kept and the
+            invariance policy left in place.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
             captured variants apart, or flagged by the risky-drop lint as a
             configuration-chosen binding.
