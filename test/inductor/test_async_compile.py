@@ -183,6 +183,14 @@ def test_flydsl_loader_main(value, stream):
         self.assertEqual(kernel.run(41, stream=7), (41, 7))
         self.assertIsNotNone(kernel.kernel_path)
 
+    def test_class_kernel_name_mangling(self):
+        """Directly verifies that _sanitize_kernel_name handles class-mangled names."""
+        from torch._inductor.async_compile import _sanitize_kernel_name
+
+        mangled_name = "_Runner__kernel_name_0"
+        sanitized = _sanitize_kernel_name(mangled_name)
+        self.assertEqual(sanitized, "kernel_name_0")
+
     def test_flydsl_rejects_unavailable_runtime(self):
         with patch(
             "torch._inductor.codegen.flydsl.flydsl_utils.runtime_available",
