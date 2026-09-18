@@ -44,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
 
 from . import config, inductor_prims
 from .utils import (
+    is_bf16x9_matmul,
     is_gpu,
     needs_fallback_due_to_atomic_add_limitations,
     use_scatter_fallback,
@@ -442,7 +443,24 @@ def round_dec(x: torch.Tensor, decimals: int = 0) -> torch.Tensor:
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
+def _preserve_bf16x9_matmul(arg_index, arg_name):
+    """Keep FP32 CUDA matmuls intact before opmath casts hide their dtype."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            mat = args[arg_index] if len(args) > arg_index else kwargs[arg_name]
+            if is_bf16x9_matmul(mat.device.type, mat.dtype):
+                return NotImplemented
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 @register_decomposition([aten.bmm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def bmm(
     self: torch.Tensor,
@@ -476,6 +494,7 @@ def bmm(
 
 
 @register_decomposition([aten.addmm])
+@_preserve_bf16x9_matmul(1, "mat1")
 @pw_cast_for_opmath
 def addmm(
     self: torch.Tensor,
@@ -525,6 +544,7 @@ def addmm(
 
 
 @register_decomposition([aten.mm])
+@_preserve_bf16x9_matmul(0, "self")
 @pw_cast_for_opmath
 def mm(
     self: torch.Tensor,
@@ -1146,38 +1166,6 @@ def _foreach_lerp_scalarlist(
         aten._foreach_mul.ScalarList(
             aten._foreach_sub.List(end_tensors, start_tensors), scalars
         ),
-    )
-
-
-@aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
-@register_decomposition(aten.miopen_batch_norm)
-def miopen_batch_norm(
-    input: torch.Tensor,
-    weight: torch.Tensor,
-    bias: torch.Tensor | None,
-    running_mean: torch.Tensor | None,
-    running_var: torch.Tensor | None,
-    training: bool,
-    exponential_average_factor: float,
-    epsilon: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    a, b, c = aten.native_batch_norm(
-        input,
-        weight,
-        bias,
-        running_mean,
-        running_var,
-        training,
-        exponential_average_factor,
-        epsilon,
-    )
-
-    if training:
-        return (a, b, c)
-    return (
-        a,
-        weight.new_zeros((0,)),
-        weight.new_zeros((0,)),
     )
 
 
