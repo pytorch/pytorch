@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     gcIfJetson,
     get_cycles_per_ms,
     getRocmVersion,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_FBCODE,
@@ -207,6 +208,7 @@ def _check_allocator_settings_on_tear_down(test_case):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
+    hw_classification = HardwareClassification.CUDA
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
@@ -6371,6 +6373,7 @@ print("OK")
     "expandable_segments mode is not supported on ROCm",
 )
 class TestResizeStorageWithAddr(TestCase):
+    hw_classification = HardwareClassification.CUDA
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -6660,6 +6663,8 @@ class TestResizeStorageWithAddr(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaAllocator(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def tearDown(self):
         super().tearDown()
         _check_allocator_settings_on_tear_down(self)
@@ -8154,6 +8159,8 @@ def reconstruct_from_tensor_metadata(metadata):
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @property
     def expandable_segments(self):
         return EXPANDABLE_SEGMENTS
@@ -8646,6 +8653,8 @@ def caching_host_allocator_max_round_threshold_and_max_cached_size(
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCachingHostAllocatorConfig(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         gc.collect()
@@ -8873,6 +8882,8 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestMemPool(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def tearDown(self):
         super().tearDown()
         _check_allocator_settings_on_tear_down(self)
@@ -10469,6 +10480,7 @@ class TestMemPool(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaOptims(TestCase):
+    hw_classification = HardwareClassification.CUDA
     # These tests will be instantiate with instantiate_device_type_tests
     # to apply the new OptimizerInfo structure.
 
@@ -10831,6 +10843,8 @@ class TestCudaOptims(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestGDS(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def _get_tmp_dir_fs_type(self):
         my_path = os.path.realpath(tempfile.gettempdir())
         root_type = ""
@@ -10941,6 +10955,8 @@ class TestGDS(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaAutocast(TestAutocast):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         self.autocast_lists = AutocastTestLists(torch.device("cuda:0"))
@@ -11487,6 +11503,8 @@ class TestCudaAutocast(TestAutocast):
 
 
 class TestCompileKernel(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
         # Simple vector addition kernel
@@ -12017,6 +12035,8 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skipIfRocmVersionLessThan((7, 0))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
@@ -12112,6 +12132,8 @@ class TestCudaDeviceParametrized(TestCase):
 
 class TestFXMemoryProfiler(TestCase):
     """Tests for memory profiler augmentation with original stack traces."""
+
+    hw_classification = HardwareClassification.CUDA
 
     class MLPModule(nn.Module):
         def __init__(self, device):
@@ -12240,6 +12262,8 @@ class TestFXMemoryProfiler(TestCase):
     not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported"
 )
 class TestCudaGreenContexts(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
 
@@ -12379,6 +12403,8 @@ class TestCudaGreenContexts(TestCase):
 
 
 class TestCudaArchList(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_get_arch_list_empty_when_cuda_not_compiled(self):
         if torch.cuda._is_compiled():
             self.skipTest("CUDA is compiled")
@@ -12405,6 +12431,8 @@ instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu"
 # Tests for fp32_precision flag propagation that don't require an actual CUDA
 # device — they only exercise C++ context state management.
 class TestFP32PrecisionFlags(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
         IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182021"
     )
@@ -12423,6 +12451,8 @@ class TestFP32PrecisionFlags(TestCase):
 
 
 class TestMemoryViz(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def test_format_flamegraph_download_moves_temp_file(self):
         # Regression test: format_flamegraph downloads flamegraph.pl into a temp
         # file and moves it into place. Previously the temp file was created by a
