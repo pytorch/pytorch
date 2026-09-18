@@ -3079,7 +3079,12 @@ def use_contiguous(m: _IntLike, n: _IntLike, k: _IntLike) -> bool:
 
 
 @functools.cache
-def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
+def get_k_splits(
+    m: _IntLike,
+    n: _IntLike,
+    k: _IntLike,
+    min_k_split: int = 2,
+) -> list[int]:
     # To limit compile time
     k_splits_limit = config.triton.num_decompose_k_splits
 
@@ -3098,7 +3103,7 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     else:
         max_k_split = min(k // m, k // n)
 
-    min_k_split = 2
+    min_k_split = max(2, min_k_split)
     # Get all divisors of k, k has to be divisible by kPart
     divisors = sympy.divisors(k)
 
@@ -3131,7 +3136,6 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
         return pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
 
     best_splits = pow_of_2_divisors + mul_of_32_divisors + rest_of_splits
-    # Otherwise, conform results to k_splits_limit
     return best_splits[:k_splits_limit]
 
 
