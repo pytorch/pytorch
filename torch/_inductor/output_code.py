@@ -26,6 +26,7 @@ import contextlib
 import dataclasses
 import logging
 import os
+import threading
 from functools import partial
 from typing import Any, cast, Protocol, TYPE_CHECKING, TypeAlias
 
@@ -1069,6 +1070,12 @@ class CompiledAOTI(OutputCode):
     device_type: str
     current_callable: Callable[..., Any] | None = None
     _cached_files: dict[str, bytes] = dataclasses.field(default_factory=dict)
+    # The CUDA runner below is created with run_single_threaded, so it does no
+    # synchronization of its own, and run() releases the GIL. Serialize all
+    # calls here, as a C++ caller of such a runner would have to.
+    _run_lock: threading.Lock = dataclasses.field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self):
         if not config.aot_inductor.link_libtorch:
@@ -1138,7 +1145,8 @@ class CompiledAOTI(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         if self.current_callable is None:
             raise RuntimeError("AOTInductor compiled so is not loaded")
-        return self.current_callable(inputs)
+        with self._run_lock:
+            return self.current_callable(inputs)
 
     def prepare_for_serialization(self) -> None:
         self.current_callable = None
@@ -1155,7 +1163,12 @@ class CompiledAOTI(OutputCode):
     def __getstate__(self):
         state = self.__dict__.copy()
         state["current_callable"] = None
+        del state["_run_lock"]
         return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._run_lock = threading.Lock()
 
     def post_compile(
         self,
