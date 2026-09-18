@@ -592,10 +592,9 @@ void Graph::lint() const {
   for (const auto& node : nodes()) {
     TORCH_CHECK(node.owningGraph() == this);
   }
-  // Check that every used list type is either produced by a prim.ListPack or
-  // immediately consumed by a prim.ListUnpack. An unused list output is valid
-  // for a reachable multi-output operator: cleanupDeadNodes cannot remove one
-  // output without removing the producer and its other, live outputs.
+  // Check that every list type is either produced by a prim.ListPack or
+  // immediately consumed by a prim.ListUnpack. We make use of this invariant
+  // to retrieve list elements in `getListElements`.
   for (const auto& [_, value] : values_) {
     if (value->type().kind() != Type::Kind::TensorList) {
       continue;
@@ -603,10 +602,9 @@ void Graph::lint() const {
     const bool producedByListPack =
         value->producer(/* resolve_folded = */ true)->target() ==
         "prim.ListPack";
-    const bool unused = value->users().empty();
     const bool consumedByListUnpack = value->users().size() == 1 &&
         value->users()[0]->target() == "prim.ListUnpack";
-    TORCH_CHECK(unused || producedByListPack || consumedByListUnpack);
+    TORCH_CHECK(producedByListPack || consumedByListUnpack);
   }
 
   auto getNames = [](const auto& values) {
@@ -973,11 +971,6 @@ std::vector<const Value*> Value::getListElements() const {
     for (const auto& tv : p->inputs()) {
       ret.push_back(tv.value);
     }
-  } else if (users().empty()) {
-    // A non-ListPack value has explicit element Values only when a ListUnpack
-    // consumes it. An unused list therefore has no structural elements to
-    // return.
-    return ret;
   } else {
     TORCH_CHECK(users().size() == 1);
     const auto listUnpack = users()[0];
