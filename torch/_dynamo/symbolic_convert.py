@@ -2380,13 +2380,10 @@ class InstructionTranslatorBase(
 
     @functools.cached_property
     def nn_modules_globals_vt(self) -> VariableTracker:
-        module_name = "torch.nn.modules.module"
-        module_source = self.import_source(module_name)
-        # import_source leaves a writer's same-named module in the alias slot
-        # when the memo is not the live entry; the value stays the memo, the
-        # module whose __globals__ _call_impl reads the hook dicts through.
-        fglobals_value = _import_module(module_name)
-        return VariableTracker.build(self, fglobals_value, module_source)
+        # The defining module, whose dicts nn.Module._call_impl reads through
+        # its own __globals__; a sys.modules rebind does not move them.
+        module = torch.nn.modules.module
+        return VariableTracker.build(self, module, self.import_source(module.__name__))
 
     def LOAD_GLOBAL(self, inst: Instruction) -> None:
         if inst.arg is None:
@@ -2437,10 +2434,18 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = _import_module(module_name)
-            # Under the key alone, whatever the module's own __name__: that
-            # entry is what __import__ hands IMPORT_NAME.
-            live = module_name in sys.modules and sys.modules[module_name] is value
+            # The live sys.modules entry, which is what IMPORT_NAME pushed and
+            # so what the guards this alias roots must read. The memo is called
+            # first so that a live resolution primes it (functools.cache keeps
+            # the first return and never recomputes): a name since removed from
+            # sys.modules or blocked there with None is then served from it,
+            # where importing again would run the module body inside the trace
+            # or, for None, raise out of guard construction. A memo still cold
+            # for such a name imports all the same, as it did before.
+            memo = _import_module(module_name)
+            entry = sys.modules.get(module_name)
+            live = entry is not None
+            value = entry if live else memo
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
         f_globals = self.output.global_scope
