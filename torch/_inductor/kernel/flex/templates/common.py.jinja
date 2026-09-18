@@ -69,7 +69,14 @@ def forward_block_mn(
             "h": "index",
             "m": "index",
             "n": "index",
-        }
+        },
+        input_ranges={
+            "b": (0, size("Q", 0)),
+            "h": (0, size("Q", 1)),
+            "m": (0, size("Q", 2)),
+            "n": (0, size("K", 2)),
+        },
+        bounds_check_indices=True,
     ) | indent_except_first(1) }}
 
     if CHECK_BLOCK_BOUNDARY:

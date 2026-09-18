@@ -486,7 +486,14 @@ def bwd_dq_block_mn(
             "h": "index",
             "m": "index",
             "n": "index",
-        }
+        },
+        input_ranges={
+            "b": (0, size("Q", 0)),
+            "h": (0, size("Q", 1)),
+            "m": (0, size("Q", 2)),
+            "n": (0, size("K", 2)),
+        },
+        bounds_check_indices=True,
     ) | indent_except_first(1) }}
 
 
@@ -560,7 +567,14 @@ def bwd_dq_block_mn(
             "h": "index",
             "m": "index",
             "n": "index",
-        }
+        },
+        input_ranges={
+            "b": (0, size("Q", 0)),
+            "h": (0, size("Q", 1)),
+            "m": (0, size("Q", 2)),
+            "n": (0, size("K", 2)),
+        },
+        bounds_check_indices=True,
     ) | indent_except_first(1) }}
     {# See Note Selective masking DQ #}
     if not IS_DIVISIBLE:
@@ -592,7 +606,14 @@ def bwd_dq_block_mn(
             h="off_hq",
             m="m",
             n="n",
-            grad_score_mod="ds"
+            grad_score_mod="ds",
+            input_ranges={
+                "b": (0, size("Q", 0)),
+                "h": (0, size("Q", 1)),
+                "m": (0, size("Q", 2)),
+                "n": (0, size("K", 2)),
+            },
+            bounds_check_indices=True,
         ) | indent_except_first(2) }}
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ds = grad_scores
@@ -719,7 +740,14 @@ def bwd_dkdv_block_mn(
             "h": "index",
             "m": "index",
             "n": "index",
-        }
+        },
+        input_ranges={
+            "b": (0, size("Q", 0)),
+            "h": (0, size("Q", 1)),
+            "m": (0, size("Q", 2)),
+            "n": (0, size("K", 2)),
+        },
+        bounds_check_indices=True,
     ) | indent_except_first(1) }}
 
     {# Note: Selective masking DK/DV
@@ -794,7 +822,14 @@ def bwd_dkdv_block_mn(
             "h": "index",
             "m": "index",
             "n": "index",
-        }
+        },
+        input_ranges={
+            "b": (0, size("Q", 0)),
+            "h": (0, size("Q", 1)),
+            "m": (0, size("Q", 2)),
+            "n": (0, size("K", 2)),
+        },
+        bounds_check_indices=True,
     ) | indent_except_first(1) }}
 
     {# See Note: Selective masking DK/DV#}
@@ -831,7 +866,14 @@ def bwd_dkdv_block_mn(
             h="idx_h",
             m="idx_m",
             n="idx_n",
-            grad_score_mod="dsT"
+            grad_score_mod="dsT",
+            input_ranges={
+                "b": (0, size("Q", 0)),
+                "h": (0, size("Q", 1)),
+                "m": (0, size("Q", 2)),
+                "n": (0, size("K", 2)),
+            },
+            bounds_check_indices=True,
         ) | indent_except_first(2) }}
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     dsT = grad_scores
