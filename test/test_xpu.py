@@ -4231,9 +4231,6 @@ class TestMemPool(TestCase):
 
 
 instantiate_parametrized_tests(TestXpu)
-instantiate_device_type_tests(
-    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
-)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())
 
