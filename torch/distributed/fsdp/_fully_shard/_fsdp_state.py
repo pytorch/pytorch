@@ -337,14 +337,9 @@ class FSDPState(_State):
             self._training_state = TrainingState.IDLE
             if self._state_ctx.iter_forward_root is self:
                 output = self._force_complete_incomplete_states(output)
-                if all_gather_state := self._comm_ctx.all_gather_state:
-                    # Free the last all-gather result if needed; refer to
-                    # [Note: Overlapping all-gather copy-in and all-gather]
-                    self._comm_ctx.all_gather_copy_in_stream.wait_event(
-                        all_gather_state.event
-                    )
-                    self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
-                    self._comm_ctx.all_gather_state = None  # free the all-gather result
+                # Free the last result retained for forward copy-in overlap; see
+                # [Note: Overlapping all-gather copy-in and all-gather].
+                self._comm_ctx.release_all_gather_state()
                 self._state_ctx.iter_forward_root = None
             return self._cast_output_dtype(output)
 
@@ -424,6 +419,12 @@ class FSDPState(_State):
                 if self._state_ctx.is_last_backward:
                     for fsdp_param_group in state._fsdp_param_groups:
                         fsdp_param_group.finalize_backward()
+            # A partial grouped forward can retain the last all-gather result
+            # until backward. Release it at the first boundary where all of the
+            # iteration's backward consumers have finished. This is deliberately
+            # independent of ``is_last_backward`` so gradient accumulation does
+            # not retain the all-gather buffer between backward calls.
+            self._comm_ctx.release_all_gather_state()
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
                 # Wait on and release any retained reduce-scatter input buffers:
@@ -489,10 +490,7 @@ class FSDPState(_State):
                 "reset_iter_state must be called on the root FSDP module"
             )
         current_stream = self._device_handle.current_stream()
-        if ag_state := self._comm_ctx.all_gather_state:
-            if ag_state.event is not None:
-                current_stream.wait_event(ag_state.event)
-            self._comm_ctx.all_gather_state = None
+        self._comm_ctx.release_all_gather_state()
         for rs_state in self._comm_ctx.reduce_scatter_states:
             if rs_state.event is not None:
                 current_stream.wait_event(rs_state.event)
