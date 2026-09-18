@@ -12876,12 +12876,25 @@ class TestGDS(TestCase):
         return root_type
 
     def _require_gds(self):
-        # GDS needs the cuFile/hipFile bindings built in, plus an O_DIRECT-capable
-        # local filesystem (ext4/xfs) for the temp file the transfer targets.
+        # GDS needs the cuFile/hipFile bindings built in. Filesystems other than
+        # ext4/xfs also need compat mode, which falls back to POSIX I/O.
         if not torch.cuda.gds.is_available():
             self.skipTest("GDS (cuFile/hipFile) not built into this install")
-        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
-            self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
+        if self._get_tmp_dir_fs_type() in ("ext4", "xfs"):
+            return
+        # hipFile registers any file and only fails the I/O without compat mode.
+        allow_compat = os.getenv("HIPFILE_ALLOW_COMPAT_MODE", "").lower()
+        if TEST_WITH_ROCM and allow_compat == "false":
+            self.skipTest("hipFile requires compat mode on this filesystem")
+        # cuFile refuses to register the file without compat mode.
+        with TemporaryFileName() as f:
+            try:
+                file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            except RuntimeError as e:
+                if "HandleRegister failed" not in str(e):
+                    raise
+                self.skipTest(f"cuFile requires compat mode on this filesystem: {e}")
+            file.save_storage(torch.empty(1, device="cuda").untyped_storage())
 
     def test_gds_is_available(self):
         # is_available() must be callable and return a bool even when GDS is off.
