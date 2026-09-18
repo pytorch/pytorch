@@ -118,6 +118,10 @@ elseif(USE_ROCM)
     c10d_add_test(
       hip/ProcessGroupNCCLErrorsTest.cpp
       LINK_LIBRARIES torch_cpu c10d_hip_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    c10d_add_test(
+      hip/NCCLDevCommManagerTest.cpp
+      LINK_LIBRARIES torch_cpu c10d_hip_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(NCCLDevCommManagerTest PRIVATE USE_ROCM USE_NCCL)
     if(INSTALL_TEST)
       install(TARGETS c10d_hip_test DESTINATION lib)
     endif()

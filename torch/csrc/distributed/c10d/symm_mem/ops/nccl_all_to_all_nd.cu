@@ -180,7 +180,7 @@ void nccl_all_to_all_nd(
         "ncclDevCommCreate failed in nccl_all_to_all_nd");
     devcomm_opt = manager.register_devcomm(group_name, devcomm, kDevcommKey);
   }
-  ncclDevComm& devcomm = devcomm_opt->get();
+  ncclDevComm devcomm = *devcomm_opt;
 
   const int my_rank = devcomm.rank;
   const int p = devcomm.nRanks;
