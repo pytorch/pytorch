@@ -6,7 +6,6 @@
 #include <c10/util/irange.h>
 
 #include <array>
-#include <string>
 
 namespace at::native {
 
@@ -70,21 +69,6 @@ inline void check_valid_input(const Tensor& input, IntArrayRef padding) {
 }
 #endif
 
-// Renders the spatial extents as "D: 1 H: 2 W: 3", using the trailing
-// `sizes.size()` labels. Only ever called to build an error message.
-inline std::string spatial_sizes_str(IntArrayRef sizes, const char* sep) {
-  constexpr std::array<const char*, 3> labels = {"D: ", "H: ", "W: "};
-  std::string out;
-  for (const auto i : c10::irange(sizes.size())) {
-    if (i > 0) {
-      out += sep;
-    }
-    out += labels[labels.size() - sizes.size() + i];
-    out += std::to_string(sizes[i]);
-  }
-  return out;
-}
-
 // A reflection cannot reach past the edge of the input, so every pad must be
 // strictly smaller than the dimension it pads. Replication has no such limit.
 inline void check_pad_within_input(const Tensor& input, IntArrayRef padding, int64_t dim) {
@@ -123,11 +107,16 @@ inline DimVector pad_shape_check(
     TORCH_CHECK(valid_output,
         "input (W: ", in_spatial[0], ") is too small."
         " Calculated output W: ", out_spatial[0]);
+  } else if (dim == 2) {
+    TORCH_CHECK(valid_output,
+        "Calculated output H: ", out_spatial[0], " W: ", out_spatial[1],
+        " must be >= 1 in every dimension"
+        " (input H: ", in_spatial[0], ", W: ", in_spatial[1], ")");
   } else {
     TORCH_CHECK(valid_output,
-        "Calculated output ", spatial_sizes_str(out_spatial, " "),
+        "Calculated output D: ", out_spatial[0], " H: ", out_spatial[1], " W: ", out_spatial[2],
         " must be >= 1 in every dimension"
-        " (input ", spatial_sizes_str(in_spatial, ", "), ")");
+        " (input D: ", in_spatial[0], ", H: ", in_spatial[1], ", W: ", in_spatial[2], ")");
   }
   return output_size;
 }

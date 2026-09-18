@@ -83,7 +83,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     load_tests,
-    MI200_ARCH,
     MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -2387,6 +2386,78 @@ if __name__ == '__main__':
         self.assertTrue(
             has_device_side_assert(stderr),
             lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}",
+        )
+
+    @slowTest
+    @unittest.skipIf(
+        not TEST_WITH_ROCM
+        or (
+            "USE_ROCM_KERNEL_ASSERT=1" not in torch.__config__.show()
+            and "USE_ROCM_KERNEL_ASSERT=ON" not in torch.__config__.show()
+        ),
+        "requires ROCm build with USE_ROCM_KERNEL_ASSERT enabled",
+    )
+    def test_rocm_kernel_assert_percent_in_condition(self):
+        # Device assert with '%' in #cond; stderr must match stock HIP format and
+        # the subprocess must fail (assert must not compile away silently).
+        code = """\
+import torch
+from torch.utils.cpp_extension import load_inline
+
+cuda_source = r'''
+#include <c10/macros/Macros.h>
+#include <cuda_runtime.h>
+
+__global__ void assert_mod_kernel(const int* x) {
+  CUDA_KERNEL_ASSERT(x[0] % 2 == 0);
+}
+
+void trigger_device_assert() {
+  int h = 1;
+  int* d = nullptr;
+  cudaMalloc(&d, sizeof(int));
+  cudaMemcpy(d, &h, sizeof(int), cudaMemcpyHostToDevice);
+  assert_mod_kernel<<<1, 1>>>(d);
+  cudaDeviceSynchronize();
+}
+'''
+cpp_source = "void trigger_device_assert();"
+
+mod = load_inline(
+    name="rocm_kernel_assert_percent_test",
+    cpp_sources=cpp_source,
+    cuda_sources=cuda_source,
+    functions=["trigger_device_assert"],
+    verbose=False,
+)
+mod.trigger_device_assert()
+raise RuntimeError("device assert did not fire")
+"""
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        env.pop("CI", None)
+        env.pop("TEST_SHOWLOCALS", None)
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            env=env,
+        )
+        stderr = proc.stderr.decode("ascii", errors="replace")
+        self.assertNotEqual(
+            proc.returncode,
+            0,
+            msg=(
+                "expected subprocess failure after device assert, "
+                f"got rc={proc.returncode}\n{stderr}"
+            ),
+        )
+        self.assertRegex(
+            stderr,
+            (
+                r"[^\n]+:\d+: assert_mod_kernel: "
+                r"Device-side assertion `x\[0\] % 2 == 0' failed\."
+            ),
+            msg=f"expected full HIP-format assert line in stderr, got:\n{stderr}",
         )
 
     @slowTest
@@ -6574,6 +6645,58 @@ class TestCudaAllocator(TestCase):
         _check_allocator_settings_on_tear_down(self)
 
     @unittest.skipIf(
+        not EXPANDABLE_SEGMENTS,
+        "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
+    )
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    @unittest.skipIf(not SM70OrLater, "requires system-scope PTX loads")
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    def test_expandable_segments_empty_cache_wrong_device(self):
+        flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
+        empty_cache_started = threading.Event()
+        empty_cache_done = threading.Event()
+        empty_cache_errors = []
+
+        torch.cuda.synchronize(0)
+        with torch.cuda.device(1):
+            spin_wait_kernel = get_wait_for_cpu_kernel()
+            src = torch.ones(48 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+            spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
+            dst = torch.empty_like(src)
+            dst.copy_(src)
+            del dst
+
+        def empty_cache_from_device_zero():
+            try:
+                with torch.cuda.device(0):
+                    empty_cache_started.set()
+                    torch.cuda.empty_cache()
+            except Exception as error:
+                empty_cache_errors.append(error)
+            finally:
+                empty_cache_done.set()
+
+        thread = threading.Thread(target=empty_cache_from_device_zero)
+        thread.start()
+        completed_before_release = None
+        try:
+            self.assertTrue(empty_cache_started.wait(timeout=10))
+            completed_before_release = empty_cache_done.wait(timeout=1)
+        finally:
+            flag_cpu[0] = 1
+            thread.join(timeout=10)
+
+        self.assertFalse(thread.is_alive())
+        if empty_cache_errors:
+            raise empty_cache_errors[0]
+        torch.cuda.synchronize(1)
+        self.assertFalse(
+            completed_before_release,
+            "empty_cache() did not wait for work on the segment's device",
+        )
+        del src
+
+    @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     def test_memory_snapshot(self):
@@ -9222,7 +9345,6 @@ class TestMemPool(TestCase):
             torch.cuda.empty_cache()
 
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/176145")
-    @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):
         """

@@ -445,6 +445,7 @@ class FlexGemmEpiModSource:
     local_reduce_finalize: str | None = None
     local_reduce_finalize_operands: tuple[str, ...] = ()
     local_reduce_store_finalize: str | None = None
+    local_reduce_binary_store_finalize: bool = False
     local_reduce_prepass_combine: str | None = None
     local_reduce_prepass_finalize: str | None = None
 
@@ -665,6 +666,7 @@ class FlexGemmEpilogueEmitter:
         epilogue_arg_kinds: tuple[str, ...],
         *,
         fast_math: bool,
+        mainloop_scale_count: int,
     ) -> None:
         self.graph_module = graph_module
         self.gemm = analysis.gemm
@@ -748,6 +750,7 @@ class FlexGemmEpilogueEmitter:
         self.alpha = alpha
         self.beta = beta
         self.fast_math = fast_math
+        self.mainloop_scale_count = mainloop_scale_count
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
         self.base_env = self.initial_env_for_params(self.params)
@@ -785,6 +788,10 @@ class FlexGemmEpilogueEmitter:
         if self.alpha != 1:
             params.append("alpha")
             gemm_value = "(acc * alpha)"
+        scales = self.operand_names[: self.mainloop_scale_count]
+        if scales:
+            # Match native: combine global scales before scaling the accumulator.
+            gemm_value = f"({gemm_value} * ({' * '.join(scales)}))"
         if (
             self.gemm.target
             in (
@@ -1197,6 +1204,7 @@ class FlexGemmEpilogueEmitter:
             local_reduce_store_finalize=(
                 finalize_name if self.local_reduce_prepass is not None else None
             ),
+            local_reduce_binary_store_finalize=self.local_reduce_finalize_uses_prepass,
             local_reduce_prepass_combine=(
                 None
                 if self.local_reduce_prepass is None
@@ -1226,6 +1234,7 @@ def materialize_flex_gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...],
     *,
     fast_math: bool = False,
+    mainloop_scale_count: int = 0,
 ) -> FlexGemmEpiModSource:
     """Materialize an analyzed FlexGEMM body as generated CuTeDSL source.
 
@@ -1254,4 +1263,5 @@ def materialize_flex_gemm_epilogue(
         beta,
         epilogue_arg_kinds,
         fast_math=fast_math,
+        mainloop_scale_count=mainloop_scale_count,
     ).materialize()

@@ -1088,11 +1088,23 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
 batch_invariant = os.getenv("TORCHINDUCTOR_BATCH_INVARIANT") == "1"
 
-# Use eager's opt-in INNER_TREE order for eligible NVIDIA CUDA sums.
+# "strict_pointwise" requests eager-compatible pointwise math, and
+# "strict_reduction" requests eager INNER_TREE order for reductions.
+# "strict" requests both. Strict modes may reduce performance.
+# TODO: Route pointwise and reduction consumers through their respective modes.
 # pyrefly: ignore [bad-assignment]
-numerics: Literal["default", "strict"] = os.environ.get(
-    "TORCHINDUCTOR_NUMERICS", "default"
-)  # type: ignore[assignment]
+numerics: Literal["default", "strict_pointwise", "strict_reduction", "strict"] = Config(
+    default=os.environ.get("TORCHINDUCTOR_NUMERICS", "default"),
+    implies={
+        mode: {
+            "eager_numerics.disable_ftz": True,
+            "eager_numerics.division_rounding": True,
+            "emulate_precision_casts": True,
+        }
+        for mode in ("strict_pointwise", "strict")
+    },
+)
+
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -1516,6 +1528,41 @@ def decide_compile_threads() -> int:
 
 # TODO: Set directly after internal rollout.
 compile_threads: int | None = None if is_fbcode() else decide_compile_threads()
+
+
+def decide_compile_worker_mode() -> str:
+    """
+    Decide whether to use threads or processes for compilation workers.
+
+    Returns one of: "auto", "process", "thread"
+    - "auto": Automatically detect if Python is free-threaded (nogil) and use
+              threads if available, otherwise use processes
+    - "process": Force multiprocessing (current behavior, compatible with all Python)
+    - "thread": Force threading (requires free-threaded Python build)
+
+    Precedence:
+    1. TORCH_COMPILE_WORKER_MODE environment variable
+    2. Default to "process" for safe multiprocessing
+    """
+    mode = os.environ.get("TORCH_COMPILE_WORKER_MODE", "process")
+    valid_modes = ("auto", "process", "thread")
+    if mode not in valid_modes:
+        import logging
+
+        log = logging.getLogger(__name__)
+        log.warning(
+            "Invalid TORCH_COMPILE_WORKER_MODE='%s'. "
+            "Valid options: %s. Defaulting to 'process'.",
+            mode,
+            ", ".join(sorted(valid_modes)),
+        )
+        mode = "process"
+    return mode
+
+
+# Controls whether compilation workers use threads or processes.
+# Options: "auto" (detect nogil), "process" (force multiprocessing), "thread" (force threading)
+compile_worker_mode: str = decide_compile_worker_mode()
 
 # Whether to quiesce the Triton-compile subprocess pool at the end of each compilation.
 quiesce_async_compile_pool: bool = Config(
@@ -1952,15 +1999,66 @@ class cpp:
     use_two_step_variance_threshold = 1024
 
 
-def tlx_mode_from_env() -> Literal["allow", "force"] | None:
-    # Only the explicit values "allow"/"force" enable torchTLX. Any other
-    # value -- unset, empty, a typo, or a legacy "default" -- maps to None so
-    # TLX stays off. See the "Knob" section of the torchTLX README under
-    # third-party/triton/.../tlx/language/tlx/inductor/README.md.
+def tlx_mode_default() -> Literal["allow", "force"] | None:
+    """Resolve torchTLX engagement, highest precedence first.
+
+    1. ``TORCHINDUCTOR_TLX_MODE``: "off", "allow" or "force". Unset is a
+       no-op. Any other value raises, so a typo fails loudly rather than
+       silently leaving TLX in whatever state the fleet is in.
+    2. ``pytorch/inductor:tlx_mode``, the fleet-wide rollout and killswitch:
+       1 off, 2 allow, 3 force. 0 is a no-op, and is also what
+       justknobs_getval_int reports for a knob that does not exist, an
+       unreachable JK, and PYTORCH_DISABLE_JUSTKNOBS -- hence a no-op rather
+       than a fleet-wide decision taken on absent information.
+    3. ``DEFAULT_MODE`` from the active Triton, which is where the TLX
+       templates live. Installing a Triton that ships the integration is
+       itself the opt-in; one that does not -- upstream OAI Triton -- has no
+       say and TLX stays off.
+
+    No fbcode gate is needed: outside fbcode the JustKnob stub reports 0,
+    which is already a no-op.
+
+    Off is spelled None rather than "off": get_hash() hashes every
+    non-compile-ignored config at its resolved value, so giving the off state
+    a new spelling would change the key for every Inductor process, TLX or
+    not, and invalidate the FX graph cache fleet-wide.
+    """
+    off_allow_force: tuple[Literal["allow", "force"] | None, ...] = (
+        None,
+        "allow",
+        "force",
+    )
+    env_modes = dict(zip(("off", "allow", "force"), off_allow_force))
+    # "default" was the documented spelling of off before this knob grew a
+    # JustKnob and a build default; keep honoring it so a job that still sets
+    # it does not die inside `import torch._inductor.config`.
+    env_modes["default"] = None
+
     mode = os.environ.get("TORCHINDUCTOR_TLX_MODE")
-    if mode in ("allow", "force"):
-        return cast("Literal['allow', 'force']", mode)
-    return None
+    if mode is not None:
+        if mode not in env_modes:
+            raise ValueError(
+                f"TORCHINDUCTOR_TLX_MODE={mode!r} is not one of {tuple(env_modes)}"
+            )
+        return env_modes[mode]
+
+    # JustKnob values 1/2/3 index off/allow/force; 0 falls through.
+    # Type-guarded, not just range-guarded: this runs at `import
+    # torch._inductor.config`, and a test that mocks the justknobs layer hands
+    # back a MagicMock, whose comparison would take that import down fleet-wide.
+    jk = torch._utils_internal.justknobs_getval_int("pytorch/inductor:tlx_mode")
+    if isinstance(jk, int) and 1 <= jk <= len(off_allow_force):
+        return off_allow_force[jk - 1]
+
+    # A Triton that does not ship torchTLX has no default, so TLX stays off.
+    # Deliberately a module directly under `triton` rather than anything in
+    # triton.language.extra.tlx: that package eagerly imports the whole TLX
+    # DSL, and this runs in every Inductor process, GPU or not.
+    try:
+        from triton._torchtlx_default import DEFAULT_MODE
+    except ImportError:
+        return None
+    return DEFAULT_MODE
 
 
 class triton:
@@ -1968,12 +2066,12 @@ class triton:
     Config specific to codegen/triton.py
     """
 
-    # torchTLX enablement. None (the default) means TLX is never considered
-    # (standard Inductor behavior); "allow" lets TLX compete via autotuning;
-    # "force" uses only TLX templates plus forced epilogue fusion. Also a
-    # no-op unless the active Triton is the fbtriton fork (the integration
-    # import in template_heuristics/tlx.py fails cleanly otherwise).
-    tlx_mode: Literal["allow", "force"] | None = tlx_mode_from_env()
+    # torchTLX enablement. None (off) means TLX is never considered (standard
+    # Inductor behavior); "allow" lets TLX compete via autotuning; "force"
+    # uses only TLX templates plus forced epilogue fusion. Also a no-op
+    # unless the active Triton ships the integration (the import in
+    # heuristics/template/tlx.py fails cleanly otherwise).
+    tlx_mode: Literal["allow", "force"] | None = tlx_mode_default()
 
     # Use cudagraphs on output code
     cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
@@ -2023,6 +2121,18 @@ class triton:
     # i.e., allow num_recording <= cudagraph_unexpected_rerecord_limit
     # note: we are conservative here and choose a large limit.
     cudagraph_unexpected_rerecord_limit = 128
+
+    # Cudagraph-managed input pointer-change count at which the configured
+    # action is applied for a parent/function edge. "copy" copies eligible
+    # inputs into stable replay buffers; "skip" runs that edge eagerly.
+    cudagraph_managed_input_rerecord_limit = 5
+    cudagraph_managed_input_rerecord_action: Literal["copy", "skip"] = "copy"
+
+    # If set, allocate this many GiB in the cudagraph memory pool when the
+    # pool is created (once per device). The upfront allocation reserves one
+    # large contiguous segment for later recordings to carve up, rather than
+    # growing the pool a segment at a time, which reduces fragmentation.
+    cudagraph_initial_mempool_allocation_gb: float | None = None
 
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
@@ -3087,6 +3197,7 @@ _cache_config_ignore_prefix: list[str] = [
     # it has no effect on compiled output, so including it would change the
     # config hash and needlessly invalidate every cache entry
     "compile_worker_watchdog_interval_seconds",
+    "compile_worker_mode",
     # see CustomGraphPass; these are handled specially
     "post_grad_custom_post_pass",
     "post_grad_custom_pre_pass",
