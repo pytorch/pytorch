@@ -263,7 +263,14 @@ Tensor internal_new_from_data(
     bool copy_variables,
     bool copy_numpy,
     bool type_inference,
-    bool pin_memory = false) {
+    bool pin_memory = false,
+    // When false, skip the __dlpack__ conversion attempt so that the caller
+    // uses only the sequence-conversion path. asarray sets this after catching
+    // a DLPack failure of its own -- a fallback introduced for backwards
+    // compatibility -- since it has already attempted __dlpack__ and must not
+    // re-attempt it here. All other callers keep the default (always try
+    // __dlpack__).
+    bool try_dlpack = true) {
   TORCH_CHECK_TYPE(
       !THPUtils_checkString(data),
       "new(): invalid data type '",
@@ -337,7 +344,7 @@ Tensor internal_new_from_data(
   }
 #endif
 
-  if (PyObject_HasAttrString(data, "__dlpack__")) {
+  if (try_dlpack && PyObject_HasAttrString(data, "__dlpack__")) {
     py::object tensor_o =
         py::module::import("torch").attr("utils").attr("dlpack").attr(
             "from_dlpack")(py::handle(data));
@@ -1793,6 +1800,23 @@ Tensor asarray(
     tensor = tensor_fromDLPack(obj);
   }
 
+  // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
+  // buffer protocol so dtype, device, and shape come from the producer. If the
+  // producer's DLPack export fails (e.g. an unsupported dtype/device, or data
+  // that only works via the buffer/sequence paths), fall back to those instead
+  // of propagating the error.
+  if (!tensor.defined() && PyObject_HasAttrString(obj, "__dlpack__")) {
+    try {
+      py::object tensor_o =
+          py::module::import("torch").attr("utils").attr("dlpack").attr(
+              "from_dlpack")(py::handle(obj));
+      tensor = py::cast<Tensor>(tensor_o);
+    } catch (py::error_already_set& e) {
+      e.restore();
+      PyErr_Clear();
+    }
+  }
+
   // Check whether 'obj' implements the buffer protocol
   if (!tensor.defined() && PyObject_CheckBuffer(obj) != 0) {
     tensor =
@@ -1867,7 +1891,9 @@ Tensor asarray(
         obj,
         /* copy_variables = */ false,
         /* copy_numpy = */ false,
-        /* type_inference = */ !dtype.has_value());
+        /* type_inference = */ !dtype.has_value(),
+        /* pin_memory = */ false,
+        /* try_dlpack = */ false);
     tensor.set_requires_grad(return_requires_grad);
   }
 
