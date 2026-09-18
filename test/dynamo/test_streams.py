@@ -2797,7 +2797,9 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         # "guard satisfied", so vary the device and pin the unresolved index too.
         for index in range(torch.cuda.device_count()):
             with torch.cuda.device(index):
-                compiled(x)
+                # CooR requires an input to be on the current accelerator, so build
+                # one per iteration instead of reusing a cuda:0 tensor throughout.
+                compiled(torch.zeros(1, device="cuda"))
 
         self.assertEqual(len(backend.graphs), 1)
         self.assertEqual(
