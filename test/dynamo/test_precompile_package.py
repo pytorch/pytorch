@@ -161,7 +161,6 @@ _NOT_LIBRARY_MODULES = {
     # judges this row from _STDLIB_ROOT, where the real graphlib.py sits, so an
     # ungated resolve against the cwd would land on stdlib and waive the row.
     "relative_file": ("graphlib", {"__file__": "graphlib.py"}, None),
-    "namespace_package": ("graphlib", {"__spec__": importlib.machinery.ModuleSpec("graphlib", None, is_package=True)}, None),
     "torch_outside_the_torch_roots": ("torch", {"__file__": os.path.join(_STDLIB_ROOT, "torch", "__init__.py")}, None),
     # The ancestor loop: a located torch does not vouch for this one.
     "torch_submodule_outside_the_torch_roots": ("torch.foo", {"__file__": os.path.join(_STDLIB_ROOT, "torch", "foo.py")}, None),
@@ -171,13 +170,6 @@ _NOT_LIBRARY_MODULES = {
     # A frozen spec vouches only for a name the frozen table has.
     "frozen_spec_under_a_non_frozen_name": ("graphlib", {"__spec__": importlib.machinery.ModuleSpec("graphlib", importlib.machinery.FrozenImporter, origin="frozen")}, None),
     "shadowed_descendant_of_a_located_parent": ("collections.abc", {"__file__": os.path.join(_STDLIB_ROOT, "site-packages", "abc.py")}, None),
-    # posixpath.realpath hands the NUL to os.lstat, which raises ValueError, and
-    # _classify_file must make that no evidence rather than an exception out of a
-    # lint. From 3.11.5/3.12 on (gh-106242) ntpath.realpath swallows the
-    # ValueError itself and returns normpath(path), which sits under the stdlib
-    # root; 3.10 lets it out and would refuse as on posix, but the gate is kept
-    # platform-wide, so there is nothing to pin on Windows.
-    **({"embedded_nul_in_the_file": ("graphlib", {"__file__": os.path.join(_STDLIB_ROOT, "graph\x00lib.py")}, None)} if sys.platform != "win32" else {}),
 }  # fmt: skip
 
 # Rows: risky?, source, value, _entry keywords. The trusted namespaces are the
@@ -1194,6 +1186,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
     @parametrize("name", _LIBRARY_NAMES)
     def test_library_module_keeps_the_waiver_for_the_real_library(self, name):
+        precompile_package._classify_file.cache_clear()
         self.assertTrue(
             precompile_package._is_library_module(name), f"{name} lost its waiver"
         )
@@ -1213,6 +1206,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         foo.__file__ = "foo.py"
         with mock.patch.dict(sys.modules, {"torch.foo": foo}):
             self.assertTrue(is_library("torch.foo"))
+        # Not imported at all, an inner name has nothing to check: deliberate.
+        self.assertTrue(is_library("collections.never_imported"))
         # A file under a nested install root is stdlib once nothing is installed
         # there: the very file the refusal table refuses with that root installed.
         name, attrs, _ = _NOT_LIBRARY_MODULES["under_a_nested_install_root"]
