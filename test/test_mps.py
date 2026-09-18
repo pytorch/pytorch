@@ -10843,6 +10843,31 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @serialTest()
+    @parametrize("dtype", [torch.int8, torch.bool])
+    @parametrize("noncontiguous", [False, True])
+    @largeTensorTest("8GB", device="mps")
+    @largeMPSBufferTest(32770 * 65536, device="mps")
+    def test_64bit_cat(self, dtype, noncontiguous):
+        # Each dimension fits in int32, but the output's linear offsets do not.
+        # https://github.com/pytorch/pytorch/issues/189960
+        rows, cols_half = 32770, 32768
+        shape = (cols_half, rows) if noncontiguous else (rows, cols_half)
+        a = torch.ones(shape, dtype=dtype, device="mps")
+        if noncontiguous:
+            a = a.t()
+        b = torch.full((rows, cols_half), 2, dtype=torch.int8, device="mps")
+        out = torch.cat([a, b], dim=1)
+
+        expected_row = torch.ones(2 * cols_half, dtype=torch.int8)
+        expected_row[cols_half:] = 2
+        boundary_row = (1 << 31) // (2 * cols_half)
+        for row in (0, boundary_row - 1, boundary_row, rows - 1):
+            self.assertEqual(out[row].cpu(), expected_row, exact_dtype=True)
+        del a, b, out
+        gc.collect()
+        torch.mps.empty_cache()
+
+    @serialTest()
     def test_rand_4b(self):
         # Used to crash with NDArray dimension length > INT_MAX on MPSGraph;
         # the Metal-kernel path decomposes via `iter.with_32bit_indexing()`.
@@ -16383,7 +16408,10 @@ class TestConsistency(TestCaseMPS):
         # MPS uses float32 intermediates for these ops, so the CPU reference
         # must also run in float32 to avoid comparing against less-precise
         # native half-precision CPU results.
-        if op.name in ["grid_sampler_2d", "grid_sampler_3d"] and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d"] or (
+            op.name == "nn.functional.pad" and op.variant_test_name in ["reflect", "replicate", "replicate_negative"]
+        )
+        if use_float_ref and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
             dtype = torch.float32
 
         cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
