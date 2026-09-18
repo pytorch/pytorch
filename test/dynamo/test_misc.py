@@ -18119,12 +18119,33 @@ fn
         expected = hex(255) + oct(8) + bin(3) + ascii("hello") + format(42, "x")
         self.assertEqual(res, x + len(expected))
 
-    def test_builtin_bytes_zero_args(self):
+    def test_builtin_bytes(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn():
-            return bytes()
+            return (
+                bytes(),
+                bytes(b"abc"),
+                bytes([65, 66, 67]),
+                bytes(3),
+                bytes("abc", "utf-8"),
+                bytes("abc", encoding="utf-8", errors="strict"),
+            )
 
-        self.assertEqual(fn(), b"")
+        self.assertEqual(
+            fn(),
+            (b"", b"abc", b"ABC", b"\0\0\0", b"abc", b"abc"),
+        )
+
+    @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+")
+    def test_builtin_buffer_constructors(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                isinstance(bytearray(b"abc"), collections.abc.Buffer),
+                isinstance(memoryview(b"abc"), collections.abc.Buffer),
+            )
+
+        self.assertEqual(fn(), (True, True))
 
     def test_guard_string_escaped(self):
         d = {frozenset({0}): {frozenset({0}): 1}}
