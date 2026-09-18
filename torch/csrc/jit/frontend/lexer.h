@@ -232,6 +232,11 @@ struct TORCH_API SharedParserData {
     }
     // invariant: the next token is not whitespace or newline
     *start = pos;
+
+    if (const std::string_view input = pos.contiguous_rest(); !input.empty()) {
+      return matchContiguous(input, kind, start, end);
+    }
+
     // check for a valid number
     size_t len = 0;
     if (isNumber(pos.rest_line(), 0, &len)) {
@@ -299,8 +304,255 @@ struct TORCH_API SharedParserData {
   }
 
  private:
-  bool validIdent(size_t i, char n) {
-    return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
+  static constexpr bool isAsciiAlpha(unsigned char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+  }
+
+  static constexpr bool isAsciiDigit(unsigned char c) {
+    return c >= '0' && c <= '9';
+  }
+
+  static constexpr bool validIdent(size_t i, char n) {
+    const auto c = static_cast<unsigned char>(n);
+    return isAsciiAlpha(c) || n == '_' || (i > 0 && isAsciiDigit(c));
+  }
+
+  static C10_ALWAYS_INLINE bool startsWith(
+      std::string_view input,
+      std::string_view prefix) {
+    return input.size() >= prefix.size() &&
+        input.compare(0, prefix.size(), prefix) == 0;
+  }
+
+  static int keywordKind(std::string_view ident) {
+    switch (ident.front()) {
+      case 'E':
+        return ident == "Ellipsis" ? TK_ELLIPSIS : TK_IDENT;
+      case 'F':
+        return ident == "False" ? TK_FALSE : TK_IDENT;
+      case 'N':
+        if (ident == "None") return TK_NONE;
+        return ident == "NoneType" ? TK_NONE_TYPE : TK_IDENT;
+      case 'T':
+        return ident == "True" ? TK_TRUE : TK_IDENT;
+      case 'a':
+        if (ident == "and") return TK_AND;
+        if (ident == "as") return TK_AS;
+        return ident == "assert" ? TK_ASSERT : TK_IDENT;
+      case 'b':
+        return ident == "break" ? TK_BREAK : TK_IDENT;
+      case 'c':
+        if (ident == "class") return TK_CLASS_DEF;
+        return ident == "continue" ? TK_CONTINUE : TK_IDENT;
+      case 'd':
+        if (ident == "def") return TK_DEF;
+        return ident == "del" ? TK_DELETE : TK_IDENT;
+      case 'e':
+        if (ident == "elif") return TK_ELIF;
+        return ident == "else" ? TK_ELSE : TK_IDENT;
+      case 'f':
+        return ident == "for" ? TK_FOR : TK_IDENT;
+      case 'g':
+        return ident == "global" ? TK_GLOBAL : TK_IDENT;
+      case 'i':
+        if (ident == "if") return TK_IF;
+        if (ident == "import") return TK_IMPORT;
+        if (ident == "in") return TK_IN;
+        return ident == "is" ? TK_IS : TK_IDENT;
+      case 'n':
+        return ident == "not" ? TK_NOT : TK_IDENT;
+      case 'o':
+        return ident == "or" ? TK_OR : TK_IDENT;
+      case 'p':
+        return ident == "pass" ? TK_PASS : TK_IDENT;
+      case 'r':
+        if (ident == "raise") return TK_RAISE;
+        return ident == "return" ? TK_RETURN : TK_IDENT;
+      case 'w':
+        if (ident == "while") return TK_WHILE;
+        return ident == "with" ? TK_WITH : TK_IDENT;
+    }
+    return TK_IDENT;
+  }
+
+  C10_ALWAYS_INLINE bool matchContiguous(
+      std::string_view input,
+      int* kind,
+      StringCordView::Iterator* start,
+      StringCordView::Iterator* end) {
+#define TC_RETURN_TOKEN(token_kind, token_len) \
+  do {                                          \
+    *kind = (token_kind);                       \
+    *end = *start;                              \
+    *end += (token_len);                        \
+    return true;                                \
+  } while (false)
+
+    const unsigned char first = static_cast<unsigned char>(input.front());
+    switch (first) {
+#define TC_CASE_DIGITS \
+  case '0':            \
+  case '1':            \
+  case '2':            \
+  case '3':            \
+  case '4':            \
+  case '5':            \
+  case '6':            \
+  case '7':            \
+  case '8':            \
+  case '9':
+#define TC_CASE_ASCII_ALPHA \
+  case 'A':                 \
+  case 'B':                 \
+  case 'C':                 \
+  case 'D':                 \
+  case 'E':                 \
+  case 'F':                 \
+  case 'G':                 \
+  case 'H':                 \
+  case 'I':                 \
+  case 'J':                 \
+  case 'K':                 \
+  case 'L':                 \
+  case 'M':                 \
+  case 'N':                 \
+  case 'O':                 \
+  case 'P':                 \
+  case 'Q':                 \
+  case 'R':                 \
+  case 'S':                 \
+  case 'T':                 \
+  case 'U':                 \
+  case 'V':                 \
+  case 'W':                 \
+  case 'X':                 \
+  case 'Y':                 \
+  case 'Z':                 \
+  case 'a':                 \
+  case 'b':                 \
+  case 'c':                 \
+  case 'd':                 \
+  case 'e':                 \
+  case 'f':                 \
+  case 'g':                 \
+  case 'h':                 \
+  case 'i':                 \
+  case 'j':                 \
+  case 'k':                 \
+  case 'l':                 \
+  case 'm':                 \
+  case 'n':                 \
+  case 'o':                 \
+  case 'p':                 \
+  case 'q':                 \
+  case 'r':                 \
+  case 's':                 \
+  case 't':                 \
+  case 'u':                 \
+  case 'v':                 \
+  case 'w':                 \
+  case 'x':                 \
+  case 'y':                 \
+  case 'z':
+      TC_CASE_DIGITS
+      case '.': {
+        size_t len = 0;
+        if (isNumber(input, 0, &len)) {
+          TC_RETURN_TOKEN(TK_NUMBER, len);
+        }
+        if (startsWith(input, "...")) TC_RETURN_TOKEN(TK_DOTS, 3);
+        TC_RETURN_TOKEN('.', 1);
+      }
+      case '\'':
+      case '"': {
+        size_t len = 0;
+        if (isString(input, 0, &len)) {
+          TC_RETURN_TOKEN(TK_STRINGLITERAL, len);
+        }
+        return false;
+      }
+      case '<':
+        if (startsWith(input, "<=>")) TC_RETURN_TOKEN(TK_EQUIVALENT, 3);
+        if (startsWith(input, "<<=")) TC_RETURN_TOKEN(TK_LSHIFT_EQ, 3);
+        if (startsWith(input, "<<")) TC_RETURN_TOKEN(TK_LSHIFT, 2);
+        if (startsWith(input, "<=")) TC_RETURN_TOKEN(TK_LE, 2);
+        TC_RETURN_TOKEN('<', 1);
+      case '>':
+        if (startsWith(input, ">>=")) TC_RETURN_TOKEN(TK_RSHIFT_EQ, 3);
+        if (startsWith(input, ">>")) TC_RETURN_TOKEN(TK_RSHIFT, 2);
+        if (startsWith(input, ">=")) TC_RETURN_TOKEN(TK_GE, 2);
+        TC_RETURN_TOKEN('>', 1);
+      case '*':
+        if (startsWith(input, "**=")) TC_RETURN_TOKEN(TK_POW_EQ, 3);
+        if (startsWith(input, "**")) TC_RETURN_TOKEN(TK_POW, 2);
+        if (startsWith(input, "*=")) TC_RETURN_TOKEN(TK_TIMES_EQ, 2);
+        TC_RETURN_TOKEN('*', 1);
+      case '/':
+        if (startsWith(input, "//")) TC_RETURN_TOKEN(TK_FLOOR_DIV, 2);
+        if (startsWith(input, "/=")) TC_RETURN_TOKEN(TK_DIV_EQ, 2);
+        TC_RETURN_TOKEN('/', 1);
+      case '+':
+        if (startsWith(input, "+=")) TC_RETURN_TOKEN(TK_PLUS_EQ, 2);
+        TC_RETURN_TOKEN('+', 1);
+      case '-':
+        if (startsWith(input, "->")) TC_RETURN_TOKEN(TK_ARROW, 2);
+        if (startsWith(input, "-=")) TC_RETURN_TOKEN(TK_MINUS_EQ, 2);
+        TC_RETURN_TOKEN('-', 1);
+      case '%':
+        if (startsWith(input, "%=")) TC_RETURN_TOKEN(TK_MOD_EQ, 2);
+        TC_RETURN_TOKEN('%', 1);
+      case '|':
+        if (startsWith(input, "|=")) TC_RETURN_TOKEN(TK_BIT_OR_EQ, 2);
+        TC_RETURN_TOKEN('|', 1);
+      case '&':
+        if (startsWith(input, "&=")) TC_RETURN_TOKEN(TK_BIT_AND_EQ, 2);
+        TC_RETURN_TOKEN('&', 1);
+      case '^':
+        if (startsWith(input, "^=")) TC_RETURN_TOKEN(TK_BIT_XOR_EQ, 2);
+        TC_RETURN_TOKEN('^', 1);
+      case '!':
+        if (startsWith(input, "!=")) TC_RETURN_TOKEN(TK_NE, 2);
+        TC_RETURN_TOKEN('!', 1);
+      case '=':
+        if (startsWith(input, "==")) TC_RETURN_TOKEN(TK_EQ, 2);
+        TC_RETURN_TOKEN('=', 1);
+      case '#':
+        if (startsWith(input, "# type:")) TC_RETURN_TOKEN(TK_TYPE_COMMENT, 7);
+        break;
+      case '@':
+      case '(':
+      case ')':
+      case '[':
+      case ']':
+      case ':':
+      case ',':
+      case '{':
+      case '}':
+      case '?':
+      case '~':
+        TC_RETURN_TOKEN(first, 1);
+      TC_CASE_ASCII_ALPHA
+      case '_': {
+        size_t len = 1;
+        while (len < input.size() && validIdent(len, input[len])) {
+          ++len;
+        }
+        const std::string_view ident = input.substr(0, len);
+        if (ident == "is" && startsWith(input, "is not")) {
+          TC_RETURN_TOKEN(TK_ISNOT, 6);
+        }
+        if (ident == "not" && startsWith(input, "not in")) {
+          TC_RETURN_TOKEN(TK_NOTIN, 6);
+        }
+        TC_RETURN_TOKEN(keywordKind(ident), len);
+      }
+      default:
+        break;
+    }
+#undef TC_CASE_ASCII_ALPHA
+#undef TC_CASE_DIGITS
+#undef TC_RETURN_TOKEN
+    return false;
   }
 
   // 1. skip whitespace
@@ -312,7 +564,8 @@ struct TORCH_API SharedParserData {
     // http://en.cppreference.com/w/cpp/string/byte/strtof
     // but we want only the number part, otherwise 1+3 will turn into two
     // adjacent numbers in the lexer
-    if (first == '-' || first == '+' || isalpha(first))
+    if (first == '-' || first == '+' ||
+        isAsciiAlpha(static_cast<unsigned char>(first)))
       return false;
     const char* startptr = str.data() + start;
     char* endptr = nullptr;
@@ -365,7 +618,7 @@ struct TORCH_API SharedParserData {
   }
 
   bool isblank(int n) {
-    return isspace(n) && n != '\n';
+    return n == ' ' || n == '\t' || n == '\r' || n == '\f' || n == '\v';
   }
 
   bool isTypeComment(StringCordView::Iterator str_iter) {
