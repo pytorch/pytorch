@@ -238,21 +238,29 @@ class RendezvousEnvTest(TestCase):
     @requires_gloo()
     @retry_on_connect_failures
     def test_logging_init(self):
-        os.environ["WORLD_SIZE"] = "1"
-        os.environ["MASTER_ADDR"] = "127.0.0.1"
-        os.environ["MASTER_PORT"] = str(common.find_free_port())
-        os.environ["RANK"] = "0"
+        # retry_on_connect_failures re-runs this whole body on a RuntimeError,
+        # so every mutation below has to be undone before the next attempt.
+        try:
+            os.environ["WORLD_SIZE"] = "1"
+            os.environ["MASTER_ADDR"] = "127.0.0.1"
+            os.environ["MASTER_PORT"] = str(common.find_free_port())
+            os.environ["RANK"] = "0"
 
-        previous_handlers = logging.root.handlers
+            previous_handlers = logging.root.handlers
 
-        c10d.init_process_group(backend="gloo", init_method="env://")
+            c10d.init_process_group(backend="gloo", init_method="env://")
 
-        current_handlers = logging.root.handlers
-        self.assertEqual(len(previous_handlers), len(current_handlers))
-        for current, previous in zip(current_handlers, previous_handlers):
-            self.assertEqual(current, previous)
+            current_handlers = logging.root.handlers
+            self.assertEqual(len(previous_handlers), len(current_handlers))
+            for current, previous in zip(current_handlers, previous_handlers):
+                self.assertEqual(current, previous)
 
-        c10d.destroy_process_group()
+            c10d.destroy_process_group()
+        finally:
+            if c10d.is_initialized():
+                c10d.destroy_process_group()
+            for var in ("WORLD_SIZE", "MASTER_ADDR", "MASTER_PORT", "RANK"):
+                os.environ.pop(var, None)
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):

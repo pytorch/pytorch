@@ -142,8 +142,9 @@ it.
 #    crashed on it with a raw internal error.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
 #    Every refusal above rests on capture tracing under a fake mode IT built, so capture
-#    also refuses to run inside another trace: an ambient ``TracingContext.fake_mode`` (a
-#    torch.compile / export / AOTAutograd trace) outranks capture's own mode, and no foreign
+#    refuses to run inside another trace, on BOTH paths: an ambient fake mode (a
+#    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
+#    outranks capture's own, and no foreign
 #    mode passes ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
 #    namespace would be run for real again. A mode built under DEFAULT config (an
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a ``.data_ptr()``
@@ -285,7 +286,7 @@ from typing_extensions import Self
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -355,8 +356,7 @@ class PrecompileError(RuntimeError):
     metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
     input, none of which capture supports on either path (invariant 3), a control-flow HOP
     (``torch.cond`` / ``torch.while_loop``), whose captured subgraph neither backend can
-    lower, a capture attempted inside another trace (an ambient ``TracingContext``
-    fake mode, which does not carry capture's fallback-off setting), a non-tensor output the
+    lower, a capture attempted inside another trace (invariant 3), a non-tensor output the
     inductor backend cannot lower, or a runtime input whose shape or memory format differs
     from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -435,7 +435,8 @@ class Capture:
     writing. Call :meth:`save` inside the block to
     checkpoint everything captured so far to those same files without ending the
     capture. The object is single-shot: the block is entered once, and calling,
-    entering, exiting and saving are all refused after it -- saving only while the
+    entering, saving and a CLEAN exit are all refused after it (an exit carrying
+    the block's own exception is a no-op) -- saving only while the
     LAST write attempt is one that FAILED, until a retry of it SUCCEEDS.
     """
 
@@ -1282,22 +1283,21 @@ def _capture(
     import contextlib
 
     args = tuple(args)
-    # An ambient TracingContext.fake_mode OUTRANKS both mode sources this capture offers
-    # make_fx (see the trace site below), and no foreign mode passes
-    # allow_fallback_kernels=False, so a meta-less op in an allowlisted namespace would run
-    # for real on zero-filled substitutes again. A mode built under DEFAULT config (an
-    # AOTAutograd / inductor one) also lacks the
-    # fake_tensor_allow_unsafe_data_ptr_access=False snapshot, so a .data_ptr() read bakes 0
-    # instead of raising; dynamo and export do build theirs inside that patch, so there only
-    # the fallback setting is lost. Refuse rather than trace under someone else's contract.
-    tc = TracingContext.try_get()
-    if tc is not None and tc.fake_mode is not None:
+    # BOTH capture paths trace under a fake mode capture builds, and an ambient one outranks
+    # it (invariant 3 in the Note has the details), so refuse rather than trace under
+    # someone else's contract. This runs first, ahead of the input scan below, whose
+    # is_pinned() probe DISPATCHES: under an ambient mode a real example tensor trips that
+    # mode's own non-fake-input assertion before any refusal of ours. Ask detect_fake_mode
+    # -- what make_fx itself resolves through -- so all three sources it ranks (an ambient
+    # TracingContext, the dispatch-mode stack, the inputs) are refused by name here instead
+    # of reaching its own mode-mismatch assertion once capture enters its mode.
+    if detect_fake_mode() is not None:
         raise PrecompileError(
-            "precompile: capture cannot run inside another trace -- a TracingContext with "
-            "a FakeTensorMode is active (e.g. precompile called from inside torch.compile "
-            "or an export/AOTAutograd trace). make_fx would adopt that mode and its "
-            "ShapeEnv, so capture's own safety settings would not apply. Capture outside "
-            "the enclosing trace."
+            "precompile: capture cannot run inside another trace -- a FakeTensorMode is "
+            "already active (e.g. precompile called from inside torch.compile or an "
+            "export/AOTAutograd trace). make_fx would adopt that mode and its ShapeEnv, so "
+            "capture's own safety settings would not apply. Capture outside the enclosing "
+            "trace."
         )
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
@@ -3084,9 +3084,8 @@ class _PrecompileApi:
         sparse tensor), a nested example input, none of which capture supports on either
         path (invariant 3), a control-flow HOP (``torch.cond`` / ``torch.while_loop``),
         which is refused rather than specialized because neither backend can lower the
-        subgraph it captures, a capture attempted inside another trace (an ambient
-        ``TracingContext`` fake mode outranks capture's own and does not carry its
-        fallback-off setting), and -- for the inductor backend -- a runtime input whose
+        subgraph it captures, a capture attempted inside another trace (invariant 3 in the
+        Note has the reason), and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
