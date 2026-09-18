@@ -17,6 +17,7 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -24,6 +25,7 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/extension.h>
+#include <array>
 #include <cstdint>
 #include <cstring>
 
@@ -1085,10 +1087,9 @@ static PyObject* assert_size_stride(
   auto size{args[1]};
   auto stride{args[2]};
 
-  Py_ssize_t op_name_size{0};
   const char* op_name{
-      nargs == 4 ? PyUnicode_AsUTF8AndSize(args[3], &op_name_size) : nullptr};
-  if (nargs == 4 && !op_name && op_name_size == -1) {
+      nargs == 4 ? PyUnicode_AsUTF8AndSize(args[3], nullptr) : nullptr};
+  if (nargs == 4 && !op_name) {
     return nullptr;
   }
 
@@ -1128,10 +1129,9 @@ static PyObject* assert_size_stride_grouped(
   auto sizes{args[1]};
   auto strides{args[2]};
 
-  Py_ssize_t op_name_size{0};
   const char* op_name{
-      nargs == 4 ? PyUnicode_AsUTF8AndSize(args[3], &op_name_size) : nullptr};
-  if (nargs == 4 && !op_name && op_name_size == -1) {
+      nargs == 4 ? PyUnicode_AsUTF8AndSize(args[3], nullptr) : nullptr};
+  if (nargs == 4 && !op_name) {
     return nullptr;
   }
 
@@ -1189,10 +1189,9 @@ static PyObject* assert_alignment(
     return nullptr;
   }
 
-  Py_ssize_t op_name_size{0};
   const char* op_name{
-      nargs == 3 ? PyUnicode_AsUTF8AndSize(args[2], &op_name_size) : nullptr};
-  if (nargs == 3 && !op_name && op_name_size == -1) {
+      nargs == 3 ? PyUnicode_AsUTF8AndSize(args[2], nullptr) : nullptr};
+  if (nargs == 3 && !op_name) {
     return nullptr;
   }
 
@@ -1275,14 +1274,14 @@ static PyObject* copy_if_misaligned(PyObject* /*self*/, PyObject* item) {
   return THPVariable_Wrap(std::move(result));
 }
 
-static at::SmallVector<Py_ssize_t, 8> unwrap_size_tuple(PyObject* obj) {
+static at::SmallVector<int64_t, 8> unwrap_size_tuple(PyObject* obj) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   auto len{PyTuple_GET_SIZE(obj)};
-  at::SmallVector<Py_ssize_t, 8> ret;
+  at::SmallVector<int64_t, 8> ret;
   ret.reserve(len);
   for (Py_ssize_t i{0}; i < len; ++i) {
     auto result{PyLong_AsSsize_t(PyTuple_GET_ITEM(obj, i))};
-    TORCH_CHECK(result != -1 || !PyErr_Occurred());
+    TORCH_CHECK(result >= 0);
     ret.emplace_back(result);
   }
   return ret;
@@ -1398,65 +1397,6 @@ static PyObject* _reinterpret_tensor(
       self, sizes, strides, offset_increment));
   END_HANDLE_TH_ERRORS;
 }
-
-#pragma GCC diagnostic ignored "-Wcast-function-type"
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-static PyMethodDef _methods[] = {
-    {"check_type_id",
-     reinterpret_cast<PyCFunction>(check_type_id),
-     METH_FASTCALL,
-     nullptr},
-    {"check_obj_id",
-     reinterpret_cast<PyCFunction>(check_obj_id),
-     METH_FASTCALL,
-     nullptr},
-    {"assert_size_stride",
-     reinterpret_cast<PyCFunction>(assert_size_stride),
-     METH_FASTCALL,
-     nullptr},
-    {"assert_size_stride_grouped",
-     reinterpret_cast<PyCFunction>(assert_size_stride_grouped),
-     METH_FASTCALL,
-     nullptr},
-    {"assert_alignment",
-     reinterpret_cast<PyCFunction>(assert_alignment),
-     METH_FASTCALL,
-     nullptr},
-    {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
-    {"dict_version", dict_version, METH_O, nullptr},
-    {"_empty_strided_cpu",
-     reinterpret_cast<PyCFunction>(_empty_strided_cpu),
-     METH_FASTCALL,
-     nullptr},
-    {"_empty_strided_cpu_pinned",
-     reinterpret_cast<PyCFunction>(_empty_strided_cpu_pinned),
-     METH_FASTCALL,
-     nullptr},
-    {"_empty_strided_cuda",
-     reinterpret_cast<PyCFunction>(_empty_strided_cuda),
-     METH_FASTCALL,
-     nullptr},
-    {"_empty_strided_xpu",
-     reinterpret_cast<PyCFunction>(_empty_strided_xpu),
-     METH_FASTCALL,
-     nullptr},
-    {"_empty_strided_mtia",
-     reinterpret_cast<PyCFunction>(_empty_strided_mtia),
-     METH_FASTCALL,
-     nullptr},
-    {"_reinterpret_tensor",
-     reinterpret_cast<PyCFunction>(_reinterpret_tensor),
-     METH_FASTCALL,
-     nullptr},
-    {nullptr, nullptr, 0, nullptr}};
-#pragma GCC diagnostic pop
-
-static struct PyModuleDef _module = {
-    PyModuleDef_HEAD_INIT,
-    "torch._C._dynamo.guards",
-    "Module containing checks on tensors",
-    -1,
-    _methods};
 
 std::string get_exception_message() {
   PyObject *ptype = nullptr, *pvalue = nullptr, *ptraceback = nullptr;
@@ -7677,8 +7617,64 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
+  static std::array<PyMethodDef, 14> _methods{
+      {{"check_type_id",
+        castPyCFunctionFast(check_type_id),
+        METH_FASTCALL,
+        nullptr},
+       {"check_obj_id",
+        castPyCFunctionFast(check_obj_id),
+        METH_FASTCALL,
+        nullptr},
+       {"assert_size_stride",
+        castPyCFunctionFast(assert_size_stride),
+        METH_FASTCALL,
+        nullptr},
+       {"assert_size_stride_grouped",
+        castPyCFunctionFast(assert_size_stride_grouped),
+        METH_FASTCALL,
+        nullptr},
+       {"assert_alignment",
+        castPyCFunctionFast(assert_alignment),
+        METH_FASTCALL,
+        nullptr},
+       {"copy_if_misaligned", copy_if_misaligned, METH_O, nullptr},
+       {"dict_version", dict_version, METH_O, nullptr},
+       {"_empty_strided_cpu",
+        castPyCFunctionFast(_empty_strided_cpu),
+        METH_FASTCALL,
+        nullptr},
+       {"_empty_strided_cpu_pinned",
+        castPyCFunctionFast(_empty_strided_cpu_pinned),
+        METH_FASTCALL,
+        nullptr},
+       {"_empty_strided_cuda",
+        castPyCFunctionFast(_empty_strided_cuda),
+        METH_FASTCALL,
+        nullptr},
+       {"_empty_strided_xpu",
+        castPyCFunctionFast(_empty_strided_xpu),
+        METH_FASTCALL,
+        nullptr},
+       {"_empty_strided_mtia",
+        castPyCFunctionFast(_empty_strided_mtia),
+        METH_FASTCALL,
+        nullptr},
+       {"_reinterpret_tensor",
+        castPyCFunctionFast(_reinterpret_tensor),
+        METH_FASTCALL,
+        nullptr},
+       {nullptr, nullptr, 0, nullptr}}};
+
+  static PyModuleDef _module{
+      PyModuleDef_HEAD_INIT,
+      "torch._C._dynamo.guards",
+      "Module containing checks on tensors",
+      -1,
+      _methods.data()};
+
   auto m = PyModule_Create(&_module);
-  if (m == nullptr)
+  if (!m)
     return nullptr;
 
 #ifdef Py_GIL_DISABLED
@@ -9059,3 +9055,4 @@ PyObject* torch_c_dynamo_guards_init() {
 }
 
 } // namespace torch::dynamo
+  
