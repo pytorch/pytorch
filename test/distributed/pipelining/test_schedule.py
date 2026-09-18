@@ -389,6 +389,56 @@ class ScheduleTest(TestCase):
         finally:
             torch.distributed.destroy_process_group()
 
+    @parametrize("enabled", [False, True])
+    def test_schedule_passes_stage_and_microbatch_indices(self, enabled):
+        class IndexModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.calls: list[tuple[int | None, int | None]] = []
+
+            def forward(self, x, *, scale, stage_idx=None, mb_idx=None):
+                self.calls.append((stage_idx, mb_idx))
+                return x * scale
+
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        try:
+            module = IndexModule()
+            stage = PipelineStage(module, 0, 1, torch.device("cpu"))
+            schedule_kwargs = (
+                {"pass_stage_and_microbatch_indices": True} if enabled else {}
+            )
+            schedule = ScheduleGPipe(
+                stage,
+                2,
+                loss_fn=lambda output, target: (output - target).square().sum(),
+                scale_grads=False,
+                **schedule_kwargs,
+            )
+            x = torch.ones(2, requires_grad=True)
+            scale = torch.full((2,), 3.0, requires_grad=True)
+
+            self.assertEqual(
+                schedule.step(x, scale=scale, target=torch.zeros(2)), x * scale
+            )
+            expected = [(0, 0), (0, 0), (0, 1)] if enabled else [(None, None)] * 3
+            self.assertEqual(module.calls, expected)
+            self.assertEqual(x.grad, torch.full_like(x, 18))
+            self.assertEqual(scale.grad, torch.full_like(scale, 6))
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_stage_and_microbatch_indices_require_manual_stages(self):
+        stage = MockPipelineStage(num_stages=1)
+        with self.assertRaisesRegex(ValueError, "manually constructed PipelineStage"):
+            ScheduleGPipe(
+                stage,
+                1,
+                pass_stage_and_microbatch_indices=True,
+            )
+
     def test_schedule_pre_split_validation(self):
         store = FakeStore()
         torch.distributed.init_process_group(
@@ -443,6 +493,25 @@ class ScheduleTest(TestCase):
                     arg_mbs=[(x0,), (x1,)],
                     target_mbs=[x0],
                 )
+
+            indexed_schedule = ScheduleGPipe(
+                stage,
+                2,
+                pass_stage_and_microbatch_indices=True,
+            )
+            for name in ("stage_idx", "mb_idx"):
+                for pre_split in (False, True):
+                    with (
+                        self.subTest(name=name, pre_split=pre_split),
+                        self.assertRaisesRegex(ValueError, f"reserves.*{name}"),
+                    ):
+                        if pre_split:
+                            indexed_schedule.step(
+                                arg_mbs=[(x0,), (x1,)],
+                                kwarg_mbs=[{name: -1}, {}],
+                            )
+                        else:
+                            indexed_schedule.step(x0, **{name: -1})
         finally:
             torch.distributed.destroy_process_group()
 
