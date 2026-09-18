@@ -22,6 +22,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
+#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
@@ -853,14 +854,22 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
 }
 
 std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getLibraryPipelineState(
-    id<MTLLibrary> lib,
-    const std::string& fname) {
-  auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
+    const std::string& fname,
+    id<MTLLibrary> lib) {
+  // Parameterized libraries can expose the same function name in multiple compiled variants.
+  // No current MPS callers use them, but this keeps variants cached separately to preserve the existing API.
+  if (nparams > 0 && !lib) {
+    lib = getLibraryForFunc(fname);
+  }
+  auto key = lib ? fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname) : fname;
   auto found_cpl = cplMap.find(key);
   if (found_cpl != cplMap.end()) {
     return found_cpl->second;
   }
 
+  if (!lib) {
+    lib = getLibraryForFunc(fname);
+  }
   NSError* error = nil;
   id<MTLFunction> func = [lib newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
   TORCH_CHECK(func, "Failed to create function state object for: ", fname);
@@ -898,7 +907,7 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 }
 
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  auto [cpl, func] = getLibraryPipelineState(name);
   return std::make_shared<MetalKernelFunction>(cpl, func);
 }
 
@@ -910,7 +919,7 @@ MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::s
   }
 
   // Create new kernel function and cache it
-  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  auto [cpl, func] = getLibraryPipelineState(name);
   auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
   return kernelCache.try_emplace(name, std::move(kernel)).first->second.get();
 }
@@ -919,21 +928,31 @@ class BundledShaderLibrary : public MetalShaderLibrary {
  public:
   BundledShaderLibrary() : MetalShaderLibrary("") {}
 
+  std::vector<std::string> getFunctionNames() override {
+    getLibrary();
+    auto rc = MetalShaderLibrary::getFunctionNames();
+    std::erase_if(rc, [&](const auto& name) { return metal40FunctionNames.contains(name); });
+    rc.insert(rc.end(), metal40FunctionNames.begin(), metal40FunctionNames.end());
+    return rc;
+  }
+
  protected:
   id<MTLLibrary> getLibrary() override {
-    if (C10_UNLIKELY(!library)) {
-      auto device = MPSDevice::getInstance()->device();
-      NSError* error = nil;
+    c10::call_once(libraryInitFlag, [this] {
+      library = loadSection("metal_basic");
 #ifdef CAN_BUILD_METAL_4
       // kernels_40.metallib is built with -mmacos-version-min=26.2 (MPP
       // cooperative-tensor ABI) and holds the only kernels has_mpp() gates.
-      const auto section_name = has_mpp() ? "metal_40" : "metal_basic";
-#else
-      const auto section_name = "metal_basic";
+      if (has_mpp()) {
+        metal40Library = loadSection("metal_40");
+        @autoreleasepool {
+          for (NSString* name in [metal40Library functionNames]) {
+            metal40FunctionNames.emplace([name UTF8String]);
+          }
+        }
+      }
 #endif
-      library = [device newLibraryWithData:getSectionData(section_name) error:&error];
-      TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
-    }
+    });
     return library;
   }
 
@@ -941,7 +960,19 @@ class BundledShaderLibrary : public MetalShaderLibrary {
     throw std::runtime_error("Should never be called");
   }
 
+  id<MTLLibrary> getLibraryForFunc(const std::string& fname) override {
+    auto basicLibrary = getLibrary();
+    return metal40FunctionNames.contains(fname) ? metal40Library : basicLibrary;
+  }
+
  private:
+  static id<MTLLibrary> loadSection(const std::string& name) {
+    NSError* error = nil;
+    auto lib = [MPSDevice::getInstance()->device() newLibraryWithData:getSectionData(name) error:&error];
+    TORCH_CHECK(lib, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    return lib;
+  }
+
   static dispatch_data_t getSectionData(const std::string& name) {
     uint32_t idx = 0;
     for (const auto cnt : c10::irange(_dyld_image_count())) {
@@ -962,6 +993,10 @@ class BundledShaderLibrary : public MetalShaderLibrary {
                                 ^(){
                                 });
   }
+
+  c10::once_flag libraryInitFlag;
+  id<MTLLibrary> metal40Library = nil;
+  std::unordered_set<std::string> metal40FunctionNames;
 };
 
 // Inner extent below which the per-element strided kernel beats the ILP tile.

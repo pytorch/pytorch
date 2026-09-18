@@ -957,8 +957,17 @@ if(USE_MPS)
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
         list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
+            # Shaders whose Metal 4.0 build differs from their 3.1 build: MPP kernels,
+            # atomic_thread_fence (ScanKernel), simdgroup_barrier scope (Quantized).
+            # BundledShaderLibrary takes the kernels kernels_40 defines from it and the
+            # rest from kernels_basic, so a shader whose build starts to depend on the
+            # Metal version must be added here.
+            set(METAL_40_SHADERS Attention Convolution GroupedMM LinearAlgebra Quantized ScanKernel)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
+                if(NOT TGT_STEM IN_LIST METAL_40_SHADERS)
+                    continue()
+                endif()
                 string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
                 list(APPEND AIR_40 ${TGT_40})
                 # MetalPerformancePrimitives switches the cooperative-tensor ABI on the
