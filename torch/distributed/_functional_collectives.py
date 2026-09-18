@@ -13,7 +13,7 @@ import torch.distributed.distributed_c10d as c10d
 from torch._utils import _maybe_view_chunk_cat
 from torch.distributed import ReduceOp
 from torch.distributed.device_mesh import DeviceMesh
-from torch.fx.experimental.proxy_tensor import get_proxy_mode
+from torch.fx.experimental.proxy_tensor import get_proxy_mode, ProxyTorchDispatchMode
 
 from . import _functional_collectives_impl as fun_col_impl
 
@@ -1749,6 +1749,42 @@ lib_impl_autograd.impl(
 )
 lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 
+
+def _reject_collective_config(*args, **kwargs):
+    raise NotImplementedError(
+        "per-collective configuration is not supported while tracing"
+    )
+
+
+lib_impl_c10d = torch.library.Library("c10d", "IMPL")
+for _op in (
+    "broadcast_",
+    "allreduce_",
+    "allreduce_coalesced_",
+    "allgather_",
+    "_allgather_base_",
+    "allgather_coalesced_",
+    "allgather_into_tensor_coalesced_",
+    "reduce_scatter_",
+    "_reduce_scatter_base_",
+    "reduce_scatter_tensor_coalesced_",
+    "reduce_",
+    "gather_",
+    "gather_into_tensor_",
+    "alltoall_",
+    "alltoall_base_",
+):
+    torch.library.register_fake(
+        f"c10d::{_op}.config", _reject_collective_config, lib=lib_impl_c10d
+    )
+    lib_impl_c10d.impl(f"{_op}.config", _reject_collective_config, "Functionalize")
+    torch.library.register_torch_dispatch(
+        f"c10d::{_op}.config",
+        ProxyTorchDispatchMode,
+        _reject_collective_config,
+        lib=lib_impl_c10d,
+    )
+
 # Mark these ops as side effectful so that DCE does not remove communication
 # whose result tensors are ignored by user code.
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
@@ -2174,12 +2210,25 @@ def _remap_traceable_collective(
     else None. Shared by the make_fx compile_on_one_rank mode below and
     non-strict export's _NonStrictTorchFunctionHandler.
     """
+    if (
+        isinstance(func, torch._ops.OpOverload)
+        and func.namespace == "c10d"
+        and func._overloadname == "config"
+    ):
+        raise NotImplementedError(
+            "per-collective configuration is not supported while tracing"
+        )
     if func not in traceable_collective_remaps:
         return None
     import inspect
 
     mapped_func = traceable_collective_remaps[func]
     bound = dict(inspect.signature(func).bind(*args, **(kwargs or {})).arguments)
+    config = bound.pop("config", None)
+    if config is not None:
+        raise NotImplementedError(
+            "per-collective configuration is not supported while tracing"
+        )
     if func in (
         torch.distributed.all_reduce,
         torch.distributed.reduce_scatter,
