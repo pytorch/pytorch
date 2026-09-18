@@ -642,11 +642,12 @@ def _module_namespaces(
 
     TRUSTED is the load-bearing half and is deliberately narrow. A module is
     that if torch or the stdlib owns it, if it is bound under its own name --
-    ``import mypkg.layers``, and the ``__import_x`` alias Dynamo installs to
-    reach an inlined function's own globals -- or if it is an attribute of a
-    trusted module under a name that module already owns: its own ``__name__``
-    (a plain ``import own_sub`` inside the parent) or the parent's plus the
-    attribute (``from . import sub``). An ALIASED user module is none of those:
+    ``import mypkg``, and the ``__import_x`` alias Dynamo installs to reach an
+    inlined function's own globals -- or if it is an attribute of a trusted
+    module under a name that module already owns: its own ``__name__`` (a plain
+    ``import own_sub`` inside the parent) or the parent's plus the attribute
+    (``from . import sub``, and ``import mypkg.layers``, which Dynamo guards as
+    ``G['mypkg'].layers``). An ALIASED user module is none of those:
     ``if flag: import impl_b as impl`` picks what ``impl.op`` resolves to per
     machine, and so does the same alias spelled ``from . import impl_b as
     impl`` in a package __init__. Inheriting the parent's trust without
@@ -657,14 +658,14 @@ def _module_namespaces(
     flag every model, is that an alias config picks between two torch modules
     is waived too (see ``_is_risky_drop``'s KNOWN GAP). A config module is the
     one namespace whose bindings config chooses by definition, so it is never
-    trusted whoever owns it. Keys are source names, and the consumer looks a
-    read's ``source.base.name`` up exactly, never by prefix.
+    trusted, whoever owns it and however it is reached (a recovered
+    ``__import_x`` alias included). Keys are source names, and the consumer
+    looks a read's ``source.base.name`` up exactly, never by prefix.
     """
     modules = {
         e.orig_guard.originating_source.name: (e.orig_guard.originating_source, e.value)
         for e in entries
         if isinstance(e.value, types.ModuleType)
-        and not isinstance(e.value, ConfigModule)
         and isinstance(_source_root(e.orig_guard.originating_source), GlobalSource)
     }
     # Dynamo guards the attributes it reads off an import alias but never the
@@ -687,7 +688,9 @@ def _module_namespaces(
         ok = False
         if found is not None:
             source, module = found
-            if _is_library_module(module.__name__):
+            if isinstance(module, ConfigModule):
+                ok = False
+            elif _is_library_module(module.__name__):
                 ok = True
             elif isinstance(source, GlobalSource):
                 ok = (
