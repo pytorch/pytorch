@@ -941,12 +941,16 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # module.training, an .item() result, mask=None.
         "CONSTANT_MATCH",
         "EQUALS_MATCH",
+        "BOOL_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
         # Pins that two inputs alias, so a graph traced under `x is y` is never
         # served two distinct tensors.
         "DUPLICATE_INPUT",
-        # hasattr is a branch like any other. Reachable on the DEFAULT gates: a
-        # single-variant capture makes every slot look invariant and the drop
-        # is not classed risky.
+        # hasattr is a branch the graph specialized on; a single-variant capture
+        # makes it look invariant, and it may be the only guard on an optional
+        # attribute.
         "HASATTR",
         # An input's KIND: a graph traced for one class and served to another
         # returns the first one's answer, with no shape to crash on. Upstream
@@ -964,17 +968,12 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # CPU tensors with no refusal.
         "DEFAULT_DEVICE",
         # Membership, key-set, length and iterator-position facts, each a branch
-        # the graph specialized on. A module-owned dict (self.opts = {}) is
-        # environment-rooted, which is exactly where a policy would drop it.
-        "BOOL_MATCH",
-        "CONSTANT_SUBCLASS_MATCH",
+        # the graph specialized on.
         "COUNT_ITERATOR_MATCH",
         "DICT_CONTAINS",
         "DICT_KEYS_MATCH",
         "DICT_NOT_CONTAINS",
         "MAPPING_KEYS_CHECK",
-        "NONE_MATCH",
-        "NOT_NONE_MATCH",
         "NOT_PRESENT_IN_GENERIC_DICT",
         "RANGE_ITERATOR_MATCH",
         "SET_CONTAINS",
@@ -985,10 +984,9 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # skip_nnmodule_hook_guards is off. Never dropped either way: with the
         # leaf it pins a length, and without one dropping the entry buys nothing.
         "EMPTY_NN_MODULE_HOOKS_DICT",
-        # Pins a folded torch._C._is_cow_tensor branch. Kept, a capture that
-        # folded one fails at serialization with the builder's own error (the
-        # tensor comes back fake and COW_TENSOR_MATCH rejects that); dropped, it
-        # would serve the folded branch to the other kind of tensor silently.
+        # Pins a folded torch._C._is_cow_tensor branch. Kept, load_guard_manager
+        # re-runs the builder on the unpickled FakeTensor and its AssertionError
+        # kills the load; dropped, the folded branch is served silently.
         "COW_TENSOR_MATCH",
     }
 )
