@@ -17,6 +17,7 @@ from unittest.mock import call, patch
 from torch._native import common_utils as native_common_utils, triton_utils
 from torch._vendor.packaging.version import Version
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -124,6 +125,8 @@ def _import_module_directly(module_name, file_name):
 
 
 class TestNativeDSLOps(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for the torch._native DSL ops framework."""
 
     def setUp(self):

@@ -4,7 +4,12 @@ import os
 from unittest.mock import patch
 
 import torch.backends.python_native as pn
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class RegistryTestMixin:
@@ -56,6 +61,8 @@ class RegistryTestMixin:
 
 @skipIfTorchDynamo("Backend tests don't need dynamo compilation")
 class TestTorchBackendsPythonNative(RegistryTestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Tests for torch.backends.python_native user-facing API."""
 
     def test_module_import(self):
@@ -512,6 +519,8 @@ class TestTorchBackendsPythonNative(RegistryTestMixin, TestCase):
 
 
 class TestTorchBackendsPythonNativeIntegration(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     """Integration tests for torch.backends.python_native with actual DSLs."""
 
     def test_real_dsl_integration(self):
