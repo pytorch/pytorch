@@ -3327,18 +3327,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         kwargs = dict(signature.bind(*args, **kwargs).arguments)
         args = []
 
-        collective_config = kwargs.pop("config", None)
-        if collective_config is not None and not (
-            collective_config.is_python_constant()
-            and collective_config.as_python_constant() is None
-        ):
-            unimplemented(
-                gb_type="Per-collective configuration",
-                context=f"{self.fn}",
-                explanation="Per-collective configuration is not supported while tracing.",
-                hints=["Run the configured collective outside torch.compile."],
-            )
-
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 gb_type="async_op=True for distributed collectives",

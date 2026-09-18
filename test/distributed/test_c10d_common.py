@@ -3266,13 +3266,13 @@ class CollectiveConfigTest(TestCase):
         ],
     )
     @parametrize("frontend", ["compile", "export_strict", "export_nonstrict"])
-    @parametrize("config_kind", ["omitted", "none", "object"])
+    @parametrize("config_kind", ["omitted", "none"])
     def test_tracing(self, name, frontend, config_kind):
         torch._dynamo.reset()
         collective = getattr(dist, name)
         kwargs = {}
         if config_kind != "omitted":
-            kwargs["config"] = object() if config_kind == "object" else None
+            kwargs["config"] = None
 
         class Module(nn.Module):
             def forward(self, tensor):
@@ -3290,22 +3290,13 @@ class CollectiveConfigTest(TestCase):
         with self._group():
             module = Module()
             tensor = torch.ones(2)
-            expected = (
-                self.assertRaisesRegex(
-                    (NotImplementedError, torch._dynamo.exc.Unsupported),
-                    "(?i)per-collective configuration",
-                )
-                if config_kind == "object"
-                else nullcontext()
-            )
-            with expected:
-                if frontend == "compile":
-                    compiled = torch.compile(module, backend="eager", fullgraph=True)
-                else:
-                    compiled = torch.export.export(
-                        module, (tensor,), strict=frontend == "export_strict"
-                    ).module()
-                self.assertEqual(compiled(tensor), module(tensor))
+            if frontend == "compile":
+                compiled = torch.compile(module, backend="eager", fullgraph=True)
+            else:
+                compiled = torch.export.export(
+                    module, (tensor,), strict=frontend == "export_strict"
+                ).module()
+            self.assertEqual(compiled(tensor), module(tensor))
 
     @parametrize("frontend", ["make_fx", "fake", "meta", "functionalize", "remap"])
     def test_raw_config_tracing(self, frontend):
@@ -3326,7 +3317,7 @@ class CollectiveConfigTest(TestCase):
                 return tensor
 
             with self.assertRaisesRegex(
-                NotImplementedError, "configuration is not supported while tracing"
+                NotImplementedError, "Raw c10d configuration overloads"
             ):
                 if frontend == "make_fx":
                     make_fx(fn)(torch.ones(2))

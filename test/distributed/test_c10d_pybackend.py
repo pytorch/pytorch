@@ -431,21 +431,6 @@ class TestPyBackend(TestCase):
         self.assertEqual(cpu_backend.calls, [])
         self.assertEqual(cuda_backend.calls, [])
 
-    def test_collective_config_compile_fallback(self) -> None:
-        backend = RecordingBackend(0, 1, "nccl2")
-        group = create_process_group(backend)
-        config = object()
-
-        def fn(tensor):
-            output = tensor.clone()
-            dist.all_reduce(output, group=group, config=config)
-            return output + 1
-
-        result = torch.compile(fn, backend="eager")(torch.zeros(2))
-        self.assertEqual(result, torch.full((2,), 3.0))
-        self.assertEqual([call[0] for call in backend.calls], ["allreduce"])
-        self.assertIs(backend.calls[0][-1].config, config)
-
     @parametrize("name", _CONFIG_COLLECTIVES)
     @parametrize("config_kind", ["omitted", "none", "object"])
     def test_collective_config_torch_function(self, name, config_kind) -> None:

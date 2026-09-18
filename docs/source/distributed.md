@@ -238,10 +238,24 @@ The argument is supported by `broadcast`, `all_reduce`, `all_reduce_coalesced`,
 `reduce`, `all_gather`, `all_gather_single`, `all_gather_coalesced`,
 `gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
 `all_to_all_single`, including their aliases. For `all_to_all_single`, omit
-the split-size lists to use equal splits. Other backends, tracing, the
-coalescing manager, and time estimation reject non-`None` configurations.
+the split-size lists to use equal splits. Other backends, the coalescing
+manager, and time estimation reject non-`None` configurations.
 External NCCL group scopes are unsupported.
 Passing `None` preserves existing behavior and does not require nccl4py.
+
+`torch.compile` and `torch.export` support configured `all_reduce`, `all_gather`,
+`all_gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
+`all_to_all_single`, including their aliases, with `async_op=False`.
+Configuration values become guarded graph constants; changing them recompiles.
+Exported programs retain the captured values, not the original Python object.
+Vendor integer and string options are supported; raw-pointer options require a
+runtime binding and cannot be traced. Use these Python APIs rather than raw
+`torch.ops.c10d` configuration overloads.
+
+Configured graphs use separate functional operators with ordered effects.
+Their runtime kernels establish completion on the calling stream before
+returning, so they do not currently support communication/computation overlap.
+The existing no-config operators and eager asynchronous behavior are unchanged.
 
 (distributed-basics)=
 

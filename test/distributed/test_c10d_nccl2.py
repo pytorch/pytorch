@@ -594,6 +594,132 @@ class ProcessGroupNCCL2CollectiveConfigNonblockingTest(
         super()._init_pg(rank, world_size, rdvz_file)
 
 
+@instantiate_parametrized_tests
+@unittest.skipUnless(
+    HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
+)
+class ProcessGroupNCCL2ConfigTracingTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl_version((2, 31, 0), "per-collective configuration")
+    @parametrize(
+        "name",
+        [
+            "all_reduce",
+            "all_gather",
+            "all_gather_single",
+            "all_gather_into_tensor",
+            "_all_gather_base",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "reduce_scatter_tensor",
+            "_reduce_scatter_base",
+            "all_to_all_single",
+        ],
+    )
+    @parametrize(
+        "frontend", ["inductor", "export_strict", "export_nonstrict", "make_fx"]
+    )
+    def test_tracing(self, name, frontend):
+        import io
+
+        from torch.distributed._functional_collectives import (
+            _LegacyToFunctionalCollectiveMode,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        size = self.world_size
+        config = NCCLCollConfig(
+            min_ctas=1,
+            max_ctas=2,
+            vendor_options=(VendorOption(7, 8, str_value="trace"),),
+        )
+        collective = getattr(dist, name)
+
+        class Module(torch.nn.Module):
+            def forward(self, tensor):
+                if name == "all_reduce":
+                    result = tensor.clone()
+                    collective(result, config=config)
+                elif name == "all_gather":
+                    outputs = [torch.empty_like(tensor) for _ in range(size)]
+                    collective(outputs, tensor, config=config)
+                    result = torch.cat(outputs)
+                elif name in (
+                    "all_gather_single",
+                    "all_gather_into_tensor",
+                    "_all_gather_base",
+                ):
+                    result = tensor.new_empty(tensor.numel() * size)
+                    collective(result, tensor, config=config)
+                elif name == "reduce_scatter":
+                    result = torch.empty_like(tensor)
+                    collective(result, [tensor] * size, config=config)
+                elif name in (
+                    "reduce_scatter_single",
+                    "reduce_scatter_tensor",
+                    "_reduce_scatter_base",
+                ):
+                    result = torch.empty_like(tensor)
+                    collective(result, tensor.repeat(size), config=config)
+                else:
+                    result = torch.empty_like(tensor)
+                    collective(result, tensor, config=config)
+                return result
+
+        tensor = torch.full((size * 2,), self.rank + 1.0, device=self.device)
+        module = Module()
+        expected = module(tensor)
+        if frontend == "inductor":
+            compiled = torch.compile(module, fullgraph=True)
+        elif frontend == "make_fx":
+            with _LegacyToFunctionalCollectiveMode():
+                compiled = make_fx(module)(tensor)
+        else:
+            exported = torch.export.export(
+                module, (tensor,), strict=frontend == "export_strict"
+            )
+            buffer = io.BytesIO()
+            torch.export.save(exported, buffer)
+            buffer.seek(0)
+            compiled = torch.export.load(buffer).module()
+        self.assertEqual(compiled(tensor), expected)
+        torch._dynamo.reset()
+
+    @requires_nccl_version((2, 31, 0), "per-collective configuration")
+    def test_config_mutation_recompiles(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        config = NCCLCollConfig(min_ctas=1, max_ctas=2, user_profiler_tag=1)
+
+        def fn(tensor):
+            output = tensor.clone()
+            dist.all_reduce(output, config=config)
+            return output
+
+        counter = CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        tensor = torch.ones(4, device=self.device)
+        self.assertEqual(compiled(tensor), tensor * self.world_size)
+        config.user_profiler_tag = 2
+        self.assertEqual(compiled(tensor), tensor * self.world_size)
+        self.assertEqual(counter.frame_count, 2)
+        torch._dynamo.reset()
+
+
+class ProcessGroupNCCL2ConfigTracingNonblockingTest(ProcessGroupNCCL2ConfigTracingTest):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = dist.ProcessGroupNCCL2.Options(
+            is_high_priority_stream=high_priority_stream
+        )
+        opts.config.blocking = 0
+        return opts
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:

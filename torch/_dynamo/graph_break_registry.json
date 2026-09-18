@@ -335,16 +335,6 @@
       "Hints": []
     }
   ],
-  "GB2871": [
-    {
-      "Gb_type": "Per-collective configuration",
-      "Context": "{self.fn}",
-      "Explanation": "Per-collective configuration is not supported while tracing.",
-      "Hints": [
-        "Run the configured collective outside torch.compile."
-      ]
-    }
-  ],
   "GB0024": [
     {
       "Gb_type": "CLEANUP_THROW with StopIteration",
