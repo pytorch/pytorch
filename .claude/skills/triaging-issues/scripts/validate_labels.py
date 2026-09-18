@@ -22,6 +22,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from triage_marker import mark_blocked
+
 
 DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
 SCRIPT_DIR = Path(__file__).parent
@@ -228,6 +230,7 @@ def main():
 
     except json.JSONDecodeError as e:
         debug_log(f"JSON decode error: {e}")
+        mark_blocked("labels hook: invalid JSON input")
         print(f"Hook error: Invalid JSON input: {e}", file=sys.stderr)
         print(
             "Hook was unable to validate labels; stopping triage.",
@@ -236,6 +239,7 @@ def main():
         sys.exit(2)
     except Exception as e:
         debug_log(f"Unexpected error: {type(e).__name__}: {e}")
+        mark_blocked(f"labels hook: {type(e).__name__}")
         print(f"Hook error: {e}", file=sys.stderr)
         print(
             "Hook was unable to validate labels; stopping triage.",
