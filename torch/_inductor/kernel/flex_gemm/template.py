@@ -20,7 +20,6 @@ from torch._inductor.heuristics.template.flex_gemm import QuackConfigKey
 from torch._inductor.kernel.flex_gemm.constraints import (
     FlexGemmLocalReduceGeometry,
     FlexGemmOutputContraction,
-    LOCAL_REDUCE_COMBINE_NAMES,
     LOCAL_REDUCE_FINALIZE_NAMES,
     LOCAL_REDUCE_PREPASS_FN_SUFFIX,
 )
@@ -36,20 +35,9 @@ if TYPE_CHECKING:
     from torch._inductor.kernel.flex_gemm.runtime import FlexGemmRuntimeLocalReducePlan
 
 
-_BUILTIN_CALLBACKS = LOCAL_REDUCE_COMBINE_NAMES | LOCAL_REDUCE_FINALIZE_NAMES
-
-
-@dataclasses.dataclass(frozen=True)
-class FlexGemmEpilogueIndexedOutputConfig:
-    """Template input positions for one row-indexed auxiliary output."""
-
-    out_index: int
-    indices_index: int
-
-
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
-    """Template-time local-reduce metadata; geometry is in physical accumulator columns."""
+    """Template-time local-reduce metadata for output and/or feed-main consumers."""
 
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
@@ -62,8 +50,6 @@ class FlexGemmEpilogueLocalReduceConfig:
     binary_store_finalize: bool = False
     prepass_combine: str | None = None
     prepass_finalize: str | None = None
-    reduce_planes: int = 1
-    fragment_reduced: bool = False
 
     @classmethod
     def from_plan(
@@ -76,7 +62,7 @@ class FlexGemmEpilogueLocalReduceConfig:
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.match.physical_geometry,
+            local_reduce.match.geometry,
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,
@@ -87,8 +73,6 @@ class FlexGemmEpilogueLocalReduceConfig:
             source.local_reduce_binary_store_finalize,
             source.local_reduce_prepass_combine,
             source.local_reduce_prepass_finalize,
-            source.local_reduce_planes,
-            source.local_reduce_fragment_reduced,
         )
 
     def runtime_plan(
@@ -101,18 +85,18 @@ class FlexGemmEpilogueLocalReduceConfig:
         )
 
         def callback(name: str | None) -> Any:
-            return name if name is None or name in _BUILTIN_CALLBACKS else resolve(name)
+            if name is None or name in LOCAL_REDUCE_FINALIZE_NAMES:
+                return name
+            return resolve(name)
 
         prepass_name = f"{epilogue_name}{LOCAL_REDUCE_PREPASS_FN_SUFFIX}"
         return FlexGemmRuntimeLocalReducePlan(
             self.geometry,
             stores=self.out_index is not None,
             feeds_main=self.feeds_main,
-            combine=callback(self.combine),
+            combine=self.combine,
             finalize=callback(self.finalize),
             finalize_operands=self.finalize_operands,
-            reduce_planes=self.reduce_planes,
-            fragment_reduced=self.fragment_reduced,
             store_finalize=callback(self.store_finalize),
             binary_store_finalize=self.binary_store_finalize,
             prepass=None if self.prepass_combine is None else resolve(prepass_name),
@@ -140,7 +124,6 @@ class FlexGemmEpilogueConfig:
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
-        indexed_output: Runtime input positions for one indexed auxiliary output.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
     """
 
@@ -155,7 +138,6 @@ class FlexGemmEpilogueConfig:
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
-    indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     output_contraction: FlexGemmOutputContraction | None
 
@@ -176,7 +158,6 @@ class FlexGemmEpilogueConfig:
             quack_epilogue_dtype,
         )
 
-        indexed = self.indexed_output
         return flex_gemm_epimod(
             epilogue_fn,
             tuple(
@@ -184,12 +165,6 @@ class FlexGemmEpilogueConfig:
             ),
             self.epilogue_arg_kinds,
             len(self.aux_out_indices),
-            None
-            if indexed is None
-            else (
-                quack_epilogue_dtype(input_dtypes[indexed.out_index]),
-                input_dtypes[indexed.indices_index],
-            ),
             None
             if self.local_reduce is None
             else self.local_reduce.runtime_plan(resolve, self.epilogue_name),
@@ -287,8 +262,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
 
     @staticmethod
     def _callback_reference(name: str) -> str:
-        """Render a built-in callback name or generated callable reference."""
-        return repr(name) if name in _BUILTIN_CALLBACKS else name
+        """Render a built-in finalizer name or generated callable reference."""
+        return repr(name) if name in LOCAL_REDUCE_FINALIZE_NAMES else name
 
     def _local_reduce_geometry(
         self, local_reduce: FlexGemmEpilogueLocalReduceConfig
@@ -315,13 +290,7 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             plan += f", output_layout={local_reduce.output_layout.codegen_reference()}"
         if local_reduce.feeds_main:
             plan += ", feeds_main=True"
-        if local_reduce.combine is None:
-            raise RuntimeError("FlexGEMM EpiMod local reductions require a combine")
-        plan += f", combine={self._callback_reference(local_reduce.combine)}"
-        if local_reduce.reduce_planes != 1:
-            plan += f", reduce_planes={local_reduce.reduce_planes}"
-        if local_reduce.fragment_reduced:
-            plan += ", fragment_reduced=True"
+        plan += f", combine={local_reduce.combine!r}"
         if local_reduce.finalize is not None:
             plan += f", finalize={self._callback_reference(local_reduce.finalize)}"
         if local_reduce.finalize_operands:
@@ -368,11 +337,6 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         if config.aux_out_indices:
             aux_outs = ", ".join(input_args[index] for index in config.aux_out_indices)
             kwargs.append(f", aux_outs=({aux_outs},)")
-        if config.indexed_output is not None:
-            kwargs.append(
-                f", indexed_out={input_args[config.indexed_output.out_index]}, "
-                f"indexed_indices={input_args[config.indexed_output.indices_index]}"
-            )
         if config.local_reduce is not None:
             kwargs.append(
                 self._local_reduce_kwargs(

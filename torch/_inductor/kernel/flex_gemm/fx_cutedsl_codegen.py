@@ -17,19 +17,17 @@ from typing import Any
 from sympy import Max, Min
 
 import torch
+from torch._inductor import inductor_prims
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import (
     CuteDSLCSEVariable,
     CuteDSLOpOverrides,
-    tensorssa_reduction,
     use_cutedsl_fast_math,
 )
 from torch._inductor.kernel.flex_gemm.constraints import (
-    FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR,
     FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR,
     FLEX_GEMM_OUTPUT_TENSOR_ERROR,
     FlexGemmLocalReduceGeometry,
-    INDEXED_OUTPUT_STORE_ARG_NAME,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_ARG_NAME,
     LOCAL_REDUCE_FINALIZE_CAPTURE_ERROR,
@@ -41,40 +39,30 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_UNPLANNED_ERROR,
 )
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
-    GroupedTensorSSALayout,
     is_shape_preserving_pointwise_node,
     squeeze_source_node,
     view_or_reshape_args,
 )
 from torch._inductor.kernel.gemm_epilogue import (
     GemmEpilogueGraph,
-    GemmReductionType,
     iter_fx_node_inputs,
-    NormalizedGemmReduction,
-    NormalizedPrepareSoftmax,
     NormalizedReduction,
 )
 from torch._inductor.kernel.gemm_epilogue_analysis import (
     build_output_contraction_plan,
-    GemmIndexedOutputStore,
     GemmLocalReduceAnalysis,
-    GemmLocalReduceMatch,
     GemmOutputLocalReducePlan,
     GemmOutputPlan,
     match_flex_gemm_local_reduce_output_storage,
 )
 from torch._inductor.kernel.gemm_epilogue_codegen import (
     _cute_arg,
-    canonical_tensorssa_reduction_type,
     gemm_epilogue_source_expr,
     GemmEpilogueCuteDSLKernel,
     GemmEpilogueCuteDSLOpOverrides,
     lower_gemm_epilogue_fx_node,
 )
-from torch._inductor.kernel.gemm_epilogue_utils import (
-    statically_known_equal,
-    statically_known_shape_equal,
-)
+from torch._inductor.kernel.gemm_epilogue_utils import statically_known_shape_equal
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -121,141 +109,20 @@ def bind_terminal_output_storage(
     )
 
 
-def terminal_dtype_conversion_source(node: torch.fx.Node) -> torch.fx.Node:
-    """Peel one terminal element-type conversion from an output."""
-    if node.target not in (
-        torch.ops.aten._to_copy.default,
-        torch.ops.prims.convert_element_type.default,
-    ):
-        return node
-    source = node.args[0]
-    return source if isinstance(source, torch.fx.Node) else node
-
-
-def flex_gemm_indexed_output_store(
-    main_output: torch.fx.Node,
-    aux: torch.fx.Node,
-) -> GemmIndexedOutputStore | None:
-    """Match one terminal row gather.
-
-    Return ``None`` when the graph is not this topology. Raise when a matched
-    gather violates a FlexGEMM legality requirement.
-    """
-    main_meta = main_output.meta.get("val")
-    aux_meta = aux.meta.get("val")
-    if (
-        not isinstance(main_meta, torch.Tensor)
-        or not isinstance(aux_meta, torch.Tensor)
-        or main_meta.ndim != 2
-        or not statically_known_shape_equal(aux_meta.shape, (main_meta.shape[0],))
-    ):
-        return None
-
-    target = terminal_dtype_conversion_source(aux)
-    target_conversion = () if target is aux else (aux,)
-    gather_node = squeeze_source_node(target)
-    if not isinstance(gather_node, torch.fx.Node):
-        return None
-    squeeze_dim = target.args[1] if len(target.args) > 1 else None
-    if squeeze_dim is not None:
-        squeeze_dims = (
-            tuple(squeeze_dim)
-            if isinstance(squeeze_dim, (tuple, list))
-            else (squeeze_dim,)
-        )
-        if len(squeeze_dims) != 1 or squeeze_dims[0] not in (-1, 1):
-            return None
-    if gather_node.target is not torch.ops.aten.gather.default:
-        return None
-    source, dim, unsqueeze_node, *gather_options = gather_node.args
-    sparse_grad = (
-        gather_options[0]
-        if gather_options
-        else gather_node.kwargs.get("sparse_grad", False)
-    )
-    if (
-        len(gather_options) > 1
-        or not isinstance(source, torch.fx.Node)
-        or dim not in (-1, 1)
-        or not isinstance(unsqueeze_node, torch.fx.Node)
-        or sparse_grad is not False
-        or unsqueeze_node.target is not torch.ops.aten.unsqueeze.default
-    ):
-        return None
-    if (
-        source not in (main_output, terminal_dtype_conversion_source(main_output))
-        or aux_meta.dtype is not main_meta.dtype
-    ):
-        raise NotImplementedError(FLEX_GEMM_INDEXED_OUTPUT_SOURCE_ERROR)
-    indices, unsqueeze_dim = unsqueeze_node.args
-    indices_meta = (
-        indices.meta.get("val") if isinstance(indices, torch.fx.Node) else None
-    )
-    gather_meta = gather_node.meta.get("val")
-    if (
-        unsqueeze_dim not in (-1, 1)
-        or not isinstance(indices, torch.fx.Node)
-        or indices.op != "placeholder"
-        or tuple(indices.users) != (unsqueeze_node,)
-        or tuple(unsqueeze_node.users) != (gather_node,)
-        or tuple(gather_node.users) != (target,)
-        or (target is not aux and tuple(target.users) != (aux,))
-        or any(user.op != "output" for user in aux.users)
-        or not isinstance(indices_meta, torch.Tensor)
-        or indices_meta.dtype not in (torch.int32, torch.int64)
-        or not statically_known_shape_equal(indices_meta.shape, aux_meta.shape)
-        or not isinstance(gather_meta, torch.Tensor)
-        or not statically_known_shape_equal(gather_meta.shape, (main_meta.shape[0], 1))
-    ):
-        return None
-    if not statically_known_equal(indices_meta.stride(0), 1):
-        raise NotImplementedError("FlexGEMM indexed output indices must be contiguous")
-    return GemmIndexedOutputStore(
-        aux,
-        indices,
-        (unsqueeze_node, gather_node, target, *target_conversion),
-    )
-
-
-def flex_gemm_indexed_output_plan(
-    output: Any,
-    aux_outputs: tuple[Any, ...],
-) -> GemmIndexedOutputStore | None:
-    """Return the unique indexed auxiliary output store, if any."""
-    if not isinstance(output, torch.fx.Node):
-        return None
-    indexed_plans = tuple(
-        plan
-        for aux_output in aux_outputs
-        if isinstance(aux_output, torch.fx.Node)
-        if (plan := flex_gemm_indexed_output_store(output, aux_output)) is not None
-    )
-    if len(indexed_plans) > 1:
-        raise NotImplementedError("FlexGEMM supports one indexed row output")
-    return indexed_plans[0] if indexed_plans else None
-
-
 def tuple_output_plan(
     output: Any,
     aux_outputs: tuple[Any, ...],
     analysis: GemmLocalReduceAnalysis,
 ) -> GemmOutputPlan:
-    """Classify ordinary and backend-owned auxiliary outputs."""
+    """Classify multi-output epilogues after checking local-reduce consumers."""
     if not isinstance(output, torch.fx.Node) or not all(
         isinstance(aux_output, torch.fx.Node) for aux_output in aux_outputs
     ):
         raise NotImplementedError(FLEX_GEMM_OUTPUT_TENSOR_ERROR)
-
-    indexed_output = flex_gemm_indexed_output_plan(output, aux_outputs)
-    indexed_node = None if indexed_output is None else indexed_output.node
-    non_indexed_aux_outputs = tuple(
-        aux_output for aux_output in aux_outputs if aux_output is not indexed_node
-    )
-
-    feed_match = analysis.common_feed_main_match((output, *non_indexed_aux_outputs))
+    feed_match = analysis.common_feed_main_match((output, *aux_outputs))
     compressed_aux_plans = tuple(
         plan
-        for aux_output in non_indexed_aux_outputs
+        for aux_output in aux_outputs
         if (plan := analysis.compressed_aux_plan(output, aux_output)) is not None
     )
     if len(compressed_aux_plans) > 1:
@@ -269,10 +136,6 @@ def tuple_output_plan(
             for reduction in compressed_reductions
         ):
             feed_match = compressed_match
-        if compressed_match.physical_span > 1 and feed_match is None:
-            raise NotImplementedError(
-                "nested TensorSSA reductions must feed the main output"
-            )
         if feed_match is not None:
             if OrderedSet(analysis.physical_reduction_nodes(feed_match)) != OrderedSet(
                 compressed_reductions
@@ -286,35 +149,11 @@ def tuple_output_plan(
             output,
             aux_outputs,
             local_reduce=compressed_aux_plan,
-            indexed_output=indexed_output,
         )
-    feed_main_plan = analysis.feed_main_output_plan(output, non_indexed_aux_outputs)
+    feed_main_plan = analysis.feed_main_output_plan(output, aux_outputs)
     if feed_main_plan is not None:
-        return dataclasses.replace(
-            feed_main_plan,
-            returned_aux_outputs=aux_outputs,
-            indexed_output=indexed_output,
-        )
-    return GemmOutputPlan(
-        output,
-        aux_outputs,
-        indexed_output=indexed_output,
-    )
-
-
-def flex_gemm_output_values(
-    graph_module: torch.fx.GraphModule,
-) -> tuple[Any, tuple[Any, ...]]:
-    """Return the main value and ordered auxiliary values from the FX output."""
-    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
-    if len(output_nodes) != 1:
-        raise NotImplementedError("FlexGEMM expects one output node")
-    output_value = output_nodes[0].args[0]
-    if isinstance(output_value, (tuple, list)):
-        if not output_value:
-            raise NotImplementedError("FlexGEMM expects one tensor output")
-        return output_value[0], tuple(output_value[1:])
-    return output_value, ()
+        return feed_main_plan
+    return GemmOutputPlan(output, aux_outputs)
 
 
 def output_plan(
@@ -322,9 +161,16 @@ def output_plan(
     local_reduce: GemmLocalReduceAnalysis,
 ) -> GemmOutputPlan:
     """Classify output consumers from one shared local-reduce analysis."""
-    output_value, aux_outputs = flex_gemm_output_values(graph_module)
-    if aux_outputs:
-        return tuple_output_plan(output_value, aux_outputs, local_reduce)
+    output_nodes = [node for node in graph_module.graph.nodes if node.op == "output"]
+    if len(output_nodes) != 1:
+        raise NotImplementedError("FlexGEMM expects one output node")
+    output_value = output_nodes[0].args[0]
+    if isinstance(output_value, (tuple, list)):
+        if len(output_value) == 1:
+            output_value = output_value[0]
+        else:
+            output, *aux_outputs = output_value
+            return tuple_output_plan(output, tuple(aux_outputs), local_reduce)
     if not isinstance(output_value, torch.fx.Node):
         raise NotImplementedError("FlexGEMM expects one tensor output")
     feed_main_plan = local_reduce.feed_main_output_plan(output_value)
@@ -397,10 +243,6 @@ class FlexGemmEpilogueAnalysis:
         outputs = bind_terminal_output_storage(output_plan(graph_module, local_reduce))
         validate_output_layout_transforms(local_reduce.graph, outputs)
         reject_unplanned_reductions(local_reduce, outputs)
-        if outputs.indexed_output is not None and outputs.output_storage_nodes:
-            raise NotImplementedError(
-                "FlexGEMM indexed outputs do not compose with terminal dtype views"
-            )
         contraction_plan = build_output_contraction_plan(
             outputs.output_storage or outputs.output,
             gemm,
@@ -417,13 +259,9 @@ class FlexGemmEpilogueAnalysis:
                 raise NotImplementedError(FLEX_GEMM_MAIN_OUTPUT_SHAPE_ERROR)
             local_reduce.commit_output_guards(outputs)
             return cls(gemm, outputs, local_reduce)
-        if outputs.aux_outputs or outputs.indexed_output is not None:
+        if outputs.aux_outputs:
             raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_COMPOSITION_ERROR)
-        if (
-            contraction_plan.transform.chunked
-            and outputs.local_reduce is not None
-            and outputs.local_reduce.match.physical_span == 1
-        ):
+        if contraction_plan.transform.chunked and outputs.local_reduce is not None:
             raise NotImplementedError(
                 "chunked grouped main outputs do not compose with grouped reductions"
             )
@@ -450,6 +288,67 @@ class FlexGemmEpilogueAnalysis:
                 FlexGemmLocalReduceGeometry(self.outputs.output_contraction.group, 1)
             )
         return tuple(geometries)
+
+
+def expand_epimod_prepare_softmax_online(
+    graph_module: torch.fx.GraphModule,
+) -> None:
+    """Expand online-softmax tuples into the max and sum EpiMod can schedule."""
+    graph = graph_module.graph
+    changed = False
+    for node in tuple(graph.nodes):
+        if (
+            node.op != "call_function"
+            or node.target is not inductor_prims.prepare_softmax_online
+        ):
+            continue
+        source = node.args[0]
+        dim = node.args[1] if len(node.args) > 1 else node.kwargs.get("dim")
+        values = node.meta.get("val")
+        if (
+            not isinstance(source, torch.fx.Node)
+            or not isinstance(dim, int)
+            or not isinstance(values, (tuple, list))
+            or len(values) != 2
+        ):
+            raise NotImplementedError(
+                "FlexGEMM EpiMod requires a static prepare_softmax_online dimension"
+            )
+        with graph.inserting_before(node):
+            maximum = graph.call_function(
+                torch.ops.aten.amax.default, (source, [dim], True)
+            )
+            centered = graph.call_function(torch.ops.aten.sub.Tensor, (source, maximum))
+            exponential = graph.call_function(torch.ops.aten.exp.default, (centered,))
+            summed = graph.call_function(
+                torch.ops.aten.sum.dim_IntList, (exponential, [dim], True)
+            )
+        for expanded, value in (
+            (maximum, values[0]),
+            (centered, source.meta.get("val")),
+            (exponential, source.meta.get("val")),
+            (summed, values[1]),
+        ):
+            expanded.meta.update(node.meta)
+            expanded.meta["val"] = value
+        for user in tuple(node.users):
+            if (
+                user.op != "call_function"
+                or user.target is not operator.getitem
+                or not isinstance(user.args[1], int)
+                or user.args[1] not in (0, 1)
+            ):
+                raise NotImplementedError(
+                    "FlexGEMM EpiMod requires direct prepare_softmax_online tuple uses"
+                )
+            user.replace_all_uses_with((maximum, summed)[user.args[1]])
+            graph.erase_node(user)
+        graph.erase_node(node)
+        changed = True
+    if changed:
+        graph.eliminate_dead_code()
+        graph.lint()
+        graph_module.recompile()
 
 
 def analyze_flex_gemm_epilogue(
@@ -549,94 +448,17 @@ class FlexGemmEpiModSource:
     local_reduce_binary_store_finalize: bool = False
     local_reduce_prepass_combine: str | None = None
     local_reduce_prepass_finalize: str | None = None
-    local_reduce_planes: int = 1
-    local_reduce_fragment_reduced: bool = False
-
-
-def online_softmax_combine_body(fast_math: bool) -> tuple[str, ...]:
-    """Cross-fragment combine of (running max, rescaled sum) TensorSSA planes, NaN-propagating."""
-    fastmath = ", fastmath=True" if fast_math else ""
-    exp_lhs = (
-        f"cute.math.exp2((lhs[0] - maximum) * {CuteDSLOpOverrides.LOG2_E}{fastmath})"
-    )
-    exp_rhs = (
-        f"cute.math.exp2((rhs[0] - maximum) * {CuteDSLOpOverrides.LOG2_E}{fastmath})"
-    )
-    return (
-        "maximum = cutlass.max(lhs[0], rhs[0])",
-        "one = cute.full_like(maximum, 1.0)",
-        f"lhs_scale = cute.where(operator.eq(lhs[0], maximum), one, {exp_lhs})",
-        f"rhs_scale = cute.where(operator.eq(rhs[0], maximum), one, {exp_rhs})",
-        "return maximum, lhs[1] * lhs_scale + rhs[1] * rhs_scale",
-    )
 
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpiModReductionSpec:
-    """Describe one normalized grouped reduction lowered into a QuACK EpiOp."""
+    """Describe one grouped reduction lowered into an external QuACK EpiOp."""
 
     node: torch.fx.Node
     aliases: tuple[torch.fx.Node, ...]
-    reduction: NormalizedGemmReduction
-    component_aliases: tuple[tuple[torch.fx.Node, ...], ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.component_aliases and len(self.component_aliases) != self.reduce_planes:
-            raise RuntimeError(
-                "FlexGEMM state component aliases must match reduction arity"
-            )
-
-    @property
-    def source(self) -> torch.fx.Node:
-        return self.reduction.source
-
-    @property
-    def is_online_softmax(self) -> bool:
-        return isinstance(self.reduction, NormalizedPrepareSoftmax)
-
-    @property
-    def combine(self) -> str | None:
-        if isinstance(self.reduction, NormalizedPrepareSoftmax):
-            return None
-        return {
-            "sum": "add",
-            "mean": "add",
-            "prod": "mul",
-            "max": "max",
-            "min": "min",
-        }[self.reduction.reduction_type]
-
-    @property
-    def finalize(self) -> str | None:
-        return (
-            "mean"
-            if isinstance(self.reduction, NormalizedReduction)
-            and self.reduction.reduction_type == "mean"
-            else None
-        )
-
-    @property
-    def reduce_planes(self) -> int:
-        """Return the number of independently transported state planes."""
-        return self.reduction.associative_state.planes
-
-    @property
-    def boundary_aliases(self) -> tuple[torch.fx.Node, ...]:
-        """Return aggregate and projected reduction nodes that bound finalization."""
-        return (
-            *self.aliases,
-            *(alias for aliases in self.component_aliases for alias in aliases),
-        )
-
-    def lift_value(self, source: Any) -> Any:
-        """Lift one source value into this reduction's logical state."""
-        if self.is_online_softmax:
-            return f"({source}, cute.full_like({source}, 1.0))"
-        return source
-
-    def generated_combine_body(self, fast_math: bool) -> tuple[str, ...]:
-        """Return a generated tuple combine, or no body for a built-in combine."""
-        return online_softmax_combine_body(fast_math) if self.is_online_softmax else ()
+    source: torch.fx.Node
+    combine: str
+    finalize: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -647,76 +469,43 @@ class FlexGemmEpiModLocalReduceSpec:
     prepass: FlexGemmEpiModReductionSpec | None = None
 
 
-def epimod_reduction_alias_key(
-    reduction: NormalizedGemmReduction,
-) -> tuple[Any, ...]:
+def epimod_reduction_alias_key(reduction: NormalizedReduction) -> tuple[Any, ...]:
     """Return the physical identity shared by equivalent FX reductions."""
     dims = (
         tuple(reduction.dim)
         if isinstance(reduction.dim, (tuple, list))
         else (reduction.dim,)
     )
-    details = (
-        (bool(reduction.keepdim), reduction.dtype, reduction.reduction_type)
-        if isinstance(reduction, NormalizedReduction)
-        else (True, None, type(reduction))
-    )
-    return reduction.source, dims, *details
-
-
-def epimod_projected_reduction(
-    node: torch.fx.Node,
-    reduction: NormalizedGemmReduction,
-) -> tuple[NormalizedGemmReduction, tuple[torch.fx.Node, ...]]:
-    """Collapse an aggregate used only through one scalar-state projection."""
-    state = reduction.associative_state
-    if state.planes == 1 or not node.users:
-        return reduction, ()
-    projection: GemmReductionType | None = None
-    aliases = []
-    for user in node.users:
-        index = user.args[1] if user.target is operator.getitem else None
-        if not isinstance(index, int) or not -state.planes <= index < state.planes:
-            return reduction, ()
-        candidate = state.reduction_projections[index % state.planes]
-        if candidate is None or (projection is not None and candidate != projection):
-            return reduction, ()
-        projection = candidate
-        aliases.append(user)
-    if projection is None:
-        return reduction, ()
     return (
-        NormalizedReduction(reduction.source, reduction.dim, True, None, projection),
-        tuple(aliases),
+        reduction.source,
+        dims,
+        bool(reduction.keepdim),
+        reduction.dtype,
+        reduction.reduction_type,
     )
 
 
 def epimod_reduction_spec(
     node: torch.fx.Node,
     aliases: tuple[torch.fx.Node, ...],
-    reduction: NormalizedGemmReduction,
+    reduction: NormalizedReduction,
 ) -> FlexGemmEpiModReductionSpec:
     """Translate one normalized FX reduction into QuACK semantics."""
-    if isinstance(reduction, NormalizedReduction) and reduction.dtype is not None:
+    if reduction.dtype is not None:
         raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
-    return FlexGemmEpiModReductionSpec(node, aliases, reduction)
-
-
-def epimod_state_projection(
-    state: FlexGemmEpiModReductionSpec,
-    candidate: FlexGemmEpiModReductionSpec,
-    matches: dict[torch.fx.Node, GemmLocalReduceMatch],
-) -> int | None:
-    """Return the state component that makes a scalar reduction redundant."""
-    if (
-        state.source is not candidate.source
-        or matches[state.node].geometry != matches[candidate.node].geometry
-        or not isinstance(candidate.reduction, NormalizedReduction)
-    ):
-        return None
-    projections = state.reduction.associative_state.reduction_projections
-    reduction_type = candidate.reduction.reduction_type
-    return projections.index(reduction_type) if reduction_type in projections else None
+    return FlexGemmEpiModReductionSpec(
+        node,
+        aliases,
+        reduction.source,
+        {
+            "sum": "add",
+            "mean": "add",
+            "prod": "mul",
+            "max": "max",
+            "min": "min",
+        }[reduction.reduction_type],
+        "mean" if reduction.reduction_type == "mean" else None,
+    )
 
 
 def epimod_dependency_slice(
@@ -743,100 +532,64 @@ def epimod_local_reduce_spec(
     physical_nodes = analysis.local_reduce.physical_reduction_nodes(local_reduce.match)
     graph = analysis.local_reduce.graph
     alias_groups: dict[
-        tuple[Any, ...], tuple[NormalizedGemmReduction, list[torch.fx.Node]]
+        tuple[Any, ...], tuple[NormalizedReduction, list[torch.fx.Node]]
     ] = {}
     for node in physical_nodes:
         reduction = graph.normalized_nodes.get(node)
-        if not isinstance(reduction, NormalizedGemmReduction):
+        if not isinstance(reduction, NormalizedReduction):
             raise AssertionError(
                 "analyzed grouped reduction requires reduction metadata"
             )
-        reduction, projection_aliases = epimod_projected_reduction(node, reduction)
         key = epimod_reduction_alias_key(reduction)
         group = alias_groups.get(key)
         if group is None:
-            alias_groups[key] = (reduction, [node, *projection_aliases])
+            alias_groups[key] = (reduction, [node])
         else:
-            group[1].extend((node, *projection_aliases))
-    reduction_specs = tuple(
-        epimod_reduction_spec(nodes[0], tuple(nodes), reduction)
-        for reduction, nodes in alias_groups.values()
-    )
-    matches = analysis.local_reduce.matches
-    state_specs = tuple(spec for spec in reduction_specs if spec.reduce_planes > 1)
-    if len(state_specs) == 1:
-        state = state_specs[0]
-        component_aliases = [[] for _ in range(state.reduce_planes)]
-        remaining = []
-        for candidate in reduction_specs:
-            if candidate is state:
-                continue
-            projection = epimod_state_projection(state, candidate, matches)
-            if projection is None:
-                remaining.append(candidate)
-            else:
-                component_aliases[projection].extend(candidate.aliases)
-        if any(component_aliases):
-            state = dataclasses.replace(
-                state,
-                component_aliases=tuple(
-                    tuple(aliases) for aliases in component_aliases
-                ),
-            )
-        reduction_specs = (state, *remaining)
-
+            group[1].append(node)
+    reductions = {nodes[0]: reduction for reduction, nodes in alias_groups.values()}
+    reduction_nodes = tuple(reductions)
+    aliases = {nodes[0]: tuple(nodes) for _, nodes in alias_groups.values()}
     geometry = local_reduce.match.geometry
-    if len(reduction_specs) == 1:
-        sink = reduction_specs[0]
-        if analysis.local_reduce.matches[sink.node].geometry != geometry:
+    if len(reduction_nodes) == 1:
+        reduction_node = reduction_nodes[0]
+        if analysis.local_reduce.matches[reduction_node].geometry != geometry:
             raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-        spec = FlexGemmEpiModLocalReduceSpec(sink)
-    elif len(reduction_specs) == 2:
-        inner_spec, outer_spec = reduction_specs
-        inner_node, outer_node = inner_spec.node, outer_spec.node
-        inner = (
-            inner_spec.reduction
-            if isinstance(inner_spec.reduction, NormalizedReduction)
-            else None
+        spec = FlexGemmEpiModLocalReduceSpec(
+            epimod_reduction_spec(
+                reduction_node, aliases[reduction_node], reductions[reduction_node]
+            )
         )
-        outer = (
-            outer_spec.reduction
-            if isinstance(outer_spec.reduction, NormalizedReduction)
-            else None
-        )
-        outer_source = None if outer is None else outer.source
-        reduction_nodes = (inner_node, outer_node)
+    elif len(reduction_nodes) == 2:
+        inner_node, outer_node = reduction_nodes
+        inner = reductions[inner_node]
+        outer_source = reductions[outer_node].source
+        matches = analysis.local_reduce.matches
         if (
             local_reduce.feeds_main
             or geometry.axis != 1
             or geometry.group > LOCAL_REDUCE_FRAGMENT_WIDTH
             or geometry.group & (geometry.group - 1)
             or any(matches[node].geometry != geometry for node in reduction_nodes)
-            or any(spec.reduce_planes != 1 for spec in reduction_specs)
-            or inner is None
             or not inner.keepdim
-            or not isinstance(outer_source, torch.fx.Node)
             or not is_shape_preserving_pointwise_node(outer_source)
             or not analysis.local_reduce.graph.depends_on(outer_source, inner_node)
         ):
             raise NotImplementedError(
                 "FlexGEMM EpiMod supports two grouped reductions only when they "
-                "have scalar state, the same axis-1 geometry, and the first "
-                "keepdim reduction feeds the pointwise source of the second"
+                "have the same axis-1 geometry and the first keepdim reduction "
+                "feeds the pointwise source of the second"
             )
-        spec = FlexGemmEpiModLocalReduceSpec(outer_spec, inner_spec)
+        spec = FlexGemmEpiModLocalReduceSpec(
+            epimod_reduction_spec(
+                outer_node, aliases[outer_node], reductions[outer_node]
+            ),
+            epimod_reduction_spec(inner_node, aliases[inner_node], inner),
+        )
     else:
         raise NotImplementedError(
             "FlexGEMM EpiMod supports one grouped reduction, or exactly two "
             "same-geometry axis-1 reductions in an inner-to-outer chain"
         )
-    if spec.sink.reduce_planes > 1 and local_reduce.feeds_main:
-        raise NotImplementedError(
-            "FlexGEMM multi-plane grouped reductions currently support returned "
-            "outputs, not feed-main consumers"
-        )
-    if local_reduce.match.physical_span > 1 and spec.sink.finalize == "mean":
-        raise NotImplementedError("nested TensorSSA reductions do not support mean")
     reduction_node = spec.sink.node
     if (
         local_reduce.feeds_main
@@ -913,7 +666,6 @@ class FlexGemmEpilogueEmitter:
         epilogue_arg_kinds: tuple[str, ...],
         *,
         fast_math: bool,
-        swap_ab: bool,
         mainloop_scale_count: int,
     ) -> None:
         self.graph_module = graph_module
@@ -924,7 +676,15 @@ class FlexGemmEpilogueEmitter:
         self.output_contraction_select_indices = (
             analysis.output_contraction_select_indices
         )
-        self.terminal_rewrites = self.outputs.terminal_rewrites
+        self.output_contraction_layouts = analysis.output_contraction_layouts
+        local_reduce_store = (
+            None if self.local_reduce is None else self.local_reduce.store
+        )
+        self.local_reduce_output_storage = (
+            None if local_reduce_store is None else local_reduce_store.output_storage
+        )
+        self.output_storage = self.outputs.output_storage
+        self.output_storage_nodes = frozenset(self.outputs.output_storage_nodes)
         self.local_reduce_spec: FlexGemmEpiModLocalReduceSpec | None = None
         self.local_reduce_prepass: FlexGemmEpiModReductionSpec | None = None
         self.local_reduce_source_nodes: frozenset[torch.fx.Node] = frozenset()
@@ -940,18 +700,10 @@ class FlexGemmEpilogueEmitter:
         self.operand_names = tuple(
             f"operand{index}" for index in range(len(epilogue_arg_placeholders))
         )
-        self.local_reduce_fragment_reduced = False
-        self.local_reduce_sink_value: CuteDSLCSEVariable | None = None
         if self.local_reduce is not None:
             spec = epimod_local_reduce_spec(analysis, self.local_reduce)
             self.local_reduce_spec = spec
             sink = spec.sink
-            match = self.local_reduce.match
-            paired = match.physical_span > 1
-            if paired and swap_ab:
-                raise NotImplementedError(
-                    "nested TensorSSA reductions do not support swap_ab=True"
-                )
             self.local_reduce_source_nodes = frozenset(
                 (
                     *analysis.local_reduce.graph.dependencies.get(sink.source, ()),
@@ -962,26 +714,17 @@ class FlexGemmEpilogueEmitter:
             if (
                 prepass is None
                 and self.local_reduce.feeds_main
-                and match.geometry.axis == 1
-                and not paired
+                and self.local_reduce.match.geometry.axis == 1
             ):
                 prepass = sink
             self.local_reduce_prepass = prepass
-            # Paired lanes complete their logical group inside one fragment
-            # (GroupedMainStore min_fragment_n); axis-N multi-plane state returns
-            # fragment partials. Both skip only QuACK's in-fragment fold.
-            self.local_reduce_fragment_reduced = paired or (
-                sink.reduce_planes > 1 and match.geometry.axis == 1 and not swap_ab
-            )
             if (
-                (not self.local_reduce.feeds_main or prepass is not None or paired)
+                (not self.local_reduce.feeds_main or prepass is not None)
                 and self.local_reduce.store is not None
                 and self.local_reduce.store.value_node is not sink.node
             ):
-                sink_aliases = frozenset(sink.boundary_aliases)
-                prepass_aliases = frozenset(
-                    () if prepass is None else prepass.boundary_aliases
-                )
+                sink_aliases = frozenset(sink.aliases)
+                prepass_aliases = frozenset(() if prepass is None else prepass.aliases)
                 self.local_reduce_finalize_nodes = epimod_dependency_slice(
                     self.local_reduce.store.value_node,
                     sink_aliases | prepass_aliases,
@@ -1004,17 +747,6 @@ class FlexGemmEpilogueEmitter:
                 self.local_reduce_finalize_uses_prepass = bool(
                     self.local_reduce_finalize_nodes & (prepass_aliases - sink_aliases)
                 )
-        grouped_tensors = analysis.output_contraction_layouts | (
-            analysis.local_reduce.grouped_tensors
-            if self.local_reduce_fragment_reduced
-            else {}
-        )
-        self.grouped_layouts = {
-            node: GroupedTensorSSALayout(layout.group, layout.axis)
-            for node, layout in grouped_tensors.items()
-            if view_or_reshape_args(node) is not None
-            or node.target is torch.ops.aten.split.Tensor
-        }
         self.alpha = alpha
         self.beta = beta
         self.fast_math = fast_math
@@ -1022,10 +754,8 @@ class FlexGemmEpilogueEmitter:
         self.kernel = GemmEpilogueCuteDSLKernel()
         self.params = ["acc"]
         self.base_env = self.initial_env_for_params(self.params)
-        if self.local_reduce_prepass is not None or (
-            self.local_reduce is not None
-            and self.local_reduce.feeds_main
-            and self.local_reduce.match.physical_span == 1
+        if self.local_reduce is not None and (
+            self.local_reduce.feeds_main or self.local_reduce_prepass is not None
         ):
             self.params.append(LOCAL_REDUCE_FEED_MAIN_ARG_NAME)
         self.local_reduce_prepass_value: CuteDSLCSEVariable | None = None
@@ -1106,29 +836,18 @@ class FlexGemmEpilogueEmitter:
         ):
             return
         sink = spec.sink
+        reduction_meta = sink.node.meta.get("val")
+        dtype = (
+            reduction_meta.dtype
+            if isinstance(reduction_meta, torch.Tensor)
+            else torch.float32
+        )
+        value = "value"
+        if sink.finalize == "mean":
+            value = f"(value / {float(local_reduce.match.geometry.group)!r})"
         kernel = GemmEpilogueCuteDSLKernel()
-        if sink.reduce_planes == 1:
-            reduction_meta = sink.node.meta.get("val")
-            dtype = (
-                reduction_meta.dtype
-                if isinstance(reduction_meta, torch.Tensor)
-                else torch.float32
-            )
-            value = "value"
-            if sink.finalize == "mean":
-                value = f"(value / {float(local_reduce.match.geometry.group)!r})"
-            reduced: Any = self.value(value, dtype)
-        else:
-            reduced = tuple(
-                self.value(f"state[{index}]", torch.float32)
-                for index in range(sink.reduce_planes)
-            )
+        reduced = self.value(value, dtype)
         env: dict[torch.fx.Node, Any] = dict.fromkeys(sink.aliases, reduced)
-        if sink.component_aliases:
-            if not isinstance(reduced, tuple):
-                raise AssertionError("state projections require multi-plane reduction")
-            for index, aliases in enumerate(sink.component_aliases):
-                env.update((alias, reduced[index]) for alias in aliases)
         if self.local_reduce_finalize_uses_prepass:
             prepass = self.local_reduce_prepass
             if prepass is None:
@@ -1203,10 +922,10 @@ class FlexGemmEpilogueEmitter:
         self.local_reduce_prepass_body = tuple(kernel.body.lines)
         self.local_reduce_prepass_result = flex_gemm_epilogue_arg(source, env)
 
-    def lower_grouped_layout(
-        self, node: torch.fx.Node, layout: GroupedTensorSSALayout
+    def lower_output_contraction_layout(
+        self, node: torch.fx.Node, layout: FlexGemmLocalReduceGeometry
     ) -> None:
-        """Reshape one physical TensorSSA fragment into grouped lanes."""
+        """Reshape one physical TensorSSA fragment into adjacent-N lane groups."""
         if node.target is torch.ops.aten.split.Tensor:
             source_node = node.args[0]
         else:
@@ -1215,9 +934,17 @@ class FlexGemmEpilogueEmitter:
                 raise AssertionError("grouped main layout requires a view or split")
             source_node = view_args[0]
         source = flex_gemm_epilogue_arg(source_node, self.env)
+        fragment_group = (
+            f"cutlass.const_expr(min({layout.group}, "
+            f"cute.size({source}.shape, mode=[0])))"
+        )
+        repeats = (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({layout.group}, cute.size({source}.shape, mode=[0])))"
+        )
         grouped = self.kernel.cse.generate(
             self.kernel.body,
-            f"{source}.reshape({layout.tensorssa_shape(source)})",
+            f"{source}.reshape(((1, {fragment_group}, {repeats}), 1, 1))",
             dtype=torch.float32,
             shape=(1,),
         )
@@ -1248,89 +975,6 @@ class FlexGemmEpilogueEmitter:
             self.kernel.body, expression, dtype=dtype, shape=(1,)
         )
 
-    def generate_like(
-        self, expression: str, reference: Any, *, shape_reference: Any | None = None
-    ) -> CuteDSLCSEVariable:
-        """Emit one expression while preserving reference dtype and shape metadata."""
-        shape_reference = reference if shape_reference is None else shape_reference
-        return self.kernel.cse.generate(
-            self.kernel.body,
-            expression,
-            dtype=getattr(reference, "dtype", None),
-            shape=getattr(shape_reference, "shape", None),
-        )
-
-    def broadcast_fragment_partial(
-        self, reduced: Any, layout: GroupedTensorSSALayout, source: Any
-    ) -> CuteDSLCSEVariable:
-        """Broadcast one fragment partial back to its grouped TensorSSA shape."""
-        return self.generate_like(
-            f"{reduced}.reshape({layout.keepdim_shape(source)}).broadcast_to({source}.shape)",
-            reduced,
-            shape_reference=source,
-        )
-
-    def lower_online_softmax_fragment_partial(
-        self, source: Any, layout: GroupedTensorSSALayout
-    ) -> tuple[CuteDSLCSEVariable, CuteDSLCSEVariable]:
-        """Reduce one TensorSSA fragment into online maximum and safe-exp sum planes."""
-        maximum = self.generate_like(
-            f'{source}.reduce(cute.ReductionOp.MAX, init_val=float("-inf"), '
-            f"reduction_profile={layout.reduction_profile})",
-            source,
-        )
-        maximum_broadcast = self.broadcast_fragment_partial(maximum, layout, source)
-        centered = self.generate_like(f"({source} - {maximum_broadcast})", source)
-        exp_centered = CuteDSLOpOverrides.exp(centered)
-        is_maximum = self.generate_like(
-            f"operator.eq({source}, cute.full_like({source}, {maximum_broadcast}))",
-            source,
-        )
-        safe_exp = self.generate_like(
-            f"cute.where({is_maximum}, cute.full_like({exp_centered}, 1.0), "
-            f"{exp_centered})",
-            exp_centered,
-        )
-        total = self.generate_like(
-            f"{safe_exp}.reduce(cute.ReductionOp.ADD, init_val=0.0, "
-            f"reduction_profile={layout.reduction_profile})",
-            safe_exp,
-        )
-        return maximum_broadcast, self.broadcast_fragment_partial(total, layout, source)
-
-    def lower_fragment_partial_state(
-        self, sink: FlexGemmEpiModReductionSpec, source: Any
-    ) -> Any:
-        """Reduce one TensorSSA fragment before the generic physical combine."""
-        if self.local_reduce is None:
-            raise AssertionError(
-                "TensorSSA grouped reduction requires a reduction plan"
-            )
-        match = self.local_reduce.match
-        geometry = match.geometry
-        layout = GroupedTensorSSALayout(geometry.group, geometry.axis)
-        if isinstance(sink.reduction, NormalizedPrepareSoftmax):
-            return self.lower_online_softmax_fragment_partial(source, layout)
-        kind = sink.reduction.reduction_type
-        desc = tensorssa_reduction(canonical_tensorssa_reduction_type(kind))
-        reduced = self.generate_like(
-            f"{source}.reduce({desc.cute_op}, init_val={desc.init_val}, "
-            f"reduction_profile={layout.reduction_profile})",
-            source,
-        )
-        if match.physical_span > 1:
-            # QuACK collects this sink at physical fragment width; broadcast the
-            # logical group value across both paired lanes.
-            physical = GroupedTensorSSALayout(
-                match.physical_geometry.group, geometry.axis
-            )
-            self.local_reduce_sink_value = self.generate_like(
-                f"{reduced}.reshape({physical.keepdim_shape('acc')})"
-                f".broadcast_to({physical.tensorssa_shape('acc')})",
-                reduced,
-            )
-        return self.broadcast_fragment_partial(reduced, layout, source)
-
     def lower_graph(self) -> None:
         """Lower FX nodes through Inductor's standard operation-dispatch API."""
         spec = self.local_reduce_spec
@@ -1350,8 +994,7 @@ class FlexGemmEpilogueEmitter:
                 if node is self.gemm or node.op in ("placeholder", "output"):
                     continue
                 if (
-                    (local_reduce is None or local_reduce.match.physical_span == 1)
-                    and (
+                    (
                         self.local_reduce_prepass is None
                         or (spec is not None and spec.prepass is not None)
                     )
@@ -1367,18 +1010,27 @@ class FlexGemmEpilogueEmitter:
                     raise NotImplementedError(
                         f"unsupported FlexGEMM EpiMod node: {node.format_node()}"
                     )
-                if node in self.grouped_layouts:
-                    self.lower_grouped_layout(node, self.grouped_layouts[node])
+                if node in self.output_contraction_layouts:
+                    self.lower_output_contraction_layout(
+                        node, self.output_contraction_layouts[node]
+                    )
                     continue
                 if node in self.output_contraction_select_indices:
                     self.lower_output_contraction_select(
                         node, self.output_contraction_select_indices[node]
                     )
                     continue
-                if node in self.terminal_rewrites:
-                    source = self.terminal_rewrites[node]
-                    if source is not None:
-                        self.env[node] = flex_gemm_epilogue_arg(source, self.env)
+                if node in self.output_storage_nodes:
+                    if self.output_storage is None:
+                        raise AssertionError("output storage wrapper requires a source")
+                    self.env[node] = flex_gemm_epilogue_arg(
+                        self.output_storage, self.env
+                    )
+                    continue
+                if (
+                    self.local_reduce_output_storage is not None
+                    and node in self.local_reduce_output_storage.nodes
+                ):
                     continue
                 if self.local_reduce_prepass is not None and node in prepass_aliases:
                     if self.local_reduce_prepass_value is None:
@@ -1395,9 +1047,7 @@ class FlexGemmEpilogueEmitter:
                     continue
                 if sink is not None and local_reduce is not None and node is sink.node:
                     source = flex_gemm_epilogue_arg(sink.source, self.env)
-                    if self.local_reduce_fragment_reduced:
-                        self.env[node] = self.lower_fragment_partial_state(sink, source)
-                    elif local_reduce.feeds_main:
+                    if local_reduce.feeds_main:
                         meta = node.meta.get("val")
                         dtype = (
                             meta.dtype
@@ -1411,7 +1061,7 @@ class FlexGemmEpilogueEmitter:
                             shape=(1,),
                         )
                     else:
-                        self.env[node] = sink.lift_value(source)
+                        self.env[node] = source
                     continue
                 self.env[node] = lower_gemm_epilogue_fx_node(
                     self.kernel, self.env, node, context="FlexGEMM"
@@ -1436,8 +1086,6 @@ class FlexGemmEpilogueEmitter:
             (main_name, main_result),
             *zip(aux_names, aux_results, strict=True),
         ]
-        if self.outputs.indexed_output is not None:
-            result_items.append((INDEXED_OUTPUT_STORE_ARG_NAME, main_result))
         if (
             self.local_reduce is not None
             and sink is not None
@@ -1445,14 +1093,9 @@ class FlexGemmEpilogueEmitter:
             and (
                 not self.local_reduce.feeds_main
                 or self.local_reduce_prepass is not None
-                or self.local_reduce.match.physical_span > 1
             )
         ):
-            store_value = (
-                flex_gemm_epilogue_arg(sink.node, self.env)
-                if self.local_reduce_sink_value is None
-                else self.local_reduce_sink_value
-            )
+            store_value = flex_gemm_epilogue_arg(sink.source, self.env)
             if self.local_reduce_finalize_uses_prepass:
                 store_value = f"({store_value}, {LOCAL_REDUCE_FEED_MAIN_ARG_NAME})"
             result_items.append(
@@ -1470,12 +1113,6 @@ class FlexGemmEpilogueEmitter:
         body = "\n".join(f"    {line}" for line in self.kernel.body.lines)
         if body:
             body += "\n"
-        combine_lines = (
-            () if sink is None else sink.generated_combine_body(self.fast_math)
-        )
-        combine_body = "\n".join(f"    {line}" for line in combine_lines)
-        if combine_body:
-            combine_body += "\n"
         finalize_body = "\n".join(
             f"    {line}" for line in self.local_reduce_finalize_body
         )
@@ -1497,31 +1134,24 @@ class FlexGemmEpilogueEmitter:
             else f"{prepass_body}return {self.local_reduce_prepass_result}\n"
         )
         key_payload = (
-            f"inline_asm={inline_asm_cache_key()}\n"
-            f"reduce_planes={1 if sink is None else sink.reduce_planes}\n"
-            f"fragment_reduced={self.local_reduce_fragment_reduced}\n"
-            f"{self.graph_module.code}\n{body}return {{{return_source}}}\n"
-            f"{combine_body}{finalize_payload}{prepass_payload}"
-            f"{self.epilogue_arg_kinds!r}"
+            f"inline_asm={inline_asm_cache_key()}\n{self.graph_module.code}\n"
+            f"{body}return {{{return_source}}}\n"
+            f"{finalize_payload}{prepass_payload}{self.epilogue_arg_kinds!r}"
         )
         key = hashlib.sha256(key_payload.encode()).hexdigest()[:16]
         name = f"flex_gemm_epilogue_{key}"
-        combine_name = None
-        combine_source = ""
-        if combine_lines:
-            combine_name = f"{name}_local_reduce_combine"
-            combine_source = f"def {combine_name}(lhs, rhs):\n{combine_body}\n"
         finalize_name = None
         finalize_source = ""
         if self.local_reduce_finalize_result is not None:
             finalize_name = f"{name}_local_reduce_finalize"
             finalize_params = ", ".join(
                 (
-                    "value, prepass_value"
-                    if self.local_reduce_finalize_uses_prepass
-                    else "state"
-                    if sink is not None and sink.reduce_planes > 1
-                    else "value",
+                    "value",
+                    *(
+                        ("prepass_value",)
+                        if self.local_reduce_finalize_uses_prepass
+                        else ()
+                    ),
                     *self.local_reduce_finalize_operands,
                 )
             )
@@ -1556,13 +1186,11 @@ class FlexGemmEpilogueEmitter:
         return FlexGemmEpiModSource(
             name=name,
             source=(
-                f"{generated_imports}{combine_source}{finalize_source}{prepass_source}"
+                f"{generated_imports}{finalize_source}{prepass_source}"
                 f"@cute.jit\ndef {name}({', '.join(self.params)}):\n"
                 f"{body}    return {{{return_source}}}\n"
             ),
-            local_reduce_combine=(
-                None if sink is None else combine_name or sink.combine
-            ),
+            local_reduce_combine=None if sink is None else sink.combine,
             local_reduce_finalize=(
                 None
                 if sink is None
@@ -1587,8 +1215,6 @@ class FlexGemmEpilogueEmitter:
                 if self.local_reduce_prepass is None
                 else self.local_reduce_prepass.finalize
             ),
-            local_reduce_planes=1 if sink is None else sink.reduce_planes,
-            local_reduce_fragment_reduced=self.local_reduce_fragment_reduced,
         )
 
     def materialize(self) -> FlexGemmEpiModSource:
@@ -1608,7 +1234,6 @@ def materialize_flex_gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...],
     *,
     fast_math: bool = False,
-    swap_ab: bool = False,
     mainloop_scale_count: int = 0,
 ) -> FlexGemmEpiModSource:
     """Materialize an analyzed FlexGEMM body as generated CuTeDSL source.
@@ -1638,6 +1263,5 @@ def materialize_flex_gemm_epilogue(
         beta,
         epilogue_arg_kinds,
         fast_math=fast_math,
-        swap_ab=swap_ab,
         mainloop_scale_count=mainloop_scale_count,
     ).materialize()
