@@ -6899,7 +6899,6 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
-    # From https://github.com/pytorch/pytorch/issues/197434
     @skip_if_gpu_halide  # slow
     def test_adaptive_max_pool2d_transposed_indices(self):
         # transposed input, indices must be logical and not physical offsets
@@ -7278,7 +7277,6 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([2, 2, 3, 6]),),
         )
 
-    # From https://github.com/pytorch/pytorch/issues/197434
     def test_max_pool2d_transposed_indices(self):
         # transposed input, indices must be logical and not physical offsets
         def fn(x):
