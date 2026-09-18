@@ -271,9 +271,9 @@ class TestC10dTorchCommsBasic(C10dTorchCommsTestBase):
         self.assertEqual(tensor.item(), sum(range(1, self.world_size + 1)))
 
     @skipIfXpu(
-             msg="second new_group() on the TorchComms xccl path hangs: "
-          "https://github.com/intel/torch-xpu-ops/issues/5385"
-        )
+        msg="second new_group() on the TorchComms xccl path hangs: "
+        "https://github.com/intel/torch-xpu-ops/issues/5385"
+    )
     def test_new_group_qualified_backend_passes_through(self):
         if self._requires_accelerator():
             return
