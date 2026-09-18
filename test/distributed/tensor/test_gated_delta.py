@@ -15,7 +15,7 @@ from torch.distributed.tensor.experimental._context_parallel._gated_delta import
     a2a_feat_to_seq,
     a2a_seq_to_feat,
 )
-from torch.nn.modules.gated_delta import GatedDeltaNet, TinyGatedDeltaModel
+from torch.nn.modules.gated_delta import _TinyGatedDeltaModel, GatedDeltaNet
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -88,7 +88,7 @@ class GatedDeltaFSDPSmokeTest(DTensorTestBase):
         mesh = init_device_mesh(
             self.device_type, (1, self.world_size), mesh_dim_names=("fsdp", "cp")
         )
-        model = TinyGatedDeltaModel(
+        model = _TinyGatedDeltaModel(
             vocab_size=32,
             hidden_size=32,
             num_heads=4,

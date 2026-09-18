@@ -9,16 +9,21 @@
 # back to in-proj / conv / A_log, not only through the residual.
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
-import torch.nn.functional as F
-from torch.distributed.device_mesh import DeviceMesh
-
-from torch.nn.attention.gated_delta import _gated_delta_rule_impl as _gdn_local
 import torch.nn.attention.gated_delta as _gdn_mod
+import torch.nn.functional as F
+from torch.nn.attention.gated_delta import (
+    _gated_delta_rule_impl as _gdn_local,
+    gated_delta_rule as _gdn_public,
+)
+
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
 
 
 _cp_mesh: DeviceMesh | None = None
@@ -42,15 +47,26 @@ def _all_to_all_single(x: torch.Tensor, group: dist.ProcessGroup) -> torch.Tenso
     """Dim-0 all-to-all that participates in autograd."""
     y = funcol.all_to_all_single_autograd(x.contiguous(), None, None, group)
     wait = getattr(y, "wait", None)
-    return wait() if callable(wait) else y
+    if callable(wait):
+        out = wait()
+        if isinstance(out, torch.Tensor):
+            return out
+    if not isinstance(y, torch.Tensor):
+        raise TypeError("all_to_all_single_autograd must return a Tensor")
+    return y
 
 
 def _plain(t: torch.Tensor) -> torch.Tensor:
     fn = getattr(t, "full_tensor", None)
-    return fn() if callable(fn) else t
+    if not callable(fn):
+        return t
+    out = fn()
+    return out if isinstance(out, torch.Tensor) else t
 
 
-def slice_param_cp(param: torch.Tensor, dim: int, group: dist.ProcessGroup) -> torch.Tensor:
+def slice_param_cp(
+    param: torch.Tensor, dim: int, group: dist.ProcessGroup
+) -> torch.Tensor:
     param = _plain(param)
     world = dist.get_world_size(group)
     rank = dist.get_rank(group)
@@ -81,7 +97,11 @@ def a2a_seq_to_feat(x: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
     feat_local = feat // world
     x = x.reshape(batch, seq_local, world, feat_local).permute(2, 1, 0, 3).contiguous()
     out = _all_to_all_single(x, group)
-    return out.permute(2, 0, 1, 3).reshape(batch, world * seq_local, feat_local).contiguous()
+    return (
+        out.permute(2, 0, 1, 3)
+        .reshape(batch, world * seq_local, feat_local)
+        .contiguous()
+    )
 
 
 def a2a_feat_to_seq(x: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
@@ -95,7 +115,11 @@ def a2a_feat_to_seq(x: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
     seq_local = seq_full // world
     x = x.reshape(batch, world, seq_local, feat_local).permute(1, 2, 0, 3).contiguous()
     out = _all_to_all_single(x, group)
-    return out.permute(2, 1, 0, 3).reshape(batch, seq_local, world * feat_local).contiguous()
+    return (
+        out.permute(2, 1, 0, 3)
+        .reshape(batch, seq_local, world * feat_local)
+        .contiguous()
+    )
 
 
 def a2a_seq_to_feat_sections(
@@ -133,7 +157,11 @@ def all_to_all_head_to_seq(x: torch.Tensor, group: dist.ProcessGroup) -> torch.T
     if t_global % world != 0:
         raise ValueError(f"seq {t_global} must be divisible by cp_size {world}")
     t_local = t_global // world
-    x = x.reshape(batch, world, t_local, h_local, dim).permute(1, 2, 0, 3, 4).contiguous()
+    x = (
+        x.reshape(batch, world, t_local, h_local, dim)
+        .permute(1, 2, 0, 3, 4)
+        .contiguous()
+    )
     out = _all_to_all_single(x, group)
     out = out.permute(2, 1, 0, 3, 4).reshape(batch, t_local, world * h_local, dim)
     return out.contiguous()
@@ -181,5 +209,5 @@ def patch_gated_delta_rule(mesh: DeviceMesh) -> None:
 def restore_gated_delta_rule() -> None:
     global _cp_mesh
     _cp_mesh = None
-    F.gated_delta_rule = _gdn_local  # type: ignore[attr-defined]
-    _gdn_mod.gated_delta_rule = _gdn_local  # type: ignore[misc]
+    F.gated_delta_rule = _gdn_public  # type: ignore[attr-defined]
+    _gdn_mod.gated_delta_rule = _gdn_public  # type: ignore[misc]

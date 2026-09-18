@@ -14,6 +14,9 @@ import torch
 from torch import Tensor
 
 
+__all__: list[str] = []
+
+
 def _l2norm(x: Tensor, eps: float = 1e-6) -> Tensor:
     return x / x.norm(p=2, dim=-1, keepdim=True).clamp_min(eps)
 
@@ -72,7 +75,24 @@ def gated_delta_rule(
     scale: float | None = None,
     use_qk_l2norm: bool = True,
 ) -> Tensor:
-    """Public op. Context parallel monkey-patches this name, not ``_gated_delta_rule_impl``."""
+    """Apply the gated delta rule to query, key, and value.
+
+    Recurrence matches Megatron-LM / FLA ``chunk_gated_delta_rule``:
+    decay the state, apply a Householder-style delta write, then read with
+    ``query``. Context parallel patches this name, not
+    ``_gated_delta_rule_impl``.
+
+    Args:
+        query, key: ``[B, T, H, K]``
+        value: ``[B, T, H, V]``
+        decay: ``[B, T, H]`` log-space gate; state is multiplied by ``exp(decay)``.
+        beta: ``[B, T, H]`` write strength, typically in ``(0, 1)``.
+        scale: optional multiplier on ``query``. Default ``1/sqrt(K)``.
+        use_qk_l2norm: L2-normalize q/k along the head dim (FLA default).
+
+    Returns:
+        output of shape ``[B, T, H, V]``.
+    """
     return _gated_delta_rule_impl(
         query,
         key,

@@ -74,8 +74,8 @@ from .dropout import (
     FeatureAlphaDropout,
 )
 from .flatten import Flatten, Unflatten
-from .gated_delta import GatedDeltaNet
 from .fold import Fold, Unfold
+from .gated_delta import GatedDeltaNet
 from .instancenorm import (
     InstanceNorm1d,
     InstanceNorm2d,

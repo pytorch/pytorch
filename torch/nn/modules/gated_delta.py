@@ -6,14 +6,17 @@ from __future__ import annotations
 
 import torch
 from torch import Tensor
+from torch.nn.parameter import Parameter
 
 from .container import ModuleList
 from .conv import Conv1d
 from .linear import Linear
 from .module import Module
 from .normalization import RMSNorm
-from torch.nn.parameter import Parameter
 from .sparse import Embedding
+
+
+__all__ = ["GatedDeltaNet"]
 
 
 def _dist_world(group) -> int:
@@ -70,8 +73,6 @@ class GatedDeltaNet(Module):
         self.dt_bias = Parameter(torch.zeros(num_heads, **factory))
 
     def forward(self, hidden_states: Tensor) -> Tensor:
-        from torch.nn import functional as F
-        from torch.nn.attention.gated_delta import _gated_delta_rule_impl
         from torch.distributed.tensor.experimental._context_parallel._gated_delta import (
             a2a_feat_to_seq,
             a2a_seq_to_feat,
@@ -80,6 +81,8 @@ class GatedDeltaNet(Module):
             slice_param_cp,
             slice_sections_cp,
         )
+        from torch.nn import functional as F
+        from torch.nn.attention.gated_delta import _gated_delta_rule_impl
 
         batch, seq_len, _ = hidden_states.shape
         projected = self.in_proj(hidden_states)
@@ -158,7 +161,7 @@ class GatedDeltaNet(Module):
         return self.out_proj(hidden)
 
 
-class TinyGatedDeltaModel(Module):
+class _TinyGatedDeltaModel(Module):
     """Stack of GDN blocks plus an embedding. Smoke / tests only; not public API."""
 
     def __init__(
