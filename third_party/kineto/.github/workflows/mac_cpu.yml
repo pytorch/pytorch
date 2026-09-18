@@ -1,0 +1,35 @@
+name: Mac CPU build and test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-test:
+    uses: pytorch/test-infra/.github/workflows/macos_job.yml@main
+    with:
+      job-name: mac-cpu-build-and-test
+      runner: macos-m1-stable
+      timeout: 180
+      # Checkout the Kineto repo at the PR ref with submodules
+      repository: ${{ github.repository }}
+      ref: ${{ github.ref }}
+      submodules: recursive
+      script: |
+        set -eux
+        .github/scripts/setup.sh
+        .github/scripts/kineto_build_test.sh cpu
+
+        # Note: We only test that Kineto builds and its unit tests pass. We
+        #       skip compiling pytorch from source and running its tests
+        #       because there's not going to be much signal from it: Kineto
+        #       does not support MPS, which is the Mac GPU.

@@ -1,0 +1,31 @@
+name: Linux CPU Kineto build and test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-test:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    with:
+      job-name: linux-cpu-kineto-build-and-test
+      runner: linux.12xlarge
+      timeout: 180
+      # Checkout the Kineto repo at the PR ref with submodules
+      repository: ${{ github.repository }}
+      ref: ${{ github.ref }}
+      submodules: recursive
+      gpu-arch-type: cpu
+      script: |
+        set -eux
+        .github/scripts/setup.sh
+        .github/scripts/kineto_build_test.sh cpu

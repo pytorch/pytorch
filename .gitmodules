@@ -85,9 +85,15 @@
 [submodule "third_party/cudnn_frontend"]
 	path = third_party/cudnn_frontend
 	url = https://github.com/NVIDIA/cudnn-frontend.git
-[submodule "third_party/kineto"]
-    path = third_party/kineto
-    url = https://github.com/pytorch/kineto
+[submodule "third_party/kineto_deps/googletest"]
+    path = third_party/kineto/libkineto/third_party/googletest
+    url = https://github.com/google/googletest.git
+[submodule "third_party/kineto_deps/fmt"]
+    path = third_party/kineto/libkineto/third_party/fmt
+    url = https://github.com/fmtlib/fmt.git
+[submodule "third_party/kineto_deps/json"]
+    path = third_party/kineto/libkineto/third_party/json
+    url = https://github.com/nlohmann/json.git
 [submodule "third_party/pocketfft"]
 	path = third_party/pocketfft
 	url = https://github.com/mreineck/pocketfft

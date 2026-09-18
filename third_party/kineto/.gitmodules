@@ -1,0 +1,9 @@
+[submodule "libkineto/third_party/googletest"]
+	path = libkineto/third_party/googletest
+	url = https://github.com/google/googletest.git
+[submodule "libkineto/third_party/fmt"]
+	path = libkineto/third_party/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "libkineto/third_party/json"]
+	path = libkineto/third_party/json
+	url = https://github.com/nlohmann/json.git
