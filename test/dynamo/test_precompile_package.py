@@ -144,8 +144,10 @@ _LIBRARY_NAMES = (
 _STDLIB_ROOT = sysconfig.get_paths()["stdlib"]
 
 # Rows: module name, its module dict, the _install_roots to judge under (None
-# keeps the real ones). Every shape a name can take without resolving to the
-# library, each refused by the check its label names. graphlib, queue, code and
+# keeps the real ones). Every shape a name can take while resolving somewhere
+# other than the library, each refused by the check its label names; the
+# refusals that need no location (not a stdlib name, not imported, None) sit
+# with the waiver rows in the next commit's tests. graphlib, queue, code and
 # distutils are all stdlib names a third party ships, and purelib NESTS inside
 # stdlib (conda) or platstdlib (venv), so a __file__ prefix check waived every
 # shadow; the stdlib dir itself is never a pip target, so no torch root holds
@@ -165,7 +167,6 @@ _NOT_LIBRARY_MODULES = {
     "torch_submodule_outside_the_torch_roots": ("torch.foo", {"__file__": os.path.join(_STDLIB_ROOT, "torch", "foo.py")}, None),
     # The inittab is keyed on the full dotted name, not its top component.
     "dotted_name_under_a_built_in_top": ("sys.sub", {"__spec__": importlib.machinery.ModuleSpec("sys.sub", importlib.machinery.BuiltinImporter, origin="built-in")}, None),
-    "built_in_loader_without_a_spec": ("sys.sub", {"__loader__": importlib.machinery.BuiltinImporter}, None),
     # A frozen spec vouches only for a name the frozen table has.
     "frozen_spec_under_a_non_frozen_name": ("graphlib", {"__spec__": importlib.machinery.ModuleSpec("graphlib", importlib.machinery.FrozenImporter, origin="frozen")}, None),
     "shadowed_descendant_of_a_located_parent": ("collections.abc", {"__file__": os.path.join(_STDLIB_ROOT, "site-packages", "abc.py")}, None),
