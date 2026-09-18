@@ -11411,9 +11411,7 @@ class TestCudaAutocast(TestAutocast):
             torch.randn([32, 32], dtype=torch.float32, device="cuda"),
         ]
 
-        with self.assertRaisesRegex(
-            RuntimeError, "batch_sizes tensor should be on CPU"
-        ):
+        def run_rnn():
             torch.ops.aten.rnn_relu(
                 data,
                 batch_sizes=batch_sizes,
@@ -11425,6 +11423,17 @@ class TestCudaAutocast(TestAutocast):
                 train=False,
                 bidirectional=False,
             )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            run_rnn()
+
+        with torch.backends.cudnn.flags(enabled=False):
+            with self.assertRaisesRegex(
+                RuntimeError, "batch_sizes tensor should be on CPU"
+            ):
+                run_rnn()
 
     @serialTest()
     def test_autocast_cache_leak(self):
