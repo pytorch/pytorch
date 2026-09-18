@@ -124,8 +124,11 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
     # Bounded by the links already walked, the way TracebackException's own walk
     # is: a key's __eq__ can chain two SystemErrors to each other, and an
     # unbounded walk of that cycle spins inside dispatch before any record exists
-    # for the report to recover from. Ids are enough because every link is alive,
-    # held by the chain from e, so none of them is reused under the set.
+    # for the report to recover from. Ids are enough for the chain CPython
+    # builds, whose __cause__ is a strong reference: every link stays alive, so
+    # none is freed and its id reused under the set. A subclass shadowing
+    # __cause__ with a property that returns a fresh object is not covered --
+    # the walk still ends, at the first id it sees twice.
     reason: BaseException = e
     seen = {id(reason)}
     while isinstance(reason, SystemError) and reason.__cause__ is not None:
@@ -2083,8 +2086,9 @@ class AOTCompiledModel:
         )
         if raised:
             # `raised` is in recording order, so this chains the index that
-            # raised first, not always the raiser the advice names: they differ when an
-            # opted-out result raised first, whose line quotes no exception text.
+            # raised first, not always the raiser the advice names: they
+            # differ when an opted-out result raised first, whose line quotes
+            # no exception text.
             raise RuntimeError(report) from next(iter(raised.values()))
         # Not `from None`: an ordinary no-match must not suppress an exception
         # this call was made while handling.
