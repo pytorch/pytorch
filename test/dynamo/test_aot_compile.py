@@ -4353,9 +4353,10 @@ from user code:
         return xs, reloaded, results
 
     def test_aot_compile_module_every_certified_global_is_re_read(self):
-        # Two certified names, which no other case here has: with one, a re-read
-        # that serves the first name and leaves the rest stale, or that abandons
-        # them at the first name the scope no longer binds, passes everything.
+        # Two certified names, which only the sort case below also loads: with
+        # one, a re-read that serves the first name and leaves the rest stale, or
+        # that abandons them at the first name the scope no longer binds, passes
+        # everything.
         # The recorded set is sorted, so AOT_LIVE_SCALE comes first however the
         # guards were collected -- the case below pins that -- and is the name
         # deleted here. The helper binds both names twice and restores both, so
@@ -4390,23 +4391,28 @@ from user code:
         # assertion on the recorded tuple pins the sort only by luck of the seed;
         # a stub that hands back the reverse-sorted order pins it under every
         # seed instead, and the helper's own assertion is what fails when the
-        # sort goes.
+        # sort goes. What this case owns is the stub's side: that the load was
+        # handed the reverse order, without which that assertion pins nothing.
         real = torch._dynamo.aot_compile._guard_source_globals
+        handed = []
 
         def reverse_sorted(output_graph):
-            return sorted(real(output_graph), reverse=True)
+            handed.append(sorted(real(output_graph), reverse=True))
+            return handed[-1]
 
         with patch("torch._dynamo.aot_compile._guard_source_globals", reverse_sorted):
-            _, _, (result,) = self._load_armed_module(
+            _, _, _ = self._load_armed_module(
                 TwoCertifiedModule, 3, names=("AOT_LIVE_SCALE", "EPS")
             )
-        self.assertEqual(result._live_global_names, ("AOT_LIVE_SCALE", "EPS"))
+        self.assertEqual(handed, [["EPS", "AOT_LIVE_SCALE"]])
 
     def test_aot_compile_module_store_global_does_not_accumulate(self):
         # A forward that rebinds a certified global itself: the replayed
         # STORE_GLOBAL lands in the bytecode's globals, so before this commit its
-        # store accumulated there call over call (x * 2, x * 4, x * 8) while the
-        # guards went on passing on the scope, which the store never reaches.
+        # store accumulated there call over call, the stored value walking
+        # EPS * 2, EPS * 4, EPS * 8 while the three calls answered x * EPS,
+        # x * 2 EPS, x * 4 EPS, and the guards went on passing on the scope,
+        # which the store never reaches.
         # The re-read takes the scope's value back before each call, so three
         # calls answer alike -- the one BC change here that needs no rebind by
         # the caller to observe. Not writing the scope, which eager would, is
@@ -4442,6 +4448,32 @@ from user code:
         EPS = rebound
         self.assertEqual(reloaded(x), (x + 1, rebound))
         self.assertIs(result.fn.__globals__["EPS"], rebound)
+
+    def test_aot_compile_module_global_bound_to_none_is_re_read(self):
+        # A scope that binds a certified name to None BINDS it, so the graph has
+        # to answer None: the distinction _UNBOUND exists for, and the one thing
+        # separating it from an absent name. With None as the absent-name default
+        # the read cannot tell the two apart, skips the binding and leaves the
+        # value the last read wrote, so the graph computes with a value the scope
+        # no longer holds while every guard passes -- the failure class this
+        # commit exists to remove, on the one lookup the sentinel was added for.
+        # Observed on the forward that RETURNS the global, so None reaches the
+        # answer instead of an operator, and with the check off, since None is a
+        # binding no kept TENSOR_MATCH accepts: dispatch refuses it on both
+        # checked passes and the opted-out last resort is what serves the call.
+        global EPS
+
+        (x,), reloaded, (result,) = self._load_armed_module(ReturnsEpsModule, 3)
+        rebound = torch.tensor(2.0)
+        EPS = rebound
+        self.assertEqual(reloaded(x), (x + 1, rebound))
+        self.assertIs(result.fn.__globals__["EPS"], rebound)
+
+        result.disable_guard_check()
+        EPS = None
+        answer = reloaded(x)
+        self.assertIsNone(answer[1])
+        self.assertIsNone(result.fn.__globals__["EPS"])
 
     def test_aot_compile_module_sweep_rebind_is_served(self):
         # Dispatch's sweep over results[1:] re-reads the guarded global as well.
@@ -4602,8 +4634,10 @@ from user code:
         )
         (result,) = compiled.compiled_results
         self.assertEqual(result._live_global_names, ("EPS",))
+        # An unmutated dict is the pin: the only path that can bind `fabricated`
+        # in the bytecode's globals is a subscript of this one, which would leave
+        # the fabricated entry in it.
         self.assertEqual(dict(scope), {})
-        self.assertIsNot(result.fn.__globals__["EPS"], fabricated)
         with self.assertRaisesRegex(RuntimeError, r"KeyError on G\['EPS'\]"):
             compiled(x)
         result.disable_guard_check()
