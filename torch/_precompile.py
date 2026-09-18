@@ -698,7 +698,8 @@ class Capture:
     :class:`MakeFxTracer` capture records a single call, so after a ``save()``
     that succeeded the block exit writes nothing more. The object is single-shot:
     the block is entered once, and calling, entering, exiting and saving are all
-    refused after it -- saving only until a WRITE that failed has been retried.
+    refused after it -- saving only while the LAST write attempt is one that
+    FAILED, until a retry of it SUCCEEDS.
     """
 
     __module__ = "torch.compiler.precompile"
@@ -799,18 +800,21 @@ class _MakeFxCapture(Capture):
         return self
 
     def __exit__(self, *exc: object) -> None:
-        # Refused like every other door once the block has run: a MANUAL second __exit__
-        # would otherwise write the pair the block that raised deliberately left alone.
-        if self._exited:
-            raise PrecompileError(_SPENT_RETRY if self._write_failed else _SPENT)
         # The capture goes inactive however the block ends, including the nothing-was-captured
         # raise below: a call after the block would trace, lower and serve and write nothing.
+        spent = self._exited
         self._entered = False
         self._exited = True
         # Only a clean exit that captured a call writes; a raise leaves whatever an
         # in-block save() already wrote on disk, untouched (see both docstrings).
         if exc[0] is not None:
             return
+        # Refused like every other door once the block has run: a MANUAL second __exit__
+        # would otherwise write the pair the block that raised deliberately left alone.
+        # BELOW the raise-return: an implicit exit carrying the caller's own exception must
+        # surface it rather than replace it with this refusal, and it writes nothing anyway.
+        if spent:
+            raise PrecompileError(_SPENT_RETRY if self._write_failed else _SPENT)
         if self._rendered is None:
             raise self._nothing_captured("inside the `with` block.")
         # An in-block save() already wrote THIS render, and there is nothing further to
@@ -847,8 +851,10 @@ class _MakeFxCapture(Capture):
 
         A make_fx capture records a single call, so there is nothing further to fold in:
         this writes the same files the block exit would, and a clean exit after a save()
-        that SUCCEEDED writes nothing more. Callable inside the block, and after a block
-        whose WRITE failed -- the exit's or an in-block save()'s -- to retry it.
+        that SUCCEEDED writes nothing more, as does a second save(). Callable inside the
+        block, and after a block whose LAST write attempt failed -- the exit's, or an
+        in-block save()'s that the clean exit did not already retry itself -- to retry
+        that write; a retry that SUCCEEDS closes this door like any other.
         """
         # Gated on the block being live like __call__ is, EXCEPT after a WRITE that raised,
         # this method's or the exit's: after a block that raised, the render is still here and
@@ -862,6 +868,11 @@ class _MakeFxCapture(Capture):
             )
         if self._rendered is None:
             raise self._nothing_captured("before calling save().")
+        # An earlier save() already wrote THIS render, so this one would rewrite a complete
+        # pair for nothing -- and a rewrite that RAISED would leave a write-failed retry
+        # state over files that are already correct (see __exit__'s same early return).
+        if self._written:
+            return
         # Armed before the write like __exit__'s, so a write that RAISED keeps save() open as
         # a retry from OUTSIDE the block too: that exception leaves the block unwritten.
         self._write_failed = True
@@ -3301,7 +3312,7 @@ class PrecompiledModule(PrecompiledRunnable):
 
 
 def _make_inlined_forward(
-    python_code: str, who: str, *, warn: bool = True
+    python_code: str, who: str, *, warn: bool
 ) -> Callable[..., object]:
     """Fallback: execute the self-contained python string (JITs kernels).
 
@@ -3795,9 +3806,9 @@ def capture(
     :class:`DynamoTracer` that checkpoints the calls made so far (each save
     re-renders and rewrites both files, so a job that dies mid-loop leaves a
     working artifact for the batches it reached), while a :class:`MakeFxTracer`
-    capture records a single call, so save() and block exit write the same files; after
-    a WRITE that failed -- the exit's or a ``save()``'s -- call it again to retry that
-    write, from outside the block too.
+    capture records a single call, so a clean exit after a ``save()`` that succeeded
+    writes nothing more; while the LAST write attempt is one that FAILED -- the exit's
+    or a ``save()``'s -- call it again to retry that write, from outside the block too.
 
     Gradients and return values keep their normal eager/``torch.compile``
     semantics: precompile snapshots and clears the example tensors' ``.grad`` around
@@ -3850,7 +3861,9 @@ def capture(
     ``functools.partial`` (at any nesting depth) -- instead of taking it as a call
     argument. An ``fn`` that CLOSES over the model gets past that check and is refused
     later, when its parameters bake into the graph as constants (invariant 1); pass the
-    model as a call argument either way.
+    model as a call argument either way. The capture object raises ``TypeError`` for a
+    call made with keyword arguments, and re-raises the ``OSError`` of a write that failed
+    out of the block exit or ``cap.save()`` -- the one to catch for the retry above.
     """
     # The telemetry key names the public spelling the module switch installs.
     torch._C._log_api_usage_once("torch.compiler.precompile.capture")
