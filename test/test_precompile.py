@@ -75,20 +75,23 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
-    def test_guard_fact_render(self):
+    def test_guard_fact_pickle_and_hash(self):
         from torch.compiler._precompile_types import GuardFact
 
-        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
-        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
-        # No rendered code falls back to <guard_type>, a value is appended, and
-        # the dropped label pads to the width of "enforced" so lines align.
-        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
-        self.assertEqual(
-            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        # A fact is a value: pickle round-trips it and equal facts hash equal.
+        fact = GuardFact(
+            guard_type="ID_MATCH",
+            source="G['fn']",
+            code=("___check_obj_id(G['fn'], <id>), type=<class 'function'>",),
+            value="is @m.py:3#abc mod.fn",
+            enforced=False,
         )
-        # Several code parts are joined; no source drops the " on ..." suffix.
-        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
-        self.assertEqual(joined.render(), "[enforced] a ; b")
+        clone = pickle.loads(pickle.dumps(fact))
+        self.assertEqual(clone, fact)
+        self.assertEqual(hash(clone), hash(fact))
+        # Keyword-only: three str fields in a row would otherwise transpose silently.
+        with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
+            GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc mod.fn", False)
 
     def test_summary_pickle_and_hash(self):
         from torch.compiler._precompile_types import PrecompileSummary
@@ -107,7 +110,7 @@ class TestPrecompile(TestCase):
             uncovered_frames=("helper",),
             wont_generalize=("n",),
             dropped_guards=(("HASATTR", "m"),) + risky,
-            kept_guards=(("TENSOR_MATCH", "x"),),
+            kept_guards=(("EQUALS_MATCH", "n"), ("TENSOR_MATCH", "x")),
             risky_dropped_guards=risky,
             policy_dropped_guards=(policy,),
             dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
@@ -120,7 +123,7 @@ class TestPrecompile(TestCase):
         # failures last, so a failure never sits between two notes.
         self.assertExpectedInline(
             str(summary),
-            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (1 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
         )
         # Keyword-only: four leading ints would otherwise transpose silently.
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
@@ -131,9 +134,11 @@ class TestPrecompile(TestCase):
 
         # Two frames' guards on the builtin len are one slot (the producer
         # normalizes the per-compile counter out of the builtins-dict key). One
-        # frame's caller filter rejected it (and the lint flagged it, so it is
-        # risky), the other frame's invariance policy dropped it, which the
-        # policy may do to a BUILTIN_MATCH: the slot sits in all three lists.
+        # frame's caller filter rejected it and the drop told that frame's
+        # variants apart, so it is risky (the risky-drop lint waives a builtin
+        # read the ordinary way); the other frame's invariance policy dropped
+        # it, which the policy may do to a BUILTIN_MATCH: the slot sits in all
+        # three lists.
         # The relations hold per frame and the type checks nothing, so the
         # report still constructs and counts the slot once.
         act = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
@@ -173,13 +178,15 @@ class TestPrecompile(TestCase):
         risky = (("ID_MATCH", "self.act"),)
         flagged = summary(dropped_guards=risky, risky_dropped_guards=risky)
         self.assertTrue(flagged.complete)
-        self.assertTrue(summary(wont_generalize=("n",)).complete)
+        pinned = summary(wont_generalize=("n",), kept_guards=(("EQUALS_MATCH", "n"),))
+        self.assertTrue(pinned.complete)
 
     def test_summary_digest_and_guard_type_counts(self):
         from torch.compiler._precompile_types import PrecompileSummary
 
         # Slots arrive sorted, as the builder emits them; the tallies keep
-        # that order.
+        # that order. A value-pinned source is one a kept value-equality guard
+        # on a bare name pins, so each such fixture keeps that guard too.
         policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
         plain = PrecompileSummary(
             frames=2,
@@ -191,17 +198,22 @@ class TestPrecompile(TestCase):
                 ("ID_MATCH", "G['fn']"),
                 ("ID_MATCH", "G['g']"),
             ),
-            kept_guards=(("TENSOR_MATCH", "x"), ("TYPE_MATCH", "x")),
+            kept_guards=(
+                ("EQUALS_MATCH", "scale"),
+                ("TENSOR_MATCH", "x"),
+                ("TYPE_MATCH", "x"),
+            ),
             policy_dropped_guards=(policy,),
             # For programmatic consumers: the digest below does not mention it.
             dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
             wont_generalize=("scale",),
         )
         self.assertEqual(plain.dropped_guard_types, {"HASATTR": 1, "ID_MATCH": 2})
-        self.assertEqual(plain.kept_guard_types, {"TENSOR_MATCH": 1, "TYPE_MATCH": 1})
+        kept = {"EQUALS_MATCH": 1, "TENSOR_MATCH": 1, "TYPE_MATCH": 1}
+        self.assertEqual(plain.kept_guard_types, kept)
         self.assertExpectedInline(
             str(plain),
-            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 2} (2 kept), 1 policy-dropped guard, 1 value-pinned source""",
+            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 2} (3 kept), 1 policy-dropped guard, 1 value-pinned source""",
         )
         # No optional clause: kept guards show up only beside the drops.
         clean = PrecompileSummary(

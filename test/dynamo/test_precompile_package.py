@@ -14,7 +14,7 @@ from torch._dynamo.aot_compile import AOTCompiledFunction
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, GuardBuilder, strip_local_scope
 from torch._dynamo.package import load_guards_state
-from torch._dynamo.source import get_global_source_name, GlobalSource
+from torch._dynamo.source import get_global_source_name, GlobalSource, LocalSource
 from torch._dynamo.types import GuardFilterEntry
 from torch._guards import Guard
 
@@ -95,13 +95,16 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         verdicts = dict(zip(unsupported, filter_fn(refused)))
         self.assertEqual(verdicts, dict.fromkeys(unsupported, False))
         # A refused derived type drops the guard too (a CONSTANT_MATCH on a code
-        # object runs through ID_MATCH). The DICT_VERSION exemption is for a
+        # object and a TENSOR_MATCH under match_on_id_for_tensor both run through
+        # ID_MATCH); the TENSOR_MATCH row also pins the accepted-by-type pair as
+        # exactly TYPE_MATCH and BUILTIN_MATCH. The DICT_VERSION exemption is for a
         # DICT_KEYS_MATCH only, and only for that derived type, so both halves of
         # its condition have a row here. Mixed verdicts in one call: the filter
         # returns them positionally, and a table of one verdict cannot tell a
         # misordered list from a right one.
         rows = [
             ("CONSTANT_MATCH", ("ID_MATCH",), False),
+            ("TENSOR_MATCH", ("ID_MATCH",), False),
             ("DICT_KEYS_MATCH", ("ID_MATCH",), False),
             ("DICT_CONTAINS", ("DICT_VERSION",), False),
             ("DICT_KEYS_MATCH", ("DICT_VERSION",), True),
@@ -121,11 +124,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # they derive. That branch is not an unconditional accept: it refuses
             # these two for a local-scope type, which is what
             # test_default_guard_filter_keeps_local_type_guards_for_a_loud_refusal
-            # covers.
+            # covers; the rows are on a local source since that is where the kept
+            # TYPE_MATCH the refusal needs sits, and the filter reads no scope.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
             ("TYPE_MATCH", ("ID_MATCH",)),
         ]
-        entries = [_entry(GlobalSource("g"), None, t, derived=d) for t, d in rows]
+        entries = [_entry(LocalSource("obj"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
         self.assertEqual(list(zip(rows, keep)), [(row, True) for row in rows])
 

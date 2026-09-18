@@ -11,17 +11,18 @@ into this module; nor ``torch._dynamo.config.caching_precompile``, which caches
 set, wraps every guard filter, this module's included (see
 ``default_guard_filter_fn``).
 
-This module holds the guard filter for the serialized guards
-(``default_guard_filter_fn``), the lint over the identity guards it drops
-(``_is_risky_drop``), the fingerprints and the guard-type classification
-behind the ``PrecompileSummary`` report -- which also decides the only guards
-an invariance policy may drop (``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the
-per-frame comparison of captured variants and the summary builder
-(``_varying_guard_slots``, ``_summarize``), and the compiler configuration and
-frame converter a capture runs under (``_capture_config``,
-``_AllowEmptyGraphsConvertFrame``). The filter lives here, with the rest of the
-capture's guard tooling, rather than beside the serializer's pre-check in
-``guards.py``: it is the capture's policy over that pre-check, not part of it.
+Over the stack that adds it, this module comes to hold the guard filter for
+the serialized guards (``default_guard_filter_fn``), the lint over the identity
+guards it drops (``_is_risky_drop``), the fingerprints and the guard-type
+classification behind the ``PrecompileSummary`` report -- which also decides
+the only guards an invariance policy may drop
+(``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the per-frame comparison of captured
+variants and the summary builder (``_varying_guard_slots``, ``_summarize``),
+and the compiler configuration and frame converter a capture runs under
+(``_capture_config``, ``_AllowEmptyGraphsConvertFrame``). The filter lives
+here, with the rest of the capture's guard tooling, rather than beside the
+serializer's pre-check in ``guards.py``: it is the capture's policy over that
+pre-check, not part of it.
 Everything here is internal; the filter alone is unprefixed because the
 capture session passes it as the default a caller may name. The multi-graph
 Dynamo capture session that drives them is a follow-up stack; nothing under
@@ -64,11 +65,12 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     as the pre-check accepts them before it looks at derived types. That is
     what keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH; the
     loaded artifact checks the builtin against the loading process's builtins,
-    so it still notices one swapped after load. Neither that keep nor the
-    DICT_KEYS_MATCH one below holds under
+    so it still notices one swapped after load. Neither that accepted-by-type
+    branch nor the DICT_KEYS_MATCH keep below holds under
     ``torch._dynamo.config.caching_precompile``: ``CheckFunctionManager``
     wraps every guard filter under that setting and drops, with a warning, any
-    guard of or deriving ID_MATCH or DICT_VERSION. The one departure from the
+    guard of type ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE or DICT_VERSION and
+    any guard deriving ID_MATCH or DICT_VERSION. The one departure from the
     pre-check is a DICT_VERSION derived by a DICT_KEYS_MATCH, which is
     ignored: the entries this filter sees carry the derived types of the build
     ``CheckFunctionManager`` runs before filtering, with ``save_guards=False``,
@@ -95,8 +97,10 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
         if g.guard_type == "DICT_KEYS_MATCH":
             derived = tuple(d for d in derived if d != "DICT_VERSION")
         keep.append(
-            # The pre-check's accepted-by-type pair, a literal in serialize_guards
-            # too; a type added there is not seen here.
+            # The pre-check's accepted-by-type pair, a literal in serialize_guards,
+            # in test_aot_compile.py's keep_builtin_guards and in
+            # test_precompile_package.py's _pre_check_accepts too; a type added
+            # to one is not seen by the others.
             g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
             or (
                 g.guard_type not in unsupported
