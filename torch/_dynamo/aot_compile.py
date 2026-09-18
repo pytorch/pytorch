@@ -1419,8 +1419,8 @@ def _resolve_guard_scope(
             "bind a plain function or bound method as model.forward instead"
         )
     # innermost_fn follows the _torchdynamo_orig_callable chain the wrappers
-    # torch.compile, torch._dynamo.disable, run and optimize return carry. A
-    # compile that wrapped its target in external_utils.wrap_inline
+    # torch.compile, torch._dynamo.disable, run, optimize and optimize_assert
+    # return carry. A compile that wrapped its target in external_utils.wrap_inline
     # (config.wrap_top_frame, or a forward defined under torch/) ends that chain
     # on wrap_inline's inner, which only forwards to what it wraps, so a function
     # OWNING external_utils' dict is followed to its __wrapped__, one hop per
@@ -2342,18 +2342,20 @@ class AOTCompiledModel:
 
         The function ``model.forward`` resolves to is the one bound as ``forward``
         seen through Dynamo's own wrappers -- the ones ``torch.compile``,
-        ``torch._dynamo.disable``, ``run`` and ``optimize`` return, and any
-        ``functools.wraps``'d ``torch._dynamo.external_utils`` function, of which
-        ``torch.compiler.wrap_numpy`` is the one a caller applies -- but not
-        through any other wrapper the caller applied: a ``functools.wraps``'d
-        decorator over it, in the class body or rebound on the instance, resolves
-        to the decorator's own function, so the scope is the decorator's module.
-        That is the scope a capture of the decorated forward records as well --
-        Dynamo traces the decorator as the root frame -- so an artifact captured
-        through the same decorator loads and reads that module's guarded globals
-        live, and one captured from the undecorated forward fails its global
-        guards there, with ``KeyError on G['NAME']`` and a hint naming that
-        module; load an artifact onto the forward it was captured from.
+        ``torch._dynamo.disable``, ``run``, ``optimize`` and ``optimize_assert``
+        return, and any function defined in ``torch._dynamo.external_utils`` that
+        carries ``__wrapped__``, of which ``torch.compiler.wrap_numpy`` and
+        ``torch._dynamo.disable(recursive=False)`` are the two a caller applies --
+        but not through any other wrapper the caller applied: a
+        ``functools.wraps``'d decorator over it, in the class body or rebound on
+        the instance, resolves to the decorator's own function, so the scope is
+        the decorator's module. That is the scope a capture of the decorated
+        forward records as well -- Dynamo traces the decorator as the root frame
+        -- so an artifact captured through the same decorator loads and reads
+        that module's guarded globals live, and one captured from the undecorated
+        forward fails its global guards there, with ``KeyError on G['NAME']`` and
+        a hint naming that module; load an artifact onto the forward it was
+        captured from.
         ``wrap_numpy`` rebound on the instance is seen through, so the scope is
         the forward's own module -- what an artifact captured from the
         undecorated forward, the only artifact that shape can load, recorded;
