@@ -95,7 +95,8 @@ class PrecompileSummary:
     bare lists cannot be checked disjoint.
 
     Three entries below name the rule they follow in
-    ``torch._dynamo.precompile_package``, added later in this stack.
+    ``torch._dynamo.precompile_package``; that module and its filter are added
+    by this stack alongside this type, the other two rules later in the stack.
 
     Attributes:
         frames: Captured frames: every frame the package holds an entry for, the
@@ -149,7 +150,7 @@ class PrecompileSummary:
             decides its own set. A slot is listed under the guard's own type
             whatever the reason for the drop, so a ``TENSOR_MATCH`` rejected for
             what its check derives is a dropped ``TENSOR_MATCH``.
-        kept_guards: Slots the artifact still checks.
+        kept_guards: Slots the serialized copy's guard filter kept.
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
             captured variants apart, or flagged by the risky-drop lint as a
             configuration-chosen binding.
