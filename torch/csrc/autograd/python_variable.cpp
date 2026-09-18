@@ -3316,7 +3316,7 @@ static PyObject* THPVariable_get_has_grad_dtype_override(
   }
   const auto& var = THPVariable_Unpack(self);
   TORCH_CHECK(
-      var.is_leaf(),
+      !var.grad_fn(),
       "_has_grad_dtype_override is only supported for leaf tensors.");
   const auto* meta = torch::autograd::impl::get_autograd_meta(var);
   return torch::autograd::utils::wrap(

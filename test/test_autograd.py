@@ -4098,6 +4098,17 @@ class TestAutograd(TestCase):
         with self.assertRaises(AttributeError):
             tensor._has_grad_dtype_override = False
 
+        if not requires_grad:
+            view = tensor.view_as(tensor)
+            tensor.requires_grad_()
+            with torch.no_grad():
+                tensor.add_(1)
+            # Query before is_leaf or grad_fn refreshes the view's history.
+            with self.assertRaisesRegex(
+                RuntimeError, "only supported for leaf tensors"
+            ):
+                _ = view._has_grad_dtype_override
+
     @skipIfTorchDynamo("grad_dtype not supported in compile")
     def test_grad_dtype(self):
         leaf = torch.tensor([1.0, 2.0], requires_grad=True)
