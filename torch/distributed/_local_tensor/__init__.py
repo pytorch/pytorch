@@ -1560,7 +1560,7 @@ class LocalTensorMode(TorchDispatchMode):
         # TODO: This should either be removed or documented why it's necessary.
         from torch.distributed.tensor import _random as dtensor_random
 
-        for global_name, local_name in _PATCHED_RANDOM_FUNCTIONS:
+        for global_name, _ in _PATCHED_RANDOM_FUNCTIONS:
             value = self._old_random_functions.pop(global_name, None)
             if value is not None:
                 mod_name, attr_name = global_name.rsplit(".", 1)
