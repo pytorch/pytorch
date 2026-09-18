@@ -6,7 +6,7 @@ Quantization
 .. automodule:: torch.ao.quantization
 .. automodule:: torch.ao.quantization.fx
 
-We are cetralizing all quantization related development to `torchao <https://github.com/pytorch/ao>`__, please checkout our new doc page: https://docs.pytorch.org/ao/stable/index.html
+We are centralizing all quantization related development to `torchao <https://github.com/pytorch/ao>`__, please checkout our new doc page: https://docs.pytorch.org/ao/stable/index.html
 
 Plan for the existing quantization flows:
 1. Eager mode quantization (torch.ao.quantization.quantize,
