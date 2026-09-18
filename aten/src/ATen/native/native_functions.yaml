@@ -5084,8 +5084,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: relu
-    MPS: relu_mps
+    CPU, CUDA, MPS, XPU: relu
     MTIA: relu_mtia
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
@@ -5099,8 +5098,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: relu_
-    MPS: relu_mps_
+    CPU, CUDA, MPS, XPU: relu_
     MTIA: relu_mtia_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
