@@ -11,17 +11,18 @@ into this module; nor ``torch._dynamo.config.caching_precompile``, which caches
 set, wraps every guard filter, this module's included (see
 ``default_guard_filter_fn``).
 
-This module holds the guard filter for the serialized guards
-(``default_guard_filter_fn``), the lint over the identity guards it drops
-(``_is_risky_drop``), the fingerprints and the guard-type classification
-behind the ``PrecompileSummary`` report -- which also decides the only guards
-an invariance policy may drop (``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the
-per-frame comparison of captured variants and the summary builder
-(``_varying_guard_slots``, ``_summarize``), and the compiler configuration and
-frame converter a capture runs under (``_capture_config``,
-``_AllowEmptyGraphsConvertFrame``). The filter lives here, with the rest of the
-capture's guard tooling, rather than beside the serializer's pre-check in
-``guards.py``: it is the capture's policy over that pre-check, not part of it.
+Over the stack that adds it, this module comes to hold the guard filter for
+the serialized guards (``default_guard_filter_fn``), the lint over the identity
+guards it drops (``_is_risky_drop``), the fingerprints and the guard-type
+classification behind the ``PrecompileSummary`` report -- which also decides
+the only guards an invariance policy may drop
+(``_INVARIANT_DROPPABLE_GUARD_TYPES``) -- the per-frame comparison of captured
+variants and the summary builder (``_varying_guard_slots``, ``_summarize``),
+and the compiler configuration and frame converter a capture runs under
+(``_capture_config``, ``_AllowEmptyGraphsConvertFrame``). The filter lives
+here, with the rest of the capture's guard tooling, rather than beside the
+serializer's pre-check in ``guards.py``: it is the capture's policy over that
+pre-check, not part of it.
 Everything here is internal; the filter alone is unprefixed because the
 capture session passes it as the default a caller may name. The multi-graph
 Dynamo capture session that drives them is a follow-up stack; nothing under
@@ -38,11 +39,9 @@ import sysconfig
 import types
 from typing import TYPE_CHECKING
 
-from torch._guards import ChainedSource
-
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .guards import CheckFunctionManager
-from .source import DictGetItemSource, GlobalSource, LocalSource
+from .source import DictGetItemSource, GetItemSource, GlobalSource, LocalSource
 
 
 if TYPE_CHECKING:
@@ -77,11 +76,12 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     as the pre-check accepts them before it looks at derived types. That is
     what keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH; the
     loaded artifact checks the builtin against the loading process's builtins,
-    so it still notices one swapped after load. Neither that keep nor the
-    DICT_KEYS_MATCH one below holds under
+    so it still notices one swapped after load. Neither that accepted-by-type
+    branch nor the DICT_KEYS_MATCH keep below holds under
     ``torch._dynamo.config.caching_precompile``: ``CheckFunctionManager``
     wraps every guard filter under that setting and drops, with a warning, any
-    guard of or deriving ID_MATCH or DICT_VERSION. The one departure from the
+    guard of type ID_MATCH, CLOSURE_MATCH, WEAKREF_ALIVE or DICT_VERSION and
+    any guard deriving ID_MATCH or DICT_VERSION. The one departure from the
     pre-check is a DICT_VERSION derived by a DICT_KEYS_MATCH, which is
     ignored: the entries this filter sees carry the derived types of the build
     ``CheckFunctionManager`` runs before filtering, with ``save_guards=False``,
@@ -108,8 +108,10 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
         if g.guard_type == "DICT_KEYS_MATCH":
             derived = tuple(d for d in derived if d != "DICT_VERSION")
         keep.append(
-            # The pre-check's accepted-by-type pair, a literal in serialize_guards
-            # too; a type added there is not seen here.
+            # The pre-check's accepted-by-type pair, a literal in serialize_guards,
+            # in test_aot_compile.py's keep_builtin_guards and in
+            # test_precompile_package.py's _pre_check_accepts too; a type added
+            # to one is not seen by the others.
             g.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH")
             or (
                 g.guard_type not in unsupported
@@ -126,25 +128,26 @@ def _owning_module(value: object) -> str | None:
     return owner if isinstance(owner, str) else None
 
 
-def _source_root(source: Source) -> Source:
-    return source.get_base() if isinstance(source, ChainedSource) else source
-
-
 # The list of Dynamo-generated resume functions every generated resume function
 # takes as its first parameter (resume_execution.py and
 # comprehension_graph_break.py mint the name; codegen_call_resume in
 # symbolic_convert.py builds the list). Its entries are generated code, not a
-# slot any config chooses, so an identity guard lost on one cannot diverge. Its
-# sibling __nested_frame_values is NOT here: it carries the live stack and
-# locals of the frames nested INSIDE the one resuming, which pops the last
-# entry off it for the callee it resumes, so a guard rooted there is judged like
-# the value it stands for.
+# slot any config chooses, so an identity guard lost on one cannot diverge.
+# Only the list and an entry read straight off it are covered: a resume
+# function's closure cells carry the resumed frame's cell variables, so a guard
+# Dynamo mints past an entry (type(__nested_resume_fns[0].__closure__[0]
+# .cell_contents).__call__ for a callable an inner def captured) is the user's
+# and is judged like any other value. Its sibling __nested_frame_values is NOT
+# here: it carries the live stack and locals of the frames nested INSIDE the
+# one resuming, which pops the last entry off it for the callee it resumes, so
+# a guard rooted there is judged like the value it stands for.
 _DYNAMO_SYNTHESIZED = ("__nested_resume_fns",)
 
 
 def _is_dynamo_synthesized(source: Source) -> bool:
-    root = _source_root(source)
-    return isinstance(root, LocalSource) and root.local_name in _DYNAMO_SYNTHESIZED
+    if isinstance(source, GetItemSource) and isinstance(source.index, int):
+        source = source.base
+    return isinstance(source, LocalSource) and source.local_name in _DYNAMO_SYNTHESIZED
 
 
 def _norm(path: str) -> str:
@@ -152,11 +155,12 @@ def _norm(path: str) -> str:
     realpath then normcase. A relative path resolves against the process cwd,
     so a recorded ``__file__`` is gated with isabs before it gets here and every
     root candidate comes through ``_norm_absolute``; this module's own
-    ``__file__`` is taken as read because the path finder absolutizes the
-    location of anything it finds (bpo-43105, 3.10+). os is different: frozen
-    since 3.11, its ``__file__`` is spelled from sys._stdlib_dir, relative under
-    a relative home until site.abs_paths() re-anchors it at startup, which -S
-    skips.
+    ``__file__`` is taken as read because it is always the path finder's
+    spelling, absolute since bpo-43105 (3.10+): the finder that keeps a relative
+    one, zipimport, cannot load torch (torch._C is an extension module), and a
+    frozen torch has no ``__file__`` at all. os is different: frozen since 3.11,
+    its ``__file__`` is spelled from sys._stdlib_dir, relative under a relative
+    home until site.abs_paths() re-anchors it at startup, which -S skips.
     """
     return os.path.normcase(os.path.realpath(path))
 
@@ -250,13 +254,21 @@ def _torch_roots() -> tuple[str, ...]:
     them roots: resolved as a directory, and two levels up from where this file
     resolves. They differ in a per-file symlink farm (see ``_stdlib_roots``),
     where torch.__path__ names the farm and every consumer asks about a file
-    that resolves into the store.
+    that resolves into the store. The second is taken only while the file still
+    resolves to <root>/_dynamo/<file>: a link that flattens the depth would make
+    an ancestor of unrelated code a torch root, and then the resolved file lies
+    under no root rather than under too wide a one.
     """
     own_file = globals().get("__file__")
     if not own_file:
         return ()  # frozen torch: no directory to anchor to
-    own = os.path.dirname(os.path.dirname(own_file))
-    roots = {_norm(own), os.path.dirname(os.path.dirname(_norm(own_file)))}
+    own_dir = os.path.dirname(own_file)
+    own = os.path.dirname(own_dir)
+    roots = {_norm(own)}
+    resolved = _norm(own_file)
+    tail = os.path.join(os.path.basename(own_dir), os.path.basename(own_file))
+    if resolved.endswith(os.sep + os.path.normcase(tail)):
+        roots.add(os.path.dirname(os.path.dirname(resolved)))
     search = getattr(sys.modules.get("torch"), "__path__", None) or ()
     listed = _norm_absolute(search)
     if roots & listed:
@@ -325,8 +337,12 @@ def _defined_where_read(
     factory fed same-file methods (``type(name, bases, {"area": _area})``,
     ``make_dataclass(..., namespace=...)``) are refused, and ``class Marker:
     pass`` fails closed. So does a class statement whose only functions are
-    generated -- a fields-only ``@dataclass``, a ``NamedTuple``, an ``Enum``
-    -- because those methods compile in ``<string>`` or the stdlib, so a plain
+    generated: a fields-only ``@dataclass``'s and a ``NamedTuple``'s are defs
+    of a factory (dataclasses' ``__create_fn__``, ``namedtuple``), so their
+    code objects' own qualname carries the factory's ``<locals>.`` prefix (on
+    3.10, where only ``co_name`` exists, the ``<string>`` or stdlib file they
+    compile in refuses them instead), and an ``Enum``'s arrive in the subclass
+    ``__dict__`` under ``Enum.`` qualnames the key rule refuses; so a plain
     config dataclass read as a global is reported. The one function the
     compiler itself puts in a class ``__dict__``, the PEP 649 annotate function
     3.14 stores for an annotated class body, compiles in the reading file, but
@@ -337,9 +353,11 @@ def _defined_where_read(
     waived, because a C-implemented wrapper such as functools.lru_cache claims
     the reader's module the same way. A ``co_filename`` is not always a path:
     an exec records ``<string>``, a REPL ``<stdin>``, and ``_norm`` would
-    resolve either against the cwd, so a fields-only dataclass read from an
-    exec-generated frame would collide with it and be waived. Only absolute
-    filenames on both sides compare; anything else fails closed. What this
+    resolve either against the cwd, so a def exec'd under ``<string>`` and read
+    from an exec-generated frame would collide with it and be waived (on 3.10 a
+    fields-only dataclass too, whose ``__init__`` compiles in ``<string>``
+    under a ``co_name`` that cannot tell it from a class statement's def). Only
+    absolute filenames on both sides compare; anything else fails closed. What this
     cannot see is a same-name fork inside the reading file -- ``try: from x
     import impl as op`` / ``except ImportError: def op``, or a class statement
     under the same ``if`` -- which binds a different def per machine under one
@@ -393,10 +411,11 @@ def _dynamo_alias_module(global_name: str) -> types.ModuleType | None:
     prefix and comes back None here, which fails closed.
 
     The OutputGraph's import_sources table is authoritative, but a guard entry
-    does not carry it; unmangling collides only for a module literally named
-    ``a_dot_b``, whose alias comes back as ``a.b`` when that module is loaded
-    too, and that one collision fails open (the callers judge the module
-    returned).
+    does not carry it; unmangling collides only for a module whose name
+    contains ``_dot_`` (``pkg.sub_dot_mod`` is aliased as
+    ``__import_pkg_dot_sub_dot_mod``, which comes back as ``pkg.sub.mod`` when
+    that module is loaded too), and that collision fails open (the callers judge
+    the module returned).
     """
     if not global_name.startswith(_IMPORT_ALIAS_PREFIX):
         return None
@@ -427,12 +446,13 @@ def _reads_a_builtin(source: Source, value: object) -> bool:
     rather than proof on that branch, which an advisory lint over a
     dropped-guard set does not defend against. Every callable in
     ``builtins.__dict__`` is one of the two kinds apart from the
-    ``_sitebuiltins`` objects, instances of neither, and beside the two
-    aliases three of them fail closed: ``open``, the one builtin function
-    ``builtins`` does not own (its ``__module__`` is ``_io``, ``io`` before
-    3.12, so a dropped guard on one of the most mainstream builtins here is
-    reported), and the heap types ``ExceptionGroup`` and ``__loader__``, the
-    latter refused under a name that is not its own as well. The exposure is
+    ``_sitebuiltins`` objects, instances of neither, and beside the aliases
+    (``WindowsError`` is a third on Windows) three of them fail closed:
+    ``open``, the one builtin function ``builtins`` does not own (its
+    ``__module__`` is ``_io``, ``io`` before 3.12, so a dropped guard on one of
+    the most mainstream builtins here is reported), and the heap types
+    ``ExceptionGroup`` (3.11+) and ``__loader__``, the latter refused under a
+    name that is not its own as well. The exposure is
     narrow either way: a registered builtin is id-matched into a BUILTIN_MATCH
     the serializer keeps, so only a deregistered, polyfilled one (``sum``,
     ``enumerate``, ``all``, ``any``) or a shim reaches the dropped set this
