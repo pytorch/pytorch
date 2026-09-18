@@ -32,12 +32,11 @@ from torch.compiler._precompile_types import (
 
 # The two tracers come from torch._precompile, which is under `from __future__ import
 # annotations`, so their annotations are still strings that only resolve against THAT
-# module's globals: resolve them BEFORE the re-homing below points
-# typing.get_type_hints (which resolves through a class's __module__) at this module
-# instead. The three _precompile_types classes need nothing -- that module has no
-# future-annotations import, so their annotations are already objects. Only
-# __annotations__ is rewritten here; dataclasses.fields() keeps the original strings,
-# since it reads __dataclass_fields__, frozen at decoration.
+# module's globals: resolve them BEFORE the re-homing below points typing.get_type_hints
+# (which resolves through a class's __module__) at this module instead. The three
+# _precompile_types classes need nothing -- that module has no future-annotations import,
+# so their annotations are already objects. Only __annotations__ is rewritten here;
+# dataclasses.fields() keeps the original strings, read from __dataclass_fields__.
 for _t in (MakeFxTracer, DynamoTracer):
     _t.__annotations__ = typing.get_type_hints(_t)
 

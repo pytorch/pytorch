@@ -52,10 +52,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ```{warning}
 `torch.compiler.precompile` and everything reached through it (`precompile.capture`,
-`precompile.load`, `torch.compiler.PrecompiledRunnable`,
-`torch.compiler.PrecompiledCallable`, and the objects they return) is a prototype API.
-Signatures, error types and the artifact format may change between releases without a
-deprecation cycle.
+`precompile.load`, `torch.compiler.PrecompiledRunnable`, `torch.compiler.PrecompiledCallable`
+and the objects they return) is a prototype API: signatures, error types and the artifact
+format may change between releases without a deprecation cycle.
 ```
 
 % precompile is a module whose members are documented manually below.
@@ -127,13 +126,9 @@ deprecation cycle.
       additionally specializes on input memory format. A call served from the reloaded
       artifact also IGNORES the serving process's ambient ``torch.autocast``: whatever
       the capture ran under is already baked in, so autocast is neutralized for the
-      duration of the call on every device this build can autocast, and the call returns
-      the capture's dtypes, not the dtypes the same eager call returns inside that region
-      -- so capture under the autocast you want baked in. The one case that still casts
-      twice is a device that reports autocast enabled and whose disable then refuses to
-      construct (a module registered under the privateuse1 backend name and missing
-      ``get_amp_supported_dtype``); it is skipped with one logged warning per device per
-      loaded artifact. See Note [precompile programming model] in
+      duration of the call and the call returns the capture's dtypes, not the dtypes the
+      same eager call returns inside that region -- so capture under the autocast you
+      want baked in. See Note [precompile programming model] in
       ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
@@ -156,16 +151,15 @@ deprecation cycle.
    gradients.
 
    Threading: the inductor lowering step drives process-global compiler state and is
-   serialized by an internal lock, so concurrent ``backend="inductor"`` captures lower
-   one at a time. The capture phase and the ``backend="eager"`` path are NOT
-   serialized. The lock is taken inside the ``cap(...)`` calls, which is where the
-   lowering runs, not held for the surrounding block.
+   serialized by an internal lock, so concurrent ``backend="inductor"`` captures lower one
+   at a time; the capture phase and the ``backend="eager"`` path are NOT serialized. The
+   lock is taken inside the ``cap(...)`` calls, where the lowering runs, not across the
+   block.
 
    :param fn: The whole computation to capture, taking the model(s) and runtime inputs
        as positional arguments. With :class:`precompile.DynamoTracer`, ``cap(...)`` also
        accepts keyword arguments and the loaded artifact takes them the same way;
-       :class:`precompile.MakeFxTracer` is positional-only. The ``nn.Module`` arguments
-       are lifted and the rest are the runtime inputs.
+       :class:`precompile.MakeFxTracer` is positional-only.
    :param artifact_path: File to write ``python_code`` to when the block exits. Required.
    :param cache_path: File to write the acceleration cache to. Required.
    :param tracer: The capture front-end and its configuration, a
@@ -176,11 +170,10 @@ deprecation cycle.
    :param training: Run with grad enabled and lower a backward into the artifact;
        defaults to ``False``. Required for a ``fn`` that runs a backward.
    :returns: A :class:`precompile.Capture` -- a context manager and callable. The artifact
-       is written to the two files on a clean exit from the block that captured at least
-       one call. Three exits write nothing: a block that raised leaves the files untouched
-       (the exception propagates), and a clean exit with nothing captured -- no call was
-       made, or the only call raised and was caught -- raises ``PrecompileError`` instead
-       of writing an empty artifact.
+       is written to the two files on a clean exit from a block that captured at least one
+       call; a block that raised leaves them untouched (the exception propagates), and a
+       clean exit with nothing captured -- no call was made, or the only call raised and was
+       caught -- raises ``PrecompileError`` instead of writing an empty artifact.
    :raises PrecompileError: if capture, lowering, or a runtime call violates the
        contract (see the exception below; a ``tracer`` of a
        type neither tracer accepts is a ``TypeError`` instead); if one of the two
@@ -219,8 +212,8 @@ deprecation cycle.
            cap(example_b)
        compiled = torch.compiler.precompile.load("s.py", "s.cache")
        # staged() breaks only within its own frame, so this artifact is STANDALONE:
-       # `installed` is False and its `with` / `unload()` are no-ops (something is
-       # taken back out only for a capture holding frames the entry cannot reach).
+       # `installed` is False and its `with` / `unload()` are no-ops (only a capture
+       # holding frames the entry cannot reach installs anything).
        out = compiled(example_a)
 ```
 
@@ -234,10 +227,9 @@ deprecation cycle.
    accelerates loading -- it carries only the compiled backend artifact (the Inductor bundle
    for ``backend="inductor"``; empty for ``backend="eager"``) and no weights. You pass the
    model(s) again at runtime.
-   Calling the result ignores this process's ambient ``torch.autocast`` on every device
-   this build can autocast, so it returns the capture's dtypes rather than the dtypes the
-   same eager call returns inside that region (see the autocast contract in the note
-   above).
+   Calling the result ignores this process's ambient ``torch.autocast``, so it returns
+   the capture's dtypes rather than the dtypes the same eager call returns inside that
+   region (see the autocast contract in the note above).
 
    .. warning::
 
@@ -462,8 +454,7 @@ deprecation cycle.
       ``(guard_type, source, rendered_check)`` for each dropped slot that renders to a
       check. The slot's ``(guard_type, source)`` alone can be ambiguous -- a dropped
       ``HASATTR`` may be the benign companion of a kept ``TENSOR_MATCH`` or the only thing
-      guarding an optional attribute -- so the rendered check is reported alongside to tell
-      them apart.
+      guarding an optional attribute -- the rendered check tells them apart.
 
    .. py:attribute:: capture_errors
 
@@ -473,10 +464,9 @@ deprecation cycle.
 
       Whether the capture covers everything it exercised: false if the capture produced no
       guarded code at all, if any frame hit the recompile limit, was bypassed or was left
-      uncovered, or if a capture call raised, and false unless at least one backend graph
-      was captured -- ``allow_empty_graphs`` lets a frame that compiled nothing still count
-      as a guarded code, so ``guarded_codes`` alone cannot tell a real capture from an
-      empty one.
+      uncovered, if a capture call raised, or if no backend graph was captured
+      (``allow_empty_graphs`` lets a frame that compiled nothing still count as a guarded
+      code, so ``guarded_codes`` alone cannot tell a real capture from an empty one).
 
    .. py:method:: dropped_guard_types()
 
@@ -499,11 +489,5 @@ deprecation cycle.
 
    One guard observed while compiling a frame variant. Frozen dataclass with ``guard_type``,
    ``source``, ``code`` (the rendered check parts), ``value``, and ``enforced`` (whether the
-   artifact still checks it). ``render()`` returns one stable, human-readable line.
-
-   .. py:method:: render()
-
-      Render the guard as one stable, human-readable line.
-
-
+   artifact still checks it).
 ```
