@@ -73,6 +73,8 @@ class PrecompileSummary:
       identically across every captured variant, and is not checked either.
     * ``dropped_guard_code`` draws its slots from ``dropped_guards`` and
       ``policy_dropped_guards``.
+    * every ``wont_generalize`` source is the source half of a ``kept_guards``
+      slot, the value-equality guard that pins it.
 
     The lists aggregate every captured frame and a slot names no frame, so two
     frames' ``self.act`` are one slot: a slot one frame kept and another dropped
@@ -91,6 +93,9 @@ class PrecompileSummary:
     (filename:firstlineno)``, recorded once per code object that hit the limit,
     so its entries do identify a frame. A bare name identifies none, so the two
     bare lists cannot be checked disjoint.
+
+    Three entries below name the rule they follow in
+    ``torch._dynamo.precompile_package``, added later in this stack.
 
     Attributes:
         frames: Captured frames: every frame the package holds an entry for, the
@@ -119,13 +124,15 @@ class PrecompileSummary:
             them: a thin wrapper whose graphs all landed in an inner frame, a
             frame Dynamo gave up on, or a frame whose compile raised (its
             message is in ``capture_errors``, so one failure shows in both
-            digest clauses). A different cause and remedy from ``bypassed``,
-            never the same frame; a frame that hit the recompile limit before
-            it recorded a guarded code is in ``truncated`` too. Not a
-            remainder: which frames count as a gap is the producer's decision,
-            and a frame the package holds an entry for but never ran is not
-            one, so this is not ``frames`` minus ``bypassed`` minus the frames
-            that hold guarded code.
+            digest clauses). A different cause and remedy from ``bypassed``
+            (an install ``skip_code``s an uncovered frame, so only a re-capture
+            recovers it, where it re-traces a bypassed one), never the same
+            frame; a frame that hit the recompile limit before it recorded a
+            guarded code is in ``truncated`` too. Not a remainder: which frames
+            count as a gap is the producer's decision, and a frame the package
+            holds an entry for but never ran is not one, so this is not
+            ``frames`` minus ``bypassed`` minus the frames that hold guarded
+            code.
         wont_generalize: Guard *sources* (not frame names) a kept value-equality
             guard on a bare argument name pins in some variant (``_pins_a_value``
             in ``torch._dynamo.precompile_package`` is the rule; ``self.eps`` is
