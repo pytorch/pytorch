@@ -29,9 +29,12 @@ from torch._inductor.runtime.caching import (
     utils,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
+    recover_orig_fp32_precision,
 )
 
 
@@ -100,6 +103,8 @@ class TestMixin:
 
 @instantiate_parametrized_tests
 class ConfigTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     FOO_THIS_VERSION: int = 0
     FOO_JK_NAME: str = "foo_jk_name"
     FOO_OSS_DEFAULT: bool = False
@@ -223,6 +228,8 @@ class ConfigTest(TestCase):
 
 @instantiate_parametrized_tests
 class ContextTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def isolation_schema_from_forms_of_context_selected(
         self,
         runtime_forms_of_context_selected: Sequence[str],
@@ -389,6 +396,8 @@ class ContextTest(TestCase):
 
 @instantiate_parametrized_tests
 class ExceptionsTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     exception_typenames: list[str] = [
         "CacheError",
         "SystemError",
@@ -433,6 +442,8 @@ class ExceptionsTest(TestCase):
 
 @instantiate_parametrized_tests
 class ImplementationsTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def sub_dir(cls) -> str:
         return f"testing-impls-instance-{cls.cls_id}"
@@ -625,6 +636,8 @@ class ImplementationsTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class LocksTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     T = TypeVar("T")
 
     @contextmanager
@@ -828,6 +841,8 @@ class LocksTest(TestMixin, TestCase):
 
 @instantiate_parametrized_tests
 class UtilsTest(TestMixin, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_lru_cache(self) -> None:
         """Test that the LRU cache decorator works correctly with various argument types.
 
@@ -874,6 +889,8 @@ class UtilsTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class InterfacesTest(TestMixin, TestCase):
     """Test class for Memoizer and PersistentMemoizer interfaces."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -1829,6 +1846,8 @@ class InterfacesTest(TestMixin, TestCase):
 class ForceDisableCachesTest(TestMixin, TestCase):
     """Test class for force_disable_caches integration with the caching module."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @classmethod
     def sub_dir(cls) -> str:
         return f"testing-force-disable-caches-{cls.cls_id}"
@@ -1911,6 +1930,8 @@ class ForceDisableCachesTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class FreshCacheIntegrationTest(TestMixin, TestCase):
     """Test class for fresh_cache integration with the caching module."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -2134,6 +2155,8 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
     correctly memoizes and replays results based on tensor metadata and
     operation parameters.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
@@ -2512,38 +2535,44 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         self.assertTrue(result_with_input)
         self.assertFalse(result_without_input)
 
+    @recover_orig_fp32_precision
     @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
-    @patch_on_disk_cache_base_dir
-    @set_caching_module_enabled(True)
     def test_should_pad_params_encoder_produces_consistent_keys(
         self, mock_is_contiguous
     ) -> None:
-        """Test that the encoder produces consistent keys for the same inputs.
-
-        Verifies that calling the encoder with the same tensor metadata produces
-        the same cache key, ensuring reliable cache hits.
-        """
+        """Test that padding cache keys are stable and precision-aware."""
         import torch
+        from torch._inductor.fx_passes.pad_mm import should_pad_bench_key
         from torch._inductor.runtime.caching import encoders
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         mock_match = self._create_mock_match()
         mat1 = torch.randn(8, 16, dtype=torch.float32)
         mat2 = torch.randn(16, 32, dtype=torch.float32)
         op = torch.ops.aten.mm
-
-        # Execute: encode the same parameters multiple times
         encoded1 = encoders.should_pad_params_encoder(mock_match, mat1, mat2, op)
         encoded2 = encoders.should_pad_params_encoder(mock_match, mat1, mat2, op)
 
-        # Assert: encodings are identical
         self.assertEqual(encoded1, encoded2)
-
-        # Also verify the structure of the encoded output
         self.assertIn("mat1", encoded1)
         self.assertIn("mat2", encoded1)
         self.assertIn("op", encoded1)
         self.assertEqual(encoded1["mat1"]["shape"], tuple(mat1.shape))
         self.assertEqual(encoded1["mat2"]["shape"], tuple(mat2.shape))
+
+        with FakeTensorMode():
+            mat1 = torch.empty(8, 16, device="cuda")
+            mat2 = torch.empty(16, 32, device="cuda")
+
+        benchmark_keys = set()
+        precisions = ("ieee", "tf32") + (("bfx9",) if BF16X9_SUPPORTED else ())
+        for precision in precisions:
+            torch.backends.cuda.matmul.fp32_precision = precision
+            encoded = encoders.should_pad_params_encoder(mock_match, mat1, mat2, op)
+            self.assertEqual(encoded["fp32_precision"], precision)
+            benchmark_keys.add(should_pad_bench_key(mock_match, mat1, mat2, op))
+
+        self.assertEqual(len(benchmark_keys), len(precisions))
 
     @patch("torch._prims_common.is_contiguous_or_false", return_value=True)
     @patch_on_disk_cache_base_dir
@@ -2599,6 +2628,8 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
 @instantiate_parametrized_tests
 class DeferredRecordingTest(TestMixin, TestCase):
     """Test class for DeferredRecording functionality."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     @classmethod
     def sub_dir(cls) -> str:
