@@ -1856,7 +1856,9 @@ class AOTCompiledModel:
     raise ``check_verbose`` caught and quoted as a blank ``str(exc)`` part;
     ``<guard check raised KIND: ...>`` for a tree whose last dispatch evaluation
     raised, or that raised out of ``check_verbose`` here, blank message included
-    (``<guard check raised RuntimeError: >``); and ``<opted out of guard
+    (``<guard check raised RuntimeError: >``), the message replaced by ``<str()
+    raised KIND>`` when the exception's own ``__str__`` raised (``<guard check
+    raised Boom: <str() raised ValueError>>``); and ``<opted out of guard
     checks; withheld because [k]'s guard check raised>`` for a result the raise
     withheld. Then one ``For [i, j]:`` line per distinct missing-global hint
     naming the entries whose guards failed on a global the process does not
