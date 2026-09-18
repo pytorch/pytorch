@@ -1106,7 +1106,7 @@ class CommonTemplate:
 
     # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
     @test_torchinductor.xfail_if_triton_cpu
-    @xfail_if_tensor_descriptor
+    @xfail_if_cpu_tensor_descriptor
     def test_reduction_padded_output_tiling(self):
         """
         Test a [Y, X, R0] reduction with tiled output dimensions.
@@ -1118,7 +1118,11 @@ class CommonTemplate:
         result, (code,) = self._run_and_compare(
             functools.partial(torch.amax, dim=-1),
             x,
-            expected_num_block_pointers=2,
+            expected_num_block_pointers=(
+                1
+                if self.block_descriptor_constructor_str == "tl.make_tensor_descriptor"
+                else 2
+            ),
             expected_num_triton_kernels=1,
             config_patches={
                 "pad_outputs": True,
@@ -1757,7 +1761,7 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         result, (code,) = self._run_and_compare(
             functools.partial(torch.amax, dim=-1),
             x,
-            expected_num_block_pointers=1,  # Input uses block_ptr, output uses device-TMA
+            expected_num_block_pointers=1,  # One tensor descriptor is emitted for this device-TMA kernel
             expected_num_triton_kernels=1,
             config_patches={
                 "pad_outputs": True,
@@ -1768,8 +1772,12 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
             },
         )
 
-        # Device-TMA metadata should be present in the emitted code.
-        self.assertIn("'XBLOCK': 4", code)
+        # Bind the minimum value to the metadata field, rather than matching
+        # an unrelated config repr that also contains XBLOCK.
+        self.assertRegex(
+            code,
+            r"'tma_min_block_sizes': \{[^}]*'XBLOCK': 4(?=,|\})",
+        )
         self.assertIn("'uses_device_tma': True", code)
 
     def test_bool_dtype_skips_tma(self):
@@ -2525,9 +2533,8 @@ if GPU_TYPE == "cuda":
     # Known TMA API limitations: these cases also fail for device-side TMA (they
     # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
     # different (still-correct) codegen that breaks the device-specific code asserts.
-    # test_reduction_padded_output_tiling is intentionally not listed because its
-    # host-side-TMA variant is a passing regression. The device-TMA variant remains
-    # covered by xfail_if_tensor_descriptor.
+    # test_reduction_padded_output_tiling is intentionally not listed because both
+    # its host-side and device-side TMA variants are passing regressions.
     _HOST_TMA_EXPECTED_FAILURES = [
         "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
         "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",

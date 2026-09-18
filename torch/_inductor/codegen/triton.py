@@ -109,7 +109,6 @@ from .common import (
     DeferredLine,
     IndentedBuffer,
     InplacedBuffer,
-    is_buffer_removed,
     OpOverrides,
     PythonPrinter,
     RemovedArg,
@@ -3273,11 +3272,14 @@ class TMACompatibilityChecker:
                         )
                         return False
                 else:
-                    # Update the minimum block sizes that are passed to triton
-                    # heuristics
-                    self.kernel.tma_min_block_sizes[block_type_str] = max(
-                        min_block_size,
-                        self.kernel.tma_min_block_sizes.get(block_type_str, 1),
+                    # Record the constraint by buffer so removed descriptors do not
+                    # leave stale restrictions in the final Triton metadata.
+                    if self.buffer_name is None:
+                        raise AssertionError(
+                            "TMA compatibility check requires a buffer name"
+                        )
+                    self.kernel._record_tma_min_block_size(
+                        self.buffer_name, block_type_str, min_block_size
                     )
 
             except ValueError:
@@ -3352,7 +3354,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.pointer_advancements: dict[SymT, dict[str, list[sympy.Expr]]] = (
             collections.defaultdict(dict)
         )
-        self.tma_min_block_sizes = dict[str, int]()
+        self._tma_min_block_sizes_by_buffer: dict[str, dict[str, int]] = {}
         # TensorDescriptorOptions for pointwise/reduction kernels; template
         # kernels set a resolved {block_shape, shape, strides} dict directly
         # (see TritonTemplateKernel.tma_descriptor).
@@ -3391,6 +3393,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.has_load_with_contiguous_rdim = False
         # We track the store name since a store can be canceled later
         self.stores_with_contiguous_rdim: list[str] = []
+
+    def _record_tma_min_block_size(
+        self, buffer_name: str, block_type: str, min_block_size: int
+    ) -> None:
+        block_sizes = self._tma_min_block_sizes_by_buffer.setdefault(buffer_name, {})
+        block_sizes[block_type] = max(min_block_size, block_sizes.get(block_type, 1))
+
+    @property
+    def tma_min_block_sizes(self) -> dict[str, int]:
+        removed = (
+            self.removed_buffers
+            | self.inplaced_to_remove
+            | V.graph.removed_buffers
+            | V.graph.inplaced_to_remove
+        )
+        result: dict[str, int] = {}
+        for buffer_name, block_sizes in self._tma_min_block_sizes_by_buffer.items():
+            if buffer_name in removed:
+                continue
+            for block_type, min_block_size in block_sizes.items():
+                result[block_type] = max(min_block_size, result.get(block_type, 1))
+        return result
 
     @property
     def uses_tma(self) -> bool:
@@ -3714,9 +3738,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @property
     def has_store_with_contiguous_rdim(self) -> bool:
-        return not all(
-            is_buffer_removed(name) for name in self.stores_with_contiguous_rdim
+        removed = (
+            self.removed_buffers
+            | self.inplaced_to_remove
+            | V.graph.removed_buffers
+            | V.graph.inplaced_to_remove
         )
+        return any(name not in removed for name in self.stores_with_contiguous_rdim)
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return triton_type(dtype)
@@ -6343,6 +6371,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype=dtype,
                 for_store=True,
                 force=False,
+                buffer_name=name,
             ),
         )
         self.inside_reduction = True
