@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, onlyOn, OpDTypes, toleranceOverride, tol,
-     largeTensorTest)
+     largeTensorTest, skipXPUIf)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
@@ -128,6 +128,7 @@ def skip_helper_for_fft(device, dtype):
 class TestFFT(TestCase):
     exact_dtype = True
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5440")
     @onlyNativeDeviceTypes
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.OneD],
          allowed_dtypes=(torch.float, torch.cfloat))
@@ -362,6 +363,7 @@ class TestFFT(TestCase):
             f"Expected complex64 or float32 output for bfloat16 input, got {result.dtype}"
         )
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5441")
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.chalf))
     def test_fft_half_and_chalf_not_power_of_two_error(self, device, dtype, op):
