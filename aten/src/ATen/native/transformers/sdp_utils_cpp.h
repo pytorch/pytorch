@@ -552,11 +552,12 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
   if (ignore_singleton_dim){
     qkv_strides_equal_1 = qkv_strides_equal_1 || params.query.sym_size(-1) == 1;
   }
-  bool is_cpu = params.query.device().type() == c10::DeviceType::CPU;
+  bool is_cpu_or_xpu = (params.query.device().type() == c10::DeviceType::CPU) ||
+                       (params.query.device().type() == c10::DeviceType::XPU);
   bool mask_stride_equal_1 = params.attn_mask.has_value()
       ? params.attn_mask.value().sym_stride(-1) == 1
       : true;
-  bool mask_stride_valid = is_cpu ? true : mask_stride_equal_1;
+  bool mask_stride_valid = is_cpu_or_xpu ? true : mask_stride_equal_1;
   if (!(qkv_strides_equal_1 && mask_stride_valid)) {
     if (debug) {
       std::ostringstream message;
