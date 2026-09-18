@@ -83,20 +83,23 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
-    def test_guard_fact_render(self):
+    def test_guard_fact_pickle_and_hash(self):
         from torch.compiler._precompile_types import GuardFact
 
-        kept = GuardFact("TYPE_MATCH", "L['x']", ("check_type_id(L['x'])",), "", True)
-        self.assertEqual(kept.render(), "[enforced] check_type_id(L['x']) on L['x']")
-        # No rendered code falls back to <guard_type>, a value is appended, and
-        # the dropped label pads to the width of "enforced" so lines align.
-        dropped = GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc fn", False)
-        self.assertEqual(
-            dropped.render(), "[dropped ] <ID_MATCH> is @m.py:3#abc fn on G['fn']"
+        # A fact is a value: pickle round-trips it and equal facts hash equal.
+        fact = GuardFact(
+            guard_type="ID_MATCH",
+            source="G['fn']",
+            code=("___check_obj_id(G['fn'], <id>), type=<class 'function'>",),
+            value="is @m.py:3#abc mod.fn",
+            enforced=False,
         )
-        # Several code parts are joined; no source drops the " on ..." suffix.
-        joined = GuardFact("GRAD_MODE", "", ("a", "b"), "", True)
-        self.assertEqual(joined.render(), "[enforced] a ; b")
+        clone = pickle.loads(pickle.dumps(fact))
+        self.assertEqual(clone, fact)
+        self.assertEqual(hash(clone), hash(fact))
+        # Keyword-only: three str fields in a row would otherwise transpose silently.
+        with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
+            GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc mod.fn", False)
 
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
@@ -2153,22 +2156,72 @@ class TestPrecompile(TestCase):
                 )
 
     def test_capture_inside_another_trace_refused(self):
-        # An ambient TracingContext.fake_mode outranks the mode capture hands make_fx, and
-        # no foreign mode passes allow_fallback_kernels=False, so a meta-less
-        # op would be run for real again; one built under DEFAULT config (as here, and as
-        # an AOTAutograd / inductor trace builds its own) also lacks the
-        # unsafe-data-ptr-access snapshot, so a .data_ptr() read bakes 0 instead of raising.
-        # So capture refuses up front, on a fn that captures cleanly on its own, rather than
-        # tracing under a foreign contract.
+        # An ambient fake mode outranks the one the UNBACKED path builds, and no foreign mode
+        # passes allow_fallback_kernels=False, so a meta-less op would be run for real again;
+        # one built under DEFAULT config (as here, and as an AOTAutograd / inductor trace
+        # builds its own) also lacks the unsafe-data-ptr-access snapshot, so a .data_ptr()
+        # read bakes 0 instead of raising. So an unbacked capture refuses up front, on a fn
+        # that captures cleanly on its own, rather than tracing under a foreign contract.
         model = torch.nn.Linear(4, 4)
         x = torch.randn(3, 4)
+        marked = torch.randn(3, 4)
+        mark_unbacked(marked, 0)
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
         with torch._guards.tracing(torch._guards.TracingContext(fake_mode)):
             with self.assertRaisesRegex(
-                PrecompileError, "cannot run inside another trace"
+                PrecompileError, "unbacked capture cannot run inside another trace"
             ):
-                _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
-        _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
+                _precompile_pair(lambda m, t: m(t), model, marked)
+            # The STATIC path traces on the real example tensors (make_fx's "real" mode
+            # resolves no fake mode at all), so it has no mode of its own to lose to the
+            # ambient one and is NOT refused.
+            _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
+        # detect_fake_mode also ranks the dispatch-mode stack, so an enclosing
+        # `with FakeTensorMode()` -- no TracingContext at all -- gets the same named refusal
+        # rather than the mode-mismatch AssertionError inside detect_fake_mode.
+        with FakeTensorMode():
+            with self.assertRaisesRegex(
+                PrecompileError, "unbacked capture cannot run inside another trace"
+            ):
+                _precompile_pair(lambda m, t: m(t), model, marked)
+        _precompile_pair(lambda m, t: m(t), model, marked)
+
+    def test_unbacked_capture_refuses_a_data_ptr_read(self):
+        # The unbacked mode is built inside the
+        # fake_tensor_allow_unsafe_data_ptr_access patch, so a .data_ptr() read in fn is
+        # refused instead of returning a meaningless value. The refusal comes out of the
+        # trace RAW here; the commit above relabels it as a PrecompileError.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def reads_pointer(mm, t):
+            t.data_ptr()
+            return mm(t)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer") as cm:
+            _precompile_pair(reads_pointer, m, x)
+        self.assertNotIsInstance(cm.exception, PrecompileError)
+
+    def test_unbacked_capture_refuses_a_meta_less_op_in_an_allowlisted_namespace(self):
+        # The other unbacked-mode hardening: allow_fallback_kernels=False. An op with no
+        # meta/fake kernel in an ALLOWLISTED namespace (aten, prims, quantized, ...) would
+        # otherwise have FakeTensorMode's unsafe fallback run its real kernel on
+        # zero-filled substitutes and bake whatever shape that produced. The op is called
+        # on the UNMARKED input on purpose: the fallback declines symbolic-sized arguments
+        # by itself, so only a static one exercises the flag. Raw out of the trace here too.
+        from torch._subclasses.fake_tensor import UnsupportedOperatorException
+        from torch.library import _scoped_library
+
+        m = torch.nn.Linear(4, 3).eval()
+        x, y = torch.randn(8, 4), torch.randn(2, 3)
+        mark_unbacked(x, 0)
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_unbacked_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_unbacked_no_meta", lambda t: t * 2, "CPU")
+            op = torch.ops.quantized.mlprecompile_unbacked_no_meta
+            with self.assertRaises(UnsupportedOperatorException):
+                _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")

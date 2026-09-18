@@ -93,15 +93,17 @@ it.
 #    applies to a traceable wrapper subclass's INNER tensors too, since a wrapper reports
 #    non-nested whatever it wraps.
 #    Make such a value a plain dense tensor or a supported subclass (e.g. DTensor).
-#    An UNBACKED capture traces under a fake mode IT built, so capture also refuses to run
-#    inside another trace: an ambient ``TracingContext.fake_mode`` (a torch.compile /
-#    export / AOTAutograd trace) outranks capture's own mode, and no foreign mode passes
+#    An UNBACKED capture traces under a fake mode IT built, so THAT path -- and only that
+#    path -- also refuses to run inside another trace: an ambient fake mode (a
+#    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
+#    outranks the mode capture built, and no foreign mode passes
 #    ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted namespace would
 #    be run for real again. A mode built under DEFAULT config (an AOTAutograd / inductor
 #    one) lacks the data-ptr snapshot as well, so a ``.data_ptr()`` read would bake 0
 #    rather than raise; a torch.compile / export mode does build under that patch, so for
-#    those two only the fallback setting is lost.
-#    Call precompile outside the enclosing trace.
+#    those two only the fallback setting is lost. A STATIC capture has no mode of its own to
+#    lose (it traces on the real example tensors), so it runs inside another trace as usual.
+#    Call precompile outside the enclosing trace, or capture statically.
 #
 #    You can opt specific user-input dims into being dynamic by marking them with
 #    ``torch._dynamo.decorators.mark_unbacked`` before calling: those dims are
@@ -230,7 +232,7 @@ from typing import Any, cast, NewType, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -291,8 +293,7 @@ class PrecompileError(RuntimeError):
     Raised when capture, lowering, ``load``, or a runtime call violates the precompile
     contract -- e.g. a tensor baked as a constant (invariant 1), an unsupported /
     effectful op, a nested example input, which capture does not support on either path
-    (invariant 3), a capture attempted inside another trace (an ambient
-    ``TracingContext`` fake mode, which does not carry capture's fallback-off setting), a
+    (invariant 3), an UNBACKED capture attempted inside another trace (invariant 3), a
     non-tensor output the inductor backend cannot lower, or a runtime input whose shape or
     memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -756,23 +757,6 @@ def _capture(
     import contextlib
 
     args = tuple(args)
-    # An ambient TracingContext.fake_mode OUTRANKS the mode this capture offers make_fx
-    # (detect_fake_mode takes it authoritatively), and no foreign mode passes
-    # allow_fallback_kernels=False, so a meta-less op in an allowlisted namespace would run
-    # for real on zero-filled substitutes again. A mode built under DEFAULT config (an
-    # AOTAutograd / inductor one) also lacks the
-    # fake_tensor_allow_unsafe_data_ptr_access=False snapshot, so a .data_ptr() read bakes 0
-    # instead of raising; dynamo and export do build theirs inside that patch, so there only
-    # the fallback setting is lost. Refuse rather than trace under someone else's contract.
-    tc = TracingContext.try_get()
-    if tc is not None and tc.fake_mode is not None:
-        raise PrecompileError(
-            "precompile: capture cannot run inside another trace -- a TracingContext with "
-            "a FakeTensorMode is active (e.g. precompile called from inside torch.compile "
-            "or an export/AOTAutograd trace). make_fx would adopt that mode and its "
-            "ShapeEnv, so capture's own safety settings would not apply. Capture outside "
-            "the enclosing trace."
-        )
     module_positions = [i for i, a in enumerate(args) if isinstance(a, torch.nn.Module)]
     module_pos_set = set(module_positions)
     mods = [a for a in args if isinstance(a, torch.nn.Module)]
@@ -847,6 +831,22 @@ def _capture(
     # (GuardOnDataDependentSymNode) rather than baking it. Reading the marks here (instead
     # of a precompile kwarg) keeps the precompile signature simple.
     marks = _read_unbacked_marks(user_flat)
+    # An UNBACKED capture traces under a fake mode IT built, and an ambient one outranks
+    # that, carrying neither of the two settings _fakeify_with_unbacked gives it (invariant 3 in the
+    # Note has the details), so refuse rather than trace under someone else's contract. The
+    # STATIC path has no mode to lose: make_fx's "real" mode resolves none. Ask
+    # detect_fake_mode -- what make_fx itself resolves through -- so all three sources it
+    # ranks (an ambient TracingContext, the dispatch-mode stack, the inputs) are refused by
+    # name here instead of reaching its own mode-mismatch assertion once capture enters its
+    # mode.
+    if any(marks) and detect_fake_mode() is not None:
+        raise PrecompileError(
+            "precompile: unbacked capture cannot run inside another trace -- a "
+            "FakeTensorMode is already active (e.g. precompile called from inside "
+            "torch.compile or an export/AOTAutograd trace). make_fx would adopt that mode "
+            "and its ShapeEnv, so capture's own safety settings would not apply. Capture "
+            "outside the enclosing trace."
+        )
     # Record each marked dim's declared min/max so the driver enforces them at runtime;
     # the capture-time torch._check on an unbacked symint never becomes a runtime guard,
     # so without this the documented mark_unbacked min/max check would be a silent no-op.
@@ -1826,10 +1826,9 @@ class _PrecompileApi:
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked
         as a constant (invariant 1), effectful ops (invariant 4), a nested example input,
-        which capture does not support on either path (invariant 3), a capture attempted
-        inside another trace (an ambient ``TracingContext`` fake mode outranks capture's
-        own and does not carry its fallback-off setting), and -- for the
-        inductor backend -- a runtime input whose stride / memory format differs from
+        which capture does not support on either path (invariant 3), an UNBACKED capture
+        attempted inside another trace (invariant 3 in the Note has the reason), and -- for
+        the inductor backend -- a runtime input whose stride / memory format differs from
         the example's (invariant 6).
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
