@@ -49,7 +49,7 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR, skipIfNoTritonDSL, skipIfNoCuteDSL, skipIfRocm, TEST_XPU,
-    TEST_CUDA, skipIfNoFlyDSL
+    TEST_CUDA, skipIfNoFlyDSL, skipIfRocmArch, MI200_ARCH
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -15827,6 +15827,10 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.int64,)),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # MIOpen's fp16 bwd-data solver ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC is inaccurate on gfx90a
+               # https://github.com/ROCm/rocm-libraries/issues/12322
+               DecorateInfo(skipIfRocmArch(MI200_ARCH), 'TestCommon', 'test_complex_half_reference_testing',
+                            device_type='cuda', dtypes=(torch.chalf,)),
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.int64,)
