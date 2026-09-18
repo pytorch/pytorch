@@ -643,9 +643,19 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
             if param.grad is not None:
                 return
 
+    # A parameter can declare a gradient dtype that differs from its own dtype
+    # (e.g. an fp32 master weight accumulating bf16 gradients). Autograd rejects
+    # a gradient that does not match `grad_dtype`, while the optimizers require
+    # the gradient to match the parameter dtype. The priming gradient is all
+    # zeros and `lr` is forced to zero below, so the dtype used here cannot
+    # affect the resulting optimizer state; relax `grad_dtype` for the duration
+    # of the priming step and restore it afterwards.
+    grad_dtypes = []
     for param_group in optim.param_groups:
         for param in param_group[_PARAMS]:
             if param.requires_grad:
+                grad_dtypes.append((param, param.grad_dtype))
+                param.grad_dtype = None
                 param.grad = torch.zeros_like(param)
 
     # Some optimizers will update parameters regardless of grads due to lr, so
@@ -659,13 +669,19 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
                 if isinstance(param_group["lr"], torch.Tensor)
                 else 0.0
             )
-    optim.step(closure=None)
-    # Whether to recover the "lr" should not matter too much as we will
-    # restore checkpointing later.
-    for param_group in optim.param_groups:
-        if "lr" in param_group:
-            param_group["lr"] = lrs.pop(0)
-    optim.zero_grad(set_to_none=True)
+    try:
+        optim.step(closure=None)
+    finally:
+        # Whether to recover the "lr" should not matter too much as we will
+        # restore checkpointing later.
+        for param_group in optim.param_groups:
+            if "lr" in param_group:
+                param_group["lr"] = lrs.pop(0)
+        # The gradients have to be cleared before `grad_dtype` is restored:
+        # assigning `grad_dtype` while a gradient is still attached is an error.
+        optim.zero_grad(set_to_none=True)
+        for param, grad_dtype in grad_dtypes:
+            param.grad_dtype = grad_dtype
 
 
 def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> dict[str, ValueType]:
