@@ -10,13 +10,10 @@ from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 
 import torch
 import torch.distributed as dist
-import torch.distributed.config as dist_config
 import torch.distributed.pipelining._p2p as p2p_module
 from torch.distributed.pipelining import (
     build_stage,
     pipeline,
-    PIPELINE_MICROBATCH_INDEX_KEY,
-    PIPELINE_STAGE_INDEX_KEY,
     PipelineStage,
     ScheduleGPipe,
 )
@@ -48,7 +45,7 @@ torch.manual_seed(0)
 
 @contextmanager
 def single_rank_process_group():
-    """Provide a temporary local process group when a test has not created one."""
+    """Provide a temporary local process group for stage unit tests."""
     init_pg = not dist.is_initialized()
     if not init_pg and dist.get_world_size() != 1:
         raise RuntimeError("pipeline stage unit tests require a single-rank group")
@@ -68,11 +65,6 @@ def single_rank_process_group():
 
 
 class PipelineStageBackendWarningTest(TestCase):
-    def test_per_direction_config_aliases_per_edge(self):
-        with self.assertWarnsRegex(FutureWarning, "use pipeline_per_edge_p2p"):
-            with dist_config.patch(pipeline_per_direction_p2p=True):
-                self.assertTrue(dist_config.pipeline_per_edge_p2p)
-
     @parametrize(
         "backend,should_warn",
         [("nccl", True), ("nccl2", True), ("nccl-lazy", False), ("gloo", False)],
@@ -93,157 +85,34 @@ class PipelineStageBackendWarningTest(TestCase):
 instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
-class PipelineStageMetadataTest(TestCase):
-    def test_pipeline_metadata_forward_kwargs(self):
-        class MetadataModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.received: list[tuple[int, int]] = []
-
-            def forward(
-                self,
-                x,
-                *,
-                scale,
-                pipeline_stage_index: int = -1,
-                pipeline_microbatch_index: int = -1,
-            ):
-                self.received.append((pipeline_stage_index, pipeline_microbatch_index))
-                return x * scale
-
-        with single_rank_process_group():
-            module = MetadataModule()
-            stage = PipelineStage(
-                module,
-                stage_index=0,
-                num_stages=1,
-                device=torch.device("cpu"),
-                input_args=torch.ones(1),
-                output_args=torch.full((1,), 3.0),
-                pass_pipeline_metadata=True,
-            )
-            cached_inputs = []
-
-            def loss_fn(output, target):
-                cached_inputs.append(tuple(stage.fwd_cache[len(cached_inputs)][1]))
-                return (output - target).square().sum()
-
-            schedule = ScheduleGPipe(
-                stage,
-                n_microbatches=2,
-                loss_fn=loss_fn,
-            )
-            x = torch.ones(2, requires_grad=True)
-            scale = torch.full((2,), 3.0, requires_grad=True)
-
-            self.assertEqual(
-                schedule.step(x, scale=scale, target=torch.zeros(2)), x * scale
-            )
-            self.assertEqual(module.received, [(0, 0), (0, 1)])
-            self.assertEqual(cached_inputs[0], (x[:1], scale[:1]))
-            self.assertEqual(cached_inputs[1], (x[1:], scale[1:]))
-            self.assertEqual(x.grad, torch.full_like(x, 18))
-            self.assertEqual(scale.grad, torch.full_like(scale, 6))
-
-            stage.clear_runtime_states()
-            reserved_value = torch.tensor(-1.0, requires_grad=True)
-            stage.forward_one_chunk(
-                0,
-                (x[:1],),
-                {
-                    "scale": scale[:1],
-                    PIPELINE_STAGE_INDEX_KEY: reserved_value,
-                    PIPELINE_MICROBATCH_INDEX_KEY: reserved_value,
-                },
-            )
-            self.assertEqual(module.received[-1], (0, 0))
-            self.assertEqual(stage.fwd_cache[0][1], [x[:1], scale[:1]])
-
-    def test_pipeline_metadata_pre_hook(self):
-        class StrictModule(torch.nn.Module):
-            def forward(self, x, *, scale):
-                return x * scale
-
-        received = []
-
-        def consume_metadata(module, args, kwargs):
-            received.append(
-                (
-                    kwargs.pop(PIPELINE_STAGE_INDEX_KEY),
-                    kwargs.pop(PIPELINE_MICROBATCH_INDEX_KEY),
-                )
-            )
-            return args, kwargs
-
-        with single_rank_process_group():
-            module = StrictModule()
-            module.register_forward_pre_hook(consume_metadata, with_kwargs=True)
-            x = torch.ones(1, requires_grad=True)
-            scale = torch.full((1,), 3.0, requires_grad=True)
-            stage = PipelineStage(
-                module,
-                stage_index=1,
-                num_stages=2,
-                device=torch.device("cpu"),
-                input_args=x,
-                output_args=x * scale,
-                pass_pipeline_metadata=True,
-            )
-            # Drive a non-first stage directly to isolate the received-input
-            # and forward-pre-hook contracts from distributed initialization.
-            stage._inference_mode = InferenceMode.STATIC
-            stage.has_backward = True
-            stage._prepare_forward_infra(3, None, has_backward=True)
-            stage._prepare_backward_infra(3)
-            stage.set_local_fwd_input(x, 2)
-
-            output = stage.forward_one_chunk(2, (), {"scale": scale})
-            self.assertEqual(output, x * scale)
-            self.assertEqual(received[-1], (1, 2))
-            self.assertEqual(stage.fwd_cache[2][1], [x, scale])
-
-            stage.backward_one_chunk(2, loss=output.sum())
-            self.assertEqual(stage.bwd_cache[2], (scale.detach(),))
-            # stage_backward releases direct input-leaf grads after copying
-            # them into the previous-stage gradient tuple.
-            self.assertIsNone(scale.grad)
-
-    def test_pipeline_metadata_requires_static_schedule(self):
+class PipelineStageMetadataInferenceTest(TestCase):
+    def test_metadata_p2p_uses_directed_edge_groups(self):
         with single_rank_process_group():
             stage = PipelineStage(
                 torch.nn.Identity(),
                 stage_index=0,
-                num_stages=1,
+                num_stages=2,
                 device=torch.device("cpu"),
-                pass_pipeline_metadata=True,
             )
-            schedule = ScheduleGPipe(stage, n_microbatches=2)
+            send_group = mock.MagicMock()
+            recv_group = mock.MagicMock()
+            stage.p2p_per_edge = True
+            stage.stage_index_to_group_rank = {0: 0, 1: 1}
+            stage._p2p_edge_groups = {
+                (0, 1): send_group,
+                (1, 0): recv_group,
+            }
 
-            with self.assertRaisesRegex(
-                PipeliningMetadataError, "complete static metadata across the pipeline"
+            with (
+                mock.patch.object(stage, "_resolve_peer_global_rank", return_value=1),
+                mock.patch.object(dist, "send_object_list") as send,
+                mock.patch.object(dist, "recv_object_list") as recv,
             ):
-                schedule.step(torch.ones(2))
+                stage._send_meta(object(), dst_stage=1)
+                stage._recv_meta(src_stage=1)
 
-    def test_pipeline_metadata_disabled(self):
-        class KwargsModule(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.kwargs = None
-
-            def forward(self, x, **kwargs):
-                self.kwargs = kwargs
-                return x
-
-        with single_rank_process_group():
-            module = KwargsModule()
-            stage = PipelineStage(
-                module,
-                stage_index=0,
-                num_stages=1,
-                device=torch.device("cpu"),
-            )
-            stage.forward_one_chunk(0, (torch.ones(1),))
-            self.assertEqual(module.kwargs, {})
+            self.assertIs(send.call_args.kwargs["group"], send_group)
+            self.assertIs(recv.call_args.kwargs["group"], recv_group)
 
     def test_recv_metadata_reinit_rejects_owned_buffers(self):
         with single_rank_process_group():
@@ -303,44 +172,32 @@ class PipelineStageMetadataTest(TestCase):
                 return grad
 
         device = torch.device("cpu")
-        init_pg = not dist.is_initialized()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            if init_pg:
-                dist.init_process_group(
-                    "gloo",
-                    init_method=f"file://{os.path.join(tmpdir, 'pg')}",
-                    rank=0,
-                    world_size=1,
-                )
-            try:
-                mod = BufferMutatingModule().to(device)
-                stage = PipelineStage(
-                    mod,
-                    stage_index=0,
-                    num_stages=1,
-                    device=device,
-                )
-                schedule = ScheduleGPipe(
-                    stage,
-                    n_microbatches=1,
-                    loss_fn=lambda out, target: out.sum() + target.sum() * 0,
-                )
+        with single_rank_process_group():
+            mod = BufferMutatingModule().to(device)
+            stage = PipelineStage(
+                mod,
+                stage_index=0,
+                num_stages=1,
+                device=device,
+            )
+            schedule = ScheduleGPipe(
+                stage,
+                n_microbatches=1,
+                loss_fn=lambda out, target: out.sum() + target.sum() * 0,
+            )
 
-                initial_counter = mod.counter.clone()
-                initial_scale = mod.scale.clone()
-                x = torch.randn(2, 4, device=device, requires_grad=True)
-                target = torch.zeros((), device=device)
+            initial_counter = mod.counter.clone()
+            initial_scale = mod.scale.clone()
+            x = torch.randn(2, 4, device=device, requires_grad=True)
+            target = torch.zeros((), device=device)
 
-                # This exercises the full metadata-inference lifecycle. The
-                # scale buffer is saved by autograd, so restoring buffers before
-                # backward metadata inference would bump its version counter.
-                schedule._initialize_stage((x,), {}, target=target)
+            # This exercises the full metadata-inference lifecycle. The
+            # scale buffer is saved by autograd, so restoring buffers before
+            # backward metadata inference would bump its version counter.
+            schedule._initialize_stage((x,), {}, target=target)
 
-                self.assertEqual(mod.counter, initial_counter)
-                self.assertEqual(mod.scale, initial_scale)
-            finally:
-                if init_pg:
-                    dist.destroy_process_group()
+            self.assertEqual(mod.counter, initial_counter)
+            self.assertEqual(mod.scale, initial_scale)
 
 
 def get_dtype_change_hook(new_dtype):

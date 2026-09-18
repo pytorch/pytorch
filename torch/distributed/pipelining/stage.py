@@ -48,7 +48,7 @@ from ._backward import (
     stage_backward_weight,
 )
 from ._debug import map_debug_info
-from ._p2p import _build_p2p_edge_groups, _P2PWarmupRound, _warn_if_eager_nccl
+from ._p2p import _DirectedRankEdge, _warn_if_eager_nccl
 from ._recv_buffers import (
     _assign_recv_info_buffers,
     _clear_unlaunched_recv_infos,
@@ -58,19 +58,11 @@ from ._recv_buffers import (
 
 
 __all__ = [
-    "PIPELINE_MICROBATCH_INDEX_KEY",
-    "PIPELINE_STAGE_INDEX_KEY",
     "PipelineStage",
     "build_stage",
 ]
 
 logger = logging.getLogger(__name__)
-
-PIPELINE_STAGE_INDEX_KEY = "pipeline_stage_index"
-PIPELINE_MICROBATCH_INDEX_KEY = "pipeline_microbatch_index"
-_PIPELINE_METADATA_KEYS = frozenset(
-    (PIPELINE_STAGE_INDEX_KEY, PIPELINE_MICROBATCH_INDEX_KEY)
-)
 
 
 def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
@@ -121,8 +113,6 @@ class _PipelineStageBase(ABC):
         device: torch.device,
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
-        *,
-        pass_pipeline_metadata: bool = False,
     ):
         """
         Args:
@@ -136,9 +126,6 @@ class _PipelineStageBase(ABC):
                 for deferred weight updates in F/I/W zero-bubble
                 schedules. If ``None``, a runner is generated
                 automatically via autograd graph traversal.
-            pass_pipeline_metadata: Inject the global stage and microbatch indices
-                as reserved keyword arguments at the forward dispatch boundary.
-                Only ``PipelineStage`` exposes this option.
         """
         super().__init__()
         if stage_index >= num_stages:
@@ -151,7 +138,6 @@ class _PipelineStageBase(ABC):
         self.num_stages = num_stages
         self.device = device
         self.group = group
-        self._pass_pipeline_metadata = pass_pipeline_metadata
 
         # Directed physical rank-edge communicators. Auto-enabled when
         # TorchComms is in use; the config flag
@@ -164,7 +150,9 @@ class _PipelineStageBase(ABC):
         )
         if not self.p2p_per_edge:
             _warn_if_eager_nccl(group)
-        self._p2p_edge_groups: dict[tuple[int, int], dist.ProcessGroup] = {}
+        # Keys are (source group rank, destination group rank). Opposite
+        # directions need distinct communicators even when they share one peer.
+        self._p2p_edge_groups: dict[_DirectedRankEdge, dist.ProcessGroup] = {}
 
         self.dw_builder = dw_builder
 
@@ -223,24 +211,21 @@ class _PipelineStageBase(ABC):
 
     @property
     def _parent_group(self) -> dist.ProcessGroup:
-        """Return the group used only by opt-in per-edge P2P setup.
+        """Return the parent group used by opt-in per-edge P2P setup.
 
         Stages without an explicit group resolve the default group here. The
-        legacy shared-communicator path does not consult this property.
+        legacy shared-communicator path deliberately does not consult this
+        property, so single-process schedules can run without initializing a
+        default process group.
+
+        Returns:
+            The explicit pipeline process group or the default process group.
         """
         return (
             self.group
             if self.group is not None
             else dist.distributed_c10d._get_default_group()
         )
-
-    def _configure_p2p_edge_groups(self) -> tuple[_P2PWarmupRound, ...]:
-        """Create directed P2P groups from the schedule's final stage mapping."""
-        groups, rounds = _build_p2p_edge_groups(
-            self.group, self.stage_index_to_group_rank, self.device
-        )
-        self._p2p_edge_groups = groups
-        return rounds
 
     @property
     def has_backward(self) -> bool:
@@ -370,7 +355,21 @@ class _PipelineStageBase(ABC):
     def _get_p2p_group(
         self, source_stage: int, destination_stage: int
     ) -> dist.ProcessGroup | None:
-        """Return the communicator for one directed logical-stage edge."""
+        """Resolve the communicator for one directed logical-stage edge.
+
+        Args:
+            source_stage: Logical stage sending the tensor.
+            destination_stage: Logical stage receiving the tensor.
+
+        Returns:
+            The shared parent group when per-edge mode is disabled, otherwise
+            the child group keyed by the source and destination group ranks.
+
+        Raises:
+            RuntimeError: If same-rank stages reach the P2P path, or the
+                schedule uses a non-adjacent logical-stage edge for which no
+                directed child was created.
+        """
         if not self.p2p_per_edge:
             return self.group
         source_rank = self.stage_index_to_group_rank[source_stage]
@@ -954,21 +953,7 @@ class _PipelineStageBase(ABC):
             # Activations only come in args form
             composite_args = self._retrieve_recv_activations(fwd_chunk_id)
 
-        user_kwargs = kwargs or {}
-        composite_kwargs = user_kwargs
-        if self._pass_pipeline_metadata:
-            # The runtime owns these keys. Dropping caller values avoids a
-            # rank-local error that could strand peers in pipeline P2P.
-            user_kwargs = {
-                key: value
-                for key, value in user_kwargs.items()
-                if key not in _PIPELINE_METADATA_KEYS
-            }
-            composite_kwargs = {
-                **user_kwargs,
-                PIPELINE_STAGE_INDEX_KEY: self.stage_index,
-                PIPELINE_MICROBATCH_INDEX_KEY: fwd_chunk_id,
-            }
+        composite_kwargs = kwargs or {}
 
         if self._runtime_validate:
             self._validate_stage_tensors(
@@ -998,8 +983,7 @@ class _PipelineStageBase(ABC):
             self.output_chunks.append(output)
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
-        # Pipeline metadata is execution context, not an autograd input.
-        flat_kwargs = flatten_args(user_kwargs)
+        flat_kwargs = flatten_args(composite_kwargs)
         flatten_input_tensors = flat_args + flat_kwargs
         self.fwd_cache[fwd_chunk_id] = (
             output_tuple,  # stage_output
@@ -1198,10 +1182,20 @@ class _PipelineStageBase(ABC):
                 )
 
     def _get_init_p2p_neighbors_ops(self) -> list[dist.P2POp]:
-        """
-        Get the operations to initialize the p2p communicators between previous and next stages.
-        This is done so by creating a dummy tensor and sending it to the next stage and receiving
-        from the previous stage.
+        """Build operations that initialize legacy parent-group P2P paths.
+
+        This path initializes the shared parent communicator used when per-edge
+        P2P is disabled. Per-edge setup instead initializes the parent
+        explicitly, creates its directed child groups, and preconnects those
+        children during schedule setup; using a child here would be
+        circular because the children do not exist yet.
+
+        Returns:
+            Dummy sends and receives for adjacent cross-rank logical stages.
+
+        Raises:
+            PipeliningMetadataError: If an adjacent logical stage has no rank
+                assignment.
         """
         ops: list[dist.P2POp] = []
 
@@ -1762,21 +1756,6 @@ class PipelineStage(_PipelineStageBase):
             zero-bubble (F/I/W) schedules.
         get_mesh: `GetMeshCallback` used during
             dynamic DTensor inference. Ignored in fully static DTensor mode.
-        pass_pipeline_metadata: Pass ``pipeline_stage_index`` and
-            ``pipeline_microbatch_index`` to each forward. The values are the
-            global logical stage index and the global microbatch index within
-            current training or evaluation step. The runtime replaces values
-            supplied under these reserved names. Use
-            :data:`PIPELINE_STAGE_INDEX_KEY` and
-            :data:`PIPELINE_MICROBATCH_INDEX_KEY` instead of spelling the names
-            in user code. This requires complete static metadata across the
-            schedule. The wrapped module may accept the reserved keywords
-            directly or consume them in a ``with_kwargs`` forward pre-hook.
-            Training with DTensor inputs also requires static
-            ``input_grads`` and ``output_grads`` metadata even when forward-only
-            evaluation succeeds without it. Compiled modules receive Python
-            integers and may recompile for each distinct value if the forward
-            uses them in control flow or shape computations.
     """
 
     def __init__(
@@ -1792,18 +1771,8 @@ class PipelineStage(_PipelineStageBase):
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
         get_mesh: GetMeshCallback | None = None,
-        *,
-        pass_pipeline_metadata: bool = False,
     ):
-        super().__init__(
-            submodule,
-            stage_index,
-            num_stages,
-            device,
-            group,
-            dw_builder,
-            pass_pipeline_metadata=pass_pipeline_metadata,
-        )
+        super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
 
         self._mesh_cache = _MeshCache(get_mesh_cb=get_mesh)
         self._inference_mode: InferenceMode | None = None
@@ -1849,7 +1818,7 @@ class PipelineStage(_PipelineStageBase):
         dist.recv_object_list(
             objects,
             src=self._resolve_peer_global_rank(src_stage),
-            group=self.group,
+            group=self._get_p2p_group(src_stage, self.stage_index),
             device=self.device,
             use_batch=True,
         )
@@ -1864,7 +1833,7 @@ class PipelineStage(_PipelineStageBase):
         dist.send_object_list(
             [meta],
             dst=self._resolve_peer_global_rank(dst_stage),
-            group=self.group,
+            group=self._get_p2p_group(self.stage_index, dst_stage),
             device=self.device,
             use_batch=True,
         )
@@ -1878,29 +1847,24 @@ class PipelineStage(_PipelineStageBase):
     ) -> torch.Tensor:
         """Forward phase of the warm-up vote protocol (stage 0 → N−1).
 
-        Each stage contributes whether it supports static metadata and whether
-        it permits dynamic inference. Elementwise multiplication with the
-        accumulated vote computes schedule-wide conjunctions. Dynamic inference
-        is invalid if any stage requests pipeline metadata.
+        Each stage computes a vote (1 = STATIC, 0 = DYNAMIC) based on
+        ``InferenceMode.needs_dynamic``, multiplies it with the accumulated
+        product from the previous stage, and forwards the result to the next
+        stage.  The final product at stage N−1 is 1 iff *every* stage voted
+        STATIC.
 
         Args:
             has_backward: Whether the schedule includes a backward pass.
-            received_acc: Two-element accumulated vote from the previous
+            received_acc: Accumulated product tensor from the previous
                 same-rank stage (V-schedule), or ``None`` for the first
                 stage / cross-rank.
 
         Returns:
-            The two-element accumulated vote after this stage.
+            The accumulated product tensor after this stage's vote.
         """
-        supports_static = int(
-            not InferenceMode.needs_dynamic(self._user_meta, has_backward)
-        )
-        permits_dynamic = int(not self._pass_pipeline_metadata)
-        my_vote_t = torch.tensor(
-            [supports_static, permits_dynamic],
-            dtype=torch.int32,
-            device=self.device,
-        )
+        my_vote = 0 if InferenceMode.needs_dynamic(self._user_meta, has_backward) else 1
+
+        my_vote_t = torch.tensor([my_vote], dtype=torch.int32, device=self.device)
 
         if self.is_first:
             acc = my_vote_t
@@ -1910,7 +1874,7 @@ class PipelineStage(_PipelineStageBase):
             acc = received_acc * my_vote_t
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index - 1)
-            acc = torch.zeros(2, dtype=torch.int32, device=self.device)
+            acc = torch.zeros(1, dtype=torch.int32, device=self.device)
             dist.recv(acc, src=peer_global, group=self.group)
             acc = acc * my_vote_t
 
@@ -1925,7 +1889,7 @@ class PipelineStage(_PipelineStageBase):
     ) -> torch.Tensor:
         """Backward phase of the warm-up vote protocol (stage N−1 → 0).
 
-        Propagates the final two-element vote (computed in the forward
+        Propagates the final accumulated product (computed in the forward
         phase) back through the pipeline so every stage learns the global
         inference mode.
 
@@ -1942,7 +1906,7 @@ class PipelineStage(_PipelineStageBase):
             result = received_result
         else:
             peer_global = self._resolve_peer_global_rank(self.stage_index + 1)
-            result = torch.zeros(2, dtype=torch.int32, device=self.device)
+            result = torch.zeros(1, dtype=torch.int32, device=self.device)
             dist.recv(result, src=peer_global, group=self.group)
 
         if not self.is_first and not self._is_same_rank(self.stage_index - 1):
@@ -2381,17 +2345,12 @@ class PipelineStage(_PipelineStageBase):
         if self._inference_mode is None:
             raise PipeliningMetadataError(
                 f"Stage {self.stage_index}: inference mode not set. "
-                f"Run warmup vote protocol first."
+                "Initialize the pipeline distributed state first."
             )
 
         fwd_meta_output: _StageForwardMeta | None = None
 
         if self._inference_mode == InferenceMode.DYNAMIC:
-            if self._pass_pipeline_metadata:
-                raise AssertionError(
-                    "the schedule-wide warm-up vote must reject dynamic metadata "
-                    "inference when pass_pipeline_metadata is enabled"
-                )
             # DYNAMIC mode: run forward metadata inference
             # args may be _StageForwardMeta for same-rank V-schedule stages
             fwd_meta_output = self._forward_metadata_inference(

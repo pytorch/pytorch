@@ -13,13 +13,13 @@ from torch._logging import warning_once
 
 logger = logging.getLogger(__name__)
 
-_P2PTopology = tuple[int, ...]
-_P2PWarmupRound = tuple[tuple[int, int], ...]
-_P2PGroupCacheKey = tuple[_P2PTopology, str]
-_P2PGroupCacheEntry = tuple[
-    dict[tuple[int, int], dist.ProcessGroup], tuple[_P2PWarmupRound, ...]
-]
-# A schedule may configure several local stage objects for one topology. Cache
+_StageRankAssignment = tuple[int, ...]
+_DirectedRankEdge = tuple[int, int]
+_P2PSplitRound = tuple[_DirectedRankEdge, ...]
+_DirectedP2PGroupMap = dict[_DirectedRankEdge, dist.ProcessGroup]
+_P2PGroupCacheKey = tuple[_StageRankAssignment, str]
+_P2PGroupCacheEntry = tuple[_DirectedP2PGroupMap, tuple[_P2PSplitRound, ...]]
+# A schedule may configure several local stage objects for one assignment. Cache
 # their shared children so every parent rank executes each split collective
 # exactly once. Full process-group teardown owns the real child lifetimes.
 _PP_EDGE_GROUP_CACHE: weakref.WeakKeyDictionary[
@@ -27,61 +27,112 @@ _PP_EDGE_GROUP_CACHE: weakref.WeakKeyDictionary[
 ] = weakref.WeakKeyDictionary()
 
 
-def _p2p_topology(
+def _stage_rank_assignment(
     stage_index_to_group_rank: dict[int, int], group_size: int
-) -> _P2PTopology:
-    """Validate and return the physical-rank assignment for logical stages."""
+) -> _StageRankAssignment:
+    """Return the physical pipeline-group rank assigned to each logical stage.
+
+    Args:
+        stage_index_to_group_rank: Mapping from each logical stage index to its
+            rank in the pipeline process group.
+        group_size: Number of ranks in the pipeline process group.
+
+    Returns:
+        A tuple indexed by logical stage, whose values are pipeline-group ranks.
+
+    Raises:
+        ValueError: If stage indices are not contiguous from zero or an assigned
+            rank falls outside the pipeline process group.
+    """
     stage_indices = set(stage_index_to_group_rank)
     expected_indices = set(range(len(stage_index_to_group_rank)))
     if stage_indices != expected_indices:
         raise ValueError(
             "Pipeline stage mapping must contain contiguous indices starting at 0"
         )
-    topology = tuple(
+    assignment = tuple(
         stage_index_to_group_rank[stage_index]
         for stage_index in range(len(expected_indices))
     )
-    if any(rank < 0 or rank >= group_size for rank in topology):
+    if any(rank < 0 or rank >= group_size for rank in assignment):
         raise ValueError(
             f"Pipeline stage mapping contains a rank outside [0, {group_size})"
         )
-    return topology
+    return assignment
 
 
-def _p2p_edge_matchings(topology: _P2PTopology) -> tuple[_P2PWarmupRound, ...]:
-    """Partition used physical edges into deterministic directed matchings."""
-    remaining = sorted(
+def _directed_edge_split_rounds(
+    stage_rank_assignment: _StageRankAssignment,
+) -> tuple[_P2PSplitRound, ...]:
+    """Partition adjacent physical-rank edges into collective split rounds.
+
+    Logical adjacencies mapped to the same physical-rank pair share a child
+    communicator. Same-rank adjacencies require no communication. Every
+    remaining rank pair appears in two directed rounds. Each returned round is
+    passed directly as one ``split_ranks`` argument to
+    :func:`torch.distributed.split_group`.
+    Because a parent rank may occur in at most one subgroup per split call, the
+    helper packs only disjoint edges into a round. Its deterministic greedy
+    matching combines independent edges and thereby reduces collective setup
+    calls without changing which directed communicators are created.
+
+    For example, the PP4/VPP2 assignment ``(0, 1, 2, 3, 0, 1, 2, 3)`` needs
+    eight directed communicators. They fit in four split calls::
+
+        ((0, 1), (2, 3))
+        ((1, 0), (3, 2))
+        ((0, 3), (1, 2))
+        ((3, 0), (2, 1))
+
+    Only successive logical stages in ``stage_rank_assignment`` contribute
+    edges. Long-range skip connections are not supported; a future arbitrary
+    connector set would need to be derived from the finalized schedule actions
+    rather than from stage placement alone.
+
+    Args:
+        stage_rank_assignment: Physical pipeline-group rank for every logical
+            stage, indexed by logical stage.
+
+    Returns:
+        Ordered split rounds containing directed ``(source_rank,
+        destination_rank)`` edges.
+    """
+    remaining_edges = sorted(
         {
             (min(source, destination), max(source, destination))
-            for source, destination in itertools.pairwise(topology)
+            for source, destination in itertools.pairwise(stage_rank_assignment)
             if source != destination
         }
     )
-    matchings: list[tuple[tuple[int, int], ...]] = []
-    while remaining:
+    edge_matchings: list[tuple[_DirectedRankEdge, ...]] = []
+    while remaining_edges:
         used_ranks: set[int] = set()
-        matching: list[tuple[int, int]] = []
-        deferred: list[tuple[int, int]] = []
-        for edge in remaining:
+        matching: list[_DirectedRankEdge] = []
+        deferred: list[_DirectedRankEdge] = []
+        for edge in remaining_edges:
             if edge[0] in used_ranks or edge[1] in used_ranks:
                 deferred.append(edge)
                 continue
             matching.append(edge)
             used_ranks.update(edge)
-        matchings.append(tuple(matching))
-        remaining = deferred
+        edge_matchings.append(tuple(matching))
+        remaining_edges = deferred
 
-    rounds: list[_P2PWarmupRound] = []
-    for matching_edges in matchings:
-        rounds.append(matching_edges)
-        rounds.append(
+    split_rounds: list[_P2PSplitRound] = []
+    for matching_edges in edge_matchings:
+        split_rounds.append(matching_edges)
+        split_rounds.append(
             tuple((destination, source) for source, destination in matching_edges)
         )
-    return tuple(rounds)
+    return tuple(split_rounds)
 
 
 def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
-    """Warn when pipeline P2P uses an eagerly initialized NCCL communicator."""
+    """Warn when the shared pipeline communicator eagerly initializes NCCL.
+
+    Args:
+        group: Pipeline process group, or ``None`` for the default group.
+    """
     if dist.get_backend(group) not in {"nccl", "nccl2"}:
         return
     warning_once(
@@ -98,7 +149,7 @@ def _initialize_additional_parent_backends(
     device_backend_map: Mapping[str, str],
     initialized_backend: str,
 ) -> None:
-    """Initialize retained native backends not exercised by stage warmup.
+    """Initialize retained native backends not exercised on the stage device.
 
     The schedule initializes the backend for the stage device before reaching
     this boundary. An unfiltered mixed-backend child retains every distinct
@@ -107,7 +158,7 @@ def _initialize_additional_parent_backends(
     Args:
         parent: Parent pipeline process group.
         device_backend_map: Parent mapping from device type to backend name.
-        initialized_backend: Backend already initialized by schedule warmup.
+        initialized_backend: Backend already initialized on the stage device.
     """
     initialized = {initialized_backend}
     for device_type, backend_name in sorted(device_backend_map.items()):
@@ -128,25 +179,48 @@ def _build_p2p_edge_groups(
     group: dist.ProcessGroup | None,
     stage_index_to_group_rank: dict[int, int],
     device: torch.device,
-) -> tuple[dict[tuple[int, int], dist.ProcessGroup], tuple[_P2PWarmupRound, ...]]:
-    """Create communicators for the directed rank edges used by a schedule."""
+) -> tuple[_DirectedP2PGroupMap, tuple[_P2PSplitRound, ...]]:
+    """Create or reuse child groups for a schedule's directed rank edges.
+
+    Child groups are keyed by ``(source_group_rank, destination_group_rank)``.
+    Opposite directions use distinct keys and communicators, while repeated
+    logical-stage edges mapped to the same directed physical edge share one
+    communicator FIFO. Only groups incident to the calling rank are returned.
+
+    Args:
+        group: Parent pipeline process group, or ``None`` for the default group.
+        stage_index_to_group_rank: Mapping from logical stage index to rank in
+            the parent pipeline process group.
+        device: Device used by this rank's pipeline stages.
+
+    Returns:
+        The local directed-edge group map and the deterministic split rounds
+        that every parent rank must execute in order.
+
+    Raises:
+        ValueError: If the stage assignment is invalid or the parent has no
+            backend for ``device``.
+        RuntimeError: If the selected native backend cannot split groups.
+    """
     parent = group if group is not None else dist.distributed_c10d._get_default_group()
     group_size = dist.get_world_size(parent)
-    topology = _p2p_topology(stage_index_to_group_rank, group_size)
-    cache_key = (topology, device.type)
+    stage_rank_assignment = _stage_rank_assignment(
+        stage_index_to_group_rank, group_size
+    )
+    cache_key = (stage_rank_assignment, device.type)
     cached = _PP_EDGE_GROUP_CACHE.get(parent, {}).get(cache_key)
     if cached is not None:
         return cached
 
     group_rank = dist.get_rank(parent)
-    rounds = _p2p_edge_matchings(topology)
-    groups: dict[tuple[int, int], dist.ProcessGroup] = {}
+    split_rounds = _directed_edge_split_rounds(stage_rank_assignment)
+    groups: _DirectedP2PGroupMap = {}
     if str(dist.get_backend(parent)) == "fake":
-        for round_edges in rounds:
+        for round_edges in split_rounds:
             for edge in round_edges:
                 if group_rank in edge:
                     groups[edge] = parent
-        return groups, rounds
+        return groups, split_rounds
 
     # Match split_group's backend selection so its default-backend validation
     # sees the same device/backend mapping as this optional filter.
@@ -190,7 +264,7 @@ def _build_p2p_edge_groups(
                 device_backend_map,
                 backend_name,
             )
-    for round_index, round_edges in enumerate(rounds):
+    for round_index, round_edges in enumerate(split_rounds):
         child = dist.split_group(
             parent_pg=parent,
             split_ranks=[list(edge) for edge in round_edges],
@@ -208,24 +282,39 @@ def _build_p2p_edge_groups(
 
     logger.info(
         "Pipeline P2P: using %d directed rank-edge split rounds",
-        len(rounds),
+        len(split_rounds),
     )
-    _PP_EDGE_GROUP_CACHE.setdefault(parent, {})[cache_key] = (groups, rounds)
-    return groups, rounds
+    _PP_EDGE_GROUP_CACHE.setdefault(parent, {})[cache_key] = (groups, split_rounds)
+    return groups, split_rounds
 
 
-def _warmup_p2p_edge_groups(
+def _preconnect_p2p_edge_groups(
     parent: dist.ProcessGroup,
-    groups: dict[tuple[int, int], dist.ProcessGroup],
-    rounds: tuple[_P2PWarmupRound, ...],
+    groups: _DirectedP2PGroupMap,
+    split_rounds: tuple[_P2PSplitRound, ...],
     device: torch.device,
 ) -> None:
-    """Exercise each directed child communicator before graph capture."""
+    """Exercise every local directed child P2P path before execution.
+
+    ``split_group`` has already created each child communicator at this point.
+    This setup-only exchange preconnects the actual send/receive paths in
+    deterministic rounds so first use cannot occur during pipeline execution or
+    CUDA-graph capture. It is distinct from a runtime's model warmup.
+
+    Args:
+        parent: Parent pipeline process group used to translate group ranks to
+            global ranks.
+        groups: Local child groups keyed by directed
+            ``(source_group_rank, destination_group_rank)`` edges.
+        split_rounds: Deterministic directed rounds returned by
+            ``_build_p2p_edge_groups``.
+        device: Device on which to allocate the setup-only payload.
+    """
     group_rank = dist.get_rank(parent)
     # Matching edges are disjoint. Waiting before the next round lets every
     # round safely reuse this one setup-only buffer.
     tensor = torch.zeros(1, dtype=torch.int32, device=device)
-    for round_edges in rounds:
+    for round_edges in split_rounds:
         local_edge = next((edge for edge in round_edges if group_rank in edge), None)
         if local_edge is None:
             continue

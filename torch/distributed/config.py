@@ -13,7 +13,6 @@ from torch.utils._config_module import Config, install_config_module
 __all__ = [
     "compile_on_one_rank",
     "use_torchcomms",
-    "pipeline_per_direction_p2p",
     "pipeline_per_edge_p2p",
 ]
 
@@ -39,25 +38,16 @@ use_torchcomms: bool = Config(
 #
 # This flag force-enables the behavior; it is auto-enabled when TorchComms is in
 # use regardless of this flag (see PipelineStage), so it mainly matters for the
-# non-TorchComms backends. Schedule initialization creates and warms one child
-# communicator per directed physical-rank edge before execution or graph capture.
-# Setup cost is proportional to the topology's disjoint edge rounds; children
-# are cached until full process-group teardown. A lazy NCCL parent still creates
-# eager two-rank split children; pipeline P2P submits their operations in batches.
+# non-TorchComms backends. Schedule initialization creates one child
+# communicator per directed physical-rank edge, then preconnects its
+# send/receive path before execution or graph capture.
+# Setup cost is proportional to the stage assignment's disjoint edge rounds;
+# children are cached until full process-group teardown. A lazy NCCL parent still
+# creates eager two-rank split children; pipeline P2P submits their operations in
+# batches.
 pipeline_per_edge_p2p: bool = Config(
     default=False,
-    env_name_default=[
-        "TORCH_DISTRIBUTED_PIPELINE_PER_EDGE_P2P",
-        "TORCH_DISTRIBUTED_PIPELINE_PER_DIRECTION_P2P",
-    ],
-)
-
-# Deprecated name for the original direction-wide implementation. The current
-# implementation isolates every directed physical-rank edge.
-pipeline_per_direction_p2p: bool = Config(
-    alias="torch.distributed.config.pipeline_per_edge_p2p",
-    deprecated=True,
-    deprecation_message="use pipeline_per_edge_p2p instead",
+    env_name_default="TORCH_DISTRIBUTED_PIPELINE_PER_EDGE_P2P",
 )
 
 
