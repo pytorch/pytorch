@@ -556,7 +556,8 @@ class Capture:
     the ``requires_grad`` and autocast contracts of that served value) -- and the
     artifact is written to the ``artifact_path`` / ``cache_path`` files when the
     block exits CLEANLY having captured at least one call: a block that raised
-    leaves the files untouched, and a clean exit with nothing captured -- no call
+    writes nothing further (files a :meth:`save` already wrote stay), and a clean
+    exit with nothing captured -- no call
     made, or the only call raised and was caught -- raises ``PrecompileError``
     rather than writing. Call :meth:`save` inside the
     block to write those same files without ending the capture; with
@@ -618,6 +619,8 @@ class _MakeFxCapture(Capture):
         # model reached any OTHER way -- fn itself, fn's __self__, a partial's bound argument
         # or the (nestable) callable a partial wraps -- is invisible to them and would bake
         # into the graph as constants (invariant 1), crashing in _check_no_constant_tensors.
+        # A model fn CLOSES over is invisible here too, and is left to that later refusal:
+        # this walks the partial chain and __self__ only, never the closure or globals.
         target, held = fn, []
         while isinstance(target, functools.partial):
             held += pytree.tree_leaves((target.args, target.keywords))
@@ -663,7 +666,8 @@ class _MakeFxCapture(Capture):
         # raise below: a call after the block would trace, lower and serve and write nothing.
         self._entered = False
         self._exited = True
-        # Only a clean exit that captured a call writes (see both docstrings).
+        # Only a clean exit that captured a call writes; a raise leaves whatever an
+        # in-block save() already wrote on disk, untouched (see both docstrings).
         if exc[0] is not None:
             return
         if self._rendered is None:
@@ -681,7 +685,7 @@ class _MakeFxCapture(Capture):
             stage = (
                 "while serving the artifact it rendered"
                 if self._serve_failed
-                else "before it rendered an artifact"
+                else "without rendering an artifact"
             )
             return PrecompileError(
                 f"nothing was captured: the capture call raised {stage}, so there is "
@@ -734,7 +738,7 @@ class _MakeFxCapture(Capture):
         if self._trace_failed or self._serve_failed:
             raise PrecompileError(
                 "the capture's single call already ran and raised, so nothing was "
-                "captured and a retry would trace the same failure. Fix what it "
+                "captured and a retry would hit the same failure. Fix what it "
                 "raised, then run a fresh capture()."
             )
         if self._traced:
@@ -750,9 +754,11 @@ class _MakeFxCapture(Capture):
         # to_cache_bytes, so code_hash is sha256 over exactly the bytes written on exit;
         # ``training`` sets the grad mode of trace and serve alike.
         with torch.enable_grad() if self._training else torch.no_grad():
-            # The single-call flag counts a RENDER, not an attempt: a trace that raised (a
-            # data-dependent op, a missing fake impl) captured nothing, so the retry and the
-            # nothing-was-captured refusals must say the trace failed, not that a call was.
+            # The single-call flag counts a RENDER, not an attempt: a call that raised in the
+            # trace (a data-dependent op, a missing fake impl) or in the render (an output
+            # pytree spec that will not serialize) captured nothing, so the retry and the
+            # nothing-was-captured refusals name the raise, not a captured call, and stay
+            # neutral about which of the two stages it came from.
             try:
                 self._module._compile(args)
                 python_code = self._module.to_python_code()
@@ -2538,27 +2544,10 @@ def _check_path_pair(
 ) -> None:
     """Refuse an artifact_path / cache_path pair no entry point can use.
 
-    Three ways it can be unusable: half a pair (the two files only load together), one
-    file named for both halves after resolving links (the write would clobber the
-    source), and a path that exists but is not a regular file. The ``None`` checks are
-    defensive (both parameters are typed) but turn ``os.fsdecode(None)``'s bare
-    ``TypeError`` into one naming the pair.
+    Two ways it can be unusable: one file named for both halves after resolving links
+    (the write would clobber the source), and a path that exists but is not a regular
+    file.
     """
-    if artifact_path is None or cache_path is None:
-        if artifact_path is None and cache_path is None:
-            raise ValueError(
-                f"{who} got neither artifact_path nor cache_path; the artifact and "
-                f"its cache are a matched pair, pass both."
-            )
-        given, missing = (
-            ("artifact_path", "cache_path")
-            if cache_path is None
-            else ("cache_path", "artifact_path")
-        )
-        raise ValueError(
-            f"{who} got {given} without {missing}; the artifact and its cache are "
-            f"a matched pair, pass both."
-        )
     # fsdecode first: realpath is type-preserving, so a bytes spelling and a str
     # spelling of one file would never compare equal.
     artifact_resolved = os.path.normcase(os.path.realpath(os.fsdecode(artifact_path)))
@@ -2613,7 +2602,9 @@ def _write_artifact(
     is ever truncated or half-written. The two renames are not one atomic step: the
     previous source is hard-linked to a backup first and put back if the second rename
     raises, so a Python exception (a full disk, a permission error) leaves the previous
-    pair intact. Which undo runs, and whether it is reported, is read off the DISK, not
+    pair intact. Without hard links the previous source is MOVED aside instead, so an
+    interrupt before the undo's probes have run leaves the artifact NAME empty with that
+    source only in the ``.bak``, unreported and one rename from recovered. Which undo runs, and whether it is reported, is read off the DISK, not
     from flags (the comment on the undo has the reasoning). Process death between the
     renames is not covered, nor a reader or a second writer racing them: that can leave
     one source beside the other's cache, which ``load`` refuses on the cache's sha256,
@@ -2924,9 +2915,9 @@ def capture(
     runs for real, is folded into the capture, and returns what serving the artifact
     produces -- and the ``(python_code, cache)`` artifact is written to
     ``artifact_path`` / ``cache_path`` when the block exits cleanly having captured at
-    least one call (a block that raised writes nothing, and so does a clean exit with
-    nothing captured -- no call made, or the only call raised and was caught -- which
-    raises instead)::
+    least one call (a block that raised writes nothing further -- files an in-block
+    ``cap.save()`` already wrote stay -- and so does a clean exit with nothing captured
+    -- no call made, or the only call raised and was caught -- which raises instead)::
 
         with torch.compiler.precompile.capture(
             fn, artifact_path="m.py", cache_path="m.cache"
@@ -2988,11 +2979,15 @@ def capture(
     :func:`load` for reading the pair back.
 
     Raises ``ValueError`` for a ``backend`` outside ``{"inductor", "eager"}`` and for a
-    path pair no entry point can use (half a pair, one file named for both halves, a path
-    that is not a regular file); ``TypeError`` for a ``tracer`` that is not a tracer
-    object; ``PrecompileError`` for a :class:`DynamoTracer`, which this build does not
-    capture with, and for an ``fn`` that HOLDS a model or a tensor instead of taking it
-    as a call argument (a bound method, a partial that holds one).
+    path pair no entry point can use (one file named for both halves, a path that is not
+    a regular file); ``TypeError`` for a ``tracer`` that is not a tracer object;
+    ``PrecompileError`` for a :class:`DynamoTracer`, which this build does not capture
+    with, and for an ``fn`` that IS a model, or that HOLDS a tensor or an ``nn.Module``
+    where this can see it -- as a bound method's ``__self__``, or bound in a
+    ``functools.partial`` (at any nesting depth) -- instead of taking it as a call
+    argument. An ``fn`` that CLOSES over the model gets past that check and is refused
+    later, when its parameters bake into the graph as constants (invariant 1); pass the
+    model as a call argument either way.
     """
     # The telemetry key names the public spelling the module switch installs.
     torch._C._log_api_usage_once("torch.compiler.precompile.capture")
@@ -3069,8 +3064,8 @@ def load(
     A half that cannot be READ or decoded -- a missing file, or the two paths passed
     the wrong way round, whose cache bytes then fail to decode as source -- is a
     ``PrecompileError`` too, with the original error as its ``__cause__``. A pair no
-    entry point can use raises ``ValueError`` instead: half a pair, one file named for
-    both halves, or a path that is not a regular file.
+    entry point can use raises ``ValueError`` instead: one file named for both halves,
+    or a path that is not a regular file.
     """
     # The telemetry key names the public spelling the module switch installs, and is
     # also the entry-point name the diagnostics carry.
