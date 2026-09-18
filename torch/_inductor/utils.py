@@ -55,7 +55,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_tops
+from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -2722,6 +2722,15 @@ def commit_tdm_operand_layout(*matrices: IRNode) -> None:
         raise AssertionError("TDM layout commit revalidation failed")
 
 
+def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
+    """Return whether generic tensor descriptor codegen may target AMD TDM."""
+    return (
+        config.triton.use_tensor_descriptor
+        and config.assume_aligned_inputs
+        and _gfx1250_device_prereqs(device)
+    )
+
+
 def _tma_descriptor_max_offset_fits_in_int32(
     mat: IRNode, add_guards: bool = False
 ) -> bool:
@@ -3683,6 +3692,14 @@ def parallel_num_threads() -> int:
     return threads
 
 
+def fp32_matmul_precision_key() -> str:
+    # Read per-backend fp32 precision instead of
+    # torch.get_float32_matmul_precision(), which raises if the legacy and
+    # per-backend APIs have been mixed.
+    getter = torch._C._get_fp32_precision_getter
+    return f"cuda:{getter('cuda', 'matmul')},mkldnn:{getter('mkldnn', 'matmul')}"
+
+
 @functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
@@ -3692,31 +3709,44 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
-    if torch.xpu.is_available():
-        is_tf32 = torch.backends.mkldnn.allow_tf32
-    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
+def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
+    is_tf32 = False
+    if device.type == "cuda":
+        is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    elif device.type == "xpu":
+        is_tf32 = bool(torch.backends.mkldnn.allow_tf32)
+    device_info_key = _get_device_info_key(device)
+    ds_tops = (
+        datasheet_tops(dtype, is_tf32=is_tf32, device_name=device_info_key)
+        if device_info_key is not None
+        else None
+    )
     if ds_tops is not None:
         return ds_tops
 
-    if not torch.cuda.is_available():
+    if device.type != "cuda" or not torch.cuda.is_available():
         log.warning(
-            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
-            "Returning 0.0; roofline estimates will use memory bandwidth only."
+            "get_device_tflops: no Triton fallback available for %s. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only.",
+            device,
         )
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
-        8,
-        0,
-    )
+    device_idx = device.index
+    if device_idx is None:
+        log.warning("get_device_tflops requires a concrete CUDA device; returning 0.0")
+        return 0.0
+    try:
+        SM80OrLater = torch.cuda.get_device_capability(device_idx) >= (8, 0)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to query CUDA capability for %s; returning 0.0 TFLOPS",
+            device,
+            exc_info=True,
+        )
+        return 0.0
 
     if dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise AssertionError(
@@ -3727,14 +3757,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate()
+        sm_clock = max_clock_rate(device_idx)
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            return get_max_tensorcore_tflops(dtype, sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock, device_idx)
 
         if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            return get_max_tensorcore_tflops(torch.float32, sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock, device_idx)
         else:
-            return get_max_simd_tflops(torch.float32, sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock, device_idx)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype)
@@ -3745,14 +3775,99 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32)
 
 
+def get_device_tflops(
+    dtype: torch.dtype, device: torch.device | str | None = None
+) -> float:
+    """
+    Return peak compute throughput without assuming a CUDA device.
+
+    Prefer registered or built-in device information. Devices exposed through
+    PyTorch's ``cuda`` device type, including ROCm, retain the existing Triton
+    fallback; other devices without registered information return zero.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for TFLOPS estimation")
+        return 0.0
+    try:
+        resolved_device = decode_device(resolved_device)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to resolve a device index for %s; returning 0.0 TFLOPS",
+            resolved_device,
+            exc_info=True,
+        )
+        return 0.0
+    return _get_device_tflops(dtype, resolved_device)
+
+
+def _current_accelerator_device() -> torch.device | None:
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        return None
+    return torch.device(accelerator.type, torch.accelerator.current_device_index())
+
+
+def _get_device_info_key(device: torch.device) -> str | None:
+    try:
+        properties = get_interface_for_device(device).Worker.get_device_properties(
+            device
+        )
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.debug("Unable to query properties for %s", device, exc_info=True)
+        return None
+    if isinstance(properties, Mapping):
+        name = properties.get("arch")
+        if not isinstance(name, str):
+            name = properties.get("name")
+    else:
+        name = getattr(properties, "name", None)
+    return name if isinstance(name, str) else None
+
+
+@functools.cache
+def _get_device_dram_gbps(device: torch.device) -> float | None:
+    device_info_key = _get_device_info_key(device)
+    ds_bw = (
+        datasheet_dram_bw_gbs(device_info_key) if device_info_key is not None else None
+    )
+    if ds_bw is not None:
+        return ds_bw
+
+    if device.type in ("cuda", "xpu"):
+        from triton.testing import get_dram_gbps
+
+        return get_dram_gbps(device.index)
+
+    log.warning(
+        "No DRAM bandwidth estimate available for %s (reported key: %s); "
+        "returning None",
+        device,
+        device_info_key or "unknown",
+    )
+    return None
+
+
+def get_device_dram_gbps(device: torch.device | str | None = None) -> float | None:
+    """
+    Return DRAM bandwidth in GB/s without assuming a CUDA device.
+
+    Prefer a registered datasheet entry. CUDA and XPU retain the Triton
+    fallback; other unknown accelerators return None.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for DRAM bandwidth estimation")
+        return None
+    return _get_device_dram_gbps(resolved_device)
+
+
 @functools.cache
 def get_gpu_dram_gbps() -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    from .analysis.device_info import datasheet_dram_bw_gbs
-
     ds_bw = datasheet_dram_bw_gbs()
     if ds_bw is not None:
         return ds_bw
@@ -5503,6 +5618,37 @@ def _round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+@functools.lru_cache
+def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, rocm_version: str) -> bool:
+    try:
+        version = tuple(int(x) for x in rocm_version.split("-")[0].split("."))
+    except ValueError:
+        # Preview builds can carry a non-numeric component; assume the layout
+        # every other arch uses rather than raising from shape inference.
+        return False
+    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+    if version < min_version:
+        return False
+    return _rocm_native_device_arch_name("cuda").startswith("gfx950")
+
+
+def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
+    """
+    gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
+    from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+    """
+    # is_available() is not stable across a process lifetime, so it must stay
+    # outside the cache -- a False from before device init would otherwise be
+    # remembered and pick the wrong scale layout for the rest of the run.
+    if not torch.version.hip or not torch.cuda.is_available():
+        return False
+    # torch.version.rocm is the SDK release that the kernel's ROCM_VERSION gate
+    # was compiled against; torch.version.hip only tracks it on shipped ROCm.
+    return _prefers_swizzle_32_8_cached(
+        mat_dtype, getattr(torch.version, "rocm", None) or torch.version.hip
+    )
+
+
 def _infer_scale_swizzle_impl(
     mat_size: tuple[Any, Any],
     scale_size: tuple[Any, ...],
@@ -5584,13 +5730,29 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
-            # AMD/XPU: no swizzle
+            # AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
+            # because the two counts are equal whenever the paddings coincide
+            # (M % 32 == 0 and K % 256 == 0), and a tie has to resolve to the
+            # layout existing callers already pass. Getting the 32x8 layout
+            # requires passing the swizzle explicitly.
             expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
             expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
             if eq_fn(scale_numel, expected_numel_a) or eq_fn(
                 scale_numel, expected_numel_b
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
+            if _prefers_swizzle_32_8(mat_dtype):
+                # AMD gfx950: 32x8-tiled scales
+                expected_numel_a = _round_up(mat_size[0], 32) * _round_up(
+                    ceildiv(K_multiplier * mat_size[1], 32), 8
+                )
+                expected_numel_b = _round_up(mat_size[1], 32) * _round_up(
+                    ceildiv(K_multiplier * mat_size[0], 32), 8
+                )
+                if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                    scale_numel, expected_numel_b
+                ):
+                    return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8
 
     return None, None
 

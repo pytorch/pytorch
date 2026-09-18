@@ -179,6 +179,7 @@ from .types import (  # noqa: F401
 from .utils import (
     builtin_dict_keys,
     common_constant_types,
+    constants_identical,
     dataclass_fields,
     dict_keys,
     get_current_stream,
@@ -768,12 +769,24 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
-        # Only needed for debugging purposes.
-        return self.root.check(x)
+        # RootGuardManager::check_nopybind_template disables the TorchFunction
+        # TLS for its accessors and restores it on every exit but a throw, which
+        # would leave the calling thread disabled: put it back on that exit.
+        torch_function_state = torch._C._get_torch_function_state()
+        try:
+            return self.root.check(x)
+        except BaseException:
+            torch._C._set_torch_function_state(torch_function_state)
+            raise
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
-        # Only needed for debugging purposes.
-        return self.root.check_verbose(x)
+        # check_verbose_nopybind has the same non-RAII exit as check() above.
+        torch_function_state = torch._C._get_torch_function_state()
+        try:
+            return self.root.check_verbose(x)
+        except BaseException:
+            torch._C._set_torch_function_state(torch_function_state)
+            raise
 
     def populate_code_parts_for_debugging(self) -> None:
         # This should be called when the guard manager is fully populated
@@ -786,20 +799,25 @@ class GuardManagerWrapper:
                 code_parts.append(code_part)
             return code_parts
 
-        def visit(mgr: GuardManager) -> None:
+        def add_code_parts(guard: LeafGuard) -> None:
             nonlocal relational_guards_seen
-            for guard in mgr.get_leaf_guards():
-                if isinstance(guard, RelationalGuard):
-                    if guard not in relational_guards_seen:
-                        self.code_parts.extend(get_code_parts(guard))
-                        relational_guards_seen.add(guard)
-                else:
+            if isinstance(guard, RelationalGuard):
+                if guard not in relational_guards_seen:
                     self.code_parts.extend(get_code_parts(guard))
+                    relational_guards_seen.add(guard)
+            else:
+                self.code_parts.extend(get_code_parts(guard))
+
+        def visit(mgr: GuardManager) -> None:
+            for guard in mgr.get_leaf_guards():
+                add_code_parts(guard)
 
             for child_mgr in mgr.get_child_managers():
                 visit(child_mgr)
 
         visit(self.root)
+        for guard in self.root.get_epilogue_lambda_guards():
+            add_code_parts(guard)
 
 
 def from_numpy(a: Any) -> torch.Tensor:
@@ -2877,7 +2895,7 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
-        eval_fn=lambda value, metadata: value == metadata,
+        eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
         ref = self.arg_ref(guard)
@@ -3001,7 +3019,7 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
-        eval_fn=lambda value, metadata: value == metadata,
+        eval_fn=lambda value, metadata: constants_identical(value, metadata),
     )
     def CONSTANT_MATCH(self, guard: Guard) -> None:
         val = self.get(guard)
@@ -3016,8 +3034,9 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: _constant_subclass_base_value(value),
-        eval_fn=lambda value, metadata: _constant_subclass_base_value(value)
-        == metadata,
+        eval_fn=lambda value, metadata: constants_identical(
+            _constant_subclass_base_value(value), metadata
+        ),
     )
     def CONSTANT_SUBCLASS_MATCH(self, guard: Guard) -> None:
         """Guard for subclasses of constant types (int, float, str, etc.).
@@ -3321,7 +3340,9 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(value.keys()),
-        eval_fn=lambda value, metadata: list(value.keys()) == metadata,
+        eval_fn=lambda value, metadata: constants_identical(
+            list(value.keys()), metadata
+        ),
     )
     def MAPPING_KEYS_CHECK(self, guard: Guard) -> None:
         """Guard on the key order of types.MappingProxyType object"""
@@ -3337,7 +3358,9 @@ class GuardBuilder(GuardBuilderBase):
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: list(dict.keys(value)),
-        eval_fn=lambda value, metadata: list(dict.keys(value)) == metadata,
+        eval_fn=lambda value, metadata: constants_identical(
+            list(dict.keys(value)), metadata
+        ),
     )
     def DICT_KEYS_MATCH(self, guard: Guard) -> None:
         """Insert guard to check that the keys of a dict are same"""

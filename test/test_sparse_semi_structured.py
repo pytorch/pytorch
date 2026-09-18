@@ -303,7 +303,6 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     def test_cutlass_mm_functionalization_decomp(self):
         """Test that semi_structured::cutlass_mm decomposes under FunctionalTensorMode.
 

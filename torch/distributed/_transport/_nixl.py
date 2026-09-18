@@ -1,0 +1,429 @@
+from __future__ import annotations
+
+import operator
+import time
+import uuid
+from dataclasses import dataclass
+from importlib import import_module
+from threading import get_ident, Lock
+from typing import Any, cast
+
+import torch
+
+from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from ._work import _validate_timeout
+
+
+def _load_backend() -> Any:
+    try:
+        return import_module("nixl")
+    except (ImportError, OSError) as error:
+        raise RuntimeError("NIXL transport requires the nixl package") from error
+
+
+def _agent_name(name: str | bytes) -> str:
+    return name.decode() if isinstance(name, bytes) else name
+
+
+@dataclass(frozen=True)
+class NIXLRemoteBuffer:
+    """A serializable descriptor for memory registered by a NIXL peer."""
+
+    agent_name: str
+    address: int
+    length: int
+    device_id: int
+    memory_type: str
+    metadata: bytes
+
+
+@dataclass
+class _Registration:
+    tensor: torch.Tensor
+    storage: Any
+    descs: Any
+    address: int
+    length: int
+    device_id: int
+    memory_type: str
+
+
+class NIXLMemoryView:
+    """A byte range in NIXL-registered memory."""
+
+    def __init__(self, memory: NIXLMemory, offset: int, length: int) -> None:
+        self._memory = memory
+        self._offset = offset
+        self._length = length
+
+    def size(self) -> int:
+        return self._length
+
+
+class NIXLMutableMemoryView(NIXLMemoryView):
+    """A writable byte range in NIXL-registered memory."""
+
+
+class NIXLMemory:
+    """A tensor registered with a NIXL transport."""
+
+    def __init__(
+        self, transport: NIXLTransport, registration: _Registration, reused: bool
+    ) -> None:
+        self._transport = transport
+        self._registration = registration
+        self._reused = reused
+
+    def _range(self, offset: int | None, length: int | None) -> tuple[int, int]:
+        offset = 0 if offset is None else operator.index(offset)
+        if offset < 0 or offset > self._registration.length:
+            raise ValueError("offset is outside the registered memory")
+        length = (
+            self._registration.length - offset
+            if length is None
+            else operator.index(length)
+        )
+        if length < 0 or length > self._registration.length - offset:
+            raise ValueError("view exceeds the registered memory")
+        return offset, length
+
+    def to_view(
+        self, offset: int | None = None, length: int | None = None
+    ) -> NIXLMemoryView:
+        return NIXLMemoryView(self, *self._range(offset, length))
+
+    def to_mutable_view(
+        self, offset: int | None = None, length: int | None = None
+    ) -> NIXLMutableMemoryView:
+        return NIXLMutableMemoryView(self, *self._range(offset, length))
+
+    def to_remote_buffer(self, *, timeout: float | None = None) -> NIXLRemoteBuffer:
+        return self._transport._call(
+            lambda: self._transport._remote_buffer(self._registration), timeout
+        )
+
+    def reused_registration(self) -> bool:
+        return self._reused
+
+
+class NIXLTransport(Transport):
+    """One-sided tensor transport backed by a NIXL plugin."""
+
+    def __init__(
+        self,
+        device: torch.device | str | None = None,
+        *,
+        plugin: str = "UCX",
+        agent_name: str | None = None,
+        num_threads: int = 0,
+        enable_prog_thread: bool = True,
+        capture_telemetry: bool = False,
+        backend_options: dict[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        super().__init__(device)
+        if self.device is not None and self.device.type not in ("cpu", "cuda"):
+            raise ValueError("NIXL transport requires a CPU or CUDA device")
+        if not plugin:
+            raise ValueError("plugin cannot be empty")
+        if num_threads < 0:
+            raise ValueError("num_threads must be nonnegative")
+        _validate_timeout(timeout)
+        if backend_options and num_threads:
+            raise ValueError(
+                "set plugin thread parameters in backend_options, not num_threads"
+            )
+        if backend_options is not None and not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in backend_options.items()
+        ):
+            raise TypeError("backend_options must map strings to strings")
+        backend = _load_backend()
+        self._plugin = plugin.upper()
+        config = backend.nixl_agent_config(
+            backends=[] if backend_options else [self._plugin],
+            num_threads=num_threads,
+            enable_prog_thread=enable_prog_thread,
+            capture_telemetry=capture_telemetry,
+        )
+        self._agent = backend.nixl_agent(
+            agent_name or f"torch-{uuid.uuid4().hex}", config
+        )
+        if backend_options:
+            self._agent.create_backend(self._plugin, dict(backend_options))
+        if self._plugin not in self._agent.backends:
+            raise RuntimeError(f"NIXL plugin {self._plugin!r} is unavailable")
+        self._timeout = timeout
+        self._default_timeout = timeout
+        self._peer_name: str | None = None
+        self._registrations: dict[tuple[int, int, str], _Registration] = {}
+        self._transfers: dict[tuple[Any, ...], Any] = {}
+        self._operation_lock = Lock()
+        self._closed = False
+        self._close_lock = Lock()
+        self._shutdown_work: Work | None = None
+
+    @staticmethod
+    def supported() -> bool:
+        try:
+            backend = _load_backend()
+            return all(
+                hasattr(backend, name) for name in ("nixl_agent", "nixl_agent_config")
+            )
+        except Exception:
+            return False
+
+    def _ensure_open(self) -> Any:
+        if self._closed:
+            raise RuntimeError("transport is closed")
+        return self._agent
+
+    def _call(self, operation: Any, timeout: float | None) -> Any:
+        return self._work_queue.run(
+            operation,
+            torch.device("cpu"),
+            async_op=False,
+            timeout=self._timeout if timeout is None else timeout,
+        )
+
+    def bind(self, *, timeout: float | None = None) -> bytes:
+        return self._call(lambda: self._ensure_open().get_agent_metadata(), timeout)
+
+    def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
+        return self._call(lambda: self._connect(peer_url), timeout)
+
+    def _connect(self, peer_url: bytes) -> int:
+        if self._peer_name is not None:
+            raise RuntimeError("transport is already connected")
+        name = _agent_name(self._ensure_open().add_remote_agent(peer_url))
+        self._peer_name = name
+        return 0
+
+    def connected(self) -> bool:
+        return self._peer_name is not None and not self._closed
+
+    def register_memory(
+        self, tensor: torch.Tensor, *, timeout: float | None = None
+    ) -> NIXLMemory:
+        return self._call(lambda: self._register_memory(tensor), timeout)
+
+    def _register_memory(self, tensor: torch.Tensor) -> NIXLMemory:
+        agent = self._ensure_open()
+        if not isinstance(tensor, torch.Tensor):
+            raise TypeError("tensor must be a torch.Tensor")
+        if not tensor.is_contiguous():
+            raise ValueError("NIXL transport requires a contiguous tensor")
+        if tensor.numel() == 0:
+            raise ValueError("cannot register an empty tensor")
+        self._check_device(tensor.device)
+        if tensor.device.type not in ("cpu", "cuda"):
+            raise ValueError("NIXL transport requires CPU or CUDA tensors")
+        length = tensor.numel() * tensor.element_size()
+        key = tensor.data_ptr(), length, str(tensor.device)
+        if registration := self._registrations.get(key):
+            return NIXLMemory(self, registration, reused=True)
+        descs = agent.register_memory(tensor, backends=[self._plugin])
+        registration = _Registration(
+            tensor,
+            tensor.untyped_storage(),
+            descs,
+            tensor.data_ptr(),
+            length,
+            max(tensor.get_device(), 0),
+            "VRAM" if tensor.is_cuda else "DRAM",
+        )
+        self._registrations[key] = registration
+        return NIXLMemory(self, registration, reused=False)
+
+    def _remote_buffer(self, registration: _Registration) -> NIXLRemoteBuffer:
+        metadata = self._ensure_open().get_partial_agent_metadata(
+            registration.descs,
+            inc_conn_info=True,
+            backends=[self._plugin],
+        )
+        return NIXLRemoteBuffer(
+            self._agent.name,
+            registration.address,
+            registration.length,
+            registration.device_id,
+            registration.memory_type,
+            metadata,
+        )
+
+    def _transfer(
+        self,
+        operation: str,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        mutable: bool,
+    ) -> int:
+        agent = self._ensure_open()
+        expected_type = NIXLMutableMemoryView if mutable else NIXLMemoryView
+        if not isinstance(local_buffer, expected_type) or (
+            local_buffer._memory._transport is not self
+        ):
+            raise TypeError("local_buffer was not registered by this transport")
+        if not isinstance(remote_buffer, NIXLRemoteBuffer):
+            raise TypeError("remote_buffer was not registered by a NIXL transport")
+        if self._peer_name != remote_buffer.agent_name:
+            raise ValueError("remote buffer does not belong to the connected peer")
+        if local_buffer.size() > remote_buffer.length:
+            raise ValueError("local view does not fit in the remote buffer")
+        registration = local_buffer._memory._registration
+        if registration.tensor.data_ptr() != registration.address or (
+            registration.tensor.numel() * registration.tensor.element_size()
+            != registration.length
+        ):
+            raise RuntimeError(
+                "registered tensor was resized or its storage was replaced"
+            )
+        if local_buffer.size() == 0:
+            return 0
+        key = (
+            operation,
+            id(registration),
+            local_buffer._offset,
+            local_buffer.size(),
+            remote_buffer.agent_name,
+            remote_buffer.address,
+            remote_buffer.length,
+            remote_buffer.device_id,
+            remote_buffer.memory_type,
+            remote_buffer.metadata,
+        )
+        with self._operation_lock:
+            handle = self._transfers.get(key)
+            if handle is None:
+                loaded_name = _agent_name(
+                    agent.add_remote_agent(remote_buffer.metadata)
+                )
+                if loaded_name != remote_buffer.agent_name:
+                    raise ValueError("remote buffer metadata names a different agent")
+                local_descs = agent.get_xfer_descs(
+                    [
+                        (
+                            registration.address + local_buffer._offset,
+                            local_buffer.size(),
+                            registration.device_id,
+                        )
+                    ],
+                    mem_type=registration.memory_type,
+                )
+                remote_descs = agent.get_xfer_descs(
+                    [
+                        (
+                            remote_buffer.address,
+                            local_buffer.size(),
+                            remote_buffer.device_id,
+                        )
+                    ],
+                    mem_type=remote_buffer.memory_type,
+                )
+                handle = agent.initialize_xfer(
+                    operation,
+                    local_descs,
+                    remote_descs,
+                    remote_buffer.agent_name,
+                    backends=[self._plugin],
+                )
+                self._transfers[key] = handle
+            try:
+                error: BaseException | None = None
+                state = "PROC"
+                try:
+                    state = agent.transfer(handle)
+                except BaseException as dispatch_error:
+                    error = dispatch_error
+                while state == "PROC":
+                    try:
+                        state = agent.check_xfer_state(handle)
+                    except BaseException as check_error:
+                        # A failed query does not establish that DMA has stopped.
+                        if error is None:
+                            error = check_error
+                    if state == "PROC":
+                        time.sleep(0.001)
+                if error is not None:
+                    raise error
+                if state != "DONE":
+                    raise RuntimeError(f"NIXL {operation.lower()} failed")
+            except BaseException:
+                self._transfers.pop(key, None)
+                try:
+                    agent.release_xfer_handle(handle)
+                except Exception:
+                    pass
+                raise
+        return 0
+
+    def write(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        if not isinstance(local_buffer, NIXLMemoryView):
+            raise TypeError("local_buffer was not registered by this transport")
+        return self._run_transfer(
+            lambda: self._transfer("WRITE", local_buffer, remote_buffer, mutable=False),
+            local_buffer._memory._registration.tensor.device,
+            async_op=async_op,
+            timeout=self._timeout if timeout is None else timeout,
+        )
+
+    def read(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        if not isinstance(local_buffer, NIXLMutableMemoryView):
+            raise TypeError("local_buffer was not registered by this transport")
+        return self._run_transfer(
+            lambda: self._transfer("READ", local_buffer, remote_buffer, mutable=True),
+            local_buffer._memory._registration.tensor.device,
+            async_op=async_op,
+            timeout=self._timeout if timeout is None else timeout,
+        )
+
+    def close(self, *, timeout: float | None = None) -> None:
+        timeout = self._timeout if timeout is None else timeout
+        _validate_timeout(timeout)
+        if get_ident() == self._work_queue.worker_ident:
+            raise RuntimeError("cannot close a transport from its worker")
+        with self._close_lock:
+            if self._shutdown_work is None:
+                self._shutdown_work = cast(
+                    Work,
+                    self._run_transfer(
+                        self._release_resources, torch.device("cpu"), async_op=True
+                    ),
+                )
+        self._close_work(timeout)
+        cast(Work, self._shutdown_work).wait()
+
+    def _release_resources(self) -> int:
+        if self._closed:
+            return 0
+        self._closed = True
+        agent = self._agent
+        peer_name = self._peer_name
+        self._peer_name = None
+        for handle in self._transfers.values():
+            agent.release_xfer_handle(handle)
+        self._transfers.clear()
+        for registration in self._registrations.values():
+            agent.deregister_memory(registration.descs, backends=[self._plugin])
+        self._registrations.clear()
+        if peer_name is not None:
+            agent.remove_remote_agent(peer_name)
+        self._agent = None
+        return 0
+
+
+__all__ = ["NIXLTransport"]
