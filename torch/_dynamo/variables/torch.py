@@ -110,7 +110,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import vt_is_iterable
+from .object_protocol import pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1201,8 +1201,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 return None
 
-            from .object_protocol import pynumber_index
-
             return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(math.lcm)
@@ -1216,8 +1214,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(arg, UserDefinedObjectVariable) for arg in args
             ):
                 return None
-
-            from .object_protocol import pynumber_index
 
             return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
