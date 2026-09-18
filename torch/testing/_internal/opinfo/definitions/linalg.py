@@ -2291,7 +2291,42 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_solve_triangular,
         supports_fwgrad_bwgrad=True,
-        skips=(skipCPUIfNoLapack,),
+        skips=(
+            skipCPUIfNoLapack,
+            # ROCm returns incorrect complex results for the 64 x 64 batched samples.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cuda",
+                dtypes=[torch.complex64],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMathBits",
+                "test_conj_view",
+                device_type="cuda",
+                dtypes=[torch.complex64],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestBwdGradients",
+                "test_fn_grad",
+                device_type="cuda",
+                dtypes=[torch.complex128],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFwdGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
+                dtypes=[torch.complex128],
+                active_if=TEST_WITH_ROCM,
+            ),
+        ),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
         supports_forward_ad=True,
     ),
