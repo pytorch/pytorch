@@ -306,7 +306,7 @@ TORCH_META_FUNC2(mean, dim)
       dtype = toString(opt_dtype.value());
     }
 
-    TORCH_CHECK(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "mean(): could not infer output dtype. ",
         what, " dtype must be either a floating point or complex dtype. ",
@@ -330,7 +330,7 @@ static ScalarType get_result_or_self_value_dtype(
 
 TORCH_META_FUNC2(norm, ScalarOpt_dim)
 (const Tensor& self, const OptionalScalarRef p, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
       "norm(): input dtype should be either floating point or complex. "
       "Got ", self.scalar_type(), " instead.");
@@ -1081,7 +1081,7 @@ Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const std::optional
 
 static void pre_check_gradient(const Tensor& self, std::optional<int64_t> spacing_size, at::OptionalIntArrayRef dim,  int64_t edge_order) {
   // Helper for gradient function to make sure input data satisfies prerequisites
-  TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
     // NOTE: If spacing was given as a scalar, the callers of this function
     // create a spacing vector of the expected size, and this check passes
@@ -1110,8 +1110,8 @@ static void pre_check_gradient(const Tensor& self, std::optional<int64_t> spacin
 }
 
 static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
-  for (const auto i : c10::irange(coordinates.size())) {
-    TORCH_CHECK(self.device() == coordinates[i].device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinates[i].device(), "!");
+  for (const auto& coordinate : coordinates) {
+    TORCH_CHECK(self.device() == coordinate.device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinate.device(), "!");
   }
 
   std::vector<Tensor> result;
@@ -1501,10 +1501,10 @@ Tensor& nanmean_out(
     std::optional<ScalarType> opt_dtype,
     Tensor& result) {
   // Check if input dtype is an integral type or Bool and raise an error
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
     !at::isIntegralType(self.scalar_type(), /*includeBool=*/true),
     "nanmean(): integral types and 'Bool' are not supported for nanmean, even for empty tensors.");
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
@@ -1525,7 +1525,7 @@ Tensor nanmean(
     at::OptionalIntArrayRef dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       self.is_floating_point() || self.is_complex(),
       "nanmean(): expected input to have floating point or complex dtype but got ",
       self.scalar_type());
@@ -1925,7 +1925,7 @@ static Tensor& std_var_out(
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "std and var only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+  TORCH_CHECK_NOT_IMPLEMENTED(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std and var only support floating point and complex dtypes");
 
   if (at::isComplexType(self.scalar_type())) {
@@ -1998,7 +1998,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
               self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               fname, " only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+  TORCH_CHECK_NOT_IMPLEMENTED(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               fname, " only support floating point and complex dtypes");
   TORCH_CHECK(result1.scalar_type() == c10::toRealValueType(result2.scalar_type()),
               fname, " expected result1 to be real and match the precision of result2. Got ",

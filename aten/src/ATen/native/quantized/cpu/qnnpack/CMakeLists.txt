@@ -233,6 +233,10 @@ set(PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS
   src/q8conv/8x8-aarch64-neon.S
   src/q8gemm/8x8-aarch64-neon.S
   src/q8gemm/8x8-dq-aarch64-neon.S
+  src/q8gemm/4x8-dq-aarch64-neon.S
+  src/q8gemm/3x8-dq-aarch64-neon.S
+  src/q8gemm/2x8-dq-aarch64-neon.S
+  src/q8gemm/1x8-dq-aarch64-neon.S
   src/q8gemm_sparse/8x4-packA-aarch64-neon.S
   src/q8gemm_sparse/8x8c1x4-dq-packedA-aarch64-neon.S
   src/q8gemm_sparse/8x8c8x1-dq-packedA-aarch64-neon.S)
