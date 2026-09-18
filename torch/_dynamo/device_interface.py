@@ -43,6 +43,29 @@ class DeviceInterface:
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
 
+    @staticmethod
+    def get_cpp_device_options(
+        aot_mode: bool, compile_only: bool
+    ) -> (
+        tuple[
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+            list[str],
+        ]
+        | None
+    ):
+        """Return device-specific C++ build options, if the backend provides them.
+
+        Out-of-tree backends may override this to return
+        ``(definitions, include_dirs, cflags, ldflags, library_dirs,
+        libraries, passthrough_args)`` for Inductor C++ compilation.
+        """
+        return None
+
     class device:
         def __new__(cls, device: torch.types.Device) -> Any:
             raise NotImplementedError
@@ -131,6 +154,19 @@ class DeviceInterface:
     def get_device_properties(cls, device: torch.types.Device = None) -> Any:
         return cls.Worker.get_device_properties(device)
 
+    @classmethod
+    def get_cache_system_info(cls) -> dict[str, object] | None:
+        """Return stable, JSON-serializable metadata for the code cache key.
+
+        Returning None opts out. An empty dict still contributes metadata.
+        Implementations should return only metadata that invalidates generated
+        or autotuned code when changed, without unnecessarily initializing hardware.
+        Only called when is_available() returns True. This hook is sampled through
+        the cached CacheBase.get_system() path, so interfaces must be registered
+        and available before its first use.
+        """
+        return None
+
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         raise NotImplementedError
@@ -174,7 +210,10 @@ class DeviceInterface:
 
         Overriding the Stream slot is the contract for stream support: it is
         what opts a GPU-class device into stream guards (device_need_guard),
-        so stream-capable backends must override it.
+        so stream-capable backends must override it. The override must be a
+        real, instantiable torch.Stream subclass: a placeholder that raises on
+        construction is still reported as stream-capable here and fails later,
+        at guard time.
         """
         return cls.Stream is not DeviceInterface.Stream
 
@@ -401,7 +440,19 @@ class MtiaInterface(DeviceInterface):
 
     current_device = staticmethod(torch.mtia.current_device)
     set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
-    device_count = staticmethod(torch.mtia.device_count)
+
+    # Unlike torch.cuda/torch.xpu, torch.mtia.device_count() has no
+    # _is_compiled() guard: it goes straight to at::detail::getMTIAHooks(),
+    # which latches a process-lifetime static on first call and would
+    # permanently shadow an MTIAHooks impl that registers later (e.g. a
+    # JIT-built extension loaded in a test's setUpClass). Report 0 until the
+    # registry has one, so no registry-driven consumer can latch the fallback.
+    @staticmethod
+    def device_count() -> int:
+        if not torch.mtia._is_compiled():
+            return 0
+        return torch.mtia.device_count()
+
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.mtia.current_stream)
     set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
@@ -745,17 +796,8 @@ def get_registered_device_interfaces() -> Iterable[tuple[str, type[DeviceInterfa
 def init_device_reg() -> None:
     global _device_initialized
     register_interface_for_device("cuda", CudaInterface)
-    for i in range(torch.cuda.device_count()):
-        register_interface_for_device(f"cuda:{i}", CudaInterface)
-
     register_interface_for_device("xpu", XpuInterface)
-    for i in range(torch.xpu.device_count()):
-        register_interface_for_device(f"xpu:{i}", XpuInterface)
-
     register_interface_for_device("mtia", MtiaInterface)
-    for i in range(torch.mtia.device_count()):
-        register_interface_for_device(f"mtia:{i}", MtiaInterface)
-
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)

@@ -7,8 +7,6 @@ import os
 import re
 import sys
 import unittest
-
-from collections.abc import Callable
 from subprocess import CalledProcessError
 
 import torch
@@ -25,14 +23,25 @@ from torch._inductor.utils import (
     is_gpu,
     OrderedSet,
 )
+from torch.utils._helion import has_helion
+from torch.utils._pallas import has_pallas_package, has_tpu_pallas
+from torch.utils._triton import (
+    has_triton,
+    has_triton_block_ptr,
+    has_triton_cpu_backend,
+)
+from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, LazyVal, TestCase
-from torch.utils._config_module import ConfigModule
-from torch.utils._helion import has_helion
-from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import has_triton, has_triton_block_ptr
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    LazyVal,
+    TestCase,
+)
+
+from collections.abc import Callable
 
 log: logging.Logger = logging.getLogger(__name__)
 
@@ -55,18 +64,12 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+# Respect triton_disable_device_detection when probing the CPU backend.
+TRITON_HAS_CPU = has_triton(include_cpu=True) and has_triton_cpu_backend()
 
 HAS_PALLAS = LazyVal(has_pallas_package)
 
 HAS_HELION = has_helion()
-
-if HAS_TRITON:
-    import triton
-
-    TRITON_HAS_CPU = "cpu" in triton.backends.backends
-else:
-    TRITON_HAS_CPU = False
-
 
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
@@ -80,6 +83,19 @@ HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON or HAS_MTIA_AND_TRITON
 HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
+
+
+def running_on_tdm_device() -> bool:
+    """Return whether the active ROCm device and Triton support gfx1250 TDM."""
+    if not torch.version.hip or not HAS_CUDA_AND_TRITON:
+        return False
+    try:
+        from torch._inductor.utils import _gfx1250_device_prereqs
+
+        device = torch.device("cuda", torch.cuda.current_device())
+        return _gfx1250_device_prereqs(device)
+    except Exception:
+        return False
 
 
 def _is_multigpu(gpu: str) -> bool:
@@ -387,10 +403,7 @@ def _quantize_blockwise(
     scale_expanded = scale.repeat_interleave(min_outer, dim=0).repeat_interleave(
         min_inner, dim=1
     )
-    x_fp8 = _to_fp8_saturated(
-        x / scale_expanded,  # Ensures that scaling doesn't cause inf/nan values
-        float8_dtype,
-    )
+    x_fp8 = _to_fp8_saturated(x * scale_expanded, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
@@ -492,10 +505,7 @@ def patch_inductor_backend(
             original_custom_backend_config,
         )
 
-
-def patch_custom_fallback_pass(
-    predicate: Callable[[torch.fx.Node], bool],
-) -> contextlib.ContextDecorator:
+def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """
     Create a custom pass which falls back based on the provided predicate. For example,
     we could provide a predicate which returns True for all aten.add.default nodes.
@@ -511,5 +521,6 @@ def patch_custom_fallback_pass(
 
         def uuid(self):
             return None
+
 
     return config.patch(post_grad_custom_pre_pass=Pass())
