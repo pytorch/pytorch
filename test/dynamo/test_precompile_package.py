@@ -72,9 +72,10 @@ def _pre_check_accepts(entry):
     # types: a second implementation of them, so a control written on it does not
     # call the filter under test. Not the whole pre-check, which raises rather
     # than returning a verdict and which also refuses a TYPE_MATCH or
-    # BUILTIN_MATCH whose guard carries _unserializable (a local-scope type) --
-    # harmless in both uses here, where the TYPE_MATCHes are on global types or
-    # dropped wholesale.
+    # BUILTIN_MATCH whose guard carries _unserializable (a local-scope type).
+    # Harmless in the three controls here: the pytree test's TYPE_MATCHes are on
+    # global types, drop_type_match drops them all, and drop_local_type_match
+    # itself removes the local-scope ones, the only ones that carry it.
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return entry.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH") or (
         entry.guard_type not in unsupported
@@ -152,9 +153,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # covers.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
             ("TYPE_MATCH", ("ID_MATCH",)),
-            # The unsaved build's DICT_VERSION on a DICT_KEYS_MATCH; the save
-            # build serializes the keys-match.
-            ("DICT_KEYS_MATCH", ("DICT_VERSION",)),
         ]
         entries = [_entry(GlobalSource("g"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
@@ -632,6 +630,65 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(install, (norm(eq),))
         self.assertTrue(within(norm(os.path.join(eq, "third_party.py")), install))
 
+    def test_torch_roots_follow_a_symlink_farm_into_the_store(self):
+        # The same farm for torch: torch.__path__ and this file's directory
+        # both name the farm, whose subdirectories are real while every module
+        # in them is a link into the store, so a root resolved as a directory
+        # stays on the farm and matches no torch file a consumer resolves.
+        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "store", "torch")
+            farm = os.path.join(tmp, "farm", "torch")
+            for rel in (("_dynamo", "precompile_package.py"), ("nn", "functional.py")):
+                os.makedirs(os.path.join(store, rel[0]), exist_ok=True)
+                os.makedirs(os.path.join(farm, rel[0]), exist_ok=True)
+                open(os.path.join(store, *rel), "w").close()
+                try:
+                    os.symlink(os.path.join(store, *rel), os.path.join(farm, *rel))
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlinks unavailable")
+            own = os.path.join(farm, "_dynamo", "precompile_package.py")
+            stub = types.SimpleNamespace(__path__=[farm])
+            with (
+                mock.patch.object(precompile_package, "__file__", own),
+                mock.patch.dict(sys.modules, {"torch": stub}),
+            ):
+                self._clear_root_caches()
+                roots = torch_roots()
+            self.assertEqual(roots, tuple(sorted((norm(farm), norm(store)))))
+            functional = norm(os.path.join(farm, "nn", "functional.py"))
+            self.assertTrue(precompile_package._within(functional, roots))
+
+    def test_roots_drop_a_relative_interpreter_path(self):
+        # A venv whose pyvenv.cfg home is relative, or a relative PYTHONHOME,
+        # leaves sys.base_prefix, sys._stdlib_dir and every sysconfig path
+        # relative while os.__file__ alone is absolute (site.abs_paths() at
+        # startup), and a relative PYTHONUSERBASE leaves the user site so; all
+        # measured on 3.12 with nothing patched. Resolved, each would sit at the
+        # process cwd of the first call and stay cached there, so every one is
+        # dropped like a relative os.__file__: the directory os resolves into is
+        # the only stdlib root left, and there is no install root at all.
+        # sys.platform is patched onto win32 so the DLLs join is exercised too.
+        home = os.path.join("relhome", "lib", "python3.12")
+        purelib = os.path.join(home, "site-packages")
+        user_site = os.path.join("reluser", "lib", "python3.12", "site-packages")
+        paths = dict(sysconfig.get_paths())
+        paths.update(stdlib=home, platstdlib=home, purelib=purelib, platlib=purelib)
+        with (
+            mock.patch.object(sysconfig, "get_paths", return_value=paths),
+            mock.patch.object(sys, "_stdlib_dir", home, create=True),
+            mock.patch.object(sys, "base_prefix", "relhome"),
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch.object(site, "getsitepackages", return_value=[purelib]),
+            mock.patch.object(site, "getusersitepackages", return_value=user_site),
+        ):
+            self._clear_root_caches()
+            stdlib = precompile_package._stdlib_roots()
+            install = precompile_package._install_roots()
+        norm = precompile_package._norm
+        self.assertEqual(stdlib, (os.path.dirname(norm(os.__file__)),))
+        self.assertEqual(install, ())
+
     def test_install_roots_skip_a_site_accessor_that_raises(self):
         # A site.py that cannot answer is skipped, not propagated: this runs
         # inside save()'s lint, which must not abort the capture. sysconfig's
@@ -713,21 +770,42 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(reads_a_builtin(sum_read, sum))
         self.assertTrue(reads_a_builtin(DictGetItemSource(_BUILTINS_DICT, "int"), int))
 
-        # Only under the builtin's own name (IOError is CPython's alias of
-        # OSError), only a value CPython built and only one builtins owns. The
-        # flag is what refuses a user class installed into builtins under its
-        # own name, whether its __module__ names the test module or, exec'd with
-        # the builtins namespace as its globals, claims "builtins" outright;
-        # among the real builtin types it costs the heap type ExceptionGroup
+        # Only under the builtin's own name (IOError and EnvironmentError are
+        # CPython's aliases of OSError), only a value CPython built and only one
+        # builtins owns. The flag is what refuses a user class installed into
+        # builtins under its own name, whether its __module__ names the test
+        # module or, exec'd with the builtins namespace as its globals, claims
+        # "builtins" outright; it is read through type's descriptor, so a
+        # metaclass property cannot shadow it or raise into the predicate.
+        # Among the real builtin types it costs the heap type ExceptionGroup
         # alone (__loader__ is a heap type too, but its __name__ is not the
         # key). The __module__ test is what refuses open, the one builtin
-        # function builtins does not own.
+        # function builtins does not own: io before 3.12, _io since.
         class UserError(Exception):
             pass
 
-        io_read = DictGetItemSource(_BUILTINS_DICT, "IOError")
-        self.assertFalse(reads_a_builtin(io_read, IOError))
-        self.assertEqual((open.__module__, open.__name__), ("_io", "open"))
+        class Shadowing(type):
+            @property
+            def __flags__(cls):
+                return 1 << 8
+
+        class Shadow(metaclass=Shadowing):
+            __module__ = "builtins"
+
+        class Raising(type):
+            @property
+            def __flags__(cls):
+                raise RuntimeError("shadowed")
+
+        class Loud(metaclass=Raising):
+            pass
+
+        for name in ("IOError", "EnvironmentError"):
+            self.assertIs(vars(builtins)[name], OSError)
+            alias_read = DictGetItemSource(_BUILTINS_DICT, name)
+            self.assertFalse(reads_a_builtin(alias_read, OSError), name)
+        self.assertEqual(open.__name__, "open")
+        self.assertIn(open.__module__, ("io", "_io"))
         open_read = DictGetItemSource(_BUILTINS_DICT, "open")
         self.assertFalse(reads_a_builtin(open_read, open))
         loader = vars(builtins)["__loader__"]
@@ -739,6 +817,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(ns["unicode"].__module__, "builtins")
         shim_read = DictGetItemSource(_BUILTINS_DICT, "unicode")
         self.assertFalse(reads_a_builtin(shim_read, ns["unicode"]))
+        self.assertEqual(Shadow.__flags__ & (1 << 8), 1 << 8)
+        self.assertEqual(Shadow.__module__, "builtins")
+        shadow_read = DictGetItemSource(_BUILTINS_DICT, "Shadow")
+        self.assertFalse(reads_a_builtin(shadow_read, Shadow))
+        with self.assertRaises(RuntimeError):
+            Loud.__flags__
+        loud_read = DictGetItemSource(_BUILTINS_DICT, "Loud")
+        self.assertFalse(reads_a_builtin(loud_read, Loud))
         refused = [
             name
             for name, value in vars(builtins).items()
@@ -841,8 +927,34 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(defined_where_read(cached, "_user_op", _HERE))
         decorated = torch.no_grad()(_user_op)
         self.assertFalse(defined_where_read(decorated, "_user_op", _HERE))
-        # A __code__ that is not a code object is refused, not read.
-        fake = types.SimpleNamespace(__qualname__="_user_op", __code__="not code")
+
+        # A same-file wraps decorator a flag turns on forges __qualname__ and
+        # compiles in this file, so the code object's own name is what tells the
+        # two arms apart: off is the def itself, on is a slot.
+        def maybe_log(fn, on):
+            if not on:
+                return fn
+
+            @functools.wraps(fn)
+            def wrapper(*args):
+                return fn(*args)
+
+            return wrapper
+
+        plain, logged = maybe_log(_user_op, False), maybe_log(_user_op, True)
+        self.assertIs(plain, _user_op)
+        self.assertEqual(logged.__qualname__, "_user_op")
+        self.assertEqual(logged.__code__.co_name, "wrapper")
+        self.assertTrue(defined_where_read(plain, "_user_op", _HERE))
+        self.assertFalse(defined_where_read(logged, "_user_op", _HERE))
+        # Only a plain function or a class is judged: a bound method forwards
+        # __qualname__ and __code__ to its function, and a namespace carrying
+        # both is refused before either is read.
+        bound = types.MethodType(_user_op, object())
+        self.assertEqual(bound.__qualname__, "_user_op")
+        self.assertIs(bound.__code__, _user_op.__code__)
+        self.assertFalse(defined_where_read(bound, "_user_op", _HERE))
+        fake = types.SimpleNamespace(__qualname__="_user_op", __code__=bound.__code__)
         self.assertFalse(defined_where_read(fake, "_user_op", _HERE))
 
     def test_defined_where_read_refuses_a_pseudo_filename(self):
@@ -954,6 +1066,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             Model.ns.__func__
         self.assertTrue(defined_where_read(Model, Model.__qualname__, _HERE))
         self.assertFalse(defined_where_read(Model, Model.__qualname__, _ELSEWHERE))
+        # The proxy itself as the value is refused by type before any read.
+        self.assertFalse(defined_where_read(Model.ns, "precompile_package_test", _HERE))
 
     def test_defined_where_read_refuses_a_class_minted_for_the_file(self):
         defined_where_read = precompile_package._defined_where_read
@@ -993,11 +1107,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(defined_where_read(under("m"), Named.__qualname__, _HERE))
         self.assertFalse(defined_where_read(under("other"), Named.__qualname__, _HERE))
         # A class imported from another file is not written here however many
-        # same-file functions the reader attaches to it.
+        # same-file functions the reader attaches to it, nor when it patches a
+        # method through functools.wraps, which forges the Point.norm qualname
+        # but not the code object's own name.
         imported = {"__name__": "mypkg.impl"}
         source = "class Point:\n    def norm(self):\n        return 0\n"
         exec(compile(source, F.__file__, "exec"), imported)
         imported["Point"].extra = _user_op
+        self.assertFalse(defined_where_read(imported["Point"], "Point", _HERE))
+
+        @functools.wraps(imported["Point"].norm)
+        def _norm(self):
+            return 1
+
+        self.assertEqual(_norm.__qualname__, "Point.norm")
+        self.assertEqual(_norm.__code__.co_name, "_norm")
+        imported["Point"].norm = _norm
         self.assertFalse(defined_where_read(imported["Point"], "Point", _HERE))
 
     def test_defined_where_read_skips_the_compiler_annotate_function(self):
@@ -1013,19 +1138,25 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         if sys.version_info >= (3, 14):
             annotate = vars(Cfg)["__annotate_func__"]
+            code = annotate.__code__
+            qualname = f"{Cfg.__qualname__}.__annotate__"
             self.assertEqual(
-                (annotate.__qualname__, annotate.__code__.co_filename),
-                (f"{Cfg.__qualname__}.__annotate__", __file__),
+                (annotate.__qualname__, code.co_qualname, code.co_filename),
+                (qualname, qualname, __file__),
             )
         self.assertFalse(defined_where_read(Cfg, Cfg.__qualname__, _HERE))
 
         # Replayed on every version with a type() class handed a same-file
-        # function under that key and qualname. The control row, the same
-        # function under an ordinary key, shows the replay is what a class
+        # function under that key, carrying the qualname on the function and on
+        # its code object as a class statement's def does. The control row, the
+        # same function under an ordinary key, shows the replay is what a class
         # statement produces; the skip of both keys, against a version that
         # stores the function under its own name, is pinned last.
         def minted(key, qualname):
-            fn = types.FunctionType(_user_op.__code__, globals(), "__annotate__")
+            code = _user_op.__code__.replace(co_name=qualname.rpartition(".")[2])
+            if sys.version_info >= (3, 11):
+                code = code.replace(co_qualname=qualname)
+            fn = types.FunctionType(code, globals(), "__annotate__")
             fn.__qualname__ = qualname
             return type("Cfg", (), {key: fn})
 
@@ -1036,7 +1167,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             own_key = minted(key, f"Cfg.{key}")
             self.assertFalse(defined_where_read(own_key, "Cfg", _HERE), key)
 
-    @torch._dynamo.config.patch(nested_graph_breaks=True)
     def test_minted_global_names_match_dynamo(self):
         # The predicates lean on names Dynamo mints inline (the two prefixes
         # through aot_compile.py), in install_builtins_dict_in_fglobals,
@@ -1087,7 +1217,8 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             return callee(z) + z
 
         seen.clear()
-        # nested_graph_breaks is off by default; the patch above turns it on.
+        # The harness runs every test under nested_graph_breaks=True (the config
+        # default is off).
         compiled = torch.compile(
             nested, backend="eager", options={"guard_filter_fn": record}
         )
@@ -1097,10 +1228,11 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             for r in roots()
             if isinstance(r, LocalSource) and r.local_name.startswith("__nested")
         }
-        # The resume function list is always passed; whether the frame values
-        # are guarded depends on which locals stay live across the break.
+        # Both lists are passed into every resume function and both are guard
+        # roots; only the first is synthesized.
         self.assertTrue(synthesized["__nested_resume_fns"])
-        self.assertFalse(synthesized.get("__nested_frame_values", False))
+        self.assertIn("__nested_frame_values", synthesized)
+        self.assertFalse(synthesized["__nested_frame_values"])
 
 
 if __name__ == "__main__":
