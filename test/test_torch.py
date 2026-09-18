@@ -34,7 +34,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
+    MI200_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_GRAPH, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
@@ -177,6 +177,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    @unittest.skipIf(TEST_WITH_ROCM, "which path dense zero_ takes is ROCm-version dependent; see zero_cuda_")
     def test_zero_dense_emits_memset(self, device):
         base = torch.ones(64, 96, device=device)
         with torch.profiler.profile() as prof:
@@ -194,6 +195,26 @@ class TestTorchDeviceType(TestCase):
             torch.cuda.synchronize()
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("elementwise_kernel" in name for name in names), names)
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    def test_zero_dense_inside_graph_capture(self, device):
+        # Whichever path zero_ takes has to survive being captured and replayed.
+        base = torch.ones(64, 96, device=device)
+        graph = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            base.zero_()
+            with torch.cuda.graph(graph):
+                base.zero_()
+        torch.cuda.current_stream().wait_stream(stream)
+
+        for _ in range(8):
+            base.fill_(1)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(base.count_nonzero().item(), 0)
 
     # For testing in64 support in upsample_nearest3d
     @skipIfRocmArch(MI200_ARCH)
