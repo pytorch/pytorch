@@ -144,8 +144,8 @@ it.
 #    Every refusal above rests on capture tracing under a fake mode IT built, so capture
 #    refuses to run inside another trace, on BOTH paths: an ambient fake mode (a
 #    torch.compile / export / AOTAutograd trace, or an enclosing ``with FakeTensorMode()``)
-#    outranks capture's own, and no foreign
-#    mode passes ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
+#    outranks capture's own, and no enclosing-trace mode passes
+#    ``allow_fallback_kernels=False``, so a meta-less op in an allowlisted
 #    namespace would be run for real again. A mode built under DEFAULT config (an
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a ``.data_ptr()``
 #    read would bake 0 rather than raise; a torch.compile / export mode does build under
@@ -604,13 +604,16 @@ def _fakeify_with_unbacked(
             elif not per:
                 fake_user.append(_fakeify_input(fake_mode, leaf, label))
             else:
-                # Validate the marked leaf through the same helper -- the fake it returns
-                # is discarded, since the leaf is rebuilt at its unbacked sizes below --
-                # so an unfakeifiable input is named whether or not it is the marked one.
-                # Without this it escapes as a raw meta-kernel error (for a marked
-                # quantized input: "SymIntArrayRef expected to contain only concrete
-                # integers"), because the rebuild never consults the meta converter.
-                _fakeify_input(fake_mode, leaf, label)
+                # Validate the marked leaf through the same helper, so an unfakeifiable
+                # input is named whether or not it is the marked one -- without this it
+                # escapes as a raw meta-kernel error (for a marked quantized input:
+                # "SymIntArrayRef expected to contain only concrete integers"), because the
+                # rebuild below never consults the meta converter. The probe runs on a
+                # THROWAWAY mode and its fake is discarded: from_tensor memoizes by tensor
+                # id, so probing fake_mode would leave a STATIC fake there that a later
+                # dispatch on this same real tensor (allow_non_fake_inputs) would reuse in
+                # place of the unbacked-sized one built below.
+                _fakeify_input(FakeTensorMode(), leaf, label)
                 sizes: list[Any] = []  # mix of static ints and unbacked SymInts
                 for i, s in enumerate(leaf.shape):
                     if i not in per:
@@ -658,20 +661,12 @@ def _fakeify_input(fake_mode: FakeTensorMode, t: Tensor, label: str) -> Tensor:
     """from_tensor for one static example tensor, naming it if it cannot be fakeified.
 
     ``label`` is one of ``_capture``'s ``input_labels`` ("parameter w", "buffer nt",
-    "user input 0"), so the refusal names what the caller has to change.
-
-    Shared by BOTH capture paths, so the same input is refused the same way whether or not
-    any dim is marked: the unbacked path fakeifies its params/buffers and its unmarked
-    inputs through this helper, and calls it on a MARKED leaf too (discarding the result)
-    to validate a leaf it then rebuilds at unbacked sizes.
-    An input the meta converter cannot represent -- a quantized tensor, a lazy-device
-    tensor, a legacy batched tensor or a view out of a sparse tensor (fake_tensor.py
-    raises this for the first, and meta_utils returns NotImplemented on the rest) --
-    cannot be traced on either path; this buys error quality, a PrecompileError that names
-    the input instead of a raw converter error. Narrow on purpose: any other failure in
-    from_tensor is an internal bug and must surface as itself. The inputs from_tensor
-    accepts but cannot faithfully REPRESENT (nested, mkldnn, sparse, pinned) are refused
-    before this, by ``_reject_unfakeifiable_input`` over every example input.
+    "user input 0"), so the refusal names what the caller has to change. Shared by BOTH
+    capture paths, so the same input is refused the same way whether or not any dim is
+    marked. Narrow on purpose: any failure in from_tensor other than the converter's own
+    "cannot represent this" is an internal bug and must surface as itself. Not
+    interchangeable with ``_reject_unfakeifiable_input``, which refuses the inputs
+    from_tensor ACCEPTS but cannot faithfully represent (nested, mkldnn, sparse, pinned).
     """
     from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
 
@@ -817,11 +812,12 @@ def _control_flow_refusal(detail: str) -> PrecompileError:
 
 def _missing_fake_kernel_refusal(detail: str) -> PrecompileError:
     return PrecompileError(
-        "precompile: fn calls an operator that has no meta/fake kernel, which the "
-        "fake-tensor trace needs to compute output shapes. For a custom op, register "
-        "one with torch.library.register_fake. A built-in ATen op has no fake kernel you "
-        "are expected to register -- registering one overrides it process-wide -- so avoid "
-        f"the op inside fn instead. {detail}"
+        "precompile: fn calls an operator with no meta/fake kernel the fake-tensor trace "
+        "can use to compute output shapes -- either none is registered, or the registered "
+        "one declines the op (as the nested-tensor constructors do). For a CUSTOM op, "
+        "register one with torch.library.register_fake. A built-in ATen op has no fake "
+        "kernel you are expected to register -- registering one overrides it process-wide "
+        f"-- so avoid the op inside fn instead. {detail}"
     )
 
 
@@ -940,8 +936,8 @@ def _capture(
     # someone else's contract. This runs first, ahead of the input scan below, whose
     # is_pinned() probe DISPATCHES: under an ambient mode a real example tensor trips that
     # mode's own non-fake-input assertion before any refusal of ours. Ask detect_fake_mode
-    # -- what make_fx itself resolves through -- so all three sources it ranks (an ambient
-    # TracingContext, the dispatch-mode stack, the inputs) are refused by name here instead
+    # -- what make_fx itself resolves through -- so both sources it sees without arguments
+    # (an ambient TracingContext, the dispatch-mode stack) are refused by name here instead
     # of reaching its own mode-mismatch assertion once capture enters its mode.
     if detect_fake_mode() is not None:
         raise PrecompileError(
@@ -1316,34 +1312,27 @@ def _capture(
                     raise
                 raise _missing_fake_kernel_refusal(f"Underlying: {first}") from e
             except RuntimeError as e:
-                # Tracing on fake tensors needs a meta/fake kernel for every op, and no
-                # op may read a fake tensor's data pointer. A library op with no kernel
-                # raises UnsupportedOperatorException (a RuntimeError subclass, so this
-                # clause catches it); a torch.library.custom_op without
-                # register_fake raises a RuntimeError naming the missing fake impl; a
-                # .data_ptr() read raises one of the two FAKE data-pointer messages matched
-                # below (that is what the config patch above buys us). Anything else is not
-                # ours to explain.
+                # Two failures here are ours to explain: an op with no usable meta/fake
+                # kernel (UnsupportedOperatorException, or the RuntimeError a
+                # torch.library.custom_op with no register_fake raises), and a read of a
+                # fake tensor's data (what the config patch above buys us). Anything else is
+                # fn's own.
                 first = (str(e).splitlines() or [""])[0]
                 # Match the fake-specific texts, not the generic "Cannot access data
                 # pointer" prefix: a REAL tensor with no storage (e.g. a sparse tensor fn
                 # closes over) raises "...of Tensor that doesn't have storage" from the same
-                # c10 code and must reach the caller unrelabeled. The match stops at
-                # StorageImpl's "(e.g." rather than spelling out its example list, which is
-                # already unambiguous against every sibling message and does not silently
-                # stop matching if that list is reordered or extended. Two sites report a fake
-                # pointer read: StorageImpl names FakeTensor, while TensorImpl's typed
-                # data_ptr_impl (reached by a kernel that dereferences a fake tensor -- e.g.
-                # tensor_split with tensor indices) reports uninitialized storage instead.
-                # A NumPy conversion (t.numpy(), np.asarray(t), t.__array__(); everyday
-                # logging/metric code) is the same read, but tensor_numpy.cpp rejects it
-                # earlier and blames "tensor subclasses", which under capture is usually
-                # precompile's own FakeTensor and not anything the caller wrote -- so match
-                # that text too rather than send them after a subclass that does not exist.
-                # The blamed subclass CAN be the caller's (the check is is_python_dispatch(),
-                # so any python-dispatch subclass fn builds trips it), which is why the
-                # refusal points at Underlying: rather than asserting whose it is. That
-                # string has one raise site.
+                # c10 code and must reach the caller unrelabeled. The three matched, as
+                # measured on this tree: .data_ptr() hits StorageImpl, which names
+                # FakeTensor; a kernel that dereferences a fake (e.g. tensor_split with
+                # tensor indices) hits TensorImpl's typed data_ptr_impl, which reports
+                # uninitialized storage instead -- that message is not fake-exclusive in
+                # principle, but no real tensor reaches it from Python (a sparse one takes
+                # the doesn't-have-storage arm, a meta one returns 0, a storage-freed one is
+                # dereferenced with no check at all); and a NumPy conversion (t.numpy(),
+                # np.asarray(t), t.__array__()) is rejected earlier by tensor_numpy.cpp,
+                # which blames "tensor subclasses" -- usually capture's own FakeTensor, but
+                # it CAN be one the caller wrote (the check is is_python_dispatch()), which
+                # is why the refusal points at Underlying: rather than asserting whose it is.
                 reads_fake_data = (
                     "Cannot access data pointer of Tensor (e.g." in str(e)
                     or "its data is not allocated yet" in str(e)
@@ -1360,7 +1349,9 @@ def _capture(
                         "Underlying:. Move the read out of fn, or wrap that kernel in a "
                         f"custom op with a registered fake impl. Underlying: {first}"
                     ) from e
-                no_fake_impl = "no fake impl registered" in str(e)
+                # The full prefix custom_ops.py emits, so a user RuntimeError that merely
+                # mentions a fake impl cannot collide.
+                no_fake_impl = "There was no fake impl registered for" in str(e)
                 if not isinstance(e, UnsupportedOperatorException) and not no_fake_impl:
                     raise
                 raise _missing_fake_kernel_refusal(f"Underlying: {first}") from e
