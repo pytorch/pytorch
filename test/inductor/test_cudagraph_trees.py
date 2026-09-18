@@ -286,6 +286,7 @@ class GraphTreeBackendTests(TestCase):
                         allocator_interface,
                     )
 
+
 if HAS_CUDA_AND_TRITON:
 
     def get_all_cudagraph_segments():
@@ -2652,14 +2653,14 @@ if HAS_CUDA_AND_TRITON:
             "persistent BLAS workspace caching is disabled",
         )
         def test_workspace_allocation_error(self):
+            from torch._inductor import graph_tree_backend
+
             torch._C._cuda_clearCublasWorkspaces()
 
-            prev = torch._inductor.cudagraph_trees.clear_cublas_manager
+            prev = graph_tree_backend.clear_cublas_manager
 
             try:
-                torch._inductor.cudagraph_trees.clear_cublas_manager = (
-                    contextlib.nullcontext
-                )
+                graph_tree_backend.clear_cublas_manager = contextlib.nullcontext
 
                 @torch.compile()
                 def foo(x, y):
@@ -2693,7 +2694,7 @@ if HAS_CUDA_AND_TRITON:
 
             finally:
                 torch._C._cuda_clearCublasWorkspaces()
-                torch._inductor.cudagraph_trees.clear_cublas_manager = prev
+                graph_tree_backend.clear_cublas_manager = prev
                 torch._inductor.cudagraph_trees.get_container(
                     self.device_idx
                 ).tree_manager = None

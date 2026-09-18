@@ -60,9 +60,7 @@ class XpuBasicTests(TestCase):
     )
     def test_unregistered_graph_tree_backend_fallback(self):
         from torch._dynamo.utils import counters
-        from torch._inductor.graph_tree_backend import (
-            is_graph_tree_backend_available,
-        )
+        from torch._inductor.graph_tree_backend import is_graph_tree_backend_available
 
         self.assertEqual(torch.accelerator.current_accelerator().type, "xpu")
         self.assertFalse(is_graph_tree_backend_available())
