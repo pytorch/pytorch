@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     # Put the submodules here to avoid circular imports
     from . import (
         _collections as _collections,
+        _collections_abc as _collections_abc,
         builtins as builtins,
         functools as functools,
         heapq as heapq,
