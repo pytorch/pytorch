@@ -604,8 +604,8 @@ class AOTInductorTestsTemplate:
             self.check_model(Model().to(self.device), example_inputs)
 
     @unittest.skipIf(
-        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
-        "Pinned async constant copy is CUDA-only",
+        not HAS_GPU or GPU_TYPE != "cuda",
+        "Pinned async constant copy is CUDA/ROCm-only",
     )
     @patch.dict(
         os.environ,
@@ -7923,7 +7923,7 @@ class AOTInductorTestsTemplate:
 
     @requires_multigpu()
     def test_cuda_to_cuda_device_copy(self):
-        if self.device != GPU_TYPE or GPU_TYPE != "cuda" or TEST_WITH_ROCM:
+        if self.device != GPU_TYPE or GPU_TYPE != "cuda":
             raise unittest.SkipTest("This test requires CUDA")
 
         device0 = torch.device(type=GPU_TYPE, index=0)
