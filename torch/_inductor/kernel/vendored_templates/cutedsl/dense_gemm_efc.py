@@ -1328,6 +1328,18 @@ class PersistentDenseGemmEFCKernel:
             self.efc.kernel.copy_and_partition_supplemental_rmem_tensors(
                 tiled_copy_t2r, tTR_rAcc, epi_tidx, epi_tile
             )
+            tDrGeneratedReduce: typing.Any = None
+            if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
+                reduce_tile = cute.make_rmem_tensor(
+                    cute.make_layout(self.cta_tile_shape_mnk[:2]), self.acc_dtype
+                )
+                tDrGeneratedReduce = partition_for_epilogue(
+                    reduce_tile,
+                    epi_tile=epi_tile,
+                    tiled_copy=tiled_copy_t2r,
+                    tidx=epi_tidx,
+                    reference_src=False,
+                )
 
             #
             # Persistent tile scheduling loop
@@ -1363,6 +1375,8 @@ class PersistentDenseGemmEFCKernel:
                     cur_tile_coord[1],
                     cur_tile_coord[2],
                 )
+                # MMA pairs share the divided coordinate. Direct epilogue stores
+                # use cur_tile_coord to preserve each CTA's row ownership.
 
                 # Slice the supplemental written tensors per MMA tile index.
                 self.efc.kernel.slice_written_tensors_per_mma_tile_index(
@@ -1447,6 +1461,10 @@ class PersistentDenseGemmEFCKernel:
                     epilogue_context.acc_vec = (
                         tiled_copy_r2s.retile(tTR_rAcc).load().to(self.epi_dtype)
                     )
+                    if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
+                        epilogue_context.local_reduce = tDrGeneratedReduce[
+                            (None, None, None, 0, subtile_idx)
+                        ]
                     log(f"before .retile tTR_rAcc = {tTR_rAcc!s}")
                     log(
                         f"tiled_copy_r2s.retile(tTR_rAcc) = {tiled_copy_r2s.retile(tTR_rAcc)!s}"
@@ -1481,7 +1499,7 @@ class PersistentDenseGemmEFCKernel:
                         output_n = cute.size(mB_nkl, mode=[0])
                         for i in cutlass.range(cute.size(direct_flt), unroll_full=True):
                             global_m = (
-                                mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                cur_tile_coord[0] * self.cta_tile_shape_mnk[0]
                                 + direct_coord_flt[i][0]
                             )
                             global_n = (
@@ -1559,7 +1577,7 @@ class PersistentDenseGemmEFCKernel:
                             g_reduce = cute.local_tile(
                                 m_reduce,
                                 (groups_per_cta, self.cta_tile_shape_mnk[1]),
-                                mma_tile_coord_mnl[:2],
+                                (cur_tile_coord[0], cur_tile_coord[1]),
                             )
                         limit_n = (
                             min(
@@ -1613,7 +1631,7 @@ class PersistentDenseGemmEFCKernel:
                             n_idx = coord_flt[i][1]
                             group_idx = row_idx // group
                             global_group_idx = (
-                                mma_tile_coord_mnl[0] * groups_per_cta + group_idx
+                                cur_tile_coord[0] * groups_per_cta + group_idx
                             )
                             group_value = reduced_flt[i]
                             group_warp_start = group_idx * group_warps
@@ -1705,8 +1723,7 @@ class PersistentDenseGemmEFCKernel:
                                     cute.size(normalized_flt), unroll_full=True
                                 ):
                                     global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
+                                        cur_tile_coord[0] * self.cta_tile_shape_mnk[0]
                                         + coord_flt[i][0]
                                     )
                                     global_n = (
@@ -1755,8 +1772,7 @@ class PersistentDenseGemmEFCKernel:
                                     cute.size(secondary_flt), unroll_full=True
                                 ):
                                     global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
+                                        cur_tile_coord[0] * self.cta_tile_shape_mnk[0]
                                         + coord_flt[i][0]
                                     )
                                     global_n = (
@@ -1864,11 +1880,11 @@ class PersistentDenseGemmEFCKernel:
                             g_reduce = cute.local_tile(
                                 m_reduce,
                                 (self.cta_tile_shape_mnk[0], groups_per_cta),
-                                mma_tile_coord_mnl[:2],
+                                (cur_tile_coord[0], cur_tile_coord[1]),
                             )
                         limit_m = min(
                             cute.size(mA_mkl, mode=[0])
-                            - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
+                            - cur_tile_coord[0] * self.cta_tile_shape_mnk[0],
                             self.cta_tile_shape_mnk[0],
                         )
                         limit_groups = (
@@ -2002,7 +2018,7 @@ class PersistentDenseGemmEFCKernel:
                                 cute.size(acc_flt), unroll_full=True
                             ):
                                 global_m = (
-                                    mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0]
+                                    cur_tile_coord[0] * self.cta_tile_shape_mnk[0]
                                     + acc_coord_flt[i][0]
                                 )
                                 global_n = (
@@ -2040,8 +2056,7 @@ class PersistentDenseGemmEFCKernel:
                                     cute.size(acc_flt), unroll_full=True
                                 ):
                                     global_m = (
-                                        mma_tile_coord_mnl[0]
-                                        * self.cta_tile_shape_mnk[0]
+                                        cur_tile_coord[0] * self.cta_tile_shape_mnk[0]
                                         + acc_coord_flt[i][0]
                                     )
                                     global_n = (
@@ -2074,12 +2089,7 @@ class PersistentDenseGemmEFCKernel:
                         assert not self.local_reduce_feeds_main
                         group = cutlass.const_expr(self.local_reduce_group)
                         assert group > 1
-                        returned_fragment = cute.make_rmem_tensor_like(
-                            epilogue_context.acc_vec, self.acc_dtype
-                        )
-                        returned_fragment.store(
-                            epilogue_context.local_reduce.to(self.acc_dtype)
-                        )
+                        returned_fragment = epilogue_context.local_reduce
                         returned_flt = cute.filter_zeros(returned_fragment)
                         returned_coordinates = partition_for_epilogue(
                             cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
@@ -2098,11 +2108,11 @@ class PersistentDenseGemmEFCKernel:
                         g_reduce = cute.local_tile(
                             m_reduce,
                             (self.cta_tile_shape_mnk[0], groups_per_cta),
-                            mma_tile_coord_mnl[:2],
+                            (cur_tile_coord[0], cur_tile_coord[1]),
                         )
                         limit_m = min(
                             cute.size(local_reduce_tensor, mode=[1])
-                            - mma_tile_coord_mnl[0] * self.cta_tile_shape_mnk[0],
+                            - cur_tile_coord[0] * self.cta_tile_shape_mnk[0],
                             self.cta_tile_shape_mnk[0],
                         )
                         limit_groups = cute.size(local_reduce_tensor, mode=[2])
@@ -2194,12 +2204,7 @@ class PersistentDenseGemmEFCKernel:
                         assert local_reduce_tensor is not None
                         assert not self.local_reduce_feeds_main
                         group = cutlass.const_expr(self.local_reduce_group)
-                        returned_fragment = cute.make_rmem_tensor_like(
-                            epilogue_context.acc_vec, self.acc_dtype
-                        )
-                        returned_fragment.store(
-                            epilogue_context.local_reduce.to(self.acc_dtype)
-                        )
+                        returned_fragment = epilogue_context.local_reduce
                         reduced_flt = cute.filter_zeros(returned_fragment)
                         coordinates = partition_for_epilogue(
                             cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
@@ -2208,9 +2213,7 @@ class PersistentDenseGemmEFCKernel:
                             tidx=epi_tidx,
                             reference_src=False,
                         )[(None, None, None, 0, subtile_idx)]
-                        coord_flt = cute.filter_zeros(
-                            tiled_copy_r2s.retile(coordinates)
-                        )
+                        coord_flt = cute.filter_zeros(coordinates)
                         lane_layout_mn, warp_layout_mn = get_lane_warp_layouts(
                             tiled_copy_t2r, reference_src=False
                         )
@@ -2243,7 +2246,7 @@ class PersistentDenseGemmEFCKernel:
                         g_reduce = cute.local_tile(
                             m_reduce,
                             (groups_per_cta, self.cta_tile_shape_mnk[1]),
-                            mma_tile_coord_mnl[:2],
+                            (cur_tile_coord[0], cur_tile_coord[1]),
                         )
                         limit_n = min(
                             cute.size(local_reduce_tensor, mode=[2])
@@ -2284,7 +2287,7 @@ class PersistentDenseGemmEFCKernel:
                             n_idx = coord_flt[i][1]
                             group_idx = row_idx // group
                             global_group_idx = (
-                                mma_tile_coord_mnl[0] * groups_per_cta + group_idx
+                                cur_tile_coord[0] * groups_per_cta + group_idx
                             )
                             group_value = reduced_flt[i]
                             group_warp_start = group_idx * group_warps
@@ -2433,9 +2436,16 @@ class PersistentDenseGemmEFCKernel:
     ) -> tuple[cute.TiledCopy, cute.Tensor, cute.Tensor]:
         """Make tiledCopy for tensor memory load, then use it to partition tensor memory (source) and register array (destination)."""
         # Make tiledCopy for tensor memory load
+        # Generated reductions use logical M/N fragments; output stores keep
+        # the physical output layout.
+        accumulator_layout = (
+            utils.LayoutEnum.ROW_MAJOR
+            if self.tensor_epilogue_returns_local_reduce
+            else self.d_layout
+        )
         copy_atom_t2r = sm100_utils.get_tmem_load_op(
             self.cta_tile_shape_mnk,
-            self.d_layout,  # Take this as the reference layout for the epilogue tile.
+            accumulator_layout,
             self.epi_dtype,  # But we get the accumulator as epi_dtype in the epilogue.
             self.acc_dtype,
             epi_tile,
@@ -2454,17 +2464,21 @@ class PersistentDenseGemmEFCKernel:
         thr_copy_t2r = tiled_copy_t2r.get_slice(tidx)
         # (T2R, T2R_M, T2R_N, EPI_M, EPI_M, STAGE)
         tTR_tAcc = thr_copy_t2r.partition_S(tAcc_epi)
-
-        # (EPI_TILE_M, EPI_TILE_N, EPI_M, EPI_N, RestM, RestN, RestL)
-        tCgC_epi = cute.flat_divide(
-            tCgC[((None, None), 0, 0, None, None, None)], epi_tile
-        )
-        # (T2R, T2R_M, T2R_N, EPI_M, EPI_N, RestM, RestN, RestL)
-        tTR_gC = thr_copy_t2r.partition_D(tCgC_epi)
-        # (T2R, T2R_M, T2R_N)
-        tTR_rAcc = cute.make_rmem_tensor(
-            tTR_gC[(None, None, None, 0, 0, 0, 0, 0)].shape, self.acc_dtype
-        )
+        if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
+            cAcc = cute.make_identity_tensor(self.cta_tile_shape_mnk[:2])
+            cAcc_epi = cute.flat_divide(cAcc, epi_tile)
+            tTR_cAcc = thr_copy_t2r.partition_D(cAcc_epi)
+            tTR_rAcc = cute.make_rmem_tensor(
+                tTR_cAcc[(None, None, None, 0, 0)].shape, self.acc_dtype
+            )
+        else:
+            tCgC_epi = cute.flat_divide(
+                tCgC[((None, None), 0, 0, None, None, None)], epi_tile
+            )
+            tTR_gC = thr_copy_t2r.partition_D(tCgC_epi)
+            tTR_rAcc = cute.make_rmem_tensor(
+                tTR_gC[(None, None, None, 0, 0, 0, 0, 0)].shape, self.acc_dtype
+            )
         return tiled_copy_t2r, tTR_tAcc, tTR_rAcc
 
     def epilogue_smem_copy_and_partition_load(

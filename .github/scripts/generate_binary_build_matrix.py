@@ -32,15 +32,13 @@ CUDA_STABLE = "13.0"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "13.0": "13.0.3",
-    "13.2": "13.2.1",
-    "13.4": "13.4.0",
+    "13.2": "13.2.2",
+    "13.4": "13.4.1",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
-# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo, which carries
-# 13-0 through 13-3 only: 13.4 is still a release candidate (13.4.0rc1). The
-# runtime image just pip-installs the published cu134 nightly, so it builds.
+# apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
 # Drop an entry once its toolkit ships in the apt repo.
-CUDA_ARCHES_RUNTIME_IMAGE_ONLY = ["13.4"]
+CUDA_ARCHES_RUNTIME_IMAGE_ONLY = []
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "13.0": "9",
@@ -69,23 +67,23 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.0": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.3; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.2": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.1; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.4": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.0rc1; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
-        "nvidia-cudnn-cu13==9.25.1.1; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.30.7; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
@@ -94,12 +92,12 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "xpu": (
-        "intel-cmplr-lib-rt==2026.1.0 | "
-        "intel-cmplr-lib-ur==2026.1.0 | "
-        "intel-cmplr-lic-rt==2026.1.0 | "
-        "intel-sycl-rt==2026.1.0 | "
-        "oneccl-devel==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2022.1.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "intel-cmplr-lib-rt==2026.1.2 | "
+        "intel-cmplr-lib-ur==2026.1.2 | "
+        "intel-cmplr-lic-rt==2026.1.2 | "
+        "intel-sycl-rt==2026.1.2 | "
+        "oneccl-devel==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "onemkl-license==2026.1.0 | "
         "onemkl-sycl-blas==2026.1.0 | "
@@ -107,14 +105,14 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "onemkl-sycl-lapack==2026.1.0 | "
         "onemkl-sycl-rng==2026.1.0 | "
         "onemkl-sycl-sparse==2026.1.0 | "
-        "dpcpp-cpp-rt==2026.1.0 | "
-        "intel-opencl-rt==2026.1.0 | "
+        "dpcpp-cpp-rt==2026.1.2 | "
+        "intel-opencl-rt==2026.1.2 | "
         "mkl==2026.1.0 | "
-        "intel-openmp==2026.1.0 | "
+        "intel-openmp==2026.1.2 | "
         "tbb==2023.1.0 | "
         "tcmlib==1.5.0 | "
         "umf==1.1.0 | "
-        "intel-pti==1.0.1 | "
+        "intel-pti==1.1.0 | "
         "pyzes==0.1.2; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
@@ -249,7 +247,7 @@ def validate_cudnn_version_consistency(arch_version: str) -> None:
         )
 
 
-_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "manywheel" / "build_env_setup.py"
+_BUILD_ENV_SETUP = REPO_ROOT / ".ci" / "wheel" / "linux" / "build_env_setup.py"
 _RUNTIME_CUDA_INIT = REPO_ROOT / "torch" / "cuda" / "__init__.py"
 
 
@@ -279,7 +277,7 @@ def validate_runtime_release_table_consistency() -> None:
     if runtime != build:
         raise RuntimeError(
             "PYTORCH_RELEASES_CODE_CC in torch/cuda/__init__.py is out of sync "
-            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/manywheel/build_env_setup.py.\n"
+            "with TORCH_CUDA_ARCH_LIST_TABLE in .ci/wheel/linux/build_env_setup.py.\n"
             f"runtime: {runtime}\nbuild:   {build}"
         )
 
