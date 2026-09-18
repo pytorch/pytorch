@@ -15,6 +15,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/irange.h>
 #include <fmt/format.h>
@@ -26,6 +27,8 @@
 #include <sstream>
 
 using namespace torch;
+static std::string prefix = "";
+static std::string suffix = "";
 
 // Critical signal handlers should be registered on worker processes before
 // doing work.
@@ -34,8 +37,10 @@ using namespace torch;
 // Python handle is _set_worker_signal_handlers().
 #define SIGNAL_HANDLER(SIGNAL, HANDLER_NAME, ERROR_MSG)                    \
   static void HANDLER_NAME(int sig, siginfo_t* info, void* ctx) {          \
+    write(STDERR_FILENO, prefix.data(), prefix.size());                    \
     auto _w =                                                              \
         write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char)); \
+    write(STDERR_FILENO, suffix.data(), suffix.size());                    \
     (void)_w;                                                              \
     struct sigaction sa{};                                                 \
     sa.sa_handler = SIG_DFL;                                               \
@@ -221,6 +226,28 @@ static PyObject* THPModule_removeWorkerPIDs(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_set_worker_signal_prefix(
+    PyObject* module,
+    PyObject* str) {
+  HANDLE_TH_ERRORS
+
+  prefix = THPUtils_unpackString(str);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_set_worker_signal_sufix(
+    PyObject* module,
+    PyObject* str) {
+  HANDLE_TH_ERRORS
+
+  suffix = THPUtils_unpackString(str);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 #undef SIGNAL_HANDLER
 
 #else
@@ -242,6 +269,18 @@ static PyObject* THPModule_removeWorkerPIDs(
   Py_RETURN_NONE;
 }
 
+static PyObject* THPModule_set_worker_signal_prefix(
+    PyObject* module,
+    PyObject* _ignored) {
+  Py_RETURN_NONE;
+}
+
+static PyObject* THPModule_set_worker_signal_sufix(
+    PyObject* module,
+    PyObject* _ignored) {
+  Py_RETURN_NONE;
+}
+
 static PyObject* THPModule_errorIfAnyWorkerFails(
     PyObject* module,
     PyObject* _ignored) {
@@ -258,6 +297,14 @@ PyMethodDef DataLoaderMethods[] = {
      nullptr},
     {"_set_worker_pids", THPModule_setWorkerPIDs, METH_VARARGS, nullptr},
     {"_remove_worker_pids", THPModule_removeWorkerPIDs, METH_O, nullptr},
+    {"_set_worker_signal_prefix",
+     THPModule_set_worker_signal_prefix,
+     METH_O,
+     nullptr},
+    {"_set_worker_signal_sufix",
+     THPModule_set_worker_signal_sufix,
+     METH_O,
+     nullptr},
     {"_error_if_any_worker_fails",
      THPModule_errorIfAnyWorkerFails,
      METH_NOARGS,
