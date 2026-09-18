@@ -5,13 +5,11 @@ import csv
 import logging
 import os
 from dataclasses import FrozenInstanceError
-from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
 
 import torch
-import torch.distributed.config as dist_config
 from torch._dynamo import OptimizedModule
 from torch.distributed.pipelining import (
     analyze_pipeline_activation_liveness,
@@ -24,14 +22,6 @@ from torch.distributed.pipelining import (
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
-)
-from torch.distributed.pipelining._p2p import (
-    _build_p2p_edge_groups,
-    _directed_edge_split_rounds,
-    _logical_edge_preconnect_rounds,
-    _PP_EDGE_GROUP_CACHE,
-    _preconnect_shared_p2p_edges,
-    _stage_rank_assignment,
 )
 from torch.distributed.pipelining._recv_buffers import _RecvBufferPool, _RecvInfo
 from torch.distributed.pipelining._utils import (
@@ -53,7 +43,6 @@ from torch.distributed.pipelining.schedules import (
     _merge_bw,
     _PipelineSchedule,
     _PipelineScheduleRuntime,
-    _resolve_unshard_lookahead,
     _simulate_comms_compute,
     _validate_schedule,
     B,
@@ -65,10 +54,8 @@ from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     RECV_B,
     RECV_F,
-    REDUCE_GRAD,
     RESHARD,
     SEND_B,
-    SEND_F,
     UNSHARD,
     W,
 )
@@ -92,389 +79,6 @@ logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
 
-class P2PInitializationTest(TestCase):
-    def test_schedule_builds_and_preconnects_one_shared_edge_group_map(self):
-        parent = MagicMock()
-        assignment = dict(enumerate((0, 1, 2, 3, 0, 1, 2, 3)))
-        stages = []
-        for stage_index in (0, 4):
-            stage = MockPipelineStage(
-                num_stages=8,
-                group_size=4,
-                group_rank=0,
-                group=parent,
-            )
-            stage.stage_index = stage_index
-            stage.device = torch.device("cpu")
-            stage.p2p_per_edge = True
-            stage.stage_index_to_group_rank = assignment
-            stages.append(stage)
-
-        groups = {(0, 1): MagicMock(), (1, 0): MagicMock()}
-        split_rounds = (((0, 1),), ((1, 0),))
-        with (
-            patch(
-                "torch.distributed.pipelining.schedules.dist.get_backend",
-                return_value="gloo",
-            ),
-            patch(
-                "torch.distributed.pipelining.schedules.dist.all_reduce"
-            ) as initialize_parent,
-            patch(
-                "torch.distributed.pipelining.schedules._build_p2p_edge_groups",
-                return_value=(groups, split_rounds),
-            ) as build_groups,
-            patch(
-                "torch.distributed.pipelining.schedules._preconnect_p2p_edge_groups"
-            ) as preconnect_groups,
-        ):
-            _PipelineSchedule._initialize_pipeline_distributed_state(
-                MagicMock(), stages, has_backward=True, initialize_p2p=True
-            )
-
-        initialize_parent.assert_called_once()
-        build_groups.assert_called_once_with(parent, assignment, torch.device("cpu"))
-        preconnect_groups.assert_called_once_with(
-            parent, groups, split_rounds, torch.device("cpu")
-        )
-        self.assertTrue(all(stage._p2p_edge_groups is groups for stage in stages))
-
-    def test_per_edge_setup_requires_consistent_local_stage_metadata(self):
-        parent = MagicMock()
-        assignment = {0: 0, 1: 1}
-
-        def make_stage(stage_index: int) -> MockPipelineStage:
-            stage = MockPipelineStage(
-                num_stages=2,
-                group_size=2,
-                group_rank=0,
-                group=parent,
-            )
-            stage.stage_index = stage_index
-            stage.device = torch.device("cpu")
-            stage.p2p_per_edge = True
-            stage.stage_index_to_group_rank = assignment
-            return stage
-
-        stages = [make_stage(0), make_stage(1)]
-        stages[1].stage_index_to_group_rank = {0: 1, 1: 0}
-        with self.assertRaisesRegex(ValueError, "stage-to-rank assignment"):
-            _PipelineSchedule._initialize_pipeline_distributed_state(
-                MagicMock(), stages, has_backward=True, initialize_p2p=True
-            )
-
-        stages = [make_stage(0), make_stage(1)]
-        stages[1].device = torch.device("cuda", 1)
-        with self.assertRaisesRegex(ValueError, "use one device"):
-            _PipelineSchedule._initialize_pipeline_distributed_state(
-                MagicMock(), stages, has_backward=True, initialize_p2p=True
-            )
-
-    def test_p2p_initialization_state_is_independent_from_metadata(self):
-        stage = MockPipelineStage(num_stages=1, group_size=1)
-        stage.stage_index = 0
-        stage.device = torch.device("cpu")
-        stage._prepare_forward_infra = MagicMock(return_value=None)
-        schedule = ScheduleGPipe(stage, n_microbatches=1)
-
-        with patch.object(
-            schedule,
-            "_initialize_pipeline_distributed_state",
-        ) as initialize_distributed_state:
-            schedule._initialize_stage((), {})
-            schedule._stage_forward_initialized = False
-            schedule._initialize_stage((), {})
-
-        self.assertEqual(
-            [call.args[2] for call in initialize_distributed_state.call_args_list],
-            [True, False],
-        )
-
-    def test_loop_assignment_uses_four_disjoint_split_rounds(self):
-        assignment = _stage_rank_assignment(
-            {stage: stage % 4 for stage in range(8)}, group_size=4
-        )
-        self.assertEqual(
-            _directed_edge_split_rounds(assignment),
-            (
-                ((0, 1), (2, 3)),
-                ((1, 0), (3, 2)),
-                ((0, 3), (1, 2)),
-                ((3, 0), (2, 1)),
-            ),
-        )
-
-    def test_shared_preconnect_rounds_preserve_repeated_logical_edges(self):
-        assignment = (0, 1, 2, 3, 0, 1, 2, 3)
-
-        rounds = _logical_edge_preconnect_rounds(assignment)
-
-        self.assertEqual(
-            rounds,
-            (
-                ((0, 1), (2, 3)),
-                ((1, 2), (3, 4)),
-                ((4, 5), (6, 7)),
-                ((5, 6),),
-            ),
-        )
-        self.assertTrue(
-            all(
-                len({assignment[stage] for edge in round_edges for stage in edge})
-                == 2 * len(round_edges)
-                for round_edges in rounds
-            )
-        )
-
-    def test_shared_preconnect_exercises_raw_path(self):
-        parent = MagicMock()
-        raw_work = MagicMock()
-        with (
-            patch(
-                "torch.distributed.pipelining._p2p.dist.get_world_size",
-                return_value=2,
-            ),
-            patch(
-                "torch.distributed.pipelining._p2p.dist.get_rank",
-                return_value=0,
-            ),
-            patch(
-                "torch.distributed.pipelining._p2p.dist.isend",
-                return_value=raw_work,
-            ) as isend,
-            patch("torch.distributed.pipelining._p2p.dist.all_reduce") as sync,
-        ):
-            _preconnect_shared_p2p_edges(
-                parent,
-                {0: 0, 1: 1},
-                {0: torch.device("cpu")},
-                torch.device("cpu"),
-            )
-
-        isend.assert_called_once()
-        self.assertIs(isend.call_args.kwargs["group"], parent)
-        self.assertEqual(isend.call_args.kwargs["group_dst"], 1)
-        raw_work.wait.assert_called_once()
-        sync.assert_called_once()
-
-    def test_v_assignment_excludes_same_rank_turn_and_wraparound(self):
-        assignment = _stage_rank_assignment(
-            dict(enumerate((0, 1, 2, 3, 3, 2, 1, 0))),
-            group_size=4,
-        )
-
-        rounds = _directed_edge_split_rounds(assignment)
-        edges = {edge for round_edges in rounds for edge in round_edges}
-        self.assertEqual(
-            edges,
-            {(0, 1), (1, 0), (1, 2), (2, 1), (2, 3), (3, 2)},
-        )
-        self.assertNotIn((0, 3), edges)
-        self.assertNotIn((3, 3), edges)
-        self.assertTrue(
-            all(
-                len({rank for edge in round_edges for rank in edge})
-                == 2 * len(round_edges)
-                for round_edges in rounds
-            )
-        )
-
-    def test_assignment_requires_contiguous_valid_stage_mapping(self):
-        with self.assertRaisesRegex(ValueError, "contiguous indices"):
-            _stage_rank_assignment({0: 0, 2: 1}, group_size=2)
-        with self.assertRaisesRegex(ValueError, "outside"):
-            _stage_rank_assignment({0: 0, 1: 2}, group_size=2)
-
-    def test_edge_groups_inherit_timeout_and_filter_only_mixed_backends(self):
-        cases = (
-            ("gloo", torch.device("cpu"), None),
-            ("cpu:gloo,cuda:nccl", torch.device("cuda"), "cuda:nccl"),
-            ("cpu:gloo,cuda:nccl", torch.device("cpu"), None),
-        )
-        for backend_config, device, expected_filter in cases:
-            with self.subTest(backend_config=backend_config, device=device):
-                timeout = timedelta(seconds=17)
-                store = FakeStore()
-                torch.distributed.init_process_group(
-                    backend="fake",
-                    rank=0,
-                    world_size=2,
-                    store=store,
-                    timeout=timeout,
-                )
-                parent = torch.distributed.distributed_c10d._get_default_group()
-                backend = MagicMock()
-                backend.supports_splitting = True
-                backend.options._timeout = timeout
-                try:
-                    with (
-                        patch.object(
-                            torch.distributed, "get_backend", return_value="gloo"
-                        ),
-                        patch.object(
-                            torch.distributed,
-                            "get_backend_config",
-                            return_value=backend_config,
-                        ),
-                        patch.object(
-                            torch.distributed.ProcessGroup,
-                            "_get_backend",
-                            return_value=backend,
-                        ),
-                        patch.object(
-                            torch.distributed, "split_group", return_value=parent
-                        ) as split_group,
-                        patch(
-                            "torch.distributed.pipelining._p2p."
-                            "_initialize_additional_parent_backends"
-                        ) as initialize_additional,
-                    ):
-                        _build_p2p_edge_groups(parent, {0: 0, 1: 1}, device)
-
-                    self.assertEqual(split_group.call_count, 2)
-                    for call in split_group.call_args_list:
-                        self.assertEqual(call.kwargs["backend"], expected_filter)
-                        self.assertEqual(call.kwargs["timeout"], timeout)
-                    if backend_config != "gloo" and device.type == "cpu":
-                        initialize_additional.assert_called_once_with(
-                            parent,
-                            {"cpu": "gloo", "cuda": "nccl"},
-                            "gloo",
-                        )
-                    else:
-                        initialize_additional.assert_not_called()
-                finally:
-                    _PP_EDGE_GROUP_CACHE.pop(parent, None)
-                    torch.distributed.destroy_process_group()
-
-    def test_edge_groups_validate_split_support_before_reading_options(self):
-        class UnsupportedBackend:
-            supports_splitting = False
-
-            @property
-            def options(self):
-                raise AssertionError("options must not be read")
-
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
-        parent = torch.distributed.distributed_c10d._get_default_group()
-        try:
-            with (
-                patch.object(torch.distributed, "get_backend", return_value="gloo"),
-                patch.object(
-                    torch.distributed,
-                    "get_backend_config",
-                    return_value="cpu:gloo",
-                ),
-                patch.object(
-                    torch.distributed.ProcessGroup,
-                    "_get_backend",
-                    return_value=UnsupportedBackend(),
-                ),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "support split_group"):
-                    _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
-        finally:
-            torch.distributed.destroy_process_group()
-
-    def test_edge_group_cache_distinguishes_stage_device(self):
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
-        parent = torch.distributed.distributed_c10d._get_default_group()
-        backend = MagicMock()
-        backend.supports_splitting = True
-        backend.options._timeout = timedelta(seconds=17)
-        try:
-            with (
-                patch.object(torch.distributed, "get_backend", return_value="gloo"),
-                patch.object(
-                    torch.distributed,
-                    "get_backend_config",
-                    return_value="cpu:gloo,cuda:nccl",
-                ),
-                patch.object(
-                    torch.distributed.ProcessGroup,
-                    "_get_backend",
-                    return_value=backend,
-                ),
-                patch.object(
-                    torch.distributed, "split_group", return_value=parent
-                ) as split_group,
-                patch(
-                    "torch.distributed.pipelining._p2p."
-                    "_initialize_additional_parent_backends"
-                ),
-            ):
-                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
-                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cuda"))
-                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
-
-            self.assertEqual(
-                [call.kwargs["backend"] for call in split_group.call_args_list],
-                [None, None, "cuda:nccl", "cuda:nccl"],
-            )
-        finally:
-            _PP_EDGE_GROUP_CACHE.pop(parent, None)
-            torch.distributed.destroy_process_group()
-
-    def test_fake_edge_groups_do_not_retain_their_parent(self):
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
-        parent = torch.distributed.distributed_c10d._get_default_group()
-        try:
-            groups, _ = _build_p2p_edge_groups(
-                parent, {0: 0, 1: 1}, torch.device("cpu")
-            )
-            self.assertEqual(set(groups), {(0, 1), (1, 0)})
-            self.assertNotIn(parent, _PP_EDGE_GROUP_CACHE)
-        finally:
-            torch.distributed.destroy_process_group()
-
-    def test_edge_groups_delegate_split_policy_to_torchcomms(self):
-        store = FakeStore()
-        torch.distributed.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
-        parent = torch.distributed.distributed_c10d._get_default_group()
-        try:
-            with (
-                patch.object(torch.distributed, "get_backend", return_value="gloo"),
-                patch.object(
-                    torch.distributed,
-                    "get_backend_config",
-                    return_value="gloo",
-                ),
-                patch.object(
-                    torch.distributed.distributed_c10d,
-                    "_use_torchcomms_enabled",
-                    return_value=True,
-                ),
-                patch.object(
-                    torch.distributed.ProcessGroup,
-                    "_get_backend",
-                    side_effect=AssertionError("native backend must not be read"),
-                ),
-                patch.object(
-                    torch.distributed, "split_group", return_value=parent
-                ) as split_group,
-            ):
-                _build_p2p_edge_groups(parent, {0: 0, 1: 1}, torch.device("cpu"))
-
-            self.assertEqual(split_group.call_count, 2)
-            for call in split_group.call_args_list:
-                self.assertIsNone(call.kwargs["backend"])
-                self.assertIsNone(call.kwargs["timeout"])
-        finally:
-            _PP_EDGE_GROUP_CACHE.pop(parent, None)
-            torch.distributed.destroy_process_group()
-
-
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
@@ -483,13 +87,14 @@ class MockPipelineStage(_PipelineStageBase):
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
         self.group = kwargs.get("group")
+        self._downstream_group = None
+        self._upstream_group = None
         self._fwd_recv_slots = {}
         self._bwd_recv_slots = {}
         self._fwd_recv_pool = _RecvBufferPool("forward")
         self._bwd_recv_pool = _RecvBufferPool("backward")
         self._recv_info_generation = 0
         self._recv_pool_generation = -1
-        self.p2p_per_edge = False
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
@@ -515,6 +120,9 @@ def _make_adjacency_stage(
             )
             self.stage_index = stage_index
             self.device = "cpu"
+
+        def _get_init_p2p_neighbors_ops(self):
+            return []
 
         def _prepare_forward_infra(self, *args, **kwargs):
             self.args_recv_info = args_recv_info
@@ -598,18 +206,22 @@ class ScheduleTest(TestCase):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         stage.stage_index = 1
         stage.device = torch.device("cpu")
-        stage._fwd_recv_slots = {}
-        stage._fwd_recv_pool = _RecvBufferPool("forward")
+        stage._downstream_group = None
         info = _RecvInfo(
             "activation", source=0, tensor_meta=_TensorMeta.from_tensor(torch.ones(2))
         )
-        stage.args_recv_info = {0: (info,)}
 
         with (
             patch.object(stage, "_resolve_peer_global_rank", return_value=0),
             patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p,
         ):
-            ops = stage.get_fwd_recv_ops(0)
+            ops = stage._get_recv_ops(
+                0,
+                (info,),
+                stage._downstream_group,
+                stage._fwd_recv_slots,
+                stage._fwd_recv_pool,
+            )
 
         self.assertEqual(len(ops), 1)
         self.assertIsNotNone(info.buffer)
@@ -649,6 +261,7 @@ class ScheduleTest(TestCase):
         stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         stage.stage_index = 1
         stage.device = torch.device("cpu")
+        stage._downstream_group = None
         meta = _TensorMeta.from_tensor(torch.ones(2))
         valid_before_invalid = _RecvInfo("valid", source=0, tensor_meta=meta)
         invalid_source = _RecvInfo("invalid", source=None, tensor_meta=meta)
@@ -659,7 +272,8 @@ class ScheduleTest(TestCase):
             stage._get_recv_ops(
                 1,
                 (valid_before_invalid, invalid_source),
-                {},
+                stage._downstream_group,
+                stage._fwd_recv_slots,
                 stage._fwd_recv_pool,
             )
         self.assertIsNone(valid_before_invalid.buffer)
@@ -678,7 +292,8 @@ class ScheduleTest(TestCase):
             stage._get_recv_ops(
                 1,
                 (first, second),
-                {},
+                stage._downstream_group,
+                stage._fwd_recv_slots,
                 stage._fwd_recv_pool,
             )
         self.assertIsNone(first.buffer)
@@ -696,7 +311,8 @@ class ScheduleTest(TestCase):
             stage._get_recv_ops(
                 1,
                 (first, second),
-                {},
+                stage._downstream_group,
+                stage._fwd_recv_slots,
                 stage._fwd_recv_pool,
             )
         self.assertIsNone(first.buffer)
@@ -709,20 +325,6 @@ class ScheduleTest(TestCase):
         with self.assertRaisesRegex(AssertionError, "info.source"):
             stage.get_fwd_recv_ops(1)
         self.assertIsNone(invalid_source.buffer)
-        self.assertFalse(stage._fwd_recv_pool._owners)
-
-        missing_edge = _RecvInfo("activation", source=0, tensor_meta=meta)
-        stage.args_recv_info[2] = (missing_edge,)
-        stage._fwd_recv_slots = {2: 0}
-        stage.p2p_per_edge = True
-        stage.stage_index_to_group_rank = {0: 0, 1: 1}
-        stage._p2p_edge_groups = {}
-        with (
-            patch.object(stage, "_resolve_peer_global_rank", return_value=0),
-            self.assertRaisesRegex(RuntimeError, "Missing directed pipeline"),
-        ):
-            stage.get_fwd_recv_ops(2)
-        self.assertIsNone(missing_edge.buffer)
         self.assertFalse(stage._fwd_recv_pool._owners)
 
     def test_same_rank_recv_assignment_is_transactional(self):
@@ -763,12 +365,14 @@ class ScheduleTest(TestCase):
         valid_stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         valid_stage.stage_index = 1
         valid_stage.device = torch.device("cpu")
+        valid_stage._downstream_group = None
         valid_info = _RecvInfo("valid", source=0, tensor_meta=meta)
         valid_stage.args_recv_info = {0: (valid_info,)}
 
         invalid_stage = MockPipelineStage(num_stages=3, group_size=1, group_rank=0)
         invalid_stage.stage_index = 2
         invalid_stage.device = torch.device("cpu")
+        invalid_stage._downstream_group = None
         invalid_info = _RecvInfo("invalid", source=None, tensor_meta=meta)
         invalid_stage.args_recv_info = {0: (invalid_info,)}
 
@@ -1889,8 +1493,7 @@ class ScheduleTest(TestCase):
             torch.distributed.destroy_process_group()
 
     @parametrize("rank", [0, 1])
-    @parametrize("per_edge", [False, True])
-    def test_fake_pg_cross_rank_uses_static_metadata(self, rank, per_edge):
+    def test_fake_pg_cross_rank_uses_static_metadata(self, rank):
         """
         With a fake process group, the cross-rank warm-up vote cannot exchange
         real data, so the schedule must infer the metadata mode locally:
@@ -1909,20 +1512,19 @@ class ScheduleTest(TestCase):
         x = torch.randn(batch_size, d_hid, device=device)
         mb = torch.randn(batch_size // num_microbatches, d_hid, device=device)
         try:
-            with dist_config.patch(pipeline_per_edge_p2p=per_edge):
-                stage = PipelineStage(
-                    mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
-                )
-                schedule = ScheduleGPipe(stage, num_microbatches)
-                schedule.step(x) if rank == 0 else schedule.step()
-                self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
+            stage = PipelineStage(
+                mod, rank, n_stages, device, input_args=mb, output_args=mod(mb)
+            )
+            schedule = ScheduleGPipe(stage, num_microbatches)
+            schedule.step(x) if rank == 0 else schedule.step()
+            self.assertEqual(stage._inference_mode, InferenceMode.STATIC)
 
-                # Without static metadata, dynamic inference is required, which
-                # cannot work over a fake group and must fail loudly.
-                stage_dyn = PipelineStage(mod, rank, n_stages, device)
-                schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
-                with self.assertRaisesRegex(RuntimeError, "fake process group"):
-                    schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
+            # Without static metadata, dynamic inference is required, which
+            # cannot work over a fake group and must fail loudly.
+            stage_dyn = PipelineStage(mod, rank, n_stages, device)
+            schedule_dyn = ScheduleGPipe(stage_dyn, num_microbatches)
+            with self.assertRaisesRegex(RuntimeError, "fake process group"):
+                schedule_dyn.step(x) if rank == 0 else schedule_dyn.step()
         finally:
             torch.distributed.destroy_process_group()
 
@@ -2072,211 +1674,6 @@ class TestSchedulePlan(TestCase):
 
         self.assertEqual(count_stage_15_unshards(default_schedule), 4)
         self.assertEqual(count_stage_15_unshards(retained_schedule), 1)
-
-    @staticmethod
-    def _interleaved_schedule(*, unshard_lookahead="full"):
-        stages = [MockPipelineStage(group_size=4, num_stages=16) for _ in range(4)]
-        return ScheduleInterleaved1F1B(
-            stages,
-            n_microbatches=16,
-            max_active_stages=4,
-            unshard_lookahead=unshard_lookahead,
-        )
-
-    def test_unshard_lookahead_policies(self):
-        self.assertEqual(
-            _resolve_unshard_lookahead("full", 4, 4),
-            (4, 4, 4, 4),
-        )
-        self.assertEqual(
-            _resolve_unshard_lookahead("auto", 4, 4),
-            (2, 3, 4, 4),
-        )
-        self.assertEqual(
-            _resolve_unshard_lookahead("auto", 4, 2),
-            (2, 2, 2, 2),
-        )
-        for invalid_window in (0, False, 1.5):
-            with self.subTest(invalid_window=invalid_window):
-                with self.assertRaisesRegex(ValueError, "positive integer"):
-                    _resolve_unshard_lookahead("full", 4, invalid_window)
-
-    def test_dual_pipe_overlap_keeps_atomic_stages_resident(self):
-        stages = [MockPipelineStage(group_size=4, num_stages=8) for _ in range(2)]
-        schedule = ScheduleDualPipeV(
-            stages,
-            n_microbatches=8,
-            max_active_stages=2,
-            unshard_lookahead=(1, 1, 1, 1),
-        )
-
-        for rank, actions in schedule.pipeline_order_with_comms.items():
-            active_stages = set()
-            for action in actions:
-                if action.computation_type == UNSHARD:
-                    active_stages.add(action.stage_index)
-                elif action.computation_type == RESHARD:
-                    active_stages.remove(action.stage_index)
-                elif action.computation_type == OVERLAP_F_B:
-                    self.assertIsNotNone(action.sub_actions)
-                    required_stages = {
-                        sub_action.stage_index for sub_action in action.sub_actions
-                    }
-                    self.assertTrue(
-                        required_stages <= active_stages,
-                        f"rank {rank} executes {action} with active stages "
-                        f"{active_stages}",
-                    )
-
-    @parametrize(
-        "lookahead,error",
-        [
-            (None, "must be 'full', 'auto', or a tuple"),
-            (True, "must be 'full', 'auto', or a tuple"),
-            (2, "must be 'full', 'auto', or a tuple"),
-            ("default", "must be 'full', 'auto', or a tuple"),
-            ("adaptive", "must be 'full', 'auto', or a tuple"),
-            ([1, 2, 3, 4], "must be 'full', 'auto', or a tuple"),
-            ((1, 2, 3), "tuple length must equal"),
-            ((1, 2, 3, 5), r"unshard_lookahead\[3\]"),
-            ((1, 2, 3, False), r"unshard_lookahead\[3\]"),
-        ],
-    )
-    def test_unshard_lookahead_rejects_invalid_values(self, lookahead, error):
-        with self.assertRaisesRegex(ValueError, error):
-            self._interleaved_schedule(unshard_lookahead=lookahead)
-
-    @parametrize(
-        "ScheduleClass",
-        [
-            ScheduleLoopedBFS,
-            ScheduleInterleaved1F1B,
-            ScheduleInterleavedZeroBubble,
-            ScheduleZBVZeroBubble,
-            ScheduleDualPipeV,
-        ],
-    )
-    def test_unshard_lookahead_preserves_non_prefetch_work(self, ScheduleClass):
-        num_local_stages = (
-            2 if ScheduleClass in (ScheduleZBVZeroBubble, ScheduleDualPipeV) else 4
-        )
-        group_size = 4
-        num_stages = num_local_stages * group_size
-
-        def build(lookahead):
-            stages = [
-                MockPipelineStage(group_size=group_size, num_stages=num_stages)
-                for _ in range(num_local_stages)
-            ]
-            return ScheduleClass(
-                stages,
-                n_microbatches=16,
-                max_active_stages=num_local_stages,
-                unshard_lookahead=lookahead,
-            )
-
-        full = build("full")
-        p2p = (SEND_F, SEND_B, RECV_F, RECV_B)
-
-        def simulation_actions(actions):
-            result = []
-            for action in actions:
-                if action.computation_type in (UNSHARD, RESHARD, REDUCE_GRAD):
-                    continue
-                if action.computation_type == OVERLAP_F_B:
-                    self.assertIsNotNone(action.sub_actions)
-                    result.extend(action.sub_actions)
-                else:
-                    result.append(action)
-            return result
-
-        for lookahead in ((1,) * group_size, "auto"):
-            staggered = build(lookahead)
-            changed_positions = []
-            for rank in range(group_size):
-                with self.subTest(lookahead=lookahead, rank=rank):
-                    staggered_actions = staggered.pipeline_order_with_comms[rank]
-                    full_actions = full.pipeline_order_with_comms[rank]
-                    self.assertEqual(
-                        sum(a.computation_type == UNSHARD for a in staggered_actions),
-                        sum(a.computation_type == UNSHARD for a in full_actions),
-                    )
-                    self.assertEqual(
-                        sum(a.computation_type == RESHARD for a in staggered_actions),
-                        sum(a.computation_type == RESHARD for a in full_actions),
-                    )
-                    self.assertEqual(
-                        [
-                            a
-                            for a in staggered_actions
-                            if a.computation_type != UNSHARD
-                            and a.computation_type not in p2p
-                        ],
-                        [
-                            a
-                            for a in full_actions
-                            if a.computation_type != UNSHARD
-                            and a.computation_type not in p2p
-                        ],
-                    )
-                    self.assertCountEqual(
-                        [
-                            action
-                            for action in staggered_actions
-                            if action.computation_type in p2p
-                        ],
-                        [
-                            action
-                            for action in full_actions
-                            if action.computation_type in p2p
-                        ],
-                    )
-                    self.assertEqual(
-                        _assign_pipeline_recv_buffer_slots(
-                            staggered_actions, has_backward=True
-                        ),
-                        _assign_pipeline_recv_buffer_slots(
-                            full_actions, has_backward=True
-                        ),
-                    )
-                    staggered_positions = [
-                        index
-                        for index, action in enumerate(staggered_actions)
-                        if action.computation_type in p2p
-                    ]
-                    full_positions = [
-                        index
-                        for index, action in enumerate(full_actions)
-                        if action.computation_type in p2p
-                    ]
-                    changed_positions.append(staggered_positions != full_positions)
-            semantic_change = lookahead != "auto" or num_local_stages > 2
-            self.assertEqual(any(changed_positions), semantic_change)
-
-            for schedule in (full, staggered):
-                _simulate_comms_compute(
-                    {
-                        rank: simulation_actions(actions)
-                        for rank, actions in schedule.pipeline_order_with_comms.items()
-                    },
-                    lambda stage: schedule.stage_index_to_group_rank[stage],
-                    num_stages,
-                )
-
-    def test_unshard_lookahead_rejects_prelowered_schedule(self):
-        schedule = self._interleaved_schedule(unshard_lookahead=(2, 2, 2, 2))
-        with self.assertRaisesRegex(ValueError, "already-lowered"):
-            schedule._prepare_schedule_with_comms(
-                schedule.pipeline_order_with_comms,
-                format="compute_comms",
-            )
-
-    def test_full_tuple_accepts_prelowered_schedule(self):
-        schedule = self._interleaved_schedule(unshard_lookahead=(4, 4, 4, 4))
-        schedule._prepare_schedule_with_comms(
-            schedule.pipeline_order_with_comms,
-            format="compute_comms",
-        )
 
     @parametrize(
         "ScheduleClass",
@@ -2482,54 +1879,6 @@ class TestScheduleLowering(ScheduleLoweringTestBase):
                     f"\nWhole Schedule: {comms_sch}"
                 ),
             )
-
-    def test_unshard_lookahead_one_lowers_steady_state(self):
-        compute = self._parse_actions(["0F0", "1F0", "2F0", "0B0", "1B0", "2B0"])
-        expected = self._parse_actions(
-            [
-                "0UNSHARD",
-                "0F0",
-                "1UNSHARD",
-                "1F0",
-                "2UNSHARD",
-                "2F0",
-                "0B0",
-                "0RESHARD",
-                "1B0",
-                "1RESHARD",
-                "2B0",
-                "2RESHARD",
-            ]
-        )
-
-        self.assertEqual(
-            _add_unshard_reshard(compute, max_active_stages=3, unshard_lookahead=1),
-            expected,
-        )
-
-    def test_overlap_unshards_all_stages_in_atomic_action(self):
-        overlap = _Action(
-            -1,
-            OVERLAP_F_B,
-            None,
-            (_Action(0, F, 0), _Action(1, B, 0)),
-        )
-        lowered = _add_unshard_reshard(
-            [overlap], max_active_stages=2, unshard_lookahead=1
-        )
-
-        self.assertEqual(
-            lowered,
-            [
-                _Action(0, UNSHARD, None),
-                _Action(1, UNSHARD, None),
-                overlap,
-                _Action(0, RESHARD, None),
-                _Action(1, RESHARD, None),
-            ],
-        )
-        with self.assertRaisesRegex(ValueError, "exceeding max_active_stages=1"):
-            _add_unshard_reshard([overlap], max_active_stages=1, unshard_lookahead=1)
 
     @parametrize(
         "test_info",
@@ -3664,7 +3013,7 @@ class TestBatchP2P(TestCase):
         p.tensor = torch.zeros(1)
         # Ops in a single _batch_p2p call normally share one group; tests pass an
         # explicit shared group. _batch_p2p splits a list spanning multiple groups
-        # into one batch per communicator, covered separately.
+        # into one batch per group (per-direction PP comms), covered separately.
         p.group = group if group is not None else MagicMock()
         # _batch_p2p groups/orders ops by group_name, so give each group a stable
         # string name (identity-derived) rather than a MagicMock attribute.
@@ -3736,12 +3085,9 @@ class TestBatchP2P(TestCase):
     @patch("torch.distributed.pipelining.schedules.dist.irecv")
     @patch("torch.distributed.pipelining.schedules.dist.isend")
     def test_mixed_ops_split_per_group(self, mock_isend, mock_irecv, mock_batch):
-        """Issue a mixed operation list once per communicator.
-
-        Directed-edge P2P can place one fused schedule batch on several child
-        groups. Splitting by group lets each edge use its own communicator
-        instead of sharing one FIFO.
-        """
+        """A mixed op list spanning multiple groups (per-direction PP comms) is
+        issued as one batch_isend_irecv per group, so each direction runs on its
+        own communicator instead of sharing one FIFO."""
         mock_batch.side_effect = lambda ops: [MagicMock() for _ in ops]
         g_fwd, g_bwd = MagicMock(), MagicMock()
         ops = [
