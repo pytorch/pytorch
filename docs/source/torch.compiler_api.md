@@ -267,10 +267,12 @@ deprecation cycle.
        ``with`` / ``unload()`` to take that back out. An artifact whose frames are all
        reachable from the entry -- including one that graph-broke or recompiled only
        within the entry frame -- is standalone: it installs nothing, and its ``with`` /
-       ``unload()`` are no-ops. Both expose the same surface, and ``installed`` (``True``
-       for the installing shape, ``False`` for standalone) tells them apart. Which one you
-       get is a property of the capture, not a load-time choice; the installing shape
-       arrives with :class:`precompile.DynamoTracer`.
+       ``unload()`` are no-ops. Both shapes are callable and support ``with``,
+       ``unload()`` and ``installed`` (``True`` for the installing shape, ``False`` for
+       standalone, which is what tells them apart); only the installing shape reports
+       ``serve_time_compiles()``. Which one you get is a property of the capture, not a
+       load-time choice; the installing shape arrives with
+       :class:`precompile.DynamoTracer`.
    :raises PrecompileError: if either half cannot be read (a missing or unreadable file,
        or the two paths swapped -- the cache's bytes then fail to decode as source); if
        ``python_code`` is not a valid precompile artifact (it fails to parse or is
