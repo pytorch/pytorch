@@ -235,6 +235,64 @@ class TestCuspyNodeTimerCUDA(TestCase):
             self.assertGreaterEqual(end_ns, start_ns)
 
     @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    def test_node_timer_names_source_keyed_graph(self):
+        # A graph captured with annotation_config={"key_by": "source"} keeps its
+        # annotations on the capture graph, so the exec node id CUPTI reports for a
+        # replayed node resolves to nothing; naming has to go through the node's source
+        # id. Registering the source field is all-or-nothing, so this also covers that
+        # the default (kernel-only) selection gets it.
+        from torch.cuda._graph_annotations import source_node_ids_available
+        from torch.cuda.graph_annotations import get_kernel_annotations, mark_kernels
+        from torch.profiler._cuspy.observers.base import ObserverAnnotationSettings
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
+
+        if not source_node_ids_available():
+            self.skipTest("sourceGraphNodeId needs a CUDA driver >= 13.4")
+
+        x = torch.randn(512, 512, device="cuda")
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            torch.relu_(x)
+        torch.cuda.current_stream().wait_stream(s)
+
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"key_by": "source"}
+        ):
+            with mark_kernels("sourceregion"):
+                for _ in range(4):
+                    torch.relu_(x)
+        g.instantiate()
+        capture_ids = set(get_kernel_annotations())
+        self.assertTrue(capture_ids, "capture recorded no annotations")
+
+        obs = NodeTimerObserver(
+            annotations=ObserverAnnotationSettings(
+                graph_annotation_resolver=lambda nid: (
+                    {"name": "sourceregion"} if nid in capture_ids else None
+                )
+            )
+        )
+        if not obs.available:
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
+        try:
+            self.assertTrue(obs._source_fields, "source node field was not selected")
+            obs._cuspy.flush(sync=True)
+            obs.drain_annotated()  # discard warmup spans
+            for _ in range(3):
+                g.replay()
+            torch.cuda.synchronize()
+            obs._cuspy.flush(sync=True)
+            spans = obs.drain_annotated()
+        finally:
+            obs.close()
+
+        if not any(spans.values()):
+            self.skipTest("driver delivered no graph spans")
+        self.assertGreater(len(spans.get("sourceregion", [])), 0)
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     def test_node_timer_collects_memcpy2_spans(self):
         # Peer-to-peer / cross-device copies surface under MEMCPY2 (not MEMCPY). CUPTI
@@ -266,6 +324,92 @@ class TestCuspyNodeTimerCUDA(TestCase):
         self.assertEqual(len(gnode), len(start))
         self.assertEqual(len(stream), len(start))
         self.assertTrue(bool((end >= start).all()))
+
+    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
+    def test_graphed_p2p_copy_named_through_the_exec_alias(self):
+        # The case source keying cannot cover on its own: a graphed peer-to-peer copy is
+        # reported as MEMCPY2, which has no source node id, so the annotation kept on the
+        # capture graph is unreachable and only the exec-keyed alias that instantiate adds
+        # (_graph_annotations.alias_sourceless_to_exec_graph) can name the span. Selecting
+        # MEMCPY2 also gives up the source field for the batch, so this resolves by exec id
+        # alone -- and has to keep resolving after a re-instantiate moves the alias.
+        from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
+
+        from torch.cuda._graph_annotations import source_node_ids_available
+        from torch.cuda.graph_annotations import mark_kernels
+        from torch.profiler._cuspy.observers.base import (
+            default_graph_annotation_resolver,
+            ObserverAnnotationSettings,
+        )
+        from torch.profiler._cuspy.observers.node_timer import NodeTimerObserver
+
+        if not source_node_ids_available():
+            self.skipTest("sourceGraphNodeId needs a CUDA driver >= 13.4")
+
+        src = torch.randn(1024, 1024, device="cuda:0")
+        dst = torch.empty(1024, 1024, device="cuda:1")
+        peer = torch.cuda.Stream(device=1)
+
+        def body():
+            # A cross-device copy issues on the destination device's stream, so fork that
+            # stream into the capture -- on the default stream it cannot join one.
+            ev = torch.cuda.Event()
+            ev.record(torch.cuda.current_stream(0))
+            with torch.cuda.stream(peer):
+                peer.wait_event(ev)
+                dst.copy_(src)
+                done = torch.cuda.Event()
+                done.record(peer)
+            torch.cuda.current_stream(0).wait_event(done)
+
+        warm = torch.cuda.Stream()
+        warm.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(warm):
+            body()
+        torch.cuda.current_stream().wait_stream(warm)
+        torch.cuda.synchronize()
+
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(
+            g, enable_annotations=True, annotation_config={"key_by": "source"}
+        ):
+            with mark_kernels("p2pregion"):
+                body()
+        g.instantiate()
+
+        obs = NodeTimerObserver(
+            kinds=(ActivityKind.MEMCPY2,),
+            annotations=ObserverAnnotationSettings(
+                graph_annotation_resolver=default_graph_annotation_resolver
+            ),
+        )
+        if not obs.available:
+            self.skipTest("Cuspy unavailable (v2 subscribe failed)")
+
+        def replay_and_drain():
+            obs._cuspy.flush(sync=True)
+            obs.drain_annotated()  # discard whatever is already buffered
+            for _ in range(3):
+                g.replay()
+            torch.cuda.synchronize()
+            obs._cuspy.flush(sync=True)
+            return obs.drain_annotated()
+
+        try:
+            self.assertFalse(
+                obs._source_fields, "MEMCPY2 has no source field to select"
+            )
+            first = replay_and_drain()
+            g.instantiate()  # fresh exec id: the alias has to follow it
+            second = replay_and_drain()
+        finally:
+            obs.close()
+
+        if not any(first.values()):
+            self.skipTest("driver emitted no MEMCPY2 records for the graphed copy")
+        self.assertGreater(len(first.get("p2pregion", [])), 0)
+        self.assertGreater(len(second.get("p2pregion", [])), 0)
 
 
 @unittest.skipIf(not TEST_CUPTI, "requires cupti bindings + generated _cupti_stubs")
