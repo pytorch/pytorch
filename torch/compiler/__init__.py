@@ -14,9 +14,11 @@ from torch._higher_order_ops.invoke_subgraph import (
 # ``torch.compiler.precompile``: a namespace, not itself callable. Capture is
 # caller-driven -- the caller invokes a capture around their own execution.
 # ``precompile.capture(fn, artifact_path=..., cache_path=...)`` is a context manager
-# that writes a ``(python_code, cache)`` artifact when the block exits, and
-# ``precompile.load(...)`` reloads one. Re-exported from the private impl. Distinct
-# from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
+# that writes a ``(python_code, cache)`` artifact when the block exits CLEANLY having
+# captured at least one call (a block that raised writes nothing), and
+# ``precompile.load(...)`` reloads one as one of the two handles re-exported here,
+# ``PrecompiledRunnable`` or ``PrecompiledCallable``. Distinct from
+# ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
 # guard-serialization caching mode), despite the shared word.
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
