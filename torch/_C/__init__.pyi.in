@@ -2028,7 +2028,7 @@ class TensorBase(metaclass=_TensorMeta):
     _has_symbolic_sizes_strides: _bool
 
     @property
-    def _has_grad_dtype_override(self) -> _bool: ...
+    def _is_grad_dtype_explicit(self) -> _bool: ...
 
     def _view_func_unsafe(
         self,

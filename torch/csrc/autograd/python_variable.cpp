@@ -3307,12 +3307,12 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_get_has_grad_dtype_override(
+static PyObject* THPVariable_get_is_grad_dtype_explicit(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
   if (has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "_has_grad_dtype_override");
+    return handle_torch_function_getter(self, "_is_grad_dtype_explicit");
   }
   const auto* meta =
       torch::autograd::impl::get_autograd_meta(THPVariable_Unpack(self));
@@ -3514,8 +3514,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
      (setter)THPVariable_set_grad_dtype,
      nullptr,
      nullptr},
-    {"_has_grad_dtype_override",
-     (getter)THPVariable_get_has_grad_dtype_override,
+    {"_is_grad_dtype_explicit",
+     (getter)THPVariable_get_is_grad_dtype_explicit,
      nullptr,
      nullptr,
      nullptr},
