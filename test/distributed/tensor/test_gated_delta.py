@@ -1,3 +1,4 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 """Gated DeltaNet context parallel: all-to-all heads, full timeline, autograd."""
 

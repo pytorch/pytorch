@@ -1,3 +1,4 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
 # Gated DeltaNet module. Do not `import torch.nn` here: this file is
 # imported from torch.nn.modules.__init__ while the nn package is still
 # loading.

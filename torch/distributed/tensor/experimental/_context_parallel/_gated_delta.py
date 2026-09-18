@@ -1,3 +1,4 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
 # GDN context parallel: Megatron-style all-to-all, not Ring Attention.
 #
 # Sequence-parallel activations become head-parallel so the gated-delta
@@ -39,16 +40,9 @@ def _cp_group(mesh: DeviceMesh) -> dist.ProcessGroup:
 
 def _all_to_all_single(x: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
     """Dim-0 all-to-all that participates in autograd."""
-    x = x.contiguous()
-    try:
-        y = funcol.all_to_all_single_autograd(x, None, None, group)
-        wait = getattr(y, "wait", None)
-        return wait() if callable(wait) else y
-    except Exception:
-        from torch.distributed.nn.functional import all_to_all_single as a2a_fn
-
-        out = torch.empty_like(x)
-        return a2a_fn(out, x, group=group)
+    y = funcol.all_to_all_single_autograd(x.contiguous(), None, None, group)
+    wait = getattr(y, "wait", None)
+    return wait() if callable(wait) else y
 
 
 def _plain(t: torch.Tensor) -> torch.Tensor:

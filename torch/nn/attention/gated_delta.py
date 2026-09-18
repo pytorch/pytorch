@@ -1,4 +1,5 @@
-# Gated DeltaNet (GDN) for PyTorch 2.13.
+# Copyright (c) Meta Platforms, Inc. and affiliates
+# Gated DeltaNet (GDN) for PyTorch.
 #
 # The recurrence matches Megatron-LM / FLA ``chunk_gated_delta_rule``:
 # decay the state, then a Householder-style delta write, then read with q.
@@ -58,16 +59,6 @@ def _gated_delta_rule_impl(
     if scale is None:
         scale = 1.0 / math.sqrt(q.size(-1))
     q = q * scale
-
-    # The CUDA extension is a forward-only smoke kernel. Keep autograd on
-    # the Python recurrence whenever any input needs a gradient.
-    if not any(t.requires_grad for t in (q, k, v, decay, beta)):
-        try:
-            from gated_delta_ext import gated_delta_rule_cuda
-
-            return gated_delta_rule_cuda(q, k, v, decay, beta)
-        except Exception:
-            pass
     return _gated_delta_rule_python(q, k, v, decay, beta)
 
 
