@@ -658,9 +658,6 @@ class ElasticLaunchTest(TestCase):
         )
         # nothing to validate, just make sure it runs
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
     def test_capture_logs_using_default_logs_specs(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
