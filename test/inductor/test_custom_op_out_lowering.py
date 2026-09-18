@@ -196,6 +196,34 @@ class TestCustomOpOutLowering(InductorTestCase):
                 FileCheck().check_regex(output_assert).run(source_code)
             self.assertNotRegex(source_code, r"\bbuf\d+\s*=\s*buf\d+\b")
 
+    @parametrize("device", DEVICES)
+    def test_tensorless_op_falls_back_to_cpu(self, device):
+        """An op with no tensor in or out has no device to inherit, so it gets CPU.
+
+        find_device only comes back empty in that case, and there is nothing for the
+        kernel to sit on but the host. It used to be an allowlist of the ops that had
+        hit the assert so far.
+        """
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("tensorless() -> SymInt")
+            lib.impl("tensorless", lambda: 3, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::tensorless", lib=lib)
+            def _tensorless_fake():
+                ctx = torch.library.get_ctx()
+                sym = ctx._shape_env.create_unbacked_symint()
+                constrain_range(sym, min=0)
+                return sym
+
+            def f(x):
+                return x + torch.ops.mylib.tensorless()
+
+            x = torch.zeros(4, device=device)
+            torch._dynamo.reset()
+            self.assertEqual(torch.compile(f, fullgraph=True)(x), torch.full_like(x, 3))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
