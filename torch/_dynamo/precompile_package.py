@@ -169,7 +169,6 @@ _ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
 # import *` in a debugging session pulls the entry points rather than every
 # private helper, and so linters do not flag them as unused.
 __all__ = [
-    "FrameInvariants",
     "PrecompileSession",
     "PrecompileSummary",
     "precompile_capture",
@@ -445,6 +444,16 @@ def _is_noop_guard_type(guard_type: str) -> bool:
         guard_type == "EMPTY_NN_MODULE_HOOKS_DICT"
         and torch._dynamo.config.skip_nnmodule_hook_guards
     )
+
+
+def _render_fact(fact: _GuardFact) -> str:
+    """Render one guard as a stable, human-readable line for the report."""
+    body = " ; ".join(fact.code) if fact.code else f"<{fact.guard_type}>"
+    if fact.value:
+        body = f"{body} {fact.value}"
+    where = f" on {fact.source}" if fact.source else ""
+    label = "enforced" if fact.enforced else "dropped"
+    return f"[{label:<8}] {body}{where}"
 
 
 # The ONLY guard types the invariance policy may drop, and only when proven
@@ -1174,11 +1183,11 @@ class PrecompileSession:
             if not f.invariant:
                 lines.append("  invariant: (none)")
             for fact in f.invariant:
-                lines.append(f"  invariant {fact.render()}")
+                lines.append(f"  invariant {_render_fact(fact)}")
             for fact in f.varying:
-                lines.append(f"  varies    {fact.render()}")
+                lines.append(f"  varies    {_render_fact(fact)}")
             for fact in f.undetermined:
-                lines.append(f"  unknown   {fact.render()}")
+                lines.append(f"  unknown   {_render_fact(fact)}")
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         # UTF-8 explicitly: the report renders user identifiers (module, class and
         # parameter names) and the ambient locale can be ASCII in a container, where
