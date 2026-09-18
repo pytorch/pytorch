@@ -3307,15 +3307,18 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_get_is_grad_dtype_explicit(
+static PyObject* THPVariable_get_has_grad_dtype_override(
     THPVariable* self,
     void* unused) {
   HANDLE_TH_ERRORS
   if (has_torch_function((PyObject*)self)) {
-    return handle_torch_function_getter(self, "_is_grad_dtype_explicit");
+    return handle_torch_function_getter(self, "_has_grad_dtype_override");
   }
-  const auto* meta =
-      torch::autograd::impl::get_autograd_meta(THPVariable_Unpack(self));
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      var.is_leaf(),
+      "_has_grad_dtype_override is only supported for leaf tensors.");
+  const auto* meta = torch::autograd::impl::get_autograd_meta(var);
   return torch::autograd::utils::wrap(
       meta &&
       (meta->grad_dtype_.has_value() || meta->allow_grad_dtype_mismatch_));
@@ -3514,8 +3517,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
      (setter)THPVariable_set_grad_dtype,
      nullptr,
      nullptr},
-    {"_is_grad_dtype_explicit",
-     (getter)THPVariable_get_is_grad_dtype_explicit,
+    {"_has_grad_dtype_override",
+     (getter)THPVariable_get_has_grad_dtype_override,
      nullptr,
      nullptr,
      nullptr},
