@@ -187,12 +187,11 @@ if(BLAS STREQUAL "Eigen")
   set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
-  include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
-  list(APPEND Caffe2_DEPENDENCY_LIBS cblas)
+  include_directories(SYSTEM ${Atlas_INCLUDE_DIR})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Atlas_LIBRARIES})
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
-  set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
+  set(BLAS_LIBRARIES ${Atlas_LIBRARIES})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
@@ -206,6 +205,9 @@ elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
+  set(BLAS_INFO "blis")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${BLIS_LIB})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
@@ -248,6 +250,9 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  set(BLAS_INFO "flexi")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${FlexiBLAS_LIB})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "APL")
   find_package(APL REQUIRED)
@@ -875,6 +880,34 @@ if(BUILD_PYTHON)
         caffe2_update_option(USE_NUMPY ON)
       endif()
     endif()
+    # When cross-compiling, FindPython does not run the interpreter to determine
+    # Python_SOABI unless CMAKE_CROSSCOMPILING_EMULATOR is set (policy CMP0190),
+    # so it is left empty. Python_add_library with WITH_SOABI would then emit
+    # extension modules without a platform suffix -- an untagged _C.so that the
+    # target interpreter will not import. A cross-python setup provides a
+    # directly runnable interpreter that reports the target's config, so when
+    # SOABI is empty, query it from the interpreter and set Python_SOABI once,
+    # for every downstream WITH_SOABI consumer.
+    #
+    # Only fill an *empty* value: a non-empty Python_SOABI is authoritative. With
+    # an emulator FindPython ran the target interpreter to compute it, and this
+    # bare invocation would run the wrong interpreter (or fail to exec the target
+    # binary), so we must not second-guess it.
+    if(CMAKE_CROSSCOMPILING AND NOT Python_SOABI)
+      execute_process(
+        COMMAND "${Python_EXECUTABLE}" -c
+                "import sysconfig; print(sysconfig.get_config_var('SOABI') or '')"
+        OUTPUT_VARIABLE _python_target_soabi
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if(_python_target_soabi)
+        message(WARNING
+          "FindPython left Python_SOABI empty while cross-compiling (it does not run "
+          "the interpreter without CMAKE_CROSSCOMPILING_EMULATOR); setting it from the "
+          "target interpreter's SOABI '${_python_target_soabi}' so Python extension "
+          "modules get a valid suffix.")
+        set(Python_SOABI "${_python_target_soabi}")
+      endif()
+    endif()
   else()
     message(WARNING "Python dependencies not met. Not compiling with python. Suppress this warning with -DBUILD_PYTHON=OFF")
     caffe2_update_option(BUILD_PYTHON OFF)
@@ -1115,6 +1148,12 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
+
+    # intra_node_comm.cpp is the only consumer, and -Wl,--no-as-needed would
+    # stamp the DT_NEEDED on even when it is not built.
+    if(USE_DISTRIBUTED AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0" AND amd_smi_FOUND)
+      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS amd_smi)
+    endif()
 
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
@@ -1471,6 +1510,12 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
+        # third_party/cutlass is included as a plain (non-SYSTEM) include dir
+        # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
+        # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
+        # prefetch) that a given translation unit's CUDA-version-gated
+        # instantiation path happens not to reference.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")

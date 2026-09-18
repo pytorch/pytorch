@@ -72,13 +72,18 @@ from .codegen.triton import (
     TritonScheduling,
     TritonSymbols,
 )
-from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
+from .codegen.triton_utils import (
+    config_of,
+    equal_1_arg_indices,
+    signature_to_meta,
+    triton_meta_device_props,
+)
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
-from .runtime.hints import DeviceProperties, TritonMeta
+from .runtime.hints import TritonMeta
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
@@ -492,6 +497,10 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             raise AssertionError("Mask is required for inner stores in modifications")
         if mode != "atomic_add":
             raise AssertionError("Only atomic_add is supported for inner stores")
+
+        # Record it on the kernel: these atomics never pass through
+        # TritonKernel.store, so nothing else would mark the kernel as using them.
+        self.kernel.atomic_add_found = True
 
         buf_name = self._add_kernel_input(name)
         index_str = self._broadcast_index(index, f"{value}.shape")
@@ -907,20 +916,24 @@ class TritonTemplateKernel(TritonKernel):
                 argdefs=argdefs,
                 is_template=True,
             ),
-            "device": DeviceProperties.create(self.output_node.get_device()),
+            "device": triton_meta_device_props(self.output_node.get_device()),
             "constants": {},
         }
-        triton_meta["configs"] = [config_of(signature)]
+        # Rendered from a deferred hook, so the body -- including any subgraph
+        # modifications that emit atomics -- already exists at this point.
+        triton_meta["configs"] = [
+            config_of(signature, pointer_range_override=self.pointer_range_override())
+        ]
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", None)
         waves_per_eu = self.meta.get("waves_per_eu", None)
         kpack = self.meta.get("kpack", None)
-        if matrix_instr_nonkdim:
+        if matrix_instr_nonkdim is not None:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
-        if waves_per_eu:
+        if waves_per_eu is not None:
             triton_meta["waves_per_eu"] = waves_per_eu
-        if kpack:
+        if kpack is not None:
             triton_meta["kpack"] = kpack
 
         # tlx options carry dynamic string keys outside the TritonMeta schema.
@@ -939,6 +952,12 @@ class TritonTemplateKernel(TritonKernel):
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
+        if self.host_tma_descriptor_args:
+            # This meta is repr'd into the generated module, so epilogue-registered
+            # TensorDescriptorOptions must be resolved to plain dims first.
+            inductor_meta["host_tma_descriptor_args"] = (
+                self.resolved_host_tma_descriptor_args()
+            )
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -1103,6 +1122,72 @@ class TritonTemplateKernel(TritonKernel):
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
         return ", ".join([texpr(self.rename_indexing(i)) for i in val])
+
+    def tma_descriptor(
+        self,
+        desc_name: str,
+        input_name: str | None,
+        block_shape: list[int],
+        dim_order: list[int] | None = None,
+    ) -> str:
+        """
+        Hook called from template code to declare a TMA descriptor.
+
+        When HOST_SIDE_TMA is True: registers the input's pointer arg in
+        host_tma_descriptor_args so the launcher replaces it with a
+        TensorDescriptor. Emits an alias so the template can use desc_name.
+
+        When HOST_SIDE_TMA is False: emits device-side descriptor creation
+        using tl.make_tensor_descriptor().
+
+        dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
+            transposes a 2D tensor so the contiguous dim is last. If None,
+            uses natural order [0, 1, ...].
+        """
+        if input_name is not None:
+            node = self.named_input_nodes[input_name]
+        else:
+            node = self.output_node
+
+        size = node.get_size()
+        ndim = len(size)
+        if dim_order is None:
+            dim_order = list(range(ndim))
+
+        if self.meta.get("HOST_SIDE_TMA", False):
+            if input_name is None:
+                raise NotImplementedError(
+                    "host-side TMA descriptors for template outputs are not supported"
+                )
+            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
+            # Read dims off the IR node rather than via self.size()/self.stride():
+            # those wrap the result in tl.full(...) under int64 indexing, which is
+            # kernel-side syntax the host launcher cannot resolve.
+            node_size = node.get_size()
+            node_stride = self.get_stride_and_maybe_freeze_layout(node)
+            desc: dict[str, Any] = {
+                "block_shape": [int(b) for b in block_shape],
+                "shape": [texpr(self.rename_indexing(node_size[d])) for d in dim_order],
+                "strides": [
+                    texpr(self.rename_indexing(node_stride[d])) for d in dim_order
+                ],
+            }
+            prev = self.host_tma_descriptor_args.get(arg_name)
+            if prev is not None and prev != desc:
+                # def_kernel dedupes operands that alias one buffer into a single
+                # kernel arg, but one tensordesc<> arg cannot describe both views.
+                raise NotImplementedError(
+                    f"host-side TMA cannot share arg {arg_name} between two "
+                    "descriptors with different shape/strides"
+                )
+            self.host_tma_descriptor_args[arg_name] = desc
+            return f"{desc_name} = {input_name}"
+
+        base_name = input_name if input_name is not None else "output"
+        stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
+        size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
+        block_str = ", ".join(str(b) for b in block_shape)
+        return f"{desc_name} = tl.make_tensor_descriptor(base={base_name}, shape=[{size_exprs}], strides=[{stride_exprs}], block_shape=[{block_str}])"
 
     def _get_subgraph(self, subgraph_number: int):
         if not isinstance(subgraph_number, int):
@@ -1767,6 +1852,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                self.tma_descriptor,
                 *self.extra_template_env_fns,
             ]
         }
@@ -3797,11 +3883,15 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
+    if precision != "bfx9":
+        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            precision,
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -3908,7 +3998,7 @@ def _classify_kernel_operation(
                     "grouped_mm",
                     "scaled_grouped_mm",
                     "mm_plus_mm",
-                    "blackwell_ws_persistent_device_tma",
+                    "blackwell_ws_persistent_tma",
                     "scaled_mm_device_tma_main_loop_scaling",
                 ):
                     return "mm"
@@ -4108,8 +4198,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
-            # Warmup the subprocess pool early so it's ready for benchmarking
-            torch._inductor.autotune_process.get_tuning_process_pool()
+            # Initialize the worker pool (subprocess or thread) so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_pool()
 
         precompile_fn = self.make_precompile_fn(
             choices,
