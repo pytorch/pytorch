@@ -2449,6 +2449,63 @@ class TestPrecompile(TestCase):
         ):
             _precompile_pair(lambda m, t, u: m(t), model, marked, x.to_sparse())
 
+    def test_wrapper_subclass_over_sparse_data_refused(self):
+        # Those three metadata reads see the OUTER tensor, and a traceable wrapper subclass
+        # reports strided, non-nested, non-mkldnn whatever it wraps -- so before the loop
+        # unwrapped one, a wrapper over SPARSE data passed every clause and then had the
+        # inner nnz dropped by the fake conversion: capture SUCCEEDED and baked "+ 0.0"
+        # where eager adds the real nnz (the parent's real-tensor trace baked it correctly),
+        # the one wrong-artifact hole the loop exists to close. It recurses through
+        # __tensor_flatten__ instead and names the inner tensor. The second half pins that
+        # unwrapping refuses only what a fake gets wrong: a wrapper over DENSE data still
+        # captures, as MaskedTensor and DTensor do.
+        class Wrapper(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, inner.shape, dtype=inner.dtype, device=inner.device
+                )
+
+            def __init__(self, inner):
+                self.inner = inner
+
+            def __tensor_flatten__(self):
+                return ["inner"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner, ctx, outer_size, outer_stride):
+                return Wrapper(inner["inner"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(t):
+                    return t.inner if isinstance(t, Wrapper) else t
+
+                return func(
+                    *_pytree.tree_map(unwrap, args),
+                    **_pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        wrapped_sparse = Wrapper(torch.tensor([[1.0, 0.0], [0.0, 2.0]]).to_sparse_coo())
+        # The outer read that let it through, asserted so the test cannot pass because the
+        # wrapper started reporting its inner layout (TwoTensor does, and is refused above).
+        self.assertIs(wrapped_sparse.layout, torch.strided)
+        with self.assertRaisesRegex(
+            PrecompileError,
+            r"user input 0 \(inner tensor 'inner' of a Wrapper subclass\) has "
+            r"torch.sparse_coo layout.*reports 0 nnz",
+        ):
+            _precompile_pair(
+                lambda t: t.values().sum() + float(t._nnz()),
+                wrapped_sparse,
+                backend="eager",
+            )
+
+        code, _ = _precompile_pair(
+            lambda t: t.sum(), Wrapper(torch.randn(3, 4)), backend="eager"
+        )
+        self.assertIn("aten.sum", code)
+
     @unittest.skipUnless(TEST_CUDA, "pin_memory needs an accelerator allocator")
     def test_pinned_input_refused(self):
         # The fourth member of that table, in its own test because constructing the input
@@ -2500,11 +2557,13 @@ class TestPrecompile(TestCase):
 
     def test_capture_inside_another_trace_refused(self):
         # An ambient TracingContext.fake_mode outranks both mode sources capture hands
-        # make_fx, and it carries neither allow_fallback_kernels=False nor the
-        # unsafe-data-ptr-access snapshot every refusal here is built on -- under it a
-        # .data_ptr() read bakes 0 instead of raising (test_capture_refuses_a_data_ptr_read
-        # pins the refusal outside a trace). So capture refuses up front, on a fn that
-        # captures cleanly on its own, rather than tracing under a foreign contract.
+        # make_fx, and no foreign mode passes allow_fallback_kernels=False, so a meta-less
+        # op would be run for real again; one built under DEFAULT config (as here, and as
+        # an AOTAutograd / inductor trace builds its own) also lacks the
+        # unsafe-data-ptr-access snapshot, so a .data_ptr() read bakes 0 instead of raising
+        # (test_capture_refuses_a_data_ptr_read pins the refusal outside a trace). So
+        # capture refuses up front, on a fn that captures cleanly on its own, rather than
+        # tracing under a foreign contract.
         model = torch.nn.Linear(4, 4)
         x = torch.randn(3, 4)
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
@@ -2644,9 +2703,9 @@ class TestPrecompile(TestCase):
             _precompile_pair(raises, model, torch.randn(3, 4), backend="eager")
         except RuntimeError as e:
             self.assertIn("my own capture-time failure", str(e))
-            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped.
+            # PrecompileError subclasses RuntimeError, so pin that it was not wrapped
+            # (the only producer of the relabeled text raises one, so this covers it).
             self.assertNotIsInstance(e, PrecompileError)
-            self.assertNotIn("no meta/fake kernel", str(e))
         else:
             self.fail("expected fn's RuntimeError to propagate out of capture")
 
@@ -2687,8 +2746,9 @@ class TestPrecompile(TestCase):
 
         with self.assertRaises(PrecompileError) as cm:
             _precompile_pair(raises, model, torch.randn(3, 4), backend="eager")
+        # Equality is the whole assertion: every relabel site builds a NEW PrecompileError
+        # with different text, so a lost "except PrecompileError: raise" reds it here.
         self.assertEqual(str(cm.exception), message)
-        self.assertIsNone(cm.exception.__cause__)
 
     def test_mutating_custom_op_captures_without_a_registered_fake(self):
         # The one carve-out in "fake tracing needs a meta/fake kernel for every op": a
