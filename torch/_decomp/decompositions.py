@@ -3557,7 +3557,22 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda or self.is_xpu:
+    # Note [log_sigmoid_forward buffer contract]: The buffer output is only
+    # consumed by the CPU backward kernel (log_sigmoid_backward_cpu). The
+    # CUDA/XPU/MPS kernels allocate an empty (0,) buffer and ignore it (see
+    # the NOTE comments in log_sigmoid_backward_{cuda,mps}), and we verified
+    # the same on a PrivateUse1 device. Meta tensors follow the CPU branch:
+    # this op has no Meta kernel, so this decomposition defines its meta
+    # behavior, matching aten on meta inputs. Backends not listed below keep
+    # the historical full-shape buffer.
+    if self.is_cpu or self.is_meta:
+        buffer = z
+    elif (
+        self.is_cuda
+        or self.is_xpu
+        or self.is_mps
+        or self.device.type == torch._C._get_privateuse1_backend_name()
+    ):
         buffer = self.new_zeros((0,))
     else:
         buffer = z
