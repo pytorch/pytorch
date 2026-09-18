@@ -19,6 +19,10 @@ from torch.distributed.checkpoint._fsspec_filesystem import (
     FsspecReader,
     FsspecWriter,
 )
+from torch.distributed.checkpoint.filesystem import (
+    DEFAULT_MAX_THREADS,
+    DEFAULT_MIN_SIZE_PER_THREAD,
+)
 from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_dict
 from torch.distributed.checkpoint.utils import CheckpointException
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -255,18 +259,23 @@ class TestFileSystem(TestCase):
         # os.sync() may be called on backends that don't support per-file fsync
         self.assertLessEqual(mock_os_sync.call_count, 2)
 
-    def test_fsspec_writer_thread_count_auto_tuning(self):
+    def test_fsspec_writer_thread_count(self):
         """
-        Verify that FsspecWriter works with auto-tuned thread_count (default None)
-        and with explicit thread_count overrides.
+        Verify FsspecWriter defaults, opt-in auto-tuning and explicit thread_count overrides.
         """
         state_dict = {f"k_{i}": torch.randn(10, 10) for i in range(8)}
 
-        # 1. Default auto-tuning (thread_count=None, min_size_per_thread=1GB, max_threads=16)
-        writer_auto = FsspecWriter("memory://test_fsspec_auto_tune")
+        # 1. Default stays single threaded; auto-tuning is opt-in.
+        writer_default = FsspecWriter("memory://test_fsspec_default_threads")
+        self.assertEqual(writer_default.thread_count, 1)
+        self.assertEqual(writer_default.max_threads, DEFAULT_MAX_THREADS)
+        self.assertEqual(
+            writer_default.min_size_per_thread, DEFAULT_MIN_SIZE_PER_THREAD
+        )
+
+        # 2. Opt into auto-tuning with thread_count=None.
+        writer_auto = FsspecWriter("memory://test_fsspec_auto_tune", thread_count=None)
         self.assertIsNone(writer_auto.thread_count)
-        self.assertEqual(writer_auto.min_size_per_thread, 1024 * 1024 * 1024)
-        self.assertEqual(writer_auto.max_threads, 16)
 
         dcp.save(state_dict, storage_writer=writer_auto, no_dist=True)
 
@@ -277,9 +286,9 @@ class TestFileSystem(TestCase):
             no_dist=True,
         )
         for k in state_dict:
-            self.assertTrue(torch.equal(state_dict[k], loaded_auto[k]))
+            self.assertEqual(state_dict[k], loaded_auto[k])
 
-        # 2. Explicit thread_count override and custom parameters
+        # 3. Explicit thread_count override and custom parameters
         writer_explicit = FsspecWriter(
             "memory://test_fsspec_explicit_threads",
             thread_count=4,
@@ -299,9 +308,8 @@ class TestFileSystem(TestCase):
             no_dist=True,
         )
         for k in state_dict:
-            self.assertTrue(torch.equal(state_dict[k], loaded_explicit[k]))
+            self.assertEqual(state_dict[k], loaded_explicit[k])
 
 
 if __name__ == "__main__":
     run_tests()
-

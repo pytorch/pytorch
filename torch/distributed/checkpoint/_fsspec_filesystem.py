@@ -12,6 +12,8 @@ from fsspec.core import url_to_fs
 
 from torch.distributed.checkpoint._extension import StreamTransformExtension
 from torch.distributed.checkpoint.filesystem import (
+    DEFAULT_MAX_THREADS,
+    DEFAULT_MIN_SIZE_PER_THREAD,
     FileSystemBase,
     FileSystemReader,
     FileSystemWriter,
@@ -112,13 +114,13 @@ class FsspecWriter(FileSystemWriter):
         path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
-        thread_count: int | None = None,
+        thread_count: int | None = 1,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
-        max_threads: int = 16,
-        min_size_per_thread: int = 1024 * 1024 * 1024,
+        max_threads: int = DEFAULT_MAX_THREADS,
+        min_size_per_thread: int = DEFAULT_MIN_SIZE_PER_THREAD,
         **kwargs,
     ) -> None:
         """
@@ -128,12 +130,16 @@ class FsspecWriter(FileSystemWriter):
             path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to None (auto-tuned based on plan size).
+            thread_count: Number of IO threads to use to write. Default to 1. If set to None, the thread count is
+                auto-tuned per save based on the plan size, see
+                :meth:`~torch.distributed.checkpoint.filesystem._FileSystemWriter._calculate_optimal_thread_count`.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
-            max_threads: Maximum number of IO threads to use when auto-tuning thread_count. Default to 16.
-            min_size_per_thread: Minimum chunk size in bytes per thread when auto-tuning thread_count. Default to 1GB.
+            max_threads: Upper bound on the number of IO threads when auto-tuning `thread_count`. Default to 16.
+                Ignored when `thread_count` is not None.
+            min_size_per_thread: Minimum number of payload bytes required to justify one additional IO thread when
+                auto-tuning `thread_count`. Default to 1GB. Ignored when `thread_count` is not None.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
