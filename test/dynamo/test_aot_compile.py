@@ -960,17 +960,6 @@ def compile_two_signatures(x, second_forward, *second_call):
     return AOTCompiledModel(mod, [doubled, second])
 
 
-class AlwaysRaises(NeverReChecked):
-    # Stub guard manager whose every check() raises `message`, for a result on a
-    # path that reaches no report: another result serves, or the call leaves
-    # __call__ as an exception that records nothing.
-    def __init__(self, message):
-        self.message = message
-
-    def check(self, f_locals):
-        raise RuntimeError(self.message)
-
-
 class RecordedThread(threading.Thread):
     # Keeps what its target raised, which threading would only print to stderr,
     # so the test that joins it can fail on it.
@@ -3188,7 +3177,7 @@ from user code:
 
         combined = compile_two_signatures(x, needs_z, x, x)
         results = combined.compiled_results
-        results[0]._artifacts.guard_manager = AlwaysRaises("zero is unhappy")
+        results[0]._artifacts.guard_manager = RaisingTree("zero is unhappy")
         self.assertFalse(combined._binds_alike(tuple(results)))
         with self.assertRaisesRegex(RuntimeError, "zero is unhappy"):
             results[0].guard_check(combined.model, x)
@@ -5415,14 +5404,17 @@ from user code:
         with self.assertNoLogs("torch._dynamo.aot_compile", level="WARNING"):
             self.assertEqual(model(x), x * 2)
 
-    def test_aot_compile_module_interrupt_out_of_a_later_tree_propagates(self):
-        # accepts() catches Exception, so a KeyboardInterrupt out of a later tree
-        # leaves __call__ as itself, the earlier raise on record unlogged.
-        # SystemExit travels the same path today; its iteration pins the handler
-        # against widening to (Exception, SystemExit), not a second path. The
-        # last call pins where the dedup is judged: the aborted calls consumed
-        # nothing, so it still warns about [0]. Judging the pair at the raise
-        # instead fails this and
+    def test_aot_compile_module_system_exit_out_of_a_later_tree_propagates(self):
+        # accepts() catches Exception, so a SystemExit out of a later tree leaves
+        # __call__ as itself, the earlier raise on record unlogged and nothing
+        # logged on the way out. It arrives bare, where the handler's own type
+        # list decides; the file's other SystemExit cases arrive wrapped in a
+        # SystemError, which _meant_an_exception rules on. A KeyboardInterrupt
+        # out of this handler is what
+        # test_aot_compile_module_interrupt_out_of_a_guard_tree_propagates pins,
+        # so this does not repeat it. The last call pins where the dedup is
+        # judged: the aborted call consumed nothing, so it still warns about
+        # [0]; judging the pair at the raise instead fails this and
         # test_aot_compile_module_two_raisers_in_the_report_and_then_the_warning.
         # assertNoLogs outermost: nested inside the raise it would check nothing.
         self._hide_leaked_dynamo_globals()
@@ -5431,22 +5423,18 @@ from user code:
         inputs = [ModelInput(args=(x,), kwargs={}, contexts=[]) for _ in range(2)]
         model._aot_compile(inputs)
 
-        class Interrupts:
-            def __init__(self, interrupt):
-                self.interrupt = interrupt
-
+        class Exits:
             def check(self, f_locals):
-                raise self.interrupt("inside the tree")
+                raise SystemExit("inside the tree")
 
         results = model.forward.compiled_results
-        results[0]._artifacts.guard_manager = AlwaysRaises("zero is unhappy")
+        results[0]._artifacts.guard_manager = RaisingTree("zero is unhappy")
         real = results[1]._artifacts.guard_manager
+        results[1]._artifacts.guard_manager = Exits()
         logger = "torch._dynamo.aot_compile"
-        for interrupt in (KeyboardInterrupt, SystemExit):
-            results[1]._artifacts.guard_manager = Interrupts(interrupt)
-            with self.assertNoLogs(logger, level="WARNING"):
-                with self.assertRaisesRegex(interrupt, "inside the tree"):
-                    model(x)
+        with self.assertNoLogs(logger, level="WARNING"):
+            with self.assertRaisesRegex(SystemExit, "inside the tree"):
+                model(x)
         results[1]._artifacts.guard_manager = real
         with self.assertLogs(logger, level="WARNING") as logs:
             self.assertEqual(model(x), x * 2)
