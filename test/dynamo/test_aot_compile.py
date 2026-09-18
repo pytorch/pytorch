@@ -3816,6 +3816,142 @@ from user code:
         self.assertNotIn("instance's forward", hints[0])
         self.assertIn("Add a ModelInput", lines[-1])
 
+    def test_no_match_report_resolves_forward_only_for_a_supplied_scope(self):
+        # A count, not the wording: the CAPTURED hint never names forward.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(
+            HermeticModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        x = torch.randn(3, 3)
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        self.assertIs(
+            model.forward.compiled_results[0]._guard_scope, _GuardScope.CAPTURED
+        )
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        g = globals()
+        saved = g.pop("AOT_HERMETIC_WEIGHT")
+        try:
+            with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
+                model(x)
+            message = str(ctx.exception)
+        finally:
+            g["AOT_HERMETIC_WEIGHT"] = saved
+        resolves.assert_not_called()
+        self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
+        hints = [line for line in message.splitlines() if line.startswith("For [")]
+        self.assertEqual(len(hints), 1, message)
+        self.assertTrue(hints[0].startswith("For [0]: "), hints[0])
+        self.assertIn("the module the compiled function was traced in", hints[0])
+        self.assertNotIn("instance's forward", message)
+        self.assertIn("Add a ModelInput", message)
+
+    def test_no_match_report_resolves_no_forward_for_a_reconstructed_scope(self):
+        # The gate is SUPPLIED, not "not CAPTURED": a count again, since the
+        # RECONSTRUCTED hint ignores forward too.
+        x = torch.randn(4, 8)
+        data = self._two_input_global_guard_artifact(x)
+        with self.assertLogs("torch._dynamo.aot_compile", level="WARNING"):
+            loaded = AOTCompiledModel.deserialize(
+                self._unresolvable_forward_module(), data
+            )
+        results = loaded.compiled_results[:1]
+        self.assertIs(results[0]._guard_scope, _GuardScope.RECONSTRUCTED)
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
+            AOTCompiledModel(loaded.model, results)(x)
+        resolves.assert_not_called()
+        hints = [
+            line for line in str(ctx.exception).splitlines() if line.startswith("For [")
+        ]
+        self.assertEqual(len(hints), 1, hints)
+        self.assertTrue(hints[0].startswith("For [0]: "), hints[0])
+        self.assertIn("missing from the scope rebuilt from the artifact", hints[0])
+
+    def test_no_match_report_resolves_forward_at_the_first_supplied_entry(self):
+        # The gate is the first SUPPLIED entry, not index 0: [0] here is CAPTURED.
+        x = torch.randn(4, 8)
+        loaded = AOTCompiledModel.deserialize(
+            GlobalConfigModule(), self._two_input_global_guard_artifact(x)
+        )
+        captured = torch.compile(
+            GlobalConfigModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        captured._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        results = captured.forward.compiled_results + loaded.compiled_results[:1]
+        self.assertEqual(
+            [r._guard_scope for r in results],
+            [_GuardScope.CAPTURED, _GuardScope.SUPPLIED],
+        )
+        inst = GlobalConfigModule()
+        mixed = AOTCompiledModel(inst, results)
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        g = globals()
+        saved = g.pop("GLOBAL_POOLING_CONFIG")
+        try:
+            with resolve as resolves, self.assertRaises(RuntimeError):
+                mixed(x)
+        finally:
+            g["GLOBAL_POOLING_CONFIG"] = saved
+        self.assertEqual(resolves.call_count, 1)
+        self.assertIs(resolves.call_args.args[0], inst)
+
+    def test_no_match_report_resolves_forward_once_past_a_resolve_that_raises(self):
+        # A count, not the wording: both entries read alike whether [1] re-ran.
+        self._hide_leaked_dynamo_globals()
+        x = torch.randn(3, 3)
+        model = torch.compile(
+            RaisingReprModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        inst = RaisingReprModule()
+        loads = [AOTCompiledModel.deserialize(inst, data) for _ in range(2)]
+        results = [loaded.compiled_results[0] for loaded in loads]
+        self.assertEqual([r._guard_scope for r in results], [_GuardScope.SUPPLIED] * 2)
+        mixed = AOTCompiledModel(inst, results)
+        inst.forward = functools.partial(HermeticModule.forward, inst)
+        with self.assertRaises(ValueError):
+            _resolve_guard_scope(inst)
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        g = globals()
+        saved = g.pop("AOT_HERMETIC_WEIGHT")
+        try:
+            with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
+                mixed(x)
+            message = str(ctx.exception)
+        finally:
+            g["AOT_HERMETIC_WEIGHT"] = saved
+        # Not assert_called_once_with: a failure would repr inst, which raises.
+        self.assertEqual(resolves.call_count, 1)
+        self.assertIs(resolves.call_args.args[0], inst)
+        self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
+        self.assertIn("[1] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
+        self.assertIn(
+            "For [0, 1]: a guarded global is missing from the live scope this "
+            f"artifact was loaded against, here vars({__name__}); define it there",
+            message,
+        )
+        self.assertNotIn("instance's forward", message)
+
     def test_no_match_report_survives_a_forward_resolve_that_raises(self):
         # deserialize without guard_globals= resolves the scope itself, so every
         # result is SUPPLIED and the report does re-resolve forward. A rebind
