@@ -2,15 +2,20 @@
 """Shared FX analysis and output planning for grouped GEMM epilogues."""
 
 import dataclasses
-from collections.abc import Sequence
+import math
 from typing import Any
 
 import torch
 from torch._inductor.kernel.flex_gemm.constraints import (
+    FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR,
     FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR,
+    FlexGemmOutputContraction,
+    local_reduce_compressed_shape,
     LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR,
     LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR,
     LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR,
+    LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR,
+    LOCAL_REDUCE_FRAGMENT_WIDTH,
     LOCAL_REDUCE_GROUPED_RESHAPE_ERROR,
     LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR,
     LOCAL_REDUCE_MATCH_NODE_ERROR,
@@ -19,71 +24,38 @@ from torch._inductor.kernel.flex_gemm.constraints import (
     LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR,
     LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR,
     LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR,
-    local_reduce_unsupported_tensorssa_error,
-    validate_local_reduce_feed_main_capability,
+    ungrouped_reduction_error,
+    unsupported_reduction_op_error,
     validate_local_reduce_tensorssa_group_size,
 )
+from torch._inductor.kernel.flex_gemm.output_layout import (
+    BLOCKED_128X4,
+    FlexGemmOutputStorageLayout,
+    TRANSPOSED,
+)
 from torch._inductor.kernel.flex_gemm.quack_reductions import (
+    FlexGemmStructuralInt,
     is_shape_preserving_pointwise_node,
     tensor_meta_shape,
 )
 from torch._inductor.kernel.gemm_epilogue import (
-    GEMM_REDUCTION_IDENTITY_SOURCE,
     GemmEpilogueGraph,
     GemmReductionGeometry,
-    GemmReductionPlan,
-    GemmReductionType,
     iter_fx_node_inputs,
     NormalizedGetItem,
-    NormalizedPrepareSoftmax,
     NormalizedReduction,
+    NormalizedSelect,
+    NormalizedSplit,
     NormalizedSqueeze,
     NormalizedUnsupportedReduction,
     NormalizedView,
 )
 from torch._inductor.kernel.gemm_epilogue_utils import (
-    guarded_int,
     normalize_shape,
     statically_known_equal,
     statically_known_shape_equal,
 )
 from torch.utils._ordered_set import OrderedSet
-
-
-def _is_inferred_reshape_dim(value: object) -> bool:
-    """Return whether a reshape dimension is the literal inferred-size marker."""
-    return isinstance(value, int) and value == -1
-
-
-def _kept_dim_matches_source(kept_size: object, source_size: object) -> bool:
-    return _is_inferred_reshape_dim(kept_size) or statically_known_equal(
-        kept_size, source_size
-    )
-
-
-def _guard_grouped_reshape_group(
-    shape: tuple[Any, ...], source_shape: tuple[Any, ...]
-) -> tuple[Any, ...]:
-    """Specialize a backed group dimension used to recognize a grouped reshape."""
-    if len(shape) != 3:
-        return shape
-    for group_index, kept_index in ((-1, 0), (-2, -1)):
-        if not _kept_dim_matches_source(shape[kept_index], source_shape[kept_index]):
-            continue
-        group_value = shape[group_index]
-        symbolic = (
-            group_value.meta.get("val")
-            if isinstance(group_value, torch.fx.Node)
-            else group_value
-        )
-        if not isinstance(symbolic, torch.SymInt):
-            continue
-        group = guarded_int(group_value)
-        if group is not None:
-            result = list(shape)
-            result[group_index] = group
-            return tuple(result)
-    return shape
 
 
 def _syntactic_grouped_tensor_layout(
@@ -92,34 +64,33 @@ def _syntactic_grouped_tensor_layout(
     """Match grouped-reshape syntax before validating source geometry."""
     if len(shape) not in (3, 4):
         return None
+    last = FlexGemmStructuralInt.from_value(shape[-1])
+    penultimate = FlexGemmStructuralInt.from_value(shape[-2])
     if (
-        isinstance(shape[-1], int)
-        and shape[-1] > 0
-        and _is_inferred_reshape_dim(shape[-2])
+        last is not None
+        and last.value > 0
+        and type(shape[-2]) is int
+        and shape[-2] == -1
     ):
-        return GemmReductionGeometry(group=shape[-1], axis=1)
+        return GemmReductionGeometry(group=last.value, axis=1)
     if (
-        _is_inferred_reshape_dim(shape[-3])
-        and isinstance(shape[-2], int)
-        and shape[-2] > 0
+        type(shape[-3]) is int
+        and shape[-3] == -1
+        and penultimate is not None
+        and penultimate.value > 0
     ):
-        return GemmReductionGeometry(group=shape[-2], axis=0)
+        return GemmReductionGeometry(group=penultimate.value, axis=0)
     return None
 
 
 def _group_count_matches_selected_dim(
-    group_count: Any,
-    selected_size: Any,
-    group: int,
-    kept_size: Any,
+    group_count: Any, selected_size: Any, group: int
 ) -> bool:
-    """Match a group count, allowing -1 to infer the selected source dimension."""
-    if _is_inferred_reshape_dim(group_count):
+    if type(group_count) is int and group_count == -1:
         return True
-    return statically_known_equal(group_count * group, selected_size) or (
-        not _is_inferred_reshape_dim(kept_size)
-        and statically_known_equal(group_count, selected_size // group)
-    )
+    return statically_known_equal(
+        group_count * group, selected_size
+    ) or statically_known_equal(group_count, selected_size // group)
 
 
 def _grouped_layout_matches_source_shape(
@@ -133,20 +104,28 @@ def _grouped_layout_matches_source_shape(
 
     m, n = source_shape
     match layout.axis, shape:
-        case 1, (kept_m, group_count, group) if group == layout.group:
-            return _kept_dim_matches_source(
-                kept_m, m
-            ) and _group_count_matches_selected_dim(group_count, n, group, kept_m)
-        case 0, (group_count, group, kept_n) if group == layout.group:
-            return _kept_dim_matches_source(
-                kept_n, n
-            ) and _group_count_matches_selected_dim(group_count, m, group, kept_n)
+        case 1, (kept_m, group_count, group):
+            structural_group = FlexGemmStructuralInt.from_value(group)
+            return (
+                structural_group is not None
+                and structural_group.value == layout.group
+                and statically_known_equal(kept_m, m)
+                and _group_count_matches_selected_dim(group_count, n, layout.group)
+            )
+        case 0, (group_count, group, kept_n):
+            structural_group = FlexGemmStructuralInt.from_value(group)
+            return (
+                structural_group is not None
+                and structural_group.value == layout.group
+                and statically_known_equal(kept_n, n)
+                and _group_count_matches_selected_dim(group_count, m, layout.group)
+            )
         case _:
             return False
 
 
 def grouped_tensor_layout(
-    shape: object, source_shape: object | None = None
+    shape: Any, source_shape: Any | None = None
 ) -> GemmReductionGeometry | None:
     """Recognize grouped M/N geometry, specializing backed group dimensions."""
     shape = normalize_shape(shape)
@@ -157,14 +136,15 @@ def grouped_tensor_layout(
     if source_shape is not None:
         source_shape = normalize_shape(source_shape)
         if isinstance(source_shape, tuple) and len(source_shape) == 2:
-            shape = _guard_grouped_reshape_group(shape, source_shape)
             candidates = []
-            match shape:
-                case (*_, int(group)) if group > 0:
-                    candidates.append(GemmReductionGeometry(group=group, axis=1))
-            match shape:
-                case (*_, int(group), _) if group > 0:
-                    candidates.append(GemmReductionGeometry(group=group, axis=0))
+            if shape:
+                group = FlexGemmStructuralInt.from_value(shape[-1])
+                if group is not None and group.value > 0:
+                    candidates.append(GemmReductionGeometry(group=group.value, axis=1))
+            if len(shape) >= 2:
+                group = FlexGemmStructuralInt.from_value(shape[-2])
+                if group is not None and group.value > 0:
+                    candidates.append(GemmReductionGeometry(group=group.value, axis=0))
             for layout in candidates:
                 if _grouped_layout_matches_source_shape(shape, source_shape, layout):
                     return layout
@@ -187,26 +167,21 @@ FEED_MAIN_BINARY_FUNCTIONS = frozenset(
 )
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@dataclasses.dataclass(frozen=True)
 class GemmLocalReduceMatch:
     """Describe a supported grouped local-reduction value found in the FX graph.
 
     Attributes:
         value_node: FX node that produces the matched local-reduction value.
         geometry: Group size and GEMM output axis reduced by the value.
-        reduction_type: Primitive reduction represented by the generated epilogue.
     """
 
     value_node: torch.fx.Node
     geometry: GemmReductionGeometry
-    reduction_node: torch.fx.Node | None = None
-    reduction_type: GemmReductionType = "sum"
 
     def __post_init__(self) -> None:
         if not isinstance(self.value_node, torch.fx.Node):
             raise RuntimeError(LOCAL_REDUCE_MATCH_NODE_ERROR)
-        if self.reduction_node is None:
-            object.__setattr__(self, "reduction_node", self.value_node)
 
     def to_plan(
         self,
@@ -247,20 +222,97 @@ class GemmLocalReduceMatch:
 
 
 @dataclasses.dataclass(frozen=True)
-class GemmLocalReduceStore:
-    """Describe where a compressed local reduction appears in graph outputs.
+class FlexGemmLocalReduceOutputStorage:
+    """Describe the physical storage selected for a returned local reduction."""
 
-    Attributes:
-        node: FX node returned as the compressed local-reduction output.
-        aux_index: Position of that node among the graph's auxiliary outputs.
-    """
+    source: torch.fx.Node
+    layout: FlexGemmOutputStorageLayout
+    nodes: tuple[torch.fx.Node, ...]
+
+
+def match_flex_gemm_local_reduce_output_storage(
+    node: torch.fx.Node,
+) -> FlexGemmLocalReduceOutputStorage | None:
+    """Recognize a supported terminal storage transform for a local reduction."""
+    if node.target is torch.ops.flex_gemm.to_blocked.default:
+        source = node.args[0] if node.args else None
+        if not isinstance(source, torch.fx.Node):
+            raise AssertionError(
+                f"malformed FlexGEMM output transform: {node.format_node()}"
+            )
+        return FlexGemmLocalReduceOutputStorage(source, BLOCKED_128X4, (node,))
+
+    if node.target is torch.ops.aten.clone.default:
+        if node.kwargs.get("memory_format") not in (None, torch.contiguous_format):
+            return None
+        transpose = node.args[0]
+        if not isinstance(transpose, torch.fx.Node) or tuple(transpose.users) != (
+            node,
+        ):
+            return None
+        nodes = (transpose, node)
+    else:
+        transpose = node
+        nodes = (node,)
+
+    if transpose.target not in (
+        torch.ops.aten.t.default,
+        torch.ops.aten.transpose.int,
+        torch.ops.aten.permute.default,
+    ):
+        return None
+    source = transpose.args[0]
+    if not isinstance(source, torch.fx.Node):
+        return None
+
+    source_meta = source.meta.get("val")
+    transpose_meta = transpose.meta.get("val")
+    output_meta = node.meta.get("val")
+    if (
+        not isinstance(source_meta, torch.Tensor)
+        or not isinstance(transpose_meta, torch.Tensor)
+        or not isinstance(output_meta, torch.Tensor)
+        or source_meta.ndim != 2
+        or not statically_known_shape_equal(output_meta.shape, source_meta.shape[::-1])
+        or not statically_known_shape_equal(
+            transpose_meta.stride(), source_meta.stride()[::-1]
+        )
+        or not output_meta.is_contiguous()
+        or not node.users
+        or any(user.op != "output" for user in node.users)
+    ):
+        return None
+    return FlexGemmLocalReduceOutputStorage(source, TRANSPOSED, nodes)
+
+
+@dataclasses.dataclass(frozen=True)
+class GemmLocalReduceStore:
+    """Describe a logical reduction value and its returned physical carrier."""
 
     node: torch.fx.Node
-    aux_index: int
+    output_storage: FlexGemmLocalReduceOutputStorage | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.node, torch.fx.Node) or self.aux_index < 0:
+        storage = self.output_storage
+        if not isinstance(self.node, torch.fx.Node) or (
+            storage is not None
+            and (
+                not isinstance(storage, FlexGemmLocalReduceOutputStorage)
+                or not storage.nodes
+                or storage.nodes[-1] is not self.node
+            )
+        ):
             raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
+
+    @property
+    def value_node(self) -> torch.fx.Node:
+        """Return the logical value written through the optional storage transform."""
+        return self.node if self.output_storage is None else self.output_storage.source
+
+    @property
+    def output_layout(self) -> FlexGemmOutputStorageLayout | None:
+        """Return the selected physical storage layout."""
+        return None if self.output_storage is None else self.output_storage.layout
 
 
 @dataclasses.dataclass(frozen=True)
@@ -283,10 +335,6 @@ class GemmOutputLocalReducePlan:
         ):
             raise RuntimeError(LOCAL_REDUCE_OUTPUT_PLAN_NODE_ERROR)
 
-    @property
-    def needs_physical_callbacks(self) -> bool:
-        return self.match.geometry.needs_physical_callbacks
-
 
 @dataclasses.dataclass(frozen=True)
 class GemmOutputPlan:
@@ -294,39 +342,42 @@ class GemmOutputPlan:
 
     Attributes:
         output: FX node returned as the main GEMM result.
-        aux_outputs: Same-shape auxiliary FX outputs returned after the main result.
+        returned_aux_outputs: Auxiliary FX outputs in the user-visible tuple order.
         local_reduce: Compressed or feed-main local-reduction output behavior.
     """
 
     output: torch.fx.Node
-    aux_outputs: tuple[torch.fx.Node, ...] = ()
+    returned_aux_outputs: tuple[torch.fx.Node, ...] = ()
     local_reduce: GemmOutputLocalReducePlan | None = None
+    output_contraction: FlexGemmOutputContraction | None = None
+    output_storage: torch.fx.Node | None = None
+    output_storage_nodes: tuple[torch.fx.Node, ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.output, torch.fx.Node) or not all(
-            isinstance(aux_output, torch.fx.Node) for aux_output in self.aux_outputs
+        if (
+            not isinstance(self.output, torch.fx.Node)
+            or not all(
+                isinstance(aux_output, torch.fx.Node)
+                for aux_output in self.returned_aux_outputs
+            )
+            or (
+                self.output_storage is not None
+                and not isinstance(self.output_storage, torch.fx.Node)
+            )
+            or not all(
+                isinstance(node, torch.fx.Node) for node in self.output_storage_nodes
+            )
         ):
             raise RuntimeError(FLEX_GEMM_OUTPUT_PLAN_NODE_ERROR)
 
     @property
-    def reduction_plan(self) -> GemmReductionPlan | None:
-        """Finalize FX ownership metadata into the shared reduction contract."""
-        local_reduce = self.local_reduce
-        if local_reduce is None:
-            return None
-        match = local_reduce.match
-        reduction_output = (
-            local_reduce.store.node.name if local_reduce.store is not None else None
-        )
-        return GemmReductionPlan(
-            reduction_output=reduction_output,
-            group=match.geometry.group,
-            axis=match.geometry.axis,
-            reduction_type=match.reduction_type,
-            source_fn=GEMM_REDUCTION_IDENTITY_SOURCE,
-            primary_output=self.output.name,
-            feeds_main=local_reduce.feeds_main,
-            feed_output=self.output.name if local_reduce.feeds_main else None,
+    def aux_outputs(self) -> tuple[torch.fx.Node, ...]:
+        """Return ordinary auxiliary values emitted by the generated callback."""
+        store = None if self.local_reduce is None else self.local_reduce.store
+        return tuple(
+            output
+            for output in self.returned_aux_outputs
+            if store is None or output is not store.node
         )
 
 
@@ -349,22 +400,46 @@ class GemmLocalReduceAnalysis:
     grouped_tensors: dict[torch.fx.Node, GemmReductionGeometry] = dataclasses.field(
         default_factory=dict
     )
+    grouped_structural_values: dict[
+        torch.fx.Node, tuple[FlexGemmStructuralInt, ...]
+    ] = dataclasses.field(default_factory=dict)
     matches: dict[torch.fx.Node, GemmLocalReduceMatch] = dataclasses.field(
         default_factory=dict
     )
+    gemm: torch.fx.Node | None = None
+    gemm_shape: tuple[Any, ...] | None = None
 
     @classmethod
     def from_graph_module(
-        cls, graph_module: torch.fx.GraphModule
+        cls,
+        graph_module: torch.fx.GraphModule,
+        gemm: torch.fx.Node | None = None,
     ) -> "GemmLocalReduceAnalysis":
         """Build shared dependency and reduction state in one topological pass."""
-        nodes = tuple(graph_module.graph.nodes)
-        analysis = cls(GemmEpilogueGraph.from_nodes(nodes))
-        for node in nodes:
+        gemm_shape = tensor_meta_shape(gemm) if gemm is not None else None
+        analysis = cls(
+            GemmEpilogueGraph.from_nodes(tuple(graph_module.graph.nodes)),
+            gemm=gemm,
+            gemm_shape=gemm_shape,
+        )
+        for node in graph_module.graph.nodes:
             if node.op == "output":
                 break
             analysis.visit_node(node)
         return analysis
+
+    def physical_reduction_nodes(
+        self, match: GemmLocalReduceMatch
+    ) -> tuple[torch.fx.Node, ...]:
+        """Return grouped reductions contributing to a propagated match."""
+        dependencies = self.graph.dependencies.get(match.value_node, ())
+        return tuple(
+            node
+            for node in self.graph.dependencies
+            if (node is match.value_node or node in dependencies)
+            and isinstance(self.graph.normalized_nodes.get(node), NormalizedReduction)
+            and node in self.matches
+        )
 
     def visit_node(self, node: torch.fx.Node) -> None:
         """Record grouped layouts and local-reduction matches for one FX node."""
@@ -372,33 +447,28 @@ class GemmLocalReduceAnalysis:
             return
         normalized = self.graph.normalized_nodes.get(node)
         if isinstance(normalized, NormalizedView):
-            if self.propagate_local_reduce_match(node, normalized.source):
+            propagated = self.propagate_local_reduce_match(node, normalized.source)
+            grouped = self.bind_grouped_layout(
+                node, normalized.shape, normalized.source
+            )
+            if propagated or grouped:
                 return
-            if self.bind_grouped_layout(node, normalized.shape, normalized.source):
+        if isinstance(normalized, NormalizedReduction):
+            if self.bind_grouped_reduction(node, normalized):
                 return
-        elif isinstance(normalized, NormalizedReduction):
-            if self.bind_grouped_reduction(
-                node,
-                normalized.source,
-                normalized.dim,
-                normalized.dtype,
-                reduction_type=normalized.reduction_type,
+            if (
+                normalized.source not in self.grouped_tensors
+                and self.gemm is not None
+                and self.graph.depends_on(normalized.source, self.gemm)
             ):
-                return
-        elif isinstance(normalized, NormalizedPrepareSoftmax):
-            if self.bind_grouped_reduction(
-                node,
-                normalized.source,
-                normalized.dim,
-                raise_invalid_dims=False,
-            ):
-                return
+                op_name = str(getattr(node.target, "overloadpacket", node.target))
+                raise ungrouped_reduction_error(op_name)
         elif isinstance(normalized, NormalizedUnsupportedReduction):
-            if normalized.source in self.grouped_tensors:
-                raise local_reduce_unsupported_tensorssa_error(normalized.target)
-        elif isinstance(normalized, (NormalizedSqueeze, NormalizedGetItem)):
-            if self.propagate_local_reduce_match(node, normalized.source):
-                return
+            raise unsupported_reduction_op_error(normalized.target)
+        if isinstance(
+            normalized, (NormalizedSqueeze, NormalizedGetItem)
+        ) and self.propagate_local_reduce_match(node, normalized.source):
+            return
         if is_shape_preserving_pointwise_node(node):
             self.propagate_pointwise_match(node, LOCAL_REDUCE_MIXED_MATCH_ERROR)
 
@@ -407,10 +477,35 @@ class GemmLocalReduceAnalysis:
         source_shape = (
             tensor_meta_shape(source) if isinstance(source, torch.fx.Node) else None
         )
-        grouped_layout = grouped_tensor_layout(shape, source_shape)
-        if grouped_layout is None or not isinstance(source, torch.fx.Node):
+        node_shape = tensor_meta_shape(node)
+        if (
+            isinstance(source, torch.fx.Node)
+            and source in self.matches
+            and self.gemm_shape is not None
+            and (
+                node_shape is None
+                or not statically_known_equal(
+                    math.prod(node_shape), math.prod(self.gemm_shape)
+                )
+            )
+        ):
             return False
-        self.grouped_tensors[node] = grouped_layout
+        layout = grouped_tensor_layout(shape, source_shape)
+        if layout is None or not isinstance(source, torch.fx.Node):
+            return False
+        self.grouped_tensors[node] = layout
+        shape_values = shape
+        if (
+            isinstance(shape_values, (list, tuple, torch.Size))
+            and len(shape_values) == 1
+            and isinstance(shape_values[0], (list, tuple, torch.Size))
+        ):
+            shape_values = shape_values[0]
+        if isinstance(shape_values, (list, tuple, torch.Size)):
+            group_index = -1 if layout.axis == 1 else -2
+            structural = FlexGemmStructuralInt.from_value(shape_values[group_index])
+            if structural is not None and structural.symbolic is not None:
+                self.grouped_structural_values[node] = (structural,)
         return True
 
     def propagate_local_reduce_match(self, node: torch.fx.Node, source: Any) -> bool:
@@ -426,36 +521,22 @@ class GemmLocalReduceAnalysis:
     def bind_grouped_reduction(
         self,
         node: torch.fx.Node,
-        input_node: Any,
-        dim: Any,
-        dtype: Any = None,
-        *,
-        reduction_type: GemmReductionType = "sum",
-        raise_invalid_dims: bool = True,
+        reduction: NormalizedReduction,
     ) -> bool:
         """Match and record a reduction over a grouped TensorSSA layout."""
-        if not isinstance(input_node, torch.fx.Node):
-            return False
-        layout = self.grouped_tensors.get(input_node)
+        layout = self.grouped_tensors.get(reduction.source)
         if layout is None:
             return False
-        if dtype is not None:
+        if reduction.dtype is not None:
             raise NotImplementedError(LOCAL_REDUCE_EXPLICIT_DTYPE_ERROR)
         validate_local_reduce_tensorssa_group_size(layout.axis, layout.group)
-        if not layout.matches_reduction_dim(dim):
-            if not raise_invalid_dims:
-                return False
+        if not layout.matches_reduction_dim(reduction.dim):
             raise NotImplementedError(LOCAL_REDUCE_INNERMOST_GROUPED_DIM_ERROR)
-        self.matches[node] = GemmLocalReduceMatch(
-            value_node=node,
-            geometry=layout,
-            reduction_node=node,
-            reduction_type=reduction_type,
-        )
+        self.matches[node] = GemmLocalReduceMatch(node, layout)
         return True
 
-    def has_physical_grouped_input(self, value: Any) -> bool:
-        """Return whether a value depends on a grouped layout needing callbacks."""
+    def has_physical_grouped_input(self, value: torch.fx.node.Argument) -> bool:
+        """Return whether a value needs a cross-fragment grouped combine."""
         active_geometries = OrderedSet(
             match.geometry for match in self.matches.values()
         )
@@ -487,6 +568,13 @@ class GemmLocalReduceAnalysis:
             if any(layout != grouped_layout for layout in grouped_layouts):
                 raise NotImplementedError(LOCAL_REDUCE_MIXED_GROUPED_LAYOUT_ERROR)
             self.grouped_tensors[node] = grouped_layout
+            structural_values = tuple(
+                structural
+                for arg in iter_fx_node_inputs((node.args, node.kwargs))
+                for structural in self.grouped_structural_values.get(arg, ())
+            )
+            if structural_values:
+                self.grouped_structural_values[node] = structural_values
         match = GemmLocalReduceMatch.common(
             [
                 self.matches[arg]
@@ -500,33 +588,58 @@ class GemmLocalReduceAnalysis:
         self.matches[node] = dataclasses.replace(match, value_node=node)
         return True
 
+    def commit_output_guards(self, outputs: GemmOutputPlan) -> None:
+        """Commit backed grouped-shape hints only when they affect accepted outputs."""
+        output_values = [outputs.output, *outputs.aux_outputs]
+        if outputs.local_reduce is not None and outputs.local_reduce.store is not None:
+            output_values.append(outputs.local_reduce.store.value_node)
+        active_geometries = OrderedSet(
+            match.geometry for match in self.matches.values()
+        )
+        if outputs.local_reduce is not None:
+            active_geometries.add(outputs.local_reduce.match.geometry)
+        seen: OrderedSet[tuple[int, int]] = OrderedSet()
+        for node, values in self.grouped_structural_values.items():
+            layout = self.grouped_tensors[node]
+            geometry = layout
+            if geometry not in active_geometries or not any(
+                self.graph.depends_on(output, node) for output in output_values
+            ):
+                continue
+            for structural in values:
+                key = (id(structural.symbolic), structural.value)
+                if key not in seen:
+                    seen.add(key)
+                    structural.guard()
+
     def match_feed_value(
         self,
-        value: Any,
+        value: torch.fx.node.Argument,
         grouped_source: torch.fx.Node,
         layout: GemmReductionGeometry,
     ) -> GemmLocalReduceMatch | None:
-        """Find the grouped reduction that produces a broadcast value."""
+        """Find the grouped normalized that produces a broadcast value."""
         if not isinstance(value, torch.fx.Node):
             return None
         normalized = self.graph.normalized_nodes.get(value)
         if isinstance(normalized, NormalizedReduction):
-            if normalized.source is not grouped_source:
+            if not self.same_grouped_view(normalized.source, grouped_source):
                 if self.graph.depends_on(normalized.source, grouped_source):
-                    raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
-                raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
+                    if not (
+                        layout.axis == 1
+                        and layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH
+                        and is_shape_preserving_pointwise_node(normalized.source)
+                    ):
+                        raise NotImplementedError(LOCAL_REDUCE_SOURCE_EXPRESSION_ERROR)
+                else:
+                    raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
             if (
                 normalized.dtype is not None
                 or not normalized.keepdim
                 or not layout.matches_reduction_dim(normalized.dim)
             ):
                 raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
-            return GemmLocalReduceMatch(
-                value_node=value,
-                geometry=layout,
-                reduction_node=value,
-                reduction_type=normalized.reduction_type,
-            )
+            return GemmLocalReduceMatch(value, layout)
         if not is_shape_preserving_pointwise_node(value):
             return None
         matches = [
@@ -538,13 +651,30 @@ class GemmLocalReduceAnalysis:
             matches, LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR
         )
 
+    def same_grouped_view(self, node: Any, grouped_source: torch.fx.Node) -> bool:
+        """True for the grouped view itself or a sibling view of the same source and shape."""
+        if node is grouped_source:
+            return True
+        if not isinstance(node, torch.fx.Node):
+            return False
+        this = self.graph.normalized_nodes.get(node)
+        other = self.graph.normalized_nodes.get(grouped_source)
+        return (
+            isinstance(this, NormalizedView)
+            and isinstance(other, NormalizedView)
+            and this.source is other.source
+            and self.grouped_tensors.get(node) is not None
+            and self.grouped_tensors.get(node)
+            == self.grouped_tensors.get(grouped_source)
+        )
+
     def validate_hidden_feed_main_reduction_input(
         self,
-        input_node: Any,
+        input_node: torch.fx.node.Argument,
         grouped_source: torch.fx.Node,
     ) -> None:
         """Reject reduction inputs that would need another physical feed-main value."""
-        if input_node is grouped_source:
+        if self.same_grouped_view(input_node, grouped_source):
             raise NotImplementedError(LOCAL_REDUCE_ONE_PHYSICAL_VALUE_ERROR)
         if not isinstance(input_node, torch.fx.Node):
             return
@@ -555,7 +685,7 @@ class GemmLocalReduceAnalysis:
 
     def validate_feed_main_source_reductions(
         self,
-        value: Any,
+        value: torch.fx.node.Argument,
         grouped_source: torch.fx.Node,
         selected_reduction: torch.fx.Node,
         seen: OrderedSet[torch.fx.Node] | None = None,
@@ -619,7 +749,7 @@ class GemmLocalReduceAnalysis:
         grouped_source: torch.fx.Node,
         layout: GemmReductionGeometry,
     ) -> bool:
-        """Return whether a candidate contains a grouped feed-main reduction."""
+        """Return whether a candidate contains a grouped feed-main normalized."""
         if not isinstance(value, torch.fx.Node):
             return False
         normalized = self.graph.normalized_nodes.get(value)
@@ -629,7 +759,7 @@ class GemmLocalReduceAnalysis:
                 and bool(normalized.keepdim)
                 and layout.matches_reduction_dim(normalized.dim)
                 and (
-                    normalized.source is grouped_source
+                    self.same_grouped_view(normalized.source, grouped_source)
                     or self.graph.depends_on(normalized.source, grouped_source)
                 )
             )
@@ -655,18 +785,17 @@ class GemmLocalReduceAnalysis:
         if not isinstance(normalized, NormalizedView):
             return None
         source_node = normalized.source
-        layout = self.grouped_tensors.get(grouped_source)
+        layout = grouped_tensor_layout(normalized.shape, tensor_meta_shape(source_node))
         if layout is None:
             return None
         if layout.axis != 0:
             if not self.feed_main_grouped_reduction(value, grouped_source, layout):
                 return None
-            if not layout.needs_physical_callbacks:
-                # Intentional fallthrough: axis-1 feeds within one TensorSSA
-                # fragment lower as plain generated TensorSSA without a feed plan.
-                return None
+            if layout.group <= LOCAL_REDUCE_FRAGMENT_WIDTH:
+                return self.match_feed_value(value, grouped_source, layout)
             raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_AXIS1_FRAGMENT_ERROR)
-        validate_local_reduce_feed_main_capability(layout.axis, layout.group)
+        if layout.group > LOCAL_REDUCE_FRAGMENT_WIDTH:
+            raise NotImplementedError(LOCAL_REDUCE_FEED_MAIN_SAME_WARP_ERROR)
         source_meta = source_node.meta.get("val")
         if (
             output_meta is not None
@@ -754,34 +883,48 @@ class GemmLocalReduceAnalysis:
             matches, LOCAL_REDUCE_FEED_MAIN_MIXED_MATCH_ERROR
         )
 
-    def common_reduction_dependency_match(
-        self, outputs: Sequence[torch.fx.Node]
-    ) -> GemmLocalReduceMatch | None:
-        """Return one physical reduction transitively consumed by the outputs."""
-        reachable = OrderedSet(outputs)
-        for output in outputs:
-            reachable.update(self.graph.dependencies.get(output, ()))
-        matches = [self.matches[node] for node in reachable if node in self.matches]
-        if not matches:
-            return None
-        reduction_node = matches[0].reduction_node
-        if reduction_node is None or any(
-            match.reduction_node is not reduction_node for match in matches
+    def compressed_aux_plan(
+        self,
+        output: Any,
+        aux: torch.fx.Node,
+    ) -> GemmOutputLocalReducePlan | None:
+        """Plan a matched reduction returned through one physical layout."""
+        output_storage = match_flex_gemm_local_reduce_output_storage(aux)
+        value_node = aux if output_storage is None else output_storage.source
+        match = self.matches.get(value_node) or self.feed_main_plan(value_node)
+        output_meta = (
+            output.meta.get("val") if isinstance(output, torch.fx.Node) else None
+        )
+        value_meta = value_node.meta.get("val")
+        aux_meta = aux.meta.get("val")
+        if (
+            match is None
+            or value_meta is None
+            or aux_meta is None
+            or output_meta is None
         ):
             return None
-        return matches[0]
+        expected_aux_shape = local_reduce_compressed_shape(
+            self.gemm_shape or output_meta.shape,
+            match.geometry.group,
+            match.geometry.axis,
+        )
+        if not statically_known_shape_equal(expected_aux_shape, value_meta.shape):
+            return None
+        if output_storage is not None:
+            output_storage.layout.validate_geometry(match.geometry)
+        return match.to_plan(
+            store=GemmLocalReduceStore(aux, output_storage),
+            feeds_main=False,
+        )
 
     def feed_main_output_plan(
         self,
         output: torch.fx.Node,
         aux_outputs: tuple[torch.fx.Node, ...] = (),
-        *,
-        allow_dependency_match: bool = False,
     ) -> GemmOutputPlan | None:
         """Plan one physical reduction value consumed by the main output."""
         match = self.common_feed_main_match((output, *aux_outputs))
-        if match is None and allow_dependency_match:
-            match = self.common_reduction_dependency_match((output, *aux_outputs))
         if match is None:
             return None
         return GemmOutputPlan(
@@ -789,3 +932,207 @@ class GemmLocalReduceAnalysis:
             aux_outputs,
             match.to_plan(store=None, feeds_main=True),
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class OutputContractionUse:
+    """Describe one grouped-main lane before complete-output validation."""
+
+    source: torch.fx.Node
+    group: int
+    chunked: bool
+    index: int
+    layout_node: torch.fx.Node
+    structural_values: tuple[FlexGemmStructuralInt, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class OutputContractionPlan:
+    """Describe one complete grouped-main output and its lowering metadata."""
+
+    transform: FlexGemmOutputContraction
+    select_indices: dict[torch.fx.Node, int]
+    layouts: dict[torch.fx.Node, GemmReductionGeometry]
+    structural_values: tuple[FlexGemmStructuralInt, ...] = ()
+
+    def commit_guards(self) -> None:
+        """Specialize backed structural values after complete validation."""
+        for structural in self.structural_values:
+            structural.guard()
+
+
+def canonical_output_contraction_source(
+    node: torch.fx.Node,
+    gemm: torch.fx.Node,
+    local_reduce: GemmLocalReduceAnalysis,
+) -> torch.fx.Node:
+    """Strip shape-preserving pointwise wrappers from a grouped lane source."""
+    while node is not gemm and is_shape_preserving_pointwise_node(node):
+        inputs = [
+            arg
+            for arg in iter_fx_node_inputs((node.args, node.kwargs))
+            if local_reduce.graph.depends_on(arg, gemm)
+        ]
+        if len(inputs) != 1:
+            break
+        node = inputs[0]
+    return node
+
+
+def match_output_contraction_use(
+    node: torch.fx.Node,
+    gemm: torch.fx.Node,
+    local_reduce: GemmLocalReduceAnalysis,
+) -> OutputContractionUse | None:
+    """Match one interleaved select or contiguous split lane."""
+    normalized = local_reduce.graph.normalized_nodes.get(node)
+    if isinstance(normalized, NormalizedSelect):
+        view = normalized.source
+        view_normalized = local_reduce.graph.normalized_nodes.get(view)
+        dim = FlexGemmStructuralInt.from_value(normalized.dim)
+        index = FlexGemmStructuralInt.from_value(normalized.index)
+        shape = tensor_meta_shape(view)
+        if (
+            not isinstance(view_normalized, NormalizedView)
+            or shape is None
+            or len(shape) != 3
+            or dim is None
+            or index is None
+            or not local_reduce.graph.depends_on(view_normalized.source, gemm)
+        ):
+            return None
+        selected_dim = dim.value % len(shape)
+        structural_values = [dim, index]
+        if selected_dim == len(shape) - 1:
+            layout = local_reduce.grouped_tensors.get(view)
+            if layout is None or layout.axis != 1:
+                return None
+            group, chunked = layout.group, False
+        elif selected_dim == 1:
+            structural_group = FlexGemmStructuralInt.from_value(shape[1])
+            source_shape = tensor_meta_shape(view_normalized.source)
+            if (
+                structural_group is None
+                or structural_group.value <= 1
+                or source_shape is None
+                or not statically_known_shape_equal(
+                    (shape[0], structural_group.value * shape[2]), source_shape
+                )
+            ):
+                return None
+            group = structural_group.value
+            structural_values.append(structural_group)
+            chunked = True
+        else:
+            return None
+        return OutputContractionUse(
+            view_normalized.source,
+            group,
+            chunked,
+            index.value,
+            view,
+            tuple(structural_values),
+        )
+
+    if not isinstance(normalized, NormalizedGetItem):
+        return None
+    split = normalized.source
+    split_normalized = local_reduce.graph.normalized_nodes.get(split)
+    if not isinstance(split_normalized, NormalizedSplit):
+        return None
+    index = FlexGemmStructuralInt.from_value(normalized.index)
+    source = split_normalized.source
+    split_size = FlexGemmStructuralInt.from_value(split_normalized.split_size)
+    shape = tensor_meta_shape(source)
+    if (
+        index is None
+        or shape is None
+        or len(shape) != 2
+        or not isinstance(shape[-1], int)
+        or split_size is None
+        or split_size.value <= 0
+        or shape[-1] % split_size.value
+        or split_normalized.dim not in (-1, 1)
+        or not local_reduce.graph.depends_on(source, gemm)
+    ):
+        return None
+    group = shape[-1] // split_size.value
+    if group <= 1:
+        return None
+    return OutputContractionUse(
+        source,
+        group,
+        True,
+        index.value,
+        split,
+        (index, split_size),
+    )
+
+
+def build_output_contraction_plan(
+    output: torch.fx.Node,
+    gemm: torch.fx.Node,
+    local_reduce: GemmLocalReduceAnalysis,
+) -> OutputContractionPlan | None:
+    """Recognize a complete adjacent-N grouped main-output expression."""
+    lanes: list[tuple[torch.fx.Node, OutputContractionUse]] = []
+    seen: OrderedSet[torch.fx.Node] = OrderedSet()
+    pending: list[Any] = [output]
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, torch.fx.Node) or node in seen:
+            continue
+        seen.add(node)
+        match = match_output_contraction_use(node, gemm, local_reduce)
+        if match is not None:
+            lanes.append((node, match))
+            continue
+        if node is gemm or (
+            node in local_reduce.grouped_tensors
+            and local_reduce.graph.depends_on(node, gemm)
+        ):
+            return None
+        pending.extend(reversed(tuple(iter_fx_node_inputs((node.args, node.kwargs)))))
+    if not lanes:
+        return None
+
+    first = lanes[0][1]
+    canonical_source = canonical_output_contraction_source(
+        first.source, gemm, local_reduce
+    )
+    indices: OrderedSet[int] = OrderedSet()
+    select_indices: dict[torch.fx.Node, int] = {}
+    layouts: dict[torch.fx.Node, GemmReductionGeometry] = {}
+    structural_values: list[FlexGemmStructuralInt] = []
+    for node, match in lanes:
+        if (
+            canonical_output_contraction_source(match.source, gemm, local_reduce)
+            is not canonical_source
+            or match.group != first.group
+            or match.chunked != first.chunked
+            or not -first.group <= match.index < first.group
+        ):
+            return None
+        index = match.index % first.group
+        indices.add(index)
+        select_indices[node] = index
+        layouts[match.layout_node] = GemmReductionGeometry(first.group, 1)
+        structural_values.extend(match.structural_values)
+    if indices != OrderedSet(range(first.group)):
+        return None
+
+    gemm_meta = gemm.meta.get("val")
+    output_meta = output.meta.get("val")
+    if not isinstance(gemm_meta, torch.Tensor) or not isinstance(
+        output_meta, torch.Tensor
+    ):
+        return None
+    expected_shape = (gemm_meta.shape[0], gemm_meta.shape[1] // first.group)
+    if not statically_known_shape_equal(output_meta.shape, expected_shape):
+        raise NotImplementedError(FLEX_GEMM_OUTPUT_CONTRACTION_SHAPE_ERROR)
+    return OutputContractionPlan(
+        FlexGemmOutputContraction(first.group, first.chunked),
+        select_indices,
+        layouts,
+        tuple(structural_values),
+    )

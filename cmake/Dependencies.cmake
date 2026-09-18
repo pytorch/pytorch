@@ -187,12 +187,11 @@ if(BLAS STREQUAL "Eigen")
   set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
-  include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
-  list(APPEND Caffe2_DEPENDENCY_LIBS cblas)
+  include_directories(SYSTEM ${Atlas_INCLUDE_DIR})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${Atlas_LIBRARIES})
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
-  set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
+  set(BLAS_LIBRARIES ${Atlas_LIBRARIES})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
@@ -206,6 +205,9 @@ elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
+  set(BLAS_INFO "blis")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${BLIS_LIB})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
@@ -248,6 +250,9 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  set(BLAS_INFO "flexi")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${FlexiBLAS_LIB})
   set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "APL")
   find_package(APL REQUIRED)
@@ -1144,6 +1149,12 @@ if(USE_ROCM)
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::host MIOpen hiprtc::hiprtc)
 
+    # intra_node_comm.cpp is the only consumer, and -Wl,--no-as-needed would
+    # stamp the DT_NEEDED on even when it is not built.
+    if(USE_DISTRIBUTED AND ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0" AND amd_smi_FOUND)
+      list(APPEND Caffe2_HIP_DEPENDENCY_LIBS amd_smi)
+    endif()
+
     # Math libraries
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver roc::hipblaslt roc::rocsolver)
@@ -1499,6 +1510,12 @@ if(NOT INTERN_BUILD_MOBILE)
       if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=pass-failed ")
+        # third_party/cutlass is included as a plain (non-SYSTEM) include dir
+        # for torch_cuda (caffe2/CMakeLists.txt), so -Wunused-function fires on
+        # cutlass header-only helpers (e.g. cutlassGetStatusString, cute's
+        # prefetch) that a given translation unit's CUDA-version-gated
+        # instantiation path happens not to reference.
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-error=unused-function ")
       endif()
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
