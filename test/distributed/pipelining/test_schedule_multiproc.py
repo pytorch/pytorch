@@ -37,7 +37,10 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining._p2p import _build_p2p_edge_groups
+from torch.distributed.pipelining._p2p import (
+    _build_p2p_edge_groups,
+    _preconnect_shared_p2p_edges,
+)
 from torch.distributed.pipelining.microbatch import split_args_kwargs_into_chunks
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -1699,8 +1702,8 @@ class CustomSchedulesTest(MultiProcContinuousTest):
 instantiate_parametrized_tests(CustomSchedulesTest)
 
 
-class GlooPerEdgeScheduleTest(MultiProcessTestCase):
-    """Exercise stage-assignment-derived groups without an accelerator backend."""
+class GlooP2PInitializationTest(MultiProcessTestCase):
+    """Exercise shared and directed P2P setup without an accelerator backend."""
 
     world_size = 2
 
@@ -1746,6 +1749,26 @@ class GlooPerEdgeScheduleTest(MultiProcessTestCase):
             parent_ref = run_world(generation)
             gc.collect()
             self.assertIsNone(parent_ref())
+
+    @requires_gloo()
+    def test_shared_parent_preconnects_raw_p2p(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        try:
+            parent = dist.distributed_c10d._get_default_group()
+            _preconnect_shared_p2p_edges(
+                parent,
+                {0: 0, 1: 1},
+                {self.rank: torch.device("cpu")},
+                torch.device("cpu"),
+            )
+        finally:
+            dist.destroy_process_group()
 
 
 class PerEdgeScheduleTest(MultiProcContinuousTest):

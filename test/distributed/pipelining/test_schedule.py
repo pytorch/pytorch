@@ -26,7 +26,9 @@ from torch.distributed.pipelining import (
 from torch.distributed.pipelining._p2p import (
     _build_p2p_edge_groups,
     _directed_edge_split_rounds,
+    _logical_edge_preconnect_rounds,
     _PP_EDGE_GROUP_CACHE,
+    _preconnect_shared_p2p_edges,
     _stage_rank_assignment,
 )
 from torch.distributed.pipelining._recv_buffers import _RecvInfo
@@ -84,23 +86,7 @@ logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
 
-class P2PEdgeGroupTest(TestCase):
-    def test_neighbor_initialization_uses_pipeline_group_ranks(self):
-        stage = MockPipelineStage(num_stages=2, group_size=2, group_rank=1)
-        stage.stage_index = 0
-        stage.stage_index_to_group_rank = {0: 1, 1: 0}
-        stage.device = torch.device("cpu")
-
-        with patch("torch.distributed.pipelining.stage.dist.P2POp") as p2p:
-            stage._get_init_p2p_neighbors_ops()
-
-        self.assertEqual(
-            [call.kwargs["group_peer"] for call in p2p.call_args_list], [0, 0]
-        )
-        del stage.stage_index_to_group_rank[1]
-        with self.assertRaisesRegex(PipeliningMetadataError, "neighboring stage 1"):
-            stage._get_init_p2p_neighbors_ops()
-
+class P2PInitializationTest(TestCase):
     def test_schedule_builds_and_preconnects_one_shared_edge_group_map(self):
         parent = MagicMock()
         assignment = dict(enumerate((0, 1, 2, 3, 0, 1, 2, 3)))
@@ -202,7 +188,6 @@ class P2PEdgeGroupTest(TestCase):
         assignment = _stage_rank_assignment(
             {stage: stage % 4 for stage in range(8)}, group_size=4
         )
-
         self.assertEqual(
             _directed_edge_split_rounds(assignment),
             (
@@ -212,6 +197,59 @@ class P2PEdgeGroupTest(TestCase):
                 ((3, 0), (2, 1)),
             ),
         )
+
+    def test_shared_preconnect_rounds_preserve_repeated_logical_edges(self):
+        assignment = (0, 1, 2, 3, 0, 1, 2, 3)
+
+        rounds = _logical_edge_preconnect_rounds(assignment)
+
+        self.assertEqual(
+            rounds,
+            (
+                ((0, 1), (2, 3)),
+                ((1, 2), (3, 4)),
+                ((4, 5), (6, 7)),
+                ((5, 6),),
+            ),
+        )
+        self.assertTrue(
+            all(
+                len({assignment[stage] for edge in round_edges for stage in edge})
+                == 2 * len(round_edges)
+                for round_edges in rounds
+            )
+        )
+
+    def test_shared_preconnect_exercises_raw_path(self):
+        parent = MagicMock()
+        raw_work = MagicMock()
+        with (
+            patch(
+                "torch.distributed.pipelining._p2p.dist.get_world_size",
+                return_value=2,
+            ),
+            patch(
+                "torch.distributed.pipelining._p2p.dist.get_rank",
+                return_value=0,
+            ),
+            patch(
+                "torch.distributed.pipelining._p2p.dist.isend",
+                return_value=raw_work,
+            ) as isend,
+            patch("torch.distributed.pipelining._p2p.dist.all_reduce") as sync,
+        ):
+            _preconnect_shared_p2p_edges(
+                parent,
+                {0: 0, 1: 1},
+                {0: torch.device("cpu")},
+                torch.device("cpu"),
+            )
+
+        isend.assert_called_once()
+        self.assertIs(isend.call_args.kwargs["group"], parent)
+        self.assertEqual(isend.call_args.kwargs["group_dst"], 1)
+        raw_work.wait.assert_called_once()
+        sync.assert_called_once()
 
     def test_v_assignment_excludes_same_rank_turn_and_wraparound(self):
         assignment = _stage_rank_assignment(
@@ -465,9 +503,6 @@ def _make_adjacency_stage(
             )
             self.stage_index = stage_index
             self.device = "cpu"
-
-        def _get_init_p2p_neighbors_ops(self):
-            return []
 
         def _prepare_forward_infra(self, *args, **kwargs):
             self.args_recv_info = args_recv_info

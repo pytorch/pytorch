@@ -24,7 +24,12 @@ from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
-from ._p2p import _build_p2p_edge_groups, _preconnect_p2p_edge_groups
+from ._p2p import (
+    _build_p2p_edge_groups,
+    _preconnect_p2p_edge_groups,
+    _preconnect_shared_p2p_edges,
+    _stage_rank_assignment,
+)
 from ._recv_buffers import _RecvInfo
 from ._utils import (
     generate_rank_to_stage_mapping,
@@ -406,14 +411,12 @@ class _PipelineSchedule(ABC):
     ) -> None:
         """Determine metadata mode and initialize pipeline communication.
 
-        Manual stages agree on static or dynamic metadata before inference.
-        When P2P setup is requested, the legacy path initializes its existing
-        parent-group transport, while directed-edge mode initializes the parent,
-        creates children from the final stage-to-rank assignment, and
-        preconnects every child before execution or graph capture. This setup is
-        distinct from a runtime's model warmup. All local stages must share one
-        parent, assignment, and device; the schedule builds the complete
-        directed group map once and attaches it to every local stage.
+        Real cross-rank schedules use one parent all-reduce to agree on manual
+        stages' metadata mode and initialize the parent communicator used by
+        batched P2P. Setup then preconnects either the shared parent's raw path
+        or the directed children created from the final stage-to-rank
+        assignment. This is independent of static or dynamic metadata and
+        distinct from a runtime's model warmup.
 
         Args:
             stages: The pipeline stages owned by this rank.
@@ -428,141 +431,96 @@ class _PipelineSchedule(ABC):
                 "All local pipeline stages must use the same P2P communicator mode"
             )
         use_per_edge = next(iter(per_edge))
-        parent: dist.ProcessGroup | None = None
-        backend: str | None = None
         stage_index_to_group_rank = stages[0].stage_index_to_group_rank
         stage_device = torch.device(stages[0].device)
-        if use_per_edge:
-            # The shared-communicator path supports schedules without an
-            # initialized process group, so resolve the parent only when this
-            # opt-in mode needs to create child groups.
+        if any(
+            stage.stage_index_to_group_rank != stage_index_to_group_rank
+            for stage in stages
+        ):
+            raise ValueError(
+                "All local pipeline stages must share one stage-to-rank assignment"
+            )
+        if use_per_edge and any(
+            torch.device(stage.device) != stage_device for stage in stages
+        ):
+            raise ValueError(
+                "All local pipeline stages must use one device with per-edge P2P"
+            )
+
+        stage_rank_assignment = _stage_rank_assignment(
+            stage_index_to_group_rank,
+            stages[0].group_size,
+        )
+        has_cross_rank = any(
+            source_rank != destination_rank
+            for source_rank, destination_rank in itertools.pairwise(
+                stage_rank_assignment
+            )
+        )
+        parent: dist.ProcessGroup | None = None
+        backend: str | None = None
+        needs_parent = has_cross_rank and (use_per_edge or dist.is_initialized())
+        if needs_parent:
             parent = stages[0]._parent_group
             if any(stage._parent_group is not parent for stage in stages):
                 raise ValueError("All local pipeline stages must share one PP group")
-            if any(
-                stage.stage_index_to_group_rank != stage_index_to_group_rank
-                for stage in stages
-            ):
-                raise ValueError(
-                    "All local pipeline stages must share one stage-to-rank assignment"
-                )
-            if any(torch.device(stage.device) != stage_device for stage in stages):
-                raise ValueError(
-                    "All local pipeline stages must use one device with per-edge P2P"
-                )
             backend = str(dist.get_backend(parent))
 
         pipeline_stages = [
             stage for stage in stages if isinstance(stage, PipelineStage)
         ]
         all_manual = len(pipeline_stages) == len(stages)
-        stage_backend_initialized = False
         if pipeline_stages and not all_manual:
             raise ValueError("A pipeline schedule cannot mix manual and traced stages")
 
         if all_manual:
-            # A fake process group cannot exchange real data: a cross-rank
-            # vote recv reads zeros and selects DYNAMIC, which then fails in
-            # `_recv_meta` (nothing was actually sent). Since dynamic
-            # inference can never work across ranks of a fake group, decide
-            # locally in that case: STATIC if every local stage has complete
-            # metadata, else error. Same-rank-only pipelines (e.g. a
-            # single-rank fake world) don't communicate, so the normal vote
-            # still works and DYNAMIC remains usable there.
             pp_stages = cast(list[PipelineStage], stages)
-            has_cross_rank = any(
-                (not st.is_first and not st._is_same_rank(st.stage_index - 1))
-                or (not st.is_last and not st._is_same_rank(st.stage_index + 1))
-                for st in pp_stages
+            supports_static = all(
+                not InferenceMode.needs_dynamic(stage._user_meta, has_backward)
+                for stage in pp_stages
             )
-            fake_backend = backend == "fake" or (
-                not use_per_edge
-                and has_cross_rank
-                and any(
-                    str(dist.get_backend(stage.group)) == "fake" for stage in stages
+            if has_cross_rank and backend == "fake" and not supports_static:
+                dynamic_stage = next(
+                    stage
+                    for stage in pp_stages
+                    if InferenceMode.needs_dynamic(stage._user_meta, has_backward)
                 )
+                raise RuntimeError(
+                    f"Stage {dynamic_stage.stage_index} requires dynamic shape "
+                    "inference, which is not supported with a fake process "
+                    "group. Provide complete static metadata (inputs/outputs, "
+                    "plus input_grads/output_grads for DTensors with backward) "
+                    "to the PipelineStage constructor."
+                )
+            if has_cross_rank and backend != "fake":
+                if parent is None:
+                    raise AssertionError("cross-rank pipeline requires a parent group")
+                vote = torch.tensor(
+                    [int(supports_static)],
+                    dtype=torch.int32,
+                    device=stage_device,
+                )
+                dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=parent)
+                supports_static = bool(vote.item())
+            determined_mode = (
+                InferenceMode.STATIC if supports_static else InferenceMode.DYNAMIC
             )
-            if has_cross_rank and fake_backend:
-                for st in pp_stages:
-                    if InferenceMode.needs_dynamic(st._user_meta, has_backward):
-                        raise RuntimeError(
-                            f"Stage {st.stage_index} requires dynamic shape "
-                            "inference, which is not supported with a fake "
-                            "process group. Provide complete static metadata "
-                            "(inputs/outputs, plus input_grads/output_grads "
-                            "for DTensors with backward) to the PipelineStage "
-                            "constructor."
-                        )
-                    st._inference_mode = InferenceMode.STATIC
-                logger.debug(
-                    "Fake process group detected; set inference_mode=static "
-                    "for %d stage(s) without voting",
-                    len(stages),
-                )
-            else:
-                if parent is not None:
-                    # Every parent rank must enter this setup-time vote before
-                    # any rank can create the assignment-derived child groups.
-                    vote = torch.tensor(
-                        [
-                            int(
-                                all(
-                                    not InferenceMode.needs_dynamic(
-                                        stage._user_meta, has_backward
-                                    )
-                                    for stage in pp_stages
-                                )
-                            ),
-                        ],
-                        dtype=torch.int32,
-                        device=stages[0].device,
-                    )
-                    dist.all_reduce(vote, op=dist.ReduceOp.MIN, group=parent)
-                    stage_backend_initialized = True
-                    result: torch.Tensor | None = vote
-                else:
-                    # The legacy ring both reaches a global mode decision and
-                    # initializes only the neighbour P2P paths. Replacing it
-                    # with all_reduce would change that initialization contract
-                    # and would require a process group for the supported
-                    # single-process path.
-                    acc: torch.Tensor | None = None
-                    for stage in pp_stages:
-                        acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
-                    result = acc
-                    for stage in reversed(pp_stages):
-                        result = stage._warmup_backward_result(received_result=result)
-                if result is None:
-                    raise RuntimeError("P2P warm-up voting failed")
-                # This initialization-time sync makes the global mode decision
-                # before any metadata P2P or CUDA graph capture can begin.
-                determined_mode = (
-                    InferenceMode.STATIC
-                    if result.item() == 1
-                    else InferenceMode.DYNAMIC
-                )
-                for stage in pp_stages:
-                    stage._inference_mode = determined_mode
-                logger.debug(
-                    "Rank determined inference_mode=%s for %d stage(s)",
-                    determined_mode.value,
-                    len(stages),
-                )
-        elif initialize_p2p and parent is None:
-            all_ops: list[dist.P2POp] = []
-            for stage in stages:
-                all_ops.extend(stage._get_init_p2p_neighbors_ops())
-            _wait_batch_p2p(_batch_p2p(all_ops))
+            for stage in pp_stages:
+                stage._inference_mode = determined_mode
+            logger.debug(
+                "Rank determined inference_mode=%s for %d stage(s)",
+                determined_mode.value,
+                len(stages),
+            )
+        elif initialize_p2p and parent is not None and backend != "fake":
+            dist.all_reduce(
+                torch.zeros(1, dtype=torch.int32, device=stage_device),
+                group=parent,
+            )
 
-        if parent is not None and initialize_p2p:
-            if backend != "fake" and not stage_backend_initialized:
-                # Initialize the stage-device backend. The edge-group builder
-                # initializes any additional backend retained by an unfiltered
-                # mixed child before calling split_group.
-                dist.all_reduce(
-                    torch.zeros(1, dtype=torch.int32, device=stages[0].device),
-                    group=parent,
-                )
+        if not initialize_p2p or not has_cross_rank or parent is None:
+            return
+        if use_per_edge:
             groups, split_rounds = _build_p2p_edge_groups(
                 parent, stage_index_to_group_rank, stage_device
             )
@@ -575,6 +533,13 @@ class _PipelineSchedule(ABC):
                     split_rounds,
                     stage_device,
                 )
+        elif backend != "fake":
+            _preconnect_shared_p2p_edges(
+                parent,
+                stage_index_to_group_rank,
+                {stage.stage_index: torch.device(stage.device) for stage in stages},
+                stage_device,
+            )
 
     def _initialize_pp_stages(
         self,
