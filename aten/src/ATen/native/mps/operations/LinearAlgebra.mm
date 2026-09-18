@@ -1102,13 +1102,47 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
   at::linalg_lu_solve_out(result_, LU, pivots, B_, left, false);
 }
 
+static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Tensor& info) {
+  const auto n = A.size(-1);
+  const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
+  const auto A_ = A.reshape({batch, n, n});
+  const auto X = result.view({batch, n, n});
+  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
+  const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
+                                  .A_rstride = A_.stride(1),
+                                  .A_cstride = A_.stride(2),
+                                  .X_bstride = X.stride(0),
+                                  .X_rstride = X.stride(1),
+                                  .X_cstride = X.stride(2)};
+  auto pso = lib.getPipelineStateForFunc(fmt::format("luInvSmall_{}", n));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, A_, X, info, params);
+      // using mtl_dispatch1DJob would launch a single threadgroup of up to 1024 threads
+      // all of which would be pinned to one GPU core, which is not ideal for such work
+      [enc dispatchThreads:MTLSizeMake(threads, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(c10::metal::simdgroup_size, 1, 1)];
+    }
+  });
+}
+
 static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
   TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
 
-  info.zero_();
   if (A.numel() == 0) {
+    info.zero_();
+    return;
+  }
+  if (A.size(-1) <= kLUSmallInvMax) {
+    lu_inv_small_encode(A, result, info);
+    if (check_errors) {
+      at::_linalg_check_errors(info, "linalg.inv_ex", A.dim() == 2);
+    }
     return;
   }
 
