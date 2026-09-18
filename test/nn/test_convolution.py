@@ -56,10 +56,12 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize as parametrize_test,
     run_tests,
     serialTest,
     set_default_dtype,
+    skipIfRocmArch,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -4533,7 +4535,9 @@ class TestConvolutionNNCUDA(NNTestCase):
             else:
                 self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
-    @skipCUDAIfRocm
+    # On 64 GiB MI200 cards MIOpen's Find runs out of memory after the reference pass; freeing
+    # the cache avoids that, but bfloat16 then misses the tolerance on the native reference side.
+    @skipIfRocmArch(MI200_ARCH)
     @largeTensorTest("48GB", "cuda")
     @serialTest()
     @dtypes(*(torch.half, torch.bfloat16))
@@ -4554,7 +4558,9 @@ class TestConvolutionNNCUDA(NNTestCase):
         y = m(x)
         self.assertEqual(yref, y)
 
-    @skipCUDAIfRocm
+    # MIOpen's Find benchmarks a GEMM backward-weights solver whose rocblas_gemm_ex call is
+    # quadratic in its large dimension, about 18 minutes per dtype at this shape.
+    @skipCUDAIfRocm(msg="https://github.com/ROCm/rocm-libraries/issues/12222")
     @largeTensorTest("96GB", "cuda")
     @serialTest()
     @dtypes(*(torch.half, torch.bfloat16))
