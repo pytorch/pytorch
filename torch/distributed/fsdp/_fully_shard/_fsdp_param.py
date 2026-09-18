@@ -1663,6 +1663,37 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
+    def check_gradient_conversion(
+        self, converted_dtype: Callable[[torch.Tensor], torch.dtype]
+    ) -> None:
+        param = self.sharded_param
+        has_override = self._has_sharded_grad_dtype_override
+        grad_dtype = self.sharded_grad_dtype
+        if not self._sharded_grad_dtype_initialized and param._has_grad_dtype_override:
+            has_override, grad_dtype = True, param.grad_dtype
+        unsharded_param = getattr(self, "_unsharded_param", None)
+        for owner in (param, unsharded_param):
+            if owner is None or owner.grad is None:
+                continue
+            target_dtype = converted_dtype(param)
+            target_grad_dtype = converted_dtype(owner.grad)
+            if owner is unsharded_param or self._grad_is_partial:
+                incompatible = (
+                    target_dtype != param.dtype or target_grad_dtype != owner.grad.dtype
+                )
+            else:
+                expected_dtype = grad_dtype if has_override else target_dtype
+                incompatible = (
+                    expected_dtype is not None and target_grad_dtype != expected_dtype
+                )
+            # Module._apply attaches the converted gradient before FSDP restores
+            # the override on the replacement parameter.
+            if incompatible or target_grad_dtype != target_dtype:
+                raise RuntimeError(
+                    "FSDP module conversion is incompatible with an existing gradient. "
+                    "Call model.zero_grad(set_to_none=True) before converting the module."
+                )
+
     def reset_sharded_param(self):
         if (
             not self._sharded_grad_dtype_initialized
@@ -1690,19 +1721,7 @@ class FSDPParam:
             if self._grad_is_partial and new_param.grad is not None
             else self.sharded_grad_dtype
         )
-        if (
-            new_param.grad is not None
-            and grad_dtype is not None
-            and new_param.grad.dtype != grad_dtype
-        ):
-            # Conversion casts an existing gradient independently of its policy.
-            torch._C._set_grad_after_module_conversion(
-                new_param,
-                new_param.grad,
-                self._has_sharded_grad_dtype_override,
-                grad_dtype,
-            )
-        elif self.sharded_param.grad_dtype != grad_dtype or (
+        if self.sharded_param.grad_dtype != grad_dtype or (
             self._has_sharded_grad_dtype_override
             and not self.sharded_param._has_grad_dtype_override
         ):
