@@ -3686,6 +3686,86 @@ from user code:
         finally:
             g["AOT_HERMETIC_WEIGHT"] = saved
 
+    def test_no_match_message_hint_stays_neutral_for_a_supplied_scope(self):
+        # deserialize skips _resolve_guard_scope when the caller passes
+        # guard_globals=, so the guards hold THAT dict rather than the globals of
+        # the function model.forward resolves to. Here that dict never had the
+        # name (names_the_resolved_module reaches the wording through a stale
+        # copy of this module's dict), and the assertions after the wording
+        # measure the advice: the name defined in the supplied dict, where the
+        # hint sends the reader, is what serves the call.
+        self._hide_leaked_dynamo_globals()
+        x = torch.randn(3, 3)
+        model = torch.compile(
+            HermeticModule(),
+            fullgraph=True,
+            backend="eager",
+            options={"guard_filter_fn": keep_global_guards},
+        )
+        model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
+        data = model._save_aot_compiled_module()
+
+        torch._dynamo.reset()
+        scope: dict[str, object] = {"__builtins__": builtins}
+        compiled = AOTCompiledModel.deserialize(
+            HermeticModule(), data, guard_globals=scope
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            compiled(x)
+        message = str(ctx.exception)
+        self.assertIn("[0] KeyError on G['AOT_HERMETIC_WEIGHT']", message)
+        self.assertIn(
+            "For [0]: a guarded global is missing from the live scope this artifact "
+            "was loaded against; define it there",
+            message,
+        )
+        self.assertNotIn("instance's forward", message)
+        # The guards hold the supplied dict, not this module's, where the name
+        # read below resolves and the class's forward is defined.
+        self.assertIs(compiled.compiled_results[0]._guard_globals, scope)
+        scope["AOT_HERMETIC_WEIGHT"] = AOT_HERMETIC_WEIGHT
+        self.assertEqual(compiled(x), x @ AOT_HERMETIC_WEIGHT)
+
+    def test_no_match_message_names_forward_only_for_the_dict_it_resolves_to(self):
+        # Two SUPPLIED results whose guards hold different dicts: one a load
+        # resolved from model.forward, so it is this module's, and one the
+        # caller supplied, which no forward resolves to. The report resolves
+        # forward once and compares that one dict against each entry's, so only
+        # the entry holding it is told which forward -- whichever entry is first.
+        global GLOBAL_POOLING_CONFIG
+
+        x = torch.randn(4, 8)
+        data = self._two_input_global_guard_artifact(x)
+        by_forward = AOTCompiledModel.deserialize(GlobalConfigModule(), data)
+        scope: dict[str, object] = {"__builtins__": builtins}
+        by_caller = AOTCompiledModel.deserialize(
+            GlobalConfigModule(), data, guard_globals=scope
+        )
+        self.assertIs(by_forward.compiled_results[0]._guard_globals, globals())
+        self.assertIs(by_caller.compiled_results[0]._guard_globals, scope)
+        saved = GLOBAL_POOLING_CONFIG
+        self.addCleanup(globals().__setitem__, "GLOBAL_POOLING_CONFIG", saved)
+        del GLOBAL_POOLING_CONFIG
+        named = "this GlobalConfigModule instance's forward resolves to"
+        neutral = "the live scope this artifact was loaded against; define it there"
+        pair = by_forward.compiled_results[:1] + by_caller.compiled_results[:1]
+        target = "torch._dynamo.aot_compile._resolve_guard_scope"
+        cases = ((pair, [named, neutral]), (pair[::-1], [neutral, named]))
+        for results, wording in cases:
+            mixed = AOTCompiledModel(GlobalConfigModule(), results)
+            resolve = patch(target, wraps=_resolve_guard_scope)
+            with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
+                mixed(x)
+            resolves.assert_called_once_with(mixed.model)
+            message = str(ctx.exception)
+            self.assertIn("[0] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
+            self.assertIn("[1] KeyError on G['GLOBAL_POOLING_CONFIG']", message)
+            hints = [line for line in message.splitlines() if line.startswith("For [")]
+            prefixes = [line[:9] for line in hints]
+            self.assertEqual(prefixes, ["For [0]: ", "For [1]: "], message)
+            for hint, want in zip(hints, wording):
+                self.assertIn(want, hint)
+
     def test_no_match_report_survives_a_forward_resolve_that_raises(self):
         # deserialize without guard_globals= resolves the scope itself, so every
         # result is SUPPLIED and the report does re-resolve forward. A rebind
