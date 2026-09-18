@@ -5531,8 +5531,8 @@ def grid_sample(
     which are used to interpolate the output value ``output[n, :, h, w]``.
     In the case of 5D inputs, ``grid[n, d, h, w]`` specifies the
     ``x``, ``y``, ``z`` pixel locations for interpolating
-    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest`` or
-    ``bilinear`` interpolation method to sample the input pixels.
+    ``output[n, :, d, h, w]``. :attr:`mode` argument specifies ``nearest``,
+    ``bilinear`` or ``bicubic`` interpolation method to sample the input pixels.
 
     :attr:`grid` specifies the sampling pixel locations normalized by the
     :attr:`input` spatial dimensions. Therefore, it should have most values in
@@ -5571,10 +5571,11 @@ def grid_sample(
                        or :math:`(N, D_\text{out}, H_\text{out}, W_\text{out}, 3)` (5-D case)
         mode (str): interpolation mode to calculate output values
             ``'bilinear'`` | ``'nearest'`` | ``'bicubic'``. Default: ``'bilinear'``
-            Note: ``mode='bicubic'`` supports only 4-D input.
             When ``mode='bilinear'`` and the input is 5-D, the interpolation mode
             used internally will actually be trilinear. However, when the input is 4-D,
-            the interpolation mode will legitimately be bilinear.
+            the interpolation mode will legitimately be bilinear. Likewise
+            ``mode='bicubic'`` is tricubic on a 5-D input, the separable cubic kernel
+            extended over the third axis; CPU and CUDA, ROCm included, implement the 5-D case.
         padding_mode (str): padding mode for outside grid values
             ``'zeros'`` | ``'border'`` | ``'reflection'``. Default: ``'zeros'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -7234,7 +7235,8 @@ def scaled_mm(
         swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
         bias: optional bias term to be added to the output
         output_dtype: dtype used for the output tensor
-        contraction_dim: describe which dimensions are :math:`K` in the matmul.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
@@ -7261,6 +7263,133 @@ def scaled_mm(
     )
 
     return out
+
+
+def scaled_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""Compute a scaled matrix product and add it to ``input``.
+
+    The result is
+
+    .. math::
+        \mathrm{out} = \beta\,\mathrm{input} +
+        \alpha\,\mathrm{scaled\_mm}(\mathrm{mat1}, \mathrm{mat2}).
+
+    The scaling recipes and swizzles have the same meaning as in
+    :func:`scaled_mm`. ``input`` must be a canonically contiguous, 16-byte-aligned
+    matrix with shape ``(mat1.size(0), mat2.size(1))`` and dtype ``float16``, ``bfloat16``, or
+    ``float32``. The result has the dtype of ``input``; there is no separate
+    output dtype. CUDA recipes are supported when their selected implementation
+    uses cuBLASLt; non-cuBLAS fallbacks and ROCm are not supported.
+
+    Args:
+        input: Matrix accumulated into the scaled matrix product.
+        mat1: Left matrix operand.
+        mat2: Right matrix operand.
+        scale_a: Tensor containing decoding scaling factors for ``mat1``.
+        scale_recipe_a: Scaling recipe for ``mat1``.
+        scale_b: Tensor containing decoding scaling factors for ``mat2``.
+        scale_recipe_b: Scaling recipe for ``mat2``.
+        swizzle_a: Swizzling pattern, if any, for ``scale_a``.
+        swizzle_b: Swizzling pattern, if any, for ``scale_b``.
+        contraction_dim: Must be empty or ``(1, 0)`` (equivalent negative
+            dimensions are also accepted).
+        use_fast_accum: Whether to enable tensor-core fast accumulation.
+        beta: Multiplier for ``input``.
+        alpha: Multiplier for the scaled matrix product.
+
+    .. note::
+        Fusing the addition removes an intermediate output rounding step, so
+        the result need not be bitwise equal to a separate scaled matrix
+        multiply followed by an addition.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
+
+
+def scaled_addmm_(
+    input: Tensor,
+    mat1: Tensor,
+    mat2: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+    *,
+    beta: float = 1.0,
+    alpha: float = 1.0,
+) -> Tensor:
+    r"""In-place version of :func:`scaled_addmm`.
+
+    This function accumulates in ``input.dtype`` (``float16``, ``bfloat16``, or
+    ``float32``), preserves the storage of ``input``, and returns ``input``. A
+    serialized WGRAD loop can create the first contribution with
+    :func:`scaled_mm`, then use ``scaled_addmm_`` for later contributions.
+
+    .. warning::
+        In-place accumulation is not safe for concurrent writers. Callers must
+        serialize writes or provide external coordination.
+    """
+    scale_a = _expand_single_value(scale_a)
+    scale_recipe_a = _expand_single_value(scale_recipe_a)
+    scale_b = _expand_single_value(scale_b)
+    scale_recipe_b = _expand_single_value(scale_recipe_b)
+    swizzle_a = _expand_single_value(swizzle_a)
+    swizzle_b = _expand_single_value(swizzle_b)
+
+    return torch._scaled_addmm_(
+        input,
+        mat1,
+        mat2,
+        scale_a,
+        _enum_list_as_int_list(scale_recipe_a),
+        _enum_list_as_int_list(_list_or_empty(swizzle_a)),
+        scale_b,
+        _enum_list_as_int_list(scale_recipe_b),
+        _enum_list_as_int_list(_list_or_empty(swizzle_b)),
+        contraction_dim,
+        beta=beta,
+        alpha=alpha,
+        use_fast_accum=use_fast_accum,
+    )
 
 
 def scaled_grouped_mm(
