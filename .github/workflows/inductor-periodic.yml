@@ -90,6 +90,7 @@ jobs:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3.10-mi350
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-default-label-prefix.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -113,6 +114,7 @@ jobs:
     needs: rocm-periodic-dynamo-benchmarks-build
     with:
       build-environment: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.build-environment }}
+      rocm-arch-list: gfx950
       docker-image: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit

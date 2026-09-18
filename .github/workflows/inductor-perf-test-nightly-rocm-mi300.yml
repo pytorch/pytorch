@@ -91,6 +91,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-jammy-rocm-py3.10-mi300
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx942
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_rocm_mi300", shard: 1, num_shards: 5, runner: "linux.rocm.gpu.mi300.1" },
@@ -124,6 +125,7 @@ jobs:
     if: github.event.schedule == '15 0 * * *'
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      rocm-arch-list: gfx942
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
@@ -141,6 +143,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      rocm-arch-list: gfx942
       dashboard-tag: training-${{ github.event_name != 'workflow_dispatch' || inputs.training }}-inference-${{ github.event_name != 'workflow_dispatch' || inputs.inference }}-default-${{ github.event_name != 'workflow_dispatch' || inputs.default }}-dynamic-${{ github.event_name != 'workflow_dispatch' || inputs.dynamic }}-cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.cudagraphs }}-cppwrapper-${{ github.event_name != 'workflow_dispatch' || inputs.cppwrapper }}-aotinductor-${{ github.event_name != 'workflow_dispatch' || inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.freezing_cudagraphs }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}

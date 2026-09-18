@@ -49,6 +49,7 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       build-environment: linux-noble-rocm-preview-py3.12-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-preview-py3.12
+      rocm-arch-list: gfx950
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 8, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.1" },
@@ -78,6 +79,7 @@ jobs:
       - target-determination
     with:
       build-environment: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.build-environment }}
+      rocm-arch-list: gfx950
       docker-image: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-preview-py3_12-build.outputs.test-matrix }}
       # The default config picks these up by discovery; the inductor config in

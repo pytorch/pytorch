@@ -127,6 +127,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3_10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
@@ -142,6 +143,7 @@ jobs:
       # TODO (huydo): Need to implement sharding for ops micro benchmark
       timeout-minutes: 900
       build-environment: ${{ needs.opmicrobenchmark-build-rocm.outputs.build-environment }}
+      rocm-arch-list: gfx950
       docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}
     secrets: inherit
