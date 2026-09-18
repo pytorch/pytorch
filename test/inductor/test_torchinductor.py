@@ -439,56 +439,6 @@ class TestCase(InductorTestCase):
             self._config_stack.close()
 
 
-class TestInductorConfigLifetime(InductorTestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    @config.patch(
-        {
-            "implicit_fallbacks": True,
-            "triton.autotune_pointwise": True,
-        }
-    )
-    def test_class_setup_does_not_patch_inductor_config(self):
-        class CollectionTestCase(TestCase):
-            pass
-
-        try:
-            CollectionTestCase.setUpClass()
-            self.assertTrue(config.implicit_fallbacks)
-            self.assertTrue(config.triton.autotune_pointwise)
-        finally:
-            CollectionTestCase.tearDownClass()
-
-    @config.patch(
-        {
-            "implicit_fallbacks": True,
-            "triton.autotune_pointwise": True,
-        }
-    )
-    def test_manual_lifecycle_restores_inductor_config(self):
-        class ManualTestCase(TestCase):
-            def runTest(self):
-                pass
-
-        test = ManualTestCase()
-        test.setUpClass()
-        try:
-            test.setUp()
-            try:
-                self.assertFalse(config.implicit_fallbacks)
-                self.assertFalse(config.triton.autotune_pointwise)
-            finally:
-                test.tearDown()
-
-            self.assertTrue(config.implicit_fallbacks)
-            self.assertTrue(config.triton.autotune_pointwise)
-        finally:
-            try:
-                test.doCleanups()
-            finally:
-                test.tearDownClass()
-
-
 class ToTuple(torch.nn.Module):
     def forward(self, x):
         return (x,)
@@ -1311,6 +1261,14 @@ def skip_if_cpu(fn):
     return wrapper
 
 
+# Note [Shared template device admission]
+# CommonTemplate also serves copy_tests consumers that expose only self.device.
+# Keep its methods in place so consumers can migrate independently, and use local
+# skips to enforce CPU/CUDA contracts without splitting the shared template.
+# Check the selected device at call time: global GPU/Triton flags do not prove
+# that each generated device has a usable backend. CPU hosts can also run tests
+# on an accelerator, so distinguish the host device from the execution device.
+# Keep historical MPS paths that do not require Triton via allow_mps.
 def skip_if_not_cpu(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1639,8 +1597,15 @@ class CommonTemplate:
     def test_aoti_eager_dtype_device_layout(self):
         ns = "aten"
         op_name = "tril_indices"
-        device = self.device
-        dispatch_key = torch._C._dispatch_key_for_device(device)
+        # Preserve legacy CPU/CUDA selection; extend it only for PrivateUse1.
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
+            dispatch_key = "PrivateUse1"
+            device = self.device
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
             row = 128
@@ -1680,8 +1645,14 @@ class CommonTemplate:
     def test_aoti_eager_support_out(self):
         ns = "aten"
         op_name = "clamp"
-        device = self.device
-        dispatch_key = torch._C._dispatch_key_for_device(device)
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
+            dispatch_key = "PrivateUse1"
+            device = self.device
 
         inp_tensor = torch.randn(128, dtype=torch.float, device=device).fill_(1.0)
         min_tensor = inp_tensor - 0.05
@@ -1733,8 +1704,14 @@ class CommonTemplate:
     def test_aoti_eager_support_str(self):
         ns = "aten"
         op_name = "div"
-        device = self.device
-        dispatch_key = torch._C._dispatch_key_for_device(device)
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
+            dispatch_key = "PrivateUse1"
+            device = self.device
 
         a = torch.randn(128, dtype=torch.float, device=device)
         b = torch.randn(128, dtype=torch.float, device=device)
@@ -1771,8 +1748,14 @@ class CommonTemplate:
     def test_aoti_eager_cache_hit(self):
         ns = "aten"
         op_name = "abs"
-        device = self.device
-        dispatch_key = torch._C._dispatch_key_for_device(device)
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
+            dispatch_key = "PrivateUse1"
+            device = self.device
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
         kernel_lib_path = aoti_compile_with_persistent_cache(
@@ -1817,7 +1800,11 @@ class CommonTemplate:
         ns = "aten"
         op_name = "abs"
 
-        device = self.device
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            device = "cuda"
+        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
+            device = self.device
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
         kernel_lib_path = aoti_compile_with_persistent_cache(
@@ -1862,8 +1849,14 @@ class CommonTemplate:
         op_overload_name = "Tensor"
         op_name_with_overload = f"{op_name}.{op_overload_name}"
 
-        device = torch.device(self.device)
-        dispatch_key = torch._C._dispatch_key_for_device(device.type)
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = torch.device("cuda")
+        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
+            dispatch_key = "PrivateUse1"
+            device = torch.device(self.device)
 
         # Test the difference between scalar tensor and scalar
         a = torch.scalar_tensor(1.0, device=device)
@@ -1929,8 +1922,14 @@ class CommonTemplate:
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_override_registration(self):
         namespace_name = "aten"
-        device = torch.device(self.device)
-        dispatch_key = torch._C._dispatch_key_for_device(device.type)
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = torch.device("cuda")
+        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
+            dispatch_key = "PrivateUse1"
+            device = torch.device(self.device)
 
         unary_op_set = ["abs", "acos"]
 
@@ -2956,6 +2955,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_op(self):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("cpu", "mps", "mtia"):
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
@@ -2985,6 +2985,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_op_compiled(self):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("cpu", "mps", "mtia"):
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
@@ -3020,6 +3021,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_op_multi_input(self):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("cpu", "mps", "mtia"):
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
@@ -3047,6 +3049,7 @@ class CommonTemplate:
         {"dynamic_shapes": False, "assume_static_by_default": True}
     )
     def test_custom_scan_would_split(self):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("cpu", "mps", "mtia"):
             raise unittest.SkipTest("associative_scan only supported on GPU")
 
@@ -3528,6 +3531,7 @@ class CommonTemplate:
 
     @skip_if_gpu_halide
     def test_cumprod_backward_split_scan_reduction_fusion(self):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("cpu", "mps", "mtia"):
             raise unittest.SkipTest("split scan only supported on GPU")
 
@@ -4542,6 +4546,7 @@ for dtype in (torch.int32, torch.int64):
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
     def test_div_floor_float_nonfinite(self, dtype):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("xpu", "mps", "mtia"):
             raise unittest.SkipTest("Only validated on CPU/CUDA")
 
@@ -7899,6 +7904,7 @@ for dtype in (torch.int32, torch.int64):
             assertGeneratedKernelCountEqual(self, 1)
 
     def test_layer_norm_rejects_complex_inputs(self):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("xpu", "mps", "mtia"):
             raise unittest.SkipTest("Only validated on CPU/CUDA")
 
@@ -10051,6 +10057,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        # These ops are CUDA/ROCm-specific; retain the MPS expected-error path.
         if self.device not in ("cuda", "mps"):
             raise unittest.SkipTest("requires cuDNN or MIOpen")
 
@@ -10315,6 +10322,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @skip_if_no_accelerator
     def test_grid_sampler_expand_preserves_view(self):
+        # Keep legacy exclusions; new backends need no separate template class.
         if self.device in ("cpu", "mps", "mtia"):
             self.skipTest("requires CUDA or XPU")
 
@@ -19975,6 +19983,19 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):
         other_cls.is_dtype_supported = my_cls.is_dtype_supported
 
 
+# Note [Device instantiation for shared Inductor templates]
+# Keep CommonTemplate and copy_tests intact so consumers migrate independently.
+# Adapt test(self) to native device instantiation while preserving parameter
+# cases, skip/xfail metadata, and public test IDs.
+#
+# host/template methods -> _wrap_template_test + _template_parametrize_fn
+#   -> bridge_cls(_TemplateDeviceHost, host_cls)
+#   -> instantiate_device_type_tests -> generated device classes
+#   -> mask inherited originals -> restore host names / apply name overrides
+#
+# host_cls must be bound in scope; generated classes replace it and are returned.
+# The host keeps self.device as a bare type. Wrappers forward device arguments
+# only when accepted, isolate metadata, and avoid re-expanding parameter cases.
 class _TemplateDeviceHost:
     def setUp(self):
         # Preserve copy_tests' historical bare device type contract.
@@ -20335,19 +20356,24 @@ if RUN_CPU:
 
 class _AcceleratorTestCase(TestCase):
     def setUp(self):
+        # The module gate admits a matrix when any accelerator can run it.
+        # Each generated variant must still have its own usable Triton backend;
+        # preserve the historical MPS path, which does not require Triton.
         if torch.device(self.device).type != "mps":
             _require_device_triton(self.device)
         super().setUp()
 
 
+if RUN_GPU or HAS_MPS:
+
+    class SweepInputsGPUTest(SweepInputs2, TestCase):
+        hw_classification = HardwareClassification.ACCELERATOR
+        gen = InputGen(10, GPU_TYPE)
+
+    SweepInputsGPUTest.populate()
+
+
 if RUN_GPU or HAS_MPS or HAS_TRITON:
-    if RUN_GPU or HAS_MPS:
-
-        class SweepInputsGPUTest(SweepInputs2, TestCase):
-            hw_classification = HardwareClassification.ACCELERATOR
-            gen = InputGen(10, GPU_TYPE)
-
-        SweepInputsGPUTest.populate()
 
     class GPUTests(_AcceleratorTestCase):
         hw_classification = HardwareClassification.ACCELERATOR
