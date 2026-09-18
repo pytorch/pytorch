@@ -147,7 +147,7 @@ from .object_protocol import (
     type_implements_sq_length,
     vt_identity_compare,
 )
-from .sets import FrozensetVariable, SetVariable
+from .sets import FrozensetVariable, OrderedSetVariable, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -2459,6 +2459,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
                 variables.ConstDictVariable,
             ),
         ):
@@ -3231,6 +3232,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 SetVariable,
                 FrozensetVariable,
                 variables.DictKeySetVariable,
+                OrderedSetVariable,
             ),
         ):
             return VariableTracker.build(tx, len(a.items) == 0)
@@ -3418,6 +3420,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                 variables.SetVariable,
                 variables.FrozensetVariable,
                 variables.DictKeySetVariable,
+                variables.OrderedSetVariable,
                 ConstDictVariable,
             ),
         ):
@@ -3884,14 +3887,10 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                 obj,
                 (variables.IteratorVariable, variables.LocalGeneratorObjectVariable),
             ):
-                if isinstance(
-                    obj,
-                    (
-                        ConstDictVariable,
-                        variables.OrderedSetVariable,
-                        variables.DictKeySetVariable,
-                    ),
-                ):
+                # An OrderedSet's key order is already guarded through the
+                # ``_dict`` source VariableBuilder registers; the object itself
+                # is not a dict and the guard manager would reject it.
+                if isinstance(obj, (ConstDictVariable, variables.DictKeySetVariable)):
                     tx.output.guard_on_key_order.add(obj.source)
                 if isinstance(obj, variables.MappingProxyVariable):
                     install_guard(

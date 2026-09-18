@@ -55,7 +55,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_tops
+from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -3754,14 +3754,71 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32)
 
 
+def _current_accelerator_device() -> torch.device | None:
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if accelerator is None:
+        return None
+    return torch.device(accelerator.type, torch.accelerator.current_device_index())
+
+
+def _get_device_info_key(device: torch.device) -> str | None:
+    try:
+        properties = get_interface_for_device(device).Worker.get_device_properties(
+            device
+        )
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.debug("Unable to query properties for %s", device, exc_info=True)
+        return None
+    if isinstance(properties, Mapping):
+        name = properties.get("arch")
+        if not isinstance(name, str):
+            name = properties.get("name")
+    else:
+        name = getattr(properties, "name", None)
+    return name if isinstance(name, str) else None
+
+
+@functools.cache
+def _get_device_dram_gbps(device: torch.device) -> float | None:
+    device_info_key = _get_device_info_key(device)
+    ds_bw = (
+        datasheet_dram_bw_gbs(device_info_key) if device_info_key is not None else None
+    )
+    if ds_bw is not None:
+        return ds_bw
+
+    if device.type in ("cuda", "xpu"):
+        from triton.testing import get_dram_gbps
+
+        return get_dram_gbps(device.index)
+
+    log.warning(
+        "No DRAM bandwidth estimate available for %s (reported key: %s); "
+        "returning None",
+        device,
+        device_info_key or "unknown",
+    )
+    return None
+
+
+def get_device_dram_gbps(device: torch.device | str | None = None) -> float | None:
+    """
+    Return DRAM bandwidth in GB/s without assuming a CUDA device.
+
+    Prefer a registered datasheet entry. CUDA and XPU retain the Triton
+    fallback; other unknown accelerators return None.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for DRAM bandwidth estimation")
+        return None
+    return _get_device_dram_gbps(resolved_device)
+
+
 @functools.cache
 def get_gpu_dram_gbps() -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    from .analysis.device_info import datasheet_dram_bw_gbs
-
     ds_bw = datasheet_dram_bw_gbs()
     if ds_bw is not None:
         return ds_bw
