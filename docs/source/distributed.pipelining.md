@@ -406,29 +406,57 @@ For example, `ScheduleGPipe` and `Schedule1F1B` are subclasses of `PipelineSched
 Whereas, `ScheduleInterleaved1F1B`, `ScheduleLoopedBFS`, `ScheduleInterleavedZeroBubble`, and `ScheduleZBVZeroBubble`
 are subclasses of `PipelineScheduleMulti`.
 
-### Passing Stage and Microbatch Indices
+### Passing Pipeline Stage Information
 
-Manual pipeline stages can receive their execution indices as keyword arguments
-without storing schedule state on the stage. Enable
-`pass_stage_and_microbatch_indices` when constructing the schedule:
+Manual pipeline stages can receive an immutable description of each scheduled
+forward without reaching into schedule state. Enable
+`pass_pipeline_stage_info` when constructing the schedule:
 
 ```python
+from torch.distributed.pipelining import PipelineStageInfo
+
+
+class StageModule(torch.nn.Module):
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        pipeline_stage_info: PipelineStageInfo,
+    ) -> torch.Tensor:
+        # The same physical PP rank may execute several logical stages.
+        slot = (
+            pipeline_stage_info.stage_index,
+            pipeline_stage_info.microbatch_index,
+        )
+        return run_stage(x, slot)
+
+
 schedule = ScheduleInterleaved1F1B(
     stages,
     n_microbatches,
-    pass_stage_and_microbatch_indices=True,
+    pass_pipeline_stage_info=True,
 )
 ```
 
-Every built-in schedule forward then receives `stage_idx`, the global logical
-stage index, and `mb_idx`, the microbatch index within the current step. These
-names are reserved while the option is enabled. Dynamic shape-metadata
-inference uses the actual stage index and microbatch index zero because it runs
-with the first microbatch as its representative input.
+Every built-in schedule forward then receives `pipeline_stage_info`, a
+`PipelineStageInfo` containing the global logical `stage_index`, the
+step-local `microbatch_index`, and `is_metadata_inference`. Physical PP rank is
+not a substitute for the stage index because one rank may own several virtual
+stages. Dynamic shape-metadata inference uses the actual stage index and
+microbatch zero, with `is_metadata_inference=True`, so a stateful module can
+distinguish the representative probe from real microbatch-zero execution.
 
 This option supports manually constructed `PipelineStage` instances. The
-indices are Python integers, so compiled stage code may specialize if it uses
-them in control flow or shape computation.
+single keyword name is reserved while the option is enabled. Custom schedule
+action handlers continue to receive `_Action`, which already carries the stage
+and microbatch indices; replacing built-in action execution also makes the
+handler responsible for any module kwargs it passes. Compiled stage code may
+specialize if it uses the integer fields in control flow or shape computation.
+
+```{eval-rst}
+.. autoclass:: torch.distributed.pipelining.PipelineStageInfo
+  :members:
+```
 
 ## Logging
 
