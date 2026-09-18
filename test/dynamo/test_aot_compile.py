@@ -2524,6 +2524,30 @@ from user code:
         # vacuous, and the last two a form-feed replace would not cover.
         self.assertIn("page break rec sep", message)
 
+    def test_no_match_report_keeps_a_raise_on_one_line_past_odd_separators(self):
+        # The raise line is the report's other entry carrying arbitrary user
+        # text, so it needs the collapse a verbose part gets: a separator
+        # splitlines() breaks on splits an entry over lines, which the count and
+        # whole-line read below fail on. None of the four is \n and the text
+        # holds no space, so that read says all four arrived and were collapsed.
+        class OddSepOnCompare:
+            # RaisesOnCompare's slot, raising four separators and no space.
+            def __hash__(self):
+                return hash("foo")
+
+            def __eq__(self, other):
+                raise ValueError("page\x0cbreak\rrec\x1esep\u2028line")
+
+        model, x = self._aot_compile_dict_branches({})
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, {OddSepOnCompare(): 1})
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        # Header, entry, fix-or-drop advice, ModelInput advice.
+        self.assertEqual(len(lines), 4, message)
+        raised = "  [0] <guard check raised ValueError: page break rec sep line (through the guard tree's pybind boundary)>"
+        self.assertEqual(lines[1], raised)
+
     def test_no_match_message_survives_a_raising_guard(self):
         # Dispatch recorded [0]'s raise as no answer, and the report quotes that
         # record for [0] and still describes [1]; at the parent the scan's raise
@@ -3840,7 +3864,10 @@ from user code:
         # quoting the link the cycle closed on; walking it unbounded returns
         # nothing, and it runs before any record exists, so there is nothing to
         # recover from. Under an alarm because the failure it pins is a hang:
-        # unbounded, this test never finishes rather than failing.
+        # unbounded, this test never finishes rather than failing. The alarm and
+        # not a harness timeout because there is none per test, so a regression
+        # hangs the whole file locally until the shard's own limit; 60s is a
+        # generous bound on one dispatch that returns in under a millisecond.
         model, x = self._aot_compile_dict_branches({})
         evil = {CyclesOnCompare(): 1}
 
