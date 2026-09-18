@@ -3542,22 +3542,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
         c10d.destroy_process_group()
 
-    @skip_if_lt_x_gpu(1)
     @requires_gloo()
     def test_split_group_keeps_gloo_options(self):
-        # dist.split_group used to substitute a deep copy of the accelerator
-        # backend's options for every device. On a gloo world that raised
-        # "cannot pickle _Options" (ProcessGroupGloo._Options has no
-        # __deepcopy__), and on a "cpu:gloo,cuda:nccl" world the gloo leg
-        # rejected the nccl options and fell back to Options::create_default(),
-        # dropping the caller's timeout and group_name.
+        # A CPU-only Gloo parent selects its CPU backend without requiring a
+        # bound accelerator, and each child keeps independently cloned options.
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo",
             store=store,
             rank=self.rank,
             world_size=self.world_size,
-            device_id=torch.device("cuda", self.rank % torch.cuda.device_count()),
         )
         ranks = list(range(self.world_size))
         child = c10d.split_group(split_ranks=[ranks], timeout=timedelta(seconds=222))
@@ -3565,6 +3559,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self.assertEqual(options._timeout, timedelta(seconds=222))
         self.assertEqual(options.group_name, child.group_name)
         self.assertEqual(options.global_ranks_in_group, ranks)
+        value = torch.tensor(float(self.rank + 1))
+        c10d.all_reduce(value, group=child)
+        self.assertEqual(value, torch.tensor(float(sum(rank + 1 for rank in ranks))))
         c10d.destroy_process_group()
 
 
