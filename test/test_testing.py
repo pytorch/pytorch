@@ -2834,6 +2834,7 @@ class TestImports(TestCase):
                            "torch._native.flydsl.intrinsics",  # depends on flydsl
                            "torch._native.cutedsl",  # depends on cutlass
                            "torch._native.ops.reductions.traits",  # depends on cutlass
+                           "torch._native.ops.bmm_outer_product.aot_kernel",  # depends on triton
                            "torch._native.ops.bmm_outer_product.triton_kernels",  # depends on triton
                            "torch._native.ops.foreach_mm",  # depends on nvmath-python, cuda-python
                            "torch._native.ops.norm.flydsl_rmsnorm_fwd",  # depends on flydsl

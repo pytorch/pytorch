@@ -81,6 +81,9 @@ def _bmm_outer_product_cond(
     return (
         _is_acc_tensor(a)
         and a.device == b.device
+        # aten raises on mixed dtypes; the kernel would instead specialize on a's
+        # dtype and read b's storage through it, returning a wrong result.
+        and a.dtype == b.dtype
         and _is_outer_product(a, b)
         and _is_hip_grid_safe(a, b)
     )
