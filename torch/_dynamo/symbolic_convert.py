@@ -257,14 +257,10 @@ ExceptionTypes: TypeAlias = (
 )
 
 
-@functools.cache
-def _import_module(name: str) -> types.ModuleType:
-    """
-    The process's first resolution of the name, kept for its lifetime: nothing
-    invalidates the memo, so after a sys.modules handover it is an older object
-    than the live entry.
-    """
-    return importlib.import_module(name)
+# What import_source last bound under each name, served when the name has since
+# left sys.modules or been blocked there with None. Never cleared, not by
+# torch._dynamo.reset() either.
+_import_source_cache: dict[str, types.ModuleType] = {}
 
 
 def _registered_module_for_globals(
@@ -2428,25 +2424,31 @@ class InstructionTranslatorBase(
             value = torch.package.package_importer._package_imported_modules[
                 module_name
             ]
-            # A registry lookup, not a memo: the module the name resolves to now.
-            live = True
             alias = (
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
+            # Not cached: _package_imported_modules is a WeakValueDictionary and
+            # _import_source_cache is never cleared, so an entry would pin a
+            # torch.package module the user has dropped for the process; the
+            # cache read is in the other arm in any case.
+            cacheable = False
         else:
             # The live sys.modules entry, which is what IMPORT_NAME pushed and
-            # so what the guards this alias roots must read. The memo is called
-            # first so that a live resolution primes it (functools.cache keeps
-            # the first return and never recomputes): a name since removed from
-            # sys.modules or blocked there with None is then served from it,
-            # where importing again would run the module body inside the trace
-            # or, for None, raise out of guard construction. A memo still cold
-            # for such a name imports all the same, as it did before.
-            memo = _import_module(module_name)
-            entry = sys.modules.get(module_name)
-            live = entry is not None
-            value = entry if live else memo
+            # so what the guards this alias roots must read, taken from
+            # sys.modules itself: importlib.import_module takes the module lock
+            # for a present name on 3.10. A name since removed or blocked with
+            # None keeps what it last resolved to, as re-importing would run
+            # the module body inside the trace. An entry still executing its
+            # body is served as is: on IMPORT_NAME's path __import__ has just
+            # waited for it, and importing it here would block on its module
+            # lock under compile_lock, an order importlib's deadlock check cannot see.
+            value = sys.modules.get(module_name)
+            if value is None and module_name in _import_source_cache:
+                value = _import_source_cache[module_name]
+            elif value is None:
+                value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
+            cacheable = True
 
         f_globals = self.output.global_scope
         # The alias outlives the compile that minted it, so a later writer that
@@ -2454,8 +2456,7 @@ class InstructionTranslatorBase(
         # seeding a guard scope -- can leave it bound to a module object of this
         # name that is not the one resolved here. That is not the name collision
         # this checks for (two module names still mangle to one alias).
-        conflict = alias in f_globals and f_globals[alias] is not value
-        if conflict:
+        if alias in f_globals and f_globals[alias] is not value:
             bound = f_globals[alias]
             # Both names out of the instance dicts: a PEP 562 module __getattr__
             # and a class-level __getattribute__ (importlib.util._LazyModule
@@ -2507,19 +2508,21 @@ class InstructionTranslatorBase(
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
                 )
-        # Recorded only once the check has passed: the package entry outlives a
-        # graph break here, and install() binds every recorded alias.
+        # Recorded only once the check has passed, all three: the package entry
+        # outlives a graph break here, and install() binds every recorded
+        # alias; the cache entry is never cleared, so a refused trace would
+        # otherwise pin a module the process may drop. sys.modules accepts any
+        # object, and a non-module entry is bound as is by the callers that
+        # make no module check, but never remembered.
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        # A writer's same-named module stays in the slot unless value is the
-        # live entry, which is what IMPORT_NAME pushed and the graph is built
-        # from; when neither is live it stays too, the memo being no less
-        # stale. The guards this alias roots and the bytecode reconstructed
-        # through it then read the module left in the slot rather than the one
-        # the graph was built from.
-        if not conflict or live:
-            f_globals[alias] = value
+        if cacheable and isinstance(value, types.ModuleType):
+            _import_source_cache[module_name] = value
+        # A writer's same-named module is replaced: value is the live entry or,
+        # for a name gone or blocked with None, what this process's traces last
+        # bound, the object the guards this alias roots were built against.
+        f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
 
