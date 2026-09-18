@@ -1576,9 +1576,10 @@ def gt(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 )
 def heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
     input_eq_zero = torch.eq(input, 0)
-    input_lt_zero = torch.logical_or(torch.lt(input, 0), torch.isnan(input))
+    input_lt_zero = torch.lt(input, 0)
     zeros_and_ones = torch.where(input_lt_zero, 0, 1)
     output = torch.where(input_eq_zero, values, zeros_and_ones)
+    output = torch.where(torch.isnan(input), input, output)
     return output
 
 
