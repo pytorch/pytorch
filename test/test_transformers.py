@@ -1123,6 +1123,28 @@ class TestTransformersAccelerator(NNTestCase):
 
         self.assertEqual(eager_out, compiled_out)
 
+    def test_transformer_encoder_layer_fwd_noncontiguous(self, device):
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                d_model=128,
+                nhead=4,
+                dim_feedforward=256,
+                dropout=0.0,
+                batch_first=True,
+            ),
+            num_layers=1,
+        ).to(device).eval()
+
+        x = torch.randn(1, 128, 16, device=device).permute(0, 2, 1)
+        self.assertFalse(x.is_contiguous())
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model, fullgraph=True)(x)
+
+        self.assertEqual(eager_out, compiled_out)
+        self.assertTrue(compiled_out.is_contiguous())
+
     def test_transformer_encoder_layer_fwd_unbacked(self, device):
         # Regression for a data-dependent error in the meta rule for
         # _transformer_encoder_layer_fwd. The rule used to test
