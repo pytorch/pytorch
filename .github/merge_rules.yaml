@@ -479,6 +479,27 @@
   - Lint
   - pull
 
+- name: Profiler
+  patterns:
+  - test/cpp/profiler/**
+  - test/profiler/**
+  - third_party/kineto
+  - torch/_C/_profiler.pyi
+  - torch/autograd/profiler*
+  - torch/csrc/autograd/profiler*
+  - torch/csrc/profiler/**
+  - torch/profiler/**
+  approved_by:
+  - ryanzhang22
+  - scotts
+  - ngimel
+  - dolpm
+  - sanrise
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Dynamo
   patterns:
   - torch/_dynamo/**
