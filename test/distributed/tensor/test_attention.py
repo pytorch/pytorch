@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import contextlib
-import itertools
 import random
 import unittest
 import unittest.mock
@@ -588,12 +587,8 @@ class CPFlexAttentionTest(DTensorTestBase):
                     seq_dims=[seq_dim] * 2,
                     load_balancer=lb,
                 )
-                torch.testing.assert_close(
-                    cp_out, expect_out, atol=atol, rtol=rtol
-                )
-                torch.testing.assert_close(
-                    cp_lse, expect_aux.lse, atol=atol, rtol=rtol
-                )
+                torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
+                torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
 
                 cp_qkv_grad = context_parallel_unshard(
                     device_mesh,
@@ -601,12 +596,8 @@ class CPFlexAttentionTest(DTensorTestBase):
                     seq_dims=[seq_dim] * 3,
                     load_balancer=lb,
                 )
-                for grad, cp_grad in zip(
-                    [t.grad for t in qkv], cp_qkv_grad
-                ):
-                    torch.testing.assert_close(
-                        grad, cp_grad, atol=atol, rtol=rtol
-                    )
+                for grad, cp_grad in zip([t.grad for t in qkv], cp_qkv_grad):
+                    torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
 
     def _get_load_balancer(
         self, lb_type: str, qkv_size: int, block_mask: BlockMask
@@ -641,8 +632,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             "_PTRRLoadBalancer",
         ]
         lengths = [
-            generate_random_lengths(max_seq_len, doc_count)
-            for _ in range(batch_size)
+            generate_random_lengths(max_seq_len, doc_count) for _ in range(batch_size)
         ]
         offsets = length_to_offsets(lengths, self.device_type)
         document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
@@ -672,8 +662,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             device=self.device_type,
         )
         qkv = [
-            torch.rand((2, 2, qkv_size, 32), device=self.device_type)
-            for _ in range(3)
+            torch.rand((2, 2, qkv_size, 32), device=self.device_type) for _ in range(3)
         ]
         device_mesh = init_device_mesh(
             device_type=self.device_type,
