@@ -105,6 +105,7 @@ from torch._inductor.utils import (
     ALIGN_BYTES,
     clear_on_fresh_cache,
     determine_aoti_mmap_flags,
+    fp32_matmul_precision_key,
     is_linux,
     is_windows,
     parallel_num_threads,
@@ -467,10 +468,7 @@ class PersistentCache(CacheBase):
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        precision = torch.backends.cuda.matmul.fp32_precision
-        # bfx9 has no legacy equivalent, and the legacy getter may reject it.
-        if precision != "bfx9":
-            precision = torch.get_float32_matmul_precision()
+        precision = fp32_matmul_precision_key()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
 
         timings = {}

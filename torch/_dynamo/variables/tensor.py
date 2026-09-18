@@ -224,9 +224,19 @@ class TensorSpecializedProps(TypedDict):
 def _current_device_index_variable(
     tx: "InstructionTranslatorBase",
 ) -> VariableTracker:
+    """The current device index for this graph, observed once and reused.
+
+    Cached the way _current_device_edge caches the device itself: the value cannot
+    change within a graph, so a fresh node per read would allocate a fresh unbacked
+    symbol each time -- leaving two reads incomparable to each other, and costing a
+    fallback kernel and a cudagraph partition boundary apiece.
+    """
     from .builder import wrap_fx_proxy
 
-    return wrap_fx_proxy(
+    cached = tx.output.coor_current_device_index_var
+    if cached is not None:
+        return cached
+    var = wrap_fx_proxy(
         tx,
         tx.output.create_proxy(
             "call_function",
@@ -235,6 +245,8 @@ def _current_device_index_variable(
             {},
         ),
     )
+    tx.output.coor_current_device_index_var = var
+    return var
 
 
 class CurrentDeviceVariable(VariableTracker):
@@ -260,6 +272,19 @@ class CurrentDeviceVariable(VariableTracker):
 
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
         return "torch.fx.experimental.proxy_tensor._coor_current_device()"
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # Keyed on the device type, to agree with tp_richcompare_impl below: two
+        # reads of the current device are the same device. Without this the base
+        # class falls back to an identity hash, so equal keys land in different
+        # dict buckets and are never compared -- a silently wrong answer for
+        # anything that groups by device, _group_tensors_by_device_and_dtype and
+        # the fused optimizers behind it included.
+        #
+        # is_fake: this is not the runtime hash. At runtime the device carries an
+        # index, so hash(torch.device("cuda", N)) differs from what we return
+        # here, and the value must not escape into output bytecode.
+        return hash(self.value), True
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
