@@ -1,6 +1,9 @@
 #pragma once
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/GridSamplerUtils.h>
+
+#include <limits>
 
 namespace at::native {
 
@@ -317,5 +320,92 @@ void get_cubic_coefficients_grad(
   coeffs[3] = (3 * A * x - 10 * A) * x + 8 * A;
 }
 
+
+// grid_sampler_unnormalize with the extent in index_t, for the kernels that
+// index with int64_t. It converts where the int-taking helper converts.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_sized(scalar_t coord, index_t size,
+                                        bool align_corners) {
+  if (align_corners) {
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
+  } else {
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
+  }
+}
+
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t grid_sampler_unnormalize_set_grad_sized(scalar_t coord, index_t size,
+                                                 bool align_corners,
+                                                 scalar_t* grad_in) {
+  if (align_corners) {
+    *grad_in = static_cast<scalar_t>(size - 1) / 2;
+    return ((coord + 1) / 2) * static_cast<scalar_t>(size - 1);
+  } else {
+    *grad_in = static_cast<scalar_t>(size) / 2;
+    return ((coord + 1) * static_cast<scalar_t>(size) - 1) / 2;
+  }
+}
+
+// compute_coordinates with the extent in index_t, the reflection parity
+// taken with fmod and no downgrade: no float converts to an integer, and a
+// position past INT_MAX keeps its voxel.
+template <typename scalar_t, typename index_t>
+__forceinline__ __device__
+scalar_t compute_coordinates_sized(scalar_t coord, index_t size,
+                                   GridSamplerPadding padding_mode,
+                                   bool align_corners) {
+  if (padding_mode == GridSamplerPadding::Border) {
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  } else if (padding_mode == GridSamplerPadding::Reflection) {
+    // the bounds reflect_coordinates halves, formed without doubling the extent
+    const scalar_t low =
+        align_corners ? static_cast<scalar_t>(0) : static_cast<scalar_t>(-0.5);
+    const scalar_t span = static_cast<scalar_t>(align_corners ? size - 1 : size);
+    if (span == 0) {
+      coord = 0;
+    } else {
+      const scalar_t in = ::fabs(coord - low);
+      const scalar_t extra = ::fmod(in, span);
+      const bool odd = ::fmod(::floor(in / span), static_cast<scalar_t>(2)) != 0;
+      coord = odd ? span - extra + low : extra + low;
+    }
+    coord = ::min(static_cast<scalar_t>(size - 1),
+                  ::max(coord, static_cast<scalar_t>(0)));
+  }
+  return coord;
+}
+
+// The device twin of resolve_cubic_taps in ATen/native/GridSampler.cpp.
+template<typename scalar_t, typename index_t>
+__forceinline__ __device__
+void resolve_cubic_taps(
+    scalar_t coord,
+    index_t size,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    scalar_t coeffs[4],
+    scalar_t* coeffs_grad,
+    index_t indices[4]) {
+  const scalar_t base = ::floor(coord);
+  get_cubic_upsampling_coefficients<scalar_t>(coeffs, coord - base);
+  if (coeffs_grad != nullptr) {
+    get_cubic_coefficients_grad<scalar_t>(coeffs_grad, coord - base);
+  }
+  const scalar_t index_limit =
+      static_cast<scalar_t>(std::numeric_limits<index_t>::max());
+  #pragma unroll 4
+  for (int i = 0; i < 4; ++i) {
+    const scalar_t tap = compute_coordinates_sized(
+        base - 1 + i, size, padding_mode, align_corners);
+    // a tap that is not finite, or past the index type, fails before the cast
+    const index_t index = (tap >= 0 && tap < index_limit)
+        ? static_cast<index_t>(tap)
+        : static_cast<index_t>(-1);
+    indices[i] = index < size ? index : static_cast<index_t>(-1);
+  }
+}
 
 }  // namespace at::native

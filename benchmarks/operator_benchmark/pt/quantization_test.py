@@ -242,15 +242,20 @@ class FakeQuantizePerTensorBaseOpBenchmark(op_bench.TorchBenchmarkBase):
             torch.rand(N, C, H, W, dtype=torch.float, device=device),
             requires_grad=self.auto_set(),
         )
-        self.scale = nn.Parameter(
-            torch.tensor([1.0]).to(device), requires_grad=self.auto_set()
-        )
-        if op_func.__name__ == "fakeQuantizePerChannelOriginalKernel":
+        # The original kernel ignores scale/zero_point, so they must not
+        # require grad: a per-input variant with only scale/zero_point
+        # requiring grad has no tensor in the autograd graph.
+        if op_func.__name__ == "fakeQuantizePerTensorOriginalKernel":
+            self.scale = nn.Parameter(
+                torch.tensor([1.0]).to(device), requires_grad=False
+            )
             self.zero_point = nn.Parameter(
-                torch.tensor([0.0]).to(device).to(zero_point_dtype),
-                requires_grad=self.auto_set(),
+                torch.tensor([0.0]).to(device), requires_grad=False
             )
         else:
+            self.scale = nn.Parameter(
+                torch.tensor([1.0]).to(device), requires_grad=self.auto_set()
+            )
             self.zero_point = nn.Parameter(
                 torch.tensor([0.0]).to(device), requires_grad=self.auto_set()
             )
