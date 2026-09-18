@@ -7,7 +7,7 @@ import torch
 __all__: list[str] = []
 
 # WeakTensorKeyDictionary to store relevant meta-data for the Tensor/Parameter
-# without changing it's life-time.
+# without changing its life-time.
 # NOTE: Alternative is to add the meta-data as an attribute to the tensor,
 #       but that will serialize the meta-data if Tensor is serialized.
 param_to_optim_hook_handle_map = torch.utils.weak.WeakTensorKeyDictionary()

@@ -21,8 +21,9 @@ from torch.overrides import (
 )
 from torch.testing._internal.common_device_type import (
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_utils import skipIfXpu, TEST_ACCELERATOR
+from torch.testing._internal.common_utils import TEST_ACCELERATOR
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -131,12 +132,34 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
 
         x = torch.tensor([3.0])
+        compiled_fn = torch.compile(fn, backend=cnt)
         with RewriteAddToMul():
             eager_res = fn(x)
-            compiled_res = torch.compile(fn, backend=cnt)(x)
+            compiled_res = compiled_fn(x)
 
         self.assertEqual(eager_res, compiled_res)
         self.assertEqual(cnt.frame_count, 0)
+
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_flop_counter_mode_compile_skip_is_transient(self):
+        from torch.utils.flop_counter import FlopCounterMode
+
+        def fn(x, y):
+            return (x @ y).sin()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with FlopCounterMode(display=False):
+            compiled_fn = torch.compile(fn, backend=cnt)
+            self.assertEqual(compiled_fn(x, y), fn(x, y))
+
+        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(compiled_fn(x, y), fn(x, y))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_get_current_dispatch_mode_stack_no_graph_break(self):
         from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
@@ -243,7 +266,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         try:
             with m, m1:
 
-                @torch.compile(fullgraph=True)
+                @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
                 def fn(x):
                     torch.set_default_device("cpu")
                     _pop_torch_function_stack()
@@ -260,7 +283,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             torch.set_default_device(None)
 
     def test_stack_state_clear_default_device(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             torch.set_default_device(None)
             return x + 1
@@ -275,7 +298,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         # Stack populated, add device
         with m, m1:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 torch.set_default_device("cpu")
                 torch.set_default_device(None)
@@ -292,7 +315,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         torch.set_default_device("cpu")
         with m, m1:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 torch.set_default_device(None)
                 return x + 1
@@ -302,7 +325,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertIs(stack[0], m)
             self.assertIs(stack[1], m1)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             torch.set_default_device("cpu")
             torch.set_default_device("cpu")
@@ -317,7 +340,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         m = BaseTorchFunctionMode()
         with m:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 _pop_torch_function_stack()
                 return x + 1
@@ -331,7 +354,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(_len_torch_function_stack(), 0)
 
     def test_is_torch_function_all_disabled(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             return (
                 torch._C._is_torch_function_all_disabled(),
@@ -343,7 +366,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(res)
 
     def test_error_empty_stack_pop_torch_function_mode(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             _pop_torch_function_stack()
             return x + 1
@@ -358,7 +381,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         m = BaseTorchFunctionMode()
         with m:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x, m):
                 _push_on_torch_function_stack(m)
                 return x + 1
@@ -375,7 +398,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         m = BaseTorchFunctionMode()
         with m:
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def fn(x):
                 z = _len_torch_function_stack()
                 return x + z
@@ -389,7 +412,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             def __init__(self, x):
                 self.x = x
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             z = TestMode(2)
             z.y = 2
@@ -461,7 +484,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(2, 2) + 1
 
         for fn_i in [fn, fn_2]:
-            fn_opt = torch.compile(fn_i, fullgraph=True)
+            fn_opt = torch.compile(fn_i, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             with TestMode1(), TestMode2():
                 expected = fn_i(inp), mode_1_called, mode_2_called
                 reset_state()
@@ -495,7 +518,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         with TestMode():
             with torch._C.DisableTorchFunctionSubclass():
                 expected = fn(inp)
@@ -524,7 +547,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         inp = (torch.ones(2, 2) + 1).as_subclass(TestSubclass)
 
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         with TestMode():
             expected = fn(inp)
             actual = fn_opt(inp)
@@ -539,7 +562,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return torch.add(o, y)
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn, fullgraph=True)
+        fn_opt = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
 
         expected = fn(*inp)
         actual = fn_opt(*inp)
@@ -555,7 +578,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return torch.add(o, y)
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
 
         expected = fn(*inp)
         actual = fn_opt(*inp)
@@ -573,7 +596,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return torch.add(o, y)
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
 
         expected = fn(*inp)
         actual = fn_opt(*inp)
@@ -585,7 +608,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         def err():
             raise RuntimeError("test")
 
-        @torch.compile()
+        @torch.compile()  # noqa: UNSPECIFIED_BACKEND
         def fn(x):
             with TestMode():
                 x += 1
@@ -612,7 +635,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return torch.add(o, y)
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2) + 2)
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn)  # noqa: UNSPECIFIED_BACKEND
 
         expected = fn(*inp)
         actual = fn_opt(*inp)
@@ -679,23 +702,23 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         inp0_int = torch.ones(1, 1, dtype=torch.int32)
         inp1_int = torch.ones(1, 1, dtype=torch.int32)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn_un(op, inp):
             return op(inp)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn_un_int(op, inp):
             return op(inp)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn_bin(op, inp0, inp1):
             return op(inp0, inp1)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn_bin_int(op, inp0, inp1):
             return op(inp0, inp1)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         def fn_tensor_and_int(op, inp0, inp1):
             return op(inp0, inp1)
 
@@ -754,7 +777,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/141232
         with torch.device("cpu"):
 
-            @torch.compile(fullgraph=True)
+            @torch.compile(fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
             def func(a):
                 d = TransformedDistribution(
                     Normal(a, 1),
@@ -773,7 +796,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         try:
             torch.set_default_device(device_type)
 
-            flex_attention = torch.compile(flex_attention, dynamic=False)
+            flex_attention = torch.compile(flex_attention, dynamic=False)  # noqa: UNSPECIFIED_BACKEND
 
             prefix_lengths = torch.arange(8)
 
@@ -806,7 +829,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4, requires_grad=True)
 
         with torch.device("cpu"):
-            torch.compile(mod, fullgraph=True)(x)
+            torch.compile(mod, fullgraph=True)(x)  # noqa: UNSPECIFIED_BACKEND
 
     def test_tensor_unflatten_with_default_device(self):
         def fn(x):
@@ -819,7 +842,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop(self):
         import torch
         import torch._higher_order_ops
@@ -828,7 +850,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         )
 
         with torch.device(device_type):
-            flex_attention = torch.compile(flex_attention_eager, dynamic=False)
+            flex_attention = torch.compile(flex_attention_eager, dynamic=False)  # noqa: UNSPECIFIED_BACKEND
 
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
@@ -843,7 +865,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                     )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU and Triton")
-    @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop_eager(self):
         import torch
         import torch._higher_order_ops
@@ -2146,7 +2167,8 @@ class outer_fn(torch.nn.Module):
         dist.destroy_process_group()
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        (IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip)
+        or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
         "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
     )
     def test_2tier_blockmask_tensor_closure_nested_compile_aot_export(self):

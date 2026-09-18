@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -23,8 +24,10 @@ from tools.linter.adapters._stable_shim_utils import (
     get_current_version,
     LintMessage,
     LintSeverity,
+    merge_base_with_main,
     MULTILINE_MATCHERS,
     PreprocessorTracker,
+    run_git_object_command,
 )
 
 
@@ -69,6 +72,8 @@ def get_added_lines(filename: str) -> set[int]:
         # Check uncommitted changes (working directory vs HEAD)
         result = subprocess.run(
             ["git", "diff", "HEAD", filename],
+            cwd=REPO_ROOT,
+            env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
             capture_output=True,
             text=True,
             timeout=5,
@@ -77,52 +82,8 @@ def get_added_lines(filename: str) -> set[int]:
             added_lines.update(parse_diff(result.stdout))
 
         # Get merge-base with origin/main to check all PR commits
-        result = subprocess.run(
-            ["git", "fetch", "origin", "main"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        if result.returncode != 0:
-            # A parallel fetcher may have advanced origin/main while we were
-            # fetching, producing a lock error. If origin/main resolves locally,
-            # the existing ref is at least as fresh as what we asked for.
-            verify = subprocess.run(
-                ["git", "rev-parse", "--verify", "origin/main"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if verify.returncode != 0:
-                raise RuntimeError(
-                    f"Failed to fetch origin/main and no usable local copy exists. "
-                    f"Fetch error: {result.stderr.strip()}"
-                )
-
-        result = subprocess.run(
-            ["git", "merge-base", "HEAD", "origin/main"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to find merge-base with origin/main. "
-                f"Make sure origin/main exists (run 'git fetch origin main'). "
-                f"Error: {result.stderr.strip()}"
-            )
-
-        merge_base = result.stdout.strip()
-        result = subprocess.run(
-            ["git", "diff", f"{merge_base}..HEAD", filename],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to get git diff information for {filename}. Error: {result.stderr}"
-            )
+        merge_base = merge_base_with_main()
+        result = run_git_object_command(["diff", f"{merge_base}..HEAD", "--", filename])
         added_lines.update(parse_diff(result.stdout))
 
     except Exception as e:
@@ -139,14 +100,15 @@ def check_file(filename: str) -> list[LintMessage]:
     1. All function declarations are within TORCH_FEATURE_VERSION blocks
     2. New functions added in this commit use the current version macro
 
-    For the AOTI shim (torch/csrc/inductor/aoti_torch/c/shim.h), we only
+    For the manual AOTI shims (torch/csrc/inductor/aoti_torch/c/*.h), we only
     enforce versioning on NEW function declarations, since existing functions
     are intentionally not version-guarded.
     """
     lint_messages: list[LintMessage] = []
 
-    # Check if this is the AOTI shim - only enforce versioning on new lines
-    is_aoti_shim = "torch/csrc/inductor/aoti_torch/c/shim.h" in filename
+    # Check if this is a manual AOTI shim - only enforce versioning on new lines,
+    # since existing declarations in these headers are intentionally unversioned.
+    is_aoti_shim = "torch/csrc/inductor/aoti_torch/c/" in filename
 
     # Get current version
     current_version = get_current_version()

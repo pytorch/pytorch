@@ -158,10 +158,14 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
     # as they are emitted
     def _handler_watcher(self, record_list):
         exit_stack = contextlib.ExitStack()
+        seen_record_ids = set()
 
         def emit_post_hook(record):
             nonlocal record_list
-            record_list.append(record)
+            record_id = id(record)
+            if record_id not in seen_record_ids:
+                seen_record_ids.add(record_id)
+                record_list.append(record)
 
         # Registered logs are the only ones with handlers, so patch those. Count and
         # patch only torch-owned handlers: when running under pytest (or any framework
@@ -178,20 +182,23 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
             self.assertLessEqual(
                 num_handlers,
                 2,
-                "All pt2 loggers should only have at most two handlers (debug artifacts and messages above debug level).",
+                "All pt2 loggers should only have at most two Torch handlers (debug artifacts and messages above debug level).",
             )
 
-            self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero handlers")
+            self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero Torch handlers")
 
             for handler in torch_handlers:
                 old_emit = handler.emit
 
-                def new_emit(record):
-                    old_emit(record)
-                    emit_post_hook(record)
+                def make_emit(old_emit):
+                    def new_emit(record):
+                        old_emit(record)
+                        emit_post_hook(record)
+
+                    return new_emit
 
                 exit_stack.enter_context(
-                    unittest.mock.patch.object(handler, "emit", new_emit)
+                    unittest.mock.patch.object(handler, "emit", make_emit(old_emit))
                 )
 
         return exit_stack

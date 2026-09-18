@@ -28,7 +28,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.non_strict_utils import _enable_graph_inputs_of_type_nn_module
 from torch._export.verifier import load_verifier
-from torch._library.opaque_object import get_opaque_type_name, is_opaque_value
+from torch._library.opaque_object import get_opaque_type_name, is_custom_class_obj
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
@@ -443,6 +443,7 @@ def deserialize_torch_artifact(
             "Fallback to weights_only=False succeeded. "
             "Loaded object of type %s after initial failure: %s",
             type(artifact),
+            e,
             exc_info=e,
         )
     if not isinstance(artifact, (tuple, dict)):
@@ -553,7 +554,8 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             f"expected triton_kernel_wrapper_functional, got {node.target}"
         )
 
-    if not has_triton():
+    # Triton kernel serialization also supports the CPU backend.
+    if not has_triton(include_cpu=True):
         raise AssertionError("triton required to serialize triton kernels")
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
@@ -1416,6 +1418,16 @@ class GraphModuleSerializer(metaclass=Final):
                         return Argument.create(as_strings=[])
                     elif isinstance(elem_type, torch.TensorType):
                         return Argument.create(as_tensors=[])
+                    elif isinstance(elem_type, torch.ListType):
+                        inner_elem_type = elem_type.getElementType()
+                        if isinstance(inner_elem_type, torch.IntType):
+                            return Argument.create(as_int_lists=[])
+                        elif isinstance(inner_elem_type, torch.FloatType):
+                            return Argument.create(as_float_lists=[])
+                        else:
+                            raise SerializeError(
+                                f"Empty list with nested type {elem_type} nyi."
+                            )
                     else:
                         # I believe empty symint lists default to ints, but
                         # please file an issue if this is not the case
@@ -1543,9 +1555,10 @@ class GraphModuleSerializer(metaclass=Final):
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
             elif all(
-                isinstance(a, tuple) and all(type(x) is int for x in a) for a in arg
+                isinstance(a, (list, tuple)) and all(type(x) is int for x in a)
+                for a in arg
             ):
-                # list of int tuples
+                # list of int lists (List[List[int]])
                 return Argument.create(as_int_lists=[list(t) for t in arg])
             elif all(
                 isinstance(a, (list, tuple)) and all(isinstance(x, float) for x in a)
@@ -1586,7 +1599,7 @@ class GraphModuleSerializer(metaclass=Final):
             return Argument.create(
                 as_custom_obj=CustomObjArgument(custom_obj_name, class_fqn)
             )
-        elif is_opaque_value(arg):
+        elif is_custom_class_obj(arg):
             custom_obj_name = f"_custom_obj_{len(self.custom_objs)}"
             self.custom_objs[custom_obj_name] = arg
             class_fqn = get_opaque_type_name(type(arg))
@@ -1618,7 +1631,7 @@ class GraphModuleSerializer(metaclass=Final):
         self.graph_state.sym_float_values[name] = serialize_sym_float(meta_val)
         return SymFloatArgument.create(as_name=name)
 
-    def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
+    def serialize_sym_bool_output(self, name, meta_val) -> SymBoolArgument:
         if name in self.graph_state.sym_bool_values:
             raise AssertionError(f"name {name!r} already in sym_bool_values")
         self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
@@ -2395,7 +2408,11 @@ class GraphModuleDeserializer(metaclass=Final):
                     ):
                         self.unbacked_symbols.add(sym)
                 # hints
-                if hint is not None and sym not in self.shape_env.backed_var_to_val:
+                if (
+                    hint is not None
+                    and isinstance(sym, sympy.Symbol)
+                    and sym not in self.shape_env.backed_var_to_val
+                ):
                     self.shape_env.add_backed_var_to_val(sym, hint)  # type: ignore[arg-type]
                 # ValueRanges
                 if vr := self.symbol_name_to_range.get(expr_str):
@@ -2950,10 +2967,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
-            self.constants = deserialize_torch_artifact(constants)
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
@@ -2984,6 +2997,13 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.shape_env.unbacked_symfloat_counter += 1
             for _ in range(count_unbacked_symint + 1):
                 self.shape_env.unbacked_symint_counter += 1
+
+            # Fake tensor constants may reconstruct symbolic sizes, which need
+            # the symbol range map initialized above.
+            self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(
+                serialized_graph_module.signature
+            )
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)

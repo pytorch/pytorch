@@ -7,7 +7,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 class TestProcessGroupHooks(MultiProcessTestCase):
@@ -20,6 +20,8 @@ class TestProcessGroupHooks(MultiProcessTestCase):
     pure-Python or fake ProcessGroup overrides the collective methods and
     dispatches without going through the c10d ops, so it bypasses these hooks.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
@@ -110,8 +112,12 @@ class TestProcessGroupHooks(MultiProcessTestCase):
             HookOpName.RECV,
         }
         for op in expected:
-            self.assertIn(op, pre_ops, f"pre-hook did not fire for {op}")
-            self.assertIn(op, post_ops, f"post-hook did not fire for {op}")
+            self.assertIn(
+                op, pre_ops, lambda msg: f"{msg}\npre-hook did not fire for {op}"
+            )
+            self.assertIn(
+                op, post_ops, lambda msg: f"{msg}\npost-hook did not fire for {op}"
+            )
 
         # Every issued collective fires exactly one pre and one post hook, and
         # each post correlates with its pre via op_id.

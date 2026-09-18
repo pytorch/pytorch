@@ -44,6 +44,16 @@ from typing_extensions import (
 )
 
 
+# Re-executing this file (retrying a failed import, or `reload`) would corrupt the C++ global state the first run set up.
+if getattr(sys, "_torch_import_started", False):
+    raise ImportError(
+        "`torch` can only be initialized once per process, so this module cannot "
+        "be imported again: neither via `importlib.reload(torch)`, nor by "
+        "re-importing after a failed `import torch`."
+    )
+sys._torch_import_started = True  # type: ignore[attr-defined]
+
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
@@ -180,6 +190,7 @@ else:
 if sys.platform == "win32":
 
     def _load_dll_libraries() -> None:
+        import importlib.util
         import sysconfig
 
         from torch.version import cuda as cuda_version
@@ -187,6 +198,13 @@ if sys.platform == "win32":
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
         th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
+        # Anchor the DLL dir on the compiled _C extension rather than __file__:
+        # editable installs (e.g. scikit-build-core) run this __init__ from the
+        # source tree, whose lib/ is empty, while _C and its dependent DLLs live
+        # in the installed tree. In a wheel install both resolve to the same dir.
+        _spec = importlib.util.find_spec("torch._C")
+        if _spec is not None and _spec.origin:
+            th_dll_path = os.path.join(os.path.dirname(_spec.origin), "lib")
         usebase_path = os.path.join(
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
@@ -354,7 +372,6 @@ def _preload_cuda_deps(err: OSError | None = None, required: bool = True) -> Non
         ("cuda_runtime", "libcudart.so.*[0-9]"),
         ("cuda_cupti", "libcupti.so.*[0-9]"),
         ("cufft", "libcufft.so.*[0-9]"),
-        ("curand", "libcurand.so.*[0-9]"),
         ("nvjitlink", "libnvJitLink.so.*[0-9]"),
         ("cusparse", "libcusparse.so.*[0-9]"),
         ("cusparselt", "libcusparseLt.so.*[0-9]"),
@@ -391,6 +408,26 @@ def _load_global_deps() -> None:
     lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
+
+    # In scikit-build-core editable installs with redirect mode, native libs are
+    # installed to the dist package location rather than relative to __file__.
+    if not os.path.exists(global_deps_lib_path):
+        try:
+            from importlib.metadata import distribution
+
+            installed = distribution("torch").locate_file(
+                os.path.join("torch", "lib", lib_name)
+            )
+            # The importlib metadata SimplePath protocol was missing the exists
+            # method in older versions; however, the actual Path implementation
+            # has it and newer versions of importlib metadata have added it to
+            # the protocol, making the following ignore unnecessary from
+            # importlib_metadata 7.0.1 and Python 3.13 onwards.
+            # pyrefly: ignore[missing-attribute]
+            if installed.exists():
+                global_deps_lib_path = str(installed)
+        except Exception:
+            pass
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -1525,6 +1562,7 @@ def is_storage(obj: object, /) -> _TypeGuard["TypedStorage | UntypedStorage"]:
         True
         >>>
         >>> # TypedStorage (legacy)
+        >>> warnings.filterwarnings("ignore", message=".*TypedStorage is deprecated")  # docs: hide
         >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
         >>> torch.is_storage(typed_storage)
         True
@@ -1755,6 +1793,7 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
         * :func:`torch.Tensor.index_put` with ``accumulate=False``
@@ -1807,8 +1846,19 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
-        * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.scatter_reduce` when called on CUDA or MPS tensor
+        * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
+          an MPS tensor with floating or complex dtype
+        * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
+          when called on an MPS tensor with floating or complex dtype
+        * :func:`torch.kthvalue` when called on an MPS tensor
+        * :class:`torch.nn.Embedding` when attempting to differentiate an MPS tensor
+        * :class:`torch.nn.EmbeddingBag` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, and :func:`torch.nn.AvgPool3d`
+          when attempting to differentiate an MPS tensor
+        * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
+          in some cases
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     In addition, several operations fill uninitialized memory when this setting
@@ -2662,24 +2712,28 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-from torch import (
+from torch import (  # usort: skip
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
     accelerator as accelerator,
     autograd as autograd,
     backends as backends,
+    # Device modules must be imported before other modules (e.g., multiprocessing)
+    # that need to access their classes at import time.
     cpu as cpu,
     cuda as cuda,
+    mps as mps,
+    mtia as mtia,
+    xpu as xpu,
     distributed as distributed,
     distributions as distributions,
     fft as fft,
+    foreach as foreach,
     futures as futures,
     hub as hub,
     jit as jit,
     linalg as linalg,
-    mps as mps,
-    mtia as mtia,
     multiprocessing as multiprocessing,
     nested as nested,
     nn as nn,
@@ -2692,7 +2746,6 @@ from torch import (
     types as types,
     utils as utils,
     version as version,
-    xpu as xpu,
 )
 from torch.signal import windows as windows
 
@@ -2780,6 +2833,7 @@ from torch._linalg_utils import (  # type: ignore[misc]
     eig,
     lstsq,
     matrix_rank,
+    qr,
     solve,
 )
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -2975,6 +3029,13 @@ class _TorchCompileWrapper:
         if hasattr(self.compiler_fn, "reset"):
             self.compiler_fn.reset()
 
+    # Forwarded so the backend's _dynamo_backend_init can be read off the
+    # wrapper (what get_compiler_fn receives); read at fire time so the hook
+    # can be set on the backend even after torch.compile() wraps it.
+    @property
+    def _dynamo_backend_init(self) -> _Any | None:
+        return getattr(self.compiler_fn, "_dynamo_backend_init", None)
+
 
 _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
@@ -3109,7 +3170,7 @@ def compile(
         - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
           This is an unsafe feature and there is no backward compatibility guarantee provided
           for dynamo guards as data types.
-          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          For stable helper functions to use, see the documentation in `torch.compiler`, for example:
           - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
           - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
           - `torch.compiler.keep_tensor_guards_unsafe`
@@ -3394,8 +3455,9 @@ def get_device_module(device: "torch.device | str | None" = None) -> _ModuleType
     elif isinstance(device, str):
         device_module_name = torch.device(device).type
     elif device is None:
-        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
-        device_module_name = torch._C._get_accelerator().type
+        # Use the current accelerator's type, falling back to CPU when none is available.
+        acc = torch._C._accelerator_getAccelerator()
+        device_module_name = acc.type if acc is not None else "cpu"
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"

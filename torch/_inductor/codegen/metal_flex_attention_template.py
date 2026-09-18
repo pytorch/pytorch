@@ -131,6 +131,7 @@ def _fx_graph_to_metal(
     captured: dict[str, Any],
     output_var: str,
     var_prefix: str,
+    int_ctype: str = "int",
 ) -> str:
     """Compile an FX GraphModule to inline Metal code.
 
@@ -268,7 +269,7 @@ def _fx_graph_to_metal(
         if target in _INT_PRESERVING_OPS:
             both_int = _is_int(args[0]) and _is_int(args[1])
             op = _INT_PRESERVING_OPS[target]
-            ctype = "long" if both_int else "float"
+            ctype = int_ctype if both_int else "float"
             code_lines.append(f"{ctype} {t} = {_val(args[0])} {op} {_val(args[1])};")
             if both_int:
                 int_vars.add(node.name)
@@ -280,7 +281,7 @@ def _fx_graph_to_metal(
             fn = "floor_divide" if target is operator.floordiv else "remainder"
             both_int = _is_int(args[0]) and _is_int(args[1])
             if both_int:
-                a, b, ctype = _val(args[0]), _val(args[1]), "long"
+                a, b, ctype = _val(args[0]), _val(args[1]), int_ctype
             else:
                 a = f"static_cast<float>({_val(args[0])})"
                 b = f"static_cast<float>({_val(args[1])})"
@@ -290,16 +291,15 @@ def _fx_graph_to_metal(
                 int_vars.add(node.name)
         elif target is operator.neg:
             is_int = _is_int(args[0])
-            code_lines.append(
-                f"{'long' if is_int else 'float'} {t} = -{_val(args[0])};"
-            )
+            ctype = int_ctype if is_int else "float"
+            code_lines.append(f"{ctype} {t} = -{_val(args[0])};")
             if is_int:
                 int_vars.add(node.name)
         elif target in (operator.and_, operator.or_):
             a, b = _val(args[0]), _val(args[1])
             if _is_int(args[0]) and _is_int(args[1]):
                 op = "&" if target is operator.and_ else "|"
-                code_lines.append(f"long {t} = {a} {op} {b};")
+                code_lines.append(f"{int_ctype} {t} = {a} {op} {b};")
                 int_vars.add(node.name)
             else:
                 op = "&&" if target is operator.and_ else "||"
@@ -357,6 +357,7 @@ def _compile_subgraph_to_metal(
     captured_meta: list[Any],
     output_var: str,
     var_prefix: str,
+    int_ctype: str = "int",
 ) -> str:
     """
     Bind placeholders by position to Metal variable names and emit parts of Metal .
@@ -376,7 +377,9 @@ def _compile_subgraph_to_metal(
             fixed[node.name] = placeholder_metal_names[i]
         else:
             captured[node.name] = captured_meta[i - n_fixed]
-    return _fx_graph_to_metal(graph_module, fixed, captured, output_var, var_prefix)
+    return _fx_graph_to_metal(
+        graph_module, fixed, captured, output_var, var_prefix, int_ctype
+    )
 
 
 def _generate_mma_shader(
@@ -606,6 +609,7 @@ def _generate_metal_shader(
     mask_captured: Sequence[tuple] = (),
     write_lse: bool = False,
     write_max: bool = False,
+    captures_fit_int32: bool = True,
 ) -> str:
     """Generate the complete Metal shader source for flex attention.
 
@@ -752,12 +756,14 @@ def _generate_metal_shader(
 
     scalar_params_str = f"    constant long* _params [[buffer({buf_idx})]]"
 
+    int_ctype = "int" if captures_fit_int32 else "long"
     score_code = _compile_subgraph_to_metal(
         graph_module=score_mod_graph,
         placeholder_metal_names=["score_val", "b_idx", "h_idx", "m_idx", "n_idx"],
         captured_meta=score_meta,
         output_var="score_val",
         var_prefix="_sm",
+        int_ctype=int_ctype,
     )
     mask_code = _compile_subgraph_to_metal(
         graph_module=mask_mod_graph,
@@ -765,10 +771,13 @@ def _generate_metal_shader(
         captured_meta=mask_meta,
         output_var="mask_result",
         var_prefix="_mm",
+        int_ctype=int_ctype,
     )
 
+    capsym_set = OrderedSet(scalar_capture_names)
     unpack_code = "\n".join(
-        f"    long {name} = _params[{i}];" for i, name in enumerate(scalar_names)
+        f"    {int_ctype if name in capsym_set else 'long'} {name} = _params[{i}];"
+        for i, name in enumerate(scalar_names)
     )
 
     if use_mma:

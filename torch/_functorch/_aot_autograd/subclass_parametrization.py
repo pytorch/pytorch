@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._custom_class_base import CustomClassBase
-from torch._library.opaque_object import is_opaque_reference_type
+from torch._library.opaque_object import is_opaque_symbolic_type
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import OpaqueMeta
@@ -76,7 +76,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
                 val = getattr(tensor, attr)
                 match val:
                     case CustomClassBase():
-                        if not is_opaque_reference_type(type(val)):
+                        if not is_opaque_symbolic_type(type(val)):
                             raise ValueError(
                                 f"{type(val).__name__!r} found in tensor attrs of "
                                 f"{type(tensor).__name__}.__tensor_flatten__(). "

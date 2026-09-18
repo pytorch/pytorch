@@ -677,7 +677,7 @@ def _expand_single_dim_strategy_to_mesh(
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
 ) -> _ExpandedSingleDimStrategyFunc:
     """
-    Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
+    Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlaceholder into all
     sharding types used by inputs.
 
     This supports functional correctness but will generate all possible combinations, which is prohibitively expensive
@@ -943,6 +943,12 @@ def _get_neighbor_placements(
     - Shard(d1) -> Shard(d2): all-to-all, valid if neither d1 nor d2 sharded right
     - Partial -> Replicate: allreduce, always valid
     - Partial -> Shard(d): reduce-scatter, valid if d not sharded to the right
+
+    Shard -> Partial("sum") is intentionally absent. Although explicit
+    redistribution supports it, the conversion materializes a global-shape
+    local tensor. Because the strategy cost model accounts only for communication,
+    we exclude this transition to avoid selecting it without accounting for its
+    memory and copy costs.
     """
     # Note: circular import
     from torch.distributed.tensor.placement_types import Partial

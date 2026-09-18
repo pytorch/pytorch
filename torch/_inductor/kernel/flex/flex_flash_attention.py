@@ -668,6 +668,7 @@ def create_flex_flash_attention_backward_kernel(
     out: TensorBox,
     logsumexp: TensorBox,
     grad_out: TensorBox,
+    grad_logsumexp: TensorBox | None,
     scale: float,
     kernel_options: dict[str, Any],
     sparse_q_block_size: int,
@@ -738,6 +739,19 @@ def create_flex_flash_attention_backward_kernel(
     sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
     sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
 
+    has_dlse = grad_logsumexp is not None
+    if (
+        has_dlse
+        and V.graph.sizevars.statically_known_equals(head_dim, 256)
+        and V.graph.sizevars.statically_known_equals(v_head_dim, 256)
+        and torch.cuda.get_device_capability(device)[0] in (10, 11)
+    ):
+        raise NotImplementedError(
+            "FLASH backend dLSE is not supported by the SM100/SM110 dedicated "
+            "head_dim=256 FA4 backward kernel. Use BACKEND='TRITON' for this "
+            "configuration."
+        )
+
     choices: list[Any] = []
 
     input_nodes: list[TensorBox] = [
@@ -779,6 +793,8 @@ def create_flex_flash_attention_backward_kernel(
     dq_kv_order_spt_for_flash = dq_kv_order_spt if has_dq_write_order else None
     if has_dq_kv_order:
         input_nodes.append(dq_kv_order)
+    if has_dlse:
+        input_nodes.append(cast(TensorBox, grad_logsumexp))
 
     supports_dq_kv_order = False
     supports_spt = False
@@ -881,6 +897,7 @@ def create_flex_flash_attention_backward_kernel(
                 HAS_DQ_WRITE_ORDER_FULL=dq_write_order_full is not None,
                 HAS_DQ_KV_ORDER=has_dq_kv_order,
                 DQ_KV_ORDER_SPT=dq_kv_order_spt_for_flash,
+                HAS_DLSE=has_dlse,
                 AUX_SCALAR_SYMBOLS=aux_scalar_symbols,
                 SUPPORTS_DQ_KV_ORDER=supports_dq_kv_order,
                 SUPPORTS_SPT=supports_spt,
