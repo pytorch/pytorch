@@ -67,6 +67,7 @@ from ..source import (
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
+    check_positional,
     check_unspec_or_constant_args,
     check_unspec_python_args,
     dict_methods,
@@ -2523,12 +2524,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             # `default` is positional-only, so a keyword call is rejected before
             # any argument count is looked at.  The name matches CPython's.
             raise_type_error(tx, "_operator.length_hint() takes no keyword arguments")
-        if not args:
-            raise_type_error(tx, "length_hint expected at least 1 argument, got 0")
-        if len(args) > 2:
-            raise_type_error(
-                tx, f"length_hint expected at most 2 arguments, got {len(args)}"
-            )
+        check_positional(tx, "length_hint", len(args), 1, 2)
         obj = args[0]
         if len(args) == 2:
             # The C entry point takes the default as Py_ssize_t: __index__ is
@@ -2582,7 +2578,9 @@ class BuiltinVariable(BaseBuiltinVariable):
             val = pylong_as_ssize_t(tx, hint)
             if val < 0:
                 raise_value_error(tx, "__length_hint__() should return >= 0")
-            return ConstantVariable.create(val)
+            # The C entry point ends in PyLong_FromSsize_t, so an int subclass
+            # such as bool is normalized to int before the caller sees it.
+            return ConstantVariable.create(int(val))
 
         # Any other non-constant hint (e.g. a compile-time-only id()) cannot be
         # type- or range-checked at trace time; refuse it rather than return a

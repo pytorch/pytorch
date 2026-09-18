@@ -2471,8 +2471,9 @@ class BaseListIteratorVariable(IteratorVariable):
         # iterator permanently reports 0.
         # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L4100-L4108
         #
-        # `items` is a snapshot when the iterator was built from an uncompiled
-        # source, so later mutations of that source are not reflected here.
+        # A forward iterator aliases the source list and so sees its mutations.
+        # `list_reversed` copies the items instead, so a shrink of the source
+        # below the current index is not reflected here.
         if self.is_exhausted:
             return ConstantVariable.create(0)
         return ConstantVariable.create(max(len(self.items) - self.index, 0))

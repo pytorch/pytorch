@@ -4492,6 +4492,23 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(torch.ones(2))[0], ("raise", "MyTypeError", "boom"))
 
+    def test_operator_length_hint_bool(self):
+        # _operator.length_hint is declared -> Py_ssize_t and ends in
+        # PyLong_FromSsize_t, so a bool from __length_hint__ arrives as an int.
+        # assertEqual cannot show this: RelaxedBooleanPair treats 1 and True as
+        # equal, so the type of the compiled result is what has to be checked.
+        def fn(x):
+            hint = operator.length_hint
+            hints = tuple(hint(WithLengthHint(b)) for b in (True, False))
+            return hints, x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        hints = opt_fn(torch.ones(2))[0]
+        self.assertIs(type(hints), tuple)
+        self.assertEqual(hints, fn(torch.ones(2))[0])
+        for hint in hints:
+            self.assertIs(type(hint), int)
+
     @parametrize("offset", (1, -5))
     def test_operator_length_hint_symbolic(self, offset):
         # A symbolic hint and a symbolic default are both specialized, so the
