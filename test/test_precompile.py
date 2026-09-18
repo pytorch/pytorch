@@ -3015,21 +3015,23 @@ class TestPrecompileCaptureFiles(TestCase):
         )
         self.assertEqual(self._leftovers(), [])
 
-    def test_a_raise_after_a_successful_save_keeps_the_saved_pair(self):
-        # The documented save()-then-raise state: the exception leaves the block, so the
-        # exit writes nothing at all and both halves are still the ones save() renamed in.
+    def test_a_save_closes_the_writes_after_it(self):
+        # What the written flag is for: the pair on disk is already THIS render, so neither a
+        # second save() nor the clean exit re-enters the write -- a rename patched to fail
+        # never fires -- and neither leaves a retry state over files that are already right.
         cap = self._capture()
-        with self.assertRaisesRegex(RuntimeError, "boom"):
-            with cap:
-                cap(self.model, self.x)
-                cap.save()
-                saved = (self._read(self.artifact), self._read(self.cache))
-                inodes = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
-                raise RuntimeError("boom")
-        self.assertEqual((self._read(self.artifact), self._read(self.cache)), saved)
-        self.assertEqual(
-            (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino), inodes
-        )
+        with cap:
+            cap(self.model, self.x)
+            cap.save()
+            no_space = OSError(errno.ENOSPC, "no space left")
+            patch = self._replacing(self.artifact, exc=no_space)
+            patch.start()
+            self.addCleanup(patch.stop)
+            cap.save()
+        call = functools.partial(cap, self.model, self.x)
+        for door in (cap.__enter__, call, cap.save):
+            with self.assertRaisesRegex(PrecompileError, r"Call capture\(\) again"):
+                door()
         self._assert_serves()
 
     def test_a_manual_exit_after_the_block_is_refused(self):
@@ -3455,8 +3457,10 @@ class TestPrecompileCaptureFiles(TestCase):
                 with cap:
                     cap(self.model, self.x)
         self.assertEqual(os.listdir(self.dir), [])
-        # Spent for tracing, but both doors send the caller to save(), which closes on success.
-        for door in (cap.__enter__, functools.partial(cap, self.model, self.x)):
+        # Spent for tracing, but every door sends the caller to save(), which closes on success.
+        call = functools.partial(cap, self.model, self.x)
+        exit_again = functools.partial(cap.__exit__, None, None, None)
+        for door in (cap.__enter__, call, exit_again):
             with self.assertRaisesRegex(PrecompileError, "WRITE is what failed"):
                 door()
         cap.save()
