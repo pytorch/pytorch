@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_graphlib.py b/test/cpython/v3_13/test_graphlib.py
-index 5f38af4024c5b07f6191a3b146e449d546561f73..bff3857e856985e37da9b165fe89cbcf1975753b 100644
+index 5f38af4024c5b07f6191a3b146e449d546561f73..f4f62946c22b6587d82544a44202f4a90aae5c84 100644
 --- a/test/cpython/v3_13/test_graphlib.py
 +++ b/test/cpython/v3_13/test_graphlib.py
 @@ -1,10 +1,29 @@
@@ -33,7 +33,16 @@ index 5f38af4024c5b07f6191a3b146e449d546561f73..bff3857e856985e37da9b165fe89cbcf
      def _test_graph(self, graph, expected):
          def static_order_with_groups(ts):
              ts.prepare()
-@@ -222,6 +241,7 @@ class TestTopologicalSort(unittest.TestCase):
+@@ -25,6 +44,8 @@ class TestTopologicalSort(unittest.TestCase):
+         for group in expected:
+             tsgroup = {next(it) for element in group}
+             self.assertEqual(set(group), tsgroup)
++        # Exhaust the generator so Dynamo does not need to close a suspended yield from.
++        self.assertEqual(list(it), [])
+ 
+     def _assert_cycle(self, graph, cycle):
+         ts = graphlib.TopologicalSorter()
+@@ -222,6 +243,7 @@ class TestTopologicalSort(unittest.TestCase):
  
          self.assertEqual(list(get_groups(ts)), list(get_groups(ts2)))
  
@@ -41,7 +50,7 @@ index 5f38af4024c5b07f6191a3b146e449d546561f73..bff3857e856985e37da9b165fe89cbcf
      def test_static_order_does_not_change_with_the_hash_seed(self):
          def check_order_with_hash_seed(seed):
              code = """if 1:
-@@ -249,4 +269,4 @@ class TestTopologicalSort(unittest.TestCase):
+@@ -249,4 +271,4 @@ class TestTopologicalSort(unittest.TestCase):
          self.assertEqual(run1, run2)
  
  if __name__ == "__main__":
