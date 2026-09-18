@@ -105,9 +105,11 @@ class GradScaler:
     iterations.  After that, step skipping should occur rarely (once every few hundred or thousand iterations).
 
     Args:
-        device (str, optional, default="cuda"): Device type to use. Possible values are: 'cuda' and 'cpu'.
+        device (str, optional, default=None): Device type to use, e.g. 'cuda', 'cpu', 'xpu'.
             The type is the same as the `type` attribute of a :class:`torch.device`.
             Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
+            Default: ``None``, which resolves to :func:`torch.accelerator.current_accelerator`
+            if an accelerator is present, else ``'cpu'``.
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
@@ -122,13 +124,16 @@ class GradScaler:
 
     def __init__(
         self,
-        device: str = "cuda",
+        device: str | None = None,
         init_scale: float = 2.0**16,
         growth_factor: float = 2.0,
         backoff_factor: float = 0.5,
         growth_interval: int = 2000,
         enabled: bool = True,
     ) -> None:
+        if device is None:
+            accel = torch.accelerator.current_accelerator()
+            device = accel.type if accel is not None else "cpu"
         self._device = device
         self._enabled = enabled
         if self._device == "cuda":
