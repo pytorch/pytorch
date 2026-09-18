@@ -119,6 +119,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MACOS_VERSION,
+    MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
     parametrize,
@@ -7763,7 +7764,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        TEST_WITH_TORCHINDUCTOR,
         "https://github.com/pytorch/pytorch/issues/165879",
     )
     @parametrize("tile_reduction", (False, True))
@@ -13434,6 +13435,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @skip_if_halide  # compiles for 5+ minutes
+    @skipIfRocmArch(MI200_ARCH)  # exceeds the inductor compile-worker timeout
     def test_avg_pool3d_backward2(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -19104,7 +19106,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179970")
     @requires_gpu_and_triton
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_cpu_scalar_with_gpu_tensor_cpp(self):

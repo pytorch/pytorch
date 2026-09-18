@@ -113,8 +113,15 @@ from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import (
+    has_triton_cuda_tma_device,
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
+)
+
+
+requires_cuda_tma = unittest.skipIf(
+    GPU_TYPE == "cuda" and not has_triton_cuda_tma_device(),
+    "requires CUDA TMA device support",
 )
 
 
@@ -597,8 +604,8 @@ class AOTInductorTestsTemplate:
             self.check_model(Model().to(self.device), example_inputs)
 
     @unittest.skipIf(
-        not HAS_GPU or GPU_TYPE != "cuda" or TEST_WITH_ROCM,
-        "Pinned async constant copy is CUDA-only",
+        not HAS_GPU or GPU_TYPE != "cuda",
+        "Pinned async constant copy is CUDA/ROCm-only",
     )
     @patch.dict(
         os.environ,
@@ -1086,6 +1093,7 @@ class AOTInductorTestsTemplate:
             },
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_on_device_tma(self, dynamic, tma_version):
@@ -4463,6 +4471,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_1d(self, dynamic, tma_version):
@@ -4525,6 +4534,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
     def test_triton_kernel_tma_descriptor_2d(self, dynamic, tma_version):
@@ -7913,7 +7923,7 @@ class AOTInductorTestsTemplate:
 
     @requires_multigpu()
     def test_cuda_to_cuda_device_copy(self):
-        if self.device != GPU_TYPE or GPU_TYPE != "cuda" or TEST_WITH_ROCM:
+        if self.device != GPU_TYPE or GPU_TYPE != "cuda":
             raise unittest.SkipTest("This test requires CUDA")
 
         device0 = torch.device(type=GPU_TYPE, index=0)
