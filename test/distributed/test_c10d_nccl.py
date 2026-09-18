@@ -1441,6 +1441,20 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_merge_group_clones_store_for_uninitialized_child(self):
+        parent_store = c10d.FileStore(self.file_name, self.world_size)
+        parent = self._create_process_group_nccl(parent_store, self.opts())
+        merge_store = test_c10d_common._CloneTrackingStore()
+
+        child = parent.merge_remote_group(merge_store, 1)
+
+        self.assertEqual(merge_store.clone_count, 1)
+        self.assertEqual(child.size(), 1)
+        child.shutdown()
+        dist.destroy_process_group()
+
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_group_backend_validation(self):

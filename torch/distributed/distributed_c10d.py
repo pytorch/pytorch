@@ -6690,8 +6690,13 @@ def split_group(
     """
     Create a new process group split from the given parent process group.
 
-    warning:: This is an experimental API. Only the ``NCCL`` and custom plugin backends
-    are supported. Other backends will raise an error.
+    .. warning::
+        This is an experimental API. The selected parent backend must
+        implement process-group splitting. Built-in support includes ``NCCL``,
+        ``XCCL``, and ``Gloo``. Custom backends are responsible for cloning the
+        prefixed child Store if they require an independent connection or mutate
+        connection-global state such as the Store timeout.
+
     Users of this API must guarantee that all ranks in the parent group enter this API call,
     and the split of the sub groups is the same across all ranks in the parent group.
 
@@ -6757,22 +6762,19 @@ def split_group(
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
 
-    if torch.accelerator.is_available():
-        parent_backend = parent_pg._get_backend(
-            torch.accelerator.current_accelerator()  # pyrefly: ignore[bad-argument-type]
-        )
-    elif _use_torchcomms_enabled():
-        # torchcomms supports CPU/gloo splitting; no accelerator is required.
-        parent_backend = parent_pg._get_backend(
-            torch.device("cpu")  # pyrefly: ignore[bad-argument-type]
-        )
+    parent_device_types = {device.type for device in parent_pg._device_types}
+    accelerator = torch.accelerator.current_accelerator()
+    if accelerator is not None and accelerator.type in parent_device_types:
+        parent_backend_device = accelerator
+    elif "cpu" in parent_device_types:
+        parent_backend_device = torch.device("cpu")
     else:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
         )
+    parent_backend = parent_pg._get_backend(parent_backend_device)
 
-    # if the parent backend does not support splitting, raise error
-    # currently this API only support NCCL and XCCL backend
+    # If the parent backend does not support splitting, raise an error.
     if (
         not parent_backend or not parent_backend.supports_splitting
     ) and not _use_torchcomms_enabled():
@@ -7826,7 +7828,8 @@ def _create_shrunk_process_group(
     else:
         group_desc = f"{metadata['original_group_name']}:shrunk"
 
-    # Create process group with new communicator (clone the parent store like split does)
+    # A shrunk communicator is re-registered and may rendezvous later, so it
+    # retains an independent Store connection like both backend shrink paths.
     prefix_store = PrefixStore(
         f"{group_name}/",
         metadata["store"].clone(),
