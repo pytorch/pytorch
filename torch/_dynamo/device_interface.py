@@ -255,6 +255,49 @@ class DeviceInterface:
                 "This device is not capable of supporting Triton"
             )
 
+    @staticmethod
+    def get_aoti_cpp_includes() -> list[str]:
+        """Return C++ #include directives for AOTI standalone main.cpp.
+
+        Returns a list of strings like '#include <cuda.h>'.
+        Default: empty (no device-specific headers needed).
+        """
+        return []
+
+    @staticmethod
+    def get_aoti_cmake_find_packages() -> list[str]:
+        """Return CMake find_package target names for AOTI standalone build.
+
+        Returns a list of package names like 'CUDA'. Default: empty.
+        """
+        return []
+
+    @staticmethod
+    def get_aoti_cmake_compile_definitions() -> list[str]:
+        """Return CMake compile definition names for AOTI standalone build.
+
+        Returns a list of definition names like 'USE_CUDA'. Default: empty.
+        """
+        return []
+
+    @staticmethod
+    def get_aoti_cmake_link_libraries() -> list[str]:
+        """Return CMake link library specs for AOTI standalone build.
+
+        Returns a list of library specs like 'cuda'. Default: empty.
+        """
+        return []
+
+    @staticmethod
+    def get_aoti_cmake_prefix_paths() -> list[str]:
+        """Return CMAKE_PREFIX_PATH entries for AOTI standalone build.
+
+        Returns a list of directory paths to prepend to CMAKE_PREFIX_PATH
+        in the generated CMakeLists.txt, enabling find_package to locate
+        backend-provided CMake config files. Default: empty.
+        """
+        return []
+
 
 class DeviceGuard:
     """
@@ -385,6 +428,26 @@ class CudaInterface(DeviceInterface):
                 raise TritonUnavailableError("triton not built with the 'amd' backend")
         elif "nvidia" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'nvidia' backend")
+
+    @staticmethod
+    def get_aoti_cpp_includes() -> list[str]:
+        if torch.version.hip:
+            return ["#include <hip/hip_runtime.h>"]
+        return ["#include <cuda.h>", "#include <cuda_runtime_api.h>"]
+
+    @staticmethod
+    def get_aoti_cmake_find_packages() -> list[str]:
+        return ["hip"] if torch.version.hip else ["CUDA"]
+
+    @staticmethod
+    def get_aoti_cmake_compile_definitions() -> list[str]:
+        return ["USE_HIP"] if torch.version.hip else ["USE_CUDA"]
+
+    @staticmethod
+    def get_aoti_cmake_link_libraries() -> list[str]:
+        if torch.version.hip:
+            return ["hip::host"]
+        return ["cuda", "${CUDA_LIBRARIES}"]
 
 
 get_mtia_stream: Callable[[int], int] | None
@@ -594,6 +657,14 @@ class XpuInterface(DeviceInterface):
 
         if "intel" not in triton.backends.backends:
             raise TritonUnavailableError("triton not built with the 'intel' backend")
+
+    @staticmethod
+    def get_aoti_cmake_compile_definitions() -> list[str]:
+        return ["USE_XPU"]
+
+    @staticmethod
+    def get_aoti_cmake_link_libraries() -> list[str]:
+        return ["sycl", "ze_loader"]
 
 
 @dataclass

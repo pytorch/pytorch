@@ -42,21 +42,13 @@ def _get_main_cpp_file(
             "#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>",
         ]
     )
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writelines(
-                [
-                    "#include <hip/hip_runtime.h>",
-                ]
-            )
+    from torch._dynamo.device_interface import get_interface_for_device
 
-        else:
-            ib.writelines(
-                [
-                    "#include <cuda.h>",
-                    "#include <cuda_runtime_api.h>",
-                ]
-            )
+    try:
+        iface = get_interface_for_device(device_type)
+        ib.writelines(iface.get_aoti_cpp_includes())
+    except NotImplementedError:
+        pass
     for model_name in model_names:
         ib.writeline(
             f'#include "{package_name}/data/aotinductor/{model_name}/{model_name}.h"'
@@ -206,33 +198,35 @@ def _get_make_file(package_name: str, model_names: list[str], device_type: str) 
     if test_configs.use_libtorch:
         ib.writeline("find_package(Torch REQUIRED)")
 
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writeline("find_package(hip REQUIRED)")
-        else:
-            ib.writeline("find_package(CUDA REQUIRED)")
+    from torch._dynamo.device_interface import get_interface_for_device
+
+    try:
+        iface = get_interface_for_device(device_type)
+    except NotImplementedError:
+        iface = None
+
+    if iface is not None:
+        for path in iface.get_aoti_cmake_prefix_paths():
+            ib.writeline(f'list(APPEND CMAKE_PREFIX_PATH "{path}")')
+
+    if iface is not None:
+        for pkg in iface.get_aoti_cmake_find_packages():
+            ib.writeline(f"find_package({pkg} REQUIRED)")
 
     ib.newline()
     for model_name in model_names:
         ib.writeline(f"add_subdirectory({package_name}/data/aotinductor/{model_name}/)")
 
     ib.writeline("\nadd_executable(main main.cpp)")
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writeline("target_compile_definitions(main PRIVATE USE_HIP)")
-        else:
-            ib.writeline("target_compile_definitions(main PRIVATE USE_CUDA)")
-    elif device_type == "xpu":
-        ib.writeline("target_compile_definitions(main PRIVATE USE_XPU)")
+    if iface is not None:
+        for definition in iface.get_aoti_cmake_compile_definitions():
+            ib.writeline(f"target_compile_definitions(main PRIVATE {definition})")
 
     model_libs = " ".join(model_names)
     ib.writeline(f"target_link_libraries(main PRIVATE torch {model_libs})")
 
-    if device_type == "cuda":
-        if torch.version.hip:
-            ib.writeline("target_link_libraries(main PRIVATE hip::host)")
-        else:
-            ib.writeline("target_link_libraries(main PRIVATE cuda ${CUDA_LIBRARIES})")
-    elif device_type == "xpu":
-        ib.writeline("target_link_libraries(main PRIVATE sycl ze_loader)")
+    if iface is not None:
+        libs = iface.get_aoti_cmake_link_libraries()
+        if libs:
+            ib.writeline(f"target_link_libraries(main PRIVATE {' '.join(libs)})")
     return ib.getvalue()
