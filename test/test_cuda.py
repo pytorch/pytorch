@@ -10827,7 +10827,9 @@ class TestGDS(TestCase):
         # local filesystem (ext4/xfs) for the temp file the transfer targets.
         if not torch.cuda.gds.is_available():
             self.skipTest("GDS (cuFile/hipFile) not built into this install")
-        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+        # hipFile's fallback path can work with filesystems that the fast path does
+        # not support.
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs") and not TEST_WITH_ROCM:
             self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
 
     def test_gds_is_available(self):
