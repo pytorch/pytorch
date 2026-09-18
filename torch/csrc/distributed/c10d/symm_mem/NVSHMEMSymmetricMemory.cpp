@@ -14,6 +14,7 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <cstdlib>
 #include <mutex>
 #include <utility>
 
@@ -418,6 +419,14 @@ static void initialize_nvshmem_with_store(
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
+
+  // NVSHMEM's IBRC transport registers an atexit handler during
+  // nvshmemx_init_attr that dlclose()s libmlx5 at process exit. Its proxy
+  // progress thread may still be polling inside libmlx5 (mlx5_poll_cq_v1) at
+  // that point, which segfaults. nvshmem_finalize() stops the progress thread
+  // and tears down transports. atexit is LIFO and we register after
+  // nvshmemx_init_attr, so this runs before the transport's dlclose handler.
+  std::atexit([]() { nvshmem_finalize(); });
 
   // Print version
 #if !defined(USE_ROCM)
