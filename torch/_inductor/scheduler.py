@@ -59,6 +59,7 @@ from .comm_analysis import (
     estimate_nccl_collective_runtime,
     estimate_nccl_collective_runtime_nccl_estimator,
 )
+from .cudagraph_utils import check_multiple_devices_or_any_cpu_nodes
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
@@ -5756,35 +5757,35 @@ class Scheduler:
             return 0
 
         graph = subgraph.graph
-        if graph.scheduler is None:
-            # Temporary codegen state just for counting; codegen() rebuilds it.
-            with (
-                config.patch(subgraph.inductor_config_patches or {}),
-                config.patch("graph_partition", False),
-                V.set_graph_handler(graph),
-            ):
-                graph.init_wrapper_code()
-                graph._update_scheduler()
+        # Nested bodies are counted under this region's patches too, the way
+        # codegen will see them.
+        with config.patch(subgraph.inductor_config_patches or {}):
+            if graph.scheduler is None:
+                # Temporary codegen state just for counting; codegen() rebuilds it.
+                with config.patch("graph_partition", False), V.set_graph_handler(graph):
+                    graph.init_wrapper_code()
+                    graph._update_scheduler()
 
-        count = 0
-        for node in graph.scheduler.nodes:
-            direct_kernel = False
-            nested_subgraphs: list[ir.Subgraph] = []
-            for scheduled_node in node.get_nodes():
-                op = scheduled_node.node
-                if not isinstance(op, ir.IRNode):
-                    continue
-                op_subgraphs = op.get_subgraphs()
-                if op_subgraphs:
-                    nested_subgraphs.extend(op_subgraphs)
-                elif not isinstance(op, ir.MultiOutput):
-                    direct_kernel = True
-            if direct_kernel and not isinstance(node, NopKernelSchedulerNode):
-                count += 1
-            count += sum(
-                self._count_subgraph_kernel_nodes(nested) for nested in nested_subgraphs
-            )
-        return count
+            count = 0
+            for node in graph.scheduler.nodes:
+                direct_kernel = False
+                nested_subgraphs: list[ir.Subgraph] = []
+                for scheduled_node in node.get_nodes():
+                    op = scheduled_node.node
+                    if not isinstance(op, ir.IRNode):
+                        continue
+                    op_subgraphs = op.get_subgraphs()
+                    if op_subgraphs:
+                        nested_subgraphs.extend(op_subgraphs)
+                    elif not isinstance(op, ir.MultiOutput):
+                        direct_kernel = True
+                if direct_kernel and not isinstance(node, NopKernelSchedulerNode):
+                    count += 1
+                count += sum(
+                    self._count_subgraph_kernel_nodes(nested)
+                    for nested in nested_subgraphs
+                )
+            return count
 
     def _count_partition_kernel_nodes(self, nodes: Sequence[BaseSchedulerNode]) -> int:
         count = 0
@@ -11278,11 +11279,16 @@ class Scheduler:
             return None
         with config.patch(subgraph.inductor_config_patches or {}):
             graph = subgraph.graph
+            if not config.triton.cudagraphs:
+                return "invoke_subgraph body opts out of cudagraphs"
             if graph.disable_cudagraphs_reason is not None:
                 return f"invoke_subgraph body {graph.disable_cudagraphs_reason}"
-            for device in graph.device_types:
-                if not is_gpu(device):
-                    return f"invoke_subgraph body has non-GPU ({device}) ops"
+            # A body is never partitioned, so judge it by whole-graph rules. The
+            # mapping is copied because the check pops the entries it tolerates.
+            if reason := check_multiple_devices_or_any_cpu_nodes(
+                dict(graph.device_node_mapping), use_cudagraph_partition=False
+            ):
+                return f"invoke_subgraph body has {reason}"
             for op in graph.operations:
                 if reason := self._ir_node_cudagraph_skip_reason(op):
                     return f"invoke_subgraph body has {reason}"
@@ -11374,27 +11380,44 @@ class Scheduler:
         or None if the node is cudagraphable.
         """
         region = self._get_invoke_subgraph_region(node)
-        if region is not None and config.triton.cudagraphs:
-            # invoke_subgraph is opaque to the outer scheduler, so the cudagraph
-            # checks have to run over the region body rather than the call node.
-            with config.patch(self._get_invoke_subgraph_config_patches(region) or {}):
-                skip_reason = self._invoke_subgraph_body_cudagraph_skip_reason(region)
-                if skip_reason is None:
-                    return self._invoke_subgraph_family_cudagraph_skip_reason(
-                        node, region
+        if region is not None:
+            patches = self._get_invoke_subgraph_config_patches(region)
+            cudagraphs_override = (
+                bool(patches["triton.cudagraphs"])
+                if patches is not None and "triton.cudagraphs" in patches
+                else None
+            )
+            if cudagraphs_override is False:
+                return "invoke_subgraph opts out of cudagraphs"
+            if cudagraphs_override is True or (
+                not V.graph.cudagraph_partition_only_regions
+                and V.graph.cudagraphs_top_level
+            ):
+                # invoke_subgraph is opaque to the outer scheduler, so the
+                # cudagraph checks run over the body, not the call node.
+                with config.patch(patches or {}):
+                    skip_reason = self._invoke_subgraph_body_cudagraph_skip_reason(
+                        region
                     )
-            if isinstance(node.node, ir.InvokeSubgraph):
-                cudagraphs_log.debug(
-                    "skipping cudagraphs for invoke_subgraph region: %s",
-                    skip_reason,
-                )
-            return skip_reason
+                    if skip_reason is None:
+                        return self._invoke_subgraph_family_cudagraph_skip_reason(
+                            node, region
+                        )
+                if isinstance(node.node, ir.InvokeSubgraph):
+                    cudagraphs_log.debug(
+                        "skipping cudagraphs for invoke_subgraph region: %s",
+                        skip_reason,
+                    )
+                return skip_reason
+
+        if V.graph.cudagraph_partition_only_regions:
+            return "partitioning is limited to annotated invoke_subgraph regions"
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
         # benefit to cudagraph
         if (
-            not torch._inductor.config.triton.cudagraphs
+            not V.graph.cudagraphs_top_level
             and _unstable_customized_partition_wrapper.wrapper is None
         ):
             return "partition includes all ops when cudagraphs is disabled"
@@ -12027,7 +12050,7 @@ class Scheduler:
             remove_redundant_argreduce_indices(list(loop_bodies))
             return (
                 self._codegen_partitions()
-                if torch._inductor.config.graph_partition
+                if V.graph.graph_partition
                 else self._codegen(self.nodes)
             )
 
