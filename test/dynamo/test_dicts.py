@@ -2667,7 +2667,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            "Dynamo specialized the compiled code on this key being absent",
+            "(HINT: Dictionary d2 must not contain key 3",
             munge_exc(record.getMessage()),
         )
 
@@ -2692,7 +2692,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(y, x.sin())
         record = self.getRecord(records, "d2")
         self.assertIn(
-            "Dynamo specialized the compiled code on this key being absent",
+            "(HINT: Dictionary d2 must not contain key 3",
             munge_exc(record.getMessage()),
         )
 
@@ -2717,8 +2717,13 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(len(failures), 1)
         expectation = "present" if present_during_tracing else "absent"
         requirement = "contain" if present_during_tracing else "not contain"
+        negation = "" if present_during_tracing else "not "
         self.assertIn(
-            f"Dictionary d must {requirement} key 'scale'; "
+            f"{negation}___dict_contains('scale', d)",
+            failures[0],
+        )
+        self.assertIn(
+            f"(HINT: Dictionary d must {requirement} key 'scale'; "
             f"Dynamo specialized the compiled code on this key being {expectation}.",
             failures[0],
         )

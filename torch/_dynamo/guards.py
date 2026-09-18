@@ -2482,7 +2482,7 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_dict_contains_guard(
             True,
             key,
-            get_verbose_code_parts(reason, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
@@ -2506,7 +2506,7 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_dict_contains_guard(
             False,
             key,
-            get_verbose_code_parts(reason, guard),
+            get_verbose_code_parts(code, guard, recompile_hint=reason),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
