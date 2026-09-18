@@ -182,6 +182,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
+    from ..heuristics.template.tlx import maybe_install as maybe_install_tlx
+
+    maybe_install_tlx()
+
     GraphTransformObserver = functools.partial(
         torch.fx.passes.graph_transform_observer.GraphTransformObserver,
         subsystem="post_grad_passes",
