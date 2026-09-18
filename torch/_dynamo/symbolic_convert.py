@@ -126,7 +126,7 @@ from .polyfills import (
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
-from .replay_record import DummyModule, ExecutionRecorder
+from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
@@ -2415,8 +2415,15 @@ class InstructionTranslatorBase(
     # Cache note: This cache only exists for the duration of this
     # InstructionTranslator - so it should be safe to do.
     @cache_method
-    def import_source(self, module_name: str) -> GlobalSource:
-        """Create an alias to a module for use in guards"""
+    def import_source(
+        self, module_name: str, graph_break_ok: bool = False
+    ) -> GlobalSource:
+        """
+        Create an alias to a module for use in guards. A slot already holding
+        something other than the resolved module is a hard error unless the
+        caller can graph break there (positional: cache_method takes no
+        keyword arguments).
+        """
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2428,14 +2435,48 @@ class InstructionTranslatorBase(
             value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
+        f_globals = self.output.global_scope
+        if alias in f_globals and f_globals[alias] is not value:
+            bound = f_globals[alias]
+            # Named by type, never repr'd: __repr__ is user code too.
+            offender = type(bound).__name__
+            if isinstance(bound, types.ModuleType):
+                # __name__ out of the instance dict: a PEP 562 module __getattr__
+                # and a class-level __getattribute__ (importlib.util._LazyModule
+                # imports on any attribute read) are user code that must not run
+                # inside a trace.
+                name = object.__getattribute__(bound, "__dict__").get("__name__")
+                if name is not None:
+                    offender = f"{offender} named {name}"
+            # f_globals is the root frame's: an inlined callee's own module is not
+            # where the alias lives, so the message names the module whose it is.
+            scope = f_globals.get("__name__")
+            # A graph break only where the traced bytecode chose the name, IMPORT_NAME.
+            # Every other caller resolves a name of Dynamo's choosing -- torch's, the
+            # stdlib's, a class's __module__, an inlined callee's module -- and from
+            # codegen an Unsupported is not a graph break but a frame skipped after the
+            # backend ran, silent at default log levels; those keep the hard error.
+            if not graph_break_ok:
+                raise AssertionError(
+                    f"import alias {alias} for {module_name} is already bound to "
+                    f"a {offender} in the globals of {scope}"
+                )
+            unimplemented(
+                gb_type="Import alias already bound",
+                context=f"{alias} for {module_name}: {offender}",
+                explanation=f"The module alias {alias} for {module_name} is already bound to "
+                f"a {offender} in the globals of {scope}, the module of the frame being compiled.",
+                hints=[
+                    f"Remove or rename the global {alias} in module {scope}.",
+                    "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
+                    "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
+                ],
+            )
+        # Recorded only once the check has passed: the package entry outlives a
+        # graph break here, and install() binds every recorded alias.
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        f_globals = self.output.global_scope
-        if not (alias not in f_globals or f_globals[alias] is value):
-            raise AssertionError(
-                "expected alias not in f_globals or f_globals[alias] is value to be true"
-            )
         f_globals[alias] = value
         self.output.update_co_names(alias)
         return GlobalSource(alias)
@@ -2510,6 +2551,21 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
+            # Before import_source, which binds the result into the traced
+            # frame's globals: a non-module sys.modules entry stays out of them.
+            # Only this arm needs the check: a replayed value is a DummyModule
+            # by construction, add_local_mod having rejected non-modules when
+            # the record was written.
+            # pyrefly: ignore [unbound-name]
+            if not isinstance(value, types.ModuleType):
+                unimplemented(
+                    gb_type="Bad import result",
+                    # pyrefly: ignore [unbound-name]
+                    context=typestr(value),
+                    explanation="Import result is not a Python module.",
+                    hints=[],
+                )
+
             if level != 0:
                 pkg = self.calc_package()
                 module_name = self.resolve_name(module_name, pkg, level)
@@ -2519,28 +2575,19 @@ class InstructionTranslatorBase(
             # returned, not the module named by module_name. However, when a
             # non-empty fromlist argument is given, the module named by name is
             # returned. Therefore, we set the source correctly here.
+            # graph_break_ok: the name is the traced bytecode's own choice.
             if not fromlist:
                 top_level_module_name = module_name.partition(".")[0]
-                source = self.import_source(top_level_module_name)
+                source = self.import_source(top_level_module_name, True)
             else:
-                source = self.import_source(module_name)
+                source = self.import_source(module_name, True)
 
         if self.exec_recorder:
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name]
-        if isinstance(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name, bad-argument-type]
-            self.push(PythonModuleVariable(value, source=source))
-        else:
-            unimplemented(
-                gb_type="Bad import result",
-                # pyrefly: ignore [unbound-name]
-                context=typestr(value),
-                explanation="Import result is not a Python module.",
-                hints=[],
-            )
+        # pyrefly: ignore [unbound-name, bad-argument-type]
+        self.push(PythonModuleVariable(value, source=source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
