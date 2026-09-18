@@ -168,7 +168,8 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                matched.append((kernel, runtime))
+                if not getattr(kernel.metadata.design, "use_prefetch", False):
+                    matched.append((kernel, runtime))
 
         if not matched:
             log.debug(
@@ -179,6 +180,138 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         matched.sort(key=lambda x: x[1])
         selected = matched[:count]
         result = [k for k, _ in selected]
+
+        # nvMatmulHeuristics currently ranks only 128-wide MMA tiles for the
+        # large-M NVFP4 projections used by FLUX.2.  A 256x192 tile with a
+        # 2x2 cluster is consistently 10-16% faster for its two repeated
+        # single-stream GEMMs (M=4608), while adding only one extra candidate
+        # to profile for each kernel family.
+        targeted_configs: OrderedSet[ConfigKey] = OrderedSet()
+        all_kernel_variants_configs: OrderedSet[ConfigKey] = OrderedSet()
+        prefetch_configs: OrderedSet[ConfigKey] = OrderedSet()
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and m >= 1024
+        ):
+            large_m_nvfp4_config = (256, 192, 2, 2)
+            targeted_configs.add(large_m_nvfp4_config)
+            all_kernel_variants_configs.add(large_m_nvfp4_config)
+
+        # nvMatmulHeuristics can omit useful one-cluster kernels for medium-M
+        # NVFP4 problems.  Keep the observed 128x64 variants plus the 128x128
+        # c1x1 QKV winner and let accurate CUDA-graph autotuning decide.
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and 64 < m <= 256
+        ):
+            targeted_configs.update(
+                (
+                    (128, 64, 1, 1),
+                    (128, 64, 1, 2),
+                    (128, 128, 1, 1),
+                    (128, 128, 1, 2),
+                )
+            )
+            if n <= 16384:
+                prefetch_configs.add((128, 128, 1, 2))
+
+        # In the swapped orientation, N is the original token count.  A full
+        # 120-candidate Qwen3-32B sweep at M=128, timed with 16 CUDA-graph
+        # replays, found 256x128 c4x1 for gate/up (and within 0.3% of the QKV
+        # oracle) and 256x64 c2x2 for down.
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and 64 < n <= 256
+            and m >= 1024
+        ):
+            medium_m_swap_configs: tuple[ConfigKey, ...] = (
+                (256, 128, 4, 1),
+                (256, 64, 2, 2),
+                (128, 64, 2, 2),
+            )
+            targeted_configs.update(medium_m_swap_configs)
+            # Each config can map to multiple operator implementations.  Keep
+            # every variant here so the later output-scale compatibility check
+            # can retain the vendored block-scaled implementation instead of
+            # accidentally selecting an incompatible first entry.
+            all_kernel_variants_configs.update(medium_m_swap_configs)
+            if m <= 16384:
+                prefetch_configs.update(((256, 64, 2, 2), (128, 64, 2, 2)))
+
+        # The SM100 heuristic can also miss useful 64-wide swapped tactics at
+        # batch sizes between 33 and 64.  A cross-model sweep found the 1x1
+        # 128x64 kernel best for Phi's wide gate/up projection and the
+        # prefetched 4x2 256x64 kernel best for its down projection.  Keep one
+        # candidate from each family and let CUDA-graph autotuning reject them
+        # for nearby Qwen shapes where the existing 2x1 tactic remains faster.
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and 32 < n <= 64
+            and m >= 1024
+        ):
+            targeted_configs.add((128, 64, 1, 1))
+            prefetch_configs.update(((256, 64, 2, 2), (256, 64, 4, 2)))
+
+        # The corresponding native-orientation 256x64 c2x2 tactic is useful
+        # for batch-64 down projections with a comparatively large K.  Scope
+        # it to that regime so smaller-K QKV/output shapes do not pay for an
+        # extra candidate that has not shown a win.
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and 32 < m <= 64
+            and n >= 1024
+            and k >= 3000
+        ):
+            targeted_configs.add((256, 64, 2, 2))
+
+        # Once a small-M projection is transposed, the original token count is
+        # the kernel's N dimension. nvMatmulHeuristics' CUTLASS3 discovery set
+        # does not currently return the Blackwell block-scaled narrow-N
+        # tactics that win the common M=32 decode shape. Keep the empirically
+        # useful one-cluster 32/64-wide tactics in the autotune set. Retain the
+        # 4x1 32-wide tactic as well: it remains competitive for very wide
+        # projections and protects against device/clock-dependent ranking.
+        if (
+            dtype_a == torch.float4_e2m1fn_x2
+            and dtype_b == torch.float4_e2m1fn_x2
+            and n <= 32
+            and m >= 1024
+        ):
+            targeted_configs.update(
+                (
+                    (128, 32, 1, 1),
+                    (128, 64, 1, 1),
+                    (128, 32, 4, 1),
+                )
+            )
+            # Small hidden/output dimensions are the cases where rotating
+            # weights made this prefetch variant competitive or best across
+            # Nemotron, Llama, Phi, and Qwen output projections. Keep wider QKV/down
+            # projections on the established non-prefetch policy, where this
+            # tactic regressed full-model decode. FP4 K is expressed in packed
+            # bytes here, so 1120 corresponds to a logical K of 2240.
+            if k <= 1120 or m <= 4480 or (k <= 4096 and m <= 5120):
+                targeted_configs.add((128, 32, 2, 1))
+                prefetch_configs.add((128, 32, 4, 1))
+
+            # A complete CUDA-graph autotune sweep over the four Qwen3-32B
+            # batch-8 projections found three additional narrow-N winners.
+            # Keep them scoped to the transposed M<=8 decode regime: broader
+            # M=32 sweeps retained the existing 32-wide configs, while adding
+            # these globally would increase tuning cost without measured gain.
+            if n <= 8:
+                targeted_configs.update(
+                    (
+                        (128, 8, 1, 1),
+                        (128, 8, 4, 1),
+                        (128, 16, 1, 1),
+                    )
+                )
 
         # Supplement with hand-picked configs in the space nvMatmulHeuristics doesn't currently explore.
         if config.nvgemm_supplement_configs:
@@ -239,12 +372,41 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (256, 256, 4, 1),
                 ]
             )
-            selected_keys = OrderedSet(
-                [_make_config_key_from_kernel_design(k.metadata.design) for k in result]
-            )
-            for key, key_kernels in config_to_kernels.items():
-                if key not in selected_keys and key in _SUPPLEMENT_CONFIGS:
-                    result.append(key_kernels[0])
+            targeted_configs.update(_SUPPLEMENT_CONFIGS)
+
+        selected_keys = OrderedSet(
+            [_make_config_key_from_kernel_design(k.metadata.design) for k in result]
+        )
+        for key, key_kernels in config_to_kernels.items():
+            if key in all_kernel_variants_configs:
+                for kernel in key_kernels:
+                    if (
+                        not getattr(kernel.metadata.design, "use_prefetch", False)
+                        and kernel not in result
+                    ):
+                        result.append(kernel)
+            elif key not in selected_keys and key in targeted_configs:
+                non_prefetch = next(
+                    (
+                        kernel
+                        for kernel in key_kernels
+                        if not getattr(kernel.metadata.design, "use_prefetch", False)
+                    ),
+                    None,
+                )
+                if non_prefetch is not None:
+                    result.append(non_prefetch)
+            if key in prefetch_configs:
+                prefetch = next(
+                    (
+                        kernel
+                        for kernel in key_kernels
+                        if getattr(kernel.metadata.design, "use_prefetch", False)
+                    ),
+                    None,
+                )
+                if prefetch is not None and prefetch not in result:
+                    result.append(prefetch)
 
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
