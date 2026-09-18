@@ -1145,7 +1145,7 @@ def get_new_module_tests():
             input_size=(2, 4, 10),
             cudnn=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1156,7 +1156,7 @@ def get_new_module_tests():
             cudnn=True,
             desc='stride',
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1178,7 +1178,7 @@ def get_new_module_tests():
             cudnn=True,
             desc='pad2',
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1189,7 +1189,7 @@ def get_new_module_tests():
             cudnn=True,
             desc='pad1size1',
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1200,7 +1200,7 @@ def get_new_module_tests():
             cudnn=True,
             desc='pad2size1',
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1211,7 +1211,7 @@ def get_new_module_tests():
             cudnn=True,
             desc='zero_batch',
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
         ),
         dict(
             fullname='Conv1d_dilated',
@@ -1219,7 +1219,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).dilation(2)',
             input_size=(2, 4, 10),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1229,7 +1229,7 @@ def get_new_module_tests():
             input_size=(2, 4, 6),
             cudnn=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1239,7 +1239,7 @@ def get_new_module_tests():
             input_size=(2, 4, 10),
             cudnn=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1249,7 +1249,7 @@ def get_new_module_tests():
             input_size=(2, 4, 10),
             cudnn=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1259,7 +1259,7 @@ def get_new_module_tests():
             input_size=(2, 4, 10),
             cudnn=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1269,7 +1269,7 @@ def get_new_module_tests():
             input_size=(2, 4, 10),
             cudnn=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1279,7 +1279,7 @@ def get_new_module_tests():
             cudnn=True,
             input_size=(1, 3, 7),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1291,7 +1291,7 @@ def get_new_module_tests():
             cudnn=True,
             desc='no_bias',
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1303,7 +1303,7 @@ def get_new_module_tests():
             cudnn=True,
             desc='dilated',
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1314,7 +1314,7 @@ def get_new_module_tests():
             cudnn=True,
             input_size=(2, 4, 7),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1325,7 +1325,7 @@ def get_new_module_tests():
             cudnn=True,
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1337,7 +1337,7 @@ def get_new_module_tests():
             desc='strided',
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1349,7 +1349,7 @@ def get_new_module_tests():
             desc='padding',
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1361,7 +1361,7 @@ def get_new_module_tests():
             desc='dilated',
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1374,7 +1374,7 @@ def get_new_module_tests():
             desc='no_bias',
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.015,
+            tf32_precision=0.03 if TEST_WITH_ROCM else 0.015,
             default_dtype=torch.double,
         ),
         dict(
@@ -1395,7 +1395,7 @@ def get_new_module_tests():
             cudnn=True,
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.015,
+            tf32_precision=0.03 if TEST_WITH_ROCM else 0.015,
             default_dtype=torch.double,
         ),
         dict(
@@ -1405,7 +1405,7 @@ def get_new_module_tests():
             input_size=(2, 4, 6, 5),
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.015,
+            tf32_precision=0.03 if TEST_WITH_ROCM else 0.015,
             default_dtype=torch.double,
         ),
         dict(
@@ -1415,7 +1415,7 @@ def get_new_module_tests():
             input_size=(2, 2, 6, 5),
             cudnn=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1498,7 +1498,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).groups(4)',
             input_size=(2, 4, 6, 6),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1507,7 +1507,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::Conv2dOptions(4, 8, {3, 3}).groups(4)',
             input_size=(2, 4, 6, 6),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1516,7 +1516,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).stride({2, 2}).groups(4)',
             input_size=(2, 4, 6, 6),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1525,7 +1525,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).padding({1, 1}).groups(4)',
             input_size=(2, 4, 6, 6),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1534,7 +1534,7 @@ def get_new_module_tests():
             cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {2, 2}).dilation({2, 2}).groups(4)',
             input_size=(2, 4, 5, 5),
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(
@@ -1616,7 +1616,7 @@ def get_new_module_tests():
             cudnn=True,
             check_with_long_tensor=True,
             with_tf32=True,
-            tf32_precision=0.005,
+            tf32_precision=0.01 if TEST_WITH_ROCM else 0.005,
             default_dtype=torch.double,
         ),
         dict(

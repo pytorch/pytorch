@@ -1598,6 +1598,19 @@ print(mem_after_first, mem_after_set, torch.cuda.memory_allocated())
 
     @recover_orig_fp32_precision
     @serialTest()
+    def test_legacy_allow_tf32_follows_new_api(self):
+        # allow_tf32 is derived from the conv/rnn precisions, so setting both
+        # through the new API leaves it readable instead of raising.
+        for precision, expected in (("none", False), ("tf32", True)):
+            torch.backends.cudnn.conv.fp32_precision = precision
+            torch.backends.cudnn.rnn.fp32_precision = precision
+            self.assertEqual(torch.backends.cudnn.allow_tf32, expected)
+            # cudnn.flags() snapshots allow_tf32 on entry.
+            with torch.backends.cudnn.flags(enabled=True):
+                pass
+
+    @recover_orig_fp32_precision
+    @serialTest()
     def test_invalid_status_for_legacy_api(self):
         torch.backends.cudnn.conv.fp32_precision = "none"
         torch.backends.cudnn.rnn.fp32_precision = "tf32"

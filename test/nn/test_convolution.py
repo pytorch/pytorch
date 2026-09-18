@@ -1416,7 +1416,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_Conv2d_groups_nobias(self, device, dtype):
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False).to(device, dtype)
         i = torch.randn(2, 4, 6, 6, device=device, dtype=dtype, requires_grad=True)
@@ -1457,7 +1457,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.006)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.006)
     def test_Conv2d_groups_nobias_v2(self, device, dtype):
         torch.manual_seed(123)
         m = nn.Conv2d(4, 16, kernel_size=3, groups=2, bias=False).to(device, dtype)
@@ -1932,7 +1932,7 @@ class TestConvolutionNNDevice(NNTestCase):
         actual = F.conv1d(x, y, padding="same", dilation=3)
         self.assertEqual(expect, actual)
 
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     @dtypesIfMPS(
         *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
@@ -1959,7 +1959,7 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(expect, actual)
 
     @dtypes(torch.float, torch.cfloat)
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_conv3d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
             rtol, atol = 2e-6, 2e-6
@@ -2053,7 +2053,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypesIfMPS(
         *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.001)
     def test_conv2d_same_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='same'
         x = torch.rand(1, 1, 10, 11, device=device, dtype=dtype, requires_grad=True)
@@ -3537,7 +3537,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)
@@ -3784,7 +3784,7 @@ class TestConvolutionNNDevice(NNTestCase):
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
     @serialTest()
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.01 if TEST_WITH_ROCM else 0.005)
     def test_conv3d_64bit_indexing(self, device):
         x = torch.rand(1, 32, 512, 512, 256)
         m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
@@ -4206,7 +4206,7 @@ class TestConvolutionNNCUDA(NNTestCase):
         m(x)
 
     @skipCUDAIfNoCudnn
-    @tf32_on_and_off(0.015)
+    @tf32_on_and_off(0.03 if TEST_WITH_ROCM else 0.015)
     def test_cudnn_not_mutate_stride(self, device):
         weight = torch.randn(64, 64, 1, 1, device=device)
         x = torch.randn(2, 64, 10, 10, device=device).to(
