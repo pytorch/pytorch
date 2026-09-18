@@ -2,10 +2,10 @@
 ## Fake Tensor metadata on node
 Each FX node has metadata on it, and in particular, stores a faketensor representing the metadata of that node `node.meta['val']`. This FakeTensor has properties like 1. shape, 2. stride, and 3. aliasing information. However, various passes may change the faketensor values, and so we need to maintain consistency.
 
-The current way we do this is through FakeTensorUpdater (in _inductor/fx_utils.py). Read it for more details, and run it if your pass needs accurate faketensor metadata.
+Passes may assume that FakeTensor metadata is consistent when they begin. If a pass changes node inputs or outputs in a way that makes downstream metadata stale, it must update the affected metadata itself or run `FakeTensorUpdater` from `_inductor/fx_utils.py` before returning. Passes do not need to run `FakeTensorUpdater` before each metadata read.
 
 ## Graph outputs
-After AOTDispatch, joint and post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes. Passes that need output storage identities can use `collect_output_storage` from `_inductor/fx_passes/fx_graph_traversal_analysis_helpers.py`.
+After AOTDispatch, joint and post-grad graph outputs are either a single FX node or a flat list or tuple of FX nodes.
 
 ## Mutations throughout the stack
 The invariant about mutation we have is:
