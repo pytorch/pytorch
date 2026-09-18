@@ -82,7 +82,8 @@ class PrecompileSummary:
     * ``kept_guards`` and ``dropped_guards`` are disjoint: a guard is
       serialized or it is not.
     * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
-    * ``policy_dropped_guards`` is disjoint from ``dropped_guards``.
+    * ``policy_dropped_guards`` is disjoint from both ``dropped_guards`` and
+      ``kept_guards``: a policy drop is not checked either.
     * ``dropped_guard_code`` draws its slots from ``dropped_guards`` and
       ``policy_dropped_guards``.
 
@@ -112,13 +113,14 @@ class PrecompileSummary:
         resume_functions: Of those, the graph-break continuations.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
-        bypassed: ``co_name``s of frames the package refused to record: every compile
-            of the frame was bypassed (``OutputGraph.bypass_package``: its
-            guards could not be serialized, or its graph held parameters by
-            static address), or a backend artifact was missing when the package
-            was saved. Not an eager fallback: the frame ran compiled during
-            capture, the package kept no variant of it a load can serve, and an
-            install re-traces it rather than skipping it as trivial.
+        bypassed: ``co_name``s of frames the package holds nothing installable
+            for: no compile of the frame recorded a guarded code and one was
+            bypassed (``OutputGraph.bypass_package``: its guards could not be
+            serialized, or its graph held parameters by static address), or a
+            backend artifact was missing when the package was saved. Not an
+            eager fallback: the frame ran compiled during capture, the package
+            kept no variant of it a load can serve, and an install re-traces it
+            rather than skipping it as trivial.
         truncated: ``co_name (filename:firstlineno)`` of each frame that hit the
             recompile limit. A lower bound, which is why the digest prints it
             as ``>=``: from a limit hit on, that frame and the frames it calls
@@ -127,12 +129,16 @@ class PrecompileSummary:
             it there is never recorded.
         uncovered_frames: ``co_name``s of frames the capture ran that ended with no
             guarded code and were not bypassed, so the artifact cannot serve
-            them: a thin wrapper whose graphs all landed in an inner frame, or a
-            frame Dynamo gave up on. A different cause and remedy from
-            ``bypassed``. Not a remainder: which frames count as a gap is the
-            producer's decision, and a frame the package holds an entry for but
-            never ran is not one, so this is not ``frames`` minus ``bypassed``
-            minus the frames that hold guarded code.
+            them: a thin wrapper whose graphs all landed in an inner frame, a
+            frame Dynamo gave up on, or a frame whose compile raised (its
+            message is in ``capture_errors``, so one failure shows in both
+            digest clauses). A different cause and remedy from ``bypassed``,
+            never the same frame; a frame that hit the recompile limit before
+            it recorded a guarded code is in ``truncated`` too. Not a
+            remainder: which frames count as a gap is the producer's decision,
+            and a frame the package holds an entry for but never ran is not
+            one, so this is not ``frames`` minus ``bypassed`` minus the frames
+            that hold guarded code.
         wont_generalize: Guard *sources* (not frame names) a kept guard pins to
             one value in some variant while no other variant of the same frame
             guards the source without pinning it, so as captured no variant
