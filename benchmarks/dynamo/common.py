@@ -2468,6 +2468,28 @@ class BenchmarkRunner:
                             fp64_outputs = process_fn(fp64_outputs)
 
                     if (
+                        self.args.training
+                        and self.args.amp
+                        and os.environ.get("A10G_BISECT_MODE") == "skip_loss"
+                    ):
+                        # Diagnostic control for the A10G SigLIP regression:
+                        # remove only collect_results()'s scalar training loss,
+                        # leaving gradients, parameters, buffers, and input
+                        # gradients subject to the normal accuracy policy.
+                        def without_scalar_training_loss(result):
+                            if not isinstance(result, (list, tuple)):
+                                raise RuntimeError("Expected collect_results output")
+                            if not isinstance(result[1], torch.Tensor):
+                                raise RuntimeError("Expected tensor training loss")
+                            if result[1].numel() != 1:
+                                raise RuntimeError("Expected scalar training loss")
+                            return result[:1] + result[2:]
+
+                        correct_result = without_scalar_training_loss(correct_result)
+                        new_result = without_scalar_training_loss(new_result)
+                        fp64_outputs = without_scalar_training_loss(fp64_outputs)
+
+                    if (
                         self.args.save_model_outputs_to
                         and self.args.compare_model_outputs_with
                         and self.args.save_model_outputs_to

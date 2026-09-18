@@ -315,6 +315,12 @@ jobs:
           TESTS_TO_EXCLUDE: ${{ inputs.tests-to-exclude }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           ENABLE_TORCH_TRACE: ${{ inputs.enable-torch-trace }}
+          TORCHBENCH_ONLY_MODELS: ${{ matrix.only_models || '' }}
+          TRITON_KERNEL_DUMP: ${{ matrix.triton_kernel_dump || '' }}
+          TRITON_ALWAYS_COMPILE: ${{ matrix.triton_kernel_dump || '' }}
+          TRITON_DUMP_DIR: ${{ github.workspace }}/test/test-reports/triton-kernel-dumps
+          A10G_BISECT_TRITON_SHA: ${{ matrix.triton_sha || '' }}
+          A10G_BISECT_LIBDEVICE_VARIANT: ${{ matrix.libdevice_variant || 'current' }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -359,7 +365,129 @@ jobs:
 
           # shellcheck disable=SC2046
           python3 -m pip install $(echo dist/*.whl)[opt-einsum]
-          ${TEST_COMMAND}
+          if [[ -n "${A10G_BISECT_TRITON_SHA}" ]] && \
+             [[ "${A10G_BISECT_TRITON_SHA}" != "$(cat .ci/docker/ci_commit_pins/triton.txt)" ]]; then
+            TRITON_WHEEL_DIR="${RUNNER_TEMP}/a10g-bisect-triton"
+            mkdir -p "${TRITON_WHEEL_DIR}"
+            TRITON_SHORT_SHA="${A10G_BISECT_TRITON_SHA:0:8}"
+            python3 -m pip install pybind11==3.0.1 nanobind==2.10.2
+            (
+              cd "${TRITON_WHEEL_DIR}"
+              python "${GITHUB_WORKSPACE}/.github/scripts/build_triton_wheel.py" \
+                --device cuda \
+                --commit-hash "${A10G_BISECT_TRITON_SHA}" \
+                --triton-version "$(cat "${GITHUB_WORKSPACE}/.ci/docker/triton_version.txt")+git${TRITON_SHORT_SHA}"
+            )
+            python3 -m pip install --force-reinstall --no-deps "${TRITON_WHEEL_DIR}"/triton-*.whl
+          fi
+          if [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "pytorch_libdevice" ]] || \
+             [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "no_ftz" ]] || \
+             [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "skip_loss" ]]; then
+            export A10G_BISECT_MODE="${A10G_BISECT_LIBDEVICE_VARIANT}"
+          elif [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "emulate_precision_casts" ]]; then
+            export TORCHINDUCTOR_EMULATE_PRECISION_CASTS=1
+          elif [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" != "current" ]]; then
+            LIBDEVICE_CONTROL_DIR="${RUNNER_TEMP}/a10g-bisect-libdevice"
+            mkdir -p "${LIBDEVICE_CONTROL_DIR}"
+            curl --fail --location --retry 3 \
+              "https://raw.githubusercontent.com/triton-lang/triton/b24d7e3a01586070e26d890f5de114065262dc5d/third_party/nvidia/backend/lib/libdevice.10.bc" \
+              --output "${LIBDEVICE_CONTROL_DIR}/old-libdevice.10.bc"
+            if [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "old" ]]; then
+              export TRITON_LIBDEVICE_PATH="${LIBDEVICE_CONTROL_DIR}/old-libdevice.10.bc"
+            elif [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "old_erff" ]] || \
+                 [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "old_powf" ]] || \
+                 [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "old_erff_powf" ]] || \
+                 [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "validation_suite" ]]; then
+              INSTALLED_LIBDEVICE_PATH="$(python3 -c 'from pathlib import Path; import triton; path = Path(triton.__file__).resolve().parent / "backends/nvidia/lib/libdevice.10.bc"; assert path.is_file(), path; print(path)')"
+              python3 -m pip install llvmlite==0.49.0
+              LIBDEVICE_CONTROL_VARIANT="${A10G_BISECT_LIBDEVICE_VARIANT}"
+              if [[ "${LIBDEVICE_CONTROL_VARIANT}" == "validation_suite" ]]; then
+                LIBDEVICE_CONTROL_VARIANT="old_erff"
+              fi
+              export TRITON_LIBDEVICE_PATH="${LIBDEVICE_CONTROL_DIR}/${LIBDEVICE_CONTROL_VARIANT}-libdevice.ll"
+              python3 .github/scripts/prepare_a10g_libdevice_control.py \
+                --current "${INSTALLED_LIBDEVICE_PATH}" \
+                --old "${LIBDEVICE_CONTROL_DIR}/old-libdevice.10.bc" \
+                --variant "${LIBDEVICE_CONTROL_VARIANT}" \
+                --output "${TRITON_LIBDEVICE_PATH}"
+            else
+              echo "Unknown libdevice control: ${A10G_BISECT_LIBDEVICE_VARIANT}" >&2
+              exit 1
+            fi
+            echo "A10G bisect libdevice: ${A10G_BISECT_LIBDEVICE_VARIANT} ${TRITON_LIBDEVICE_PATH}"
+          fi
+          python3 -c 'import triton; print("A10G bisect Triton:", triton.__version__, triton.__file__)'
+          if [[ "${A10G_BISECT_LIBDEVICE_VARIANT}" == "validation_suite" ]]; then
+            PROBE_REPORT_DIR="test/test-reports/a10g-bisect/erff-probe"
+            mkdir -p "${PROBE_REPORT_DIR}"
+            OLD_ERFF_LIBDEVICE_PATH="${TRITON_LIBDEVICE_PATH}"
+            TOOLKIT_LIBDEVICE_PATH="/usr/local/cuda/nvvm/libdevice/libdevice.10.bc"
+            if [[ ! -f "${TOOLKIT_LIBDEVICE_PATH}" ]]; then
+              echo "CUDA toolkit libdevice not found: ${TOOLKIT_LIBDEVICE_PATH}" >&2
+              exit 1
+            fi
+
+            TRITON_LIBDEVICE_PATH="${INSTALLED_LIBDEVICE_PATH}" \
+              TRITON_CACHE_DIR="${RUNNER_TEMP}/triton-cache-current" \
+              python3 .github/scripts/a10g_erff_probe.py run \
+                --label triton-current \
+                --output "${PROBE_REPORT_DIR}/triton-current.pt"
+            TRITON_LIBDEVICE_PATH="${OLD_ERFF_LIBDEVICE_PATH}" \
+              TRITON_CACHE_DIR="${RUNNER_TEMP}/triton-cache-old-erff" \
+              python3 .github/scripts/a10g_erff_probe.py run \
+                --label triton-old-erff \
+                --output "${PROBE_REPORT_DIR}/triton-old-erff.pt"
+            TRITON_LIBDEVICE_PATH="${TOOLKIT_LIBDEVICE_PATH}" \
+              TRITON_CACHE_DIR="${RUNNER_TEMP}/triton-cache-toolkit" \
+              python3 .github/scripts/a10g_erff_probe.py run \
+                --label cuda-toolkit \
+                --output "${PROBE_REPORT_DIR}/cuda-toolkit.pt"
+            python3 .github/scripts/a10g_erff_probe.py compare \
+              --output "${PROBE_REPORT_DIR}/comparison.json" \
+              "${PROBE_REPORT_DIR}/triton-current.pt" \
+              "${PROBE_REPORT_DIR}/triton-old-erff.pt" \
+              "${PROBE_REPORT_DIR}/cuda-toolkit.pt"
+
+            unset TRITON_LIBDEVICE_PATH
+            MODEL_CONTROL_RESULTS="test/test-reports/a10g-bisect/model-controls.tsv"
+            printf 'control\tstatus\n' > "${MODEL_CONTROL_RESULTS}"
+            for CONTROL in pytorch_libdevice no_ftz skip_loss; do
+              if A10G_BISECT_MODE="${CONTROL}" \
+                 TRITON_CACHE_DIR="${RUNNER_TEMP}/triton-cache-${CONTROL}" \
+                 TORCHINDUCTOR_CACHE_DIR="${RUNNER_TEMP}/torchinductor-cache-${CONTROL}" \
+                 ${TEST_COMMAND}; then
+                CONTROL_STATUS=pass
+              else
+                CONTROL_STATUS=fail
+              fi
+              printf '%s\t%s\n' "${CONTROL}" "${CONTROL_STATUS}" | tee -a "${MODEL_CONTROL_RESULTS}"
+              CONTROL_REPORT_DIR="test/test-reports/a10g-bisect/model-control-${CONTROL}"
+              mkdir -p "${CONTROL_REPORT_DIR}"
+              cp test/test-reports/*timm_models.csv "${CONTROL_REPORT_DIR}/" 2>/dev/null || true
+            done
+          else
+            ${TEST_COMMAND}
+          fi
+
+      - name: Record A10G bisect metadata
+        if: always() && matrix.a10g_bisect == true
+        shell: bash
+        run: |
+          mkdir -p test/test-reports/a10g-bisect
+          cp .ci/docker/ci_commit_pins/triton.txt test/test-reports/a10g-bisect/pinned-triton-sha.txt
+          printf '%s\n' '${{ matrix.triton_sha }}' > test/test-reports/a10g-bisect/tested-triton-sha.txt
+          printf '%s\n' '${{ matrix.libdevice_variant }}' > test/test-reports/a10g-bisect/libdevice-variant.txt
+          git rev-parse HEAD > test/test-reports/a10g-bisect/pytorch-sha.txt
+          nvidia-smi -q > test/test-reports/a10g-bisect/nvidia-smi.txt
+
+      - name: Upload A10G bisect artifacts
+        if: always() && matrix.a10g_bisect == true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: a10g-triton-bisect-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test/test-reports
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Report soft-failed tests
         if: always() && inputs.soft-fail-tests && steps.test.outcome == 'failure'
