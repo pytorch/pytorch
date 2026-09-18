@@ -55,12 +55,11 @@ _EXTERNAL_DATA_HINT = (
 # default instead, in the one lookup a live scope needs.
 _UNBOUND = object()
 
-# What a raise can cost the tree it came out of, said once: the no-match report
-# and the warning the serving paths log both name it. Hedged, because only a
-# throw skips the reset on check_nopybind_template's exits: a tree that returns
-# with an error set (the SystemError _unwrapped_raise reads through) reset on
-# its way out, and neither the last-resort veto nor this clause tells the two
-# apart.
+# What a raise can cost the tree it came out of, as the no-match report's caveat
+# states it. Hedged, because only a throw skips the reset on
+# check_nopybind_template's exits: a tree that returns with an error set (the
+# SystemError _unwrapped_raise reads through) reset on its way out, and neither
+# the last-resort veto nor this clause tells the two apart.
 _STALE_AFTER_THROW = (
     "a C++ throw out of a tree can leave that tree's relational guard state "
     "stale, so its next check can reject a call it fits or accept one it does not"
@@ -1891,8 +1890,9 @@ class AOTCompiledModel:
     ``KeyboardInterrupt`` or ``SystemExit`` still reaches the caller as itself.
     A raise only out of ``check_verbose`` here is quoted on its line and
     chained nowhere; so is one recorded in dispatch that the next evaluation of
-    the same tree answered, until the caveat a follow-up change appends to the
-    advice names those trees and quotes their raises.
+    the same tree answered: the caveat says only that a raise came before the
+    rejection the advice rests on, and a follow-up change makes it name those
+    trees and quote their raises.
     """
 
     model: torch.nn.Module
@@ -2224,9 +2224,10 @@ class AOTCompiledModel:
                 # survives in the chain when it was recorded first of all, and in
                 # the footer's fix-or-drop line when it was recorded first of the
                 # inputs nobody opted out. When it is neither -- another checked
-                # tree raised before it -- this report carries that raise nowhere,
-                # until the caveat a follow-up change appends to the advice
-                # names such trees and quotes their raises.
+                # tree raised before it -- this report carries that raise
+                # nowhere: the caveat below says only that a raise came before
+                # the rejection the advice rests on, and a follow-up change
+                # makes it name such trees and quote their raises.
                 lines.append(_raised_line(i, raised[i]))
                 continue
             manager = result._live_guard_manager()

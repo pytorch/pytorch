@@ -793,8 +793,10 @@ class RejectsOnceThenRaises(NeverReChecked):
         raise RuntimeError(self.message)
 
 
-# The sentence the no-match report appends to its ModelInput advice when every
-# rejection that advice rests on followed a raise from its own tree.
+# The tail of the no-match report's ModelInput advice, from the advice's own last
+# clause through the caveat appended after it when every rejection the advice
+# rests on followed a raise from its own tree: spliced together so an endswith()
+# over it pins the junction of the two, which a caveat-only golden would not.
 CAVEAT_AFTER_A_RAISE = "which need not be the one that loaded them. Fix the raise first: every rejection this advice rests on followed a raise from its own tree, and a C++ throw out of a tree can leave that tree's relational guard state stale, so its next check can reject a call it fits or accept one it does not."
 
 
@@ -2821,24 +2823,9 @@ from user code:
             def check(self, f_locals):
                 raise RuntimeError("the first tree is unhappy")
 
-        class RaisesThenRejects:
-            def __init__(self):
-                self.checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                if self.checks == 1:
-                    raise RuntimeError("the second tree's first pass is unhappy")
-                return False
-
-            def check_verbose(self, f_locals):
-                return types.SimpleNamespace(
-                    result=False, verbose_code_parts=["the second tree's guard"]
-                )
-
         results = model.forward.compiled_results
         results[0]._artifacts.guard_manager = Raises()
-        stub = RaisesThenRejects()
+        stub = RaisesOnceThenRejects("the second tree's first pass is unhappy")
         results[1]._artifacts.guard_manager = stub
         with self.assertRaises(RuntimeError) as ctx:
             model(x)
@@ -2847,7 +2834,7 @@ from user code:
         self.assertEqual(stub.checks, 2)
         raised = "  [0] <guard check raised RuntimeError: the first tree is unhappy>"
         self.assertIn(raised, lines)
-        self.assertIn("  [1] the second tree's guard", lines)
+        self.assertIn("  [1] stub guard rejected", lines)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
         # [1]'s rejection followed its own raise, so the advice is qualified.
@@ -2867,6 +2854,10 @@ from user code:
         self.assertIn("Tried 0 compiled input(s):", message)
         self.assertNotIn("Every guard tree raised", message)
         self.assertIn("Add a ModelInput", message)
+        # No entry answered, so there is no rejection for the advice to rest on:
+        # the caveat's `coverable` term is what keeps it off this report, where
+        # the advice itself is printed by the no-results disjunct beside it.
+        self.assertNotIn("every rejection this advice rests on", message)
 
     def test_no_match_message_when_only_the_report_raises(self):
         # The other of _raised_line's two call sites: the report's own handler
