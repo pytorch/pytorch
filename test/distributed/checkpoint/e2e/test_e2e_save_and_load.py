@@ -380,7 +380,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         sd["foo"] = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
         sd.set_sd_item_called = False
 
-        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.save(
+            sd,
+            storage_writer=DCP.FileSystemWriter(self.temp_dir, overwrite=True),
+        )
         DCP.load(sd, checkpoint_id=self.temp_dir)
 
         # Validate that the non-stateful state dict was replaced with the loaded state dict
