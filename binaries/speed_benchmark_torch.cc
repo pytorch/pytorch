@@ -18,7 +18,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -315,9 +314,8 @@ int main(int argc, char** argv) {
       "Number of main runs should be non negative, provided ",
       FLAGS_iter,
       ".");
-  caffe2::Timer timer;
-  std::vector<float> times;
-  auto micros = timer.MicroSeconds();
+  const auto bench_start = high_resolution_clock::now();
+  std::vector<float> times(FLAGS_iter, 0);
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
     runner->run(module, inputs);
@@ -325,7 +323,9 @@ int main(int argc, char** argv) {
     auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());
   }
-  micros = timer.MicroSeconds();
+  const double micros = duration<double, std::micro>(
+                            high_resolution_clock::now() - bench_start)
+                            .count();
   if (FLAGS_report_pep) {
     for (auto t : times) {
       std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
