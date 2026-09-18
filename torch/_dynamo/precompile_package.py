@@ -553,8 +553,8 @@ def _is_library_module(module_name: str | None) -> bool:
     conda and inside platstdlib in a venv, so the exclusion is what does the
     work), or with no file at all because it is built in or frozen, which the
     path finder cannot shadow. That is required of the TOP-LEVEL name: not
-    imported, a namespace package, or without location evidence, it is
-    untrusted. An imported inner name only has to not be located ELSEWHERE:
+    imported, or without location evidence (a namespace package has none), it
+    is untrusted. An imported inner name only has to not be located ELSEWHERE:
     the package it was found in is already located, and a real submodule can
     carry no evidence of its own: pyexpat.errors, which pyexpat's C init
     registers with neither ``__file__`` nor ``__spec__``, and torch.ops, a
