@@ -878,19 +878,18 @@ std::tuple<Tensor, std::optional<int64_t>> gather_batch_rule(
 }
 
 Tensor get_expanded_index(const Tensor& index, SymIntArrayRef self_size, int64_t dim) {
-  if (index.dim() == 0) {
-    return index.expand_symint(self_size);
-  }
   dim = maybe_wrap_dim(dim, static_cast<int64_t>(self_size.size()));
+  // index_select and index_copy treat a scalar index as a length-1 vector.
+  Tensor index_1d = index.dim() == 0 ? index.unsqueeze(0) : index;
 
   // setup new_index_shape as [BS, 1, ..., idx_size, ..., 1]
   // to reshape index_
-  auto idx_size = index.sym_size(0);  // get non-batch size of index tensor
+  auto idx_size = index_1d.sym_size(0);  // get non-batch size of index tensor
   Tensor index_;
   {
     VmapSymDimVector new_index_shape(self_size.size(), 1);
     new_index_shape[dim] = idx_size;
-    index_ = index.view_symint(new_index_shape);
+    index_ = index_1d.view_symint(new_index_shape);
   }
   // Now apply expand to index_
   {
