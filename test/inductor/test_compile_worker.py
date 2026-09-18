@@ -1302,6 +1302,51 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    def test_worker_nvgemm_precompile_separates_output_scale(self):
+        import torch
+        from torch._inductor.codegen.nv_universal_gemm import (
+            nv_universal_gemm_kernel as nvgemm_kernel,
+        )
+
+        matrix_meta = types.SimpleNamespace(
+            sizes=(4, 4), strides=(4, 1), device="cpu", dtype=torch.float32
+        )
+        scale_meta = types.SimpleNamespace(
+            sizes=(1,), strides=(1,), device="cpu", dtype=torch.float32
+        )
+        cuda_ctx = types.SimpleNamespace(
+            max_active_clusters=None, device_capability=(10, 0)
+        )
+
+        with (
+            patch.object(
+                nvgemm_kernel,
+                "_compile_nvgemm",
+                return_value=(object(), None, None, False),
+            ) as compile_nvgemm,
+            patch("torch._inductor.utils._ensure_fp4_dtype_registered"),
+            patch.object(nvgemm_kernel, "_patch_max_active_clusters", return_value=[]),
+            patch.object(
+                nvgemm_kernel,
+                "_get_scaled_gemm_modes",
+                return_value=(None, None, None, None),
+            ),
+        ):
+            nvgemm_kernel._worker_nvgemm_autotuning_precompile(
+                "kernel",
+                "SCALED_GEMM",
+                "accumulator",
+                (matrix_meta, matrix_meta, scale_meta, scale_meta, scale_meta),
+                matrix_meta,
+                {},
+                cuda_ctx,
+                has_output_scale=True,
+            )
+
+        args, kwargs = compile_nvgemm.call_args
+        self.assertEqual(len(args[1]), 4)
+        self.assertEqual(kwargs["output_scale"].shape, (1,))
+
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
