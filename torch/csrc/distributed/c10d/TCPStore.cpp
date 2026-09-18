@@ -4,6 +4,7 @@
 #include <fmt/ranges.h>
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/TerminationSignal.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/store/TCPStoreBackend.hpp>
@@ -261,6 +262,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   }
 
   Socket::initialize();
+  c10d::detail::installTerminationHandlers();
 
   addr_.port = opts.port;
 
@@ -323,6 +325,8 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
       // success
       break;
+    } catch (const c10::DistInterruptedError& ex) {
+      throw;
     } catch (const c10::DistNetworkError& ex) {
       if (deadline < std::chrono::steady_clock::now()) {
         C10D_ERROR(
@@ -402,7 +406,17 @@ void TCPStore::waitForWorkers() {
                 *numWorkers_));
       }
       /* sleep override */
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      ::timespec req{};
+      req.tv_sec = 10 / 1000;
+      req.tv_nsec = (10 % 1000) * 1000000;
+
+      if (::nanosleep(&req, nullptr) != 0) {
+        if (errno == EINTR) {
+          if (c10d::detail::isTerminationSignalReceived()) {
+            C10_THROW_ERROR(DistInterruptedError, c10::utils::str_error(errno));
+          }
+        }
+      }
     }
   }
 }
