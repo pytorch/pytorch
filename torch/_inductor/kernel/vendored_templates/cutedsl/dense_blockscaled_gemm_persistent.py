@@ -169,7 +169,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         - Float8E4M3FN/Float8E5M2
     :note: Constraints:
         - MMA tiler M must be 128 or 256 (use_2cta_instrs)
-        - MMA tiler N must be 64/128/192/256
+        - MMA tiler N must be 8/16/32/64/128/192/256. Tiles below 64 are
+          restricted to a single N tile and cluster-N of one.
         - Cluster shape M must be multiple of 2 if Mma tiler M is 256
         - Cluster shape M/N must be positive and power of 2, total cluster size <= 16
         - Also, Cluster shape M/N must be <= 4 for scale factor multicasts due to limited size of scale factors
@@ -2744,7 +2745,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # Skip invalid mma tile shape
         if mma_tiler_mn[0] not in [128, 256]:
             is_valid = False
-        if mma_tiler_mn[1] not in [64, 128, 192, 256]:
+        if mma_tiler_mn[1] not in [8, 16, 32, 64, 128, 192, 256]:
             is_valid = False
         # Skip illegal cluster shape
         if cluster_shape_mn[0] % (2 if mma_tiler_mn[0] == 256 else 1) != 0:
@@ -2887,6 +2888,12 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         if not Sm100BlockScaledPersistentDenseGemmKernel.is_valid_tensor_alignment(
             m, n, k, l, ab_dtype, c_dtype, a_major, b_major, c_major
         ):
+            can_implement = False
+        # Narrow-N MMA instructions cannot cover multiple N tiles and do not
+        # support multicast along N.  They are nevertheless ideal for the
+        # transposed small-M inference shape, where the swapped problem's N is
+        # exactly the original token count (typically 8/16/32).
+        if mma_tiler_mn[1] < 64 and (n > mma_tiler_mn[1] or cluster_shape_mn[1] > 1):
             can_implement = False
         return can_implement
 
