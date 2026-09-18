@@ -2000,7 +2000,6 @@ class TestMeta(TestCase):
         self.assertEqual(ref_out.stride(), meta_out.stride())
 
     @onlyCUDA
-    @unittest.skipIf(torch.version.hip, "cuFFT-specific stride behavior")
     def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
         self._assert_fft_meta_stride_matches_eager(
             aten._fft_c2c.default,

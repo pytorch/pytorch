@@ -85,9 +85,6 @@ test_failures = {
     "test_regional_fallback_by_default_invoke_subgraph": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
-    "test_regional_codegen_only_config_cpp_wrapper": TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    ),
     # This manually constructs an FX graph with an OpOverloadPacket target to
     # cover a legacy lowering table entry, which is outside the subprocess
     # compile serialization path this file exercises.

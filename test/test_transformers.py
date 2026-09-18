@@ -2923,11 +2923,9 @@ class TestSDPACPU(NNTestCase):
             return masked_out, grads
 
         if backend == SDPBackend.FLASH_ATTENTION and "cuda" in str(device):
-            unittest.skip("FlashAttention does not support masks on cuda")
-            return
+            self.skipTest("FlashAttention does not support masks on cuda")
         if backend == SDPBackend.EFFICIENT_ATTENTION and "cpu" in str(device):
-            unittest.skip("EfficientAttention does not support masks on cpu")
-            return
+            self.skipTest("EfficientAttention does not support masks on cpu")
         query, key, value, mask = attention_inputs(seq_len, head_dim, device, dtype)
 
         # Compute results for the tested backend
@@ -4692,8 +4690,7 @@ class TestSDPAAccelerator(NNTestCase):
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
         if torch.accelerator.get_memory_info()[1] < 80 * 2**30:
-            unittest.skip("This test requires substatnial GPU memory.")
-            return
+            self.skipTest("This test requires substantial GPU memory.")
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 1, 32, 64
         seq_len_q, seq_len_kv = 8192, 8192
@@ -5318,8 +5315,7 @@ class TestSDPAAccelerator(NNTestCase):
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
-            unittest.skip("Reference implementation OOM")
-            return
+            self.skipTest("Reference implementation OOM")
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         seed = 42
@@ -5440,8 +5436,7 @@ class TestSDPAAccelerator(NNTestCase):
             mask = (rand_uniform > tester_p).to(torch.float32)
             return mask
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
-            unittest.skip("Reference implementation OOM")
-            return
+            self.skipTest("Reference implementation OOM")
         if TEST_WITH_ROCM and seq_len_q * seq_len_k * head_dim * batch_size > 1024 * 1024 * 128:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         seed = 42
@@ -5866,8 +5861,7 @@ class TestSDPAAccelerator(NNTestCase):
         if (TEST_WITH_ROCM or TEST_XPU) and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
             torch.accelerator.empty_cache()  # Prevent memory fragmentation
         if max(seq_len_q, seq_len_k) >= 2048 and torch.accelerator.get_memory_info()[1] < 40 * 2**30:
-            unittest.skip("Reference implementation OOM")
-            return
+            self.skipTest("Reference implementation OOM")
 
         # ROCm now supports 2 different backends for SDPA that require different set up.
         TEST_WITH_CK = False
