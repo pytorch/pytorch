@@ -3797,6 +3797,23 @@ from user code:
         # The raise a plain call surfaces stays reachable from the report.
         self.assertTrue(any("boom from __eq__" in c for c in chained), chained)
 
+    def test_aot_compile_module_tree_that_raised_then_answered_still_withholds(self):
+        # The veto reads `raised`, every index that raised at any point, not
+        # `unanswered`, the ones whose LAST evaluation raised: a tree that raised
+        # in the scan and answered on the second pass still withholds the last
+        # resort, that answer standing on state the throw may have left stale.
+        model, x = self._aot_compile_dict_branches({}, None)
+        model.forward.compiled_results[1].disable_guard_check()
+        manager = model.forward.compiled_results[0]._live_guard_manager()
+        answers = [ValueError("boom in the scan"), False]
+        with patch.object(manager, "check", side_effect=answers) as check:
+            with self.assertRaises(RuntimeError) as ctx:
+                model(x, {})
+        # [0] left `unanswered` on the second pass and stayed in `raised`.
+        self.assertEqual(check.call_count, 2)
+        withheld = "  [1] <opted out of guard checks; withheld because [0]'s guard check raised>"
+        self.assertIn(withheld, str(ctx.exception).splitlines())
+
     def test_aot_compile_module_raise_from_an_opted_out_result_withholds_nothing(self):
         # check() ignores the flag, so [0]'s tree still raises through the leaf in
         # both passes; nobody asked for its answer, so the raise vetoes nothing and
