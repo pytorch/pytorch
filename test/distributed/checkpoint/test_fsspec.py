@@ -581,6 +581,40 @@ class TestFileSystem(TestCase):
         for i in range(4):
             self.assertEqual(state_dict[f"t_{i}"], load_dict[f"t_{i}"])
 
+    def test_default_load_planner_parallel_support_not_inherited(self):
+        # DefaultLoadPlanner is the documented extension point, and the
+        # documented pattern overrides resolve_tensor / commit_tensor. Such a
+        # subclass must not silently inherit the parallel opt-in, because the
+        # reasoning that makes DefaultLoadPlanner safe no longer applies.
+        self.assertTrue(dcp.DefaultLoadPlanner().supports_parallel_load)
+
+        class MaterializingPlanner(dcp.DefaultLoadPlanner):
+            def resolve_tensor(self, read_item):
+                return torch.empty_like(super().resolve_tensor(read_item))
+
+            def commit_tensor(self, read_item, tensor):
+                self.state_dict[read_item.dest_index.fqn] = tensor
+
+        self.assertFalse(MaterializingPlanner().supports_parallel_load)
+
+        class CommitOnlyPlanner(dcp.DefaultLoadPlanner):
+            def commit_tensor(self, read_item, tensor):
+                pass
+
+        self.assertFalse(CommitOnlyPlanner().supports_parallel_load)
+
+        # A subclass that leaves both hooks alone stays on the fast path.
+        class RenamingPlanner(dcp.DefaultLoadPlanner):
+            pass
+
+        self.assertTrue(RenamingPlanner().supports_parallel_load)
+
+        # ... and one that has verified its own hooks can opt back in.
+        class VerifiedPlanner(MaterializingPlanner):
+            supports_parallel_load = True
+
+        self.assertTrue(VerifiedPlanner().supports_parallel_load)
+
     def test_fsspec_reader_workers_config(self):
         checkpoint_dir = "memory://test_workers_config"
         reader = FsspecReader(checkpoint_dir, cpu_workers=8)

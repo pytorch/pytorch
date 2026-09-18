@@ -303,14 +303,30 @@ class DefaultLoadPlanner(LoadPlanner):
     original_state_dict: STATE_DICT_TYPE
     mappings: FLATTEN_MAPPING
 
-    # ``resolve_tensor`` performs a read-only lookup into ``state_dict`` and
-    # narrows it to the region owned by the ``ReadItem``. Distinct ``ReadItem``s
-    # own disjoint regions, so the resolved tensors never share storage, and
-    # ``commit_tensor`` is a no-op. This planner is therefore safe to drive from
-    # several threads at once. Subclasses that override ``resolve_tensor`` or
-    # ``commit_tensor`` to route through a shared staging buffer must reset this
-    # to ``False``.
-    supports_parallel_load: bool = True
+    @property
+    def supports_parallel_load(self) -> bool:
+        """See :attr:`LoadPlanner.supports_parallel_load`.
+
+        ``DefaultLoadPlanner`` itself qualifies: ``resolve_tensor`` performs a
+        read-only lookup into ``state_dict`` and narrows it to the region owned
+        by the ``ReadItem``, so distinct items never share storage, and
+        ``commit_tensor`` is a no-op.
+
+        That reasoning does not carry over to a subclass that overrides either
+        hook -- the documented extension pattern of materializing a tensor in
+        ``resolve_tensor`` and writing it back in ``commit_tensor`` is
+        order-dependent, for instance. Such subclasses drop back to the
+        sequential path automatically. A subclass that has verified its own
+        hooks are safe can opt back in with a plain class attribute::
+
+            class MyPlanner(DefaultLoadPlanner):
+                supports_parallel_load = True
+        """
+        cls = type(self)
+        return (
+            cls.resolve_tensor is DefaultLoadPlanner.resolve_tensor
+            and cls.commit_tensor is DefaultLoadPlanner.commit_tensor
+        )
 
     def __init__(
         self,
