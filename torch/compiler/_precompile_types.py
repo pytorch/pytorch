@@ -54,22 +54,23 @@ class PrecompileSummary:
     error.
     Everything here describes the calls that ran, not every possible input or
     unexecuted branch, and once ``truncated`` is non-empty every count and
-    frame list is a lower bound: executions after a limit hit ran untraced, so
-    nothing here saw them.
+    frame list is a lower bound: from a limit hit on, that frame and everything
+    it called ran untraced, so a frame first reached there is in no list here.
 
     The guard fields hold ``(guard_type, source)`` slots, the source spelled as
     ``GuardFilterEntry.name``, i.e. the ``Guard.name`` with local scope stripped
     (``L['self'].act`` -> ``self.act``; ``G['CFG'].width`` unchanged). Each list
     holds a slot once, however many frames or variants carried it, so
     ``dropped_guard_types`` counts distinct slots, not occurrences. The relations
-    between the lists hold within one frame variant, where the producer decides
+    between the lists hold within one frame variant, where the producer applies
     them, and are stated here rather than checked:
 
     * ``kept_guards`` and ``dropped_guards`` are disjoint: a guard is
       serialized or it is not.
     * ``risky_dropped_guards`` is drawn from ``dropped_guards``.
-    * ``policy_dropped_guards`` is disjoint from both ``dropped_guards`` and
-      ``kept_guards``: a policy drop is not checked either.
+    * ``policy_dropped_guards`` is disjoint from both: a policy drop is taken
+      out of the serialized copy the filter kept, once the slot held
+      identically across every captured variant, and is not checked either.
     * ``dropped_guard_code`` draws its slots from ``dropped_guards`` and
       ``policy_dropped_guards``.
 
@@ -125,11 +126,13 @@ class PrecompileSummary:
             and a frame the package holds an entry for but never ran is not
             one, so this is not ``frames`` minus ``bypassed`` minus the frames
             that hold guarded code.
-        wont_generalize: Guard *sources* (not frame names) a kept guard pins to
-            one value in some variant while no other variant of the same frame
-            guards the source without pinning it, so as captured no variant
-            served another value. Observed, not proven: a variant that never
-            guarded the source does not count as serving other values of it.
+        wont_generalize: Guard *sources* (not frame names) a kept value-equality
+            guard on a bare argument name pins in some variant (``_pins_a_value``
+            in ``torch._dynamo.precompile_package`` is the rule; ``self.eps`` is
+            not a bare name) while no other variant of the same frame guards the
+            source without pinning it, so as captured no variant served another
+            value. Observed, not proven: a variant that never guarded the source
+            does not count as serving other values of it.
         dropped_guards: Slots the serialized copy's guard filter rejected, so the
             artifact does not check them and a load cannot notice whatever they
             checked. Which guards a filter rejects is that filter's own
@@ -143,11 +146,13 @@ class PrecompileSummary:
         risky_dropped_guards: The subset of ``dropped_guards`` observed to tell
             captured variants apart, or flagged by the risky-drop lint as a
             configuration-chosen binding.
-        policy_dropped_guards: Serializable slots dropped because they held
-            identically across every variant. Reported apart from
-            ``dropped_guards`` because the remedy differs, and reported at all
-            because a capture that discards a precondition should not look like
-            one that had none.
+        policy_dropped_guards: Slots the filter kept that the invariance policy
+            then dropped because they held identically across every captured
+            variant (``_INVARIANT_DROPPABLE_GUARD_TYPES`` in
+            ``torch._dynamo.precompile_package`` bounds what it may drop).
+            Reported apart from ``dropped_guards`` because the remedy differs,
+            and reported at all because a capture that discards a precondition
+            should not look like one that had none.
         dropped_guard_code: ``(guard_type, source, rendered_check)``, one per slot
             of ``dropped_guards`` or ``policy_dropped_guards`` whose guard
             rendered a check (its ``GuardBuilder`` method set ``Guard.code_list``;
@@ -164,9 +169,10 @@ class PrecompileSummary:
             check tells them apart. Kept beside the slot lists so the slots stay
             the identity the policy compares on; for programmatic consumers,
             not the digest.
-        capture_errors: One message per capture call that raised, the exception
-            type first (``"RuntimeError: boom"``), so the digest's first line
-            is never empty however the exception was raised.
+        capture_errors: One message per distinct exception a capture call raised
+            (repeats of the same type and message collapse), the exception type
+            first (``"RuntimeError: boom"``), so the digest's first line is
+            never empty however the exception was raised.
     """
 
     frames: int
