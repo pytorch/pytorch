@@ -1825,10 +1825,12 @@ def _resolve_unshard_lookahead(
     """Resolve one validated all-gather prefetch distance per pipeline rank.
 
     ``"full"`` is the compatibility default and matches the residency window
-    on every rank. ``"auto"`` uses the tested fixed rank-indexed heuristic
-    ``min(rank + 2, max_active_stages)``; it is not derived from a schedule's
-    warmup and equals ``"full"`` when the residency window is at most two.
-    A tuple is the exact expert override, with one value per PP rank.
+    on every rank. ``"auto"`` lets rank zero issue its current and next stage,
+    then adds one stage per downstream rank to use the pipeline startup bubble:
+    ``min(rank + 2, max_active_stages)``. This assumes balanced stage compute
+    and parameter-preparation times; it is a deterministic preset, not a
+    schedule-derived optimum. A tuple is the exact expert override, with one
+    value per PP rank.
     """
     if (
         isinstance(max_active_stages, bool)
