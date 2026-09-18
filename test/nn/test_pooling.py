@@ -831,6 +831,24 @@ class TestPoolingNNDevice(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected dimensions"):
             torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
 
+        # Without matching leading dims, the CPU kernel used to read past the
+        # end of gradOutput and return garbage; the CUDA kernel had the same
+        # missing check.
+        grad_output = torch.randn(1, 2, 2, 2, device=device)
+        input = torch.randn(3, 4, 4, 4, device=device)
+        with self.assertRaisesRegex(RuntimeError, "same size at dim 0"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
+        grad_output = torch.randn(1, 3, 2, 2, 2, device=device)
+        input = torch.randn(2, 3, 4, 4, 4, device=device)
+        with self.assertRaisesRegex(RuntimeError, "same size at dim 0"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
+        grad_output = torch.randn(2, 1, 2, 2, 2, device=device)
+        input = torch.randn(2, 3, 4, 4, 4, device=device)
+        with self.assertRaisesRegex(RuntimeError, "same size at dim 1"):
+            torch.ops.aten._adaptive_avg_pool3d_backward(grad_output, input)
+
     def test_adaptive_max_pooling_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 7, 7, device=device)
