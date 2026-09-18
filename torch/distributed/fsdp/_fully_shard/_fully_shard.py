@@ -677,6 +677,39 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
+    def set_all_gather_input_fn(self, fn: Callable, *, recurse: bool = True) -> None:
+        """Set the function that prepares a parameter group's all-gather inputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
+        The function takes ``(fsdp_params, group, device, all_gather_comm)`` and
+        returns an ``AllGatherInput`` containing the input and output tensors,
+        per-parameter input dtypes and element counts, and packed split sizes.
+        Split sizes are in collective-buffer elements, or bytes for mixed dtypes.
+        It prepares parameter inputs, allocates the output through
+        ``all_gather_comm.allocate``, and packs the input as a view into that
+        output's storage so FSDP retains it through collective completion.
+        The default output callback expects the existing rank-major layout.
+
+        The function runs without gradient tracking on the all-gather copy-in
+        stream. FSDP manages stream dependencies, communication, and output
+        processing. Groups of size one bypass this callback.
+
+        Args:
+            fn (Callable): Function that prepares and packs all-gather inputs.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._all_gather_input_fn = fn
+
     def set_all_gather_output_fn(self, fn: Callable, *, recurse: bool = True) -> None:
         """Set the function that copies a parameter group's all-gather outputs.
 

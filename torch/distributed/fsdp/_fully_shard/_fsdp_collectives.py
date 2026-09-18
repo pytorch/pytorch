@@ -20,6 +20,14 @@ from ._fsdp_common import (
 from ._fsdp_param import FSDPParam, ShardedState
 
 
+class AllGatherInput(NamedTuple):
+    input_tensor: torch.Tensor
+    output_tensor: torch.Tensor
+    param_all_gather_input_dtypes: list[list[torch.dtype]]
+    param_all_gather_input_numels: list[list[int]]
+    all_gather_input_split_sizes: list[int]
+
+
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
     all_gather_event: torch.Event | None
@@ -321,6 +329,47 @@ def chunk_cat(
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
 
 
+def _default_all_gather_input_fn(
+    fsdp_params: list[FSDPParam],
+    group: dist.ProcessGroup,
+    device: torch.device,
+    all_gather_comm: AllGather,
+) -> AllGatherInput:
+    """Prepare and pack inputs into the rank-major all-gather output buffer."""
+    world_size, rank = group.size(), group.rank()
+    param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
+    (
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        dtype,
+    ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
+    if dtype == torch.uint8:
+        all_gather_inputs = [
+            t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
+        ]
+    else:
+        all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
+    inp_split_sizes = [t.numel() for t in all_gather_inputs]
+    all_gather_input_numel = sum(inp_split_sizes)
+    all_gather_output = all_gather_comm.allocate(
+        (all_gather_input_numel * world_size,), dtype=dtype, device=device
+    )
+    all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+        all_gather_inputs,
+        all_gather_output,
+        inp_split_sizes,
+        all_gather_input_numel,
+        rank,
+    )
+    return AllGatherInput(
+        all_gather_input,
+        all_gather_output,
+        param_all_gather_input_dtypes,
+        param_all_gather_input_numels,
+        inp_split_sizes,
+    )
+
+
 @torch.no_grad()
 def foreach_all_gather(
     fsdp_params: list[FSDPParam],
@@ -330,51 +379,30 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
+    *,
+    all_gather_input_fn: Callable = _default_all_gather_input_fn,
 ) -> AllGatherResult | None:
-    world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
-        (
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            dtype,
-        ) = _get_all_gather_input_metadatas(param_all_gather_inputs)
-        if dtype == torch.uint8:
-            all_gather_inputs = [
-                t.view(torch.uint8) for ts in param_all_gather_inputs for t in ts
-            ]
-        else:
-            all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
-        inp_split_sizes = [t.numel() for t in all_gather_inputs]
-        all_gather_input_numel = sum(inp_split_sizes)
-        all_gather_output = all_gather_comm.allocate(
-            (all_gather_input_numel * world_size,), dtype=dtype, device=device
+        all_gather_input = all_gather_input_fn(
+            fsdp_params, group, device, all_gather_comm
         )
-        all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
-            all_gather_inputs,
-            all_gather_output,
-            inp_split_sizes,
-            all_gather_input_numel,
-            rank,
-        )
-        del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with device_handle.stream(all_gather_stream):
         all_gather_work = all_gather_comm(
-            output_tensor=all_gather_output,
-            input_tensor=all_gather_input,
+            output_tensor=all_gather_input.output_tensor,
+            input_tensor=all_gather_input.input_tensor,
             group=group,
             async_op=async_op,
         )
         all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
-            all_gather_output,
+            all_gather_input.output_tensor,
             all_gather_event,
             all_gather_work,
-            param_all_gather_input_dtypes,
-            param_all_gather_input_numels,
-            inp_split_sizes,
+            all_gather_input.param_all_gather_input_dtypes,
+            all_gather_input.param_all_gather_input_numels,
+            all_gather_input.all_gather_input_split_sizes,
         )
 
 
