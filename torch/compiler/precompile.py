@@ -12,13 +12,16 @@ guard-serialization caching mode), despite the shared word.
 
 import typing
 
+# ruff: noqa: PLC0414  # the `X as X` re-exports below are deliberate
 from torch._precompile import (
     Capture,
     capture,
     DynamoTracer,
     load,
     MakeFxTracer,
-    PrecompileError as PrecompileError,  # noqa: PLC0414
+    PrecompiledCallable as PrecompiledCallable,
+    PrecompiledRunnable as PrecompiledRunnable,
+    PrecompileError as PrecompileError,
 )
 from torch.compiler._precompile_types import (
     FrameInvariants,
@@ -39,12 +42,11 @@ for _t in (MakeFxTracer, DynamoTracer):
     _t.__annotations__ = typing.get_type_hints(_t)
 
 
-# These types are defined in torch._precompile / a private module (for
-# import-layering reasons, and because dataclass decoration resolves annotations
-# against the defining module). Declare this module their home so introspection
-# (test_public_bindings, Sphinx) resolves them under torch.compiler.precompile,
-# where they are re-exported; that rewrites their __module__ process-globally, and the
-# public spelling is the only one either defining module documents.
+# These types are defined in private modules (for import-layering reasons, and because
+# dataclass decoration resolves annotations against the defining module). Declare this
+# module their home so introspection (test_public_bindings, Sphinx) resolves them under
+# torch.compiler.precompile, where they are re-exported; that rewrites their __module__
+# process-globally, and the public spelling is the only one either module documents.
 for _t in (
     MakeFxTracer,
     DynamoTracer,
@@ -59,11 +61,12 @@ del _t
 del typing  # not part of the public surface
 
 
-# PrecompileError is intentionally NOT in __all__: its home is torch.compiler
-# (torch.compiler.PrecompileError, for the conventional ``except`` spelling), so
-# its __module__ is "torch.compiler". It is re-exported here only so
-# ``torch.compiler.precompile.PrecompileError`` also resolves, spelled as an
-# explicit ``as`` alias so a type checker under no_implicit_reexport sees it.
+# PrecompileError and the two loaded-artifact handles are intentionally NOT in
+# __all__: their home is torch.compiler (torch.compiler.PrecompileError, for the
+# conventional ``except`` spelling; the handles for an ``isinstance`` check), so their
+# __module__ is "torch.compiler". They are re-exported here only so the
+# ``torch.compiler.precompile.<name>`` spelling also resolves, each an explicit ``as``
+# alias so a type checker under no_implicit_reexport sees the re-export.
 __all__ = [
     "capture",
     "load",
