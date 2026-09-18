@@ -333,6 +333,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         add_bn: bool = True,
+        device: str | torch.device | None = None,
     ) -> nn.Module | FSDP:
         """
         Initializes a :class:`TransformerWithSharedParams` instance.
@@ -350,6 +351,10 @@ class TransformerWithSharedParams(FSDPTestModel):
             deterministic (bool): Whether to make the model deterministic
                 across constructions.
             add_bn (bool): Whether to include batch norm in the model.
+            device (Optional[Union[str, torch.device]]): Device the model is
+                moved to for ``DEVICE_AFTER`` initialization. Named ``device``
+                to distinguish it from the FSDP constructor's ``device_id``
+                passed via ``fsdp_kwargs``.
         """
 
         if fsdp_kwargs is None:
@@ -399,7 +404,12 @@ class TransformerWithSharedParams(FSDPTestModel):
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                # TODO: Transitional fallback to the global DEVICE_TYPE until
+                # all callers pass ``device`` explicitly; remove this once
+                # they have migrated.
+                if device is None:
+                    device = DEVICE_TYPE
+                fsdp_model = fsdp_model.to(device)
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
@@ -461,6 +471,7 @@ class NestedWrappedModule(FSDPTestModel):
         device_init_mode: DEVICEInitMode,
         fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
+        device: str | torch.device | None = None,
     ) -> nn.Module:
         """
         Initializes a :class:`NestedWrappedModule` instance.
@@ -476,6 +487,10 @@ class NestedWrappedModule(FSDPTestModel):
                 forwarded to the FSDP constructor.
             deterministic (bool): Whether to make the model deterministic
                 across constructions.
+            device (Optional[Union[str, torch.device]]): Device the model is
+                moved to for ``DEVICE_AFTER`` initialization. Named ``device``
+                to distinguish it from the FSDP constructor's ``device_id``
+                passed via ``fsdp_kwargs``.
         """
         if fsdp_kwargs is None:
             fsdp_kwargs = {}
@@ -496,7 +511,12 @@ class NestedWrappedModule(FSDPTestModel):
                 **fsdp_kwargs,
             )
             if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
-                fsdp_model = fsdp_model.to(DEVICE_TYPE)
+                # TODO: Transitional fallback to the global DEVICE_TYPE until
+                # all callers pass ``device`` explicitly; remove this once
+                # they have migrated.
+                if device is None:
+                    device = DEVICE_TYPE
+                fsdp_model = fsdp_model.to(device)
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
