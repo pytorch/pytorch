@@ -207,7 +207,15 @@ class FsspecReader(FileSystemReader):
         return cat_ranges_fn is not fsspec.AbstractFileSystem.cat_ranges
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
-        if not plan.items or not self._supports_batched_cat_ranges():
+        # The batched path resolves and writes into target tensors from several
+        # threads at once, so it is only correct for planners that declare the
+        # per-item hooks safe to call concurrently. See
+        # ``LoadPlanner.supports_parallel_load``.
+        if (
+            not plan.items
+            or not getattr(planner, "supports_parallel_load", False)
+            or not self._supports_batched_cat_ranges()
+        ):
             return super().read_data(plan, planner)
 
         reqs = sorted(
@@ -246,16 +254,32 @@ class FsspecReader(FileSystemReader):
         if batch:
             batches.append((paths, starts, ends, batch))
 
-        planner_lock = threading.Lock()
+        # ``load_bytes`` mutates the planner's state_dict in place, so it still
+        # has to be serialized. The tensor path needs no lock: the planner
+        # declared ``supports_parallel_load``, which guarantees distinct items
+        # resolve to non-overlapping storage.
+        load_bytes_lock = threading.Lock()
 
         def fetch_batch(b):
             bp, bs, be, br = b
             chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
+            # ``on_error`` is advisory: fsspec's AsyncFileSystem._cat_ranges
+            # only started honoring it recently, and other backends may ignore
+            # it entirely. Older implementations always pass
+            # ``return_exceptions=True`` down to ``_run_coros_in_chunks`` and
+            # hand the exception back in-band, which would otherwise surface as
+            # an opaque TypeError from ``io.BytesIO`` in a worker thread and
+            # hide the underlying storage failure.
+            for path, start, end, chunk in zip(bp, bs, be, chunks):
+                if isinstance(chunk, BaseException):
+                    raise RuntimeError(
+                        f"Failed to read bytes [{start}, {end}) from {path}"
+                    ) from chunk
             return chunks, br
 
         def process_chunk(req, chunk_data):
             self._load_item(
-                req, io.BytesIO(chunk_data), planner, planner_lock=planner_lock
+                req, io.BytesIO(chunk_data), planner, load_bytes_lock=load_bytes_lock
             )
 
         with (

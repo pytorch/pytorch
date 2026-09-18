@@ -303,6 +303,15 @@ class DefaultLoadPlanner(LoadPlanner):
     original_state_dict: STATE_DICT_TYPE
     mappings: FLATTEN_MAPPING
 
+    # ``resolve_tensor`` performs a read-only lookup into ``state_dict`` and
+    # narrows it to the region owned by the ``ReadItem``. Distinct ``ReadItem``s
+    # own disjoint regions, so the resolved tensors never share storage, and
+    # ``commit_tensor`` is a no-op. This planner is therefore safe to drive from
+    # several threads at once. Subclasses that override ``resolve_tensor`` or
+    # ``commit_tensor`` to route through a shared staging buffer must reset this
+    # to ``False``.
+    supports_parallel_load: bool = True
+
     def __init__(
         self,
         flatten_state_dict: bool = True,

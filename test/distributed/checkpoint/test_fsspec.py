@@ -513,6 +513,74 @@ class TestFileSystem(TestCase):
         # Verify executor threads have been cleaned up after failure
         self.assertLessEqual(threading.active_count(), initial_threads + 1)
 
+    def test_fsspec_reader_cat_ranges_inband_exception(self):
+        # fsspec's AsyncFileSystem._cat_ranges only started honoring on_error
+        # recently; older versions (and other backends) hand the exception back
+        # in the result list instead of raising. The reader must surface it
+        # rather than feeding an exception object to io.BytesIO.
+        checkpoint_dir = "memory://test_cat_ranges_inband_exception"
+        state_dict = {f"t_{i}": torch.randn(4) for i in range(4)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        reader = FsspecReader(checkpoint_dir)
+        real_cat_ranges = reader.fs.fs.cat_ranges
+
+        def cat_ranges_returning_exception(paths, starts, ends, **kwargs):
+            chunks = real_cat_ranges(paths, starts, ends, **kwargs)
+            # Simulate a backend that ignores on_error="raise".
+            return [OSError("simulated range failure"), *chunks[1:]]
+
+        load_dict = {f"t_{i}": torch.zeros(4) for i in range(4)}
+        with patch.object(
+            reader.fs.fs, "cat_ranges", side_effect=cat_ranges_returning_exception
+        ):
+            with self.assertRaises(CheckpointException) as context:
+                dcp.load(
+                    state_dict=load_dict,
+                    storage_reader=reader,
+                    planner=dcp.DefaultLoadPlanner(),
+                    no_dist=True,
+                )
+            self.assertIn("Failed to read bytes", str(context.exception))
+
+    def test_fsspec_reader_planner_without_parallel_support(self):
+        # A planner that has not opted in to concurrent resolve_tensor /
+        # commit_tensor must keep the reader on the sequential path, since the
+        # batched path copies into the resolved tensor without holding a lock.
+        checkpoint_dir = "memory://test_planner_without_parallel_support"
+        state_dict = {f"t_{i}": torch.randn(4) for i in range(4)}
+        dcp.save(
+            state_dict=state_dict,
+            storage_writer=FsspecWriter(checkpoint_dir),
+            planner=dcp.DefaultSavePlanner(),
+            no_dist=True,
+        )
+
+        class SerialOnlyLoadPlanner(dcp.DefaultLoadPlanner):
+            supports_parallel_load = False
+
+        reader = FsspecReader(checkpoint_dir, max_batch_size=2)
+        load_dict = {f"t_{i}": torch.zeros(4) for i in range(4)}
+        with patch.object(
+            reader.fs.fs, "cat_ranges", wraps=reader.fs.fs.cat_ranges
+        ) as mock_cat_ranges:
+            dcp.load(
+                state_dict=load_dict,
+                storage_reader=reader,
+                planner=SerialOnlyLoadPlanner(),
+                no_dist=True,
+            )
+            mock_cat_ranges.assert_not_called()
+
+        # The fallback must still load correctly.
+        for i in range(4):
+            self.assertEqual(state_dict[f"t_{i}"], load_dict[f"t_{i}"])
+
     def test_fsspec_reader_workers_config(self):
         checkpoint_dir = "memory://test_workers_config"
         reader = FsspecReader(checkpoint_dir, cpu_workers=8)
