@@ -48,6 +48,13 @@ _EXTERNAL_DATA_HINT = (
     "Mark the value(s) as external data by using `external_data={'key': ...}`."
 )
 
+# Absent-name default for the two reads of a certified global out of the guard
+# scope. That scope can be a dict the CALLER passed as guard_globals, so a
+# subscript would run a __missing__ hook it defines, mutating the caller's
+# mapping and serving the graph a value no guard checked; dict.get takes this
+# default instead, in the one lookup a live scope needs.
+_UNBOUND = object()
+
 
 # A guard failure that is exactly a missing top-level global: the verbose code
 # part a guard tree reports for one ("KeyError on G['CONFIG']"). A trailing
@@ -58,7 +65,6 @@ _MISSING_GLOBAL_RE = re.compile(r"KeyError on G\[(?P<name>[^\[\]]*)\]")
 # The G['NAME'] operands of a symbolic-shape guard installed as a Python lambda.
 # Anchored: shape exprs are source names, so L['self'].myG['k'] carries no global.
 _SHAPE_GUARD_GLOBAL_RE = re.compile(r"\bG\['([^']*)'\]")
-_UNBOUND = object()
 
 # Names Dynamo mints into the scope the guards resolve against, rather than
 # names the caller wrote: the __import_* module aliases, the __builtins_dict___N
@@ -108,9 +114,12 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
     # _PyErr_FormatFromCause chained behind it. __cause__, not __context__: that
     # call sets both, but PEP 3134 sets __context__ for ANY exception raised while
     # another was handled, so it would quote what the CALLER was handling. The
-    # whole chain, not one hop: a leaf's own `raise SystemError(...) from <exc>`
-    # is wrapped again at that boundary, so what the tree meant can sit two hops
-    # down, and an interrupt down there must not be read as an answer.
+    # whole run of SystemErrors, not one hop: a leaf's own `raise
+    # SystemError(...) from <exc>` is wrapped again at that boundary, so what the
+    # tree meant can sit two hops down, and an interrupt down there must not be
+    # read as an answer. It stops at the first link that is not a SystemError: an
+    # exception user code raised `from` an interrupt is that code's own answer,
+    # and reading past it would report the interrupt in its place.
     reason: BaseException = e
     while isinstance(reason, SystemError) and reason.__cause__ is not None:
         reason = reason.__cause__
@@ -124,8 +133,10 @@ def _meant_an_exception(e: Exception) -> bool:
 
 def _quoted(reason: BaseException) -> str:
     # The exception is the tree's, so its __str__ is user code: one that raises
-    # must not take the report with it. Exception, as the handlers catch: an
-    # interrupt out of __str__ propagates like one out of the tree.
+    # must not take the report with it. Every Exception is caught, one wrapping
+    # an interrupt included: nothing is unwrapped here, so a bare
+    # KeyboardInterrupt or SystemExit out of __str__ propagates while a
+    # SystemError raised from one is quoted as the raise it is.
     try:
         return str(reason)
     except Exception as exc:
@@ -992,27 +1003,31 @@ class AOTCompiledFunction:
         sub-path of it, which the guard does not certify -- is re-read from the
         guard scope here, so a rebind that scope took and the guards accepted (a
         same-metadata swap under a ``TENSOR_MATCH``, which checks metadata, not
-        values) is what the graph computes with. Every other global keeps the
-        value the bytecode's globals were built with at load, a container a
-        guard reaches only through a sub-path such as ``G['D']['a']`` included:
-        that guard certifies the one item, not the container's other members. A
-        name the scope does not bind is skipped rather than deleted, so it keeps
-        whatever it last held -- the serialized value if the scope never bound
-        it -- and, unless the check is disabled, the guard rooted at it refuses
-        the call. A global the graph itself rebinds is re-read from the scope on
-        the next call too: the replayed ``STORE_GLOBAL`` lands in the bytecode's
-        globals, not in the scope, so the stored value is one no guard certified
-        and the scope's is what the check before the call just passed. That is a
-        deliberate trade-off: a forward that accumulates into a guarded global
-        (``global W; W = W * 2``) serves the scope's value on every call, where
-        eager, whose store lands in the dict its guards read, counts up. Leaving
-        a stored name out of the re-read instead would serve the stored value
-        after a rebind of the scope the guards accepted -- the check certifying
-        one value while the graph reads another, which is the stale read this
-        re-read removes -- and writing the store back into the scope is a
-        behaviour neither load path has. Under the default filter, which drops
-        every guard whose own source is a global (a symbolic-shape guard on a
-        global with a dynamic dim survives it, but is rooted at the ShapeEnv),
+        values) is what the graph computes with. Every other global keeps
+        whatever the bytecode's globals hold -- the value they were built with
+        at load, unless the graph itself stores to it, which nothing here takes
+        back -- a container a guard reaches only through a sub-path such as
+        ``G['D']['a']`` included: that guard certifies the one item, not the
+        container's other members. A name the scope does not bind is skipped
+        rather than deleted, so it keeps whatever it last held -- the
+        serialized value if the scope never bound it -- and, unless the check
+        is disabled, the guard rooted at it refuses the call, and a mapping
+        that fabricates a missing name through ``__missing__`` is not asked to:
+        the read takes ``_UNBOUND`` instead. A global the graph itself rebinds
+        is re-read from the scope on the next call too: the replayed
+        ``STORE_GLOBAL`` lands in the bytecode's globals, not in the scope, so
+        the stored value is one no guard certified and the scope's is what the
+        check before the call just passed. That is a deliberate trade-off: a
+        forward that accumulates into a guarded global (``global W; W = W *
+        2``) serves the scope's value on every call, where eager, whose store
+        lands in the dict its guards read, counts up. Leaving a stored name out
+        of the re-read instead would serve the stored value after a rebind of
+        the scope the guards accepted -- the check certifying one value while
+        the graph reads another, which is the stale read this re-read removes
+        -- and writing the store back into the scope is a behaviour neither
+        load path has. Under the default filter, which drops every guard whose
+        own source is a global (a symbolic-shape guard on a global with a
+        dynamic dim survives it, but is rooted at the ShapeEnv),
         ``_live_global_names`` is empty, nothing is re-read and such a store
         accumulates in the bytecode's globals, unchecked.
 
@@ -1034,7 +1049,8 @@ class AOTCompiledFunction:
         shares, so two threads serving one loaded artifact while either rebinds
         a guarded global race on that dict and one can run the graph on the
         value the other just wrote; a caller who needs isolation loads the
-        artifact once per thread, since each load builds its own dict."""
+        artifact once per thread, since each load builds one such dict per
+        compiled result."""
         if self._live_global_names:
             # Narrowing for pyrefly, not a live check: __post_init__ records the
             # set only under a supplied scope, and nothing nulls _guard_globals.
@@ -1043,6 +1059,11 @@ class AOTCompiledFunction:
                 raise AssertionError("_live_global_names recorded without a scope")
             f_globals = self.fn.__globals__
             for name in self._live_global_names:
+                # One read, not a membership test and then a read: the scope is
+                # live, and a del landing between the two would raise where an
+                # absent name is skipped. get() rather than a subscript under
+                # try/except, so a caller's mapping is never asked to fabricate
+                # a value through __missing__; see _UNBOUND.
                 value = scope.get(name, _UNBOUND)
                 if value is not _UNBOUND:
                     f_globals[name] = value
@@ -1663,13 +1684,15 @@ class AOTCompiledModel:
     surfaces the raise on that path -- no report is built where a graph is
     served, so the serve is deliberately silent until a follow-up change
     adds the warning it logs. A ``KeyboardInterrupt`` or ``SystemExit``
-    anywhere on the ``SystemError`` cause chain that reaches dispatch is never
-    read as an answer and propagates -- as itself from a Python-level guard
-    manager, or as the ``SystemError`` the pybind boundary wrapped it in when a
-    leaf left it set. An interrupt the tree's own code caught and re-raised as
-    something else is not read: it sits on ``__context__``, which the unwrap
-    does not follow. One leaf keeps an interrupt from reaching dispatch at all,
-    and every artifact's tree holds it:
+    anywhere on an unbroken chain of ``SystemError`` causes that reaches dispatch
+    is never read as an answer and propagates -- as itself from a Python-level
+    guard manager, or as the ``SystemError`` the pybind boundary wrapped it in
+    when a leaf left it set. An interrupt behind a link of any other kind is not
+    read: one the tree's own code caught and re-raised sits on ``__context__``,
+    which the unwrap does not follow, and one an ordinary exception was raised
+    ``from`` is that exception's own answer, which the walk stops on. One leaf
+    keeps an interrupt from reaching dispatch at all, and every artifact's tree
+    holds it:
     ``LAMBDA_GUARD::check_nopybind`` (``guards.cpp:1918-1928``) clears whatever
     its lambda raised, of whatever type, and answers false, so an interrupt
     raised under a kept lambda guard is read as an ordinary mismatch and
@@ -2073,11 +2096,12 @@ class AOTCompiledModel:
         namespace holds -- are inserted (never overwriting an existing key) so
         guards rooted at them resolve in a process that never traced. Every CALL
         writes as well, in the other direction: the certified names are written
-        into the globals of the artifact this returns, which all of its calls
-        share, so two threads calling one loaded artifact while either rebinds a
-        guarded global race on that dict and one can run the graph on the value
-        the other thread's guard check accepted. A caller who needs isolation
-        loads the artifact once per thread, since each load builds its own dict.
+        into the globals of the compiled result that serves the call, which every
+        call that result serves shares, so two threads whose calls land on one
+        result while either rebinds a guarded global race on that dict and one
+        can run the graph on the value the other thread's guard check accepted. A
+        caller who needs isolation loads the artifact once per thread, since each
+        load builds one such dict per serialized result.
 
         A symbolic-shape guard on a global with a dynamic dim resolves its
         operands in that live dict as well, whether it installs as a Python
