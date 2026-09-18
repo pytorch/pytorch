@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TEST_CUDA,
+    HardwareClassification,
     TestCase,
 )
 from torch.testing._internal.common_quantized import (
@@ -745,6 +746,7 @@ class _TestFP8MatmulMixin:
         self.assertEqual(captured_input, expected, atol=5e-2, rtol=5e-2)
 
 class TestFP8Matmul(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipXPU
     def test_pack_uint4(self):
@@ -763,6 +765,7 @@ class TestFP8Matmul(TestCase):
 
 
 class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def _test_tautological_mm(self, device: str,
                               x_dtype: torch.dtype = e4m3_type,
@@ -2682,6 +2685,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
 class TestFP8MatmulCuda(TestCase, _TestFP8MatmulMixin):
+    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
     def test_error_message_fp8_pre_sm89(self, device) -> None:
