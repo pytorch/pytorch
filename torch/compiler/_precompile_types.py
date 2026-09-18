@@ -1,16 +1,38 @@
+"""Plain-data types the multi-graph precompile capture reports through.
+
+A leaf module on purpose. ``import torch`` loads ``torch.compiler``, and through
+it ``torch._precompile`` (and, once ``torch.compiler.precompile`` is a module
+later in this stack, this module too), without loading ``torch._dynamo``, so a
+type that public surface exports cannot live in the Dynamo-side internals,
+``torch/_dynamo/precompile_package.py`` (which imports this module at load time
+later in this stack), without an import cycle. Import-wise the types could live
+in ``torch/_precompile.py``; keeping them out of it is layering: the Dynamo
+internals must not depend on the make_fx capture module, which the follow-up
+capture session makes an importer of those internals. The types are frozen
+dataclasses of immutable fields, so they pickle, compare by value and hash.
+"""
+
 import dataclasses
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class GuardFact:
     """One guard observed while compiling a frame variant.
 
     Attributes:
         guard_type: The Dynamo guard type, e.g. ``"TENSOR_MATCH"``.
-        source: The guarded source expression, e.g. ``"L['x']"``; empty for a
-            guard checked against no source.
-        code: The rendered check parts; empty when the guard renders none.
-        value: The rendered value the check compares against; empty when it has none.
+        source: The guarded source, spelled as ``GuardFilterEntry.name``, i.e.
+            the ``Guard.name`` with local scope stripped (``L['x']`` -> ``x``),
+            the same spelling as the ``(guard_type, source)`` slots of
+            ``PrecompileSummary``: ``"x"``, ``"self.eps"``, ``"G['CFG'].width"``.
+            Empty for a guard checked against no source.
+        code: The rendered check parts, with the addresses Dynamo interpolates
+            scrubbed by the producer, e.g.
+            ``("___check_type_id(L['x'], <id>), type=<class 'int'>",)``; empty
+            when the guard renders none.
+        value: A rendered fragment for what the check compares that its code does
+            not show: a tensor's dtype and shape line, or ``"is <callable>"`` for
+            an identity guard. Empty when the code says it all.
         enforced: Whether the artifact still checks this guard (it was serialized).
     """
 
@@ -19,39 +41,3 @@ class GuardFact:
     code: tuple[str, ...]
     value: str
     enforced: bool
-
-    def render(self) -> str:
-        """Render the guard as one stable, human-readable line."""
-        body = " ; ".join(self.code) if self.code else f"<{self.guard_type}>"
-        if self.value:
-            body = f"{body} {self.value}"
-        where = f" on {self.source}" if self.source else ""
-        label = "enforced" if self.enforced else "dropped"
-        return f"[{label:<8}] {body}{where}"
-
-
-@dataclasses.dataclass(frozen=True)
-class FrameInvariants:
-    """Guards that held, varied, or were undetermined across one frame's variants.
-
-    Guards from different frames are not comparable (an entry frame guards its
-    arguments, a resume frame whatever crossed the break), so the report is per frame.
-
-    Attributes:
-        frame: The frame's code name.
-        filename: The file its code lives in.
-        lineno: Its first line.
-        variants: How many guarded variants of the frame were captured.
-        invariant: Guards that held identically in every variant: preconditions
-            the artifact is only valid under.
-        varying: Guards that differed between variants: what tells its graphs apart.
-        undetermined: Guards a single variant could not classify either way.
-    """
-
-    frame: str
-    filename: str
-    lineno: int
-    variants: int
-    invariant: tuple[GuardFact, ...]
-    varying: tuple[GuardFact, ...]
-    undetermined: tuple[GuardFact, ...]
