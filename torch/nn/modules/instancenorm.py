@@ -228,11 +228,11 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
-            Default: ``False``
+            Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
-            statistics in both training and eval modes. Default: ``False``
+            statistics in both training and eval modes. Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`affine` is ``True``). Default: ``True``
 
@@ -349,11 +349,11 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
-            Default: ``False``
+            Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
-            statistics in both training and eval modes. Default: ``False``
+            statistics in both training and eval modes. Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`affine` is ``True``). Default: ``True``
 
@@ -469,11 +469,11 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters, initialized the same way as done for batch normalization.
-            Default: ``False``
+            Default: ``True``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
-            statistics in both training and eval modes. Default: ``False``
+            statistics in both training and eval modes. Default: ``True``
         bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
             :attr:`affine` is ``True``). Default: ``True``
 
