@@ -7204,6 +7204,51 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
         self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
 
+    def test_type_mro_method(self):
+        class Foo:
+            pass
+
+        class Bar(Foo):
+            pass
+
+        counter = CompileCounter()
+
+        @torch._dynamo.optimize_assert(counter)
+        def fn():
+            return Bar.mro()
+
+        self.assertEqual(fn(), Bar.mro())
+
+    def test_type_mro_shadowed(self):
+        class Shadow:
+            @staticmethod
+            def mro():
+                return "shadowed"
+
+        class MroMeta(type):
+            def mro(cls):
+                return [cls, object]
+
+        class WithMroMeta(metaclass=MroMeta):
+            pass
+
+        class GetattributeMeta(type):
+            def __getattribute__(cls, name):
+                if name == "mro":
+                    return lambda: "dynamic"
+                return super().__getattribute__(name)
+
+        class WithGetattributeMeta(metaclass=GetattributeMeta):
+            pass
+
+        @torch.compile(backend="eager")
+        def fn(cls):
+            return cls.mro()
+
+        self.assertEqual(fn(Shadow), "shadowed")
+        self.assertEqual(fn(WithMroMeta), [WithMroMeta, object])
+        self.assertEqual(fn(WithGetattributeMeta), "dynamic")
+
     def test_builtin_str_on_user_defined_function(self):
         def another_fn():
             pass
