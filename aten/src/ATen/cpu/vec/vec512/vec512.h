@@ -85,8 +85,7 @@ std::
         const double* base_addr,
         const Vectorized<int64_t>& vindex,
         Vectorized<double>& mask) {
-  auto all_ones = _mm512_castsi512_pd(_mm512_set1_epi64(0xFFFFFFFFFFFFFFFF));
-  auto mask_ = _mm512_cmp_pd_mask(all_ones, mask.values, _CMP_EQ_OQ);
+  auto mask_ = _mm512_movepi64_mask(_mm512_castpd_si512(mask.values));
   return _mm512_mask_i64gather_pd(src, mask_, vindex, base_addr, scale);
 }
 
@@ -97,8 +96,7 @@ std::
         const float* base_addr,
         const Vectorized<int32_t>& vindex,
         Vectorized<float>& mask) {
-  auto all_ones = _mm512_castsi512_ps(_mm512_set1_epi32(0xFFFFFFFF));
-  auto mask_ = _mm512_cmp_ps_mask(all_ones, mask.values, _CMP_EQ_OQ);
+  auto mask_ = _mm512_movepi32_mask(_mm512_castps_si512(mask.values));
   return _mm512_mask_i32gather_ps(src, mask_, vindex, base_addr, scale);
 }
 #endif
