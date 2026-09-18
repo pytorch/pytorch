@@ -421,9 +421,16 @@ class DeviceTypeTestBase(TestCase):
     # Returns the capability map used by @requires_capabilities.
     # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
     # declare supported capabilities. This method evaluates the support checks.
+    # Pass a category namespace (e.g. Capability.attention) to only evaluate and
+    # return the capabilities of that category.
     @classmethod
-    def get_capabilities(cls) -> dict[str, bool]:
-        return {k: bool(fn()) for k, fn in cls._capabilities().items()}
+    def get_capabilities(cls, category: type | None = None) -> dict[str, bool]:
+        prefix = "" if category is None else f"{category.__name__}."
+        return {
+            k: bool(fn())
+            for k, fn in cls._capabilities().items()
+            if k.startswith(prefix)
+        }
 
     # Returns a capability map from capability identifier to a callable that
     # determines whether the current device supports it.

@@ -305,7 +305,11 @@ with _temp_test_configs(
 
 
 class TestCapabilityGating(TestCase):
-    """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
+    """Verify that @requires_capabilities gates tests on PrivateUse1 backends.
+
+    Also covers get_capabilities(category=...), which must only return the
+    capabilities of the requested category.
+    """
 
     executed_count = 0
 
@@ -324,7 +328,7 @@ class TestCapabilityGating(TestCase):
     @classmethod
     def tearDownClass(cls):
         PrivateUse1TestBase._capabilities = cls._saved_capabilities
-        expected_runs = 3
+        expected_runs = 4
         if cls.executed_count != expected_runs:
             raise AssertionError(
                 f"Capability gating failed! "
@@ -374,6 +378,19 @@ class TestCapabilityGating(TestCase):
             r"has not declared capabilities: attention\.flash_attention",
         ):
             dummy(self)
+        type(self).executed_count += 1
+
+    def test_capability_category_filter(self, device):
+        """get_capabilities(category=...) returns only the requested category."""
+
+        self.assertEqual(
+            type(self).get_capabilities(Capability.dtype),
+            {Capability.dtype.fp8: True, Capability.dtype.bf16: False},
+        )
+
+        # Caps of other categories are not leaked into the result.
+        self.assertEqual(type(self).get_capabilities(Capability.attention), {})
+
         type(self).executed_count += 1
 
 
