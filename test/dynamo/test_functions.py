@@ -3356,10 +3356,14 @@ partial_fn = functools.partial(fn, scale=2)
             def __index__(self):
                 return 3
 
+        class FloatSubclass(float):
+            pass
+
         fn = getattr(math, name)
 
         def func(x):
-            return x + 1, fn(FloatLike(), 1.0), fn(1.0, IndexLike())
+            sub = fn(FloatSubclass(1.5), 2.0)
+            return x + 1, fn(FloatLike(), 1.0), fn(1.0, IndexLike()), sub
 
         x = torch.rand(10)
         opt = torch.compile(func, backend="eager", fullgraph=True)
@@ -3432,9 +3436,10 @@ partial_fn = functools.partial(fn, scale=2)
         def func(x):
             return x + 1, fn(FloatLike(x.shape[0]), 2.0)
 
-        x = torch.rand(7)
         opt = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
-        self.assertEqual(opt(x), func(x))
+        for size in (7, 9, 11):
+            x = torch.rand(size)
+            self.assertEqual(opt(x), func(x))
 
     def test_math_remainder_domain_error(self):
         class FloatLike:
