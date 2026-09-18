@@ -120,9 +120,18 @@ def _unwrapped_raise(e: Exception) -> tuple[str, BaseException]:
     # read as an answer. It stops at the first link that is not a SystemError: an
     # exception user code raised `from` an interrupt is that code's own answer,
     # and reading past it would report the interrupt in its place.
+    # Bounded by the links already walked, the way TracebackException's own walk
+    # is: a key's __eq__ can chain two SystemErrors to each other, and an
+    # unbounded walk of that cycle spins inside dispatch before any record exists
+    # for the report to recover from. Ids are enough because every link is alive,
+    # held by the chain from e, so none of them is reused under the set.
     reason: BaseException = e
+    seen = {id(reason)}
     while isinstance(reason, SystemError) and reason.__cause__ is not None:
         reason = reason.__cause__
+        if id(reason) in seen:
+            break
+        seen.add(id(reason))
     return type(reason).__name__, reason
 
 
@@ -1769,8 +1778,11 @@ class AOTCompiledModel:
         # chained cause worth reading. That traceback holds this frame, and so
         # args and kwargs, until the cyclic collector runs -- the `except ... as
         # e` cleanup that breaks that cycle is undone by the store -- so an exit
-        # that serves a graph, and so builds no report to read the record,
-        # clears both first and leaves this call's inputs to reference counting.
+        # that serves a graph, and so builds no report to read the record, clears
+        # `raised` first and leaves this call's inputs to reference counting.
+        # `unanswered` holds ints and frees nothing; it is cleared beside `raised`
+        # to keep the subset invariant _no_match_report documents, so no reader
+        # finds an index unanswered with no exception recorded for it.
         raised: dict[int, Exception] = {}
         unanswered: set[int] = set()
         # Per-result bindings by index, kept for the re-check and the report.
