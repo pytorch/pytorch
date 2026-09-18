@@ -13,6 +13,7 @@ import operator
 import os
 import pickle
 import sys
+import threading
 import time
 import traceback
 import types
@@ -1868,6 +1869,44 @@ def _check_tensor_list(param: object, param_name: str) -> None:
         )
 
 
+# NCCL groups can span process groups on the calling thread.
+class _GroupedCollectiveContext(threading.local):
+    def __init__(self) -> None:
+        self.reason: str | None = None
+
+    def check_config(self) -> None:
+        if self.reason is not None:
+            raise NotImplementedError(
+                "per-collective configuration is not supported " + self.reason
+            )
+
+    @contextlib.contextmanager
+    def enter(self, reason: str) -> collections.abc.Iterator[None]:
+        previous = self.reason
+        self.reason = reason
+        try:
+            yield
+        finally:
+            self.reason = previous
+
+
+_grouped_collective_context = _GroupedCollectiveContext()
+
+
+def _check_collective_config(
+    group: ProcessGroup | C10DBackend | None, tensor: torch.Tensor
+) -> None:
+    _grouped_collective_context.check_config()
+    group = group or _get_default_group()
+    backend = (
+        group if isinstance(group, C10DBackend) else group._get_backend(tensor.device)
+    )
+    if backend.name() != "nccl2":
+        raise RuntimeError(
+            "Per-collective configuration is only supported by the nccl2 backend"
+        )
+
+
 def _group_or_default_group(group: ProcessGroup | None = None) -> ProcessGroup:
     if group is None or group is GroupMember.WORLD:
         group = _get_default_group()
@@ -3664,7 +3703,14 @@ def _coalescing_manager(
     if device:
         group._start_coalescing(device)
     cm = _CoalescingManager()
-    yield cm
+    with _grouped_collective_context.enter("with coalescing"):
+        try:
+            yield cm
+        except BaseException:
+            _world.pg_coalesce_state.pop(group)
+            if device:
+                group._end_coalescing(device)
+            raise
     work = None
     op_list = _world.pg_coalesce_state.pop(group)
     if op_list:
@@ -3776,8 +3822,11 @@ def _time_estimator(
         )
     backend._start_time_estimate()
     cm = _TimeEstimator()
-    yield cm
-    cm.estimated_time = backend._end_time_estimate()
+    with _grouped_collective_context.enter("during time estimation"):
+        try:
+            yield cm
+        finally:
+            cm.estimated_time = backend._end_time_estimate()
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
