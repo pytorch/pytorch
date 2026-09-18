@@ -23,7 +23,7 @@ optimizer-specific optimizations and safety guarantees.
 import logging
 import weakref
 from collections.abc import Iterable
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable
@@ -41,7 +41,7 @@ from ..source import (
     GradSource,
 )
 from ..utils import GLOBAL_KEY_PREFIX, unpack_iterable
-from .base import GetSet, Method, VariableTracker
+from .base import GetSet, Method, readonly_setter, VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .hashable import HashableTracker
@@ -158,7 +158,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return None
 
     tp_getset = {
-        "param_groups": GetSet(_get_param_groups),
+        "param_groups": GetSet(_get_param_groups, readonly_setter),
     }
 
     def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
@@ -227,7 +227,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 and isinstance(arg.source.base, AttrSource)
                 and arg.source.base.member == "param_groups"
             ):
-                return self.value.param_groups[arg.source.index]
+                return self.value.param_groups[cast(int, arg.source.index)]
 
             raise ArgMappingException
 
