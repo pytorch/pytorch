@@ -43,8 +43,8 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
 )
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     get_cycles_per_ms,
+    HardwareClassification,
     run_tests,
     wrapSwapTensorsTest,
 )
@@ -53,6 +53,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
+
 
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
@@ -414,7 +415,6 @@ class TestReplicate1DTrainingCore(FSDPTest):
         self.assertEqual(ref_root_loss, root_loss)
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
-
 
     @skip_if_lt_x_gpu(2)
     def test_explicit_prefetching(self, device):
