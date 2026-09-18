@@ -1075,7 +1075,7 @@ class CachingAutotuner(KernelInterface):
         exc = None
         try:
             load_device = _resolve_load_device(
-                self.device_props.index, self.device_props.type
+                self.triton_meta["device"], self.device_props.type
             )
             # DeviceGuard ensures each launcher's binary loads onto the right device.
             with DeviceGuard(device_interface, cast(int, load_device)):
@@ -3033,11 +3033,6 @@ class StaticTritonCompileResult(CompileResult[_T]):
         triton_meta: TritonMeta,
         heuristic_type: HeuristicType,
     ) -> _KernelType | None:
-        """The statically launchable kernel for this compile, or None to fall back.
-
-        None sends the caller to TritonCompileResult instead; the bypass reason is
-        logged, and strict_static_triton_launcher turns it into an error.
-        """
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
@@ -3059,13 +3054,8 @@ class StaticTritonCompileResult(CompileResult[_T]):
             if (
                 heuristic_type == HeuristicType.USER_AUTOTUNE
                 and not torch._inductor.config.static_launch_user_defined_triton_kernels
-                and triton_meta.get("device") is not None
             ):
-                # Don't support user defined triton kernels yet -- unless the device index
-                # was dropped (compile-on-one-rank), where one artifact serves every
-                # device and only the static launcher keeps its handles per device. The
-                # TritonCompileResult fallback bakes a single CUfunction, so it raises
-                # `invalid resource handle` on the second device.
+                # Don't support user defined triton kernels yet
                 raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
             if inductor_meta.get("store_cubin"):
