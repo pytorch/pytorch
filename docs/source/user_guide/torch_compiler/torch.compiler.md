@@ -38,7 +38,7 @@ might be used interchangeably in this documentation.
 is caller-driven: enter `precompile.capture(fn, artifact_path=..., cache_path=...)` as a
 context manager and call it exactly as you would `fn` -- with the model(s) passed among the
 arguments, positionally (the default `MakeFxTracer` takes positional arguments only;
-`DynamoTracer` will also accept keyword arguments), e.g.
+`DynamoTracer` will also accept keyword arguments). For example:
 
 ```python
 with torch.compiler.precompile.capture(
@@ -48,7 +48,7 @@ with torch.compiler.precompile.capture(
 f = torch.compiler.precompile.load("m.py", "m.cache")
 ```
 
--- and it writes a self-contained, runnable Python source artifact plus an acceleration
+The capture writes a self-contained, runnable Python source artifact plus an acceleration
 cache when the block exits cleanly having captured at least one call (a block that raised
 writes nothing). The default tracer captures several calls, with the graph breaks
 and recompilations between them; pass `tracer=torch.compiler.precompile.MakeFxTracer()` to
