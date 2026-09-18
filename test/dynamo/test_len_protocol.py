@@ -1291,6 +1291,36 @@ class TestFrozenDataclassLen(torch._dynamo.test_case.TestCase):
         self.assertEqual(len2, 3)
 
 
+class TestUnboundBuiltinDunder(torch._dynamo.test_case.TestCase):
+    """Unbound type.__len__(obj) / type.__iter__(obj) calls dispatch through
+    BuiltinVariable's declarative tp_methods table."""
+
+    @make_dynamo_test
+    def test_unbound_len(self):
+        t = (4, 5)
+        self.assertEqual(tuple.__len__(t), 2)
+        s = "abcd"
+        self.assertEqual(str.__len__(s), 4)
+        fs = frozenset({1, 2, 3})
+        self.assertEqual(frozenset.__len__(fs), 3)
+
+    @make_dynamo_test
+    def test_unbound_len_type_dunder(self):
+        t = (1, 2, 3)
+        self.assertEqual(type(t).__len__(t), 3)
+
+    @make_dynamo_test
+    def test_unbound_iter(self):
+        t = (1, 2, 3)
+        it = tuple.__iter__(t)
+        self.assertEqual(list(it), [1, 2, 3])
+        # for-loop desugars to the same iterator protocol
+        total = 0
+        for x in tuple.__iter__(t):
+            total += x
+        self.assertEqual(total, 6)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
