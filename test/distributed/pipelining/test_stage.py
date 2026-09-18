@@ -3,6 +3,7 @@
 
 import os
 import tempfile
+from contextlib import contextmanager
 from unittest import mock
 
 from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
@@ -16,7 +17,7 @@ from torch.distributed.pipelining import (
     PipelineStage,
     ScheduleGPipe,
 )
-from torch.distributed.pipelining._utils import PipeliningMetadataError
+from torch.distributed.pipelining._utils import InferenceMode, PipeliningMetadataError
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -42,6 +43,27 @@ backend = dist.get_default_backend_for_device(device_type)
 torch.manual_seed(0)
 
 
+@contextmanager
+def single_rank_process_group():
+    """Provide a temporary local process group for stage unit tests."""
+    init_pg = not dist.is_initialized()
+    if not init_pg and dist.get_world_size() != 1:
+        raise RuntimeError("pipeline stage unit tests require a single-rank group")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        if init_pg:
+            dist.init_process_group(
+                "gloo",
+                init_method=f"file://{os.path.join(tmpdir, 'pg')}",
+                rank=0,
+                world_size=1,
+            )
+        try:
+            yield
+        finally:
+            if init_pg:
+                dist.destroy_process_group()
+
+
 class PipelineStageBackendWarningTest(TestCase):
     @parametrize(
         "backend,should_warn",
@@ -64,6 +86,42 @@ instantiate_parametrized_tests(PipelineStageBackendWarningTest)
 
 
 class PipelineStageMetadataInferenceTest(TestCase):
+    def test_recv_metadata_reinit_rejects_owned_buffers(self):
+        with single_rank_process_group():
+            activation = torch.ones(1, requires_grad=True)
+            forward_stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=1,
+                num_stages=2,
+                device=torch.device("cpu"),
+                input_args=activation,
+                output_args=activation,
+            )
+            forward_stage._inference_mode = InferenceMode.STATIC
+            forward_stage._prepare_forward_infra(1, None)
+            forward_stage.args_recv_info[0][0].allocate_buffer("cpu")
+            with self.assertRaisesRegex(
+                PipeliningMetadataError, "incomplete pipeline step"
+            ):
+                forward_stage._prepare_forward_infra(1, None)
+
+            backward_stage = PipelineStage(
+                torch.nn.Identity(),
+                stage_index=0,
+                num_stages=2,
+                device=torch.device("cpu"),
+                input_args=activation,
+                output_args=activation,
+            )
+            backward_stage._inference_mode = InferenceMode.STATIC
+            backward_stage._prepare_forward_infra(1, (activation,))
+            backward_stage._prepare_backward_infra(1)
+            backward_stage.grad_recv_info[0][0].allocate_buffer("cpu")
+            with self.assertRaisesRegex(
+                PipeliningMetadataError, "incomplete pipeline step"
+            ):
+                backward_stage._prepare_backward_infra(1)
+
     def test_dynamic_metadata_inference_restores_module_buffers(self):
         class BufferMutatingModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -86,44 +144,32 @@ class PipelineStageMetadataInferenceTest(TestCase):
                 return grad
 
         device = torch.device("cpu")
-        init_pg = not dist.is_initialized()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            if init_pg:
-                dist.init_process_group(
-                    "gloo",
-                    init_method=f"file://{os.path.join(tmpdir, 'pg')}",
-                    rank=0,
-                    world_size=1,
-                )
-            try:
-                mod = BufferMutatingModule().to(device)
-                stage = PipelineStage(
-                    mod,
-                    stage_index=0,
-                    num_stages=1,
-                    device=device,
-                )
-                schedule = ScheduleGPipe(
-                    stage,
-                    n_microbatches=1,
-                    loss_fn=lambda out, target: out.sum() + target.sum() * 0,
-                )
+        with single_rank_process_group():
+            mod = BufferMutatingModule().to(device)
+            stage = PipelineStage(
+                mod,
+                stage_index=0,
+                num_stages=1,
+                device=device,
+            )
+            schedule = ScheduleGPipe(
+                stage,
+                n_microbatches=1,
+                loss_fn=lambda out, target: out.sum() + target.sum() * 0,
+            )
 
-                initial_counter = mod.counter.clone()
-                initial_scale = mod.scale.clone()
-                x = torch.randn(2, 4, device=device, requires_grad=True)
-                target = torch.zeros((), device=device)
+            initial_counter = mod.counter.clone()
+            initial_scale = mod.scale.clone()
+            x = torch.randn(2, 4, device=device, requires_grad=True)
+            target = torch.zeros((), device=device)
 
-                # This exercises the full metadata-inference lifecycle. The
-                # scale buffer is saved by autograd, so restoring buffers before
-                # backward metadata inference would bump its version counter.
-                schedule._initialize_stage((x,), {}, target=target)
+            # This exercises the full metadata-inference lifecycle. The
+            # scale buffer is saved by autograd, so restoring buffers before
+            # backward metadata inference would bump its version counter.
+            schedule._initialize_stage((x,), {}, target=target)
 
-                self.assertEqual(mod.counter, initial_counter)
-                self.assertEqual(mod.scale, initial_scale)
-            finally:
-                if init_pg:
-                    dist.destroy_process_group()
+            self.assertEqual(mod.counter, initial_counter)
+            self.assertEqual(mod.scale, initial_scale)
 
 
 def get_dtype_change_hook(new_dtype):
