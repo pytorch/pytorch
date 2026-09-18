@@ -273,12 +273,14 @@ struct TransposeTilePad {
                                               : 1;   // 4 B: 33 words
 };
 
-template <typename T, bool kGridStride>
+template <typename T, int kVectorSize, int kAccessSize, bool kGridStride>
 __global__ void transpose_copy_tiled_kernel(
     const T* __restrict__ src, T* __restrict__ dst,
     int64_t width, int64_t height,
     int64_t src_pitch, int64_t dst_pitch) {
-  __shared__ T tile[kTransposeTile][kTransposeTile + TransposeTilePad<T>::value];
+  __shared__ T tile[kVectorSize][kTransposeTile][kTransposeTile + TransposeTilePad<T>::value];
+  using Vec = memory::aligned_vector<T, kAccessSize>;
+  constexpr int rows = kTransposeRows * kAccessSize;
 
   // gridDim.y is capped at 65535 on every compute capability, so walk the
   // tile rows with a grid-stride loop instead of mapping them 1:1 to blocks.
@@ -286,22 +288,66 @@ __global__ void transpose_copy_tiled_kernel(
 
   int64_t by = blockIdx.y;
   do {
-    int64_t x = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.x;
+    int64_t x = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.x * kAccessSize;
     int64_t y = by * kTransposeTile + threadIdx.y;
 
-    for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
+    #pragma unroll
+    for (int j = 0; j < kTransposeTile; j += rows) {
       if (x < width && (y + j) < height) {
-        tile[threadIdx.y + j][threadIdx.x] = src[(y + j) * src_pitch + x];
+        Vec inputs[kVectorSize];
+        #pragma unroll
+        for (int i = 0; i < kVectorSize; ++i) {
+          inputs[i] = *reinterpret_cast<const Vec*>(
+              src + ((y + j) * kVectorSize + i) * src_pitch + x);
+        }
+        // Transpose each packed 2x2 or 4x4 block in registers. Separate
+        // padded planes keep both shared-memory accesses bank-conflict free.
+        #pragma unroll
+        for (int k = 0; k < kAccessSize; ++k) {
+          T values[kVectorSize];
+          #pragma unroll
+          for (int i = 0; i < kVectorSize; ++i) {
+            values[i] = inputs[i].val[k];
+          }
+          if constexpr (kVectorSize == 2) {
+            const auto a = values[0];
+            const auto b = values[1];
+            values[0] = __byte_perm(a, b, 0x5410);
+            values[1] = __byte_perm(a, b, 0x7632);
+          } else if constexpr (kVectorSize == 4) {
+            const auto a = __byte_perm(values[0], values[1], 0x5140);
+            const auto b = __byte_perm(values[0], values[1], 0x7362);
+            const auto c = __byte_perm(values[2], values[3], 0x5140);
+            const auto d = __byte_perm(values[2], values[3], 0x7362);
+            values[0] = __byte_perm(a, c, 0x5410);
+            values[1] = __byte_perm(a, c, 0x7632);
+            values[2] = __byte_perm(b, d, 0x5410);
+            values[3] = __byte_perm(b, d, 0x7632);
+          }
+          #pragma unroll
+          for (int i = 0; i < kVectorSize; ++i) {
+            tile[i][threadIdx.y + j][threadIdx.x * kAccessSize + k] = values[i];
+          }
+        }
       }
     }
     __syncthreads();
 
-    x = by * kTransposeTile + threadIdx.x;
+    x = by * kTransposeTile + threadIdx.x * kAccessSize;
     y = static_cast<int64_t>(blockIdx.x) * kTransposeTile + threadIdx.y;
 
-    for (int j = 0; j < kTransposeTile; j += kTransposeRows) {
+    #pragma unroll
+    for (int j = 0; j < kTransposeTile; j += rows) {
       if (x < height && (y + j) < width) {
-        dst[(y + j) * dst_pitch + x] = tile[threadIdx.x][threadIdx.y + j];
+        #pragma unroll
+        for (int i = 0; i < kVectorSize; ++i) {
+          Vec output;
+          #pragma unroll
+          for (int k = 0; k < kAccessSize; ++k) {
+            output.val[k] = tile[i][threadIdx.x * kAccessSize + k][threadIdx.y + j];
+          }
+          *reinterpret_cast<Vec*>(dst + ((y + j) * kVectorSize + i) * dst_pitch + x) = output;
+        }
       }
     }
     // With a single pass there is no next iteration to guard
@@ -312,16 +358,16 @@ __global__ void transpose_copy_tiled_kernel(
   } while (by < tiles_y);
 }
 
-template <typename T>
+template <typename T, int kVectorSize = 1, int kAccessSize = 1>
 void launch_tiled_transpose(bool needs_stride, dim3 grid, dim3 block,
                             cudaStream_t stream, const void* sp, void* dp,
                             int64_t w, int64_t h,
                 int64_t src_pitch, int64_t dst_pitch) {
   if (needs_stride) {
-    transpose_copy_tiled_kernel<T, true><<<grid, block, 0, stream>>>(
+    transpose_copy_tiled_kernel<T, kVectorSize, kAccessSize, true><<<grid, block, 0, stream>>>(
         reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h, src_pitch, dst_pitch);
   } else {
-    transpose_copy_tiled_kernel<T, false><<<grid, block, 0, stream>>>(
+    transpose_copy_tiled_kernel<T, kVectorSize, kAccessSize, false><<<grid, block, 0, stream>>>(
         reinterpret_cast<const T*>(sp), reinterpret_cast<T*>(dp), w, h, src_pitch, dst_pitch);
   }
 }
@@ -342,24 +388,49 @@ bool maybe_tiled_transpose_copy(TensorIterator& iter) {
   const int64_t src_pitch = is[0] / es;   // elements between src rows
   if (os[1] % es != 0 || is[0] % es != 0) return false;
 
-  // Below ~4 MB the tiled path and the generic strided kernel are
-  // indistinguishable above kernel-launch overhead (measured on sm_89 with
-  // L2 flushing and 3 repeats; every smaller size showed >4% run-to-run
-  // variance). Above it the tiled path was faster in every measured case
-  // except fp64 with a very short output row, where the strided kernel
-  // already reaches peak bandwidth and tiling costs ~4%.
-  if (h * w * es < (int64_t(4) << 20)) return false;
+  const void* sp = iter.tensor(1).const_data_ptr();
+  void* dp = iter.tensor(0).mutable_data_ptr();
+  constexpr int kWordSize = sizeof(uint32_t);
+  constexpr int kAccessSize = 4;
+  constexpr int kAlignment = alignof(memory::aligned_vector<uint32_t, kAccessSize>);
+  const int vec = es < kWordSize ? kWordSize / es : 1;
+  const int elements_per_access = kAccessSize * vec;
+  const bool vectorized = es <= kWordSize &&
+      w % elements_per_access == 0 && h % elements_per_access == 0 &&
+      src_pitch % elements_per_access == 0 && dst_pitch % elements_per_access == 0 &&
+      reinterpret_cast<uintptr_t>(sp) % kAlignment == 0 &&
+      reinterpret_cast<uintptr_t>(dp) % kAlignment == 0;
+  // Narrow vectorized copies benefit from tiling at smaller sizes.
+  const int64_t min_bytes = vectorized && es < kWordSize
+      ? (int64_t(256) << 10) : (int64_t(4) << 20);
+  if (h * w * es < min_bytes) return false;
 
+  // One word holds four bytes or two halfwords, giving 128x128 or 64x64 tiles.
+  const int tile_size = kTransposeTile * (vectorized ? vec : 1);
   const int64_t kMaxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-  const int64_t tiles_x = (w + kTransposeTile - 1) / kTransposeTile;
-  const int64_t tiles_y = (h + kTransposeTile - 1) / kTransposeTile;
-  dim3 block(kTransposeTile, kTransposeRows);
+  const int64_t tiles_x = (w + tile_size - 1) / tile_size;
+  const int64_t tiles_y = (h + tile_size - 1) / tile_size;
+  const int access_size = vectorized ? kAccessSize : 1;
+  dim3 block(kTransposeTile / access_size, kTransposeRows * access_size);
   const bool needs_stride = tiles_y > kMaxGridY;
   dim3 grid((unsigned)tiles_x,
             (unsigned)(needs_stride ? kMaxGridY : tiles_y));
   auto stream = at::cuda::getCurrentCUDAStream();
-  const void* sp = iter.tensor(1).const_data_ptr();
-  void* dp = iter.tensor(0).mutable_data_ptr();
+
+  if (vectorized) {
+    if (es == sizeof(uint8_t)) {
+      launch_tiled_transpose<uint32_t, kWordSize / sizeof(uint8_t), kAccessSize>(needs_stride, grid, block, stream,
+          sp, dp, w / vec, h / vec, src_pitch / vec, dst_pitch / vec);
+    } else if (es == sizeof(uint16_t)) {
+      launch_tiled_transpose<uint32_t, kWordSize / sizeof(uint16_t), kAccessSize>(needs_stride, grid, block, stream,
+          sp, dp, w / vec, h / vec, src_pitch / vec, dst_pitch / vec);
+    } else {
+      launch_tiled_transpose<uint32_t, 1, kAccessSize>(needs_stride, grid, block, stream,
+          sp, dp, w, h, src_pitch, dst_pitch);
+    }
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return true;
+  }
 
   switch (es) {
     case 1: launch_tiled_transpose<uint8_t>(needs_stride, grid, block, stream, sp, dp, w, h, src_pitch, dst_pitch); break;
