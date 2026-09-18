@@ -124,9 +124,16 @@ workspace for each hipBLAS handle and HIP stream, which was the default before P
 Persistent workspaces must not be used when capturing multiple HIP graphs on the same stream.
 
 Handles returned by ``torch.cuda.current_blas_handle()`` have no workspace bound when ATen workspace
-caching is disabled. rocBLAS then allocates its own workspace on demand, outside the HIP caching
-allocator and not during stream capture; bind one with ``rocblas_set_workspace`` before using such a
-handle inside a captured graph.
+caching is disabled. rocBLAS may then allocate a workspace of its own on demand, outside the HIP
+caching allocator. Binding a workspace afterwards frees that allocation, and neither the allocation
+nor the free is legal while a stream is capturing, so bind one with ``rocblas_set_workspace`` before
+using such a handle inside a captured graph.
+
+Create the BLAS handle before capture begins, for example with a warmup operation on the capture
+stream. ``hipblasCreate`` initializes hipBLASLt, which allocates device memory that HIP rejects on a
+capturing stream. This is independent of how workspaces are managed, and it also applies to
+TunableOp, whose tuning benchmarks must run outside capture. See
+`ROCm/rocm-libraries#11838 <https://github.com/ROCm/rocm-libraries/issues/11838>`_.
 
 When caching is enabled, a hipBLAS workspace is allocated for each combination of hipBLAS handle and
 HIP stream that executes a hipBLAS kernel requiring a workspace.  In order to
