@@ -251,9 +251,9 @@ void woq_matmul_int4_impl_cache(
       ldc,
       device_id,
       f_attr,
+      scale.scalar_type(),
       group_size,
-      zp_group_size,
-      scale.scalar_type());
+      zp_group_size);
 
   auto& engine = GpuEngineManager::Instance().get_engine();
 
