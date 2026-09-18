@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import logging
-from functools import lru_cache
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -34,26 +33,16 @@ class LookupTableChoices(InductorChoices):
         Get the template lookup table from config.
         Override this method to use custom lookup table sources (database, API, etc.).
         """
-        if not torch.cuda.is_available() or config.lookup_table.table is None:
+        if config.lookup_table.table is None:
             return {}
         return config.lookup_table.table
 
     @staticmethod
-    @lru_cache
     def _get_device_key(device: torch.device) -> str | None:
-        """
-        Generate a device key for lookup table indexing.
-        For CPU devices, returns None.
-        For CUDA devices, returns the props.gcnArchName string.
-        """
-        if device.type != "cuda":
-            # only cuda devices are supported, this indicates that the system is not in use
-            # for this device
-            return None
+        """Architecture key from ``architecture_name_from_device``."""
+        from torch._inductor.kernel_inputs import architecture_name_from_device
 
-        # Get CUDA device properties
-        props = torch.cuda.get_device_properties(device.index)
-        return props.gcnArchName
+        return architecture_name_from_device(device)
 
     @staticmethod
     def _generate_kernel_inputs_key(kernel_inputs: KernelInputs) -> str:
