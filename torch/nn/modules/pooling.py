@@ -1310,8 +1310,6 @@ class _AdaptiveMaxPoolNd(Module):
         return f"output_size={self.output_size}"
 
 
-
-
 class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
     r"""Applies a 1D adaptive max pooling over an input signal composed of several input planes.
 
