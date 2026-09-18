@@ -1412,19 +1412,16 @@ class TS2EPConverter:
 
         self.name_to_param: dict[str, torch.Tensor] = {}
         self.name_to_buffer: dict[str, torch.Tensor] = {}
-        param_list = (
-            list(self.ts_model.parameters())
-            if not isinstance(self.ts_model, torch._C.ScriptFunction)
-            else []
-        )
         if not isinstance(self.ts_model, torch._C.ScriptFunction):
+            # remove_duplicate=False so that a submodule aliased under several
+            # attributes is reported under every name state_dict() uses for it.
+            # Which bucket a name lands in is load-bearing: lift_get_attr below
+            # only re-fetches the live nn.Parameter for names it does not
+            # already have in name_to_buffer.
+            named_params = self.ts_model.named_parameters(remove_duplicate=False)  # type: ignore[union-attr]
+            param_names = {k for k, _ in named_params}
             for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
-                # Check if tensor belongs to any parameter.
-                if any(
-                    (tensor == param).all()
-                    for param in param_list
-                    if tensor.shape == param.shape
-                ):
+                if k in param_names:
                     self.name_to_param[k] = tensor
                 else:
                     self.name_to_buffer[k] = tensor
@@ -1465,7 +1462,8 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
         # Post-processing step to deal with quantized operators.
         replace_quantized_ops_with_standard_ops(gm)
-        log.info("GraphModule: %s", gm.print_readable(print_output=False))
+        if log.isEnabledFor(logging.INFO):
+            log.info("GraphModule: %s", gm.print_readable(print_output=False))
 
         ep = self.retrace_as_exported_program(
             gm,
