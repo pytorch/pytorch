@@ -53,7 +53,14 @@ __all__ = [
 ]
 
 
-def _gen_rank_device(global_rank: int, device_type: str = "cuda") -> str:
+def _infer_default_device_type() -> str:
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    return accelerator.type if accelerator is not None else "cpu"
+
+
+def _gen_rank_device(global_rank: int, device_type: str | None = None) -> str:
+    if device_type is None:
+        device_type = _infer_default_device_type()
     if device_type == "cpu":
         return "cpu"
     device_module = _get_device_module(device_type)
@@ -100,8 +107,10 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
 
 
 def _alloc_tensor(
-    props: TensorProperties, size: Sequence[int], device_type: str = "cuda"
+    props: TensorProperties, size: Sequence[int], device_type: str | None = None
 ) -> torch.Tensor:
+    if device_type is None:
+        device_type = _infer_default_device_type()
     if device_type == "cpu":
         device = cast(torch.device, _get_device_module(device_type).current_device())
     else:
