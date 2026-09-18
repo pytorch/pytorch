@@ -139,6 +139,37 @@ class TestCodegenTriton(InductorTestCase):
         self.assertTrue(torch.isnan(actual_max[2]).item())
         self.assertIn("tl.where", " ".join(code))
 
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    @inductor_config.patch(
+        force_disable_caches=True,
+        combo_kernels=True,
+        benchmark_combo_kernel=False,
+        combo_kernel_per_subkernel_blocks=False,
+        combo_kernel_max_distance=-1,
+        combo_kernel_peak_memory_increase_gb=None,
+        combo_kernel_peak_memory_pct_threshold=None,
+    )
+    def test_singleton_reduction_store_broadcast(self):
+        def fn(x, y):
+            # Keep this dimension symbolic until Inductor proves it is one.
+            torch._check(x.shape[0] == 1)
+            return x.sum(dim=1), y.sum(dim=1)
+
+        x = torch.randn(1, 2048, device=GPU_TYPE)
+        y = torch.randn(128, 2048, device=GPU_TYPE)
+        expected = fn(x, y)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=True), x, y
+        )
+
+        self.assertEqual(actual, expected)
+        self.assertIn("SequentialComboKernelGrid", " ".join(code))
+        self.assertIn(
+            "tl.full([1, 1], 0, tl.int32).broadcast_to(XBLOCK, 1)",
+            " ".join(code),
+        )
+
     def test_range_tree_entry_ownership_uses_root_identity(self):
         class AlternateR0Root(IterationRangesRoot):
             def block_size(self):
