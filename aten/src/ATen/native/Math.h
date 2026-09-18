@@ -1245,14 +1245,19 @@ template <>
 template <typename T>
 inline typename std::enable_if_t<std::is_integral_v<T>, T>
 calc_gcd(T a, T b) {
-  a = abs_impl(a);
-  b = abs_impl(b);
-  while (a != 0) {
-    T c = a;
-    a = b % a;
-    b = c;
+  // Use unsigned arithmetic to avoid undefined behavior when a or b
+  // is INT_MIN, where std::abs() overflows because |INT_MIN| > INT_MAX.
+  // Note: gcd(INT_MIN, 0) returns INT_MIN (negative) because the true
+  // result |INT_MIN| is not representable in T. Same as NumPy.
+  using U = std::make_unsigned_t<T>;
+  U ua = (a < 0) ? -static_cast<U>(a) : static_cast<U>(a);
+  U ub = (b < 0) ? -static_cast<U>(b) : static_cast<U>(b);
+  while (ua != 0) {
+    U c = ua;
+    ua = ub % ua;
+    ub = c;
   }
-  return b;
+  return static_cast<T>(ub);
 }
 
 template <typename T>
