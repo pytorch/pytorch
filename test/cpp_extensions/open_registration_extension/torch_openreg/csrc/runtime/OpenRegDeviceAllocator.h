@@ -42,6 +42,7 @@ class DeviceMemoryAllocator {
 };
 
 
+// LITERALINCLUDE START: OPENREG DEVICE ALLOCATOR CLASS
 class OpenRegDeviceAllocator final : public c10::DeviceAllocator {
  public:
   OpenRegDeviceAllocator();
@@ -71,6 +72,7 @@ class OpenRegDeviceAllocator final : public c10::DeviceAllocator {
   std::recursive_mutex mutex_;
   ska::flat_hash_map<void*, c10::DeviceIndex> allocated_blocks_;
 };
+// LITERALINCLUDE END: OPENREG DEVICE ALLOCATOR CLASS
 
 
 
