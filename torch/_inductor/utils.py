@@ -506,7 +506,13 @@ TMA_DESCRIPTOR_SIZE = 128
 #
 # 1. Legality. `make_tensor_descriptor` enforces rank 1-5, a unit innermost
 #    stride, and an innermost *block* extent of at least 16 bytes. This is the
-#    only alignment-shaped rule Triton actually checks.
+#    only alignment-shaped rule Triton actually checks. Note what it does NOT
+#    constrain: the logical innermost *extent*. `can_use_tma` requires that to
+#    be a 16-byte multiple; TDM has no such rule, because a descriptor load
+#    bounds-checks against the logical shape and zero-fills beyond it, so a
+#    block may legally overhang the extent. That is what admits FP16 head_dim
+#    65 (a 130-byte extent under a 128-element block). Do not copy TMA's rule
+#    here: it would reject padded head dimensions that are correct on TDM.
 # 2. Operand policy. Inductor additionally requires 16-byte storage offset and
 #    outer strides. Conservative, not required: it constrains where an operand
 #    may start, and does not establish base-pointer alignment.
@@ -2664,12 +2670,15 @@ def _tdm_operand_compatible(
         return False
     outer_idx = 0 if row_major else 1
 
-    return (
-        _tdm_operand_policy_violation(
-            mat, accepted_dtypes, offset, [strides_i[outer_idx]]
-        )
-        is None
+    violation = _tdm_operand_policy_violation(
+        mat, accepted_dtypes, offset, [strides_i[outer_idx]]
     )
+    if violation is not None:
+        # Covers the shared dtype/alignment policy only; the rank and
+        # orientation exits above return before a reason exists.
+        log.debug("Dense TDM operand rejected for %s: %s", mat.get_name(), violation)
+        return False
+    return True
 
 
 def _guard_tdm_operand_layout(mat: IRNode) -> None:
@@ -2767,17 +2776,19 @@ def use_gfx1250_descriptor_codegen(device: torch.device | None) -> bool:
 
 def use_flex_tdm_descriptor(
     *matrices: IRNode,
-    block_shapes: Sequence[Sequence[sympy.Expr | int]] | None = None,
+    block_shapes: Sequence[Sequence[sympy.Expr | int]],
 ) -> bool:
     """Return whether flex operands satisfy TDM descriptor and request constraints."""
     from .virtualized import V
 
+    if not config.triton.enable_flex_tdm:
+        return False
     if not matrices or not _gfx1250_device_prereqs(matrices[0].get_device()):
         return False
 
-    if block_shapes is None:
-        block_shapes = [()] * len(matrices)
-    elif len(block_shapes) != len(matrices):
+    # Checked rather than zipped loosely: zip() truncates, so a short list would
+    # silently leave later operands unvalidated.
+    if len(block_shapes) != len(matrices):
         raise AssertionError("Expected one block shape per flex descriptor operand")
 
     def _reject(mat: IRNode, reason: str) -> bool:
@@ -2810,21 +2821,21 @@ def use_flex_tdm_descriptor(
         if violation is not None:
             return reject(violation)
 
-        if block_shape and len(block_shape) != 2:
+        if len(block_shape) != 2:
             return reject("expected a two-dimensional block shape")
 
-        # Rule 1, against the extent actually requested: block width if given,
-        # else the dim. This is the frontend's minimum, not an alignment policy.
-        innermost = block_shape[-1] if block_shape else sizes[-1]
+        # Rule 1, against the extent actually requested, which is the block
+        # width rather than the logical dim. This is the frontend's minimum,
+        # not an alignment policy.
         if not V.graph.sizevars.statically_known_geq(
-            innermost * itemsize, _TDM_MIN_INNERMOST_REQUEST_BYTES
+            block_shape[-1] * itemsize, _TDM_MIN_INNERMOST_REQUEST_BYTES
         ):
             return reject(
                 "innermost request extent is not statically known to hold at "
                 f"least {_TDM_MIN_INNERMOST_REQUEST_BYTES} bytes"
             )
 
-        if block_shape and not aligned(
+        if not aligned(
             block_shape[-1] * itemsize,
             _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
         ):
