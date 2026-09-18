@@ -507,6 +507,11 @@ class ScaleModule(torch.nn.Module):
         return x * 2
 
 
+class PairModule(torch.nn.Module):
+    def forward(self, x, y):
+        return x + y
+
+
 class CustomCallModule(torch.nn.Module):
     def __call__(self, x):
         return super().__call__(x) + 100
@@ -749,6 +754,48 @@ class RaisesUnprintable:
     # A stub guard manager whose every check raises an UnprintableError.
     def check(self, f_locals):
         raise UnprintableError("never printed")
+
+
+class RaisesOnceThenRejects:
+    """Stub guard manager that raises `message` on its first check() and rejects
+    on every later one: raised in the scan, rejected on the second pass, so the
+    report quotes the rejection and the advice standing on it is qualified."""
+
+    def __init__(self, message):
+        self.checks = 0
+        self.message = message
+
+    def check(self, f_locals):
+        self.checks += 1
+        if self.checks == 1:
+            raise RuntimeError(self.message)
+        return False
+
+    def check_verbose(self, f_locals):
+        return types.SimpleNamespace(
+            result=False, verbose_code_parts=["stub guard rejected"]
+        )
+
+
+class RejectsOnceThenRaises(NeverReChecked):
+    """The mirror: rejects on its first check() and raises `message` on every
+    later one, so its last evaluation raised and the report must not re-check
+    it, while the rejection it did give came before any raise."""
+
+    def __init__(self, message):
+        self.checks = 0
+        self.message = message
+
+    def check(self, f_locals):
+        self.checks += 1
+        if self.checks == 1:
+            return False
+        raise RuntimeError(self.message)
+
+
+# The sentence the no-match report appends to its ModelInput advice when every
+# rejection that advice rests on followed a raise from its own tree.
+CAVEAT_AFTER_A_RAISE = "which need not be the one that loaded them. Fix the raise first: every rejection this advice rests on followed a raise from its own tree, and a C++ throw out of a tree can leave that tree's relational guard state stale, so its next check can reject a call it fits or accept one it does not."
 
 
 # Not the identity: an identity weight makes "read the serialized weight" and
@@ -2641,6 +2688,9 @@ from user code:
         # Two independent things to do: fix or drop [0], cover [1] with an input.
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
+        # [1]'s rejection followed no raise, so the advice rests on a trusted
+        # answer and carries no post-throw caveat.
+        self.assertNotIn("every rejection this advice rests on", message)
         # One line per input, not a multi-line GuardDebugInfo repr per input.
         # Counted rather than read off the report's total, which an advice line
         # moves without changing what an entry looks like.
@@ -2811,6 +2861,8 @@ from user code:
         self.assertIn("  [1] the second tree's guard", lines)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertIn("Add a ModelInput", message)
+        # [1]'s rejection followed its own raise, so the advice is qualified.
+        self.assertIn("followed a raise from its own tree", message)
         self.assertNotIn("Every guard tree raised", message)
 
     def test_no_match_report_claims_no_raise_for_an_artifact_with_no_inputs(self):
@@ -3651,6 +3703,36 @@ from user code:
         # mitigation for [1]'s entry as well as for [0]'s real mismatch.
         self.assertIn("[0] L['mode'] == 0", message)
         self.assertIn("Add a ModelInput", message)
+
+    def test_no_match_message_qualifies_the_advice_when_the_re_check_raises(self):
+        # The re-check raised where dispatch saw a rejection: the only entry line
+        # is the re-check's raise, and the ModelInput advice is still qualified.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        class RaisesThenRejectsThenRaises(RaisesOnceThenRejects):
+            def check_verbose(self, f_locals):
+                raise RuntimeError("the re-check is unhappy")
+
+        stub = RaisesThenRejectsThenRaises("the first pass is unhappy")
+        model.forward.compiled_results[0]._artifacts.guard_manager = stub
+        with self.assertRaises(RuntimeError) as ctx:
+            served = model(torch.randn(3, 3))
+            self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual(stub.checks, 2)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
+        raised = "  [0] <guard check raised RuntimeError: the re-check is unhappy>"
+        self.assertIn(raised, lines)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        self.assertIn("Add a ModelInput", message)
+        self.assertIn("every rejection this advice rests on", message)
+        self.assertNotIn("Every guard tree raised", message)
+        self.assertEqual(str(ctx.exception.__cause__), "the first pass is unhappy")
 
     def test_no_match_message_when_guarded_state_changes_before_the_report(self):
         # The entry's other cause, with every guard answering consistently:
@@ -4691,6 +4773,9 @@ from user code:
         self.assertIn(withheld, message)
         self.assertIn("[0]'s raise, not a guard failure, is what withheld", message)
         self.assertIn("Add a ModelInput", message)
+        # The withheld line says why [1] was withheld, not that [0]'s rejection
+        # followed its raise; the advice standing on that rejection says so.
+        self.assertIn("every rejection this advice rests on", message)
         # One line per input: the withheld opt-out is described once, and
         # reaching the re-check for it would add a second line about the guards
         # nobody asked about.
@@ -4920,24 +5005,14 @@ from user code:
 
     def test_no_match_message_advises_an_input_after_an_answer_then_a_raise(self):
         # The tree rejected on the scan and raised on the second pass: its line is
-        # the raise, but a ModelInput could still cover the call.
+        # the raise, but a ModelInput could still cover the call, unqualified.
         self._hide_leaked_dynamo_globals()
         model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
         model._aot_compile(
             [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
         )
 
-        class RejectsThenRaises(NeverReChecked):
-            def __init__(self):
-                self.checks = 0
-
-            def check(self, f_locals):
-                self.checks += 1
-                if self.checks == 1:
-                    return False
-                raise RuntimeError("the second pass is unhappy")
-
-        stub = RejectsThenRaises()
+        stub = RejectsOnceThenRaises("the second pass is unhappy")
         model.forward.compiled_results[0]._artifacts.guard_manager = stub
         with self.assertRaises(RuntimeError) as ctx:
             model(torch.randn(3, 3))
@@ -4950,6 +5025,120 @@ from user code:
         # not re-check it, and NeverReChecked's line is what a re-check adds.
         self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
         self.assertIn("Add a ModelInput", message)
+        # The rejection came BEFORE the raise, so the advice carries no caveat.
+        self.assertNotIn("every rejection this advice rests on", message)
+        self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_qualifies_a_rejection_that_followed_a_raise(self):
+        # The mirror image: raised on the scan, rejected on the second pass. The
+        # ModelInput line stays and says the rejection it rests on followed a raise.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[])]
+        )
+
+        stub = RaisesOnceThenRejects("the scan is unhappy")
+        model.forward.compiled_results[0]._artifacts.guard_manager = stub
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3))
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual(stub.checks, 2)
+        self.assertIn("  [0] stub guard rejected", lines)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
+        # One paragraph: the caveat qualifies the advice, not a line of its own.
+        self.assertTrue(advice.endswith(CAVEAT_AFTER_A_RAISE), advice)
+        self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_qualifies_a_rejection_that_followed_a_cpp_throw(self):
+        # The stub above raises from Python; this is the raise the caveat's clause
+        # is about, out of a real tree. TENSOR_MATCH on a strided nested tensor
+        # fires a TORCH_CHECK, and that throw skips the reset on
+        # check_nopybind_template's exits, so NO_TENSOR_ALIASING still holds
+        # L['x'] from the scan when the second pass visits x's manager -- before
+        # y's, whose leaf threw -- and rejects the call there. That stale
+        # rejection is the one the advice rests on; the report's re-check runs on
+        # the state that rejection reset and quotes y's mismatch instead. Two
+        # orderings besides the reset carry this: root accessors stay in
+        # Guard.sort_key order (L['x'] before L['y']; the throw leaves before the
+        # fail-count bump and sort in check_accessors_nopybind), and
+        # TensorCheck::check_verbose compares dispatch key sets before it reads
+        # strides, so the re-check names L['y'] rather than throwing again.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(PairModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [
+                ModelInput(
+                    args=(torch.randn(3, 3), torch.randn(3, 3)), kwargs={}, contexts=[]
+                )
+            ]
+        )
+        x = torch.randn(3, 3)
+        nested = torch.nested.nested_tensor(
+            [torch.randn(2, 3), torch.randn(3, 3)], layout=torch.strided
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, nested)
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        cause = ctx.exception.__cause__
+        self.assertIn("doesn't support strides", str(cause))
+        # pybind translated a throw; no tree returned with an error set.
+        self.assertIsNone(cause.__cause__)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 1, message)
+        entry = next(ln for ln in lines if ln.startswith("  ["))
+        self.assertNotIn("<guard check raised", entry)
+        self.assertIn("L['y']", entry)
+        self.assertIn("[0]'s guard check raised while checking this call", message)
+        advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
+        self.assertTrue(advice.endswith(CAVEAT_AFTER_A_RAISE), advice)
+        self.assertNotIn("Every guard tree raised", message)
+        # The residue itself, probed after the dispatch under test so that
+        # dispatch ran on a tree nothing here had touched: the evaluation right
+        # after the throw fails on x as a duplicate.
+        result = model.forward.compiled_results[0]
+        tree = result._live_guard_manager()
+        f_locals = result.prepare_f_locals(model.forward.model, x, nested)
+        with self.assertRaisesRegex(RuntimeError, "doesn't support strides"):
+            tree.check(f_locals)
+        stale = tree.check_verbose(f_locals).verbose_code_parts
+        self.assertEqual(stale, ["Duplicate tensor found where not expected!"])
+
+    def test_no_match_message_trusts_one_rejection_taken_before_a_raise(self):
+        # One trusted rejection is enough to leave the advice unqualified: [0]
+        # rejected and then raised, [1] raised and then rejected. Requiring every
+        # rejection on record to be trusted would qualify this report on [1]'s.
+        self._hide_leaked_dynamo_globals()
+        model = torch.compile(ScaleModule(), fullgraph=True, backend="eager")
+        model._aot_compile(
+            [
+                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
+                ModelInput(args=(torch.randn(3, 3),), kwargs={}, contexts=[]),
+            ]
+        )
+
+        results = model.forward.compiled_results
+        first = RejectsOnceThenRaises("the second pass is unhappy")
+        second = RaisesOnceThenRejects("the scan is unhappy")
+        results[0]._artifacts.guard_manager = first
+        results[1]._artifacts.guard_manager = second
+        with self.assertRaises(RuntimeError) as ctx:
+            served = model(torch.randn(3, 3))
+            self.fail(f"dispatch served {served[0, 0].item()}, not a raise")
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertEqual((first.checks, second.checks), (2, 2))
+        raised = "[0] <guard check raised RuntimeError: the second pass is unhappy>"
+        self.assertIn(f"  {raised}", lines)
+        self.assertIn("  [1] stub guard rejected", lines)
+        self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, message)
+        # `raised` is in recording order, and [1]'s scan raise came first.
+        self.assertIn("[1]'s guard check raised while checking this call", message)
+        self.assertEqual(str(ctx.exception.__cause__), "the scan is unhappy")
+        self.assertIn("Add a ModelInput", message)
+        self.assertNotIn("every rejection this advice rests on", message)
         self.assertNotIn("Every guard tree raised", message)
 
     def test_aot_compile_module_second_pass_warns_that_it_served_over_a_raise(self):

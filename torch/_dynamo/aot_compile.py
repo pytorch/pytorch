@@ -55,6 +55,17 @@ _EXTERNAL_DATA_HINT = (
 # default instead, in the one lookup a live scope needs.
 _UNBOUND = object()
 
+# What a raise can cost the tree it came out of, said once: the no-match report
+# and the warning the serving paths log both name it. Hedged, because only a
+# throw skips the reset on check_nopybind_template's exits: a tree that returns
+# with an error set (the SystemError _unwrapped_raise reads through) reset on
+# its way out, and neither the last-resort veto nor this clause tells the two
+# apart.
+_STALE_AFTER_THROW = (
+    "a C++ throw out of a tree can leave that tree's relational guard state "
+    "stale, so its next check can reject a call it fits or accept one it does not"
+)
+
 
 # A guard failure that is exactly a missing top-level global: the verbose code
 # part a guard tree reports for one ("KeyError on G['CONFIG']"). A trailing
@@ -1865,12 +1876,14 @@ class AOTCompiledModel:
     define; a ``fix or drop that artifact`` line naming the first input that
     raised of those nobody opted out, when one did; and -- when some checked
     tree reached an answer, or the artifact holds no input at all -- the advice
-    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When
-    no checked tree ever answered and two or more trees raised, a line saying
-    every guard tree raised replaces it, unless an opted-out result's line has
-    already said the raise withheld it; a single raiser's own line already says
-    as much. When some guard tree raised in dispatch, the last raise of the
-    first input that raised is the
+    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
+    When every rejection that advice rests on followed a raise from its own
+    tree, it says so and says to fix the raise first; when no checked tree ever
+    answered and two or more trees raised, a line saying every guard tree
+    raised replaces it, unless an opted-out result's line has already said the
+    raise withheld it; a single raiser's own line already says as much. When
+    some guard tree raised in dispatch, the last raise of the first input that
+    raised is the
     ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
     sees: an ``except RuntimeError`` (a ``TORCH_CHECK``) catches the report
     with the tree's raise one hop down, and an ``except SystemError`` no longer
@@ -1993,6 +2006,8 @@ class AOTCompiledModel:
         unanswered: set[int] = set()
         # Indices that ever reached an answer, which a ModelInput could have covered.
         answered: set[int] = set()
+        # Answered with no raise of their own on record (see warn_swallowed).
+        trusted: set[int] = set()
         # Per-result bindings, filled on first use, kept for the re-check and report.
         bound: dict[int, dict[str, object]] = {}
         # The first result is bound and checked inline, as at a single-result
@@ -2022,6 +2037,7 @@ class AOTCompiledModel:
                 answer = False
             else:
                 answered.add(0)
+                trusted.add(0)
             if answer:
                 # The guard manager already passed; go through _serve rather
                 # than result(), which would re-run the ~0.85us guard eval on
@@ -2061,8 +2077,11 @@ class AOTCompiledModel:
             if answer:
                 return True
             # Recorded on a rejection only: an accept serves and builds no report.
+            # Measured 0.06us for the four against a 1.3us check().
             unanswered.discard(i)
             answered.add(i)
+            if i not in raised:
+                trusted.add(i)
             return False
 
         for i, result in enumerate(results[1:], 1):
@@ -2121,6 +2140,7 @@ class AOTCompiledModel:
             raised=raised,
             unanswered=unanswered,
             answered=answered,
+            trusted=trusted,
             bound=bound,
             enabled=enabled,
         )
@@ -2141,6 +2161,7 @@ class AOTCompiledModel:
         raised: dict[int, Exception],
         unanswered: set[int],
         answered: set[int],
+        trusted: set[int],
         bound: dict[int, dict[str, object]],
         enabled: list[bool],
     ) -> str:
@@ -2181,6 +2202,7 @@ class AOTCompiledModel:
         # An entry that answered in either dispatch pass rejected this call, so a
         # ModelInput could have covered it even where its line below is a raise.
         coverable = any(results[i]._guard_check_enabled for i in answered)
+        trusted_rejection = any(results[i]._guard_check_enabled for i in trusted)
         withheld = not all(enabled)
         for i, result in enumerate(results):
             if not enabled[i]:
@@ -2278,12 +2300,20 @@ class AOTCompiledModel:
         # An artifact holding no inputs at all -- which deserialize() accepts --
         # has no entry to answer, and adding an input is exactly the advice for it.
         if coverable or not results:
-            lines.append(
+            advice = (
                 "Add a ModelInput covering this call, or check whether "
                 "guard_filter_fn kept a guard this call cannot satisfy -- both "
                 "belong to the process that compiles the artifacts, which need "
                 "not be the one that loaded them."
             )
+            if coverable and not trusted_rejection:
+                # Keyed on what dispatch recorded, not on the entry lines: the
+                # re-check may have printed a raise or an accept instead.
+                advice += (
+                    " Fix the raise first: every rejection this advice rests on "
+                    f"followed a raise from its own tree, and {_STALE_AFTER_THROW}."
+                )
+            lines.append(advice)
         if len(raised) > 1 and not withheld and not coverable:
             # `not coverable`: no checked tree answered, so every entry line above
             # is a raise and the advice above is off. Not beside a withheld line,
