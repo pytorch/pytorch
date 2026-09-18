@@ -947,6 +947,8 @@ class KernelDefinitionLine(WrapperLine):
     metadata: str | None = None
     gpu: bool = True
     cpp_definition: str | None = None
+    standalone: bool = False
+    autotune_body: str | None = None
 
     def codegen(self, code: IndentedBuffer) -> None:
         self.wrapper._define_kernel_helper(
@@ -955,6 +957,8 @@ class KernelDefinitionLine(WrapperLine):
             metadata=self.metadata,
             gpu=self.gpu,
             cpp_definition=self.cpp_definition,
+            standalone=self.standalone,
+            autotune_body=self.autotune_body,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1693,6 +1697,9 @@ class PythonWrapperCodegen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: dict[str, str] = {}
+        # Set by define_kernel when a backend binds its kernel through AsyncCompile.
+        # Only meaningful once every kernel has been defined, i.e. after line replay.
+        self.uses_async_compile = False
         self.kernel_numel_expr: OrderedSet[tuple[str, GraphLowering]] = OrderedSet()
         # Nesting depth of the kernel-profiling {} scope blocks currently open.
         # A symbolic numel emitted inside one is block-scoped, so it has to be
@@ -1854,10 +1861,10 @@ class PythonWrapperCodegen(CodeGen):
                 empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
                 reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
                 alloc_from_pool = torch.ops.inductor._alloc_from_pool
-                async_compile = AsyncCompile()
             """,
             strip=True,
         )
+        self.write_async_compile_binding()
         try:
             # Only add empty_strided_p2p() if distributed and SymmetricMemory
             # is available
@@ -2049,6 +2056,9 @@ class PythonWrapperCodegen(CodeGen):
             self.prefix.writeline(line)
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
+
+    def write_async_compile_binding(self) -> None:
+        self.header.writeline("async_compile = AsyncCompile()")
 
     def write_async_compile_wait(self) -> None:
         self.prefix.splice(
@@ -3645,7 +3655,14 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
+        # Every backend's kernel definition funnels through here, so this is the one
+        # place that can tell whether the emitted module still needs an AsyncCompile at
+        # all -- ten of the eleven backends bind their kernel by calling one.
+        if "async_compile." in kernel_body:
+            self.uses_async_compile = True
         self.writeline(
             KernelDefinitionLine(
                 self,
@@ -3654,18 +3671,27 @@ class PythonWrapperCodegen(CodeGen):
                 metadata=metadata,
                 gpu=gpu,
                 cpp_definition=cpp_definition,
+                standalone=standalone,
+                autotune_body=autotune_body,
             )
         )
 
     @staticmethod
     def _format_kernel_definition(
-        kernel_name: str, kernel_body: str, metadata: str | None = None
+        kernel_name: str,
+        kernel_body: str,
+        metadata: str | None = None,
+        standalone: bool = False,
     ):
         if config.triton.autotune_at_compile_time and metadata:
             # Generating autotune block
             # Need to replace C++ comment starter with Python comment starter
             metadata = re.sub(r"^// ", "# ", metadata, flags=re.MULTILINE)
         metadata_comment = f"{metadata}\n" if metadata else ""
+        # A standalone body already binds kernel_name itself (it is a decorated def, not
+        # an expression), so assigning it would be a syntax error rather than a rebind.
+        if standalone:
+            return f"\n\n{metadata_comment}{kernel_body}"
         body = f"\n\n{metadata_comment}{kernel_name} = {kernel_body}"
         return body
 
@@ -3676,10 +3702,18 @@ class PythonWrapperCodegen(CodeGen):
         metadata: str | None = None,
         gpu: bool = True,
         cpp_definition: str | None = None,
+        standalone: bool = False,
+        autotune_body: str | None = None,
     ):
         if config.triton.autotune_at_compile_time and gpu:
+            # The autotune block is exec'd rather than emitted, so it wants whichever
+            # form runs there, not the one meant to be read: a standalone kernel carries
+            # filename=__file__, which is undefined in that exec.
             body = self._format_kernel_definition(
-                kernel_name, kernel_body, metadata=metadata
+                kernel_name,
+                autotune_body if autotune_body is not None else kernel_body,
+                metadata=metadata,
+                standalone=standalone and autotune_body is None,
             )
             self.kernel_autotune_defs.splice(body)
             if V.graph.cpp_wrapper:
@@ -3687,9 +3721,44 @@ class PythonWrapperCodegen(CodeGen):
                 return
 
         body = self._format_kernel_definition(
-            kernel_name, kernel_body, metadata=metadata
+            kernel_name, kernel_body, metadata=metadata, standalone=standalone
         )
         self.header.splice(body)
+
+    # Whether Triton kernels are bound by handing their source to AsyncCompile (the
+    # default) or defined directly at module level. Only the former can fan compilation
+    # out to the worker pool, so this also decides whether priming it pays.
+    async_compiles_triton_kernels = True
+
+    def emit_triton_kernel_definition(
+        self,
+        kernel_name: str,
+        subs_name: str,
+        src_code: str,
+        device_type: str,
+        metadata: str | None = None,
+    ) -> None:
+        """Bind ``kernel_name`` to a launchable Triton kernel at module scope.
+
+        The default form hands the kernel to AsyncCompile as a source STRING, which is
+        what lets compilation fan out to the worker pool. Subclasses that care more
+        about the emitted module being readable can define the kernel as code instead.
+        """
+        self.define_kernel(
+            kernel_name,
+            self.async_compile_triton_body(subs_name, src_code, device_type),
+            metadata,
+        )
+
+    @staticmethod
+    def async_compile_triton_body(
+        subs_name: str, src_code: str, device_type: str
+    ) -> str:
+        compile_wrapper = IndentedBuffer()
+        compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
+        compile_wrapper.splice(src_code, strip=True)
+        compile_wrapper.writeline(f"''', device_str='{device_type}')")
+        return compile_wrapper.getvalue()
 
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)
