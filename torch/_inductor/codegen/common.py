@@ -308,6 +308,20 @@ class TMADescriptorArg:
 
 
 @dataclasses.dataclass
+class TupleArg:
+    name: str
+    args: list[KernelArgType]
+
+
+@dataclasses.dataclass
+class NamedTupleArg:
+    name: str
+    type_name: str
+    fields: tuple[str, ...]
+    args: list[KernelArgType]
+
+
+@dataclasses.dataclass
 class DeviceCodegen:
     scheduling: SchedulingConstructor
     wrapper_codegen: WrapperConstructor
@@ -315,7 +329,15 @@ class DeviceCodegen:
     fx_wrapper_codegen: WrapperConstructor | None = None
 
 
-KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | ConstexprArg
+KernelArgType = (
+    WorkspaceArg
+    | TensorArg
+    | SizeArg
+    | TMADescriptorArg
+    | ConstexprArg
+    | TupleArg
+    | NamedTupleArg
+)
 
 # Device index to emit into generated code: either a literal compile-time index, or a
 # code expression evaluated at run time (e.g. current_device_idx_expr() under

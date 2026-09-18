@@ -558,6 +558,64 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
+    @staticmethod
+    def rebuild_udtk_aggregate(spec: Any, values: tuple[Any, ...]) -> Any:
+        from torch._higher_order_ops.triton_kernel_wrap import aggregate_spec_children
+
+        values_iter = iter(values)
+
+        def rebuild(node_spec: Any) -> Any:
+            kind = node_spec[0]
+            if kind == "leaf":
+                return next(values_iter)
+            if kind not in ("tuple", "namedtuple"):
+                raise ValueError(f"Unsupported aggregate spec: {node_spec!r}")
+            children_specs = aggregate_spec_children(node_spec)
+            children = tuple(rebuild(child) for child in children_specs)
+            if kind == "tuple":
+                return children
+
+            tuple_type = namedtuple(node_spec[1], node_spec[2])
+            tuple_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
+            return tuple_type(*children)
+
+        aggregate = rebuild(spec)
+        try:
+            next(values_iter)
+        except StopIteration:
+            return aggregate
+        raise ValueError("Aggregate spec has fewer leaves than its values")
+
+    @staticmethod
+    def reduce_udtk_aggregate(value: Any) -> tuple[Any, tuple[Any, ...]]:
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            create_leaf_spec,
+            create_named_tuple_spec,
+            create_tuple_spec,
+        )
+
+        leaves = []
+
+        def create_spec(node: Any) -> Any:
+            if not isinstance(node, tuple):
+                leaf_spec = create_leaf_spec(str(len(leaves)))
+                leaves.append(node)
+                return leaf_spec
+
+            children = tuple(create_spec(child) for child in node)
+            fields = getattr(type(node), "_fields", None)
+            if fields is None:
+                return create_tuple_spec(children)
+            return create_named_tuple_spec(
+                type(node).__name__, tuple(fields), children
+            )
+
+        spec = create_spec(value)
+        return (
+            CachingAutotuner.rebuild_udtk_aggregate,
+            (spec, tuple(leaves)),
+        )
+
     def __init__(
         self,
         fn,
@@ -2932,13 +2990,21 @@ class CompileResult(Generic[_T]):
 
     def _get_arg_lists(
         self, arg_names, constexprs
-    ) -> tuple[list[str], list[str], OrderedSet[str]]:
+    ) -> tuple[
+        list[str],
+        list[str],
+        OrderedSet[str],
+        dict[str, tuple[Any, ...]],
+    ]:
         """
         Return a bunch of intermediate lists of args needed for generating
-        launcher code.
+        launcher code. The final dictionary contains whole UDTK aggregate
+        constexprs that must be installed in the dynamic launcher's globals.
         """
         compile_meta = self.compile_meta
         cfg = self.config
+        bound_udtk_constexprs: dict[str, tuple[Any, ...]] = {}
+        reserved_names = OrderedSet(arg_names)
         known_constants = OrderedSet(
             arg for i, arg in enumerate(arg_names) if i in constexprs
         )
@@ -2964,7 +3030,23 @@ class CompileResult(Generic[_T]):
         )
         none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
+        def _bind_udtk_constexpr(constant: tuple[Any, ...]) -> str:
+            index = len(bound_udtk_constexprs)
+            name = f"__udtk_constexpr_{index}"
+            while name in reserved_names:
+                index += 1
+                name = f"__udtk_constexpr_{index}"
+            reserved_names.add(name)
+            bound_udtk_constexprs[name] = constant
+            return name
+
         def _convert_constant(constant):
+            if isinstance(constant, tuple):
+                # The repr of a generated NamedTuple refers to its dynamic type,
+                # which is not available in the launcher's exec scope. Bind the
+                # already-constructed aggregate instead. This also handles plain
+                # tuples containing values whose repr is not reconstructible.
+                return _bind_udtk_constexpr(constant)
             if isinstance(constant, str):
                 return "r'" + constant + "'"
             else:
@@ -3006,7 +3088,7 @@ class CompileResult(Generic[_T]):
         if "extra_launcher_args" in self.inductor_meta:
             def_args = [*def_args, *self.inductor_meta["extra_launcher_args"]]
 
-        return call_args, def_args, none_args
+        return call_args, def_args, none_args, bound_udtk_constexprs
 
 
 _KernelCompileResult: TypeAlias = (
@@ -3181,7 +3263,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         # want only a subset of the arguments passed to triton.
         # Here, arg_names is exactly fn.src.arg_names and declared_constexprs is exactly fn.src.constexprs,
         # which matches behavior with regular TritonCompileResult
-        _, def_args, none_args = self._get_arg_lists(
+        _, def_args, none_args, _ = self._get_arg_lists(
             self.kernel.arg_names, self.kernel.declared_constexprs
         )
 
@@ -3300,7 +3382,12 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         binary = self.kernel
         fn = binary.src.fn
         binary._init_handles()
-        (call_args, def_args, none_args) = self._get_arg_lists(
+        (
+            call_args,
+            def_args,
+            none_args,
+            bound_udtk_constexprs,
+        ) = self._get_arg_lists(
             fn.arg_names, get_constexprs(fn)
         )
         binary_shared = (
@@ -3356,6 +3443,12 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
+        if overlap := scope.keys() & bound_udtk_constexprs.keys():
+            raise AssertionError(f"UDTK constexpr launcher name collision: {overlap}")
+        # `exec` uses this dictionary as the launcher's globals. Keeping the
+        # aggregate constants here constructs them once per launcher and avoids
+        # requiring their generated NamedTuple types in this third namespace.
+        scope.update(bound_udtk_constexprs)
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
             # TODO(jansel): delete this branch in mid-2025

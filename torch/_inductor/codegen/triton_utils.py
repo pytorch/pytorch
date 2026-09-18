@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import collections
 import functools
 import warnings
 from typing import Any
@@ -22,9 +23,11 @@ from .common import (
     ArgName,
     ConstexprArg,
     KernelArgType,
+    NamedTupleArg,
     SizeArg,
     TensorArg,
     TMADescriptorArg,
+    TupleArg,
     WorkspaceArg,
 )
 
@@ -125,10 +128,21 @@ def triton_meta_device_props(device: torch.device) -> DeviceProperties:
 def signature_of(
     arg: KernelArgType,
     *,
-    size_dtype: str | None,
+    size_dtype: Any,
     use_fp64_for_python_float: bool = True,
-) -> str:
+) -> Any:
     """Return the Triton signature type for an Inductor kernel argument."""
+    if isinstance(arg, NamedTupleArg):
+        fields = (
+            signature_of(arg=child, size_dtype=child_size_dtype)
+            for child, child_size_dtype in zip(arg.args, size_dtype, strict=True)
+        )
+        return collections.namedtuple(arg.type_name, arg.fields)(*fields)
+    if isinstance(arg, TupleArg):
+        return tuple(
+            signature_of(arg=child, size_dtype=child_size_dtype)
+            for child, child_size_dtype in zip(arg.args, size_dtype, strict=True)
+        )
     if isinstance(arg, TensorArg):
         typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
@@ -252,7 +266,7 @@ def signature_to_meta(
     indices: list[int] | None = None,
     is_template: bool = False,
     use_fp64_for_python_float: bool = True,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     if indices is None:
         indices = list(range(len(signature)))
 
@@ -268,6 +282,8 @@ def signature_to_meta(
         #
         # assume_32bit_indexing already asserts (and guards) that every ks* symbol
         # fits in int32.
+        if isinstance(arg, (NamedTupleArg, TupleArg)):
+            return tuple(_decide_tl_dtype(a) for a in arg.args)
         if (
             not is_template
             and not use_block_ptr_enabled()
@@ -434,21 +450,50 @@ def config_of(
             return True
         return input_idx not in (V.graph.inputs_to_check or ())
 
+    def aligned_leaf_paths(
+        arg: KernelArgType, path: tuple[int, ...]
+    ) -> list[tuple[int, ...]]:
+        if isinstance(arg, (NamedTupleArg, TupleArg)):
+            return [
+                leaf_path
+                for child_idx, child in enumerate(arg.args)
+                for leaf_path in aligned_leaf_paths(child, (*path, child_idx))
+            ]
+        if is_aligned(
+            arg,
+            alignment=16,
+            include_tensor=include_tensor_alignment(arg),
+        ):
+            return [path]
+        return []
+
     if config.triton.divisible_by_16:
-        divisible_by_16 = tuple(
-            i
-            for i, arg in zip(indices, args)
-            if is_aligned(
-                arg,
-                alignment=16,
-                include_tensor=include_tensor_alignment(arg),
+        if triton_version_uses_attrs_dict():
+            divisible_by_16 = tuple(
+                path
+                for i, arg in zip(indices, args)
+                for path in aligned_leaf_paths(arg, (i,))
             )
-        )
+        else:
+            divisible_by_16 = tuple(
+                i
+                for i, arg in zip(indices, args)
+                # Only possible to specify attrs for tuple types
+                # with attrs_dict
+                if not isinstance(arg, (NamedTupleArg, TupleArg))
+                and is_aligned(
+                    arg,
+                    alignment=16,
+                    include_tensor=include_tensor_alignment(arg),
+                )
+            )
     else:
         divisible_by_16 = ()
 
+    # TODO(mwizak): is it possible to specify which tuple args equal to 1?
     equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
+    # TODO: handle pointer range for aggregate type args
     # On AMD/HIP, tag tensor args whose storage fits in 2GB so Triton
     # can use 32-bit pointer offsets and emit buffer load/store ops.
     if pointer_range_override is not None:

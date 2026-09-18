@@ -236,6 +236,79 @@ if HAS_GPU:
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
+    def _record_functional_clone_keys(self):
+        records = []
+
+        def record_graph(graph):
+            functional_nodes = graph.find_nodes(
+                op="call_function",
+                target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+            )
+            self.assertEqual(len(functional_nodes), 1)
+            node = functional_nodes[0]
+            records.append(
+                (
+                    tuple(node.kwargs["tensors_to_clone"]),
+                    node.kwargs["aggregate_type_metadata"],
+                )
+            )
+            return graph
+
+        return record_graph, records
+
+    def _aggregate_leaf_key(self, spec, *path):
+        for index in path:
+            if spec[0] == "tuple":
+                children = spec[1]
+            elif spec[0] == "namedtuple":
+                children = spec[3]
+            else:
+                self.fail(f"Expected aggregate node, got {spec!r}")
+            spec = children[index]
+        self.assertEqual(spec[0], "leaf")
+        return spec[1]
+
+    def _assert_exact_functional_clone_keys(self, records, *mutated_paths):
+        self.assertTrue(records, "Functionalization graph was not inspected")
+        for clone_keys, aggregate_type_metadata in records:
+            args_spec = aggregate_type_metadata["args"]
+            expected_keys = {
+                self._aggregate_leaf_key(args_spec, *path) for path in mutated_paths
+            }
+            self.assertEqual(set(clone_keys), expected_keys)
+
+    def test_generate_ttir_aggregate_rejected_before_v4(self):
+        from torch._higher_order_ops import triton_kernel_wrap
+        from torch._inductor.utils import TritonAttrsDescriptorVersion
+
+        aggregate_type_metadata = {
+            "config": triton_kernel_wrap.create_tuple_spec(
+                (triton_kernel_wrap.create_leaf_spec("flat_source"),)
+            )
+        }
+        for version in (
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        ):
+            with (
+                self.subTest(version=version),
+                mock.patch(
+                    "torch._inductor.utils.get_triton_attrs_descriptor_version",
+                    return_value=version,
+                ),
+                self.assertRaisesRegex(
+                    NotImplementedError,
+                    "require Triton's V4 attrs-dict interface or later",
+                ),
+            ):
+                generate_ttir(
+                    None,
+                    {},
+                    tma_descriptor_metadata={},
+                    aggregate_type_metadata=aggregate_type_metadata,
+                )
+
     @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU,
         "requires triton cpu",
@@ -265,6 +338,1170 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(actual, x * 3)
 
     @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_aggregate_rejected_before_v4(self):
+        import triton
+        import triton.language as tl
+
+        from torch._inductor.utils import TritonAttrsDescriptorVersion
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def aggregate_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config[0] + offsets)
+            tl.store(out + offsets, values * config[1])
+
+        def tuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)]((x, 2), out, BLOCK_SIZE=16)
+            return out
+
+        def namedtuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)](Config(x, 2), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        legacy_versions = (
+            TritonAttrsDescriptorVersion.V1_COMPILER,
+            TritonAttrsDescriptorVersion.V2_BACKENDS,
+            TritonAttrsDescriptorVersion.V3_BACKENDS_TUPLE,
+        )
+        for version in legacy_versions:
+            for fn in (tuple_fn, namedtuple_fn):
+                with (
+                    self.subTest(version=version, aggregate=fn.__name__),
+                    mock.patch(
+                        "torch._inductor.utils.get_triton_attrs_descriptor_version",
+                        return_value=version,
+                    ),
+                    self.assertRaisesRegex(
+                        torch._dynamo.exc.Unsupported,
+                        "require Triton's V4 attrs-dict interface or later",
+                    ),
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    @inductor_config.patch("cpp_wrapper", True)
+    def test_triton_kernel_aggregate_cpp_wrapper_unsupported(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def aggregate_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config[0] + offsets)
+            tl.store(out + offsets, values * config[1])
+
+        def tuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)]((x, 2.0), out, BLOCK_SIZE=16)
+            return out
+
+        def namedtuple_fn(x):
+            out = torch.empty_like(x)
+            aggregate_kernel[(1,)](Config(x, 2.0), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        for fn in (tuple_fn, namedtuple_fn):
+            with (
+                self.subTest(aggregate=fn.__name__),
+                self.assertRaisesRegex(
+                    torch._inductor.exc.InductorError,
+                    "C\\+\\+ wrappers and AOTInductor do not support tuple or "
+                    "NamedTuple arguments to user-defined Triton kernels",
+                ),
+            ):
+                torch.compile(fn, fullgraph=True)(x)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU and has_triton_tensor_descriptor_host_tma(),
+        "requires triton cpu and TensorDescriptor support",
+    )
+    def test_triton_kernel_namedtuple_with_tensor_descriptor(self):
+        import triton
+        import triton.language as tl
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def descriptor_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load_tensor_descriptor(config.source, [0])
+            tl.store(out + offsets, values * config.scale)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            descriptor = TensorDescriptor.from_tensor(x, block_shape=[16])
+            descriptor_kernel[(1,)](Config(descriptor, 2.0), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, x * 2)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_namedtuple_nested_constexpr_eager_backend(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "mode"))
+
+        @triton.jit
+        def nested_constexpr_kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            if config.mode == "double":
+                values *= 2
+            tl.store(out + offsets, values, mask=mask)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            nested_constexpr_kernel[(1,)](
+                Config(x, tl.constexpr("double")),
+                out,
+                x.numel(),
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(actual, x * 2)
+
+        def fn_with_keyword_constexpr(x):
+            out = torch.empty_like(x)
+            nested_constexpr_kernel[(1,)](
+                Config(x, tl.constexpr(value="double")),
+                out,
+                x.numel(),
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        actual = torch.compile(
+            fn_with_keyword_constexpr, backend="eager", fullgraph=True
+        )(x)
+        self.assertEqual(actual, x * 2)
+
+        mode = tl.constexpr("double")
+
+        def fn_with_existing_constexpr(x):
+            out = torch.empty_like(x)
+            nested_constexpr_kernel[(1,)](
+                Config(x, mode), out, x.numel(), BLOCK_SIZE=16
+            )
+            return out
+
+        actual = torch.compile(
+            fn_with_existing_constexpr, backend="eager", fullgraph=True
+        )(x)
+        self.assertEqual(actual, x * 2)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_aggregate_constexpr_leaf_types(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "metadata"))
+
+        @triton.jit
+        def constexpr_leaf_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config.source + offsets)
+            if config.metadata[0] is None:
+                values += 1
+            if config.metadata[1] == "double":
+                values *= 2
+            values = values.to(config.metadata[2])
+            values += config.metadata[3]
+            values *= config.metadata[4]
+            if config.metadata[5]:
+                values += 1
+            tl.store(out + offsets, values)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            metadata = (
+                tl.constexpr(None),
+                tl.constexpr("double"),
+                tl.constexpr(tl.float32),
+                tl.constexpr(3),
+                tl.constexpr(0.5),
+                tl.constexpr(True),
+            )
+            constexpr_leaf_kernel[(1,)](Config(x, metadata), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, ((x + 1) * 2 + 3) * 0.5 + 1)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_externally_supplied_plain_tuple(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def tuple_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config[0] + offsets)
+            tl.store(out + offsets, values * config[1][0])
+
+        def fn(config):
+            out = torch.empty_like(config[0])
+            tuple_kernel[(1,)](config, out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        compiled = torch.compile(fn, fullgraph=True)
+        self.assertEqual(compiled((x, (3,))), x * 3)
+        self.assertEqual(compiled((x + 1, (4,))), (x + 1) * 4)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_aggregate_direct_mutation(self):
+        import triton
+        import triton.language as tl
+
+        ReadOnly = collections.namedtuple("ReadOnly", ("source", "scale"))
+        Args = collections.namedtuple("Args", ("mutated", "nested"))
+
+        @triton.jit
+        def kernel(args, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(args.nested.source + offsets, mask=mask)
+            tl.store(
+                args.mutated + offsets,
+                values * args.nested.scale,
+                mask=mask,
+            )
+
+        def fn(args):
+            n_elements = args.mutated.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
+            return args.mutated + args.nested.source
+
+        read_only = torch.arange(35, dtype=torch.float32, device="cpu")
+        read_only_before = read_only.clone()
+        mutated = torch.zeros_like(read_only)
+        args = Args(mutated, ReadOnly(read_only, 2.0))
+        graph_pass, clone_records = self._record_functional_clone_keys()
+
+        with inductor_config.patch(post_grad_custom_post_pass=graph_pass):
+            result = torch.compile(fn, fullgraph=True)(args)
+
+        # Path (0,) is args.mutated. Exact equality also guards against
+        # conservatively cloning the nested read-only tensor at path (1, 0).
+        self._assert_exact_functional_clone_keys(clone_records, (0,))
+        self.assertEqual(result, read_only_before * 3.0)
+        self.assertEqual(mutated, read_only_before * 2.0)
+        self.assertEqual(read_only, read_only_before)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_aggregate_view_mutation(self):
+        import triton
+        import triton.language as tl
+
+        ReadOnly = collections.namedtuple("ReadOnly", ("source", "scale"))
+        Args = collections.namedtuple("Args", ("mutated", "nested"))
+
+        @triton.jit
+        def kernel(args, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(args.nested.source + offsets, mask=mask)
+            tl.store(
+                args.mutated + offsets,
+                values * args.nested.scale,
+                mask=mask,
+            )
+
+        def fn(base, read_only):
+            mutated_view = base[2:-3]
+            args = Args(mutated_view, ReadOnly(read_only, -1.5))
+            n_elements = mutated_view.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
+            return base + 1.0, mutated_view * 2.0
+
+        read_only = torch.arange(35, dtype=torch.float32, device="cpu")
+        read_only_before = read_only.clone()
+        base = torch.full((40,), 11.0, device="cpu")
+        expected_base = base.clone()
+        expected_base[2:-3] = read_only_before * -1.5
+
+        base_result, view_result = torch.compile(fn, fullgraph=True)(base, read_only)
+
+        self.assertEqual(base_result, expected_base + 1.0)
+        self.assertEqual(view_result, read_only_before * -3.0)
+        self.assertEqual(base, expected_base)
+        self.assertEqual(read_only, read_only_before)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_aggregate_multiple_mutations(self):
+        import triton
+        import triton.language as tl
+
+        Nested = collections.namedtuple("Nested", ("second", "read_only"))
+        Args = collections.namedtuple("Args", ("first", "nested"))
+
+        @triton.jit
+        def kernel(args, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(args.nested.read_only + offsets, mask=mask)
+            tl.store(args.first + offsets, values + 4.0, mask=mask)
+            tl.store(args.nested.second + offsets, values - 7.0, mask=mask)
+
+        def fn(args):
+            n_elements = args.first.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
+            return args.first - args.nested.second + args.nested.read_only
+
+        read_only = torch.arange(35, dtype=torch.float32, device="cpu")
+        read_only_before = read_only.clone()
+        first = torch.zeros_like(read_only)
+        second = torch.zeros_like(read_only)
+        args = Args(first, Nested(second, read_only))
+        graph_pass, clone_records = self._record_functional_clone_keys()
+
+        with inductor_config.patch(post_grad_custom_post_pass=graph_pass):
+            result = torch.compile(fn, fullgraph=True)(args)
+
+        # Paths (0,) and (1, 0) are the two written leaves. The exact set
+        # excludes the nested read-only leaf at path (1, 1).
+        self._assert_exact_functional_clone_keys(clone_records, (0,), (1, 0))
+        self.assertEqual(result, read_only_before + 11.0)
+        self.assertEqual(first, read_only_before + 4.0)
+        self.assertEqual(second, read_only_before - 7.0)
+        self.assertEqual(read_only, read_only_before)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_aggregate_aliased_leaves(self):
+        import triton
+        import triton.language as tl
+
+        Args = collections.namedtuple("Args", ("mutated", "alias"))
+
+        @triton.jit
+        def kernel(args, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(args.alias + offsets, mask=mask)
+            tl.store(args.mutated + offsets, values + 5.0, mask=mask)
+
+        def fn(args):
+            n_elements = args.mutated.numel()
+            kernel[(triton.cdiv(n_elements, 16),)](args, n_elements, BLOCK_SIZE=16)
+            return args.mutated + 1.0, args.alias * 2.0
+
+        aliased = torch.arange(35, dtype=torch.float32, device="cpu")
+        aliased_before = aliased.clone()
+        args = Args(aliased, aliased)
+
+        mutated_result, alias_result = torch.compile(fn, fullgraph=True)(args)
+
+        self.assertEqual(mutated_result, aliased_before + 6.0)
+        self.assertEqual(alias_result, (aliased_before + 5.0) * 2.0)
+        self.assertEqual(aliased, aliased_before + 5.0)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_namedtuple_nested_specialized_one(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.jit
+        def specialized_one_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config.source + offsets)
+            tl.store(out + offsets, values * config.scale)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            specialized_one_kernel[(1,)](Config(source=x, scale=1), out, BLOCK_SIZE=16)
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, x)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_nested_namedtuple_whole_constexpr(self):
+        import triton
+        import triton.language as tl
+
+        Inner = collections.namedtuple("Inner", ("scale", "bias"))
+        Config = collections.namedtuple("Config", ("transform",))
+
+        @triton.jit
+        def whole_constexpr_kernel(
+            config: tl.constexpr, source, out, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(source + offsets)
+            transform = config.transform
+            tl.store(out + offsets, values * transform.scale + transform.bias)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            whole_constexpr_kernel[(1,)](
+                Config(transform=Inner(scale=2.0, bias=1.0)),
+                x,
+                out,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        self.assertEqual(compiled(x), x * 2 + 1)
+        self.assertEqual(compiled(x + 1), (x + 1) * 2 + 1)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_explicit_whole_constexpr_namedtuple(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("scale", "bias"))
+
+        @triton.jit
+        def whole_constexpr_kernel(config, source, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(source + offsets)
+            tl.store(out + offsets, values * config.scale + config.bias)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            whole_constexpr_kernel[(1,)](
+                tl.constexpr(Config(scale=2.0, bias=1.0)),
+                x,
+                out,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, x * 2 + 1)
+        FileCheck().check("tl.constexpr(Config(scale=2.0, bias=1.0))").run(code)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_nested_explicit_constexpr_namedtuple(self):
+        import triton
+        import triton.language as tl
+
+        Transform = collections.namedtuple("Transform", ("scale", "bias"))
+        Config = collections.namedtuple("Config", ("source", "transform"))
+
+        @triton.jit
+        def nested_constexpr_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config.source + offsets)
+            tl.store(
+                out + offsets,
+                values * config.transform.scale + config.transform.bias,
+            )
+
+        def fn(x):
+            out = torch.empty_like(x)
+            nested_constexpr_kernel[(1,)](
+                Config(
+                    source=x,
+                    transform=tl.constexpr(Transform(scale=2.0, bias=1.0)),
+                ),
+                out,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, x * 2 + 1)
+        FileCheck().check("transform=tl.constexpr(Transform(scale=2.0, bias=1.0))").run(
+            code
+        )
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_signature_constexpr_aggregate_symbolic_guard(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("n_elements",))
+
+        @triton.jit
+        def kernel(config: tl.constexpr, source, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < config.n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(out + offsets, values + config.n_elements, mask=mask)
+
+        def fn(source):
+            out = torch.empty_like(source)
+            kernel[(1,)](Config(source.shape[0]), source, out, BLOCK_SIZE=64)
+            return out
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+
+        source = torch.arange(17, dtype=torch.float32, device="cpu")
+        self.assertEqual(compiled(source), source + 17)
+        first_frame_count = counter.frame_count
+
+        source = torch.arange(33, dtype=torch.float32, device="cpu")
+        self.assertEqual(compiled(source), source + 33)
+        self.assertGreater(counter.frame_count, first_frame_count)
+        second_frame_count = counter.frame_count
+
+        source = source + 1
+        self.assertEqual(compiled(source), source + 33)
+        self.assertEqual(counter.frame_count, second_frame_count)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_nested_constexpr_aggregate_symbolic_guard(self):
+        import triton
+        import triton.language as tl
+
+        Metadata = collections.namedtuple("Metadata", ("n_elements",))
+        Config = collections.namedtuple("Config", ("source", "metadata"))
+
+        @triton.jit
+        def kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            mask = offsets < config.metadata.n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            tl.store(out + offsets, values + config.metadata.n_elements, mask=mask)
+
+        def fn(source):
+            out = torch.empty_like(source)
+            config = Config(
+                source,
+                tl.constexpr(Metadata(source.shape[0])),
+            )
+            kernel[(1,)](config, out, BLOCK_SIZE=64)
+            return out
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+
+        source = torch.arange(17, dtype=torch.float32, device="cpu")
+        self.assertEqual(compiled(source), source + 17)
+        first_frame_count = counter.frame_count
+
+        source = torch.arange(33, dtype=torch.float32, device="cpu")
+        self.assertEqual(compiled(source), source + 33)
+        self.assertGreater(counter.frame_count, first_frame_count)
+        second_frame_count = counter.frame_count
+
+        source = source + 1
+        self.assertEqual(compiled(source), source + 33)
+        self.assertEqual(counter.frame_count, second_frame_count)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_constexpr_aggregate_rejects_tensor_leaf(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source",))
+
+        @triton.jit
+        def kernel(config: tl.constexpr, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            tl.store(out + offsets, 0.0)
+
+        def fn(source):
+            out = torch.empty_like(source)
+            kernel[(1,)](Config(source), out, BLOCK_SIZE=16)
+            return out
+
+        source = torch.arange(16, dtype=torch.float32, device="cpu")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "must be Python constants",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(source)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_explicit_constexpr_tuple_containing_namedtuple(self):
+        import triton
+        import triton.language as tl
+
+        Transform = collections.namedtuple("Transform", ("scale", "bias"))
+
+        @triton.jit
+        def tuple_constexpr_kernel(config, source, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(source + offsets)
+            transform = config[0]
+            tl.store(out + offsets, values * transform.scale + transform.bias)
+
+        def fn(x):
+            out = torch.empty_like(x)
+            tuple_constexpr_kernel[(1,)](
+                tl.constexpr((Transform(scale=2.0, bias=1.0),)),
+                x,
+                out,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.arange(16, dtype=torch.float32, device="cpu")
+        actual, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(actual, x * 2 + 1)
+        FileCheck().check("tl.constexpr((Transform(scale=2.0, bias=1.0),))").run(code)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_autotune_compile_time_mixed_aggregate(self):
+        import triton
+        import triton.language as tl
+
+        Metadata = collections.namedtuple("Metadata", ("bias", "dtype"))
+        Config = collections.namedtuple(
+            "Config", ("source", "runtime", "leaf_dtype", "metadata")
+        )
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}),
+                triton.Config({"BLOCK_SIZE": 32}),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            values = values.to(config.leaf_dtype)
+            values = values.to(config.metadata.dtype)
+            tl.store(
+                out + offsets,
+                values * config.runtime[0] + config.metadata.bias,
+                mask=mask,
+            )
+
+        def fn(config):
+            out = torch.empty_like(config.source)
+            kernel[
+                lambda meta: (triton.cdiv(config.source.numel(), meta["BLOCK_SIZE"]),)
+            ](
+                config,
+                out,
+                config.source.numel(),
+            )
+            return out
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        config = Config(
+            source=source,
+            runtime=(2.0,),
+            leaf_dtype=tl.constexpr(tl.float32),
+            metadata=tl.constexpr(Metadata(bias=1.0, dtype=tl.float32)),
+        )
+        with inductor_config.patch("triton.autotune_at_compile_time", True):
+            actual = torch.compile(fn, fullgraph=True)(config)
+        self.assertEqual(actual, source * 2.0 + 1.0)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_autotune_compile_time_whole_constexpr_aggregates(self):
+        import triton
+        import triton.language as tl
+
+        Transform = collections.namedtuple("Transform", ("scale", "bias"))
+        Config = collections.namedtuple("Config", ("transform", "dtype"))
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}),
+                triton.Config({"BLOCK_SIZE": 32}),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def declared_kernel(
+            config: tl.constexpr,
+            source,
+            out,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            values = values.to(config.dtype)
+            tl.store(
+                out + offsets,
+                values * config.transform.scale + config.transform.bias,
+                mask=mask,
+            )
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}),
+                triton.Config({"BLOCK_SIZE": 32}),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def explicit_kernel(config, source, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            values = values.to(config.dtype)
+            tl.store(
+                out + offsets,
+                values * config.transform.scale + config.transform.bias,
+                mask=mask,
+            )
+
+        config = Config(Transform(2.0, 1.0), tl.float32)
+
+        def declared_fn(source):
+            out = torch.empty_like(source)
+            n_elements = source.numel()
+            declared_kernel[
+                lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            ](config, source, out, n_elements)
+            return out
+
+        def explicit_fn(source):
+            out = torch.empty_like(source)
+            n_elements = source.numel()
+            explicit_kernel[
+                lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            ](tl.constexpr(config), source, out, n_elements)
+            return out
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        with inductor_config.patch("triton.autotune_at_compile_time", True):
+            declared = torch.compile(declared_fn, fullgraph=True)(source)
+            explicit = torch.compile(explicit_fn, fullgraph=True)(source)
+        expected = source * 2.0 + 1.0
+        self.assertEqual(declared, expected)
+        self.assertEqual(explicit, expected)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_autotune_aggregate_cache_key(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("source", "scale"))
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}),
+                triton.Config({"BLOCK_SIZE": 32}),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def kernel(config, out, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(config.source + offsets, mask=mask)
+            tl.store(out + offsets, values * config.scale, mask=mask)
+
+        def fn(config):
+            out = torch.empty_like(config.source)
+            n_elements = config.source.numel()
+            kernel[lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)](
+                config, out, n_elements
+            )
+            return out
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        actual = torch.compile(fn, fullgraph=True)(Config(source, 2.0))
+        self.assertEqual(actual, source * 2.0)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_autotune_aggregate_key_recompilation(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("scale",))
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}),
+                triton.Config({"BLOCK_SIZE": 32}),
+            ],
+            key=["config"],
+        )
+        @triton.jit
+        def kernel(source, out, config, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(out + offsets, values * config.scale, mask=mask)
+
+        def fn(source, config):
+            out = torch.empty_like(source)
+            n_elements = source.numel()
+            kernel[lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)](
+                source, out, config, n_elements
+            )
+            return out
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+
+        self.assertEqual(compiled(source, Config(2.0)), source * 2.0)
+        first_frame_count = counter.frame_count
+        self.assertEqual(compiled(source, Config(3.0)), source * 3.0)
+        self.assertGreater(counter.frame_count, first_frame_count)
+        second_frame_count = counter.frame_count
+        self.assertEqual(compiled(source, Config(3.0)), source * 3.0)
+        self.assertEqual(counter.frame_count, second_frame_count)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_autotune_aggregate_callbacks_and_decorators(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple(
+            "Config", ("x_size", "scale", "preferred_config")
+        )
+        configs = [
+            triton.Config({"CONFIG_ID": 1}),
+            triton.Config({"CONFIG_ID": 2}),
+            triton.Config({"CONFIG_ID": 3}),
+        ]
+
+        def early_config_prune(configs, named_args, **kwargs):
+            config = named_args["config"]
+            assert isinstance(config, Config)
+            assert config.x_size > 0
+            return configs
+
+        def perf_model(config, CONFIG_ID, **kwargs):
+            assert isinstance(config, Config)
+            return abs(CONFIG_ID - config.preferred_config)
+
+        heuristic = {
+            "BLOCK_SIZE": lambda args: triton.next_power_of_2(args["config"].x_size)
+        }
+
+        @triton.autotune(
+            configs=configs,
+            key=["config"],
+            prune_configs_by={
+                "early_config_prune": early_config_prune,
+                "perf_model": perf_model,
+                "top_k": 1,
+            },
+        )
+        @triton.heuristics(values=heuristic)
+        @triton.jit
+        def callback_kernel(
+            source,
+            out,
+            config,
+            n_elements,
+            CONFIG_ID: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(
+                out + offsets,
+                values * config.scale + CONFIG_ID * 0,
+                mask=mask,
+            )
+
+        @triton.heuristics(values=heuristic)
+        @triton.jit
+        def standalone_heuristics_kernel(
+            source, out, config, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(out + offsets, values * config.scale, mask=mask)
+
+        @triton.heuristics(values=heuristic)
+        @triton.autotune(configs=configs, key=["config"])
+        @triton.jit
+        def reverse_decorator_kernel(
+            source,
+            out,
+            config,
+            n_elements,
+            CONFIG_ID: tl.constexpr,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(out + offsets, values * config.scale, mask=mask)
+
+        def callback_fn(source, config):
+            out = torch.empty_like(source)
+            n_elements = source.numel()
+
+            def grid(meta):
+                return (
+                    triton.cdiv(config.x_size, meta["BLOCK_SIZE"])
+                    + meta["CONFIG_ID"] * 0,
+                )
+
+            callback_kernel[grid](source, out, config, n_elements)
+            return out
+
+        def standalone_fn(source, config):
+            out = torch.empty_like(source)
+            n_elements = source.numel()
+            standalone_heuristics_kernel[
+                lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            ](source, out, config, n_elements)
+            return out
+
+        def reverse_fn(source, config):
+            out = torch.empty_like(source)
+            n_elements = source.numel()
+            reverse_decorator_kernel[
+                lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            ](source, out, config, n_elements)
+            return out
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        config = Config(source.numel(), 2.0, 2)
+        expected = source * 2.0
+        self.assertEqual(
+            torch.compile(callback_fn, fullgraph=True)(source, config), expected
+        )
+        self.assertEqual(
+            torch.compile(standalone_fn, fullgraph=True)(source, config), expected
+        )
+        self.assertEqual(
+            torch.compile(reverse_fn, fullgraph=True)(source, config), expected
+        )
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_triton_kernel_autotune_aggregate_hooks_unsupported(self):
+        import triton
+        import triton.language as tl
+
+        Config = collections.namedtuple("Config", ("x_size",))
+        configs = [
+            triton.Config({"BLOCK_SIZE": 16}),
+            triton.Config({"BLOCK_SIZE": 32}),
+        ]
+
+        def user_pre_hook(kwargs, reset_only=False):
+            self.assertGreater(kwargs["config"].x_size, 0)
+
+        def user_post_hook(kwargs, exception):
+            self.assertGreater(kwargs["config"].x_size, 0)
+
+        def config_pre_hook(kwargs):
+            self.assertGreater(kwargs["config"].x_size, 0)
+
+        @triton.autotune(configs=configs, key=[], pre_hook=user_pre_hook)
+        @triton.jit
+        def user_pre_hook_kernel(
+            source, out, config, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            tl.store(out + offsets, tl.load(source + offsets, mask=mask), mask=mask)
+
+        @triton.autotune(configs=configs, key=[], post_hook=user_post_hook)
+        @triton.jit
+        def user_post_hook_kernel(
+            source, out, config, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            tl.store(out + offsets, tl.load(source + offsets, mask=mask), mask=mask)
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}, pre_hook=config_pre_hook),
+                triton.Config({"BLOCK_SIZE": 32}, pre_hook=config_pre_hook),
+            ],
+            key=[],
+        )
+        @triton.jit
+        def config_pre_hook_kernel(
+            source, out, config, n_elements, BLOCK_SIZE: tl.constexpr
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            tl.store(out + offsets, tl.load(source + offsets, mask=mask), mask=mask)
+
+        def make_fn(kernel):
+            def fn(source, config):
+                out = torch.empty_like(source)
+                n_elements = source.numel()
+                kernel[lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)](
+                    source, out, config, n_elements
+                )
+                return out
+
+            return fn
+
+        source = torch.arange(35, dtype=torch.float32, device="cpu")
+        config = Config(source.numel())
+        message = (
+            "pre_hook and post_hook are not supported in "
+            "triton.Autotune or triton.Config"
+        )
+        for name, kernel in (
+            ("user-pre-hook", user_pre_hook_kernel),
+            ("user-post-hook", user_post_hook_kernel),
+            ("config-pre-hook", config_pre_hook_kernel),
+        ):
+            torch._dynamo.reset()
+            with (
+                self.subTest(hook=name),
+                self.assertRaisesRegex(torch._dynamo.exc.Unsupported, message),
+            ):
+                torch.compile(make_fn(kernel), fullgraph=True)(source, config)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_generate_ttir_namedtuple_nested_constexpr(self):
+        import triton
+        import triton.language as tl
+        from torch._higher_order_ops import triton_kernel_wrap
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        @triton.jit
+        def nested_constexpr_kernel(config, out, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            values = tl.load(config.source + offsets)
+            values *= config.parameters[0]
+            if config.parameters[1] == "double":
+                values *= 2
+            values += config.parameters[2]
+            tl.store(out + offsets, values)
+
+        fake_mode = FakeTensorMode()
+        source = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
+        out = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "parameters"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_source"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_scale"),
+                        triton_kernel_wrap.create_leaf_spec(
+                            "flat_mode", is_constexpr=True
+                        ),
+                        triton_kernel_wrap.create_leaf_spec("flat_bias"),
+                    )
+                ),
+            ),
+        )
+
+        ttir, ordered_arg_names = generate_ttir(
+            nested_constexpr_kernel,
+            {
+                "flat_source": source,
+                "flat_scale": 3.0,
+                "flat_mode": "double",
+                "flat_bias": 1.0,
+                "out": out,
+                "BLOCK_SIZE": 16,
+            },
+            {},
+            {"config": spec},
+        )
+
+        self.assertEqual(
+            ordered_arg_names,
+            ["flat_source", "flat_scale", "flat_bias", "out"],
+        )
+        ttir_text = str(ttir)
+        self.assertIn("config.source", ttir_text)
+        self.assertIn("config.parameters.0", ttir_text)
+        self.assertNotIn("config.parameters.1:", ttir_text)
+        self.assertIn("config.parameters.2", ttir_text)
+
+    @unittest.skipUnless(
         HAS_CPU and TRITON_HAS_CPU and has_triton_tensor_descriptor_host_tma(),
         "requires triton cpu and TensorDescriptor support",
     )
@@ -283,12 +1520,12 @@ class KernelTests(torch._inductor.test_case.TestCase):
         fake_mode = FakeTensorMode()
         source = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
         destination = fake_mode.from_tensor(torch.empty(16, dtype=torch.float32))
-        spec = triton_kernel_wrap.NamedTupleSpec(
-            type_name="Config",
-            field_names=("source", "destination"),
-            children=(
-                triton_kernel_wrap.LeafSpec("flat_source"),
-                triton_kernel_wrap.LeafSpec("flat_destination"),
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("source", "destination"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_source"),
+                triton_kernel_wrap.create_leaf_spec("flat_destination"),
             ),
         )
 
@@ -329,15 +1566,15 @@ class KernelTests(torch._inductor.test_case.TestCase):
     def test_reconstruct_triton_kernel_args_materializes_tma_first(self):
         from torch._higher_order_ops import triton_kernel_wrap
 
-        spec = triton_kernel_wrap.NamedTupleSpec(
-            type_name="Config",
-            field_names=("tensor", "nested"),
-            children=(
-                triton_kernel_wrap.LeafSpec("flat_tensor"),
-                triton_kernel_wrap.TupleSpec(
-                    children=(
-                        triton_kernel_wrap.LeafSpec("flat_descriptor"),
-                        triton_kernel_wrap.LeafSpec("flat_constant"),
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("tensor", "nested"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_tensor"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_descriptor"),
+                        triton_kernel_wrap.create_leaf_spec("flat_constant"),
                     )
                 ),
             ),
@@ -370,8 +1607,8 @@ class KernelTests(torch._inductor.test_case.TestCase):
                     {"flat_descriptor": descriptor_metadata},
                     {
                         "config": spec,
-                        "static_config": triton_kernel_wrap.TupleSpec(
-                            children=(triton_kernel_wrap.LeafSpec("flat_static"),)
+                        "static_config": triton_kernel_wrap.create_tuple_spec(
+                            (triton_kernel_wrap.create_leaf_spec("flat_static"),)
                         ),
                     },
                     constant_args=constant_args,
@@ -394,6 +1631,65 @@ class KernelTests(torch._inductor.test_case.TestCase):
         # Reconstruction must not mutate values owned by the FX node.
         self.assertEqual(graph_kwargs["flat_descriptor"], "descriptor base tensor")
         self.assertEqual(constant_args["flat_static"], 8)
+
+    def test_aggregate_type_metadata_uses_fx_literals(self):
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        spec = triton_kernel_wrap.create_named_tuple_spec(
+            "Config",
+            ("tensor", "parameters"),
+            (
+                triton_kernel_wrap.create_leaf_spec("flat_tensor"),
+                triton_kernel_wrap.create_tuple_spec(
+                    (
+                        triton_kernel_wrap.create_leaf_spec("flat_scale"),
+                        triton_kernel_wrap.create_leaf_spec(
+                            "flat_mode", is_constexpr=True
+                        ),
+                    )
+                ),
+            ),
+        )
+        self.assertEqual(
+            spec,
+            (
+                "namedtuple",
+                "Config",
+                ("tensor", "parameters"),
+                (
+                    ("leaf", "flat_tensor", False),
+                    (
+                        "tuple",
+                        (
+                            ("leaf", "flat_scale", False),
+                            ("leaf", "flat_mode", True),
+                        ),
+                        False,
+                    ),
+                ),
+                False,
+            ),
+        )
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        hop = graph.call_function(
+            triton_kernel_wrap.triton_kernel_wrapper_functional,
+            kwargs={
+                "kernel_idx": 0,
+                "constant_args_idx": 0,
+                "grid": [(1,)],
+                "tma_descriptor_metadata": {"x": ("stable", ([8],))},
+                "kwargs": {"x": x},
+                "tensors_to_clone": ["x"],
+                "aggregate_type_metadata": {"config": spec},
+            },
+        )
+
+        # FX recursively embeds tuple/dict metadata in the HOP arguments. It
+        # must not emit constructor nodes for aggregate metadata.
+        self.assertEqual(list(graph.nodes), [x, hop])
+        self.assertEqual(hop.kwargs["aggregate_type_metadata"], {"config": spec})
 
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
         if inductor_config.cpp_wrapper:
@@ -6872,6 +8168,82 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
             FileCheck().check(get_func_call()).check_count(
                 "del", num_deallocs, exactly=True
             ).run(code_str)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_fusion_relu_epilogue_tuple_aggregate_cpu(self):
+        @triton.jit
+        def kernel(source, destination, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(destination[0] + offsets, values * 2.0, mask=mask)
+
+        def fn(source):
+            destination = torch.empty_like(source)
+            n_elements = source.numel()
+            kernel[(triton.cdiv(n_elements, 32),)](
+                source,
+                (destination,),
+                n_elements,
+                BLOCK_SIZE=32,
+            )
+            return destination.relu()
+
+        source = torch.linspace(-2.0, 2.0, 1024, device="cpu")
+        metrics.reset()
+        with fresh_cache():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), source
+            )
+
+        self.assertEqual(actual, (source * 2.0).relu())
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.check_code(code, num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @unittest.skipUnless(
+        HAS_CPU and TRITON_HAS_CPU,
+        "requires triton cpu",
+    )
+    def test_fusion_relu_epilogue_nested_namedtuple_aggregate_cpu(self):
+        Nested = collections.namedtuple("Nested", ("destination",))
+        Output = collections.namedtuple("Output", ("nested", "scale"))
+
+        @triton.jit
+        def kernel(source, output, n_elements, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            values = tl.load(source + offsets, mask=mask)
+            tl.store(
+                output.nested.destination + offsets,
+                values * output.scale,
+                mask=mask,
+            )
+
+        def fn(source):
+            destination = torch.empty_like(source)
+            n_elements = source.numel()
+            kernel[(triton.cdiv(n_elements, 32),)](
+                source,
+                Output(Nested(destination), 2.0),
+                n_elements,
+                BLOCK_SIZE=32,
+            )
+            return destination.relu()
+
+        source = torch.linspace(-2.0, 2.0, 1024, device="cpu")
+        metrics.reset()
+        with fresh_cache():
+            actual, (code,) = run_and_get_code(
+                torch.compile(fn, fullgraph=True), source
+            )
+
+        self.assertEqual(actual, (source * 2.0).relu())
+        self.assertEqual(metrics.generated_kernel_count, 1)
+        self.check_code(code, num_kernels=1, num_allocs=1, num_deallocs=1)
+        FileCheck().check("Output(nested=Nested(destination=buf").run(code)
 
     @requires_cuda_and_triton
     def test_fusion_relu_epilogue(self):

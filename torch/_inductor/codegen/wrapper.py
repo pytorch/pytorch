@@ -27,6 +27,7 @@ import torch._ops
 import torch.utils._pytree as pytree
 from torch import dtype as torch_dtype
 from torch._dynamo.utils import counters, dynamo_timed, get_debug_dir
+from torch._higher_order_ops import triton_kernel_wrap
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -98,7 +99,6 @@ from .triton_utils import (
     triton_meta_device_props,
 )
 
-
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
@@ -146,6 +146,25 @@ CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", 
 BufferLike = ir.Buffer | WorkspaceArg
 FxConversionFunc = Callable[["WrapperLine"], None]
 
+
+@dataclasses.dataclass
+class AggregateArg:
+    spec: triton_kernel_wrap.AggregateSpec
+    flat_values: dict[str, Any]
+
+
+@dataclasses.dataclass
+class AggregateType:
+    spec: triton_kernel_wrap.AggregateSpec
+    flat_values: dict[str, Any]
+
+@dataclasses.dataclass(frozen=True)
+class StrCallArg:
+    """
+    Represents str literals that are nested within aggregate types (tuples, namedtuples e.t.c)
+    to distinguish them from tensor string references
+    """
+    value: str
 
 @dataclasses.dataclass
 class BenchmarkStorageGroup:
@@ -1768,6 +1787,8 @@ class PythonWrapperCodegen(CodeGen):
         self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
         self.allocated_workspaces: dict[str, Any] = {}
 
+        # User defined triton kernel aggregate types
+        self._udtk_aggregate_types: dict[tuple[str, tuple[str, ...]], str] = {}
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
             debug_printer_level=config.aot_inductor.debug_intermediate_value_printer,
@@ -1998,6 +2019,47 @@ class PythonWrapperCodegen(CodeGen):
                 self._meta_vars.add(var)
         # pyrefly: ignore [bad-index, index-error]
         return self._metas[meta]
+
+    def maybe_add_udtk_aggregate_type_def(self, spec: triton_kernel_wrap.AggregateSpec) -> str:
+        # TODO: move spec validation into triton kernel wrap that can be reused
+        if not isinstance(spec, tuple):
+            raise TypeError("aggregate type spec must be a tuple")
+        if not spec or not isinstance(spec[0], str):
+            raise ValueError(
+                "spec tuple must be nonempty, with the first argument giving the spec type"
+            )
+        if spec[0] == "namedtuple":
+            if len(spec) != 5:
+                raise ValueError("namedtuple type must have 5 fields")
+            type_name = spec[1]
+            fields = spec[2]
+            key = (type_name, fields)
+        elif spec[0] == "tuple":
+            return "tuple"
+        else:
+            raise ValueError(f"Unsupported spec type: {spec}")
+
+        if var_name := self._udtk_aggregate_types.get(key):
+            return var_name
+        for registered_name, registered_fields in self._udtk_aggregate_types:
+            if registered_name == type_name:
+                raise ValueError(
+                    f"NamedTuple {type_name!r} was already registered with fields "
+                    f"{registered_fields!r}, not {fields!r}"
+                )
+        var_name = type_name
+        self._udtk_aggregate_types[key] = var_name
+        definition = f"{var_name} = collections.namedtuple({var_name!r}, {fields!r})"
+
+        if not V.graph.cpp_wrapper:
+            self.add_import_once("import collections")
+            self.header.writeline(definition)
+
+        if config.triton.autotune_at_compile_time:
+            if not self.kernel_autotune_calls.contains("import collections"):
+                self.kernel_autotune_calls.writeline("import collections")
+            self.kernel_autotune_calls.writeline(definition)
+        return var_name
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
@@ -3714,6 +3776,7 @@ class PythonWrapperCodegen(CodeGen):
         grids: list[list[int | sympy.Expr]],
         epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
         launch_kwargs: tuple[str, ...],
+        aggregate_type_metadata: triton_kernel_wrap.AggregateTypeMetadata,
     ):
         """Codegen a user-defined Triton kernel and return its cache entry.
 
@@ -3736,16 +3799,30 @@ class PythonWrapperCodegen(CodeGen):
         from .common import (
             ConstexprArg,
             KernelArgType,
+            NamedTupleArg,
             SizeArg,
             TensorArg,
             TMADescriptorArg,
+            TupleArg,
         )
 
         original_name = kernel.__name__
+        uses_attrs_dict = triton_version_uses_attrs_dict()
+        if aggregate_type_metadata:
+            # User-defined aggregate lowering is only defined for the attrs-dict
+            # signature format.  This also protects direct codegen callers.
+            triton_kernel_wrap.validate_udtk_aggregate_support()
         signature: list[KernelArgType] = []
-        constants: dict[str, Any] = {}
+        constants: dict[str | tuple[int, ...], Any] = {}
         arg_indices: list[int] = []
         equal_to_1_args: list[str] = []
+
+        def unwrap_constexpr(value: Any) -> Any:
+            # Keep only the payload in metadata.  A tl.constexpr instance does not
+            # have a Python expression that `_sanitize_for_repr` can reconstruct.
+            import triton.language as tl
+
+            return value.value if isinstance(value, tl.constexpr) else value
 
         def add_to_signature(idx, arg):
             signature.append(arg)
@@ -3753,15 +3830,15 @@ class PythonWrapperCodegen(CodeGen):
 
         def add_arg(idx, arg, is_constexpr=False, equals_1=False, equals_none=False):
             if is_constexpr:
-                if triton_version_uses_attrs_dict():
-                    # tl.constexpr args appear in the signature in new versions of triton,
-                    # but not in old versions of triton.
+                if uses_attrs_dict:
+                    # Attrs-dict Triton represents constexpr arguments explicitly
+                    # in the signature.  Legacy Triton omits declared constexprs.
                     add_to_signature(idx, arg)
 
                 if arg.name in kwargs:
                     # the arg may not appear in kwargs if it is an autotuned arg.
                     # in this case, it will be added in triton_heuristics after autotuning.
-                    constants[arg.name] = kwargs[arg.name]
+                    constants[arg.name] = unwrap_constexpr(kwargs[arg.name])
 
             else:
                 # the only case where arg name isn't in kwargs, should be
@@ -3770,19 +3847,17 @@ class PythonWrapperCodegen(CodeGen):
                     raise AssertionError(f"expected {arg.name} in kwargs")
 
                 if equals_1:
-                    if triton_version_uses_attrs_dict():
-                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as "constexpr"),
-                        #                         and add the arg as a constant.
-                        # new versions of triton: add the equal-to-1 arg in the signature (labeled as, e.g., "i32"),
-                        #                         and add the arg as a constant.
+                    if uses_attrs_dict:
+                        # Attrs-dict Triton labels specialized-one arguments as
+                        # constexpr.  Legacy Triton retains their scalar type.
                         add_to_signature(idx, ConstexprArg(name=arg.name))
                     else:
                         add_to_signature(idx, arg)
                     constants[arg.name] = 1
                 elif equals_none:
-                    if triton_version_uses_attrs_dict():
-                        # new versions of triton: add the none arg in the signature (as a constexpr arg) and as a constant
-                        # old versions of triton: include the none arg as a constant (but not in the signature)
+                    if uses_attrs_dict:
+                        # Attrs-dict Triton includes None as a constexpr signature
+                        # entry.  Legacy Triton omits the top-level argument.
                         add_to_signature(idx, ConstexprArg(name=arg.name))
                     constants[arg.name] = None
                 else:
@@ -3790,6 +3865,114 @@ class PythonWrapperCodegen(CodeGen):
 
         arg_names = [p.name for p in kernel.params]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]
+
+        def maybe_add_udtk_aggregate_type_to_wrapper(
+            aggregate_spec: triton_kernel_wrap.AggregateSpec,
+        ) -> None:
+            if aggregate_spec[0] == "leaf":
+                return
+            if aggregate_spec[0] == "namedtuple":
+                self.maybe_add_udtk_aggregate_type_def(aggregate_spec)
+            for child_spec in triton_kernel_wrap.aggregate_spec_children(
+                aggregate_spec
+            ):
+                maybe_add_udtk_aggregate_type_to_wrapper(child_spec)
+
+        # A constexpr aggregate is represented by one signature entry, so the
+        # recursive signature walk below does not see NamedTuple types contained
+        # in it.  Register every type from the spec before constants are rendered.
+        for aggregate_spec in aggregate_type_metadata.values():
+            maybe_add_udtk_aggregate_type_to_wrapper(aggregate_spec)
+
+        def get_nested_arg_type(
+            key,
+            arg,
+            aggregate_spec=None,
+            constant_path: tuple[int, ...] | None = None,
+        ):
+            is_constexpr = aggregate_spec is not None and aggregate_spec[-1]
+            if is_constexpr or arg is None:
+                if constant_path is None:
+                    raise AssertionError(
+                        f"Missing constant path for aggregate argument {key!r}"
+                    )
+                value = unwrap_constexpr(arg)
+                constants[constant_path] = value
+
+                # V4 signatures carry the constexpr marker at the same
+                # aggregate path as the constants dictionary.
+                return ConstexprArg(name=key)
+
+            if isinstance(arg, ir.TMADescriptor):
+                api_type, block_shape, dtype = (
+                    ("stable", arg.block_shape, arg.tensor.get_dtype())
+                    if isinstance(arg, ir.TMADescriptorStable)
+                    else ("experimental", None, None)
+                )
+                return TMADescriptorArg(
+                    name=key,
+                    api_type=api_type,
+                    block_shape=block_shape,
+                    dtype=dtype,
+                )
+            elif isinstance(arg, ir.Buffer):
+                return TensorArg(
+                    name=key,
+                    buffer=arg.get_name(),
+                    dtype=arg.get_dtype(),
+                )
+            elif isinstance(arg, ir.ReinterpretView):
+                # for ReinterpretView we use the underlying
+                # buffer name and note the (possibly non-zero)
+                # offset relative to the underlying buffer
+                return TensorArg(
+                    name=key,
+                    buffer=arg.data.get_name(),
+                    dtype=arg.get_dtype(),
+                    offset=arg.layout.offset,
+                )
+            elif isinstance(arg, tuple):
+                if aggregate_spec is None:
+                    raise AssertionError(f"Missing aggregate spec for argument {key!r}")
+                child_specs = triton_kernel_wrap.aggregate_spec_children(aggregate_spec)
+                if len(arg) != len(child_specs):
+                    raise AssertionError(
+                        f"Aggregate argument {key!r} has {len(arg)} values but "
+                        f"its spec has {len(child_specs)} children"
+                    )
+                if constant_path is None:
+                    raise AssertionError(
+                        f"Missing constant path for aggregate argument {key!r}"
+                    )
+                children = [
+                    get_nested_arg_type(
+                        key,
+                        child,
+                        child_spec,
+                        (*constant_path, child_idx),
+                    )
+                    for child_idx, (child, child_spec) in enumerate(
+                        zip(arg, child_specs, strict=True)
+                    )
+                ]
+                if aggregate_spec[0] == "namedtuple":
+                    type_name = self.maybe_add_udtk_aggregate_type_def(aggregate_spec)
+                    return NamedTupleArg(key, type_name, aggregate_spec[2], children)
+                return TupleArg(key, children)
+
+            arg_type = SizeArg(key, arg)
+            if (
+                constant_path is not None
+                and isinstance(arg, (int, sympy.Integer))
+                and V.graph.sizevars.statically_known_equals(arg, 1)
+            ):
+                # Triton implicitly specializes integer one, including when it
+                # occurs below an aggregate.  Its value must therefore appear
+                # in constants even though the aggregate spec does not mark it.
+                constants[constant_path] = 1
+                return ConstexprArg(name=key)
+            return arg_type
+
         for idx, key in enumerate(arg_names):
             if idx in constexprs:
                 add_arg(idx, ConstexprArg(name=key), is_constexpr=True)
@@ -3803,51 +3986,21 @@ class PythonWrapperCodegen(CodeGen):
             if kwargs[key] is None:
                 add_arg(idx, ConstexprArg(name=key), equals_none=True)
             else:
-                if isinstance(arg, ir.TMADescriptor):
-                    api_type, block_shape, dtype = (
-                        ("stable", arg.block_shape, arg.tensor.get_dtype())
-                        if isinstance(arg, ir.TMADescriptorStable)
-                        else ("experimental", None, None)
-                    )
-                    add_arg(
-                        idx,
-                        TMADescriptorArg(
-                            name=key,
-                            api_type=api_type,
-                            block_shape=block_shape,
-                            dtype=dtype,
-                        ),
-                    )
-                elif isinstance(arg, ir.Buffer):
-                    add_arg(
-                        idx,
-                        TensorArg(
-                            name=key,
-                            buffer=arg.get_name(),
-                            dtype=arg.get_dtype(),
-                        ),
-                    )
-                elif isinstance(arg, ir.ReinterpretView):
-                    # for ReinterpretView we use the underlying
-                    # buffer name and note the (possibly non-zero)
-                    # offset relative to the underlying buffer
-                    add_arg(
-                        idx,
-                        TensorArg(
-                            name=key,
-                            buffer=arg.data.get_name(),
-                            dtype=arg.get_dtype(),
-                            offset=arg.layout.offset,
-                        ),
-                    )
-                else:
+                arg_type = get_nested_arg_type(
+                    key,
+                    arg,
+                    aggregate_type_metadata.get(key),
+                    (idx,) if key in aggregate_type_metadata else None,
+                )
+                equals_1 = False
+                if isinstance(arg_type, SizeArg):
                     equals_1 = isinstance(
                         arg, (int, sympy.Integer)
                     ) and V.graph.sizevars.statically_known_equals(
                         arg,
                         1,  # type: ignore[arg-type]
                     )
-                    add_arg(idx, SizeArg(key, arg), equals_1=equals_1)
+                add_arg(idx, arg_type, equals_1=equals_1)
 
         triton_signature = signature_to_meta(
             signature,
@@ -3968,9 +4121,14 @@ class PythonWrapperCodegen(CodeGen):
         # Distinguish between different functions using function id
         cache_key: Any = [id(kernel.fn)]
         if len(configs) > 0:
-            for arg in kwargs.values():
+            for key, arg in kwargs.items():
                 # We need to key on non tensor arg only in autotune mode
-                if not isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
+                if spec := aggregate_type_metadata.get(key):
+                    cache_key.append(spec)
+                    for flat_arg in pytree.tree_leaves(arg):
+                        if not isinstance(flat_arg, (ir.Buffer, ir.ReinterpretView, ir.TMADescriptor)):
+                            cache_key.append(flat_arg)
+                elif not isinstance(arg, (ir.Buffer, ir.ReinterpretView)):
                     cache_key.append(arg)
         cache_key.append(str(triton_meta))
         cache_key.extend(str(inductor_meta))
@@ -4015,6 +4173,19 @@ class PythonWrapperCodegen(CodeGen):
                 f"from {type_spec.module} import "
                 f"{type_spec.root_name} as {type_spec.root_name}"
             )
+        # TODO(mwizak): this is specialised to namedtuples only, we need to refactor some
+        # code to allow imports, definitions and pickle helpers to share similar
+        # code via add_udtk_aggregate_type
+        if self._udtk_aggregate_types:
+            compile_wrapper.writeline("import collections")
+            for (_, fields), type_name in self._udtk_aggregate_types.items():
+                compile_wrapper.writeline(
+                    f"{type_name} = collections.namedtuple({type_name!r}, {fields!r})"
+                )
+                compile_wrapper.writeline(
+                    f"{type_name}.__reduce__ = "
+                    "triton_heuristics.CachingAutotuner.reduce_udtk_aggregate"
+                )
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
@@ -4203,19 +4374,84 @@ class PythonWrapperCodegen(CodeGen):
             """
         )
 
+    def _prepare_udtk_aggregate_call_str(
+        self,
+        spec: triton_kernel_wrap.AggregateSpec,
+        flat_kwargs: dict[str, str],
+    ) -> Any:
+        is_constexpr = spec[-1]
+        def maybe_wrap_constexpr(value):
+            if is_constexpr:
+                return f"tl.constexpr({value})"
+            return value
+
+        if spec[0] == "leaf":
+            _, flat_key, _is_constexpr = spec
+            if flat_key in flat_kwargs:
+                value = flat_kwargs[flat_key]
+            else:
+                raise ValueError(
+                    f"Aggregate leaf {flat_key!r} was not found in the arguments"
+                )
+            return maybe_wrap_constexpr(str(value))
+
+        children_specs = triton_kernel_wrap.aggregate_spec_children(spec)
+        children = tuple(
+            self._prepare_udtk_aggregate_call_str(child, flat_kwargs)
+            for child in children_specs
+        )
+        if spec[0] == "tuple":
+            children_strs = ", ".join(children)
+            trailing_comma = "," if len(children) == 1 else ""
+            return maybe_wrap_constexpr(f"({children_strs}{trailing_comma})")
+
+        type_definition = self.maybe_add_udtk_aggregate_type_def(spec)
+        if spec[0] == "namedtuple":
+            field_values = ", ".join(
+                f"{field}={value}"
+                for field, value in zip(spec[2], children, strict=True)
+            )
+            return maybe_wrap_constexpr(f"{type_definition}({field_values})")
+
+        # TODO(mwizak): improve error message
+        raise NotImplementedError(f"{spec[0]=} type is not yet supported")
+
     def prepare_triton_kernel_call(self, call_args):
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton
+
         def wrap_arg(arg):
             if isinstance(arg, str):
                 # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
                 return arg + ".item()" if should_unwrap_unspec_arg(arg) else arg
             elif isinstance(arg, (int, float, bool, SymbolicCallArg)):
                 return str(arg)
+            elif isinstance(arg, AggregateArg):
+                args_strs = {
+                    flat_key: wrap_arg(flat_value)
+                    for flat_key, flat_value in arg.flat_values.items()
+                }
+                return self._prepare_udtk_aggregate_call_str(arg.spec, args_strs)
+            elif has_triton_package() and isinstance(arg, triton.language.dtype):
+                return repr(arg)
+            elif arg is None:
+                # None is reachable if within an aggregate type like a tuple / namedtuple
+                return repr(arg)
+            elif isinstance(arg, StrCallArg):
+                return repr(arg.value)
             else:
                 return pexpr(V.graph.sizevars.simplify(arg))
 
         return [wrap_arg(arg) for arg in call_args]
 
     def generate_example_arg_value(self, arg, arg_type, raw_arg=None):
+        from torch.utils._triton import has_triton_package
+
+        if has_triton_package():
+            import triton
+
         if isinstance(arg_type, torch_dtype):
             if isinstance(raw_arg, ir.TMADescriptor):
                 # first we generate the underlying buffer
@@ -4258,6 +4494,8 @@ class PythonWrapperCodegen(CodeGen):
                 self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
             return buf_name
+        elif has_triton_package() and isinstance(arg, triton.language.dtype):
+            return repr(arg)
         elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
             if isinstance(arg, str):
@@ -4313,9 +4551,14 @@ class PythonWrapperCodegen(CodeGen):
         # This is used to generate example args for autotuning later on.
         self.args_to_buffers.update(
             {
-                arg: V.graph.try_get_buffer(arg)
+                flat_arg: V.graph.try_get_buffer(flat_arg)
                 for arg in call_args
-                if isinstance(arg, str)
+                for flat_arg in (
+                    arg.flat_values.values()
+                    if isinstance(arg, AggregateArg)
+                    else (arg,)
+                )
+                if isinstance(flat_arg, str)
             }
         )
 
@@ -4457,6 +4700,69 @@ class PythonWrapperCodegen(CodeGen):
 
             all_args = []
             tensor_arg_strs = []  # used only when _per_kernel is True
+
+            def flatten_raw_aggregate(spec, value):
+                import triton.language as tl
+
+                if isinstance(value, tl.constexpr):
+                    value = value.value
+                if spec[0] == "leaf":
+                    return {spec[1]: value}
+                if not isinstance(value, tuple):
+                    raise AssertionError(f"Expected aggregate value, got {type(value)}")
+
+                child_specs = triton_kernel_wrap.aggregate_spec_children(spec)
+                if len(value) != len(child_specs):
+                    raise AssertionError(
+                        f"Aggregate has {len(value)} values but its spec has "
+                        f"{len(child_specs)} children"
+                    )
+
+                flat_values = {}
+                for child_spec, child_value in zip(child_specs, value, strict=True):
+                    flat_values.update(flatten_raw_aggregate(child_spec, child_value))
+                return flat_values
+
+            def generate_example_arg_value_aggregate_wrapper(arg, arg_type, raw_arg):
+                if isinstance(arg_type, AggregateType):
+                    flat_raw_args = flatten_raw_aggregate(arg.spec, raw_arg)
+                    kwarg_strs = {
+                        flat_key: generate_example_arg_value_aggregate_wrapper(
+                            arg.flat_values[flat_key],
+                            arg_type.flat_values[flat_key],
+                            flat_raw_args[flat_key],
+                        )
+                        for flat_key in arg.flat_values
+                    }
+                    arg_str = self._prepare_udtk_aggregate_call_str(
+                        arg.spec, kwarg_strs
+                    )
+                elif isinstance(arg_type, torch_dtype):
+                    # workspace allocation is already generated by `generate_workspace_allocation()`
+                    # in `TritonKernel.call_kernel()`.
+                    if re.match(r"^(workspace|semaphore)", arg):
+                        arg_str = arg
+                    elif _per_kernel:
+                        arg_str = self.generate_example_arg_value(
+                            arg, arg_type, raw_arg
+                        )
+                        tensor_arg_strs.append(arg_str)
+                    elif arg not in self.kernel_autotune_example_args:
+                        arg_str = self.generate_example_arg_value(
+                            arg, arg_type, raw_arg
+                        )
+                    else:
+                        arg_str = self.kernel_autotune_example_args[arg][0]
+                    if not _per_kernel:
+                        self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
+                else:
+                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
+
+                if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
+                    arg_str += ".item()"
+
+                return arg_str
+
             if raw_args is None:
                 # create a dummy raw_args for uniform behavior in the following loop
                 if raw_keys is not None:
@@ -4496,29 +4802,8 @@ class PythonWrapperCodegen(CodeGen):
                     # Empty raw_key means this is an arg that's not native to the triton kernel,
                     # and is being added by inductor.
                     arg_str = reused_args[raw_arg]
-                elif isinstance(arg_type, torch_dtype):
-                    # workspace allocation is already generated by `generate_workspace_allocation()`
-                    # in `TritonKernel.call_kernel()`.
-                    if re.match(r"^(workspace|semaphore)", arg):
-                        arg_str = arg
-                    elif _per_kernel:
-                        arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg
-                        )
-                        tensor_arg_strs.append(arg_str)
-                    elif arg not in self.kernel_autotune_example_args:
-                        arg_str = self.generate_example_arg_value(
-                            arg, arg_type, raw_arg
-                        )
-                    else:
-                        arg_str = self.kernel_autotune_example_args[arg][0]
-                    if not _per_kernel:
-                        self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
-                    arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
-
-                if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
-                    arg_str += ".item()"
+                    arg_str = generate_example_arg_value_aggregate_wrapper(arg, arg_type, raw_arg)
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             # Make sure kernel launch under a device guard because models don't always run on device 0

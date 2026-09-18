@@ -139,7 +139,6 @@ from .utils import (
 )
 from .virtualized import ops, OpsValue, V
 
-
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
@@ -8631,6 +8630,12 @@ class UserDefinedTritonKernel(ExternKernel):
     A user-defined triton kernel (e.g. via @triton.jit).
     """
 
+    @override
+    def get_kwargs_value(self, arg_name: str, **kwargs: Any) -> Any:
+        if arg_name in self.kwargs_with_aggregate_reconstruction:
+            return self.kwargs_with_aggregate_reconstruction.get(arg_name)
+        return super().get_kwargs_value(arg_name, **kwargs)
+
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
 
@@ -8640,6 +8645,8 @@ class UserDefinedTritonKernel(ExternKernel):
         configs = []
         restore_value_args: list[str] = []
         reset_to_zero_args: list[str] = []
+        # TODO(mwizak): handle autotuner path?
+        # Need to see if there is an aggregate in a restore idx / value and remove it
         if isinstance(kernel, Autotuner):
             # https://github.com/triton-lang/triton/pull/5083
             # changes kernel.restore_idx to kernel.restore_value
@@ -8743,6 +8750,8 @@ class UserDefinedTritonKernel(ExternKernel):
         See https://github.com/pytorch/pytorch/issues/151692"""
 
         from torch._inductor.utils import triton_version_uses_attrs_dict
+        from torch._higher_order_ops import triton_kernel_wrap
+        from .codegen.wrapper import AggregateArg, AggregateType, StrCallArg
 
         (
             kernel,
@@ -8753,8 +8762,10 @@ class UserDefinedTritonKernel(ExternKernel):
 
         # For an epilogue containing a cast, the output arg in kwargs must point to the
         # epilogue's output so that the compiled signature uses the correct dtype.
-        kernel_kwargs = self.kwargs
+        kernel_kwargs = self.kwargs_with_aggregate_reconstruction
+
         epilogue_out_override: dict[str, Any] = {}
+        # TODO(mwizak): Handle epilogue fusion
         if epilogue_fusion:
             if len(self.arg_accesses.read_writes.writes) != 1:
                 raise AssertionError(
@@ -8762,8 +8773,24 @@ class UserDefinedTritonKernel(ExternKernel):
                 )
             mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
             epilogue_computed_buffer, _ = epilogue_fusion
-            kernel_kwargs = {**self.kwargs, mutable_arg_name: epilogue_computed_buffer}
+            kernel_kwargs = {
+                **self.kwargs,
+                mutable_arg_name: epilogue_computed_buffer
+            }
             epilogue_out_override = {mutable_arg_name: epilogue_computed_buffer}
+            if self.aggregate_type_metadata:
+                for aggregate_name, aggregate_spec in self.aggregate_type_metadata.items():
+                    if mutable_arg_name in triton_kernel_wrap.get_aggregate_leaf_keys(aggregate_spec):
+                        # reconstruct the aggregate with the new epilogue buffer
+                        new_aggregate_dict, _ = triton_kernel_wrap.reconstruct_triton_kernel_aggregates(kernel_kwargs, {aggregate_name: aggregate_spec})
+                        # TODO(mwizak): this mutation is not good as get_kwargs_value references this data member..
+                        self.kwargs_with_aggregate_reconstruction[aggregate_name] = new_aggregate_dict[aggregate_name]
+                        kernel_kwargs = self.kwargs_with_aggregate_reconstruction
+                        # No need to override the buffer name since the aggregate contains the
+                        # updated buffer
+                        epilogue_out_override = {}
+                        break
+
 
         (
             new_name,
@@ -8779,6 +8806,7 @@ class UserDefinedTritonKernel(ExternKernel):
             self.grid,
             epilogue_fusion,
             self.launch_kwargs,
+            self.aggregate_type_metadata,
         )
         named_args = {
             k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
@@ -8793,6 +8821,70 @@ class UserDefinedTritonKernel(ExternKernel):
         arg_types: list[Any] = []
         raw_keys_filtered: list[Any] = []
         raw_args_filtered: list[Any] = []
+
+        def get_arg_and_type(name, arg, aggregate_spec=None):
+            if aggregate_spec is not None:
+                flat_args: dict[str, Any] = {}
+                flat_types: dict[str, Any] = {}
+
+                def visit(spec, value):
+                    # The spec retains the constexpr marker used when emitting the
+                    # call. Unwrap here so aggregate lowering can inspect the value.
+                    if has_triton and isinstance(value, triton.language.constexpr):
+                        value = value.value
+
+                    if spec[0] == "leaf":
+                        _, flat_key, _is_constexpr = spec
+                        flat_args[flat_key], flat_types[flat_key] = (
+                            get_arg_and_type(name, value)
+                        )
+                        return
+
+                    if not isinstance(value, tuple):
+                        raise AssertionError(
+                            f"Expected aggregate value for argument {name!r}, "
+                            f"got {type(value)}"
+                        )
+
+                    child_specs = triton_kernel_wrap.aggregate_spec_children(spec)
+                    if len(value) != len(child_specs):
+                        raise AssertionError(
+                            f"Aggregate argument {name!r} has {len(value)} values "
+                            f"but its spec has {len(child_specs)} children"
+                        )
+                    for child_spec, child_value in zip(
+                        child_specs, value, strict=True
+                    ):
+                        visit(child_spec, child_value)
+
+                visit(aggregate_spec, arg)
+                return (
+                    AggregateArg(aggregate_spec, flat_args),
+                    AggregateType(aggregate_spec, flat_types),
+                )
+
+            if isinstance(arg, IRNode):
+                return arg.codegen_reference(), arg.get_dtype()
+            elif isinstance(arg, (int, float, bool, Expr)):
+                return arg, type(arg)
+            elif has_triton and isinstance(arg, triton.language.dtype):
+                return arg, type(arg)
+            elif isinstance(arg, str):
+                return StrCallArg(arg), str
+            elif name in constexpr_names:
+                # insert a dummy value for constexpr args of unsupported type
+                # constexprs will end up getting baked into the kernel at compile time
+                return -1, int
+            elif arg is None:
+                return None, None
+            elif has_triton and isinstance(arg, triton.language.constexpr):
+                # For tl.constexpr wrapped args, unwrap to determine the arg and type.
+                # The tl.constexpr wrapper will be reapplied when the kernel call args
+                # are created
+                return get_arg_and_type(name, arg.value)
+            else:
+                raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
+
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
@@ -8801,18 +8893,7 @@ class UserDefinedTritonKernel(ExternKernel):
                 continue
             raw_keys_filtered.append(name)
             raw_args_filtered.append(arg)
-            if isinstance(arg, IRNode):
-                args.append(arg.codegen_reference())
-                arg_types.append(arg.get_dtype())
-            elif isinstance(arg, (int, float, bool, Expr)):
-                args.append(arg)
-                arg_types.append(type(arg))
-            elif name in constexpr_names:
-                # insert a dummy value for constexpr args of unsupported type
-                # constexprs will end up getting baked into the kernel at compile time
-                args.append(-1)
-                arg_types.append(int)
-            elif arg is None:
+            if arg is None:
                 """
                 Filter out None args.
 
@@ -8829,7 +8910,11 @@ class UserDefinedTritonKernel(ExternKernel):
                     raw_keys_filtered.pop()
                     raw_args_filtered.pop()
             else:
-                raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
+                a, a_type = get_arg_and_type(
+                    name, arg, self.aggregate_type_metadata.get(name)
+                )
+                args.append(a)
+                arg_types.append(a_type)
 
         self.codegen_comment(wrapper, new_name)
         wrapper.generate_kernel_call(
@@ -8864,13 +8949,29 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel_idx: int,
         grid: Any,
         tma_descriptor_metadata: dict[str, Any],
+        aggregate_type_metadata: dict[str, Any],
         kernel_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
     ) -> None:
+        from torch._higher_order_ops import triton_kernel_wrap
+
+        if aggregate_type_metadata:
+            # Dynamo normally rejects this first.  Keep the lowering boundary
+            # guarded as well for callers that construct the HOP directly.
+            triton_kernel_wrap.validate_udtk_aggregate_support()
+            if V.graph.fx_wrapper:
+                # TODO(mwizak): Add tuple and NamedTuple argument support to
+                # WrapperFxCodegen and carry the aggregate specs to its Triton HOP.
+                raise NotImplementedError(
+                    "FX wrappers do not support tuple or NamedTuple arguments "
+                    "to user-defined Triton kernels"
+                )
+
         inputs: list[IRNode] = []
         kwargs: dict[str, IRNode] = {}
         constant_args: list[IRNode] = []
 
+        self.aggregate_type_metadata = aggregate_type_metadata
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
@@ -8904,8 +9005,23 @@ class UserDefinedTritonKernel(ExternKernel):
         # If we are autotuning, not all arguments will be passed
         if not hasattr(kernel, "arg_names"):
             raise AssertionError('Expected hasattr(kernel, "arg_names")')
+
+        if V.graph.cpp_wrapper and self.aggregate_type_metadata:
+            from .exc import CppWrapperCodegenError
+
+            # The Python wrapper reconstructs tuple and NamedTuple arguments at
+            # the Triton launch boundary. The C++ wrapper has no equivalent
+            # structured argument representation yet, so fail before emitting a
+            # signature or launch call that it cannot represent.
+            raise CppWrapperCodegenError(
+                "C++ wrappers and AOTInductor do not support tuple or NamedTuple "
+                "arguments to user-defined Triton kernels"
+            )
+
         self.ordered_kwargs_for_cpp_kernel = [
-            arg for arg in kernel.arg_names if arg in kernel_args
+            arg
+            for arg in kernel.arg_names
+            if arg in kernel_args or arg in self.aggregate_type_metadata
         ]
 
         from torch._higher_order_ops.triton_kernel_wrap import (
@@ -8922,12 +9038,20 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_ast = ast.parse(self.kernel_src)
         self.kernel_stores = identify_triton_stores(self.kernel_src)
         self.kernel_args = kernel_args
+        self.kwargs_with_aggregate_reconstruction = self.kwargs
+        if self.aggregate_type_metadata:
+            self.kwargs_with_aggregate_reconstruction, _constant_args = (
+                triton_kernel_wrap.reconstruct_triton_kernel_aggregates(
+                    self.kwargs, aggregate_type_metadata=aggregate_type_metadata
+                )
+            )
+
         # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype
         self.arg_accesses = identify_accessed_tensors(
             kernel,
             {**kernel_args, **autotuned_kwargs},
             tma_descriptor_metadata,
-            aggregate_type_metadata={},
+            aggregate_type_metadata=aggregate_type_metadata,
         )
 
         # Filter to only tensor args: with Triton 3.7+, ordered_arg_names

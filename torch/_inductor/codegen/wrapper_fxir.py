@@ -1258,6 +1258,7 @@ class FxConverter:
             "constant_args_idx": constant_args_idx,
             "grid": wrapper_grid,
             "tma_descriptor_metadata": {},
+            "aggregate_type_metadata": {},
             "kwargs": call_kwargs,
         }
         if backend_options:

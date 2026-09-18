@@ -9194,17 +9194,12 @@ def triton_kernel_wrap_(
 ):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
-    if aggregate_type_metadata:
-        raise NotImplementedError(
-            "Inductor lowering for aggregate user-defined Triton kernel "
-            "arguments is not implemented yet"
-        )
-
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     ir.UserDefinedTritonKernel(
         kernel_idx=kernel_idx,
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
+        aggregate_type_metadata=aggregate_type_metadata,
         kernel_args={**kwargs, **constant_args},
         launch_kwargs=() if launch_kwargs is None else launch_kwargs,
     )

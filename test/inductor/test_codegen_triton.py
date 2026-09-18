@@ -2,6 +2,7 @@
 import ast
 import contextlib
 import dataclasses
+import pickle
 import re
 import unittest
 from collections import namedtuple, OrderedDict
@@ -16,7 +17,15 @@ import torch._inductor.config as inductor_config
 from torch._inductor import ir
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen import triton_utils
-from torch._inductor.codegen.common import ArgName, CSEVariable, SizeArg, TensorArg
+from torch._inductor.codegen.common import (
+    ArgName,
+    CSEVariable,
+    ConstexprArg,
+    NamedTupleArg,
+    SizeArg,
+    TensorArg,
+    TupleArg,
+)
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
@@ -34,6 +43,7 @@ from torch._inductor.codegen.wrapper import _escape_triton_kernel_source_for_wra
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner, CompileResult
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     get_importable_constexpr_types,
@@ -755,6 +765,145 @@ def helper(x):
                 ]
             ),
         )
+
+    @inductor_config.patch("triton.divisible_by_16", True)
+    def test_config_of_nested_aggregate_alignment(self):
+        from torch._inductor.utils import triton_version_uses_attrs_dict
+
+        if not triton_version_uses_attrs_dict():
+            self.skipTest("nested argument attributes require Triton's attrs dict")
+
+        config_arg = NamedTupleArg(
+            "config",
+            "Config",
+            ["source", "parameters"],
+            [
+                TensorArg(
+                    name="source",
+                    buffer="source",
+                    dtype=torch.float32,
+                ),
+                TupleArg(
+                    "parameters",
+                    [
+                        SizeArg("scale", sympy.Integer(16)),
+                        SizeArg("bias", sympy.Integer(3)),
+                    ],
+                ),
+            ],
+        )
+
+        with patch.object(triton_utils, "is_unaligned_buffer", return_value=False):
+            triton_config = triton_utils.config_of([config_arg], indices=[3])
+
+        self.assertEqual(
+            triton_config,
+            {
+                (3, 0): [["tt.divisibility", 16]],
+                (3, 1, 0): [["tt.divisibility", 16]],
+            },
+        )
+
+    def test_signature_of_nested_namedtuple(self):
+        flat_arg = NamedTupleArg(
+            "nested_field",
+            "FlatType",
+            ("x", "y"),
+            [ConstexprArg("x"), ConstexprArg("y")],
+        )
+        config_arg = NamedTupleArg(
+            "config",
+            "NestedType",
+            ("a", "nested_field"),
+            [ConstexprArg("a"), flat_arg],
+        )
+
+        signature = triton_utils.signature_of(
+            config_arg, size_dtype=(None, (None, None))
+        )
+
+        self.assertEqual(type(signature).__name__, "NestedType")
+        self.assertEqual(signature._fields, ("a", "nested_field"))
+        self.assertEqual(type(signature.nested_field).__name__, "FlatType")
+        self.assertEqual(signature.nested_field._fields, ("x", "y"))
+
+    def test_udtk_aggregate_pickle_roundtrip(self):
+        inner_type = namedtuple("InnerType", ("x", "y"))
+        outer_type = namedtuple("OuterType", ("value", "nested"))
+        inner_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
+        outer_type.__reduce__ = CachingAutotuner.reduce_udtk_aggregate
+        value = outer_type(1, (inner_type(2, None), 3))
+
+        restored = pickle.loads(pickle.dumps(value))
+
+        self.assertEqual(type(restored).__name__, "OuterType")
+        self.assertEqual(restored._fields, ("value", "nested"))
+        self.assertEqual(type(restored.nested[0]).__name__, "InnerType")
+        self.assertEqual(restored.nested[0]._fields, ("x", "y"))
+        self.assertEqual(restored, value)
+        self.assertEqual(pickle.loads(pickle.dumps(restored)), value)
+
+    def test_udtk_constexpr_launcher_scope_binding(self):
+        inner_type = namedtuple("InnerType", ("scale",))
+        outer_type = namedtuple("OuterType", ("inner",))
+        aggregate = outer_type(inner_type(2))
+        compile_result = CompileResult(
+            kernel=None,
+            config=SimpleNamespace(kwargs={}, num_warps=4, num_stages=3),
+            compile_meta={
+                "signature": {
+                    "aggregate": "constexpr",
+                    "plain_tuple": "constexpr",
+                    "scalar": "constexpr",
+                    "text": "constexpr",
+                },
+                "constants": {
+                    "aggregate": aggregate,
+                    "plain_tuple": (3, 4),
+                    "scalar": 4,
+                    "text": "value",
+                },
+            },
+            inductor_meta={},
+        )
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics."
+            "triton_version_uses_attrs_dict",
+            return_value=True,
+        ):
+            (
+                call_args,
+                def_args,
+                none_args,
+                bound_udtk_constexprs,
+            ) = compile_result._get_arg_lists(
+                ["aggregate", "plain_tuple", "scalar", "text"],
+                [0, 1, 2, 3],
+            )
+
+        self.assertEqual(
+            call_args,
+            ["__udtk_constexpr_0", "__udtk_constexpr_1", "4", "r'value'"],
+        )
+        self.assertEqual(def_args, [])
+        self.assertEqual(none_args, set())
+        self.assertIs(bound_udtk_constexprs["__udtk_constexpr_0"], aggregate)
+        self.assertIs(
+            bound_udtk_constexprs["__udtk_constexpr_1"],
+            compile_result.compile_meta["constants"]["plain_tuple"],
+        )
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics."
+            "triton_version_uses_attrs_dict",
+            return_value=False,
+        ):
+            _, _, _, legacy_bound_udtk_constexprs = compile_result._get_arg_lists(
+                ["aggregate", "plain_tuple", "scalar", "text"],
+                [0, 1, 2, 3],
+            )
+        self.assertEqual(legacy_bound_udtk_constexprs, {})
 
     def test_config_of_sizearg_with_check_constraint(self):
         from torch.utils._sympy.functions import Mod

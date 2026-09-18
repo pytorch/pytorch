@@ -188,28 +188,78 @@ TMADescriptorMetadata = dict[
 ]
 
 
-# TODO(mwizak): Better class names
-@dataclasses.dataclass(frozen=True)
-class LeafSpec:
-    flat_key: str
-
-
-@dataclasses.dataclass(frozen=True)
-class TupleSpec:
-    children: tuple["AggregateSpec", ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class NamedTupleSpec:
-    type_name: str
-    field_names: tuple[str, ...]
-    children: tuple["AggregateSpec", ...]
-
-
+# Aggregate specs are represented using only FX-native tuple literals. In
+# particular, dataclass instances passed to an FX tracer are represented as
+# call_function nodes that reconstruct the dataclass, while tuples are
+# recursively stored as node arguments. Keep this metadata as tuples so it
+# remains metadata when a Triton HOP is retraced by an Inductor graph pass.
+#
+# LeafSpec:       ("leaf", flat_key, is_constexpr)
+# TupleSpec:      ("tuple", tuple[children], is_constexpr)
+# NamedTupleSpec: ("namedtuple", type_name, tuple[field_names],
+#                  tuple[children], is_constexpr)
+LeafSpec = tuple[typing.Literal["leaf"], str, bool]
+TupleSpec = tuple[typing.Literal["tuple"], tuple["AggregateSpec", ...], bool]
+NamedTupleSpec = tuple[
+    typing.Literal["namedtuple"],
+    str,
+    tuple[str, ...],
+    tuple["AggregateSpec", ...],
+    bool,
+]
 AggregateSpec = LeafSpec | TupleSpec | NamedTupleSpec
 # Only top-level aggregate parameters have entries. Ordinary scalar/tensor/TMA
 # parameters are represented solely by the existing argument maps.
 AggregateTypeMetadata = dict[str, TupleSpec | NamedTupleSpec]
+
+UDTK_AGGREGATE_VERSION_ERROR = (
+    "Tuple and NamedTuple arguments to user-defined Triton kernels require "
+    "Triton's V4 attrs-dict interface or later."
+)
+
+
+def triton_version_supports_udtk_aggregates() -> bool:
+    # Aggregate signature entries and path-keyed constants use the raw attrs-dict
+    # representation introduced by Triton V4.  The older AttrsDescriptor formats
+    # do not have a compatible representation for this lowering.
+    from torch._inductor.utils import triton_version_uses_attrs_dict
+
+    return triton_version_uses_attrs_dict()
+
+
+def validate_udtk_aggregate_support() -> None:
+    if not triton_version_supports_udtk_aggregates():
+        raise NotImplementedError(UDTK_AGGREGATE_VERSION_ERROR)
+
+
+def create_leaf_spec(flat_key: str, *, is_constexpr: bool = False) -> LeafSpec:
+    return ("leaf", flat_key, is_constexpr)
+
+
+def create_tuple_spec(
+    children: tuple[AggregateSpec, ...], *, is_constexpr: bool = False
+) -> TupleSpec:
+    return ("tuple", children, is_constexpr)
+
+
+def create_named_tuple_spec(
+    type_name: str,
+    field_names: tuple[str, ...],
+    children: tuple[AggregateSpec, ...],
+    *,
+    is_constexpr: bool = False,
+) -> NamedTupleSpec:
+    return ("namedtuple", type_name, field_names, children, is_constexpr)
+
+
+def aggregate_spec_children(
+    spec: TupleSpec | NamedTupleSpec,
+) -> tuple[AggregateSpec, ...]:
+    if spec[0] == "tuple":
+        return spec[1]
+    if spec[0] == "namedtuple":
+        return spec[3]
+    raise AssertionError(f"Expected an aggregate container spec, got {spec!r}")
 
 
 ###############################################################################
@@ -321,6 +371,9 @@ def generate_ttir(
     """
     Uses Triton's internal code generation to create TTIR
     """
+    if aggregate_type_metadata:
+        validate_udtk_aggregate_support()
+
     import sympy
     import triton
     import triton.runtime.jit
@@ -362,9 +415,9 @@ def generate_ttir(
         if name not in kernel.arg_names and name in options.__dict__:
             kwargs.pop(name)
 
-    # Replace all SymExprs with a regular value for TTIR generation
-    # Replace all flat FakeTensor/TensorBox leaves with representative real values.
-    # These replacements are needed for triton's type, key and config functions
+    # Replace all SymExprs with a regular value for TTIR generation and all flat
+    # FakeTensor/TensorBox leaves with representative real values. These
+    # replacements are needed for Triton's type, key, and config functions.
     def convert_type_for_ttir_generation(name: str, a: Any) -> Any:
         if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
             return 2
@@ -398,7 +451,7 @@ def generate_ttir(
         name: convert_type_for_ttir_generation(name, arg)
         for name, arg in kwargs.items()
     }
-    kwargs, _constant_args = _reconstruct_triton_kernel_aggregates(
+    kwargs, _constant_args = reconstruct_triton_kernel_aggregates(
         graph_kwargs=kwargs,
         aggregate_type_metadata=aggregate_type_metadata,
     )
@@ -409,9 +462,7 @@ def generate_ttir(
             f"passed {list(kwargs.keys())}, expected {kernel.arg_names}."
         )
 
-    ordered_args: dict[str, Any] = {}
-    for name in kernel.arg_names:
-        ordered_args[name] = kwargs[name]
+    ordered_args = {name: kwargs[name] for name in kernel.arg_names}
 
     def is_stable_tensor_descriptor_arg(arg: object) -> bool:
         if has_triton_tensor_descriptor_host_tma():
@@ -457,17 +508,22 @@ def generate_ttir(
         return [name]
 
     def get_aggregate_arg_names(spec: AggregateSpec, arg: Any) -> list[str]:
-        if isinstance(spec, LeafSpec):
-            return get_leaf_arg_names(spec.flat_key, arg)
-        if len(spec.children) != len(arg):
+        is_constexpr = spec[-1]
+        if is_constexpr:
+            return []
+        if spec[0] == "leaf":
+            _, flat_key, _is_constexpr = spec
+            return get_leaf_arg_names(flat_key, arg)
+        children = aggregate_spec_children(spec)
+        if len(children) != len(arg):
             raise AssertionError(
                 "Aggregate argument does not match its spec: "
-                f"expected {len(spec.children)} children, got {len(arg)}"
+                f"expected {len(children)} children, got {len(arg)}"
             )
         return list(
             itertools.chain.from_iterable(
                 get_aggregate_arg_names(child_spec, child_arg)
-                for child_spec, child_arg in zip(spec.children, arg)
+                for child_spec, child_arg in zip(children, arg)
             )
         )
 
@@ -571,12 +627,46 @@ def generate_ttir(
 
     specialization = _get_specialization(ordered_args.values())
     # Triton explicitly interprets ASTSource.constants entries as constexpr
-    # Thus, only None and arguments marked `is_constexpr` should be treated as such.
-    constants = {
-        name: arg
-        for name, arg in ordered_args.items()
-        if _is_constexpr_or_none(name, arg)
-    }
+    # Thus, only None and arguments marked `is_constexpr` should be treated as
+    # such. Nested paths match the paths produced by Triton's native binder.
+    constants: dict[str | tuple[int, ...], Any] = {}
+
+    def collect_aggregate_constants(
+        param_idx: int,
+        spec: AggregateSpec,
+        arg: Any,
+        path: tuple[int, ...] = (),
+    ) -> None:
+        # Is the argument a wrapped tl.constexpr? Note that this is
+        # different from a tl.constexpr formal parameter
+        is_constexpr = spec[-1]
+        if is_constexpr or arg is None:
+            constants[(param_idx, *path)] = (
+                arg.value if isinstance(arg, triton.language.constexpr) else arg
+            )
+            return
+        if spec[0] == "leaf":
+            # Ordinary leaf remains a runtime TTIR argument
+            return
+        children = aggregate_spec_children(spec)
+        if len(children) != len(arg):
+            raise AssertionError(
+                "Aggregate argument does not match its spec: "
+                f"expected {len(children)} children, got {len(arg)}"
+            )
+        for child_idx, (child_spec, child_arg) in enumerate(zip(children, arg)):
+            collect_aggregate_constants(
+                param_idx,
+                child_spec,
+                child_arg,
+                (*path, child_idx),
+            )
+
+    for param_idx, (name, arg) in enumerate(ordered_args.items()):
+        if _is_constexpr_or_none(name, arg):
+            constants[name] = arg
+        elif (spec := aggregate_type_metadata.get(name)) is not None:
+            collect_aggregate_constants(param_idx, spec, arg)
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
 
@@ -1640,13 +1730,12 @@ def _namedtuple_type_from_spec(
     return collections.namedtuple(type_name, field_names)
 
 
-def _aggregate_leaf_keys(spec: AggregateSpec) -> tuple[str, ...]:
-    if isinstance(spec, LeafSpec):
-        return (spec.flat_key,)
+def get_aggregate_leaf_keys(spec: AggregateSpec) -> tuple[str, ...]:
+    if spec[0] == "leaf":
+        return (spec[1],)
+    children = aggregate_spec_children(spec)
     return tuple(
-        itertools.chain.from_iterable(
-            _aggregate_leaf_keys(child) for child in spec.children
-        )
+        itertools.chain.from_iterable(get_aggregate_leaf_keys(child) for child in children)
     )
 
 
@@ -1655,32 +1744,49 @@ def _reconstruct_aggregate(
     graph_kwargs: dict[str, Any],
     constant_args: dict[str, Any],
 ) -> Any:
-    if isinstance(spec, LeafSpec):
-        if spec.flat_key in graph_kwargs:
-            return graph_kwargs[spec.flat_key]
-        if spec.flat_key in constant_args:
-            return constant_args[spec.flat_key]
-        raise ValueError(
-            f"Aggregate leaf {spec.flat_key!r} was not found in the arguments"
-        )
+    def maybe_wrap_with_tl_constexpr(value, *, is_constexpr: bool):
+        if is_constexpr:
+            import triton.language as tl
 
+            return tl.constexpr(value)
+        return value
+
+    if spec[0] == "leaf":
+        _, flat_key, is_constexpr = spec
+        if flat_key in graph_kwargs:
+            value = graph_kwargs[flat_key]
+        elif flat_key in constant_args:
+            value = constant_args[flat_key]
+        else:
+            raise ValueError(
+                f"Aggregate leaf {flat_key!r} was not found in the arguments"
+            )
+        return maybe_wrap_with_tl_constexpr(value, is_constexpr=is_constexpr)
+
+    children_specs = aggregate_spec_children(spec)
     children = tuple(
         _reconstruct_aggregate(child, graph_kwargs, constant_args)
-        for child in spec.children
+        for child in children_specs
     )
-    if isinstance(spec, TupleSpec):
-        return children
+    if spec[0] == "tuple":
+        reconstructed_value = children
+    elif spec[0] == "namedtuple":
+        _, type_name, field_names, _, _ = spec
+        if len(field_names) != len(children):
+            raise ValueError(
+                f"NamedTuple {type_name!r} has {len(field_names)} fields but "
+                f"its aggregate spec has {len(children)} children"
+            )
+        namedtuple_type = _namedtuple_type_from_spec(type_name, field_names)
+        reconstructed_value = namedtuple_type(*children)
+    else:
+        # TODO(mwizak): improve error message
+        raise NotImplementedError(f"{spec[-1]} aggregate type not yet implemented.")
 
-    if len(spec.field_names) != len(children):
-        raise ValueError(
-            f"NamedTuple {spec.type_name!r} has {len(spec.field_names)} fields but "
-            f"its aggregate spec has {len(children)} children"
-        )
-    namedtuple_type = _namedtuple_type_from_spec(spec.type_name, spec.field_names)
-    return namedtuple_type(*children)
+    return maybe_wrap_with_tl_constexpr(reconstructed_value, is_constexpr=spec[-1])
 
 
-def _reconstruct_triton_kernel_aggregates(
+def reconstruct_triton_kernel_aggregates(
     graph_kwargs: dict[str, Any],
     aggregate_type_metadata: AggregateTypeMetadata,
     *,
@@ -1701,7 +1807,7 @@ def _reconstruct_triton_kernel_aggregates(
 
     aggregate_leaf_keys: set[str] = set()
     for name, spec in aggregate_type_metadata.items():
-        leaf_keys = _aggregate_leaf_keys(spec)
+        leaf_keys = get_aggregate_leaf_keys(spec)
         for key in leaf_keys:
             if key in aggregate_leaf_keys:
                 raise AssertionError(
@@ -1752,7 +1858,7 @@ def reconstruct_triton_kernel_args(
             graph_kwargs[key], metadata
         )
 
-    return _reconstruct_triton_kernel_aggregates(
+    return reconstruct_triton_kernel_aggregates(
         graph_kwargs,
         aggregate_type_metadata,
         constant_args=constant_args,
@@ -1924,12 +2030,6 @@ def get_mutated_tensors(
     tma_descriptor_metadata: TMADescriptorMetadata,
     aggregate_type_metadata: AggregateTypeMetadata,
 ) -> list[str]:
-    # if aggregate_type_metadata:
-    #     # generate_ttir does not yet map a nested Triton signature back to flat
-    #     # leaf keys. Conservatively cloning every tensor leaf preserves
-    #     # functionalization correctness until that precise analysis is added.
-    #     return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
-
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     tensor_accesses = identify_accessed_tensors(
@@ -2320,6 +2420,7 @@ class TritonHOPifier:
         combined_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
         kernel_arg_names: set[str],
+        constexpr_arg_names: set[str],
         tx,
     ) -> Optional["ConstantVariable"]:
         raise NotImplementedError("abstract method")
@@ -2826,10 +2927,9 @@ class TritonHOPifier:
             constexprs = [p.num for p in variable.kernel.fn.params if p.is_constexpr]
             arg_names = [p.name for p in variable.kernel.fn.params]
 
-        for idx, arg_name in enumerate(arg_names):
-            # TODO(mwizak): handle constexpr NamedTuple, triton must have a key that can be used
-            # for aggregate types that we can use as the guard
-            if idx in constexprs:
+        constexpr_arg_names = {arg_names[idx] for idx in constexprs}
+        for arg_name in arg_names:
+            if arg_name in constexpr_arg_names:
                 if arg_name in combined_args_raw:
                     # [Note: Specialize tl.constexpr args in user-defined triton kernels]
                     # This arg is marked as tl.constexpr. That means that triton will recompile every time
@@ -2845,7 +2945,13 @@ class TritonHOPifier:
                         combined_args_raw[arg_name]
                     )
         return self.call_HOP(
-            variable, grids, combined_args_raw, launch_kwargs, jit_arg_names, tx
+            variable,
+            grids,
+            combined_args_raw,
+            launch_kwargs,
+            jit_arg_names,
+            constexpr_arg_names,
+            tx,
         )
 
 
@@ -2975,6 +3081,7 @@ class TracingTritonHOPifier(TritonHOPifier):
         combined_args: dict[str, Any],
         launch_kwargs: tuple[str, ...],
         kernel_arg_names: set[str],
+        constexpr_arg_names: set[str],
         tx: None,
     ) -> None:
         if tx is not None:
