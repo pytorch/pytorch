@@ -42,7 +42,6 @@ def flex_gemm_problem(
     concat_layout: Any,
     *,
     blockscaled: bool = False,
-    varlen_m: bool = False,
 ) -> Any:
     """Describe a FlexGEMM call (physical GEMM M and N) for QuACK config pruning."""
     from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn, ModProblem
@@ -52,7 +51,6 @@ def flex_gemm_problem(
         m=m,
         n=n,
         b_kn=mod_b_kn(device, concat_layout),
-        varlen_m=varlen_m,
         blockscaled=blockscaled,
         concat=bool(concat_layout),
     )
@@ -106,7 +104,10 @@ def quack_blockscaled_scale_view(
 
 
 def normalize_c(
-    C: torch.Tensor | None, expected_shape: tuple[int, ...], beta: float
+    C: torch.Tensor | None,
+    expected_shape: tuple[int, ...],
+    beta: float,
+    device_type: str,
 ) -> torch.Tensor | None:
     """Return the effective C tensor that QuACK should read for alpha/beta GEMMs."""
     if C is None:
@@ -120,8 +121,11 @@ def normalize_c(
     broadcast_C = torch.broadcast_to(C, expected_shape)
     if broadcast_C.ndim not in (2, 3):
         raise NotImplementedError("FlexGEMM currently supports only 2-D or 3-D C")
-    if not broadcast_C.is_cuda:
-        raise RuntimeError("FlexGEMM requires CUDA C")
+    if broadcast_C.device.type != device_type:
+        raise RuntimeError(
+            f"FlexGEMM requires C on the {device_type} device, "
+            f"got {broadcast_C.device.type}"
+        )
     if broadcast_C.stride(-1) != 1 and broadcast_C.stride(-2) != 1:
         raise NotImplementedError("FlexGEMM requires C to be row- or column-major")
     return broadcast_C
@@ -207,8 +211,6 @@ def flex_gemm_epimod(
     aux_output_count: int,
     local_reduce: FlexGemmRuntimeLocalReducePlan | None,
     output_contraction: FlexGemmOutputContraction | None,
-    *,
-    varlen_m: bool,
 ):
     """Build and cache a QuACK TensorSSA EpiMod from FlexGEMM metadata.
 
@@ -222,18 +224,15 @@ def flex_gemm_epimod(
         aux_output_count,
         None if local_reduce is None else local_reduce.cache_key,
         output_contraction,
-        varlen_m,
     )
     epimod = _EPIMOD_CACHE.get(key)
     if epimod is not None:
         return epimod
 
-    from torch._inductor.kernel.flex_gemm.quack_ops.col_load import ScalarColVecLoad
     from torch._vendor.quack import cute_dsl_utils
     from torch._vendor.quack.epilogue import frontend as epilogue_module, ops as epi_ops
 
     op_types = {
-        "scalar": epi_ops.Scalar,
         "row": epi_ops.RowVecLoad,
         "col": epi_ops.ColVecLoad,
         "tile": epi_ops.TileLoad,
@@ -244,10 +243,11 @@ def flex_gemm_epimod(
     ):
         name = f"operand{index}"
         dtype = cute_dsl_utils.torch2cute_dtype_map[arg_dtype]
-        op_type = op_types[kind]
-        if varlen_m and kind == "col" and dtype.width < 32:
-            op_type = ScalarColVecLoad
-        ops[name] = op_type(name, dtype=dtype)
+        ops[name] = (
+            epi_ops.Scalar(name, dtype=dtype)
+            if kind == "scalar"
+            else op_types[kind](name, dtype=dtype)
+        )
     if output_contraction is not None:
         from torch._inductor.kernel.flex_gemm.quack_ops.main_store import (
             GroupedMainStore,
@@ -361,17 +361,12 @@ def gemm_epilogue(
     epilogue_arg_kinds: tuple[str, ...] = (),
     local_reduce: FlexGemmRuntimeLocalReducePlan | None = None,
     output_contraction: FlexGemmOutputContraction | None = None,
-    cu_seqlens_m: torch.Tensor | None = None,
     config: QuackConfigKey,
     stream: int | None = None,
 ) -> torch.Tensor:
-    """Run a dense, block-scaled or varlen-M FlexGEMM call through the vendored QuACK EpiMod.
+    """Run a dense or block-scaled FlexGEMM call through the vendored QuACK EpiMod.
 
     ``config`` pins the exact GemmConfig Inductor selected at lowering time.
-    ``cu_seqlens_m`` (``[0, *offs]``, int32) selects grouped_mm's varlen-M path:
-    ``a`` is ``[total_m, K]`` and ``b`` is per-group ``[E, K, N]``. Captured
-    row/col vectors are always passed rank-1; QuACK shares a row across groups
-    and offsets a ``[total_m]`` column per group.
     """
     from torch._vendor.quack.gemm_config import GemmConfig
 
@@ -400,9 +395,8 @@ def gemm_epilogue(
         len(aux_outs),
         local_reduce,
         output_contraction,
-        varlen_m=cu_seqlens_m is not None,
     )
-    effective_C = normalize_c(C, tuple(out.shape), beta)
+    effective_C = normalize_c(C, tuple(out.shape), beta, a.device.type)
     operands: dict[str, Any] = {}
     if "alpha" in epimod.operand_names:
         operands["alpha"] = alpha
@@ -411,9 +405,9 @@ def gemm_epilogue(
     for index, (arg, kind) in enumerate(
         zip(quack_epilogue_args, epilogue_arg_kinds, strict=True)
     ):
-        if kind in ("row", "col"):
-            arg = arg.squeeze(0 if kind == "row" else -1)
-        operands[f"operand{index}"] = arg
+        operands[f"operand{index}"] = (
+            arg.squeeze(-1).unsqueeze(0) if kind == "col" else arg
+        )
     initialize_local_reduce_out = None
     if local_reduce is not None:
         # QuACK's host_validate checks the compressed buffer against the GEMM
@@ -466,8 +460,9 @@ def gemm_epilogue(
         None if output_contraction is None else output_contraction.concat_layout
     )
     quack_config = GemmConfig(**dict(config))
+    device_module = torch.get_device_module(a.device)
     stream_context = (
-        torch.cuda.stream(torch.cuda.ExternalStream(stream, device=a.device))
+        device_module.stream(device_module.ExternalStream(stream, device=a.device))
         if stream is not None
         else contextlib.nullcontext()
     )
@@ -489,7 +484,6 @@ def gemm_epilogue(
             config=quack_config,
             tuned=False,
             concat_layout=concat_layout,
-            cu_seqlens_m=cu_seqlens_m,
             compile_dispatch=False,
             **operands,
         )
