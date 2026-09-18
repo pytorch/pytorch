@@ -399,7 +399,7 @@ class FSDPState(_State):
 
     @_dynamo_disable
     def _root_post_backward_final_callback(
-        self, finalize_gradient_accumulation: bool = False
+        self, manual_finalization: bool = False
     ) -> None:
         logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
@@ -417,7 +417,7 @@ class FSDPState(_State):
                 # autograd backward order and preserving RS overlap for
                 # per-param-mesh modules whose inputs lack gradients.
                 for fsdp_param_group in reversed(state._fsdp_param_groups):
-                    if finalize_gradient_accumulation:
+                    if manual_finalization:
                         if fsdp_param_group._deferred_gradient_reduction:
                             # set_requires_gradient_sync(False) deferred this
                             # parameter group's reduction.
