@@ -22,7 +22,7 @@ import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
 from torch._dynamo.comptime import comptime
-from torch._dynamo.exc import InternalTorchDynamoError, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.guards import CheckFunctionManager
 from torch._dynamo.package import (
     _collapse_device_types,
@@ -1262,6 +1262,70 @@ def add(x, y):
             _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
+    def test_import_alias_rebind_keeps_the_global_nn_hooks_visible(self):
+        # nn_modules_globals_vt decides whether a module call may bypass
+        # _call_impl by reading the four global hook dicts, and it has to read
+        # the ones _call_impl reads through its own __globals__: the defining
+        # module's, which a sys.modules rebind does not move. The alias binds
+        # the live entry, so under a rebind it names a different module than
+        # the value, and the guards on the dicts' contents have to root at the
+        # defining module as well, or they read the shim and fail on a key it
+        # lacks. A hook registered on the defining module while the shim's
+        # dicts are empty is the case where the two disagree. The bypass
+        # decision reads the value, so it sees the hook under either source;
+        # the CLOSURE_MATCH on the hook is what reads through the source, and
+        # rooted at the alias it subscripts the shim's empty dict as the guard
+        # is built and raises KeyError on the handle's id.
+        name = "torch.nn.modules.module"
+        alias = "__import_torch_dot_nn_dot_modules_dot_module"
+        real = sys.modules[name]
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        mod = M()
+
+        def fn(x):
+            return mod(x)
+
+        fired = []
+
+        def hook(module, inputs, output):
+            fired.append(module)
+            return output * 2
+
+        args = (torch.randn(3, 2),)
+        # Compiled once first, so the process has resolved the name already.
+        torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        torch._dynamo.reset()
+        shim = types.ModuleType(name)
+        for attr in (
+            "_global_backward_pre_hooks",
+            "_global_backward_hooks",
+            "_global_forward_hooks",
+            "_global_forward_pre_hooks",
+        ):
+            setattr(shim, attr, {})
+        handle = real.register_module_forward_hook(hook)
+        try:
+            sys.modules[name] = shim
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            expected = fn(*args)
+            self.assertEqual(fired, [mod])
+            self.assertEqual(expected, compiled_fn(*args))
+            self.assertEqual(fired, [mod, mod])
+            self.assertIs(torch.nn.modules.module, real)
+            self.assertIs(fn.__globals__[alias], shim)
+        finally:
+            handle.remove()
+            sys.modules[name] = real
+            fn.__globals__.pop(alias, None)
+            fn.__globals__.pop("__import_torch", None)
+            _import_source_cache.pop(name, None)
+            _import_source_cache.pop("torch", None)
+            torch._dynamo.reset()
+
     @parametrize("stale_named_for", ("target", "key"))
     def test_import_alias_accepts_a_stale_module_of_either_accepted_name(
         self, stale_named_for
@@ -1636,69 +1700,6 @@ def add(x, y):
             self.assertIs(fn.__globals__[alias], new)
         finally:
             sys.modules.pop(name, None)
-            fn.__globals__.pop(alias, None)
-            _import_source_cache.pop(name, None)
-            torch._dynamo.reset()
-
-    def test_import_alias_nn_hook_guards_read_the_live_entry_the_alias_binds(self):
-        # nn_modules_globals_vt's value is the defining module, whose dicts
-        # _call_impl reads through its own __globals__, rooted at the alias,
-        # which binds the live entry: a shim under the name, so the hook-dict
-        # guards read the shim. With no hook registered they agree with eager;
-        # with a forward hook on the defining module the CLOSURE_MATCH on the
-        # handle's id subscripts the shim's empty dict as the guard is built
-        # and raises, with no eager fallback. Pinned as the state the commit
-        # directly above this one changes; the cache entry the compile writes
-        # is popped in finally so the shim cannot be left in it.
-        name = "torch.nn.modules.module"
-        alias = "__import_torch_dot_nn_dot_modules_dot_module"
-        real = sys.modules[name]
-
-        class M(torch.nn.Module):
-            def forward(self, x):
-                return x + 1
-
-        mod = M()
-
-        def fn(x):
-            return mod(x)
-
-        args = (torch.randn(3, 2),)
-        torch.compile(fn, backend="eager", fullgraph=True)(*args)
-        torch._dynamo.reset()
-        shim = types.ModuleType(name)
-        for attr in (
-            "_global_backward_pre_hooks",
-            "_global_backward_hooks",
-            "_global_forward_hooks",
-            "_global_forward_pre_hooks",
-        ):
-            setattr(shim, attr, {})
-        handle = None
-        try:
-            sys.modules[name] = shim
-            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(fn(*args), compiled_fn(*args))
-            self.assertIs(fn.__globals__[alias], shim)
-            torch._dynamo.reset()
-            handle = real.register_module_forward_hook(lambda m, i, o: o * 2)
-            # The dict key is the handle's id, a process-global counter.
-            with (
-                self.assertLogs("torch._guards", level="ERROR") as logs,
-                self.assertRaisesRegex(InternalTorchDynamoError, r"KeyError: \d+"),
-            ):
-                torch.compile(fn, backend="eager", fullgraph=True)(*args)
-            guard = (
-                rf"Error while creating guard:\nName: \"G\['{alias}'\]"
-                rf"\._global_forward_hooks\[{handle.id}\]\"\n\s+Source: global"
-                r"\n\s+Create Function: CLOSURE_MATCH"
-            )
-            self.assertRegex("\n".join(logs.output), guard)
-            self.assertIs(fn.__globals__[alias], shim)
-        finally:
-            if handle is not None:
-                handle.remove()
-            sys.modules[name] = real
             fn.__globals__.pop(alias, None)
             _import_source_cache.pop(name, None)
             torch._dynamo.reset()
