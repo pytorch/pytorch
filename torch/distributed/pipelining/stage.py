@@ -5,7 +5,7 @@ import operator
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import torch
@@ -42,6 +42,7 @@ from torch.distributed.pipelining._utils import (
 from torch.distributed.tensor import DTensor
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils._pytree import tree_map_only
 
 from ._backward import (
     _autograd_grad_for_inputs,
@@ -54,6 +55,7 @@ from ._recv_buffers import (
     _assign_recv_info_buffers,
     _clear_unlaunched_recv_infos,
     _ensure_recv_infos_drained,
+    _RecvBufferPool,
     _RecvInfo,
 )
 
@@ -271,6 +273,12 @@ class _PipelineStageBase(ABC):
         # Backward infra will be created lazily
         self.grad_recv_info: dict = {}
         self.grad_send_info: list | None = None
+        self._fwd_recv_slots: Mapping[int, int] = {}
+        self._bwd_recv_slots: Mapping[int, int] = {}
+        self._fwd_recv_pool = _RecvBufferPool("forward")
+        self._bwd_recv_pool = _RecvBufferPool("backward")
+        self._recv_info_generation = 0
+        self._recv_pool_generation = -1
 
         # To be populated later by the Schedule
         self.chunks: int | None = None
@@ -398,6 +406,7 @@ class _PipelineStageBase(ABC):
             self.grad_recv_info[mb_index] = self._create_grad_recv_info(
                 self.act_send_info
             )
+        self._recv_info_generation += 1
 
     @abstractmethod
     def _create_grad_recv_info(
@@ -416,16 +425,22 @@ class _PipelineStageBase(ABC):
 
     def _get_recv_ops(
         self,
+        microbatch_index: int,
         recv_infos: tuple[_RecvInfo, ...],
         group: dist.ProcessGroup | None,
+        slots: Mapping[int, int],
+        pool: _RecvBufferPool,
     ) -> list[dist.P2POp]:
         """Build one direction's receive operations transactionally.
 
         Args:
+            microbatch_index: Microbatch whose assigned pool slot is acquired.
             recv_infos: Descriptors for the tensors received by this stage.
             group: The direction-specific process group for these receives.
                 Forward receives use the upstream group and backward receives
                 use the downstream group.
+            slots: Static microbatch-to-slot assignment for this direction.
+            pool: Stable receive-buffer pool for this direction.
 
         Returns:
             Receive operations whose buffers remain owned by ``recv_infos``.
@@ -444,22 +459,187 @@ class _PipelineStageBase(ABC):
                 raise AssertionError("expected info.source to be not None")
             peer_ranks.append(self._resolve_peer_global_rank(info.source))
 
-        ops: list[dist.P2POp] = []
-        acquired: list[_RecvInfo] = []
+        # Resolve every peer before taking ownership of receive storage.
+        self._acquire_recv_buffers(microbatch_index, recv_infos, slots, pool)
         try:
+            ops: list[dist.P2POp] = []
             for info, peer_global_rank in zip(recv_infos, peer_ranks, strict=True):
                 if peer_global_rank is None:
                     continue
-                buffer = info.allocate_buffer(self.device)
-                acquired.append(info)
+                buffer = info.buffer
+                if buffer is None:
+                    raise PipeliningMetadataError(
+                        f"Receive buffer for '{info.input_name}' has not been set"
+                    )
                 ops.append(dist.P2POp(dist.irecv, buffer, peer_global_rank, group))
         except Exception:
-            # No operation has been submitted yet, so only buffers acquired by
-            # this call can be released safely.
-            _clear_unlaunched_recv_infos(tuple(acquired))
+            self._clear_unlaunched_recv_buffers(
+                microbatch_index, recv_infos, slots, pool
+            )
             raise
 
         return ops
+
+    def _prepare_recv_buffer_pools(
+        self,
+        fwd_slots: Mapping[int, int],
+        num_fwd_slots: int,
+        bwd_slots: Mapping[int, int],
+        num_bwd_slots: int,
+    ) -> None:
+        """Allocate stable receive pools for a finalized runtime schedule."""
+        fwd_infos = self._validate_uniform_recv_metadata(self.args_recv_info, fwd_slots)
+        bwd_infos = self._validate_uniform_recv_metadata(self.grad_recv_info, bwd_slots)
+
+        self._fwd_recv_pool.prepare(num_fwd_slots, fwd_infos, self.device)
+        # Forward-only execution has no backward assignments. Keep any existing
+        # backward pool so switching back to training preserves its addresses.
+        if num_bwd_slots:
+            self._bwd_recv_pool.prepare(num_bwd_slots, bwd_infos, self.device)
+        self._fwd_recv_slots = fwd_slots
+        self._bwd_recv_slots = bwd_slots
+        self._recv_pool_generation = self._recv_info_generation
+
+    def _recv_buffer_pools_match(
+        self,
+        fwd_slots: Mapping[int, int],
+        num_fwd_slots: int,
+        bwd_slots: Mapping[int, int],
+        num_bwd_slots: int,
+    ) -> bool:
+        """Return whether the current pools implement the requested plan."""
+        return (
+            self._recv_pool_generation == self._recv_info_generation
+            and self._fwd_recv_slots == fwd_slots
+            and self._bwd_recv_slots == bwd_slots
+            and self._fwd_recv_pool.num_slots >= num_fwd_slots
+            and self._bwd_recv_pool.num_slots >= num_bwd_slots
+        )
+
+    def _ensure_recv_buffer_pools_idle(self) -> None:
+        """Reject a pool transition while an incomplete step owns storage."""
+        if not self._fwd_recv_pool.is_idle or not self._bwd_recv_pool.is_idle:
+            raise PipeliningMetadataError(
+                f"Stage {self.stage_index} has receive storage owned by an "
+                "incomplete pipeline step; destroy the process group, then "
+                "reconstruct the stages and schedule before retrying"
+            )
+
+    def _disable_recv_buffer_pools(self) -> None:
+        """Remove a prior schedule's static receive-buffer configuration."""
+        self._ensure_recv_buffer_pools_idle()
+        self._fwd_recv_slots = {}
+        self._bwd_recv_slots = {}
+        self._fwd_recv_pool.reset()
+        self._bwd_recv_pool.reset()
+        self._recv_pool_generation = -1
+
+    @staticmethod
+    def _validate_uniform_recv_metadata(
+        recv_info_by_microbatch: dict[int, tuple[_RecvInfo, ...]],
+        slots: Mapping[int, int],
+    ) -> tuple[_RecvInfo, ...]:
+        """Validate the metadata contract once before allocating a pool."""
+        if not slots:
+            return ()
+        first_infos = recv_info_by_microbatch[min(slots)]
+        expected = tuple(
+            None if info.is_root_arg else info.tensor_meta for info in first_infos
+        )
+        for microbatch_index in slots:
+            actual = tuple(
+                None if info.is_root_arg else info.tensor_meta
+                for info in recv_info_by_microbatch[microbatch_index]
+            )
+            if actual != expected:
+                if len(actual) != len(expected):
+                    raise PipeliningMetadataError(
+                        "Receive metadata must be uniform across pooled "
+                        f"microbatches; microbatch {microbatch_index} has "
+                        f"{len(actual)} inputs, expected {len(expected)}"
+                    )
+                mismatch_index = next(
+                    index
+                    for index, (expected_meta, actual_meta) in enumerate(
+                        zip(expected, actual, strict=True)
+                    )
+                    if expected_meta != actual_meta
+                )
+                raise PipeliningMetadataError(
+                    "Receive metadata must be uniform across pooled microbatches; "
+                    f"microbatch {microbatch_index}, input {mismatch_index} differs"
+                )
+        return first_infos
+
+    def _acquire_recv_buffers(
+        self,
+        microbatch_index: int,
+        recv_infos: tuple[_RecvInfo, ...],
+        slots: Mapping[int, int],
+        pool: _RecvBufferPool,
+    ) -> None:
+        """Acquire a static slot or allocate this receive just in time."""
+        slot = slots.get(microbatch_index)
+        if slot is not None:
+            pool.acquire(slot, microbatch_index, recv_infos)
+            return
+        acquired: list[_RecvInfo] = []
+        try:
+            for info in recv_infos:
+                if not info.is_root_arg and info.tensor_meta is not None:
+                    info.allocate_buffer(self.device)
+                    acquired.append(info)
+        except Exception:
+            _clear_unlaunched_recv_infos(tuple(acquired))
+            raise
+
+    @staticmethod
+    def _clear_unlaunched_recv_buffers(
+        microbatch_index: int,
+        recv_infos: tuple[_RecvInfo, ...],
+        slots: Mapping[int, int],
+        pool: _RecvBufferPool,
+    ) -> None:
+        """Release one receive batch that was acquired but never launched."""
+        _clear_unlaunched_recv_infos(recv_infos)
+        slot = slots.get(microbatch_index)
+        if slot is not None:
+            pool.release(slot, microbatch_index)
+
+    def _release_fwd_recv_buffers(self, microbatch_index: int) -> None:
+        """Release the forward receive slot for one microbatch, if pooled."""
+        slot = self._fwd_recv_slots.get(microbatch_index)
+        if slot is not None:
+            self._fwd_recv_pool.release(slot, microbatch_index)
+
+    def _release_bwd_recv_buffers(self, microbatch_index: int) -> None:
+        """Release the backward receive slot for one microbatch, if pooled."""
+        slot = self._bwd_recv_slots.get(microbatch_index)
+        if slot is not None:
+            self._bwd_recv_pool.release(slot, microbatch_index)
+
+    def _release_all_recv_buffers(self) -> None:
+        """Release receive slots retained through the end of the step."""
+        self._fwd_recv_pool.release_all()
+        self._bwd_recv_pool.release_all()
+
+    def _materialize_recv_alias(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Materialize a tensor that aliases storage managed by a recv pool."""
+        local_tensor = to_local_if_dtensor(tensor)
+        if self._fwd_recv_pool.aliases(local_tensor) or self._bwd_recv_pool.aliases(
+            local_tensor
+        ):
+            logger.debug(
+                "%s Materializing a tensor that aliases a recv pool", self.log_prefix
+            )
+            return tensor.clone()
+        return tensor
+
+    def _materialize_recv_aliases(self, output: Any) -> Any:
+        """Materialize pooled tensor leaves before output escapes the stage."""
+        if not (self._fwd_recv_pool.num_slots or self._bwd_recv_pool.num_slots):
+            return output
+        return tree_map_only(torch.Tensor, self._materialize_recv_alias, output)
 
     """[Note: V-schedule special case]
 
@@ -507,6 +687,10 @@ class _PipelineStageBase(ABC):
             assignments.append((info, to_local_if_dtensor(tensor, detach=True)))
         _assign_recv_info_buffers(tuple(assignments))
 
+    def get_local_fwd_output(self, output: Any) -> Any:
+        """Return a same-rank output without aliases to this stage's pools."""
+        return self._materialize_recv_aliases(output)
+
     def get_local_bwd_output(self, mb_index):
         """
         Returns the input grad tensors for this stage, which correspond to the stage inputs during forward.
@@ -519,7 +703,7 @@ class _PipelineStageBase(ABC):
             raise AssertionError("can't get bwd output if this stage is first")
 
         self._check_chunk_id(mb_index)
-        return self.bwd_cache.pop(mb_index)
+        return self._materialize_recv_aliases(self.bwd_cache.pop(mb_index))
 
     def set_local_bwd_input(
         self, next_stage_bwd_outputs: tuple[torch.Tensor | None, ...], mb_index: int
@@ -576,7 +760,13 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: tuple[_RecvInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
-        return self._get_recv_ops(recv_infos, self._downstream_group)
+        return self._get_recv_ops(
+            fwd_chunk_id,
+            recv_infos,
+            self._downstream_group,
+            self._fwd_recv_slots,
+            self._fwd_recv_pool,
+        )
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -587,15 +777,39 @@ class _PipelineStageBase(ABC):
             return []
 
         recv_infos = self.grad_recv_info[bwd_chunk_id]
-        return self._get_recv_ops(recv_infos, self._upstream_group)
+        return self._get_recv_ops(
+            bwd_chunk_id,
+            recv_infos,
+            self._upstream_group,
+            self._bwd_recv_slots,
+            self._bwd_recv_pool,
+        )
 
     def _clear_unlaunched_fwd_recv(self, microbatch_index: int) -> None:
         """Release forward buffers when their receive batch was not submitted."""
-        _clear_unlaunched_recv_infos(self.args_recv_info[microbatch_index])
+        self._clear_unlaunched_recv_buffers(
+            microbatch_index,
+            self.args_recv_info[microbatch_index],
+            self._fwd_recv_slots,
+            self._fwd_recv_pool,
+        )
 
     def _clear_unlaunched_bwd_recv(self, microbatch_index: int) -> None:
         """Release backward buffers when their receive batch was not submitted."""
-        _clear_unlaunched_recv_infos(self.grad_recv_info[microbatch_index])
+        self._clear_unlaunched_recv_buffers(
+            microbatch_index,
+            self.grad_recv_info[microbatch_index],
+            self._bwd_recv_slots,
+            self._bwd_recv_pool,
+        )
+
+    def _ensure_fwd_recv_consumed(self, microbatch_index: int) -> None:
+        """Require a custom forward action to consume its receive descriptors."""
+        _ensure_recv_infos_drained({0: self.args_recv_info[microbatch_index]})
+
+    def _ensure_bwd_recv_consumed(self, microbatch_index: int) -> None:
+        """Require a custom backward action to consume its receive descriptors."""
+        _ensure_recv_infos_drained({0: self.grad_recv_info[microbatch_index]})
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -608,11 +822,14 @@ class _PipelineStageBase(ABC):
 
         for idx, out in enumerate(output_tuple):
             dst_stages = self.act_send_info[idx]
+            if not any(dst is not None for dst in dst_stages):
+                continue
+            send_tensor = self._materialize_recv_alias(
+                to_local_if_dtensor(out, detach=True)
+            )
             for dst in dst_stages:
                 if dst is None:
                     continue
-                # Extract local tensor if DTensor
-                send_tensor = to_local_if_dtensor(out, detach=True)
                 logger.debug(
                     "%s Sending tensor to Stage %s: %s",
                     self.log_prefix,
@@ -697,7 +914,7 @@ class _PipelineStageBase(ABC):
 
             if isinstance(grad, torch.Tensor):
                 # Extract local tensor if DTensor
-                send_tensor = to_local_if_dtensor(grad)
+                send_tensor = self._materialize_recv_alias(to_local_if_dtensor(grad))
                 logger.debug(
                     "%s Sending gradient to Stage %s: %s",
                     self.log_prefix,
@@ -995,7 +1212,7 @@ class _PipelineStageBase(ABC):
         # Prepare for final output merge or reduction
         # Output chunks is only used for the last stage since we only merge the output of the last stage
         if self.is_last and save_forward_output:
-            self.output_chunks.append(output)
+            self.output_chunks.append(self._materialize_recv_aliases(output))
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
         flat_kwargs = flatten_args(composite_kwargs)
@@ -1386,6 +1603,7 @@ class _PipelineStage(_PipelineStageBase):
         # directly from graph placeholder values with correct requires_grad.
         for chunk in range(num_microbatches):
             self.args_recv_info[chunk] = self._create_act_recv_info()
+        self._recv_info_generation += 1
 
         # Step 2: Derive _stage_meta.inputs from recv infos.
         # forward_one_chunk builds composite_args as:
@@ -1521,7 +1739,6 @@ class _PipelineStage(_PipelineStageBase):
                 tensor_meta.shape,
                 tensor_meta.dtype,
             )
-
             return _RecvInfo(
                 arg_node.name,
                 src_stage,
@@ -2397,6 +2614,7 @@ class PipelineStage(_PipelineStageBase):
                     )
                     for meta in self._stage_meta.inputs
                 )
+        self._recv_info_generation += 1
 
     def _setup_forward_send_info(self) -> None:
         """Setup send info for forward pass."""
