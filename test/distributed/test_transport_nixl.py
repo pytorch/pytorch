@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import asyncio
 import pickle
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -38,10 +40,13 @@ class _Transfer:
 
 
 class _AgentConfig:
-    def __init__(self, *, backends, num_threads, enable_prog_thread):
+    def __init__(
+        self, *, backends, num_threads, enable_prog_thread, capture_telemetry=False
+    ):
         self.backends = backends
         self.num_threads = num_threads
         self.enable_prog_thread = enable_prog_thread
+        self.capture_telemetry = capture_telemetry
 
 
 class _Agent:
@@ -59,6 +64,9 @@ class _Agent:
         self.remote_metadata = {}
         self.released = 0
         self.agents[name] = self
+
+    def create_backend(self, plugin, options):
+        self.backends[plugin] = dict(options)
 
     def _metadata(self, registrations):
         entries = [
@@ -229,26 +237,178 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertFalse(first.connected())
         self.assertEqual(first_agent.registrations, [])
 
-    def test_timeout_drains_before_releasing_transfer(self):
+    def test_timeout_retains_pending_transfer(self):
+        import threading
+
+        first, second = self.make_transport_pair()
+        release = threading.Event()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        self.addCleanup(release.set)
+        source = first.register_memory(torch.arange(8, dtype=torch.uint8))
+        target = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        remote = target.to_remote_buffer()
+        agent = first._agent
+        with patch.object(
+            agent, "transfer", side_effect=lambda handle: (release.wait(5) and "DONE")
+        ):
+            work = first.write(source.to_view(), remote, async_op=True, timeout=0.01)
+            with self.assertRaises(TimeoutError):
+                work.wait()
+            self.assertFalse(work.is_completed())
+            self.assertEqual(agent.released, 0)
+            with self.assertRaises(TimeoutError):
+                first.close(timeout=0.01)
+            self.assertTrue(agent.registrations)
+            release.set()
+            first.close(timeout=5)
+        self.assertTrue(work.is_completed())
+        self.assertEqual(agent.registrations, [])
+        self.assertEqual(agent.released, 1)
+
+    @parametrize(
+        "operation",
+        [
+            "bind",
+            "connect",
+            "register",
+            "descriptor",
+            "read",
+            "write",
+            "read_async",
+            "write_async",
+        ],
+    )
+    def test_operation_timeout(self, operation):
         first, second = self.make_transport_pair()
         self.addCleanup(second.close)
         self.addCleanup(first.close)
-        first._timeout = 1
         source = first.register_memory(torch.arange(8, dtype=torch.uint8))
         target = second.register_memory(torch.zeros(8, dtype=torch.uint8))
-        _Agent.transfer_state = "PROC"
-        with (
-            patch.object(_nixl.time, "monotonic", side_effect=[0, 2, 3]),
-            patch.object(
-                first._agent, "check_xfer_state", side_effect=["PROC", "DONE"]
-            ) as check,
-            self.assertRaisesRegex(TimeoutError, "write timed out"),
-        ):
+        remote = target.to_remote_buffer()
+        release = threading.Event()
+        self.addCleanup(release.set)
+        methods = {
+            "bind": ("get_agent_metadata", lambda: first.bind(timeout=0.01)),
+            "connect": (
+                "add_remote_agent",
+                lambda: first.connect(second.bind(), timeout=0.01),
+            ),
+            "register": (
+                "register_memory",
+                lambda: first.register_memory(torch.ones(9), timeout=0.01),
+            ),
+            "descriptor": (
+                "get_partial_agent_metadata",
+                lambda: source.to_remote_buffer(timeout=0.01),
+            ),
+            "read": (
+                "transfer",
+                lambda: first.read(source.to_mutable_view(), remote, timeout=0.01),
+            ),
+            "write": (
+                "transfer",
+                lambda: first.write(source.to_view(), remote, timeout=0.01),
+            ),
+            "read_async": (
+                "transfer",
+                lambda: asyncio.run(
+                    first.read_async(source.to_mutable_view(), remote, timeout=0.01)
+                ),
+            ),
+            "write_async": (
+                "transfer",
+                lambda: asyncio.run(
+                    first.write_async(source.to_view(), remote, timeout=0.01)
+                ),
+            ),
+        }
+        method, call = methods[operation]
+        if operation == "connect":
+            first._peer_name = None
+        original = getattr(first._agent, method)
+
+        def blocked(*args, **kwargs):
+            if not release.wait(5):
+                raise RuntimeError("test did not release operation")
+            return original(*args, **kwargs)
+
+        with patch.object(first._agent, method, side_effect=blocked):
+            with self.assertRaises(TimeoutError):
+                call()
+            release.set()
+            first.close(timeout=5)
+
+    @parametrize("timeout", [-1, float("nan"), float("inf")])
+    def test_invalid_timeout(self, timeout):
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            with self.assertRaises(ValueError):
+                _nixl.NIXLTransport(timeout=timeout)
+        first, second = self.make_transport_pair()
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        with self.assertRaises(ValueError):
+            first.bind(timeout=timeout)
+        with self.assertRaises(ValueError):
+            first.close(timeout=timeout)
+
+    def test_backend_options(self):
+        options = {"NET_DEVICES": "all"}
+        with patch.object(_nixl, "_load_backend", return_value=self.backend()):
+            with _nixl.NIXLTransport(
+                backend_options=options, capture_telemetry=True
+            ) as transport:
+                self.assertEqual(transport._agent.backends["UCX"], options)
+                self.assertTrue(transport._agent.config.capture_telemetry)
+                options.clear()
+                self.assertEqual(
+                    transport._agent.backends["UCX"], {"NET_DEVICES": "all"}
+                )
+
+    def test_empty_view_and_replaced_storage(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        tensor = torch.ones(8)
+        source = first.register_memory(tensor)
+        target = second.register_memory(torch.zeros(8))
+        remote = target.to_remote_buffer()
+        self.assertEqual(first.write(source.to_view(0, 0), remote), 0)
+        self.assertEqual(first._transfers, {})
+        with self.assertRaises(TypeError):
+            source.to_view(0.5)
+        tensor.set_(torch.zeros(8))
+        with self.assertRaisesRegex(RuntimeError, "storage was replaced"):
+            first.write(source.to_view(), remote)
+
+    def test_changed_remote_metadata_rebuilds_handle(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        remote = target.to_remote_buffer()
+        first.write(source.to_view(), remote)
+        name, entries = pickle.loads(remote.metadata)
+        updated = replace(remote, metadata=pickle.dumps((name, entries + entries)))
+        first.write(source.to_view(), updated)
+        self.assertEqual(len(first._transfers), 2)
+
+    def test_peer_validation(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        remote = target.to_remote_buffer()
+        with self.assertRaisesRegex(RuntimeError, "already connected"):
+            first.connect(second.bind())
+        with self.assertRaisesRegex(ValueError, "connected peer"):
+            first.write(source.to_view(), replace(remote, agent_name="other"))
+        with self.assertRaisesRegex(ValueError, "different agent"):
             first.write(
-                source.to_view(), target.to_remote_buffer(), async_op=True
-            ).wait()
-        self.assertEqual(check.call_count, 2)
-        self.assertEqual(first._agent.released, 1)
+                source.to_view(), replace(remote, metadata=pickle.dumps(("other", [])))
+            )
         self.assertEqual(first._transfers, {})
 
     @parametrize("failure", ["dispatch", "query"])

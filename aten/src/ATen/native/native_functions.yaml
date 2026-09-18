@@ -5084,8 +5084,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: relu
-    MPS: relu_mps
+    CPU, CUDA, MPS, XPU: relu
     MTIA: relu_mtia
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
@@ -5099,8 +5098,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA, XPU: relu_
-    MPS: relu_mps_
+    CPU, CUDA, MPS, XPU: relu_
     MTIA: relu_mtia_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
@@ -12319,8 +12317,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: softplus_out
-    MPS: softplus_out_mps
+    CPU, CUDA, MPS, XPU: softplus_out
 
 - func: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   structured_delegate: softplus.out
@@ -12333,8 +12330,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA, XPU: softplus_backward_out
-    MPS: softplus_backward_out_mps
+    CPU, CUDA, MPS, XPU: softplus_backward_out
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
