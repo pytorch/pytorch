@@ -68,16 +68,27 @@ OPS_DIR = os.path.join(REPO, "torch", "_native", "ops")
 SIDECAR_VERSION = 1
 
 # forkserver, never "fork": a fork parent that has initialized CUDA gives workers a
-# dead context, silently. forkserver is as safe as spawn and pays the torch import
-# once rather than per worker.
+# dead context, silently. Forkserver is as safe as spawn and, on Python versions
+# with correct preload path handling, pays the torch import once rather than per worker.
 # TODO(native-aot): forkserver does not exist on Windows; fall back to "spawn" when
 # Windows CUDA builds start exporting.
 POOL_START_METHOD = "forkserver"
 
-# Preloaded in the forkserver's server process, so workers inherit it imported. Only
-# modules safe in a fork PARENT belong here: importing torch neither initializes CUDA
-# nor builds DSL state.
-POOL_PRELOAD = ("torch",)
+
+# CPython gh-117378 fixed forkserver preload's sys.path inheritance in 3.12.8 and
+# 3.13.1. On older versions, skip preloading so workers import torch after their
+# parent sys.path is restored. Importing torch is otherwise safe in a fork parent:
+# it initializes neither CUDA nor DSL state.
+def _pool_preload(version: tuple[int, ...]) -> tuple[str, ...]:
+    fixed = (
+        version >= (3, 14)
+        or (version[:2] == (3, 13) and version >= (3, 13, 1))
+        or (version[:2] == (3, 12) and version >= (3, 12, 8))
+    )
+    return ("torch",) if fixed else ()
+
+
+POOL_PRELOAD = _pool_preload(sys.version_info[:3])
 
 
 def load_builder(op: str, kernel_module: str):
@@ -235,10 +246,22 @@ def export_point(
         build = load_builder(op_pkg, kernel_module)
         b = build(point)
     except ImportError as e:
+        runtimes = {
+            runtime
+            for tc in toolchains.TOOLCHAINS.values()
+            for runtime in tc.REQUIRED_RUNTIMES
+        }
+        if e.name and any(
+            e.name == runtime or e.name.startswith(runtime + ".")
+            for runtime in runtimes
+        ):
+            raise RuntimeError(
+                f"{op_pkg}: cannot export, DSL runtime not installed "
+                f"({e.name}). Install it, or set TORCH_NATIVE_AOT=0 to "
+                f"build without embedded DSL kernels."
+            ) from e
         raise RuntimeError(
-            f"{op_pkg}: cannot export, DSL runtime not installed "
-            f"({e.name or e}). Install it, or set TORCH_NATIVE_AOT=0 to "
-            f"build without embedded DSL kernels."
+            f"{op_pkg}: cannot export because its builder import failed ({e})."
         ) from e
     # Builder dicts may omit kind (CuTeDSL is the default); sidecars always
     # carry it, written below.
@@ -708,7 +731,7 @@ def main(argv: list[str] | None = None) -> None:
         from concurrent.futures import as_completed, ProcessPoolExecutor
 
         ctx = multiprocessing.get_context(POOL_START_METHOD)
-        # Import torch once in the server; workers inherit it by fork.
+        # Fixed Pythons import torch once in the server; affected ones import per worker.
         ctx.set_forkserver_preload(list(POOL_PRELOAD))
         n = min(args.jobs, len(todo))
         with ProcessPoolExecutor(max_workers=n, mp_context=ctx) as pool:

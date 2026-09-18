@@ -17,7 +17,6 @@
 #include <ATen/ops/log_sigmoid_forward_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mul_native.h>
-#include <ATen/ops/relu_native.h>
 #include <ATen/ops/rsub.h>
 #include <ATen/ops/sigmoid.h>
 #include <ATen/ops/sigmoid_backward_native.h>
@@ -35,25 +34,6 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/ActivationKernel_metallib.h>
 #endif
-
-Tensor relu_mps(const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
-  auto output = at::empty_like(self);
-  if (output.numel() == 0)
-    return output;
-  auto iter = at::TensorIteratorConfig().add_output(output).add_const_input(self).build();
-  lib.exec_unary_kernel(iter, "relu");
-  return output;
-}
-
-Tensor& relu_mps_(Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "relu is not supported for complex types");
-  if (self.numel() == 0)
-    return self;
-  auto iter = at::TensorIteratorConfig().add_output(self).add_const_input(self).set_check_mem_overlap(false).build();
-  lib.exec_unary_kernel(iter, "relu");
-  return self;
-}
 
 static void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambda = 0.5) {
   lib.exec_unary_kernel(iter, "hardshrink", lambda);
@@ -105,6 +85,18 @@ static void elu_backward_kernel(TensorIteratorBase& iter,
         params,
         fmt::format("ELUBackwardParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
   });
+}
+
+static void softplus_kernel(TensorIteratorBase& iter, const Scalar& beta, const Scalar& threshold) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "softplus not implemented for ", iter.dtype());
+  SoftplusParams params{beta.to<float>(), threshold.to<float>()};
+  lib.exec_unary_kernel_with_params(iter, "softplus", params, "SoftplusParams");
+}
+
+static void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta, const Scalar& threshold) {
+  TORCH_CHECK_NOT_IMPLEMENTED(isFloatingType(iter.dtype()), "softplus_backward not implemented for ", iter.dtype());
+  SoftplusParams params{beta.to<float>(), threshold.to<float>()};
+  lib.exec_binary_kernel_with_params(iter, "softplus_backward", params, "SoftplusParams");
 }
 
 static void silu_kernel(TensorIteratorBase& iter) {
@@ -358,6 +350,8 @@ REGISTER_DISPATCH(hardswish_stub, hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, hardswish_backward_kernel);
 REGISTER_DISPATCH(elu_stub, elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, elu_backward_kernel);
+REGISTER_DISPATCH(softplus_stub, softplus_kernel);
+REGISTER_DISPATCH(softplus_backward_stub, softplus_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 REGISTER_DISPATCH(silu_stub, silu_kernel);
