@@ -3569,15 +3569,21 @@ def _scalar_type_name(dtype: torch.dtype) -> str:
     return dtype_name[:1].upper() + dtype_name[1:]
 
 
-def _check_native_layer_norm_cuda_param_dtype(
+def _check_native_layer_norm_param_dtype(
     input: Tensor,
     normalized_ndim: int,
     weight: Tensor | None,
     bias: Tensor | None,
 ) -> None:
-    if input.device.type != "cuda":
-        return
-
+    # Every backend measured rejects a weight or bias whose dtype differs from the
+    # input: CUDA (which is why this check exists, #185693), CPU with "mixed dtype
+    # (CPU): expect parameter to have scalar type of Float", and Ascend NPU from
+    # aclnnLayerNorm. The restriction is not CUDA's, so gating the check on the
+    # device made the ref accept, on every other backend, a call eager refuses.
+    #
+    # The num_rows carve-out below is left as it was, i.e. still only right for
+    # CUDA: CUDA accepts the mismatch when no rows are processed, CPU rejects it
+    # even then. Narrowing that needs the empty case measured on MPS, XPU and NPU.
     mismatched_dtype = None
     if weight is not None and weight.dtype != input.dtype:
         mismatched_dtype = weight.dtype
@@ -3653,7 +3659,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
-    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
+    _check_native_layer_norm_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
