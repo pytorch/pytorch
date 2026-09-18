@@ -10,6 +10,7 @@ import torch
 import torch._dynamo.testing as dynamo_testing
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.utils import common_constant_types
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -1687,6 +1688,50 @@ class TestSimpleNamespace(TestCase):
         ns_compiled = types.SimpleNamespace(name="cfg", scale=2)
         self.assertEqual(fn(ns_eager, x), opt_fn(ns_compiled, x))
         self.assertEqual(vars(ns_eager), vars(ns_compiled))
+
+
+class TestConstantTypeProperty(TestCase):
+    """Attribute access on a type in common_constant_types.
+
+    Those objects are wrapped as ConstantVariable, so they bypass
+    UserDefinedObjectVariable and resolve attributes through the generic object
+    protocol, where a property has to be guarded on the type that owns it.
+    """
+
+    def test_property_on_constant_type(self):
+        class Holder:
+            def __init__(self, v):
+                self._v = v
+
+            @property
+            def val(self):
+                return self._v
+
+        holder = Holder(3)
+
+        def fn(x):
+            return x + holder.val
+
+        common_constant_types.add(Holder)
+        try:
+            x = torch.randn(3)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), fn(x))
+        finally:
+            common_constant_types.discard(Holder)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_property_on_cuda_device_properties(self):
+        # _CudaDeviceProperties is the constant type carrying properties that
+        # shows up in practice.
+        props = torch.cuda.get_device_properties(0)
+
+        def fn(x):
+            return x + props.multi_processor_count
+
+        x = torch.randn(3, device="cuda")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 instantiate_parametrized_tests(TestObjectConstruction)
