@@ -8,6 +8,7 @@ import unittest
 
 import torch
 import torch.nn as nn
+from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import _ExperimentalConfig
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._trace_validator import (
@@ -18,8 +19,12 @@ from torch.profiler._trace_validator import (
     _check_stream_wait_corr_id_in_past,
     _check_stream_wait_corr_id_populated,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -38,18 +43,43 @@ _DEVICE_TYPE_TO_ACTIVITY = {
     "xpu": ProfilerActivity.XPU,
     "hpu": ProfilerActivity.HPU,
     "mtia": ProfilerActivity.MTIA,
-    "privateuse1": ProfilerActivity.PrivateUse1,
 }
 
 
 def _activity_for_device_type(device_type):
     """Map a device type string to its ProfilerActivity enum."""
+    # privateuse1 cannot be a table entry: the device_type a test sees is the
+    # registered backend name ("openreg", ...), because PrivateUse1TestBase.setUpClass
+    # overwrites device_type with _get_privateuse1_backend_name(). Resolved per call,
+    # not at import, since a backend may register after this module loads.
+    if device_type == _get_privateuse1_backend_name():
+        return ProfilerActivity.PrivateUse1
     if device_type not in _DEVICE_TYPE_TO_ACTIVITY:
         raise ValueError(
             f"No ProfilerActivity mapping for device type {device_type!r}. "
             f"Add it to _DEVICE_TYPE_TO_ACTIVITY."
         )
     return _DEVICE_TYPE_TO_ACTIVITY[device_type]
+
+
+def _backward_seq_events(events):
+    """The events _check_backward_seq_id_uniqueness actually indexes.
+
+    Mirrors that rule's filter exactly, including the way its ``or`` chain still
+    admits a falsy-but-present sequence number; keep the two in sync. A guard
+    built on the event name alone would accept a trace the rule finds nothing to
+    check in.
+    """
+    matched = []
+    for ev in events:
+        name = ev.get("name", "")
+        if ev.get("ph") != "X" or "autograd::engine::evaluate_function:" not in name:
+            continue
+        args = ev.get("args", {})
+        seq = args.get("Sequence number") or args.get("seq_num")
+        if seq is not None:
+            matched.append(ev)
+    return matched
 
 
 def _sync_device(device):
@@ -223,9 +253,6 @@ def _load_events(trace_path):
 class _TraceValidatorE2EMixin:
     """Shared helpers for E2E trace validator test classes."""
 
-    def _events(self, payload):
-        return self._payloads[payload]
-
     @staticmethod
     def _fmt(violations, limit=5):
         lines = [f"  {v}" for v in violations[:limit]]
@@ -248,6 +275,8 @@ class TestTraceValidatorRules(TestCase):
     These tests verify rule logic using hand-crafted event dictionaries.
     No profiling or device operations — runs on any machine.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     # --- _check_nccl_metadata ---
 
@@ -553,57 +582,47 @@ class TestTraceValidatorRules(TestCase):
 # ---------------------------------------------------------------------------
 
 
-# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed
-# while all E2E tests are disabled. Re-enable alongside the per-test skips once
-# kineto's CPU/GPU timestamp clock-skew issue is fixed.
-@unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
-class TestTraceValidatorE2EAgnostic(_TraceValidatorE2EMixin, TestCase):
+class TestTraceValidatorE2EAgnosticDevice(_TraceValidatorE2EMixin, TestCase):
     """E2E tests for validation rules that are not tied to any specific accelerator.
 
     Category: Accelerator-AGNOSTIC
 
-    These tests profile a real workload on whatever accelerator is available
-    and validate trace properties that are hardware-independent (autograd
-    sequence IDs). Any backend that can run a ResNet50 training loop will
-    exercise these tests.
+    These tests profile a real workload on the accelerator under test and
+    validate trace properties that are hardware-independent (autograd sequence
+    IDs). The rules themselves are backend-neutral, so any backend that can run
+    a ResNet50 training loop belongs here -- add it to the ``only_for`` list
+    below once someone has actually run these tests on it.
 
     Instantiated per device type via ``instantiate_device_type_tests``.
     """
 
-    _trace_dir: str = ""
-    _payloads: dict = {}
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        device = torch.device(cls.device_type, 0)
-        activity = _activity_for_device_type(cls.device_type)
-        cls._trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_agnostic_")
-        cls._payloads = {
-            "training": _profile_training_payload(
-                os.path.join(cls._trace_dir, "training.json"),
-                device,
-                activity,
-            ),
-        }
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls._trace_dir and os.path.isdir(cls._trace_dir):
-            shutil.rmtree(cls._trace_dir, ignore_errors=True)
-        super().tearDownClass()
-
-    @unittest.skip(
-        "kineto backward sequence ID uniqueness not yet verified in kineto integration testing"
-    )
+    @skipCUDAIf(True, "backward sequence ID uniqueness not yet verified on CUDA")
     def test_backward_seq_id_uniqueness(self, device):
-        v = _check_backward_seq_id_uniqueness(self._events("training"))
-        self.assertEqual(len(v), 0, self._fmt(v))
+        # Kept on failure so CI leaves the trace behind for inspection.
+        trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_agnostic_")
+        trace_path = os.path.join(trace_dir, "training.json")
+        dev = torch.device(device)
+        events = _profile_training_payload(
+            trace_path, dev, _activity_for_device_type(dev.type)
+        )
+        # _check_backward_seq_id_uniqueness([]) returns [], so len(v) == 0 cannot tell a
+        # holding rule from a trace it found nothing to check. Guard on the rule's own
+        # predicate: a backward event without a sequence number is never indexed.
+        indexed = _backward_seq_events(events)
+        self.assertTrue(indexed, f"no indexable backward events; kept at {trace_path}")
+        v = _check_backward_seq_id_uniqueness(events)
+        self.assertEqual(len(v), 0, f"{self._fmt(v)}\ntrace kept at {trace_path}")
+        shutil.rmtree(trace_dir, ignore_errors=True)
 
 
 instantiate_device_type_tests(
-    TestTraceValidatorE2EAgnostic, globals(), except_for=("cpu",)
+    TestTraceValidatorE2EAgnosticDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 
 
@@ -612,10 +631,11 @@ instantiate_device_type_tests(
 # ---------------------------------------------------------------------------
 
 
-# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed
-# while all E2E tests are disabled. Re-enable alongside the per-test skips once
-# kineto's CPU/GPU timestamp clock-skew issue is fixed.
-@unittest.skip("E2E tests disabled pending kineto clock-skew fix; see per-test skips")
+# Class-level skip so setUpClass (which profiles a ResNet50 on GPU) is bypassed while
+# this class's tests are disabled. Re-enable alongside the per-test skips once kineto's
+# CPU/GPU timestamp clock-skew issue is fixed. Scope note: the skew is CUDA-side, so it
+# does not hold TestTraceValidatorE2EAgnosticDevice, whose rule reads CPU-side events.
+@unittest.skip("CUDA E2E disabled pending kineto clock-skew fix; see per-test skips")
 @unittest.skipUnless(TEST_CUDA, "CUDA not available")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 @instantiate_parametrized_tests
@@ -630,8 +650,13 @@ class TestTraceValidatorE2ECUDA(_TraceValidatorE2EMixin, TestCase):
     and CUDA event synchronization.
     """
 
+    hw_classification = HardwareClassification.CUDA
+
     _trace_dir: str = ""
     _payloads: dict = {}
+
+    def _events(self, payload):
+        return self._payloads[payload]
 
     @classmethod
     def setUpClass(cls):
