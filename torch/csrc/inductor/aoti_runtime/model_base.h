@@ -751,8 +751,7 @@ inline size_t pinnedAsyncConstantsCopyStageBufferBytes() {
       std::memory_order_relaxed);
 }
 
-using ConstantMap =
-    std::unordered_map<std::string, MaybeOwningAtenTensorHandle>;
+using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
 // Update the list here if more devices are supported in the future

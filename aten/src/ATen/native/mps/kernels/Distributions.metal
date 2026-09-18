@@ -365,9 +365,7 @@ REGISTER_EXPONENTIAL(bfloat);
 // Bernoulli with scalar probability p. Each thread processes 4 elements,
 // amortizing one Philox-4x32-10 round (4 uint32s) across the group so the
 // kernel becomes bandwidth-bound rather than RNG-bound. The mask bit is
-// converted to T via `c10::metal::cast_to`, which routes complex destinations
-// to `T(value, 0)` — matching the previous MPSGraph behaviour where bool was
-// cast to complex as "1+0j" / "0+0j".
+// converted to T via `c10::metal::cast_to`.
 template <typename T>
 kernel void bernoulli_scalar(
     device T* output [[buffer(0)]],
@@ -435,8 +433,6 @@ REGISTER_BERNOULLI(char);
 REGISTER_BERNOULLI(short);
 REGISTER_BERNOULLI(int);
 REGISTER_BERNOULLI(long);
-REGISTER_BERNOULLI(float2);
-REGISTER_BERNOULLI(half2);
 
 constant constexpr int BINOMIAL_RANDOMS_STRIDE = 32;
 

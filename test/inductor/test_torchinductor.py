@@ -181,7 +181,7 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+HAS_AVX2 = torch.cpu._is_avx2_supported()
 
 _OPS_WITHOUT_GPU_LOWP: frozenset[str] = frozenset(
     {
@@ -1377,6 +1377,16 @@ def skip_if_pallas(fn):
     return wrapper
 
 
+def skip_if_mps(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if is_mps_backend(self.device):
+            raise unittest.SkipTest("mps not supported")
+        return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def xfail_if_mps(fn):
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
@@ -1561,6 +1571,20 @@ def target_assert_size_stride_str(
     return f"{size_str}, {stride_str}"
 
 
+def target_assert_alignment_regex(
+    cpp_wrapper: bool, op_name: str | None = None, alignment: int = 16
+):
+    if op_name is None:
+        op_name_literal = r'"[^"]+"' if cpp_wrapper else r"'[^']+'"
+    else:
+        quote = '"' if cpp_wrapper else "'"
+        op_name_literal = re.escape(f"{quote}{op_name}{quote}")
+    return (
+        rf"assert_alignment\s*\(\s*[^,]+,\s*{alignment},\s*"
+        rf"{op_name_literal}\s*\)"
+    )
+
+
 @instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
@@ -1597,15 +1621,8 @@ class CommonTemplate:
     def test_aoti_eager_dtype_device_layout(self):
         ns = "aten"
         op_name = "tril_indices"
-        # Preserve legacy CPU/CUDA selection; extend it only for PrivateUse1.
-        dispatch_key = "CPU"
-        device = "cpu"
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = "cuda"
-        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
-            dispatch_key = "PrivateUse1"
-            device = self.device
+        device = self.device
+        dispatch_key = torch._C._dispatch_key_for_device(device)
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
             row = 128
@@ -1645,14 +1662,8 @@ class CommonTemplate:
     def test_aoti_eager_support_out(self):
         ns = "aten"
         op_name = "clamp"
-        dispatch_key = "CPU"
-        device = "cpu"
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = "cuda"
-        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
-            dispatch_key = "PrivateUse1"
-            device = self.device
+        device = self.device
+        dispatch_key = torch._C._dispatch_key_for_device(device)
 
         inp_tensor = torch.randn(128, dtype=torch.float, device=device).fill_(1.0)
         min_tensor = inp_tensor - 0.05
@@ -1704,14 +1715,8 @@ class CommonTemplate:
     def test_aoti_eager_support_str(self):
         ns = "aten"
         op_name = "div"
-        dispatch_key = "CPU"
-        device = "cpu"
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = "cuda"
-        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
-            dispatch_key = "PrivateUse1"
-            device = self.device
+        device = self.device
+        dispatch_key = torch._C._dispatch_key_for_device(device)
 
         a = torch.randn(128, dtype=torch.float, device=device)
         b = torch.randn(128, dtype=torch.float, device=device)
@@ -1748,14 +1753,8 @@ class CommonTemplate:
     def test_aoti_eager_cache_hit(self):
         ns = "aten"
         op_name = "abs"
-        dispatch_key = "CPU"
-        device = "cpu"
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = "cuda"
-        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
-            dispatch_key = "PrivateUse1"
-            device = self.device
+        device = self.device
+        dispatch_key = torch._C._dispatch_key_for_device(device)
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
         kernel_lib_path = aoti_compile_with_persistent_cache(
@@ -1800,11 +1799,7 @@ class CommonTemplate:
         ns = "aten"
         op_name = "abs"
 
-        device = "cpu"
-        if self.device.lower() == "cuda":
-            device = "cuda"
-        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
-            device = self.device
+        device = self.device
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
         kernel_lib_path = aoti_compile_with_persistent_cache(
@@ -1849,14 +1844,8 @@ class CommonTemplate:
         op_overload_name = "Tensor"
         op_name_with_overload = f"{op_name}.{op_overload_name}"
 
-        dispatch_key = "CPU"
-        device = torch.device("cpu")
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = torch.device("cuda")
-        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
-            dispatch_key = "PrivateUse1"
-            device = torch.device(self.device)
+        device = torch.device(self.device)
+        dispatch_key = torch._C._dispatch_key_for_device(device.type)
 
         # Test the difference between scalar tensor and scalar
         a = torch.scalar_tensor(1.0, device=device)
@@ -1922,14 +1911,8 @@ class CommonTemplate:
     @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_override_registration(self):
         namespace_name = "aten"
-        dispatch_key = "CPU"
-        device = torch.device("cpu")
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = torch.device("cuda")
-        elif self.device.lower() == torch._C._get_privateuse1_backend_name():
-            dispatch_key = "PrivateUse1"
-            device = torch.device(self.device)
+        device = torch.device(self.device)
+        dispatch_key = torch._C._dispatch_key_for_device(device.type)
 
         unary_op_set = ["abs", "acos"]
 
@@ -6615,6 +6598,61 @@ for dtype in (torch.int32, torch.int64):
             rtol=rtol,
             check_lowp=False,
             reference_in_float=not use_fp16,
+        )
+
+    @skip_if_cpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_conv_bwd_weight_backends": "TRITON",
+            "max_autotune_conv_bwd_input_backends": "TRITON",
+        }
+    )
+    @parametrize("nhwc_weight", (False, True))
+    @parametrize("nhwc_input", (False, True))
+    @with_tf32_off
+    @skipIfRocmVersionAtLeast(
+        [7, 14]
+    )  # ROCm 7.14+ Triton conv2d backward accuracy issue in this UT family
+    def test_conv2d_backward_input_layout(self, nhwc_weight: bool, nhwc_input: bool):
+        in_channels, out_channels, groups = 3, 4, 1
+        stride, dilation, padding, kernel = 1, 1, 1, 3
+
+        if torch._inductor.compile_fx.fx_compile_mode == FxCompileMode.SUBPROCESS:
+            self.skipTest("Expected failure under subprocess compile mode")
+
+        def fn(grad_output, inp, weight):
+            return torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [out_channels],
+                [stride, stride],
+                [padding, padding],
+                [dilation, dilation],
+                False,
+                [0, 0],
+                groups,
+                [True, True, True],
+            )
+
+        input_h = input_w = 16
+        output_h = (input_h + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+        output_w = (input_w + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
+
+        weight = torch.randn([out_channels, in_channels // groups, kernel, kernel])
+        if nhwc_weight:
+            weight = weight.to(memory_format=torch.channels_last)
+        inp = torch.randn([2, in_channels, input_h, input_w])
+        if nhwc_input:
+            inp = inp.to(memory_format=torch.channels_last)
+
+        self.common(
+            fn,
+            (torch.randn([2, out_channels, output_h, output_w]), inp, weight),
+            atol=3e-4,
+            rtol=0.001,
+            check_lowp=False,
         )
 
     @skip_if_cpu
@@ -16445,7 +16483,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if code and len(code) > 0 and "assert_alignment(" in code[0]:
                 try:
                     FileCheck().check_regex(
-                        r"assert_alignment\s*\(\s*[^,]+,\s*[^,]+,\s*'[^']+'\s*\)"
+                        target_assert_alignment_regex(config.cpp_wrapper)
                     ).run(code[0])
                 except Exception as e:
                     print(f"Failed regex match for assert_alignment: {e}")
@@ -17150,15 +17188,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     # Skipped on MPS because avgpool size is not divisible
     @xfail_if_mps
-    @skip_if_gpu_halide
+    @skip_if_halide
     def test_adaptive_avg_pool1d_argmax(self):
         # https://github.com/pytorch/pytorch/issues/113013
+        # https://github.com/pytorch/pytorch/issues/193492
         def fn(x):
             x = torch.adaptive_avg_pool1d(input=x, output_size=2)
             x = torch.argmax(input=x)
             return x
 
-        x = torch.rand([4, 4, 3], dtype=torch.float64)
+        x = torch.zeros(4, 4, 3, device=self.device, dtype=torch.float64).transpose(
+            0, 1
+        )
+        x[1, 3] = x.new_tensor([0.0, 1.0, 2.0])
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(fn(x), torch.tensor(15, device=self.device))
         self.common(fn, (x,))
 
     @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
@@ -17468,7 +17512,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             or name
             not in [
                 "airy_ai",
-                "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",
                 "ndtri",
@@ -19359,6 +19402,57 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue("ReductionHint.OUTER" in code)
         self.assertFalse("ReductionHint.INNER" in code)
 
+    @parametrize("slice_pointwise", (False, True))
+    @skip_if_halide
+    @skip_if_pallas
+    @skip_if_mps
+    def test_argmin_argmax_fused_reduction_logical_index(self, slice_pointwise):
+        # https://github.com/pytorch/pytorch/issues/193661
+        def fn(x):
+            reduced = torch.mean(x, dim=-1)
+            if slice_pointwise:
+                reduced = reduced[1:]
+            return reduced.argmin(), reduced.argmax()
+
+        x = (
+            torch.zeros(2, 4, 4, 8, device=self.device)
+            .transpose(0, 1)
+            .contiguous()
+            .transpose(0, 1)[..., ::2]
+        )
+        batch = 1 if slice_pointwise else 0
+        x[batch, 1, 1] = -1
+        x[batch, 3, 0] = 1
+        expected = (
+            torch.tensor(5, device=self.device),
+            torch.tensor(12, device=self.device),
+        )
+
+        self.assertEqual(fn(x), expected)
+        self.common(fn, (x,))
+
+    @skip_if_halide
+    @skip_if_pallas
+    @skip_if_mps
+    def test_argreduce_native_index_cse(self):
+        def fn(x):
+            return x.argmax(), x.reshape(-1).argmax()
+
+        x = torch.arange(4 * 6 * 8, device=self.device, dtype=torch.float32).reshape(
+            4, 6, 8
+        )
+        self.common(fn, (x,))
+
+        compiled = torch.compile(fn, fullgraph=True)
+        if is_cpp_backend(self.device):
+            _, code = run_and_get_cpp_code(compiled, x)
+            self.assertIn("tmp_acc0", code)
+            self.assertNotIn("tmp_acc1", code)
+        else:
+            code = run_and_get_triton_code(compiled, x)
+            self.assertEqual(code.count("@triton_heuristics."), 1)
+            self.assertEqual(code.count("triton_helpers.max_with_index"), 1)
+
     @skip_if_halide
     @skip_if_no_accelerator_triton
     def test_triton_argmin_argmax_transpose_logical_index(self):
@@ -19397,6 +19491,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (x.argmin(), x.argmax())
 
         self.common(fn, (torch.randn(6, 4, device=device).t().contiguous().t(),))
+
+        def fn(x):
+            return (
+                x.permute(1, 0, 2).argmax(),
+                x.transpose(0, 1).argmax(),
+                x.permute(2, 1, 0).argmax(),
+            )
+
+        x = torch.zeros(4, 6, 8, device=device)
+        x[2, 4, 7] = 1
+        self.common(fn, (x,))
+        code = run_and_get_triton_code(torch.compile(fn, fullgraph=True), x)
+        self.assertEqual(code.count("@triton_heuristics."), 1)
+        # Equivalent value/index pairs merge; the distinct mapping does not.
+        self.assertEqual(code.count("triton_helpers.max_with_index"), 2)
 
     @skip_if_halide
     @skip_if_no_accelerator_triton
@@ -19991,11 +20100,12 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):
 # host/template methods -> _wrap_template_test + _template_parametrize_fn
 #   -> bridge_cls(_TemplateDeviceHost, host_cls)
 #   -> instantiate_device_type_tests -> generated device classes
-#   -> mask inherited originals -> restore host names / apply name overrides
+#   -> mask inherited originals -> restore public names in one pass
 #
 # host_cls must be bound in scope; generated classes replace it and are returned.
 # The host keeps self.device as a bare type. Wrappers forward device arguments
 # only when accepted, isolate metadata, and avoid re-expanding parameter cases.
+# _template_source_name tracks the exact source method through case decorators.
 class _TemplateDeviceHost:
     def setUp(self):
         # Preserve copy_tests' historical bare device type contract.
@@ -20081,6 +20191,10 @@ def _template_parametrize_fn(
                 else unittest.expectedFailure
             )
 
+        def preserve_source_name(test_case):
+            test_case._template_source_name = test._template_source_name
+            return test_case
+
         for test_case, test_suffix, param_kwargs, decorator_fn in cases:
 
             def combined_decorator_fn(
@@ -20088,48 +20202,15 @@ def _template_parametrize_fn(
                 _decorator_fn=decorator_fn,
                 _decorators=tuple(decorators),
             ):
-                return (*_decorator_fn(params), *_decorators)
+                return (*_decorator_fn(params), *_decorators, preserve_source_name)
 
             yield test_case, test_suffix, param_kwargs, combined_decorator_fn
 
     return parametrize_fn
 
 
-def _rename_test_suffix(generated_cls, device_suffix, suffix):
-    marker = f"_{device_suffix}"
-    for name, value in tuple(generated_cls.__dict__.items()):
-        if not name.startswith("test") or marker not in name:
-            continue
-        prefix, _, tail = name.rpartition(marker)
-        new_name = f"{prefix}_{suffix}{tail}" if suffix else f"{prefix}{tail}"
-        if hasattr(generated_cls, new_name):
-            raise AssertionError(f"duplicate generated test: {new_name}")
-        setattr(generated_cls, new_name, value)
-        delattr(generated_cls, name)
-
-
-def _restore_host_test_names(generated, host_test_names):
-    for generated_cls in generated:
-        device_suffix = generated_cls.device_type
-        if device_suffix == "privateuse1":
-            device_suffix = torch._C._get_privateuse1_backend_name()
-        marker = f"_{device_suffix}"
-        for name, value in tuple(generated_cls.__dict__.items()):
-            prefix, matched, tail = name.rpartition(marker)
-            if not matched or not any(
-                prefix == host_name or prefix.startswith(f"{host_name}_")
-                for host_name in host_test_names
-            ):
-                continue
-            new_name = f"{prefix}{tail}"
-            if getattr(generated_cls, new_name, None) is not None:
-                raise AssertionError(f"duplicate generated test: {new_name}")
-            setattr(generated_cls, new_name, value)
-            delattr(generated_cls, name)
-
-
 def _apply_template_name_overrides(
-    generated, scope, suffix_overrides, class_name_overrides
+    generated, scope, suffix_overrides, class_name_overrides, host_test_names=()
 ):
     for generated_cls in generated:
         device_type = generated_cls.device_type
@@ -20138,10 +20219,27 @@ def _apply_template_name_overrides(
             if device_type == "privateuse1"
             else device_type
         )
-        if suffix_overrides:
-            suffix = suffix_overrides.get(device_suffix, device_suffix)
-            if suffix != device_suffix:
-                _rename_test_suffix(generated_cls, device_suffix, suffix)
+        suffix = (suffix_overrides or {}).get(device_suffix, device_suffix)
+        marker = f"_{device_suffix}"
+        for name, value in tuple(generated_cls.__dict__.items()):
+            if not name.startswith("test"):
+                continue
+            is_host = getattr(value, "_template_source_name", None) in host_test_names
+            new_suffix = "" if is_host else suffix
+            if new_suffix == device_suffix:
+                continue
+            prefix, matched, tail = name.rpartition(marker)
+            if not matched:
+                continue
+            new_name = (
+                f"{prefix}_{new_suffix}{tail}" if new_suffix else f"{prefix}{tail}"
+            )
+            if hasattr(generated_cls, new_name) and not (
+                is_host and getattr(generated_cls, new_name) is None
+            ):
+                raise AssertionError(f"duplicate generated test: {new_name}")
+            setattr(generated_cls, new_name, value)
+            delattr(generated_cls, name)
 
         if not class_name_overrides:
             continue
@@ -20190,74 +20288,55 @@ def instantiate_device_type_tests_from_templates(
     bridge_cls = type(host_cls.__name__, (_TemplateDeviceHost, host_cls), {})
     bridge_cls.__module__ = host_cls.__module__
 
-    # Normalize inherited host tests before the device framework sees them.
-    host_test_names = set()
-    for name in dir(host_cls):
-        if not name.startswith("test"):
-            continue
-        value = getattr(host_cls, name)
-        if not callable(value):
-            continue
-        host_test_names.add(name)
-        host_test = _wrap_template_test(value)
+    # Collect host and template methods, then adapt them through the same path.
+    tests = {
+        name: getattr(host_cls, name)
+        for name in dir(host_cls)
+        if name.startswith("test") and callable(getattr(host_cls, name))
+    }
+    host_test_names = set(tests)
+    for template in templates:
+        for name, value in template.__dict__.items():
+            if name.startswith("test_"):
+                if name in host_test_names:
+                    raise AssertionError(f"duplicate test method: {name}")
+                tests[name] = value
+        if hasattr(template, "is_dtype_supported"):
+            bridge_cls.is_dtype_supported = template.is_dtype_supported
+
+    for name, value in tests.items():
+        is_host = name in host_test_names
+        new_test = _wrap_template_test(value)
+        # Native wrappers retain function metadata, so names need no guessing.
+        new_test._template_source_name = name
         source_parametrize_fn = (
             None
             if _is_preexpanded_test(name, value)
-            else getattr(host_test, "parametrize_fn", None)
+            else getattr(new_test, "parametrize_fn", None)
         )
-        host_test.__dict__.pop("parametrize_fn", None)
+        new_test.__dict__.pop("parametrize_fn", None)
+        decorator = None if is_host else test_decorator
+        tf = None if is_host else test_failures and test_failures.get(name)
+        has_xfail_prop = (
+            not is_host and xfail_prop is not None and hasattr(value, xfail_prop)
+        )
         test_metadata_decorators = _unittest_metadata_decorators(value)
-        if source_parametrize_fn or test_metadata_decorators:
-            host_test.parametrize_fn = _template_parametrize_fn(
+        if (
+            source_parametrize_fn
+            or decorator
+            or test_metadata_decorators
+            or tf
+            or has_xfail_prop
+        ):
+            new_test.parametrize_fn = _template_parametrize_fn(
                 source_parametrize_fn,
-                None,
+                decorator,
                 test_metadata_decorators,
-                None,
-                False,
-                None,
+                tf,
+                has_xfail_prop,
+                suffix_overrides,
             )
-        setattr(bridge_cls, name, host_test)
-
-    # Add each template while preserving parameterization and failure metadata.
-    for template in templates:
-        for name, value in template.__dict__.items():
-            if not name.startswith("test_"):
-                continue
-            if name in host_test_names:
-                raise AssertionError(f"duplicate test method: {name}")
-
-            new_test = _wrap_template_test(value)
-            already_parametrized = _is_preexpanded_test(name, value)
-            source_parametrize_fn = (
-                None
-                if already_parametrized
-                else getattr(new_test, "parametrize_fn", None)
-            )
-            new_test.__dict__.pop("parametrize_fn", None)
-
-            tf = test_failures and test_failures.get(name)
-            has_xfail_prop = xfail_prop is not None and hasattr(value, xfail_prop)
-            test_metadata_decorators = _unittest_metadata_decorators(value)
-            if (
-                source_parametrize_fn
-                or test_decorator
-                or test_metadata_decorators
-                or tf
-                or has_xfail_prop
-            ):
-                new_test.parametrize_fn = _template_parametrize_fn(
-                    source_parametrize_fn,
-                    test_decorator,
-                    test_metadata_decorators,
-                    tf,
-                    has_xfail_prop,
-                    suffix_overrides,
-                )
-
-            setattr(bridge_cls, name, new_test)
-
-        if hasattr(template, "is_dtype_supported"):
-            bridge_cls.is_dtype_supported = template.is_dtype_supported
+        setattr(bridge_cls, name, new_test)
 
     # Delegate device selection, class generation, and capability handling.
     scope[host_cls.__name__] = bridge_cls
@@ -20269,7 +20348,7 @@ def instantiate_device_type_tests_from_templates(
         allow_xpu=allow_xpu,
         allow_mps=allow_mps,
     )
-    # Mask inherited originals so only device-suffixed host tests are discoverable.
+    # Mask inherited originals to avoid collecting them a second time.
     for name in host_test_names:
         setattr(bridge_cls, name, None)
 
@@ -20281,11 +20360,9 @@ def instantiate_device_type_tests_from_templates(
         and bridge_cls in value.__mro__
     )
 
-    _restore_host_test_names(generated, host_test_names)
-
     # Apply copy_tests-compatible public names after standard generation.
     _apply_template_name_overrides(
-        generated, scope, suffix_overrides, class_name_overrides
+        generated, scope, suffix_overrides, class_name_overrides, host_test_names
     )
 
     return generated

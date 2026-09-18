@@ -362,13 +362,18 @@ def index_add(
     *,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
-    # If we are not in fbcode and dtype is bfloat16
-    # fallback to index_add kernel
-    # see https://github.com/pytorch/pytorch/issues/137425 for details
     if not is_fbcode() and x.dtype == torch.bfloat16:
-        return NotImplemented
-    else:
-        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
+        # Triton supports BF16 atomic add on ROCm and NVIDIA SM90 and newer.
+        if x.device.type != "cuda" or (
+            torch.version.hip is None
+            and torch.cuda.get_device_capability(x.device) < (9, 0)
+        ):
+            return NotImplemented
+    # The index_put lowering expects tensor indices to have at least one
+    # dimension. Normalizing a scalar index preserves index_add semantics.
+    if index.ndim == 0:
+        index = index.unsqueeze(0)
+    return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants

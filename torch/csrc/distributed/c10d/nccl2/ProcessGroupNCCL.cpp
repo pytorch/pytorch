@@ -14,7 +14,6 @@
 #include <unordered_set>
 
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/env.h>
@@ -25,7 +24,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLBootstrap.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
-#include <torch/csrc/distributed/c10d/nccl2/Utils.hpp>
 
 namespace c10d::nccl2 {
 
@@ -270,8 +268,6 @@ void ProcessGroupNCCL::initNcclResources() {
   if (!dependency_event_) {
     dependency_event_.emplace(cudaEventDisableTiming);
   }
-
-  max_event_pool_size_ = kDefaultMaxEventPoolSize;
 
   NCCL_CHECK(
       nccl_api_,
@@ -561,13 +557,7 @@ void ProcessGroupNCCL::finalize() {
     }
   }
 
-  // Clean up event pool
-  {
-    std::lock_guard<std::mutex> lock(event_pool_mutex_);
-    while (!event_pool_.empty()) {
-      event_pool_.pop();
-    }
-  }
+  event_pool_->clear();
 
   barrier_buffer_.clear();
 
@@ -1718,7 +1708,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
 
   // A synchronous barrier host-blocks the CPU thread in synchronizeInternal(),
   // matching stock ProcessGroupNCCL; async barriers stay stream-ordered.
-  work->hostBlocking_ = !async_op;
+  work->setHostBlocking(!async_op);
 
   // Record start event before NCCL operation
   work->recordStart("barrier");

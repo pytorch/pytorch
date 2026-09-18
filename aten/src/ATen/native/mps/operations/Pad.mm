@@ -212,6 +212,19 @@ static Tensor& pad_out_template(Tensor& output,
     grad_output = grad_output_.contiguous();
   }
 
+  // MPSGraph pads a rank > 4 operand incorrectly once the output inner extent is large
+  // (https://github.com/pytorch/pytorch/issues/194922). Only the trailing padding_size / 2 dims
+  // are padded, so fold the leading dims into one batch dim.
+  const bool needs_flatten = ndims > 4;
+  if (needs_flatten) {
+    const int64_t batch_end = ndims - padding_size / 2 - 1;
+    input = input.flatten(0, batch_end);
+    if (is_backward_pass) {
+      grad_output = grad_output.flatten(0, batch_end);
+    }
+    ndims = input.dim();
+  }
+
   const uint32_t dims_mask = (1U << ndims) - 1;
   uint32_t startMask = dims_mask, endMask = dims_mask;
   std::vector<NSNumber*> leftPadVec(ndims, @(0));
@@ -311,6 +324,11 @@ static Tensor& pad_out_template(Tensor& output,
         } else {
           newCachedGraph->gradInputTensor_ = padGradTensor;
         }
+      }
+      if (needs_flatten) {
+        newCachedGraph->gradInputTensor_ = [mpsGraph reshapeTensor:newCachedGraph->gradInputTensor_
+                                                         withShape:getMPSShape(output)
+                                                              name:nil];
       }
     });
 

@@ -967,6 +967,35 @@ class TestCppExtensionUtils(TestCase):
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("cc"))
 
+    @staticmethod
+    def _fake_version_module(**attrs):
+        module = types.ModuleType("fake_torch_version")
+        for name, value in attrs.items():
+            setattr(module, name, value)
+        return module
+
+    def test_derive_rocm_version_prefers_rocm(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm="6.4.2")
+        derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (6, 4))
+
+    def test_derive_rocm_version_falls_back_when_attribute_absent(self):
+        version = self._fake_version_module(hip="7.0.51831")
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING") as logs:
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+        self.assertIn("torch.version.rocm", logs.output[0])
+
+    def test_derive_rocm_version_falls_back_when_rocm_is_none(self):
+        version = self._fake_version_module(hip="7.0.51831", rocm=None)
+        with self.assertLogs("torch.utils.cpp_extension", level="WARNING"):
+            derived = torch.utils.cpp_extension._derive_rocm_version(version)
+        self.assertEqual(derived, (7, 0))
+
+    def test_derive_rocm_version_is_none_off_rocm(self):
+        version = self._fake_version_module(hip=None, rocm=None)
+        self.assertIsNone(torch.utils.cpp_extension._derive_rocm_version(version))
+
 
 class TestTraceback(TestCase):
     @staticmethod

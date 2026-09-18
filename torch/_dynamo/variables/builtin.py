@@ -85,6 +85,7 @@ from .base import (
     AsPythonConstantNotImplementedError,
     GetSet,
     Member,
+    Method,
     ValueMutationNew,
     VariableTracker,
 )
@@ -3240,6 +3241,18 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return DictBuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
 
+    def fromkeys(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+
+    tp_methods = {
+        "fromkeys": Method(fromkeys),
+    }
+
     def call_method(
         self,
         tx: "InstructionTranslatorBase",
@@ -3262,11 +3275,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     [],
                     tx=tx,
                 )
-
-        if name == "fromkeys":
-            return DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, dict, *args, **kwargs
-            )
 
         resolved_fn = getattr(dict, name, None)
         if resolved_fn is not None and resolved_fn in dict_methods:

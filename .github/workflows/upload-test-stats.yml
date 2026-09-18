@@ -8,6 +8,7 @@ on:
       - trunk
       - trunk-rocm-sandbox
       - periodic
+      - periodic-strict
       - periodic-rocm-mi200
       - periodic-rocm-mi300
       - periodic-rocm-mi350
