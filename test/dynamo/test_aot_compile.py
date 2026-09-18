@@ -606,6 +606,16 @@ class WrapsAnInterruptOnCompare:
         raise SystemError("inner") from self.exc
 
 
+class RaisesFromAnInterruptOnCompare:
+    # RaisesOnCompare's slot, raising the tree's OWN answer `from` an interrupt.
+    # Pins the unwrap stopping at the first link that is not a SystemError.
+    def __hash__(self):
+        return hash("foo")
+
+    def __eq__(self, other):
+        raise ValueError("mid") from KeyboardInterrupt("ctrl-c")
+
+
 class DictBranchModule(torch.nn.Module):
     def forward(self, x, d):
         if d is None:
@@ -3722,6 +3732,23 @@ from user code:
         inner = ctx.exception.__cause__
         self.assertIsInstance(inner, SystemError)
         self.assertIs(inner.__cause__, interrupt)
+
+    def test_aot_compile_module_raise_from_an_interrupt_reaches_the_report(self):
+        # The walk stops at the first link that is not a SystemError: a key that
+        # raises `from` a Ctrl-C chose the ValueError as its answer, so the report
+        # quotes that and not the interrupt behind it. Walk past it and
+        # _meant_an_exception answers False, and the boundary SystemError leaves
+        # the call in the report's place.
+        model, x = self._aot_compile_dict_branches({})
+        with self.assertRaises(RuntimeError) as ctx:
+            model(x, {RaisesFromAnInterruptOnCompare(): 1})
+        quoted = "  [0] <guard check raised ValueError: mid (through the guard tree's pybind boundary)>"
+        self.assertIn(quoted, str(ctx.exception).splitlines())
+        # Nothing is lost: the interrupt stays reachable behind the answer.
+        boundary = ctx.exception.__cause__
+        self.assertIsInstance(boundary, SystemError)
+        self.assertIsInstance(boundary.__cause__, ValueError)
+        self.assertIsInstance(boundary.__cause__.__cause__, KeyboardInterrupt)
 
     @unittest.skipIf(not hasattr(signal, "SIGALRM"), "bounds a hang with SIGALRM")
     def test_aot_compile_module_raise_chained_in_a_cycle_reaches_the_report(self):
