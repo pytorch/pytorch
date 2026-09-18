@@ -896,7 +896,8 @@ class FileSystemReader(StorageReader):
         if req.type == LoadItemType.BYTE_IO:
             read_bytes = io.BytesIO(transform_from.read(-1))
             read_bytes.seek(0)
-            with load_bytes_lock if load_bytes_lock is not None else nullcontext():
+            lock = load_bytes_lock if load_bytes_lock is not None else nullcontext()
+            with lock:
                 planner.load_bytes(req, read_bytes)
         else:
             if transform_from.seekable():

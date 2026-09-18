@@ -288,6 +288,7 @@ class FsspecReader(FileSystemReader):
             ) as cpu_executor,
             concurrent.futures.ThreadPoolExecutor(max_workers=1) as prefetch_executor,
         ):
+            next_io: concurrent.futures.Future | None = None
             try:
                 next_io = prefetch_executor.submit(fetch_batch, batches[0])
 
@@ -307,8 +308,16 @@ class FsspecReader(FileSystemReader):
                     for f in futures:
                         f.result()
             finally:
-                cpu_executor.shutdown(wait=True, cancel_futures=True)
-                prefetch_executor.shutdown(wait=True, cancel_futures=True)
+                # ``cancel_futures`` is the part the enclosing ``with`` does not
+                # do: ThreadPoolExecutor.__exit__ calls ``shutdown(wait=True)``,
+                # which drains the queue rather than dropping it, so a failure
+                # in one item would still run every process_chunk behind it.
+                # Waiting is left to __exit__. The outstanding prefetch is
+                # cancelled for the same reason and so its result is not
+                # silently discarded.
+                if next_io is not None:
+                    next_io.cancel()
+                cpu_executor.shutdown(wait=False, cancel_futures=True)
 
         fut: Future[None] = Future()
         fut.set_result(None)
