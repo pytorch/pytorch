@@ -105,6 +105,44 @@ bool registerGilChecker() {
 }
 
 static bool registered = registerGilChecker();
+
+::c10d::nccl2::MaterializedCollectiveConfig materializeCollectiveConfig(
+    const c10::IValue& config) {
+  TORCH_CHECK_TYPE(
+      config.isPyObject(), "Collective config must be a Python object");
+  pybind11::gil_scoped_acquire gil;
+  py::module_::import("torch.distributed.distributed_c10d")
+      .attr("_grouped_collective_context")
+      .attr("check_config")();
+  auto config_obj = py::reinterpret_borrow<py::object>(config.toPyObject());
+  auto nccl_core = py::module_::import("nccl.core.communicator");
+  TORCH_CHECK_TYPE(
+      py::isinstance(config_obj, nccl_core.attr("NCCLCollConfig")),
+      "config must be an nccl.core.NCCLCollConfig");
+  // The tuple owns the native config and its vendor extension chain.
+  auto materialized =
+      nccl_core.attr("_materialize_coll_config")(config_obj).cast<py::tuple>();
+  auto lowpp = materialized[0];
+  auto config_type =
+      py::module_::import("nccl.bindings.nccl").attr("CollConfig");
+  TORCH_CHECK_TYPE(
+      py::isinstance(lowpp, config_type),
+      "config must materialize an nccl.bindings.nccl.CollConfig");
+  auto data = lowpp.attr("ptr").cast<uintptr_t>();
+  TORCH_CHECK(data != 0, "config.ptr must be nonzero");
+  return {
+      reinterpret_cast<const void*>(data), // NOLINT(performance-no-int-to-ptr)
+      torch::jit::toIValue(std::move(materialized), c10::PyObjectType::get())};
+}
+
+bool registerCollectiveConfigConverter() {
+  ::c10d::nccl2::get_collective_config_converter() =
+      &materializeCollectiveConfig;
+  return true;
+}
+
+static bool collective_config_converter_registered =
+    registerCollectiveConfigConverter();
 #endif // USE_C10D_NCCL
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
@@ -163,6 +201,23 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
 namespace torch::distributed::c10d {
 
 namespace {
+
+template <typename Options>
+py::object getCollectiveConfig(const Options& options) {
+  if (!options.config.has_value()) {
+    return py::none();
+  }
+  return torch::jit::toPyObject(options.config.value());
+}
+
+template <typename Options>
+void setCollectiveConfig(Options& options, const py::object& config) {
+  if (config.is_none()) {
+    options.config = std::nullopt;
+    return;
+  }
+  options.config = torch::jit::toIValue(config, c10::PyObjectType::get());
+}
 
 py::bytes toPyBytes(const std::vector<uint8_t>& data) {
   return py::bytes(reinterpret_cast<const char*>(data.data()), data.size());
@@ -1193,20 +1248,32 @@ Example:
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
       .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::BroadcastOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::BroadcastOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::BroadcastOptions>,
+          &setCollectiveConfig<::c10d::BroadcastOptions>);
 
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllreduceOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllreduceOptions>,
+          &setCollectiveConfig<::c10d::AllreduceOptions>);
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
       module, "AllreduceCoalescedOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceCoalescedOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceCoalescedOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllreduceCoalescedOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllreduceCoalescedOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllreduceCoalescedOptions>,
+          &setCollectiveConfig<::c10d::AllreduceCoalescedOptions>);
 
   py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
       .def(py::init<>())
@@ -1214,18 +1281,30 @@ Example:
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
       .def_readwrite("timeout", &::c10d::ReduceOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::ReduceOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::ReduceOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::ReduceOptions>,
+          &setCollectiveConfig<::c10d::ReduceOptions>);
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllgatherOptions>,
+          &setCollectiveConfig<::c10d::AllgatherOptions>);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank)
       .def_readwrite("timeout", &::c10d::GatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::GatherOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::GatherOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::GatherOptions>,
+          &setCollectiveConfig<::c10d::GatherOptions>);
 
   py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
       .def(py::init<>())
@@ -1237,7 +1316,11 @@ Example:
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::ReduceScatterOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::ReduceScatterOptions>,
+          &setCollectiveConfig<::c10d::ReduceScatterOptions>);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -1249,7 +1332,11 @@ Example:
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllToAllOptions::asyncOp)
+      .def_property(
+          "config",
+          &getCollectiveConfig<::c10d::AllToAllOptions>,
+          &setCollectiveConfig<::c10d::AllToAllOptions>);
 
   py::class_<::c10d::ReconfigureOptions>(module, "ReconfigureOptions")
       .def(py::init<>())

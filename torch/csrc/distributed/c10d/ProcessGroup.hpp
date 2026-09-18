@@ -237,7 +237,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
     // it as it is now.
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
@@ -268,7 +270,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     bool,
                     int64_t)>();
 
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
@@ -296,7 +300,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              bool,
                              int64_t)>();
 
-    auto work = op.call(
+    auto work = callCollective(
+        op,
+        opts.config,
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
@@ -324,7 +330,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              int64_t,
                              bool,
                              int64_t)>();
-    auto work = op.call(
+    auto work = callCollective(
+        op,
+        opts.config,
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
@@ -356,7 +364,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              bool,
                              int64_t)>();
 
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -391,7 +401,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 bool,
                 int64_t)>();
 
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -431,7 +443,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              bool)>();
 
-    auto work = op.call(
+    auto work = callCollective(
+        op,
+        opts.config,
         outputTensorLists,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -463,7 +477,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 bool)>();
 
-    auto work = op.call(
+    auto work = callCollective(
+        op,
+        opts.config,
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -501,7 +517,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              int64_t,
                              bool,
                              int64_t)>();
-    auto work = op.call(
+    auto work = callCollective(
+        op,
+        opts.config,
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -537,7 +555,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 bool,
                 int64_t)>();
 
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -608,7 +628,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
                     bool,
                     int64_t)>();
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -639,7 +661,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 bool,
                 int64_t)>();
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -682,7 +706,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 bool,
                 int64_t)>();
 
-    auto work = op.call(
+    auto work = callCollective(
+        op,
+        opts.config,
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -726,7 +752,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              std::vector<int64_t>,
                              bool,
                              int64_t)>();
-    auto work = op.call(
+    auto work = callCollective(
+        op,
+        opts.config,
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -769,7 +797,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     bool,
                     int64_t)>();
-    auto work = std::get<1>(op.call(
+    auto work = std::get<1>(callCollective(
+        op,
+        opts.config,
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
@@ -1362,6 +1392,22 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     for (auto& entry : postHooks_) {
       entry.second(args);
     }
+  }
+
+ private:
+  template <typename Return, typename... Args, typename... CallArgs>
+  static Return callCollective(
+      const c10::TypedOperatorHandle<Return(Args...)>& op,
+      const OptionalCollectiveConfig& config,
+      CallArgs&&... args) {
+    if (!config.has_value()) {
+      return op.call(std::forward<CallArgs>(args)...);
+    }
+    const c10::OperatorHandle config_op =
+        c10::Dispatcher::singleton().findSchemaOrThrow(
+            op.operator_name().name.c_str(), "config");
+    return config_op.typed<Return(Args..., OptionalCollectiveConfig)>().call(
+        std::forward<CallArgs>(args)..., config);
   }
 };
 
