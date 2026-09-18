@@ -8,6 +8,7 @@ from pathlib import Path
 
 import torch
 from torch._dynamo.testing import CompileCounter
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -420,6 +421,30 @@ class TestLibtorchAgnostic(TestCase):
         expected = torch.sort(t_view, stable=True, dim=dim, descending=descending)
         self.assertEqual(values, expected.values)
         self.assertEqual(indices, expected.indices)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @dtypes(torch.float32, torch.int32, torch.bool)
+    def test_my_flip(self, device, dtype):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        t = make_tensor(2, 3, 4, device=device, dtype=dtype)
+        t_noncontig = t[:, ::2, :].transpose(0, 2)
+        for x in (t, t_noncontig):
+            for dims in ([0], [1, 2], [-1], [-3, 1], [0, 1, 2], []):
+                result = libtorch_agnostic.ops.my_flip(x, dims)
+                self.assertEqual(result, torch.flip(x, dims))
+                self.assertNotEqual(result.data_ptr(), x.data_ptr())
+
+        for shape in ((2, 0, 4), ()):
+            x = make_tensor(shape, device=device, dtype=dtype)
+            result = libtorch_agnostic.ops.my_flip(x, [0])
+            self.assertEqual(result, torch.flip(x, [0]))
+
+        with self.assertRaisesRegex(RuntimeError, "appears multiple times"):
+            libtorch_agnostic.ops.my_flip(t, [0, -3])
+        for dim in (3, -4):
+            with self.assertRaisesRegex(RuntimeError, "Dimension out of range"):
+                libtorch_agnostic.ops.my_flip(t, [dim])
 
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
