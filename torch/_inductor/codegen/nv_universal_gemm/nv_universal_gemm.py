@@ -116,19 +116,27 @@ def _nvgemm_cold_cache_pool_size(
 ) -> int:
     """Choose a divisor of ``unroll`` whose B operands exceed twice L2.
 
-    Scope the policy to medium-M, moderate-width projections.  Smaller decode
-    batches already select good kernels with the cheaper hot-cache benchmark,
-    while very wide gate/up projections did not change winners in the model
-    validation and needlessly increased tuning time.
+    Scope the policy to decode/medium-M, moderate-width projections.  M=32 is
+    included because hybrid models such as Nemotron execute a long sequence of
+    distinct same-shaped weights and expose ranking errors hidden by the
+    repeated-weight benchmark.  Very wide gate/up projections remain excluded
+    because they did not change winners in model validation and needlessly
+    increased tuning time.
     """
+    small_m32 = (
+        len(output_shape) == 2 and output_shape[0] == 32 and output_shape[1] <= 32768
+    )
+    medium_m = (
+        len(output_shape) == 2
+        and 64 < output_shape[0] <= 256
+        and output_shape[1] <= 16384
+    )
     if (
         not config.nvgemm_autotune_cold_cache
         or variant != GemmVariant.SCALED_GEMM
         or input_tensors[0].dtype != torch.float4_e2m1fn_x2
         or len(output_shape) != 2
-        or output_shape[0] <= 64
-        or output_shape[0] > 256
-        or output_shape[1] > 16384
+        or not (small_m32 or medium_m)
         or unroll < 2
         or len(input_tensors) < 4
     ):
