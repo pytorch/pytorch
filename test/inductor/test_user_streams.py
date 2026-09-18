@@ -40,6 +40,44 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfNoAcceleratorTriton,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+
+
+_CROSS_STREAM_NUM_ELEMENTS = 256
+_CROSS_STREAM_ORIGINAL_VALUE = 0x11111111
+_CROSS_STREAM_REPLACEMENT_VALUE = 0x22222222
+_CROSS_STREAM_QUEUE_DEPTH = 8
+_CROSS_STREAM_SPIN_LIMIT = 2_000_000
+
+
+if HAS_CUDA_AND_TRITON:
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def _cross_stream_spin(delay_ptr, spin_limit: tl.constexpr):
+        delay = 0
+        spin = 0
+        while spin < spin_limit:
+            delay += tl.load(delay_ptr, volatile=True)
+            spin += 1
+        tl.store(delay_ptr, delay)
+
+    @triton.jit
+    def _cross_stream_copy_and_capture_pointer(
+        source_ptr,
+        output_ptr,
+        source_address_ptr,
+    ):
+        offsets = tl.arange(0, 256)
+        mask = offsets < 256
+        values = tl.load(source_ptr + offsets, mask=mask)
+        tl.store(output_ptr + offsets, values, mask=mask)
+        tl.store(source_address_ptr, source_ptr.to(tl.uint64))
+
+    @triton.jit
+    def _cross_stream_capture_pointer(pointer, address_ptr):
+        tl.store(address_ptr, pointer.to(tl.uint64))
 
 
 def _extract_wrapper_body(code):
@@ -1239,6 +1277,110 @@ class TestUserStreamCompile(InductorTestCase):
         self.assertIn("record_event", wrapper)
         self.assertIn("wait_event", wrapper)
         self.assertNotIn("buf0; del buf0", wrapper)
+
+    def test_explicit_deallocation_waits_for_cross_stream_use(self):
+        """Dynamo orders an explicit deallocation after its side-stream use."""
+        consumer_stream = torch.cuda.Stream()
+        ready = torch.cuda.Event()
+
+        def fn(model_input, delay):
+            source = model_input + _CROSS_STREAM_ORIGINAL_VALUE
+            ready.record()
+
+            with torch.cuda.stream(consumer_stream):
+                ready.wait()
+                consumer_output = torch.empty_like(source)
+                source_address = torch.empty(
+                    (1,), dtype=torch.int64, device=model_input.device
+                )
+                for _ in range(_CROSS_STREAM_QUEUE_DEPTH):
+                    torch.library.wrap_triton(_cross_stream_spin)[(1,)](
+                        delay,
+                        _CROSS_STREAM_SPIN_LIMIT,
+                    )
+                torch.library.wrap_triton(
+                    _cross_stream_copy_and_capture_pointer
+                )[(1,)](
+                    source,
+                    consumer_output,
+                    source_address,
+                )
+
+            del source
+            replacement = torch.full_like(
+                model_input, _CROSS_STREAM_REPLACEMENT_VALUE
+            )
+            replacement_address = torch.empty(
+                (1,), dtype=torch.int64, device=model_input.device
+            )
+            torch.library.wrap_triton(_cross_stream_capture_pointer)[(1,)](
+                replacement,
+                replacement_address,
+            )
+            return (
+                consumer_output,
+                source_address,
+                replacement_address,
+                replacement,
+            )
+
+        compiled_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        delay = torch.zeros((1,), dtype=torch.int32, device="cuda")
+
+        warmup_input = torch.zeros(
+            (_CROSS_STREAM_NUM_ELEMENTS,), dtype=torch.int32, device="cuda"
+        )
+        warmup_outputs = compiled_fn(warmup_input, delay)
+        torch.cuda.synchronize()
+        del warmup_input, warmup_outputs
+        torch.cuda.empty_cache()
+
+        model_input = torch.zeros(
+            (_CROSS_STREAM_NUM_ELEMENTS,), dtype=torch.int32, device="cuda"
+        )
+        (
+            consumer_output,
+            source_address,
+            replacement_address,
+            replacement,
+        ) = compiled_fn(model_input, delay)
+
+        completion = torch.cuda.Event()
+        completion.record(consumer_stream)
+        consumer_pending_after_launch = not completion.query()
+        torch.cuda.synchronize()
+
+        self.assertTrue(
+            consumer_pending_after_launch,
+            "consumer completed before the test could exercise asynchronous lifetime",
+        )
+        self.assertGreater(source_address.item(), 0)
+        self.assertGreater(replacement_address.item(), 0)
+        self.assertEqual(
+            source_address.item(),
+            replacement_address.item(),
+            "Inductor did not reuse the generated temporary",
+        )
+        torch.testing.assert_close(
+            consumer_output.cpu(),
+            torch.full(
+                (_CROSS_STREAM_NUM_ELEMENTS,),
+                _CROSS_STREAM_ORIGINAL_VALUE,
+                dtype=torch.int32,
+            ),
+            rtol=0,
+            atol=0,
+        )
+        torch.testing.assert_close(
+            replacement.cpu(),
+            torch.full(
+                (_CROSS_STREAM_NUM_ELEMENTS,),
+                _CROSS_STREAM_REPLACEMENT_VALUE,
+                dtype=torch.int32,
+            ),
+            rtol=0,
+            atol=0,
+        )
 
     def test_stream_record_wait_event_not_dropped(self):
         """stream.record_event() and stream.wait_event() must survive compilation."""
