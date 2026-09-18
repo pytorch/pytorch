@@ -19,6 +19,7 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import (
+    _write_artifact,
     capture,
     load,
     MakeFxTracer,
@@ -3378,6 +3379,18 @@ class TestPrecompileCaptureFiles(TestCase):
                 self._rewrite_raises(KeyboardInterrupt, "interrupted")
         self.assertNotEqual((self._read(self.artifact), self._read(self.cache)), before)
         self._assert_serves()
+
+    def test_an_interrupt_among_the_probes_keeps_the_previous_source(self):
+        # The undo's own reads have that window: an interrupt between the backup read (the
+        # True below) and the flag saying the reads RAN dropped the previous source's .bak.
+        before = self._write_pair()[0]
+        cut = mock.patch("os.path.lexists", side_effect=[True, KeyboardInterrupt()])
+        with self._replacing(self.cache, exc=OSError(errno.ENOSPC, "no space")), cut:
+            with self.assertNoLogs("torch._precompile", level="WARNING"):
+                with self.assertRaises(KeyboardInterrupt):
+                    _write_artifact(self.artifact, self.cache, "new", b"new-cache")
+        kept = [self._read(os.path.join(self.dir, n)) for n in self._leftovers()]
+        self.assertEqual(kept, [before])
 
     def test_an_interrupt_after_the_undos_rename_reports_nothing(self):
         # The undo's OWN os.replace has that window too: the previous source is back under
