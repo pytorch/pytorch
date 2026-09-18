@@ -732,6 +732,7 @@ class TestScaledMMLayoutConstraint(TestCase):
             self.assertEqual(len(new_args), num_positional)
             self.assertEqual(new_kwargs.keys(), kwargs.keys())
 
+    @skipIfRocm(msg="NVIDIA DeepSeek scale orientation policy")
     @parametrize("scale_side", ["a", "b"])
     @parametrize("strides", [(4, 1), (1, 4)])
     @parametrize("keyword_args", [False, True])
@@ -801,6 +802,46 @@ class TestScaledMMLayoutConstraint(TestCase):
             self.assertEqual(
                 result[f"scale_{scale_side}"][0].get_stride(), list(strides)
             )
+
+    @parametrize("scale_side", ["a", "b"])
+    @parametrize("producer", [False, True])
+    def test_rocm_ambiguous_scale_without_metadata(self, scale_side, producer):
+        graph = torch.fx.Graph()
+        graph.output(())
+        lowering = GraphLowering(torch.fx.GraphModule({}, graph))
+
+        def tensor(name, size, strides):
+            return ir.TensorBox.create(
+                ir.InputBuffer(
+                    name=name,
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"), torch.float32, size, strides
+                    ),
+                )
+            )
+
+        m, n = (512, 80) if scale_side == "a" else (80, 512)
+        a = tensor("a", [m, 512], [512, 1])
+        b = tensor("b", [512, n], [1, 512])
+        scale = tensor("scale", [4, 4], [1, 4])
+        other = tensor("other", [80, 4], [1, 80])
+        # Test the HIP layout policy, not execution of an unsupported DeepSeek GEMM.
+        node = graph.call_function(torch.ops.aten._scaled_mm_v2.default)
+        with (
+            V.set_graph_handler(lowering),
+            mock.patch.object(torch.version, "hip", torch.version.hip or "7.0"),
+        ):
+            if producer:
+                scale = lowering_clone(scale)
+                self.assertIsNone(scale.maybe_get_stride())
+            sa, sb = (scale, other) if scale_side == "a" else (other, scale)
+            ra, rb = (5, 4) if scale_side == "a" else (4, 5)
+            args, _ = scaled_mm_v2_constraint(
+                node, a, b, [sa], [ra], [0], [sb], [rb], [0], None, torch.float32
+            )
+            for constrained, original in ((args[2][0], sa), (args[5][0], sb)):
+                self.assertEqual(constrained.get_size(), original.get_size())
+                self.assertEqual(constrained.get_stride(), [4, 1])
 
     def test_compatible_leading_dimensions(self):
         graph = torch.fx.Graph()
