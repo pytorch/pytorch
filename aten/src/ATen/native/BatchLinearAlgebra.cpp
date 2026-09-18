@@ -3482,9 +3482,10 @@ static void linalg_lstsq_out_info(
 }
 
 static std::string get_default_lstsq_driver(std::optional<std::string_view> driver, const Tensor& input) {
-  // if `driver` is empty, we set driver_str to "gels" if working with CUDA tensors,
+  // if `driver` is empty, we set driver_str to "gels" if working with CUDA or XPU tensors,
   // otherwise to "gelsy" driver.
   std::string driver_str;
+  const bool is_cuda_or_xpu = input.is_cuda() || input.is_xpu();
   // check whether the user provided name is a valid driver name
   if (driver.has_value()) {
     driver_str = std::string(driver.value());
@@ -3494,11 +3495,12 @@ static std::string get_default_lstsq_driver(std::optional<std::string_view> driv
     static std::unordered_set<std::string_view> allowed_drivers = {
       "gels", "gelsy", "gelsd", "gelss"
     };
-    // CUDA supports only the 'gels' driver; CPU and MPS support all four.
-    if (input.is_cuda()) {
+    // CUDA and XPU support only the 'gels' driver; CPU and MPS support all four.
+    if (is_cuda_or_xpu) {
       TORCH_CHECK(
         driver_str == "gels",
-        "torch.linalg.lstsq: `driver` other than `gels` is not supported on CUDA"
+        "torch.linalg.lstsq: `driver` other than `gels` is not supported on ",
+        input.is_cuda() ? "CUDA" : "XPU"
       );
     } else { // CPU and MPS
       TORCH_CHECK(
@@ -3509,8 +3511,8 @@ static std::string get_default_lstsq_driver(std::optional<std::string_view> driv
     }
   } else {
     // if driver name is not provided, set to default 'gelsy' if on CPU,
-    // or to `gels` if on CUDA.
-    driver_str = input.is_cuda() ? "gels" : "gelsy";
+    // or to `gels` if on CUDA or XPU.
+    driver_str = is_cuda_or_xpu ? "gels" : "gelsy";
   }
   return driver_str;
 }
