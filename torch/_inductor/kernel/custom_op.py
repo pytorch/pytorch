@@ -519,13 +519,6 @@ def autotune_custom_op(
             f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
         )
 
-    from torch._inductor import config
-
-    if config.triton.tlx_mode is not None:
-        from torch._inductor.heuristics.template import tlx
-
-        tlx.maybe_install()
-
     # Convert user input generation functions BEFORE creating choices
     input_gen_fns: dict[int, Callable[[IRNode], torch.Tensor]] = {}
     if user_input_gen_fns:
@@ -543,6 +536,8 @@ def autotune_custom_op(
         input_gen_fns=input_gen_fns if input_gen_fns else None,
         config_patches_list=config_patches_list,
     )
+
+    from torch._inductor import config
 
     if include_fallback:
         # Add the custom op itself as an external choice. This provides a
