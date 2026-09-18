@@ -741,6 +741,26 @@ nvgemm_autotune_cold_cache: bool = (
 # "autotune" makes both variants available to the normal algorithm selector.
 nvgemm_prefetch: str = os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0")
 
+# Enable programmatic dependent launch for the vendored SM100 block-scaled
+# NVGEMM kernel. The kernel waits only on the dynamic activation operand, so
+# the static weight and its scale factors can be loaded while the preceding
+# kernel is still completing.
+nvgemm_pdl: bool = os.environ.get("TORCHINDUCTOR_NVGEMM_PDL", "0") == "1"
+
+# Wait at the common kernel prologue before any operand loads, matching the
+# conservative FlashInfer PDL policy.  When disabled, the kernel may preload
+# the static operand before waiting on the dynamic activation.
+nvgemm_pdl_wait_before_loads: bool = (
+    os.environ.get("TORCHINDUCTOR_NVGEMM_PDL_WAIT_BEFORE_LOADS", "0") == "1"
+)
+
+# K tile after which the input-loading warp releases the next PDL grid. Zero
+# maximizes overlap; -1 defers release until all input tiles are issued; -2
+# mirrors FlashInfer and emits the release at the common kernel tail.
+nvgemm_pdl_release_k: int = int(
+    os.environ.get("TORCHINDUCTOR_NVGEMM_PDL_RELEASE_K", "0")
+)
+
 
 # Triton conv templates show wins on ROCm; on CUDA, profiling shows no gains on H100.
 _conv_default_backends = "ATEN,TRITON" if torch.version.hip else "ATEN"
