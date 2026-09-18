@@ -8,8 +8,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fsspec.core import url_to_fs
-
 from torch.distributed.checkpoint._extension import StreamTransformExtension
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
@@ -27,6 +25,18 @@ __all__ = [
     "FsspecWriter",
     "FsspecReader",
 ]
+
+
+def _url_to_fs(path: str | os.PathLike, **kwargs):
+    try:
+        from fsspec.core import url_to_fs
+    except ModuleNotFoundError as exc:
+        if exc.name != "fsspec":
+            raise
+        msg = "FsspecReader/FsspecWriter require fsspec. Install it with `pip install fsspec`."
+        raise ModuleNotFoundError(msg) from exc
+
+    return url_to_fs(path, **kwargs)
 
 
 class FileSystem(FileSystemBase):
@@ -59,7 +69,7 @@ class FileSystem(FileSystemBase):
         return os.path.join(path, suffix)
 
     def init_path(self, path: str | os.PathLike, **kwargs) -> str | os.PathLike:
-        self.fs, _ = url_to_fs(path, **kwargs)
+        self.fs, _ = _url_to_fs(path, **kwargs)
         return path
 
     def rename(self, path: str | os.PathLike, new_path: str | os.PathLike) -> None:
@@ -74,7 +84,7 @@ class FileSystem(FileSystemBase):
             return False
 
         try:
-            url_to_fs(checkpoint_id)
+            _url_to_fs(checkpoint_id)
         except ValueError:
             return False
 
@@ -152,6 +162,10 @@ class FsspecWriter(FileSystemWriter):
 
 
 class FsspecReader(FileSystemReader):
+    """
+    Basic implementation of StorageReader using fsspec.
+    """
+
     def __init__(self, path: str | os.PathLike, **kwargs) -> None:
         super().__init__(path)
         self.fs = FileSystem()
