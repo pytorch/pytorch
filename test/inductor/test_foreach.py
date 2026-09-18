@@ -1452,6 +1452,49 @@ class ForeachTests(TestCase):
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
 
+    def test_foreach_div_inplace_complex(self):
+        def fn(tensors):
+            torch.foreach.div_(tensors, 1j)
+
+        a_eager = [torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)]
+        a_compiled = [torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)]
+
+        fn(a_eager)
+        torch.compile(fn)(a_compiled)
+
+        self.assertEqual(a_eager, a_compiled)
+
+    def test_foreach_div_inplace_complex_list(self):
+        def fn(tensors, divisors):
+            torch.foreach.div_(tensors, divisors)
+
+        t_eager = [torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)]
+        t_compiled = [torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64)]
+        d = [torch.tensor([2.0, 2.0], dtype=torch.complex64)]
+
+        fn(t_eager, d)
+        torch.compile(fn)(t_compiled, d)
+
+        self.assertEqual(t_eager, t_compiled)
+
+    def test_foreach_add_inplace_complex_sgd(self):
+        p_eager = torch.nn.Parameter(
+            torch.complex(torch.randn(3, 2), torch.randn(3, 2))
+        )
+        p_compiled = torch.nn.Parameter(p_eager.clone().detach())
+
+        opt_eager = torch.optim.SGD([p_eager], lr=0.1, foreach=True)
+        opt_compiled = torch.optim.SGD([p_compiled], lr=0.1, foreach=True)
+
+        p_eager.grad = torch.ones_like(p_eager)
+        p_compiled.grad = torch.ones_like(p_compiled)
+
+        opt_eager.step()
+        torch.compile(opt_compiled.step)()
+
+        self.assertEqual(p_eager, p_compiled)
+
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
