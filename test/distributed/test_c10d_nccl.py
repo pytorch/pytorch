@@ -772,11 +772,10 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         x = torch.empty((1,), device=device)
         work = c10d.all_reduce(x, async_op=True)
 
-        # Wait for non-0 ranks to garbage collect Work -- this is the latest
-        # point where extra CUDA context can be created
-        if self.rank == 0:
-            time.sleep(5)
         del work
+        # Wait for every rank to delete Work without touching another CUDA context.
+        store = c10d.distributed_c10d._get_default_store()
+        store.barrier("work_deleted", self.world_size)
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         nprocs = len(processes)
@@ -882,9 +881,8 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         c10d.reduce_scatter_single(x, y)
         c10d.barrier()
 
-        # Wait a bit for remote processes to touch my device
-        if self.rank == 0:
-            time.sleep(5)
+        # Wait for every rank to finish the operations without touching CUDA.
+        store.barrier("sync_ops_done", self.world_size)
 
         handle = pynvml.nvmlDeviceGetHandleByIndex(self.rank)
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
