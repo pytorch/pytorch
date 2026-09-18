@@ -1652,6 +1652,9 @@ if __name__ == "__main__":
     allocator_lib = ctypes.CDLL(dummy_allocator)
     called_dummy_alloc = ctypes.c_int.in_dll(allocator_lib, "called_dummy_alloc")
     called_dummy_free = ctypes.c_int.in_dll(allocator_lib, "called_dummy_free")
+    # mem_get_info() must still work while the pluggable allocator is active.
+    _, _ = torch.xpu.mem_get_info()
+    _, _ = torch.accelerator.get_memory_info()
     print(called_dummy_alloc.value, called_dummy_free.value)
 """
         rc = check_output(test_script).splitlines()[-1]
