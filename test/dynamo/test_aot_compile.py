@@ -4001,6 +4001,32 @@ from user code:
         self.assertTrue(hints[0].startswith("For [0]: "), hints[0])
         self.assertIn("missing from the scope rebuilt from the artifact", hints[0])
 
+    def test_no_match_report_resolves_no_forward_for_an_ordinary_mismatch(self):
+        # The gate sits under the missing-global branch: a count, no hint to read.
+        x = torch.randn(4, 8)
+        data = self._two_input_global_guard_artifact(x)
+        keyless: dict[str, object] = {
+            "__builtins__": builtins,
+            "GLOBAL_POOLING_CONFIG": {},
+        }
+        loaded = AOTCompiledModel.deserialize(
+            GlobalConfigModule(), data, guard_globals=keyless
+        )
+        results = loaded.compiled_results[:1]
+        self.assertIs(results[0]._guard_scope, _GuardScope.SUPPLIED)
+        resolve = patch(
+            "torch._dynamo.aot_compile._resolve_guard_scope", wraps=_resolve_guard_scope
+        )
+        with resolve as resolves, self.assertRaises(RuntimeError) as ctx:
+            AOTCompiledModel(loaded.model, results)(x)
+        resolves.assert_not_called()
+        lines = str(ctx.exception).splitlines()
+        self.assertEqual(
+            lines[1], "  [0] KeyError on G['GLOBAL_POOLING_CONFIG']['pooling']"
+        )
+        hints = [line for line in lines if line.startswith("For [")]
+        self.assertEqual(hints, [], lines)
+
     def test_no_match_report_resolves_forward_at_the_first_supplied_entry(self):
         # The gate is the first SUPPLIED entry, not index 0: [0] here is CAPTURED.
         x = torch.randn(4, 8)
