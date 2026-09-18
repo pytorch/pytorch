@@ -704,13 +704,32 @@ class FakeTensorConverter:
 
 @functools.cache
 def init_gpu_context(device: torch.device) -> None:
-    # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    if torch.accelerator.current_accelerator(True) == device.type:
-        (
-            torch.empty(1, device=device)
-            if torch.version.hip is None
-            else torch.zeros(1, device=device)
-        )
+    # Backward will error with FakeTensors on an accelerator if no real tensors
+    # have been initialized on it first. Self-guards on the current accelerator,
+    # so any other device type (cpu and meta included) is a no-op. The
+    # allocation must be REAL: callers may hold the meta TLS include set
+    # (in_kernel_invocation_manager), under which a plain torch.empty would
+    # hit the meta kernel instead of the real device, and no_dispatch() alone
+    # does not clear that include set, so clear it explicitly around the
+    # allocation, keeping the key guard state intact.
+    # NB: only the *current* accelerator warms up. getAccelerator() prefers a
+    # registered PrivateUse1 backend and runtime MTIA over compile-time
+    # backends, so on builds where a higher-precedence accelerator is present,
+    # cuda/xpu FakeTensors do not warm up here.
+    # Cached contract: the warmup decision is derived from the current
+    # accelerator at first call and is NOT invalidated by later backend
+    # registration. Registering (without renaming) a PrivateUse1 backend after
+    # a generic-name privateuse1 FakeTensor was already built keeps a stale
+    # no-warmup entry for that device; late registration is unsupported here.
+    acc = torch.accelerator.current_accelerator(True)
+    if acc is not None and acc.type == device.type:
+        with no_dispatch(), torch._C._PreserveDispatchKeyGuard():
+            torch._C._set_meta_in_tls_dispatch_include(False)
+            (
+                torch.empty(1, device=device)
+                if torch.version.hip is None
+                else torch.zeros(1, device=device)
+            )
 
 
 @contextlib.contextmanager
@@ -931,8 +950,16 @@ class FakeTensor(Tensor):
 
     @staticmethod
     def _normalize_fake_device(device: torch.device) -> torch.device:
-        """Normalize device by initializing GPU context and setting device index."""
-        if device.type in ("cuda", "xpu"):
+        """Normalize device by initializing the accelerator context and index."""
+        # Self-guards on the current accelerator, so no device-type whitelist is
+        # needed here and PrivateUse1 backends are covered. The
+        # only_lift_cpu_tensors TLS gate (set by FakeTensorMode.__enter__ when
+        # avoid_device_init is True: cpu-only machines, and Apple silicon,
+        # whose avoid_device_init does not consult mps) forbids materializing
+        # on device, so the warmup is skipped there. The gate is checked at
+        # this call site, NOT inside init_gpu_context, so a gate-driven skip
+        # is never cached: later calls with the gate off still warm up.
+        if not torch._C._only_lift_cpu_tensors():
             init_gpu_context(device)
 
         if _is_indexed_device_type(device.type) and device.index is None:
