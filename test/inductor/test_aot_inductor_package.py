@@ -224,8 +224,8 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     def test_int64_floor_divide_tensor_constant_divisor(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA or XPU")
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
