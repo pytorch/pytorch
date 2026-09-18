@@ -736,6 +736,9 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        # [device-as-parameter] the single coor::current_device_index observation
+        # for this graph, mirroring _current_device_edge's node cache on the tracer.
+        self.coor_current_device_index_var: VariableTracker | None = None
         # List of TensorVariables that are leaf tensors created in-graph
         # (e.g., nn.Parameter via tracable_create_parameter). These need to be
         # tracked separately from input_source_to_var for backward() auto-detection.
