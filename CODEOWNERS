@@ -133,6 +133,8 @@
 # /test/expect/TestSparseMeta.test_print_meta_SparseCOO_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSC_float64.expect
 # /test/expect/TestSparseMeta.test_print_meta_SparseCSR_float64.expect
+# /test/expect/TestSparseXPU.test_print_coalesced_xpu_float64.expect
+# /test/expect/TestSparseXPU.test_print_uncoalesced_xpu_float64.expect
 /test/test_sparse.py @amjames @pearu @nikitaved
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
 # /test/test_sparse_semi_structured.py

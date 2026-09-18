@@ -930,7 +930,7 @@ class TestFFT(TestCase):
                             self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 10)  # default is cuda:0
                         self.assertEqual(torch.backends.cuda.cufft_plan_cache.max_size, 11)  # default is cuda:1
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     @dtypes(torch.cfloat, torch.cdouble)
     def test_cufft_context(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/109448
@@ -946,7 +946,7 @@ class TestFFT(TestCase):
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     @largeTensorTest("18GB")
     def test_fft_conjugate_symmetry_fill_int64_indexing(self, device):
         # The CUDA conjugate-symmetry fill uses 32-bit index math when numel and
@@ -1621,7 +1621,7 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(1, 1), i_single, atol=1e-6, rtol=0, exact_dtype=True)
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyCUDA
     @requires_mkl
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input
@@ -1690,7 +1690,7 @@ for doc_test in FFTDocTestFinder().find(torch.fft, globs=dict(torch=torch)):
     generate_doc_test(doc_test)
 
 
-instantiate_device_type_tests(TestFFT, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestFFT, globals())
 instantiate_device_type_tests(TestFFTDocExamples, globals(), only_for='cpu')
 
 if __name__ == '__main__':
