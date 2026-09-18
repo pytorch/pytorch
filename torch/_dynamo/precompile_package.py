@@ -1083,13 +1083,14 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
-# Guards that pin an input's SHAPE, VALUE or KIND, never policy-dropped even
-# when they held identically across every captured variant. A drop is licensed
-# by "it discriminated nothing", but with a single example nothing CAN
-# discriminate, and what would disappear is the check that the runtime input
-# looks like the captured one at all. A dropped shape guard crashes inside a
-# kernel on inductor and can quietly miscompute on eager; a dropped value guard
-# serves the captured branch to every other value with correct-looking numerics.
+# Guards that pin an input's SHAPE, VALUE or KIND, or ambient state the graph
+# was traced under, never policy-dropped even when they held identically across
+# every captured variant. A drop is licensed by "it discriminated nothing", but
+# with a single example nothing CAN discriminate, and what would disappear is
+# the check that the runtime input looks like the captured one at all. A dropped
+# shape guard crashes inside a kernel on inductor and can quietly miscompute on
+# eager; a dropped value guard serves the captured branch to every other value
+# with correct-looking numerics.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
         "TENSOR_MATCH",
@@ -1115,9 +1116,10 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # reference-type opaque object.
         "TYPE_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
-        # The graph specialized on utils_device.CURRENT_DEVICE: captured under
-        # the default None and served under set_default_device("cuda"), it
-        # returns CPU tensors with no refusal.
+        # Ambient state (installed on GlobalStateSource, not an input): the
+        # graph specialized on utils_device.CURRENT_DEVICE; captured under the
+        # default None and served under set_default_device("cuda"), it returns
+        # CPU tensors with no refusal.
         "DEFAULT_DEVICE",
         # Membership, key-set, length and iterator-position facts, each a branch
         # the graph specialized on. A module-owned dict (self.opts = {}) is
@@ -1136,9 +1138,10 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "SET_CONTAINS",
         "SET_NOT_CONTAINS",
         "TUPLE_ITERATOR_LEN",
-        # A SEQUENCE_LENGTH on a module's hook dicts when
-        # skip_nnmodule_hook_guards is off, and nothing under the default: so
-        # either there is nothing to drop, or what there is pins a value.
+        # Installed on a module's empty hook dicts under every config; its leaf,
+        # a SEQUENCE_LENGTH on the dict, exists only when
+        # skip_nnmodule_hook_guards is off. Never dropped either way: with the
+        # leaf it pins a length, and without one dropping the entry buys nothing.
         "EMPTY_NN_MODULE_HOOKS_DICT",
         # Pins a folded torch._C._is_cow_tensor branch. Kept, a capture that
         # folded one fails at serialization with the builder's own error (the
