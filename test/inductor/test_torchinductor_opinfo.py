@@ -1322,7 +1322,8 @@ class TestInductorOpInfo(TestCase):
 
         torch._dynamo.reset()
         with torch.no_grad():
-            torch.accelerator.empty_cache()
+            if device_type != "cpu":
+                torch.accelerator.empty_cache()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
