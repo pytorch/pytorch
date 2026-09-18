@@ -30,6 +30,17 @@ OpType = Union["torch._ops.HigherOrderOperator", "torch._ops.OpOverload"]
 
 _EffectType = EffectType
 
+# Effectful ops that are still safe to serve from a compiled artifact. An op
+# qualifies only if its observable behavior is a pure function of its
+# graph-visible arguments, so that registering it effectful means just "do not
+# DCE or reorder me" -- anything it branches on is then an ordinary node arg and
+# lands in the FX graph hash. _linalg_check_errors qualifies (reads the info
+# tensor plus constant api_name/is_matrix, then returns or raises); aten::_print
+# does not (real I/O), nor does higher_order::call_torchbind (opaque state).
+_CACHEABLE_EFFECTFUL_OPS: set[str] = {
+    "aten::_linalg_check_errors",
+}
+
 
 def _get_op_qualname(op: _op_identifier) -> str:
     """Convert an op identifier to a qualified string key."""
@@ -43,6 +54,15 @@ def _get_op_qualname(op: _op_identifier) -> str:
         return op
 
     raise ValueError(f"Invalid operator input {op}")
+
+
+def is_cacheable_effectful_op(op: Any) -> bool:
+    """Return whether an effectful operator wrapped in with_effects is safe to cache."""
+    try:
+        qualname = _get_op_qualname(op)
+        return qualname in _CACHEABLE_EFFECTFUL_OPS
+    except (ValueError, AttributeError):
+        return False
 
 
 def _register_effectful_op(
