@@ -48,9 +48,10 @@ def _pre_check_accepts(entry):
     # types: a second implementation of them, so a control written on it does not
     # call the filter under test. Not the whole pre-check, which raises rather
     # than returning a verdict and which also refuses a TYPE_MATCH or
-    # BUILTIN_MATCH whose guard carries _unserializable (a local-scope type) --
-    # harmless in both uses here, where the TYPE_MATCHes are on global types or
-    # dropped wholesale.
+    # BUILTIN_MATCH whose guard carries _unserializable (a local-scope type).
+    # Harmless in the three controls here: the pytree test's TYPE_MATCHes are on
+    # global types, drop_type_match drops them all, and drop_local_type_match
+    # itself removes the local-scope ones, the only ones that carry it.
     unsupported = CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES
     return entry.guard_type in ("TYPE_MATCH", "BUILTIN_MATCH") or (
         entry.guard_type not in unsupported
@@ -123,9 +124,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # covers.
             ("BUILTIN_MATCH", ("ID_MATCH",)),
             ("TYPE_MATCH", ("ID_MATCH",)),
-            # The unsaved build's DICT_VERSION on a DICT_KEYS_MATCH; the save
-            # build serializes the keys-match.
-            ("DICT_KEYS_MATCH", ("DICT_VERSION",)),
         ]
         entries = [_entry(GlobalSource("g"), None, t, derived=d) for t, d in rows]
         keep = precompile_package.default_guard_filter_fn(entries)
