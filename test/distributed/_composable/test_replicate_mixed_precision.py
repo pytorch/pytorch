@@ -14,6 +14,7 @@ from torch.distributed.fsdp import MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -23,12 +24,12 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTestContinuous,
     FSDPTestMultiThread,
-    get_devtype,
     MLP,
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     MI300_ARCH,
     run_tests,
     skipIfRocmArch,
@@ -37,20 +38,21 @@ from torch.testing._internal.common_utils import (
 )
 
 
-device_type = torch.device(get_devtype())
-
-
 class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     world_size = 2
 
     def _init_models_and_optims(
         self,
         param_dtype: torch.dtype | None,
         reduce_dtype: torch.dtype | None,
+        *,
+        device: str,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
-        ref_model = copy.deepcopy(model).to(device_type)
+        ref_model = copy.deepcopy(model).to(device)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         mp_policy = MixedPrecisionPolicy(
@@ -69,21 +71,26 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
-    def test_compute_dtype(self):
+    def test_compute_dtype(self, device):
+        device = torch.device(device).type
         self.run_subtests(
             {
                 "param_dtype": [torch.bfloat16, torch.float16],
             },
             self._test_compute_dtype,
+            device=device,
         )
 
     def _test_compute_dtype(
         self,
         param_dtype: torch.dtype,
+        *,
+        device: str,
     ):
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
             reduce_dtype=None,
+            device=device,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_single
@@ -99,7 +106,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
         )
 
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -138,7 +145,9 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
-    def test_input_jvp(self):
+    def test_input_jvp(self, device):
+        device = torch.device(device).type
+
         class ThreeInputMLP(nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
@@ -166,7 +175,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             cast_forward_inputs=True,
         )
         mesh = init_device_mesh(
-            device_type.type,
+            torch.device(device).type,
             mesh_shape=(self.world_size,),
             mesh_dim_names=("replicate",),
         )
@@ -174,7 +183,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
 
         def init_model(model_cls):
             model = model_cls(dim)
-            ref_model = copy.deepcopy(model).to(device_type.type)
+            ref_model = copy.deepcopy(model).to(device)
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-3)
             ref_model_bf16 = copy.deepcopy(ref_model).to(torch.bfloat16)
             replicate_fn(model.in_proj)
@@ -201,9 +210,9 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
 
         model, optim, ref_model, ref_optim, ref_model_bf16 = init_model(ThreeInputMLP)
 
-        z_batch = torch.randn((6, dim), device=device_type.type)
-        t_batch = torch.rand((6, 1), device=device_type.type)
-        r_batch = t_batch * torch.rand((6, 1), device=device_type.type)
+        z_batch = torch.randn((6, dim), device=device)
+        t_batch = torch.rand((6, 1), device=device)
+        r_batch = t_batch * torch.rand((6, 1), device=device)
         fsdp_vmap_out = torch.vmap(model)(z_batch, t_batch, r_batch)
         ref_vmap_out = torch.vmap(
             lambda z_, t_, r_: ref_model_bf16(
@@ -243,10 +252,10 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             torch.manual_seed(42 + self.rank * 10 + iter_idx)
-            x = torch.randn((4, dim), device=device_type.type)
-            e = torch.randn((4, dim), device=device_type.type)
-            t = torch.rand((4, 1), device=device_type.type)
-            r = t * torch.rand((4, 1), device=device_type.type)
+            x = torch.randn((4, dim), device=device)
+            e = torch.randn((4, dim), device=device)
+            t = torch.rand((4, 1), device=device)
+            r = t * torch.rand((4, 1), device=device)
             # Require input grads to exercise backward through the JVP primal.
             z = ((1 - t) * x + t * e).detach().requires_grad_()
             t = t.detach().requires_grad_()
@@ -297,15 +306,17 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
-    def test_reduce_dtype(self):
-        self._test_reduce_dtype_fp32_reduce()
-        self._test_reduce_dtype_bf16_reduce()
+    def test_reduce_dtype(self, device):
+        device = torch.device(device).type
+        self._test_reduce_dtype_fp32_reduce(device=device)
+        self._test_reduce_dtype_bf16_reduce(device=device)
 
-    def _test_reduce_dtype_fp32_reduce(self):
+    def _test_reduce_dtype_fp32_reduce(self, *, device: str):
         param_dtype, reduce_dtype = torch.bfloat16, torch.float32
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
+            device=device,
         )
         ref_model_bf16 = copy.deepcopy(ref_model).to(param_dtype)
         orig_reduce_scatter = dist.reduce_scatter_single
@@ -317,7 +328,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -346,13 +357,12 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
 
-    def _test_reduce_dtype_bf16_reduce(
-        self,
-    ):
+    def _test_reduce_dtype_bf16_reduce(self, *, device: str):
         param_dtype, reduce_dtype = torch.float32, torch.bfloat16
         ref_model, ref_optim, model, optim = self._init_models_and_optims(
             param_dtype=param_dtype,
             reduce_dtype=reduce_dtype,
+            device=device,
         )
         group = dist.distributed_c10d._get_default_group()
         orig_reduce_scatter = dist.reduce_scatter_single
@@ -364,7 +374,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((4, 16), device=device_type.type, dtype=param_dtype)
+        inp = torch.randn((4, 16), device=device, dtype=param_dtype)
         for iter_idx in range(10):
             optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             fsdp_loss = model(inp).sum()
@@ -392,18 +402,22 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
-    def test_grad_acc_with_reduce_dtype(self):
+    def test_grad_acc_with_reduce_dtype(self, device):
         """
         Tests that gradient accumulation without reduce-scatter when using
         bf16 compute and fp32 reduction accumulates the unsharded gradients in
         fp32.
         """
+        device = torch.device(device).type
         self.run_subtests(
             {"reshard_after_forward": [True, False]},
             self._test_grad_acc_with_reduce_dtype,
+            device=device,
         )
 
-    def _test_grad_acc_with_reduce_dtype(self, reshard_after_forward: bool):
+    def _test_grad_acc_with_reduce_dtype(
+        self, reshard_after_forward: bool, *, device: str
+    ):
         torch.manual_seed(42)
         param_dtype, reduce_dtype = (torch.bfloat16, torch.float32)
         mp_policy = MixedPrecisionPolicy(
@@ -413,7 +427,7 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
         # To emulate the mixed precision implementation where forward/backward
         # compute use bf16 and optimizer uses fp32, we maintain both an fp32
         # and a bf16 copy of the reference model
-        ref_model = copy.deepcopy(model).to(device_type)
+        ref_model = copy.deepcopy(model).to(device)
         ref_model_compute = copy.deepcopy(ref_model).to(param_dtype)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         for mlp in model:
@@ -429,7 +443,6 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         torch.manual_seed(42 + self.rank + 1)
-        device = device_type
         # Train on the same input to avoid loss explosion
         num_microbatches = 4
         inp = torch.randn((2 * num_microbatches, 16), device=device, dtype=param_dtype)
@@ -483,13 +496,16 @@ class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
 
 
 class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return 2
 
     @skip_if_lt_x_gpu(1)
-    def test_float16_on_one_submodule(self):
-        x = torch.zeros(2, 100, device=device_type)
+    def test_float16_on_one_submodule(self, device):
+        device = torch.device(device).type
+        x = torch.zeros(2, 100, device=device)
 
         # Subtest 1: use fp16 on the second child submodule -- does not require
         # any additional casting logic
@@ -497,7 +513,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         model = SaveForwardInputsModel(
             forward_inputs,
             cast_forward_inputs=False,
-        ).to(device_type)
+        ).to(device)
         replicate(model.c2, mp_policy=MixedPrecisionPolicy(param_dtype=torch.float16))
         replicate(model)
         model(x).sum().backward()
@@ -510,7 +526,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=True
-        ).to(device_type)
+        ).to(device)
         replicate(
             model.c2,
             mp_policy=MixedPrecisionPolicy(
@@ -528,7 +544,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         forward_inputs: dict[nn.Module, torch.Tensor] = {}
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs, cast_forward_inputs=False
-        ).to(device_type)
+        ).to(device)
         replicate(
             model.c1,
             mp_policy=MixedPrecisionPolicy(
@@ -542,13 +558,17 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         self.assertEqual(forward_inputs[model.c2].dtype, torch.float32)
 
     @skip_if_lt_x_gpu(1)
-    def test_submodules_with_external_inputs(self):
+    def test_submodules_with_external_inputs(self, device):
+        device = torch.device(device).type
         self.run_subtests(
             {"enable_submodule_cast": [False, True]},
             self._test_submodules_with_external_inputs,
+            device=device,
         )
 
-    def _test_submodules_with_external_inputs(self, enable_submodule_cast: bool):
+    def _test_submodules_with_external_inputs(
+        self, enable_submodule_cast: bool, *, device: str
+    ):
         class ToyModule(nn.Module):
             def __init__(self, forward_inputs: dict[str, torch.Tensor]) -> None:
                 super().__init__()
@@ -570,13 +590,13 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.forward_inputs["model_input_x"] = x
                 y = torch.ones(
-                    2, 100, device=device_type.type, dtype=torch.float32
+                    2, 100, device=device, dtype=torch.float32
                 )  # external input
                 return self.l2(self.l1(x), y)
 
         forward_inputs: dict[str, torch.Tensor] = {}
-        model = ToyModel(forward_inputs).to(device_type)
-        x = torch.zeros(2, 100, device=device_type.type, dtype=torch.float32)
+        model = ToyModel(forward_inputs).to(device)
+        x = torch.zeros(2, 100, device=device, dtype=torch.float32)
         replicate(
             model.l2,
             mp_policy=MixedPrecisionPolicy(
@@ -597,17 +617,19 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
-    def test_norm_modules_bf16(self):
+    def test_norm_modules_bf16(self, device):
+        device = torch.device(device).type
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
-        self._test_norm_modules(mp_policy)
+        self._test_norm_modules(mp_policy, device=device)
 
     @skip_if_lt_x_gpu(1)
     @skipIfRocmArch(MI300_ARCH)  # https://github.com/pytorch/pytorch/issues/182988
-    def test_norm_modules_fp16(self):
+    def test_norm_modules_fp16(self, device):
+        device = torch.device(device).type
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.float16)
-        self._test_norm_modules(mp_policy)
+        self._test_norm_modules(mp_policy, device=device)
 
-    def _test_norm_modules(self, mp_policy: MixedPrecisionPolicy):
+    def _test_norm_modules(self, mp_policy: MixedPrecisionPolicy, *, device: str):
         def inner(model: nn.Module, x: torch.Tensor):
             # Run forward and backward to check for no type mismatch errors
             z = model(x)
@@ -618,27 +640,27 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         model = nn.Sequential(nn.Linear(32, 32), nn.LayerNorm(32), nn.Linear(32, 32))
         for module in (model[0], model[1], model[2], model):
             replicate(module, mp_policy=mp_policy)
-        inner(model, torch.randn((4, 32)))
+        inner(model, torch.randn((4, 32), device=device))
 
         # Batch norm 1D
         model = nn.Sequential(nn.Linear(32, 32), nn.BatchNorm1d(32), nn.Linear(32, 32))
         for module in (model[0], model[1], model[2], model):
             replicate(module, mp_policy=mp_policy)
-        inner(model, torch.randn((4, 32)))
+        inner(model, torch.randn((4, 32), device=device))
 
         # Batch norm 2D: error in backward from buffer dtype mismatch
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
         for module in (model[0], model[1], model[2], model):
             replicate(module, mp_policy=mp_policy)
         if TEST_HPU:
-            inner(model, torch.randn((3, 1, 9, 9)))
+            inner(model, torch.randn((3, 1, 9, 9), device=device))
         else:
             with self.assertRaisesRegex(
                 RuntimeError,
                 "Expected running_mean to have type",  # Error not seen on HPUs and hence it can be skipped
             ):
                 # Errors in batch norm 2D backward
-                inner(model, torch.randn((3, 1, 9, 9)))
+                inner(model, torch.randn((3, 1, 9, 9), device=device))
 
         # Batch norm 2D: cast buffers down to lower precision
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
@@ -647,7 +669,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         # Casting batch norm buffers to the lower precision allows backward
         model[1].running_mean = model[1].running_mean.to(mp_policy.param_dtype)
         model[1].running_var = model[1].running_var.to(mp_policy.param_dtype)
-        inner(model, torch.randn((3, 1, 9, 9)))
+        inner(model, torch.randn((3, 1, 9, 9), device=device))
 
         # Batch norm 2D: use special mixed precision policy
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
@@ -655,16 +677,17 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         replicate(model[1], mp_policy=bn_mp_policy)
         for module in (model[0], model[2], model):
             replicate(module, mp_policy=mp_policy)
-        inner(model, torch.randn((3, 1, 9, 9)))
+        inner(model, torch.randn((3, 1, 9, 9), device=device))
 
     @skip_if_lt_x_gpu(1)
-    def test_clamp_reduce_dtype(self):
+    def test_clamp_reduce_dtype(self, device):
+        device = torch.device(device).type
         # Initialize the model directly in bf16
         init_dtype = torch.bfloat16
         model = nn.Sequential(
             nn.Linear(32, 32, dtype=init_dtype),
             nn.Linear(32, 32, dtype=init_dtype),
-        ).to(device_type.type)
+        ).to(device)
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
         )
@@ -686,12 +709,14 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
         with patch_reduce_scatter(reduce_scatter):
-            inp = torch.randn((4, 32), device=device_type.type)
+            inp = torch.randn((4, 32), device=device)
             loss = model(inp).sum()
             loss.backward()
 
     @skip_if_lt_x_gpu(1)
-    def test_dataclass_input(self):
+    def test_dataclass_input(self, device):
+        device = torch.device(device).type
+
         @dataclasses.dataclass
         class Input:
             x: torch.Tensor
@@ -707,13 +732,20 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
         mp_policy = MixedPrecisionPolicy(
             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
         )
-        model = Model()
-        inp = Input(torch.randn(2, 10).cuda())
+        model = Model().to(device)
+        inp = Input(torch.randn(2, 10, device=device))
 
         replicate(model, mp_policy=mp_policy)
         loss = model(inp).sum()
         loss.backward()
 
+
+instantiate_device_type_tests(
+    TestReplicateMixedPrecisionTraining, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestReplicateMixedPrecisionCasts, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
