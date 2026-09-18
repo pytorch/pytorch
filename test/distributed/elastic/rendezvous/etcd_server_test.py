@@ -8,10 +8,11 @@
 import os
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
-from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer, find_free_port
 
 
 if os.getenv("CIRCLECI"):
@@ -20,6 +21,44 @@ if os.getenv("CIRCLECI"):
 
 
 class EtcdServerTest(unittest.TestCase):
+    def test_find_free_port_retries_after_socket_creation_failure(self):
+        addrs = [(2, 1, 6, "", None), (10, 1, 6, "", None)]
+        usable_socket = MagicMock()
+
+        with (
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo",
+                return_value=addrs,
+            ),
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.socket",
+                side_effect=[OSError("socket failed"), usable_socket],
+            ) as socket_mock,
+        ):
+            result = find_free_port()
+
+        self.assertIs(result, usable_socket)
+        self.assertEqual(socket_mock.call_count, 2)
+        usable_socket.bind.assert_called_once_with(("localhost", 0))
+        usable_socket.listen.assert_called_once_with(0)
+        usable_socket.close.assert_not_called()
+
+    def test_find_free_port_all_socket_creation_attempts_fail(self):
+        addrs = [(2, 1, 6, "", None), (10, 1, 6, "", None)]
+
+        with (
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.getaddrinfo",
+                return_value=addrs,
+            ),
+            patch(
+                "torch.distributed.elastic.rendezvous.etcd_server.socket.socket",
+                side_effect=[OSError("first failure"), OSError("second failure")],
+            ),
+            self.assertRaisesRegex(RuntimeError, "Failed to create a socket"),
+        ):
+            find_free_port()
+
     def test_etcd_server_start_stop(self):
         server = EtcdServer()
         server.start()
