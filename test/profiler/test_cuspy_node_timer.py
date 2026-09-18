@@ -350,6 +350,9 @@ class TestCuspyNodeTimerCUDA(TestCase):
         # The reported node ids are the capture graph's, not an exec graph's.
         self.assertTrue(set(nodes.tolist()) <= capture_ids | {0})
 
+    # Constructor validation only, so libcupti's version does not matter -- but importing
+    # the observer still needs the bindings and the generated _cupti_stubs.
+    @unittest.skipIf(not TEST_CUPTI, "requires cupti bindings + generated _cupti_stubs")
     def test_source_key_space_rejects_kinds_without_a_source_id(self):
         from cupti.cupti import ActivityKind  # pyrefly: ignore[missing-import]
 
