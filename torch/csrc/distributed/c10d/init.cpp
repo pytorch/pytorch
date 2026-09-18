@@ -820,6 +820,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
             return reducer.update_process_group(std::move(new_process_group));
           },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_manual_finalization_required",
+          &::c10d::Reducer::set_manual_finalization_required,
+          py::arg("required"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_should_finalize_after_backward",
+          &::c10d::Reducer::should_finalize_after_backward,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_finalize_backward_manual",
+          &::c10d::Reducer::finalize_backward_manual,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -1009,7 +1022,19 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)");
+          R"(The factor of the PREMUL_SUM ReduceOp.)")
+      .def(
+          "boxed",
+          [](const ::c10d::ReduceOp& self) {
+            return torch::jit::toPyObject(
+                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return *ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -2157,9 +2182,8 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              if (worldSize.value() == 0) {
-                throw py::value_error("TCPStore world size cannot be 0");
-              }
+              TORCH_CHECK_VALUE(
+                  worldSize.value() != 0, "TCPStore world size cannot be 0");
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2222,9 +2246,7 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            if (!store) {
-              throw py::value_error("store argument cannot be None");
-            }
+            TORCH_CHECK_VALUE(store, "store argument cannot be None");
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -3766,8 +3788,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            throw std::invalid_argument(
-                "Specify either `hostname` or `interface` argument.");
+            TORCH_CHECK_VALUE(
+                false, "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",

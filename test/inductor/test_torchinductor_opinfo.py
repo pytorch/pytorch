@@ -596,9 +596,17 @@ inductor_override_kwargs["xpu"] = {
     "randn": {"assert_equal": False},
     "nn.functional.rrelu": {"check_gradient": False},
     # XPU
+    # Mirrors the CUDA override from #189872; the fp16 backward gap is the
+    # same eager-vs-inductor intermediate-precision difference on XPU.
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
@@ -764,6 +772,20 @@ if TEST_WITH_ROCM:
             ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5},
             # See https://github.com/pytorch/pytorch/pull/186595#issuecomment-4849920339
             ("combinations", f16): {"grad_atol": 5e-4, "grad_rtol": 2e-3},
+            # Sample 6 broadcasts the exponent (10, 1, 5) against the base
+            # (10, 5), so the base gradient contains the reduction
+            #   sum(grad * exponent * base ** (exponent - 1), dim=0).
+            # On ROCm, eager and Triton take separate powf paths (system ROCm
+            # OCML versus Triton's bundled OCML), introducing a small difference
+            # before this reduction. The terms at the failing element strongly
+            # cancel, which makes the result sensitive to the FP32 reduction
+            # tree. Persistent-reduction autotuning can legally select different
+            # XBLOCK layouts, and thus different trees, based on timing. Observed
+            # layouts produce relative errors up to 1.396e-5, just above the
+            # generic 1.3e-5 tolerance, across gfx90a, gfx942, and gfx950.
+            # Keep the forward tolerance unchanged and allow modest headroom only
+            # for gradients. See https://github.com/pytorch/pytorch/issues/165296.
+            ("__rpow__", f32): {"grad_atol": 1.5e-5, "grad_rtol": 2e-5},
         }
     )
 
