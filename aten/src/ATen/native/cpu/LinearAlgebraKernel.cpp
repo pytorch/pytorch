@@ -8,7 +8,36 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/irange.h>
 
+// gcc defaults to -ffp-contract=fast, which fuses the multiply-add in
+// `addr_kernel` even across the rounding `c10::Half`'s operators impose. That
+// drops a rounding step the reference implementations keep, leaving float16 an
+// ulp off on hardware with native fp16. No source-level barrier blocks the
+// fusion -- `beta * self + x` is itself a fusable pair -- so this has to be
+// file-scoped, and float and double give up their fma as a result. clang and
+// MSVC (/fp:strict, see cmake/Codegen.cmake) honour the rounding already.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC optimize("fp-contract=off")
+#endif
+
 namespace at::native { namespace {
+
+// Must mirror whatever the compiler did to the scalar lambda in `addr_kernel`:
+// clang contracts the float and double cases but leaves c10::Half alone, MSVC
+// contracts nothing under /fp:strict, and gcc contracts nothing thanks to the
+// pragma above. This has to be a function rather than an `#if` in the lambda
+// itself: the lambda is an AT_DISPATCH macro argument, and a preprocessor
+// directive inside a macro argument is undefined -- MSVC rejects it outright.
+template <typename T>
+inline Vectorized<T> mul_add(
+    const Vectorized<T>& a,
+    const Vectorized<T>& b,
+    const Vectorized<T>& acc) {
+#if defined(_MSC_VER) || (defined(__GNUC__) && !defined(__clang__))
+  return a * b + acc;
+#else
+  return vec::fmadd(a, b, acc);
+#endif
+}
 
 void addr_kernel(TensorIterator &iter,
                  const Scalar& beta, const Scalar& alpha) {
@@ -75,7 +104,7 @@ void addr_kernel(TensorIterator &iter,
           [=](Vec self_vec,
               Vec vec1_vec,
               Vec vec2_vec) __ubsan_ignore_undefined__ {
-            return beta_vec * self_vec + alpha_vec * vec1_vec * vec2_vec;
+            return mul_add(beta_vec, self_vec, alpha_vec * vec1_vec * vec2_vec);
           }
         );
       }
