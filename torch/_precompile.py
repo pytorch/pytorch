@@ -450,12 +450,14 @@ class Capture:
     capture, and returns what serving the artifact produces (:func:`capture` has
     the ``requires_grad`` and autocast contracts of that served value) -- and the
     artifact is written to the ``artifact_path`` / ``cache_path`` files when the block
-    exits CLEANLY: a block that RAISED writes nothing further (files a :meth:`save`
-    already wrote stay), and a clean exit that never called the capture raises instead
-    of writing. Call :meth:`save` inside the block to
+    exits CLEANLY and an in-block :meth:`save` has not already written it: the files a
+    :meth:`save` wrote stay as they are, whether the block then raised or exited
+    cleanly, and a clean exit that never called the capture raises instead of
+    writing. Call :meth:`save` inside the block to
     checkpoint everything captured so far to those same files without ending the
-    capture. The object is single-shot: the block is entered once, calling outside
-    it is refused, and so is saving -- except to retry a WRITE that failed.
+    capture. The object is single-shot: the block is entered once, and calling,
+    entering, exiting and saving are all refused after it -- saving only until a
+    WRITE that failed has been retried.
     """
 
     def __enter__(self) -> Self:
@@ -534,6 +536,10 @@ class _MakeFxCapture(Capture):
         self._serve_failed = False
         self._write_failed = False
         self._rendered: tuple[str, bytes] | None = None
+        # Paired with _rendered: True once THAT render is on disk, so a clean exit does
+        # not rewrite what an in-block save() already landed. Cleared wherever the render
+        # is, so it can never vouch for bytes that are no longer the ones in hand.
+        self._written = False
 
     def __enter__(self) -> Self:
         # Single-shot in both directions: a nested `with cap:` would deactivate the outer
@@ -548,6 +554,10 @@ class _MakeFxCapture(Capture):
         return self
 
     def __exit__(self, *exc: object) -> None:
+        # Refused like every other door once the block has run: a MANUAL second __exit__
+        # would otherwise write the pair the block that raised deliberately left alone.
+        if self._exited:
+            raise PrecompileError(_SPENT_RETRY if self._write_failed else _SPENT)
         # The capture goes inactive however the block ends, including the nothing-was-captured
         # raise below: a call after the block would trace, lower and serve and write nothing.
         self._entered = False
@@ -558,12 +568,18 @@ class _MakeFxCapture(Capture):
             return
         if self._rendered is None:
             raise self._nothing_captured("inside the `with` block.")
+        # An in-block save() already wrote THIS render, and there is nothing further to
+        # fold in, so the bytes on disk are the ones this would write: rewriting them
+        # would re-enter the two-rename window over a complete pair, and could raise
+        # OSError out of a block whose files are already correct.
+        if self._written:
+            return
         # A write that RAISED (ENOSPC, a read-only directory) leaves the previous pair
         # intact and this render in memory, so it must not strand a finished capture:
         # the flag keeps save() open as a retry of the WRITE, no re-trace needed.
         self._write_failed = True
         _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
-        self._write_failed = False
+        self._write_failed, self._written = False, True
 
     def _nothing_captured(self, how: str) -> PrecompileError:
         """The refusal for a write with no render: the call failed, or never happened."""
@@ -584,9 +600,10 @@ class _MakeFxCapture(Capture):
     def save(self) -> None:
         """Write the captured artifact to disk.
 
-        A make_fx capture records a single call, so there is nothing further to fold in;
-        save() and block exit write the same files. Callable inside the block, and after
-        a block whose WRITE failed -- the exit's or an in-block save()'s -- to retry it.
+        A make_fx capture records a single call, so there is nothing further to fold in:
+        this writes the same files the block exit would, and a clean exit after a save()
+        that SUCCEEDED writes nothing more. Callable inside the block, and after a block
+        whose WRITE failed -- the exit's or an in-block save()'s -- to retry it.
         """
         # Gated on the block being live like __call__ is, EXCEPT after a WRITE that raised,
         # this method's or the exit's: after a block that raised, the render is still here and
@@ -604,7 +621,7 @@ class _MakeFxCapture(Capture):
         # a retry from OUTSIDE the block too: that exception leaves the block unwritten.
         self._write_failed = True
         _write_artifact(self._artifact_path, self._cache_path, *self._rendered)
-        self._write_failed = False
+        self._write_failed, self._written = False, True
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         # Only the block exit writes the files, so a call made outside it would
@@ -649,6 +666,7 @@ class _MakeFxCapture(Capture):
                 self._module._compile(args)
                 python_code = self._module.to_python_code()
                 self._rendered = (python_code, self._module.to_cache_bytes(python_code))
+                self._written = False
             except RuntimeError as e:
                 self._trace_failed = True
                 # Precompile's own refusals are already explained, and one IS a
@@ -690,7 +708,7 @@ class _MakeFxCapture(Capture):
                 # The serve is where the driver's own runtime checks run, so a serve that
                 # raised is a call that did not work: drop the render, or a CAUGHT serve
                 # error would leave the exit writing a pair whose serve never worked.
-                self._serve_failed, self._rendered = True, None
+                self._serve_failed, self._rendered, self._written = True, None, False
                 raise
 
 
@@ -2493,11 +2511,12 @@ def _write_artifact(
     raises, so a Python exception (a full disk, a permission error) leaves the previous
     pair intact. Without hard links the previous source is MOVED aside instead, so an
     interrupt before the undo's probes have run leaves the artifact NAME empty with that
-    source only in the ``.bak``, unreported and one rename from recovered. Which undo runs, and whether it is reported, is read off the DISK, not
-    from flags (the comment on the undo has the reasoning). Process death between the
-    renames is not covered, nor a reader or a second writer racing them: that can leave
-    one source beside the other's cache, which ``load`` refuses on the cache's sha256,
-    and can cost the previous source. The parent directory is fsync'd after, best effort.
+    source only in the ``.bak``, unreported and one rename from recovered. Which undo
+    runs, and whether it is reported, is read off the DISK, not from flags (the comment
+    on the undo has the reasoning). Process death between the renames is not covered, nor
+    a reader or a second writer racing them: that can leave one source beside the other's
+    cache, which ``load`` refuses on the cache's sha256, and can cost the previous source.
+    The parent directory is fsync'd after, best effort.
     """
     written = []
     new_stats: list[os.stat_result] = []
@@ -2603,10 +2622,15 @@ def _write_artifact(
             named = backup if kept else artifact_path
             if probed and not undone and os.path.lexists(named):
                 if kept:
+                    # Reached from both shapes the undo's rename serves -- the previous
+                    # source moved aside (the artifact name is GONE) and this call's source
+                    # renamed in over it -- so the wording names only what holds in both:
+                    # the .bak, and that renaming it back is the recovery.
                     log.warning(
-                        "precompile could not put the previous artifact back at %s; its "
-                        "previous source is kept at %s and the cache at %s does not match "
-                        "that file, so the pair does not load until it is rewritten.",
+                        "precompile could not put the previous artifact back at %s; that "
+                        "previous source is kept at %s, and the pair does not load until "
+                        "that file is moved back over the first path (the cache at %s is "
+                        "the one that matches it).",
                         os.fspath(artifact_path),
                         backup,
                         os.fspath(cache_path),
@@ -2802,10 +2826,11 @@ def capture(
     ``fn`` takes inside the block (keyword arguments are refused) -- the call runs
     for real, is folded into the capture, and returns what serving the artifact
     produces -- and the ``(python_code, cache)`` artifact is written to
-    ``artifact_path`` / ``cache_path`` when the block exits CLEANLY: a block that
-    RAISED writes nothing further -- files an in-block ``cap.save()`` already wrote stay
-    -- and a clean exit that never called the capture raises instead of writing. These names will be exported from
-    ``torch.compiler.precompile``; until then import them from here::
+    ``artifact_path`` / ``cache_path`` when the block exits CLEANLY and an in-block
+    ``cap.save()`` has not already written it: the files such a ``save()`` wrote stay as
+    they are, whether the block then raised or exited cleanly, and a clean exit that
+    never called the capture raises instead of writing. These names will be exported
+    from ``torch.compiler.precompile``; until then import them from here::
 
         from torch._precompile import capture, load
 
