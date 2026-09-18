@@ -272,7 +272,7 @@ def _meta_arg(arg: object) -> object:
     return arg
 
 
-# TODO: Unify with same_tensor_meta in fx_graph_traversal_analysis_helpers.py
+# TODO: Unify with same_tensor_meta in fx_utils.py
 # after resolving non-strided tensor behavior.
 def _same_tensor_metadata(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
     def same_dim(lhs_dim: object, rhs_dim: object) -> bool:

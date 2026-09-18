@@ -19,7 +19,11 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
-from torch._inductor.fx_utils import get_node_storage, is_node_realized
+from torch._inductor.fx_utils import (
+    _same_size_stride_and_storage_offset,
+    get_node_storage,
+    is_node_realized,
+)
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -32,8 +36,6 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
-
-from .fx_graph_traversal_analysis_helpers import _same_size_stride_and_storage_offset
 
 
 log = logging.getLogger(__name__)

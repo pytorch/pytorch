@@ -824,6 +824,51 @@ def get_node_storage(node: torch.fx.Node) -> int | None:
     return get_storage(node.meta["val"])
 
 
+def _same_size_stride_and_storage_offset(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    """Check equal size, stride, and storage offset without adding guards."""
+
+    def same_value(lhs_value, rhs_value) -> bool:
+        return statically_known_true(sym_eq(lhs_value, rhs_value))
+
+    def same_sequence(lhs_values, rhs_values) -> bool:
+        return len(lhs_values) == len(rhs_values) and all(
+            same_value(lhs_value, rhs_value)
+            for lhs_value, rhs_value in zip(lhs_values, rhs_values)
+        )
+
+    return (
+        same_sequence(lhs.size(), rhs.size())
+        and same_sequence(lhs.stride(), rhs.stride())
+        and same_value(lhs.storage_offset(), rhs.storage_offset())
+    )
+
+
+def same_tensor_meta(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    """Check equal tensor metadata without comparing storage identity.
+
+    For strided tensors this compares size, stride, storage offset, dtype, device,
+    layout, and conjugate and negative view bits. For other layouts, only size and
+    the common dtype, device, layout, and view-bit properties are compared.
+    """
+    return (
+        lhs.dtype == rhs.dtype
+        and lhs.device == rhs.device
+        and lhs.layout == rhs.layout
+        and (
+            (
+                lhs.layout == torch.strided
+                and _same_size_stride_and_storage_offset(lhs, rhs)
+            )
+            or (
+                lhs.layout != torch.strided
+                and statically_known_true(sym_eq(lhs.size(), rhs.size()))
+            )
+        )
+        and lhs.is_conj() == rhs.is_conj()
+        and lhs.is_neg() == rhs.is_neg()
+    )
+
+
 def get_fake(x: Any, gm: torch.fx.GraphModule | None) -> Any:
     """Return a fake tensor from the meta values of an input FX node.  If the input node
     is a get_attr node, we attempt to resolve it as a member of gm."""

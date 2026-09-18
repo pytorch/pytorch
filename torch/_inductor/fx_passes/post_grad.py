@@ -28,7 +28,12 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
-from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+from ..fx_utils import (
+    FakeTensorUpdater,
+    get_fake_args_kwargs,
+    get_node_storage,
+    same_tensor_meta,
+)
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -63,10 +68,6 @@ from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
-from .fx_graph_traversal_analysis_helpers import (
-    collect_output_storage,
-    same_tensor_meta,
-)
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
@@ -1313,6 +1314,20 @@ def true_noop(*args, **kwargs):
     return True
 
 
+def _collect_output_storage(
+    graph: torch.fx.Graph,
+) -> OrderedSet[int | None]:
+    output_node = graph.output_node()
+    outputs = output_node.args[0]
+    if not isinstance(outputs, (list, tuple)):
+        outputs = (outputs,)
+    return OrderedSet(
+        get_node_storage(output)
+        for output in outputs
+        if isinstance(output, torch.fx.Node)
+    )
+
+
 def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
@@ -1325,7 +1340,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
         input_storages.add(get_node_storage(node))
 
     output_node = graph.output_node()
-    output_storages = collect_output_storage(graph)
+    output_storages = _collect_output_storage(graph)
 
     for node in graph.nodes:
         if node.target in noop_registry:
@@ -1403,6 +1418,9 @@ _SUPPORTED_DTYPE_CONVERSION_VIEWS = OrderedSet(
 def _replay_view(
     view: torch.fx.Node, old: torch.fx.Node, new: torch.Tensor
 ) -> torch.Tensor:
+    target = view.target
+    if not callable(target):
+        raise AssertionError("expected call_function target")
     args, kwargs = pytree.tree_map(
         lambda value: (
             new
@@ -1417,7 +1435,7 @@ def _replay_view(
     if fake_mode is None:
         raise AssertionError("expected FakeTensor inputs")
     with fake_mode:
-        return view.target(*args, **kwargs)
+        return target(*args, **kwargs)
 
 
 def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
@@ -1434,7 +1452,7 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
     if graph.find_nodes(op="call_function", target=aten.set_.default):
         return
 
-    output_storages = collect_output_storage(graph)
+    output_storages = _collect_output_storage(graph)
 
     # Index retained base conversions by
     # (input storage ID, source dtype, destination dtype).
@@ -1466,7 +1484,7 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
             continue
         key = (source_storage, source_val.dtype, conversion_val.dtype)
         base_conversions = base_conversions_by_storage[key]
-        # find a previous conversion that this converson can reuse.
+        # Find a previous conversion that this conversion can reuse.
         base_conversion = next(
             (
                 base_conversion
@@ -1497,9 +1515,12 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
 
         base_source = cast(torch.fx.Node, get_arg_value(base_conversion, 0, "a"))
         if source is base_source:
-            # two identical converisons detected.
+            # Two identical conversions detected.
             replacement = base_conversion
         else:
+            view_target = source.target
+            if not callable(view_target):
+                raise AssertionError("expected call_function target")
             base_conversion_val = cast(torch.Tensor, base_conversion.meta["val"])
             # Replay view_op(base_conversion) and require its metadata to match
             # the conversion being replaced, since it will replace it.
@@ -1522,7 +1543,7 @@ def reuse_dtype_conversion_across_views(graph: torch.fx.Graph) -> None:
             )
             with graph.inserting_before(conversion):
                 replacement = graph.call_function(
-                    source.target, replacement_args, replacement_kwargs
+                    view_target, replacement_args, replacement_kwargs
                 )
             replacement.meta = conversion.meta.copy()
             replacement.meta["val"] = replacement_val
