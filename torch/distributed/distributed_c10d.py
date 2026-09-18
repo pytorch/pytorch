@@ -319,6 +319,71 @@ torch.serialization.add_safe_globals(
 GroupName = NewType("GroupName", str)
 
 
+def _create_torchcomms_backend(
+    backend: str,
+    device: str,
+    *,
+    group_rank: int,
+    group_size: int,
+    group_name: GroupName,
+    store: Store,
+    device_id: torch.device | None,
+    backend_options: object | None,
+) -> C10DBackend:
+    """Create a c10d BackendWrapper for one TorchComms backend instance."""
+    if not _TORCHCOMM_AVAILABLE:
+        raise RuntimeError("TorchComms is not available")
+
+    torch_device = torch.device(device)
+    if (
+        device_id is not None
+        and device_id.index is not None
+        and device_id.type == torch_device.type
+    ):
+        torch_device = device_id
+
+    hints: dict[str, str] = {"persistent_store": "true"}
+    if backend_options is not None:
+        extra = _pg_options_to_hints(backend_options)
+        if extra:
+            hints.update(extra)
+
+    # TorchComms currently discovers rank and size from the environment. Seed
+    # the subgroup-local values only around communicator creation and restore
+    # the caller's environment before returning.
+    saved_rank_size = (
+        os.environ.get("TORCHCOMM_RANK"),
+        os.environ.get("TORCHCOMM_SIZE"),
+    )
+    os.environ["TORCHCOMM_RANK"] = str(group_rank)
+    os.environ["TORCHCOMM_SIZE"] = str(group_size)
+    try:
+        comm = new_comm(
+            backend,
+            torch_device,
+            name=group_name,
+            store=store,
+            hints=hints,
+        )
+    finally:
+        for key, value in zip(
+            ("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved_rank_size
+        ):
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    buffer_size = os.environ.get(
+        "TORCH_FR_BUFFER_SIZE",
+        os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
+    )
+    recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
+    recorder.register_with_comm(comm)
+    _world.comms.append(comm)
+    return _BackendWrapper(comm)
+
+
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
 def _export_c_types() -> None:
     _public_types_to_change_module = [
@@ -956,6 +1021,32 @@ def _register_builtin_xccl_backend() -> None:
         extended_api=True,
         devices=Backend.backend_capability[Backend.XCCL],
         _backend_type=ProcessGroup.BackendType.XCCL,
+    )
+
+
+def _register_torchcomms_backend(backend: str, device: str) -> None:
+    """Register a TorchComms backend with c10d's standard backend registry."""
+
+    def create_backend(
+        opts: _DistributedBackendOptions, backend_options: object | None
+    ) -> C10DBackend:
+        process_group = not_none(opts.process_group)
+        return _create_torchcomms_backend(
+            backend,
+            device,
+            group_rank=opts.group_rank,
+            group_size=opts.group_size,
+            group_name=opts.group_id,
+            store=opts.store,
+            device_id=process_group.bound_device_id,
+            backend_options=backend_options,
+        )
+
+    Backend.register_backend(
+        backend,
+        create_backend,
+        extended_api=True,
+        devices=[device],
     )
 
 
@@ -2973,74 +3064,24 @@ def _new_process_group_helper(
             and backend_str not in [Backend.FAKE]
             and _torchcomms_handles_backend(backend_str)
         ):
-            torch_device = torch.device(device)
-            # Pass this rank's actual device WITH its index. A device-type-only
-            # torch.device(device) makes the TorchComms bootstrap default the
-            # device to (group-local rank % device_count) -- correct only for the
-            # world group (group-local == global rank). For a subgroup the
-            # group-local rank differs from the rank's physical device, so the
-            # comm (and its lazy P2P pair comms) would be created on the wrong
-            # device, causing illegal memory access. The default PG's
-            # bound_device_id is this rank's device for every group it joins.
-            if (
-                device_id is not None
-                and device_id.index is not None
-                and device_id.type == torch_device.type
-            ):
-                torch_device = device_id
             logger.warning(
                 "Using TorchComms backend (enabled via %s) for device %s with backend %s",
                 "TORCH_DISTRIBUTED_USE_TORCHCOMMS env var"
                 if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
                 else "dist_config.use_torchcomms",
-                torch_device,
+                device_id or torch.device(device),
                 backend_str,
             )
-            # `persistent_store=true` tells torchcomms to reuse the c10d-side
-            # `backend_prefix_store` directly instead of constructing its own
-            # TCPStore via StoreManager (which would otherwise require an
-            # explicit MASTER_ADDR/MASTER_PORT and conflict with the c10d
-            # rendezvous store on rapid re-binds).
-            hints: dict[str, str] = {"persistent_store": "true"}
-            if backend_options is not None:
-                extra = _pg_options_to_hints(backend_options)
-                if extra:
-                    hints.update(extra)
-            # new_comm has no rank/size params -- the TorchComms bootstrap reads
-            # them from TORCHCOMM_RANK/SIZE. Seed from this group's rank/size so
-            # non-Torchrun launchers (which TorchComms cannot auto-detect, e.g.
-            # process-spawning inference servers) work without each caller having
-            # to set these. Save/restore around the call (single-threaded here).
-            _tc_saved = (
-                os.environ.get("TORCHCOMM_RANK"),
-                os.environ.get("TORCHCOMM_SIZE"),
+            backend_class = _create_torchcomms_backend(
+                backend_str,
+                device,
+                group_rank=group_rank,
+                group_size=group_size,
+                group_name=group_name,
+                store=backend_prefix_store,
+                device_id=device_id,
+                backend_options=backend_options,
             )
-            os.environ["TORCHCOMM_RANK"] = str(group_rank)
-            os.environ["TORCHCOMM_SIZE"] = str(group_size)
-            try:
-                comm = new_comm(
-                    backend_str,
-                    torch_device,
-                    name=group_name,
-                    store=backend_prefix_store,
-                    hints=hints,
-                )
-            finally:
-                for _k, _v in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), _tc_saved):
-                    if _v is None:
-                        os.environ.pop(_k, None)
-                    else:
-                        os.environ[_k] = _v
-            buffer_size = os.environ.get(
-                "TORCH_FR_BUFFER_SIZE",
-                os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
-            )
-            recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
-            recorder.register_with_comm(comm)
-            # Keep a reference so the comm outlives this function scope.
-            _world.comms.append(comm)
-            group_name = GroupName(group_name)
-            backend_class = _BackendWrapper(comm)
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
             # collide in ProcessGroup::setBackend's backendTypeToBackend_ map

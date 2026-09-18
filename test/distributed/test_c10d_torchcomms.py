@@ -605,6 +605,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
 
         with mock.patch.multiple(
             c10d,
+            _TORCHCOMM_AVAILABLE=True,
             _use_torchcomms_enabled=lambda: True,
             _torchcomms_handles_backend=lambda b: True,
             new_comm=fake_new_comm,
@@ -698,6 +699,48 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+    def test_registered_backend_creator_reuses_torchcomms_factory(self):
+        backend = "registered_tc_test"
+        process_group = mock.MagicMock()
+        process_group.bound_device_id = torch.device("cuda:3")
+        opts = mock.MagicMock()
+        opts.process_group = process_group
+        opts.group_rank = 1
+        opts.group_size = 4
+        opts.group_id = c10d.GroupName(self.id())
+        opts.store = dist.HashStore()
+        backend_options = object()
+        wrapped_backend = object()
+
+        with (
+            mock.patch.object(dist.Backend, "register_backend") as register,
+            mock.patch.object(
+                c10d,
+                "_create_torchcomms_backend",
+                return_value=wrapped_backend,
+            ) as create,
+        ):
+            c10d._register_torchcomms_backend(backend, "cuda")
+            creator = register.call_args.args[1]
+            self.assertIs(creator(opts, backend_options), wrapped_backend)
+
+        register.assert_called_once_with(
+            backend,
+            creator,
+            extended_api=True,
+            devices=["cuda"],
+        )
+        create.assert_called_once_with(
+            backend,
+            "cuda",
+            group_rank=1,
+            group_size=4,
+            group_name=opts.group_id,
+            store=opts.store,
+            device_id=torch.device("cuda:3"),
+            backend_options=backend_options,
+        )
 
     def _drive_non_member(
         self,
