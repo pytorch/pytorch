@@ -219,9 +219,9 @@ class TimeoutTest(TestCase):
                 error_list.append(e)
 
         world_size = 4
-        errors_by_type = {name: [] for name in ("file", "tcp", "hash")}
+        error_list = []
         threads = []
-        for init_type, error_list in errors_by_type.items():
+        for init_type in ["file", "tcp", "hash"]:
             for rank in range(world_size):
                 t = threading.Thread(
                     target=thread_work,
@@ -236,17 +236,18 @@ class TimeoutTest(TestCase):
                 threads.append(t)
                 t.start()
 
-        for thread in threads:
-            thread.join()
+            for thread in threads:
+                thread.join()
 
-        for init_type, error_list in errors_by_type.items():
             # we expect the world_size-1 threads to have failed
-            self.assertEqual(len(error_list), world_size - 1, init_type)
+            self.assertEqual(len(error_list), world_size - 1)
             for error in error_list:
                 self.assertTrue(
                     "Timed out initializing process group in store based barrier"
                     in error.args[0]
                 )
+            error_list = []
+            threads = []
 
 
 class BackendEntryPointTest(TestCase):
