@@ -605,6 +605,7 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
 
         with mock.patch.multiple(
             c10d,
+            _TORCHCOMM_AVAILABLE=True,
             _use_torchcomms_enabled=lambda: True,
             _torchcomms_handles_backend=lambda b: True,
             new_comm=fake_new_comm,
@@ -699,7 +700,55 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 else:
                     os.environ[k] = v
 
-    def _drive_non_member(self, *, torchcomms_enabled):
+    def test_registered_backend_creator_reuses_torchcomms_factory(self):
+        backend = "registered_tc_test"
+        process_group = mock.MagicMock()
+        process_group.bound_device_id = torch.device("cuda:3")
+        opts = mock.MagicMock()
+        opts.process_group = process_group
+        opts.group_rank = 1
+        opts.group_size = 4
+        opts.group_id = c10d.GroupName(self.id())
+        opts.store = dist.HashStore()
+        backend_options = object()
+        wrapped_backend = object()
+
+        with (
+            mock.patch.object(dist.Backend, "register_backend") as register,
+            mock.patch.object(
+                c10d,
+                "_create_torchcomms_backend",
+                return_value=wrapped_backend,
+            ) as create,
+        ):
+            c10d._register_torchcomms_backend(backend, "cuda")
+            creator = register.call_args.args[1]
+            self.assertIs(creator(opts, backend_options), wrapped_backend)
+
+        register.assert_called_once_with(
+            backend,
+            creator,
+            extended_api=True,
+            devices=["cuda"],
+        )
+        create.assert_called_once_with(
+            backend,
+            "cuda",
+            group_rank=1,
+            group_size=4,
+            group_name=opts.group_id,
+            store=opts.store,
+            device_id=torch.device("cuda:3"),
+            backend_options=backend_options,
+        )
+
+    def _drive_non_member(
+        self,
+        *,
+        torchcomms_enabled,
+        parent_backend="cuda:nccl",
+        requested_backend="cuda:nccl",
+    ):
         """Drive the non-member early-return path of a subgroup.
 
         The default group is faked as initialized and device-bound with this
@@ -710,18 +759,25 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         default = mock.MagicMock()
         default.rank.return_value = 0
         default.bound_device_id = torch.device("cuda:0")
-        with mock.patch.multiple(
-            c10d,
-            _use_torchcomms_enabled=lambda: torchcomms_enabled,
-            is_initialized=lambda: True,
-            _get_default_group=lambda: default,
-            _get_split_source=lambda pg: split_src,
+        with (
+            mock.patch.dict(
+                c10d._world.pg_map,
+                {default: (parent_backend, dist.HashStore())},
+                clear=True,
+            ),
+            mock.patch.multiple(
+                c10d,
+                _use_torchcomms_enabled=lambda: torchcomms_enabled,
+                is_initialized=lambda: True,
+                _get_default_group=lambda: default,
+                _get_split_source=lambda pg: split_src,
+            ),
         ):
             res = c10d._new_process_group_helper(
                 group_size=2,
                 group_rank=0,
                 global_ranks_in_group=[1, 2],  # rank 0 is NOT a member
-                backend="nccl",
+                backend=requested_backend,
                 store=dist.HashStore(),
                 group_name=c10d.GroupName(self.id()),
                 timeout=self.TIMEOUT,
@@ -739,6 +795,55 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
         res, split_src = self._drive_non_member(torchcomms_enabled=False)
         self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
         split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
+
+    def test_non_member_does_not_construct_backend_config(self):
+        with mock.patch.object(c10d, "BackendConfig") as backend_config:
+            res, split_src = self._drive_non_member(torchcomms_enabled=False)
+
+        self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
+        split_src.perform_nocolor_split.assert_called_once_with(torch.device("cuda:0"))
+        backend_config.assert_not_called()
+
+    def test_non_member_skips_parent_split_for_different_backend(self):
+        res, split_src = self._drive_non_member(
+            torchcomms_enabled=False,
+            parent_backend="cuda:nccl",
+            requested_backend="cuda:mccl",
+        )
+        self.assertEqual(res, (dist.GroupMember.NON_GROUP_MEMBER, None))
+        split_src.perform_nocolor_split.assert_not_called()
+
+    def test_missing_parent_world_state_skips_split(self):
+        parent = mock.MagicMock()
+        parent.bound_device_id = torch.device("cuda:0")
+        split_src = mock.MagicMock()
+
+        with (
+            mock.patch.dict(c10d._world.pg_map, {}, clear=True),
+            mock.patch.object(c10d, "_get_split_source", return_value=split_src),
+        ):
+            result = c10d._get_compatible_split_source(
+                parent, "cuda:nccl"
+            )
+
+        self.assertIsNone(result)
+
+    def test_missing_device_mappings_skip_split(self):
+        parent = mock.MagicMock()
+        parent.bound_device_id = torch.device("cuda:0")
+        split_src = mock.MagicMock()
+
+        with (
+            mock.patch.dict(
+                c10d._world.pg_map,
+                {parent: ("cpu:gloo", dist.HashStore())},
+                clear=True,
+            ),
+            mock.patch.object(c10d, "_get_split_source", return_value=split_src),
+        ):
+            result = c10d._get_compatible_split_source(parent, "xpu:xccl")
+
+        self.assertIsNone(result)
 
 
 class TestC10dGroupNameHashSalt(TestCase):
