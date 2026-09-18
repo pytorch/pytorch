@@ -1436,16 +1436,16 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         )
 
     def test_pq_vs_full_expansion_data_driven(self):
-        """Data-driven comparison across mesh shapes, all placement types for mm.
+        """Exhaustively compare all mm placement types on 1D and 2D meshes.
 
-        Enumerates all combos of R, S(0), S(1), P(sum) for each mesh dim on
-        both inputs, across 1D/2D/3D meshes.
+        Higher-dimensional exhaustive expansion is prohibitively expensive:
+        3D checks 4096 input pairs against 512 strategies each. The dedicated
+        hard tests above cover representative 3D and 4D interactions.
         """
         placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         mesh_configs = [
             ("1d", torch.arange(4)),
             ("2d", torch.arange(4).reshape(2, 2)),
-            ("3d", torch.arange(8).reshape(2, 2, 2)),
         ]
 
         for mesh_name, mesh_tensor in mesh_configs:
