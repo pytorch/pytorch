@@ -2542,7 +2542,7 @@ class DistributedDataParallelTest(
         if self.rank != 0:
             # Time out due to rank 0 not calling into allreduce.
             with self.assertRaises(dist.DistBackendError):
-                pg.allreduce([inp]).wait(timedelta(seconds=5))
+                pg.allreduce([inp]).wait(timedelta(milliseconds=1))
 
             # Now when nonzero rank attempts to use communicator, original failure reason should be logged.
             try:
