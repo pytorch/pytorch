@@ -88,8 +88,7 @@ return(%foo)
     elementNames.emplace_back(element->name());
   }
   EXPECT_THAT(
-      elementNames,
-      ContainerEq(std::vector<std::string>({"foo", "bar"})));
+      elementNames, ContainerEq(std::vector<std::string>({"foo", "bar"})));
 }
 
 TEST(GraphTest, UnusedNonListPackHasNoStructuralElements) {
