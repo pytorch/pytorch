@@ -4493,6 +4493,53 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipIf(not TEST_WITH_ROCM, "TunableOp only tunes rocBLAS gemms")
+    @serialTest()
+    @blas_library_context("cublas")
+    def test_graph_capture_tunableop_cublas_workspace(self):
+        # TunableOp issues rocBLAS gemms through its own solution-index call, so
+        # it has to reach the eager workspace through the scoped accessor to stay
+        # capture safe. Tuning benchmarks candidates and cannot run under
+        # capture, so tune first and let the capture replay the chosen solution.
+        a = torch.randn(512, 512, device="cuda")
+        b = torch.randn(512, 512, device="cuda")
+        was_enabled = torch.cuda.tunable.is_enabled()
+        was_tuning = torch.cuda.tunable.tuning_is_enabled()
+        results_filename = torch.cuda.tunable.get_filename()
+        max_duration = torch.cuda.tunable.get_max_tuning_duration()
+        max_iterations = torch.cuda.tunable.get_max_tuning_iterations()
+        try:
+            with tempfile.TemporaryDirectory() as results_dir:
+                torch.cuda.tunable.set_filename(
+                    os.path.join(results_dir, "tunableop_results.csv")
+                )
+                torch.cuda.tunable.enable(True)
+                torch.cuda.tunable.tuning_enable(True)
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(1)
+                expected = a @ b
+                torch.cuda.synchronize()
+                self.assertTrue(torch.cuda.tunable.get_results())
+
+                torch.cuda.tunable.tuning_enable(False)
+                stream = torch.cuda.Stream()
+                stream.wait_stream(torch.cuda.current_stream())
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph, stream=stream):
+                    captured = a @ b
+                graph.replay()
+                stream.synchronize()
+                self.assertEqual(captured, expected)
+        finally:
+            torch.cuda.tunable.set_max_tuning_iterations(max_iterations)
+            torch.cuda.tunable.set_max_tuning_duration(max_duration)
+            torch.cuda.tunable.tuning_enable(was_tuning)
+            torch.cuda.tunable.enable(was_enabled)
+            torch.cuda.tunable.set_filename(results_filename)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_rng_functional(self):
         ops_with_kwargs = (
             (torch.nn.functional.dropout, {"p": 0.1}),
