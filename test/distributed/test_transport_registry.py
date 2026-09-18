@@ -161,7 +161,7 @@ class TestTransportRegistry(TestCase):
         with patch.object(
             _registry, "_iter_entry_points", return_value=iter([entry_point])
         ):
-            self.assertEqual(available_transports(), ("external",))
+            self.assertEqual(available_transports(), ("external", "nixl"))
 
 
 @instantiate_parametrized_tests
@@ -202,6 +202,14 @@ class TestTransportWork(TestCase):
         self.assertIsNone(work.exception())
         self.assertEqual(work.get_future().wait(), [])
         self.assertEqual(work.result(), [])
+
+    def test_synchronous_backend_timeout_preserved(self):
+        def operation(local, remote):
+            raise TimeoutError("backend operation timed out")
+
+        with _TestTransport(operation=operation) as transport:
+            with self.assertRaisesRegex(TimeoutError, "backend operation timed out"):
+                transport.write(None, None)
 
     def test_work_error(self):
         def operation(local, remote):
@@ -392,6 +400,44 @@ class TestTransportWork(TestCase):
                 await task
 
         asyncio.run(run())
+
+    def test_explicit_asyncio_timeout_does_not_drain(self):
+        transport, started, release, _ = self.blocked_transport()
+        work = transport.write(None, None, async_op=True)
+
+        async def run():
+            self.assertTrue(await asyncio.to_thread(started.wait, 5))
+            with self.assertRaises(TimeoutError):
+                await wait_all([work], timeout=0.001)
+            self.assertFalse(work.is_completed())
+            release.set()
+            await wait_all([work], timeout=5)
+
+        asyncio.run(run())
+
+    def test_explicit_asyncio_cancellation_does_not_cancel_work(self):
+        transport, started, release, _ = self.blocked_transport()
+        work = transport.write(None, None, async_op=True)
+
+        async def run():
+            task = asyncio.create_task(wait_all([work], timeout=5))
+            self.assertTrue(await asyncio.to_thread(started.wait, 5))
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertFalse(work.is_completed())
+            release.set()
+            await wait_all([work])
+
+        asyncio.run(run())
+
+    @parametrize("timeout", [-1, float("nan"), float("inf")])
+    def test_invalid_asyncio_timeout_does_not_submit(self, timeout):
+        with _TestTransport() as transport:
+            with patch.object(transport, "write") as write:
+                with self.assertRaises(ValueError):
+                    asyncio.run(transport.write_async(None, None, timeout=timeout))
+                write.assert_not_called()
 
     def test_asyncio_completed_work_and_empty_batch(self):
         with _TestTransport() as transport:
