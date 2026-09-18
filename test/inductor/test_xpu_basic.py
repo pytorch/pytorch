@@ -4,6 +4,7 @@ import os
 import sys
 
 import torch
+from torch._inductor import config
 
 
 importlib.import_module("filelock")
@@ -49,6 +50,33 @@ class XpuBasicTests(TestCase):
             return a / b
 
         self.common(fn, (torch.rand(2, 3, 16, 16), torch.rand(2, 3, 16, 16)))
+
+    @config.patch(
+        {
+            "graph_partition": False,
+            "triton.cudagraphs": True,
+            "triton.cudagraph_trees": True,
+        }
+    )
+    def test_unregistered_graph_tree_backend_fallback(self):
+        from torch._dynamo.utils import counters
+        from torch._inductor.graph_tree_backend import (
+            is_graph_tree_backend_available,
+        )
+
+        self.assertEqual(torch.accelerator.current_accelerator().type, "xpu")
+        self.assertFalse(is_graph_tree_backend_available())
+        counters.clear()
+
+        def fn(x):
+            return torch.sin(x) + 1
+
+        x = torch.randn(16, device="xpu")
+        expected = fn(x)
+        actual = torch.compile(fn)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
 
 if __name__ == "__main__":
