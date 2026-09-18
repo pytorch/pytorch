@@ -29,6 +29,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
   get-changed-files:
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     name: Get changed files
     uses: ./.github/workflows/_get-changed-files.yml
@@ -142,6 +143,7 @@ jobs:
         python3 torch/testing/_internal/check_kernel_launches.py |& tee cuda_kernel_launch_checks.txt
 
   pr-sanity-checks:
+    needs: get-label-type
     name: pr-sanity-checks
     runs-on: linux.24_04.4x
     # Only run this on pull requests. This check is simple enough to be done without a Docker image
@@ -238,6 +240,7 @@ jobs:
         PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
 
   test_collect_env:
+    needs: get-label-type
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env
     runs-on: ${{ matrix.runner }}
@@ -309,6 +312,7 @@ jobs:
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   doc-redirects-check:
+    needs: get-label-type
     name: doc-redirects-check
     runs-on: linux.24_04.4x
     if: github.event_name == 'pull_request' && github.repository_owner == 'pytorch'
