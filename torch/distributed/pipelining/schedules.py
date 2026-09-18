@@ -29,7 +29,6 @@ from ._utils import (
     generate_rank_to_stage_mapping,
     generate_stage_to_rank_mapping,
     InferenceMode,
-    PipeliningMetadataError,
 )
 from .microbatch import (
     _split_tensor,
@@ -99,6 +98,30 @@ REDUCE_GRAD = _ComputationType.REDUCE_GRAD
 # _split_tensor so DTensor targets preserve their Shard placements instead of
 # being silently all-gathered to Replicate by the default dispatch path.
 _TARGET_CHUNK_SPEC = TensorChunkSpec(0)
+
+_STAGE_INDEX_KWARG = "stage_idx"
+_MICROBATCH_INDEX_KWARG = "mb_idx"
+_STAGE_AND_MICROBATCH_INDEX_KWARGS = frozenset(
+    (_STAGE_INDEX_KWARG, _MICROBATCH_INDEX_KWARG)
+)
+
+
+def _check_reserved_stage_forward_kwargs(kwargs: dict[str, Any]) -> None:
+    """Reject user arguments whose names are owned by the schedule.
+
+    Args:
+        kwargs: User-provided arguments for one stage forward.
+
+    Raises:
+        ValueError: If ``kwargs`` contains ``stage_idx`` or ``mb_idx``.
+    """
+    collisions = _STAGE_AND_MICROBATCH_INDEX_KWARGS & kwargs.keys()
+    if collisions:
+        names = ", ".join(sorted(collisions))
+        raise ValueError(
+            "pass_stage_and_microbatch_indices reserves forward "
+            f"keyword argument(s): {names}"
+        )
 
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
@@ -277,6 +300,8 @@ class _PipelineSchedule(ABC):
         kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
         # From arguments
         self._n_microbatches = n_microbatches
@@ -290,6 +315,7 @@ class _PipelineSchedule(ABC):
         # Chunking specification for keyword inputs. (default: `None`)
         self._kwargs_chunk_spec = kwargs_chunk_spec
         self._output_merge_spec = output_merge_spec
+        self._pass_stage_and_microbatch_indices = pass_stage_and_microbatch_indices
         """
         # args_chunk_spec and kwargs_chunk_spec specify how to chunk inputs.
         # They are used to convert batch to microbatches in `step(x)`.  See
@@ -302,6 +328,31 @@ class _PipelineSchedule(ABC):
         # Holds the losses for each microbatch.
         self._internal_losses: list[torch.Tensor] = []
         logger.info("Using %s", self.__class__.__name__)
+
+    def _stage_forward_kwargs(
+        self,
+        stage: _PipelineStageBase,
+        mb_idx: int,
+        kwargs: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Return keyword arguments for one scheduled stage forward.
+
+        Args:
+            stage: Stage executing the forward.
+            mb_idx: Microbatch index within the current step.
+            kwargs: User-provided stage keyword arguments.
+
+        Returns:
+            A new dictionary containing ``stage_idx`` and ``mb_idx`` when the
+            option is enabled; otherwise, the original arguments.
+        """
+        if not self._pass_stage_and_microbatch_indices:
+            return kwargs
+        return {
+            **(kwargs or {}),
+            _STAGE_INDEX_KWARG: stage.stage_index,
+            _MICROBATCH_INDEX_KWARG: mb_idx,
+        }
 
     def _maybe_compute_loss(
         self, stage, output, target_mbs, mb_index, loss_kwargs=None
@@ -400,35 +451,23 @@ class _PipelineSchedule(ABC):
                 )
                 return
             acc: torch.Tensor | None = None
-            for stage in pp_stages:
+            for stage in cast(list[PipelineStage], stages):
                 acc = stage._warmup_forward_vote(has_backward, received_acc=acc)
             result: torch.Tensor | None = acc
-            for stage in reversed(pp_stages):
+            determined_mode: InferenceMode | None = None
+            for stage in reversed(cast(list[PipelineStage], stages)):
                 result = stage._warmup_backward_result(received_result=result)
-            if result is None:
-                raise RuntimeError("P2P warm-up voting failed")
-            supports_static, permits_dynamic = map(bool, result.tolist())
-            if not supports_static and not permits_dynamic:
-                local_status = ", ".join(
-                    f"stage {stage.stage_index}: "
-                    f"needs_dynamic={InferenceMode.needs_dynamic(stage._user_meta, has_backward)}, "
-                    f"pass_pipeline_metadata={stage._pass_pipeline_metadata}"
-                    for stage in pp_stages
+                if result is None:
+                    raise RuntimeError("P2P warm-up voting failed")
+                determined_mode = (
+                    InferenceMode.STATIC
+                    if result.item() == 1
+                    else InferenceMode.DYNAMIC
                 )
-                raise PipeliningMetadataError(
-                    "pass_pipeline_metadata requires complete static metadata "
-                    "across the pipeline: provide input_args and output_args for "
-                    "every stage, plus input_grads and output_grads for DTensors "
-                    f"with backward. Local stage status: {local_status}"
-                )
-            determined_mode = (
-                InferenceMode.STATIC if supports_static else InferenceMode.DYNAMIC
-            )
-            for stage in pp_stages:
                 stage._inference_mode = determined_mode
             logger.debug(
                 "Rank determined inference_mode=%s for %d stage(s)",
-                determined_mode.value,
+                determined_mode.value if determined_mode else "None",
                 len(stages),
             )
         elif not p2p_done:
@@ -516,7 +555,7 @@ class _PipelineSchedule(ABC):
                         next_stage_args = stage._prepare_forward_infra(
                             self._n_microbatches,
                             stage_args,
-                            kwargs,
+                            self._stage_forward_kwargs(stage, 0, kwargs),
                             has_backward=self._has_backward,
                         )
                     fwd_initialized = True
@@ -727,6 +766,8 @@ class _PipelineSchedule(ABC):
     ) -> tuple[list | None, list | None, list | None]:
         pre_split = any(mbs is not None for mbs in (arg_mbs, kwarg_mbs, target_mbs))
         if not pre_split:
+            if self._pass_stage_and_microbatch_indices:
+                _check_reserved_stage_forward_kwargs(kwargs)
             args_split, kwargs_split = self._split_inputs(args, kwargs)
             targets_split = (
                 list(_split_tensor(target, _TARGET_CHUNK_SPEC, self._n_microbatches))
@@ -770,6 +811,9 @@ class _PipelineSchedule(ABC):
                     "kwarg_mbs must be a list of dicts, but "
                     f"kwarg_mbs[{mb_index}] is a {type(kwarg_mb)}"
                 )
+
+            if self._pass_stage_and_microbatch_indices:
+                _check_reserved_stage_forward_kwargs(kwarg_mb)
 
         return arg_mbs, kwarg_mbs, target_mbs
 
@@ -907,6 +951,12 @@ class PipelineScheduleSingle(_PipelineSchedule):
     Implements the `step` method.
     Derived classes should implement `_step_microbatches`.
 
+    When ``pass_stage_and_microbatch_indices`` is enabled, every built-in
+    scheduled forward receives the global logical stage index as ``stage_idx``
+    and the microbatch index within the step as ``mb_idx``. Dynamic metadata
+    inference uses microbatch zero. The option supports manually constructed
+    :class:`PipelineStage` instances only.
+
     Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
     should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
     or sum losses (scale_grads=False).
@@ -921,7 +971,14 @@ class PipelineScheduleSingle(_PipelineSchedule):
         kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
+        if pass_stage_and_microbatch_indices and not isinstance(stage, PipelineStage):
+            raise ValueError(
+                "pass_stage_and_microbatch_indices only supports manually "
+                "constructed PipelineStage instances"
+            )
         # Init parent
         super().__init__(
             n_microbatches=n_microbatches,
@@ -930,6 +987,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
         # Self attributes
         self._stage = stage
@@ -1117,7 +1175,11 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
                 for work in works.values():
                     _wait_batch_p2p(work)
 
-                self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
+                self._stage.forward_one_chunk(
+                    i,
+                    arg_mbs[i],
+                    self._stage_forward_kwargs(self._stage, i, kwarg_mbs[i]),
+                )  # type: ignore[index]
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
@@ -1173,7 +1235,10 @@ class ScheduleGPipe(PipelineScheduleSingle):
                     _wait_batch_p2p(work)
 
                 output = self._stage.forward_one_chunk(
-                    i, arg_mbs[i], kwarg_mbs[i], save_forward_output=return_outputs
+                    i,
+                    arg_mbs[i],
+                    self._stage_forward_kwargs(self._stage, i, kwarg_mbs[i]),
+                    save_forward_output=return_outputs,
                 )  # type: ignore[index]
 
                 ops = self._stage.get_fwd_send_ops(i)
@@ -1270,6 +1335,8 @@ class Schedule1F1B(PipelineScheduleSingle):
         kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
         output_merge_spec: dict[str, Any] | tuple[Any] | None = None,
         scale_grads: bool = True,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
         super().__init__(
             stage=stage,
@@ -1279,6 +1346,7 @@ class Schedule1F1B(PipelineScheduleSingle):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
         if n_microbatches < self._num_stages:
             raise ValueError(
@@ -1333,7 +1401,9 @@ or equal to the number of stages ({self._num_stages})."
             output = self._stage.forward_one_chunk(
                 fwd_mb_index,
                 arg_mbs[fwd_mb_index],
-                kwarg_mbs[fwd_mb_index],
+                self._stage_forward_kwargs(
+                    self._stage, fwd_mb_index, kwarg_mbs[fwd_mb_index]
+                ),
                 save_forward_output=return_outputs,
             )  # type: ignore[index]
 
@@ -1393,7 +1463,9 @@ or equal to the number of stages ({self._num_stages})."
             output = self._stage.forward_one_chunk(
                 fwd_mb_index,
                 arg_mbs[fwd_mb_index],
-                kwarg_mbs[fwd_mb_index],
+                self._stage_forward_kwargs(
+                    self._stage, fwd_mb_index, kwarg_mbs[fwd_mb_index]
+                ),
                 save_forward_output=return_outputs,
             )  # type: ignore[index]
 
@@ -2014,6 +2086,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
     Base class for multi-stage schedules.
     Implements the `step` method.
 
+    When ``pass_stage_and_microbatch_indices`` is enabled, every built-in
+    scheduled forward receives the global logical stage index as ``stage_idx``
+    and the microbatch index within the step as ``mb_idx``. Dynamic metadata
+    inference uses microbatch zero. The option supports manually constructed
+    :class:`PipelineStage` instances only.
+
     Gradients are scaled by num_microbatches depending on the `scale_grads` argument, defaulting to True.  This setting
     should match the configuration of your loss_fn, which may either average losses (scale_grads=True)
     or sum losses (scale_grads=False).
@@ -2030,7 +2108,16 @@ class PipelineScheduleMulti(_PipelineSchedule):
         use_full_backward: bool | None = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
+        if pass_stage_and_microbatch_indices and not all(
+            isinstance(stage, PipelineStage) for stage in stages
+        ):
+            raise ValueError(
+                "pass_stage_and_microbatch_indices only supports manually "
+                "constructed PipelineStage instances"
+            )
         # Init parent
         super().__init__(
             n_microbatches=n_microbatches,
@@ -2039,6 +2126,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
         # Self attributes
         self._stages = stages
@@ -2365,7 +2453,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         output = stage.forward_one_chunk(
                             mb_index,
                             arg_mbs[mb_index],
-                            kwarg_mbs[mb_index],
+                            self._stage_forward_kwargs(
+                                stage, mb_index, kwarg_mbs[mb_index]
+                            ),
                             save_forward_output=return_outputs,
                         )
                         self._maybe_compute_loss(
@@ -2843,7 +2933,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 output = stage.forward_one_chunk(
                     mb_index,
                     arg_mbs[mb_index],  # type: ignore[index]
-                    kwarg_mbs[mb_index],  # type: ignore[index]
+                    self._stage_forward_kwargs(
+                        stage,
+                        mb_index,
+                        kwarg_mbs[mb_index],  # type: ignore[index]
+                    ),
                     save_forward_output=return_outputs,
                 )
                 self._maybe_compute_loss(
@@ -3001,6 +3095,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
         super().__init__(
             stages=stages,
@@ -3011,6 +3107,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3240,6 +3337,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3253,6 +3352,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3351,6 +3451,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3366,6 +3468,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3550,6 +3653,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3565,6 +3670,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3738,6 +3844,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         backward_requires_autograd: bool = True,
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
+        *,
+        pass_stage_and_microbatch_indices: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3753,6 +3861,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             backward_requires_autograd=backward_requires_autograd,
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
+            pass_stage_and_microbatch_indices=pass_stage_and_microbatch_indices,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
