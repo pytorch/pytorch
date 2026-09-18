@@ -2883,10 +2883,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
+            device_index = device.index
+            if device_index is None:
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                # Under compile-on-one-rank the index must stay None so the runtime
+                # resolves it per rank and one artifact serves them all.
+                if not _coor_enabled():
+                    device_index = 0
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device_index),
                 {},
             )
             return ConstantVariable.create(None)

@@ -16383,7 +16383,10 @@ class TestConsistency(TestCaseMPS):
         # MPS uses float32 intermediates for these ops, so the CPU reference
         # must also run in float32 to avoid comparing against less-precise
         # native half-precision CPU results.
-        if op.name in ["grid_sampler_2d", "grid_sampler_3d"] and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+        use_float_ref = op.name in ["grid_sampler_2d", "grid_sampler_3d"] or (
+            op.name == "nn.functional.pad" and op.variant_test_name in ["reflect", "replicate", "replicate_negative"]
+        )
+        if use_float_ref and dtype is None and mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
             dtype = torch.float32
 
         cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
