@@ -192,6 +192,27 @@ def skip_on_xpu(test_func):
 skip_on_mps = skipMPSIf(True, "Not supported on MPS")
 
 
+@functools.lru_cache
+def _is_gfx950() -> bool:
+    """True on the AMD target the Gluon flex-attention template targets.
+
+    Matches the hook's own test (an exact target, not the gfx95 family), so this
+    cannot enable the tests on a part where the hook declines to offer a body.
+    """
+    if not (torch.cuda.is_available() and torch.version.hip):
+        return False
+    try:
+        arch = torch.cuda.get_device_properties(0).gcnArchName
+    except Exception:
+        return False
+    return arch.split(":", 1)[0].startswith("gfx950")
+
+
+# Not bound as skipUnless(_is_gfx950(), ...) here: that evaluates at module scope
+# and so initializes CUDA during collection on every platform. The class below
+# checks it in setUpClass instead, which runs only if its tests are selected.
+
+
 def _is_not_implemented_exc(exc):
     """True if `exc` is or wraps a NotImplementedError (Dynamo/Inductor wrap it)."""
     seen = set()
@@ -10768,6 +10789,366 @@ class TestLearnableBiases(InductorTestCase):
                 lambda msg: f"{msg}\n{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
             )
 
+
+class TestGluonFlexAttention(InductorTestCase):
+    """The Gluon (Triton low-level frontend) flex-attention template on gfx950.
+
+    The template is an extra autotuning candidate, so these tests force it with
+    ``autotune_choice_name_regex`` and assert a Gluon kernel was really emitted --
+    without that check a green test would only prove the Triton template is correct.
+    """
+
+    B, H, S = 2, 4, 512
+    TOL = {torch.float16: 2e-2, torch.bfloat16: 3e-2}
+
+    @classmethod
+    def setUpClass(cls):
+        if not _is_gfx950():
+            raise unittest.SkipTest(
+                "Gluon flex-attention is only offered on AMD gfx950"
+            )
+        super().setUpClass()
+
+    def _inputs(self, dtype, head_dim, seq_len=None):
+        torch.manual_seed(0)
+        return [
+            torch.randn(
+                self.B,
+                self.H,
+                seq_len or self.S,
+                head_dim,
+                device="cuda",
+                dtype=dtype,
+            )
+            for _ in range(3)
+        ]
+
+    @staticmethod
+    def _src(code):
+        return "\n".join(code) if isinstance(code, (list, tuple)) else str(code)
+
+    @classmethod
+    def _emitted_gluon(cls, code):
+        return "@gluon.jit" in cls._src(code)
+
+    @classmethod
+    def _emitted_async(cls, code):
+        # only the async body stages through the DMA intrinsic
+        return "buffer_load_to_shared" in cls._src(code)
+
+    def _patches(self, *, enabled=True, force="gluon_flex_attention"):
+        # Just the one config value, which is what a caller sets: the handler that
+        # reads it is installed on import. Every forced test below emitting a Gluon
+        # kernel is what proves that install is still happening.
+        return config.patch(
+            {
+                "max_autotune": True,
+                "force_disable_caches": True,
+                "gluon_flex_attention": enabled,
+                "test_configs.autotune_choice_name_regex": force or None,
+            }
+        )
+
+    def _compile(self, fn, args, *, enabled=True, force="gluon_flex_attention"):
+        torch._dynamo.reset()
+        with self._patches(enabled=enabled, force=force):
+            out, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+        torch.cuda.synchronize()
+        return out, code
+
+    def _check(
+        self,
+        *,
+        dtype,
+        head_dim,
+        mask_fn=None,
+        score_mod=None,
+        seq_len=None,
+        sparse_block_size=None,
+        force="gluon_flex_attention",
+    ):
+        seq_len = seq_len or self.S
+        q, k, v = self._inputs(dtype, head_dim, seq_len)
+        scale = head_dim**-0.5
+        mask_kwargs = (
+            {} if sparse_block_size is None else {"BLOCK_SIZE": sparse_block_size}
+        )
+        block_mask = (
+            create_block_mask(
+                mask_fn, self.B, self.H, seq_len, seq_len, device="cuda", **mask_kwargs
+            )
+            if mask_fn is not None
+            else None
+        )
+
+        def fn(q, k, v):
+            return flex_attention(
+                q, k, v, score_mod=score_mod, block_mask=block_mask, scale=scale
+            )
+
+        expected = fn(q, k, v)
+        actual, code = self._compile(fn, (q, k, v), force=force)
+        if force:
+            self.assertTrue(self._emitted_gluon(code), "no Gluon kernel was emitted")
+        tol = self.TOL[dtype]
+        self.assertEqual(actual.float(), expected.float(), atol=tol, rtol=tol)
+        return code
+
+    # (mask_fn, score_mod) for each branch the template specializes on.
+    MODS = {
+        "identity": (None, None),
+        "causal": (lambda b, h, m, n: m >= n, None),
+        "softcap": (None, lambda s, b, h, m, n: 20.0 * torch.tanh(s / 20.0)),
+        "head_bias": (None, lambda s, b, h, m, n: s - 0.125 * h),
+    }
+
+    @common_utils.parametrize("case", list(MODS))
+    def test_score_and_mask_mods(self, case):
+        """Identity, mask_mod-only, and both score_mod flavours the template branches on."""
+        mask_fn, score_mod = self.MODS[case]
+        self._check(
+            dtype=torch.float16,
+            head_dim=64,
+            mask_fn=mask_fn,
+            score_mod=score_mod,
+        )
+
+    @common_utils.parametrize(
+        "dtype,head_dim,masked",
+        [
+            common_utils.subtest((torch.bfloat16, 64, True), name="bf16_64_causal"),
+            common_utils.subtest((torch.float16, 128, True), name="fp16_128_causal"),
+            common_utils.subtest((torch.bfloat16, 128, False), name="bf16_128_dense"),
+        ],
+    )
+    def test_dtypes_and_head_dims(self, dtype, head_dim, masked):
+        """Both supported head dims, since each selects a different DMA staging layout."""
+        mask_fn = (lambda b, h, m, n: m >= n) if masked else None
+        self._check(dtype=dtype, head_dim=head_dim, mask_fn=mask_fn)
+
+    @common_utils.parametrize(
+        "dtype,masked",
+        [
+            common_utils.subtest((torch.float16, False), name="fp16_dense"),
+            common_utils.subtest((torch.bfloat16, True), name="bf16_causal"),
+        ],
+    )
+    def test_logsumexp(self, dtype, masked):
+        """LSE feeds the backward pass, so a wrong one is invisible in the output."""
+        q, k, v = self._inputs(dtype, 64)
+        block_mask = (
+            create_block_mask(
+                lambda b, h, m, n: m >= n,
+                self.B,
+                self.H,
+                self.S,
+                self.S,
+                device="cuda",
+            )
+            if masked
+            else None
+        )
+
+        def fn(q, k, v):
+            return flex_attention(
+                q, k, v, block_mask=block_mask, scale=0.125, return_lse=True
+            )
+
+        ref_out, ref_lse = fn(q, k, v)
+        (out, lse), code = self._compile(fn, (q, k, v))
+        self.assertTrue(self._emitted_gluon(code))
+        tol = self.TOL[dtype]
+        self.assertEqual(out.float(), ref_out.float(), atol=tol, rtol=tol)
+        self.assertEqual(lse.float(), ref_lse.float(), atol=tol, rtol=tol)
+
+    def test_fully_masked_rows(self):
+        """Rows with no legal key: the -inf row max must not become NaN."""
+        q, k, v = self._inputs(torch.float16, 64)
+        block_mask = create_block_mask(
+            lambda b, h, m, n: m < 0, self.B, self.H, self.S, self.S, device="cuda"
+        )
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, block_mask=block_mask, scale=0.125)
+
+        expected = fn(q, k, v)
+        actual, _ = self._compile(fn, (q, k, v))
+        self.assertTrue(
+            torch.isfinite(actual).all(), "masked-out rows produced NaN/inf"
+        )
+        self.assertEqual(float(actual.abs().max()), 0.0)
+        tol = self.TOL[torch.float16]
+        self.assertEqual(actual.float(), expected.float(), atol=tol, rtol=tol)
+
+    def test_unforced_autotune_winner_is_correct(self):
+        """How a user actually runs it: the Gluon body only competes, and may lose."""
+        q, k, v = self._inputs(torch.float16, 64)
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, scale=0.125)
+
+        expected = fn(q, k, v)
+        actual, _ = self._compile(fn, (q, k, v), force=False)
+        tol = self.TOL[torch.float16]
+        self.assertEqual(actual.float(), expected.float(), atol=tol, rtol=tol)
+
+    @common_utils.parametrize("seq_len", [500, 4000])
+    def test_non_divisible_kv_len(self, seq_len):
+        """A KV_LEN that BLOCK_N does not divide must not reach the async body.
+
+        That body stages K/V by unmasked DMA and clamps a prefetch which would
+        overrun to KV_LEN - BLOCK_N, which is a block start only when BLOCK_N
+        divides KV_LEN. Offered anyway, the final block scores staged rows against
+        the column indices of a different block: 33% relative error at S=4000,
+        picked by ordinary autotuning rather than needing to be forced.
+        """
+        # forced, so the sync body still has to be correct here
+        code = self._check(dtype=torch.float16, head_dim=64, seq_len=seq_len)
+        self.assertFalse(
+            self._emitted_async(code),
+            "async body offered at a KV_LEN it cannot stage correctly",
+        )
+        # and again as a user would run it, with the body only competing
+        self._check(dtype=torch.float16, head_dim=64, seq_len=seq_len, force=False)
+
+    def test_sparse_block_hanging_off_the_end(self):
+        """BLOCK_N | KV_LEN is the async gate even though sparse blocks can overhang.
+
+        KV_LEN=320 with the default 128 sparse block passes the gate (320 % 64 == 0)
+        while sparse block 2 spans [256, 384), so it hangs off the end -- and this
+        mask leaves a row whose *only* block is that one, which is the case where the
+        prefetch clamp could bite. It is nonetheless safe, and not by luck:
+        IS_DIVISIBLE is ``KV_LEN % 128 == 0 and (KV_LEN % SPARSE_KV == 0 or
+        SPARSE_KV >= KV_LEN)``, so an overhanging block forces it False and the body
+        takes its masked path. When it is True no block can overhang. Gating on
+        SPARSE_KV instead would cost the async body every unmasked shape, since
+        SPARSE_KV is 2**30 there.
+        """
+        sparse = 128
+        seq_len = 320
+        code = self._check(
+            dtype=torch.float16,
+            head_dim=64,
+            mask_fn=lambda b, h, m, n: n >= 2 * sparse,
+            seq_len=seq_len,
+            sparse_block_size=sparse,
+            force="gluon_flex_attention_async",
+        )
+        self.assertTrue(
+            self._emitted_async(code),
+            "async body did not run, so this asserts nothing about it",
+        )
+
+    @common_utils.parametrize("head_dim", [64, 128])
+    def test_irregularly_gapped_mask(self, head_dim):
+        """The async prefetch must track the block it is actually filling.
+
+        The slot refilled at iteration i is next read at i + NUM_BUF, so the
+        prefetch advances by that iteration's delta. Advancing by iteration i's
+        delta instead only agrees when the scheduled block starts are evenly
+        spaced, which dense and causal both are -- so this needs a mask whose
+        kv_indices has *irregular* gaps. Uniform gaps do not reach it: with
+        SPARSE_KV_MULTIPLE=2 the deltas alternate and every jump is equal.
+
+        Unfixed this gave 183% relative error at head_dim 64 and 109% at 128, and
+        the async body won ordinary autotuning at both.
+        """
+        legal = (0, 5, 6, 9)
+
+        def mask_mod(b, h, m, n):
+            blk = n // 128
+            keep = blk == legal[0]
+            for idx in legal[1:]:
+                keep = keep | (blk == idx)
+            return keep
+
+        code = self._check(
+            dtype=torch.float16,
+            head_dim=head_dim,
+            mask_fn=mask_mod,
+            seq_len=2048,
+            force="gluon_flex_attention_async",
+        )
+        self.assertTrue(
+            self._emitted_async(code),
+            "async body did not run, so this asserts nothing about it",
+        )
+
+    @common_utils.parametrize(
+        "dtype,head_dim",
+        [
+            common_utils.subtest((torch.float16, 64), name="fp16_64"),
+            common_utils.subtest((torch.bfloat16, 128), name="bf16_128"),
+        ],
+    )
+    def test_tall_query_tile(self, dtype, head_dim):
+        """BLOCK_M=256 is offered only without a block mask, so cover that path.
+
+        create_block_mask defaults to a 128 sparse Q block and 128 % 256 != 0, so a
+        masked run filters these configs out and with them the num_warps=8 rows of
+        the DMA ladder.
+        """
+        self._check(dtype=dtype, head_dim=head_dim, mask_fn=None)
+
+    def test_negative_scale(self):
+        """A negative scale must not take the identity fold.
+
+        The fold subtracts ``max(qk) * QK_SCALE`` instead of the row max of the
+        scaled scores, which is the row *min* once QK_SCALE is negative. Softmax is
+        invariant to what constant it subtracts, so this only costs stability -- but
+        it costs all of it: the exp2 arguments become ``|QK_SCALE|`` times the score
+        span, and once that passes fp32's exp2 range the output is NaN. scale=-1.0
+        at head_dim 128 puts it near 160, where it does.
+        """
+        head_dim = 128
+        q, k, v = self._inputs(torch.float16, head_dim)
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, scale=-1.0)
+
+        expected = fn(q, k, v)
+        actual, _ = self._compile(fn, (q, k, v))
+        self.assertTrue(torch.isfinite(actual).all(), "negative scale overflowed")
+        tol = self.TOL[torch.float16]
+        self.assertEqual(actual.float(), expected.float(), atol=tol, rtol=tol)
+
+    def test_single_switch(self):
+        """The config flag is the whole interface; nothing else has to be set.
+
+        ``heuristics/template/gluon.py`` installs the choices handler when
+        ``torch._inductor`` is imported, which is what lets the flag mean anything.
+        The forced tests above would all stop emitting a Gluon kernel if that
+        regressed; this names the reason so the failure is not a mystery.
+        """
+        from torch._inductor.kernel.flex.gluon_flex import (
+            enable_gluon_flex_attention,
+            GluonInductorChoices,
+        )
+
+        factory = config.inductor_choices_class
+        self.assertIsNotNone(factory, "no choices factory was installed on import")
+        self.assertIsInstance(factory(), GluonInductorChoices)
+        with config.patch({}):
+            enable_gluon_flex_attention()
+            self.assertTrue(config.gluon_flex_attention)
+
+    def test_disabled_is_a_no_op(self):
+        """With the config flag off, no Gluon kernel may be emitted."""
+        q, k, v = self._inputs(torch.float16, 64)
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, scale=0.125)
+
+        expected = fn(q, k, v)
+        actual, code = self._compile(fn, (q, k, v), enabled=False, force=False)
+        self.assertFalse(
+            self._emitted_gluon(code), "Gluon kernel emitted while the flag was off"
+        )
+        tol = self.TOL[torch.float16]
+        self.assertEqual(actual.float(), expected.float(), atol=tol, rtol=tol)
+
+
+common_utils.instantiate_parametrized_tests(TestGluonFlexAttention)
 
 instantiate_device_type_tests(
     TestFlexAttention,
