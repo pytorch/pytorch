@@ -21,6 +21,10 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1338,6 +1342,40 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)
+
+
+class TestInplacePointwise(DTensorOpTestBase):
+    @with_comms
+    @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    def test_add_sub(self, device, dtype):
+        mesh = self.build_device_mesh()
+        local_tensor = torch.tensor(
+            [[-2.0, 0.0], [0.5, 8.0]], device=device, dtype=dtype
+        )
+        ops = (
+            torch.ops.aten.add_.Tensor,
+            torch.ops.aten.sub_.Tensor,
+            torch.ops.aten.add_.Scalar,
+            torch.ops.aten.sub_.Scalar,
+        )
+        for op in ops:
+            for value, alpha in ((0.25, 2), (1.0003, 3.001), (1e40, 1)):
+                with self.subTest(op=op, value=value, alpha=alpha):
+                    expected = local_tensor.clone()
+                    op(expected, value, alpha=alpha)
+                    grad = DTensor.from_local(
+                        local_tensor.clone(), mesh, [Partial("avg")]
+                    )
+                    with CommDebugMode() as comm_mode:
+                        result = op(grad, value, alpha=alpha)
+                    self.assertIs(result, grad)
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertEqual(grad.placements, (Partial("avg"),))
+                    self.assertEqual(grad.to_local(), expected, rtol=0, atol=0)
+                    self.assertEqual(grad.full_tensor(), expected)
+
+
+instantiate_device_type_tests(TestInplacePointwise, globals())
 
 
 class TestPointwiseRuleValidation(TestCase):
