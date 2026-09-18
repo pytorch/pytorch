@@ -24,6 +24,7 @@ __all__: list[str] = [
     "list_flash_attention_impls",
     "current_flash_attention_impl",
     "restore_flash_attention_impl",
+    "gated_delta_rule",
 ]
 
 
@@ -195,3 +196,6 @@ restore_flash_attention_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
 from . import _fa3, _fa4
+from .gated_delta import gated_delta_rule
+
+gated_delta_rule.__module__ = __name__

@@ -74,6 +74,7 @@ from .dropout import (
     FeatureAlphaDropout,
 )
 from .flatten import Flatten, Unflatten
+from .gated_delta import GatedDeltaNet
 from .fold import Fold, Unfold
 from .instancenorm import (
     InstanceNorm1d,
@@ -222,6 +223,7 @@ __all__ = [
     "GLU",
     "GRU",
     "GRUCell",
+    "GatedDeltaNet",
     "GaussianNLLLoss",
     "GroupNorm",
     "Hardshrink",
