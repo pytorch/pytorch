@@ -9,7 +9,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 from torch.utils._pytree import tree_map
 
 
@@ -36,7 +36,7 @@ class PreDispatchSchemaCheckMode(SchemaCheckMode):
         self._dispatch_key = torch._C.DispatchKey.PreDispatch
         super().__init__()
 
-    def _may_alias_or_mutate(self, func, types, args, kwargs):
+    def _run_and_check_may_alias_or_mutate(self, func, types, args, kwargs):
         def unwrap(e):
             if isinstance(e, torch.Tensor) and type(e) is not torch.Tensor:
                 try:
@@ -62,21 +62,26 @@ class PreDispatchSchemaCheckMode(SchemaCheckMode):
                     SchemaArgument(SchemaArgType.output, j),
                     SchemaArgument(SchemaArgType.input, i),
                 ):
-                    return True
+                    return True, out
             if schema_info.is_mutable(
                 SchemaArgument(SchemaArgType.input, i),
             ):
-                return True
+                return True, out
 
-        return False
+        return False, out
 
     # creating this just so we have access to the offending op
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if torch.Tag.maybe_aliasing_or_mutating in func.tags:
+            return func(*args, **kwargs)
+
         try:
             return super().__torch_dispatch__(func, types, args=args, kwargs=kwargs)
         except RuntimeError as e:
             # check if schema claims to be either aliasing or mutating
-            alias_or_mutate = self._may_alias_or_mutate(func, types, args, kwargs)
+            alias_or_mutate, out = self._run_and_check_may_alias_or_mutate(
+                func, types, args, kwargs
+            )
             if (
                 not alias_or_mutate
             ):  # if schema is aliasing or mutating, will decompose further
@@ -87,9 +92,12 @@ class PreDispatchSchemaCheckMode(SchemaCheckMode):
                     + msg,
                 )
                 raise e
+            return out
 
 
 class TestOpInfo(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @ops(op_db, allowed_dtypes=(torch.float, torch.int))
     def test_schema_check_op(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
