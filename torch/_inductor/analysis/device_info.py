@@ -10,9 +10,10 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class DeviceInfo:
     """
-    Theoretical numbers from data sheet.  When a data sheet reports both
-    Tensor/Matrix-Core and non-Tensor-Core numbers, the higher (Tensor Core)
-    number is used.
+    Device performance information. Built-in entries contain theoretical
+    datasheet values; backends may register their own estimates. When a data
+    sheet reports both Tensor/Matrix-Core and non-Tensor-Core numbers, the
+    higher (Tensor Core) number is used.
 
     NVIDIA data sheets since Hopper (H100) only publish Tensor-Core TFLOPS
     with 2:4 structured sparsity (marked ``*With sparsity``).  For devices
@@ -298,6 +299,11 @@ _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B7
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).
 _device_mapping = {k.upper(): v for k, v in _device_mapping.items()}
+
+
+def register_device_info(name: str, info: DeviceInfo) -> None:
+    """Register backend performance information before runtime estimation."""
+    _device_mapping[name.upper()] = info
 
 
 def lookup_device_info(name: str) -> DeviceInfo | None:

@@ -1275,10 +1275,15 @@ def _coor_current_device_index_impl() -> int:
 
 @torch.library.register_fake("coor::current_device_index")
 def _coor_current_device_index_fake() -> torch.SymInt:
+    from torch.fx.experimental.symbolic_shapes import constrain_range
+
+    # Unbacked, but not a size, so not ctx.new_dynamic_size(): that files the
+    # symbol under ShapeEnv.size_like, whose size-oblivious reasoning assumes a
+    # value is never 0 or 1 -- here, that this rank is never cuda:0 or cuda:1.
     ctx = torch.library.get_ctx()
-    # An accelerator index is non-negative; new_dynamic_size() carries that bound, so
-    # downstream reasoning is not stuck on a symbol that might be negative.
-    return ctx.new_dynamic_size()
+    index = ctx._shape_env.create_unbacked_symint()
+    constrain_range(index, min=0)  # an accelerator index is non-negative
+    return index
 
 
 def _coor_check_current_accelerator(

@@ -48,6 +48,13 @@ _EXTERNAL_DATA_HINT = (
     "Mark the value(s) as external data by using `external_data={'key': ...}`."
 )
 
+# Absent-name default for the two reads of a certified global out of the guard
+# scope. That scope can be a dict the CALLER passed as guard_globals, so a
+# subscript would run a __missing__ hook it defines, mutating the caller's
+# mapping and serving the graph a value no guard checked; dict.get takes this
+# default instead, in the one lookup a live scope needs.
+_UNBOUND = object()
+
 
 # A guard failure that is exactly a missing top-level global: the verbose code
 # part a guard tree reports for one ("KeyError on G['CONFIG']"). A trailing
@@ -593,8 +600,8 @@ class AOTCompiledFunction:
     _guard_check_enabled: bool = True
     _extra_globals: dict[str, object] | None = None
     # Guard-only scope, held by reference; kept apart from _extra_globals so
-    # nothing in it reaches the compiled bytecode but the names __post_init__
-    # picks out of it.
+    # nothing in it reaches the compiled bytecode but the names _serve re-takes,
+    # which are the ones __post_init__ certified.
     _guard_globals: dict[str, object] | None = None
     # Which of the three scopes the artifact's guards resolve against, so a
     # guard failure can say something actionable about the dict the name was
@@ -613,10 +620,13 @@ class AOTCompiledFunction:
     # Whether a kept guard is rooted at a user global; False until a load
     # decides it. Arms the live-value pick, and deserialize's fallback warning.
     _has_global_guards: bool = dataclasses.field(init=False, default=False)
-    # Whether to pick the guarded names out of _guard_globals into the
-    # bytecode's globals snapshot, which only a caller that supplied a guard
-    # scope but no f_globals -- the module load path -- needs.
-    _bytecode_reads_guard_scope: bool = False
+    # The globals a kept guard's own source IS (not one reached only through a
+    # sub-path of it), armed only for a supplied live scope. _serve re-takes
+    # them out of _guard_globals before every call: the guards read that dict by
+    # reference while the bytecode's globals are a dict of their own, so leaving
+    # them at their load-time values would let a rebind the guards ACCEPT
+    # compute with whatever the load happened to see.
+    _live_global_names: tuple[str, ...] = dataclasses.field(init=False, default=())
     # The rebuilt callable, set by __post_init__ (never absent on a live
     # artifact); a declared field rather than an attribute setattr'd onto the
     # instance. Out of repr and eq because the field has no default: leaving it
@@ -680,16 +690,36 @@ class AOTCompiledFunction:
                 # A live scope: a name it lacks must fail the guard rather than
                 # fall back to the value serialized with the artifact.
                 self._guard_scope = _GuardScope.SUPPLIED
-                if self._bytecode_reads_guard_scope and self._has_global_guards:
+                if self._has_global_guards:
                     # The narrow set, because a passing guard is the only thing
                     # that certifies a live value is the one the graph was
-                    # compiled for. The builtins dict key is left out as well: a
-                    # guard rooted at it certifies the live dict itself, which
-                    # the graph's snapshot never copies.
+                    # compiled for. The builtins dict key needs no subtracting
+                    # here: it can only arrive through a CHAINED source, which
+                    # _guard_source_globals drops already, since
+                    # load_builtin_from_argval is the one site that mints a
+                    # source under that key and mints a DictGetItemSource.
+                    # Not intersected with the scope: a name it does not bind
+                    # yet fails the guard rooted at it, so with the check on
+                    # nothing is served on that name until a caller who
+                    # populates the dict after the load binds it -- and then the
+                    # re-read is what the graph gets, not the value the artifact
+                    # was traced with.
+                    certified = _guard_source_globals(output_graph)
+                    self._live_global_names = tuple(sorted(certified))
+                    # Bound at load as well as re-taken per call in _serve: a
+                    # certified name the bytecode reads but the graph never
+                    # lifted -- a global the forward mutates or returns -- is
+                    # in external_refs but not in import_sources, and in
+                    # used_globals only when its name shadows a builtin, which
+                    # get_runtime_env binds there to the builtin object; so
+                    # unless it is bound here or by f_globals, its check fails,
+                    # or for such a name the graph reads the builtin instead.
+                    # Taken with .get, as in _serve, so a del racing the load
+                    # cannot raise KeyError out of it.
                     live = {
-                        name: guard_scope[name]
-                        for name in _guard_source_globals(output_graph)
-                        if name != builtins_key and name in guard_scope
+                        n: v
+                        for n in certified
+                        if (v := guard_scope.get(n, _UNBOUND)) is not _UNBOUND
                     }
                     extra_globals = {**(extra_globals or {}), **live}
 
@@ -911,6 +941,86 @@ class AOTCompiledFunction:
                 # line of its own, starting with a stray space.
                 msg = msg.rstrip() + " -- " + self._missing_global_hint()
             raise RuntimeError(msg)
+        return self._serve(*args, **kwargs)
+
+    def _serve(self, *args: Any, **kwargs: Any) -> Any:
+        """Run the graph, re-reading the globals a kept guard certifies.
+
+        Every call of an artifact runs through here -- ``__call__`` once its
+        guards pass or the check is disabled, and all four exits of
+        ``AOTCompiledModel.__call__``: the first pass, the sweep over the later
+        results, the re-check pass and the opted-out last resort -- so this is
+        the only caller of the raw ``fn``, and no dispatch pass serves a value an
+        earlier call re-read for a name the scope binds.
+
+        A global a kept guard's own source IS -- not one reached only through a
+        sub-path of it, which the guard does not certify -- is re-read from the
+        guard scope here, so a rebind that scope took and the guards accepted (a
+        same-metadata swap under a ``TENSOR_MATCH``, which checks metadata, not
+        values) is what the graph computes with. Every other global keeps
+        whatever the bytecode's globals hold -- the value they were built with
+        at load, unless the graph itself stores to it, which nothing here takes
+        back -- a container a guard reaches only through a sub-path such as
+        ``G['D']['a']`` included: that guard certifies the one item, not the
+        container's other members. A name the scope does not bind is skipped
+        rather than deleted, so it keeps whatever it last held -- the
+        serialized value if the scope never bound it -- and, unless the check
+        is disabled, the guard rooted at it refuses the call, and a mapping
+        that fabricates a missing name through ``__missing__`` is not asked to:
+        the read takes ``_UNBOUND`` instead. A global the graph itself rebinds
+        is re-read from the scope on the next call too: the replayed
+        ``STORE_GLOBAL`` lands in the bytecode's globals, not in the scope, so
+        the stored value is one no guard certified and the scope's is what the
+        check before the call just passed. That is a deliberate trade-off: a
+        forward that accumulates into a guarded global (``global W; W = W *
+        2``) serves the scope's value on every call, where eager, whose store
+        lands in the dict its guards read, counts up. Leaving a stored name out
+        of the re-read instead would serve the stored value after a rebind of
+        the scope the guards accepted -- the check certifying one value while
+        the graph reads another, which is the stale read this re-read removes
+        -- and writing the store back into the scope is a behaviour neither
+        load path has. Under the default filter, which drops every guard whose
+        own source is a global (a symbolic-shape guard on a global with a
+        dynamic dim survives it, but is rooted at the ShapeEnv),
+        ``_live_global_names`` is empty, nothing is re-read and such a store
+        accumulates in the bytecode's globals, unchecked.
+
+        Only a load handed a live scope arms this. An artifact compiled in this
+        process has none, so its globals stay at the values the capture copied
+        while its guards read the module dict they were rooted in: the same two
+        dicts, left to diverge as they already did rather than widened here.
+
+        An artifact that opted out of the check re-reads the same names with
+        nothing certifying them and serves whatever it finds, a value a kept
+        guard would have rejected included, or, for a name the scope no longer
+        binds, whatever the bytecode's globals last held: the opt-out is unsafe
+        by construction, and holding those names at their load-time values
+        instead would be no more checked, only stale.
+        The re-read is not atomic with the guard check before it, so a rebind
+        landing between the two is served unchecked -- the same window an eager
+        compiled frame has between guard evaluation and LOAD_GLOBAL. The write
+        lands in this artifact's own ``fn.__globals__``, which every call of it
+        shares, so two threads serving one loaded artifact while either rebinds
+        a guarded global race on that dict and one can run the graph on the
+        value the other just wrote; a caller who needs isolation loads the
+        artifact once per thread, since each load builds one such dict per
+        compiled result."""
+        if self._live_global_names:
+            # Narrowing for pyrefly, not a live check: __post_init__ records the
+            # set only under a supplied scope, and nothing nulls _guard_globals.
+            scope = self._guard_globals
+            if scope is None:
+                raise AssertionError("_live_global_names recorded without a scope")
+            f_globals = self.fn.__globals__
+            for name in self._live_global_names:
+                # One read, not a membership test and then a read: the scope is
+                # live, and a del landing between the two would raise where an
+                # absent name is skipped. get() rather than a subscript under
+                # try/except, so a caller's mapping is never asked to fabricate
+                # a value through __missing__; see _UNBOUND.
+                value = scope.get(name, _UNBOUND)
+                if value is not _UNBOUND:
+                    f_globals[name] = value
         return self.fn(*args, **kwargs)
 
     def source_info(self) -> "SourceInfo":
@@ -1006,7 +1116,6 @@ class AOTCompiledFunction:
         external_closure_data: dict[str, Any] | None = None,
         *,
         guard_globals: dict[str, object] | None = None,
-        bytecode_reads_guard_scope: bool = False,
         forward_not_resolved_reason: str | None = None,
     ) -> "AOTCompiledFunction":
         """Rebuild a compiled function from ``serialize()`` output.
@@ -1018,18 +1127,20 @@ class AOTCompiledFunction:
         "no scope" -- and the load WRITES into it, seeding the recorded aliases,
         builtins-dict key and unnamed-scope key a kept guard is rooted at without
         replacing a name it already binds, so pass the dict those should land in.
-        Passing neither resolves global guards against the scope rebuilt from the
-        artifact, where a rebinding in this process is invisible.
-
-        ``bytecode_reads_guard_scope`` picks the guarded names out of
-        ``guard_globals`` into the bytecode's globals snapshot as well -- the live
-        value of each global a kept guard's own source IS, not one reached only
-        through a sub-path of it, which the guard does not certify, and apart from
-        the recorded ``__builtins_dict___N`` key, excluded by name -- one name at
-        a time. Only a caller that supplies a guard scope but no ``f_globals``
-        needs it, i.e. the module load path: such a caller cannot inspect the
-        guards itself, so it gets the substitution only where a guard certifies
-        it, and never for a global whose guard a filter dropped.
+        Supplying it also binds the certified globals into the bytecode's globals
+        at load and arms the per-call re-read ``_serve`` performs: a global a kept
+        guard's own source IS -- not one reached only through a sub-path of it,
+        which the guard does not certify, and apart from the recorded
+        ``__builtins_dict___N`` key, excluded by name -- is taken from that dict at
+        load and on every call, one name at a time, so the graph reads only what a
+        guard certifies and never a global whose guard a filter dropped; the
+        load-time bind is what lets a ``guard_globals``-only load succeed where the
+        serialized scope lacks such a global, and it is written over ``f_globals``:
+        a certified name both bind is taken from ``guard_globals`` from the load
+        onwards, not only from the first call. The public loader passes one dict
+        as both, so it is unaffected. Passing neither resolves global guards
+        against the scope rebuilt from the artifact, where a rebinding in this
+        process is invisible.
         """
         f = io.BytesIO(data)
         f.seek(0)
@@ -1050,7 +1161,6 @@ class AOTCompiledFunction:
             artifacts,
             _extra_globals=f_globals,
             _guard_globals=guard_globals,
-            _bytecode_reads_guard_scope=bytecode_reads_guard_scope,
             _forward_not_resolved_reason=forward_not_resolved_reason,
         )
 
@@ -1564,9 +1674,15 @@ class AOTCompiledModel:
         first = results[0]
         f_locals = first.prepare_f_locals(self.model, *args, **kwargs)
         if first._live_guard_manager().check(f_locals):
-            # The guards just passed: call fn rather than result(), whose
-            # __call__ would bind and evaluate them again.
-            return first.fn(self.model, *args, **kwargs)
+            # The guard manager already passed; go through _serve rather
+            # than result(), which would re-run the ~0.85us guard eval on this
+            # hot dispatch path. _serve costs one Python frame plus a scope
+            # read and a dict write per certified global instead (about 0.4us
+            # with one name), and is what hands the graph the globals that
+            # check just accepted. Gating that frame out per site is not worth
+            # it: _serve is the only caller of the raw fn, and a site that got
+            # the gate wrong would serve a stale global with every guard passing.
+            return first._serve(self.model, *args, **kwargs)
         bound = [f_locals]
         shared = len(results) > 1 and self._binds_alike(results)
         for result in results[1:]:
@@ -1574,7 +1690,7 @@ class AOTCompiledModel:
                 f_locals = result.prepare_f_locals(self.model, *args, **kwargs)
             bound.append(f_locals)
             if result._live_guard_manager().check(f_locals):
-                return result.fn(self.model, *args, **kwargs)
+                return result._serve(self.model, *args, **kwargs)
         # One exit of check() refuses without running the tree: a tag-safe root's
         # no-tensor-aliasing fast check (GuardManager::check_nopybind). It
         # disarms that root, so a second check() runs the tree it skipped. With
@@ -1584,12 +1700,12 @@ class AOTCompiledModel:
         # 1us per result, accepted.
         for result, f_locals in zip(results, bound):
             if result._live_guard_manager().check(f_locals):
-                return result.fn(self.model, *args, **kwargs)
+                return result._serve(self.model, *args, **kwargs)
         # A result that opted out via disable_guard_check() accepts anything, but
         # only after both passes above have failed to find a real match.
         for result in results:
             if not result._guard_check_enabled:
-                return result.fn(self.model, *args, **kwargs)
+                return result._serve(self.model, *args, **kwargs)
         raise RuntimeError(self._no_match_report(results, bound))
 
     def _no_match_report(
@@ -1692,25 +1808,43 @@ class AOTCompiledModel:
 
         Guards on globals are evaluated, by reference, against the live
         ``__globals__`` of the function ``model.forward`` resolves to, and the
-        compiled bytecode reads a snapshot, taken here, of the globals serialized
-        with the artifact in which the names a kept guard's own source IS -- not a
-        global reached only through a sub-path of it, and never the recorded
-        ``__builtins_dict___N`` key -- are replaced by that live dict's values. So
-        a value the graph reads live is one a passing guard certifies, every other
-        global is the one it was traced with, and a guarded global the live dict
-        lacks fails the guard rather than falling back to the serialized value.
-        Rebinding a global after the load changes nothing the graph reads unless a
-        guard on its value refuses the call, and the certification is only as strong
-        as the guard's type: a kept ``TENSOR_MATCH`` checks metadata, not values,
-        and a root ``TYPE_MATCH`` on a container checks its type, not the members
-        the graph reads through it. Loading also MUTATES that dict: a recorded
-        ``__import_*`` alias a kept guard still reads, that builtins key when a
-        guard source names it, and the ``___unnamed_scope_*`` key of an inlined
-        frame's globals when the graph lifted a value through it -- bound to the
-        dict serialized with the artifact, since the key embeds an ``id()`` from
-        the tracing process that no live namespace holds -- are inserted (never
-        overwriting an existing key) so guards rooted at them resolve in a
-        process that never traced.
+        compiled bytecode reads the globals serialized with the artifact except
+        for the names a kept guard's own source IS -- not a global reached only
+        through a sub-path of it, and never the recorded ``__builtins_dict___N``
+        key -- which are re-taken from that live dict on every call. So a value
+        the graph reads live is one a passing guard certifies, every other global
+        is the one it was traced with, and a guarded global the live dict lacks
+        fails the guard rather than falling back to the serialized value. The
+        re-take writes into each compiled result's own ``fn.__globals__``,
+        shared by every call that result serves, so two threads served by one
+        loaded model while either rebinds a guarded global race on that dict,
+        with or without the GIL; a caller who needs isolation loads once per
+        thread.
+        Rebinding a guarded global after the load is therefore what the graph
+        computes with once the guards accept it, and the certification is only as
+        strong as the guard's type: a kept ``TENSOR_MATCH`` accepts a same-metadata
+        swap, checking metadata and not values, and a root ``TYPE_MATCH`` on a
+        container checks its type, not the members the graph reads through it.
+        It also stops at a result that opted out through ``disable_guard_check()``:
+        dispatch serves that result once every checked result refused the call,
+        and the re-read serves it whatever the live dict binds -- a value a kept
+        guard refused included, or, for a name the dict no longer binds, the last
+        value read -- since holding the load-time values instead would be no more
+        checked, only stale.
+        Loading also MUTATES that dict: a recorded ``__import_*`` alias a kept guard
+        still reads, that builtins key when a guard source names it, and the
+        ``___unnamed_scope_*`` key of an inlined frame's globals when the graph
+        lifted a value through it -- bound to the dict serialized with the artifact,
+        since the key embeds an ``id()`` from the tracing process that no live
+        namespace holds -- are inserted (never overwriting an existing key) so
+        guards rooted at them resolve in a process that never traced. Every CALL
+        writes as well, in the other direction: the certified names are written
+        into the globals of the compiled result that serves the call, which every
+        call that result serves shares, so two threads whose calls land on one
+        result while either rebinds a guarded global race on that dict and one
+        can run the graph on the value the other thread's guard check accepted. A
+        caller who needs isolation loads the artifact once per thread, since each
+        load builds one such dict per serialized result.
 
         A symbolic-shape guard on a global with a dynamic dim resolves its
         operands in that live dict as well, whether it installs as a Python
@@ -1740,8 +1874,8 @@ class AOTCompiledModel:
 
         ``guard_globals``, when supplied, is that scope instead of anything
         resolved from ``model.forward``, so a caller who wants neither the live
-        read nor the write passes its own dict; it is seeded and substituted from
-        on the same terms.
+        read nor the write passes its own dict; it is seeded, bound into the
+        bytecode's globals at load, and re-read from on the same terms.
 
         Hooks registered on ``model`` do not run: the artifact calls ``forward``
         directly. The artifact records none, so what is warned about here is what
@@ -1785,7 +1919,6 @@ class AOTCompiledModel:
                     AOTCompiledFunction.deserialize(
                         result,
                         guard_globals=scope,
-                        bytecode_reads_guard_scope=True,
                         forward_not_resolved_reason=forward_not_resolved_reason,
                     )
                 )
