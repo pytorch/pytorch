@@ -20,6 +20,55 @@ from typing_extensions import deprecated, NotRequired, ParamSpec
 import torch
 
 
+@functools.cache
+def _scalar_type_to_dtype() -> "tuple[torch.dtype, ...]":
+    # Indexed by c10::ScalarType (see ScalarType.h's
+    # AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS); append-only.
+    #
+    # This is deferred (rather than a module-level tuple) because torch._utils
+    # is imported by torch/__init__.py before `torch._C import *` populates
+    # dtype attributes like `torch.uint8` on the torch module.
+    return (
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+        torch.bool,
+        torch.qint8,
+        torch.quint8,
+        torch.qint32,
+        torch.bfloat16,
+        torch.quint4x2,
+        torch.quint2x4,
+        torch.bits1x8,
+        torch.bits2x4,
+        torch.bits4x2,
+        torch.bits8,
+        torch.bits16,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    )
+
+
+def _decode_scalar_type(scalar_type: int) -> "torch.dtype":
+    dtypes = _scalar_type_to_dtype()
+    if not (0 <= scalar_type < len(dtypes)):
+        raise IndexError(scalar_type)
+    return dtypes[scalar_type]
+
+
 def _type(self, dtype=None, non_blocking=False, **kwargs):
     """Returns the type if `dtype` is not provided, else casts this object to
     the specified type.
