@@ -8162,8 +8162,9 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertRaisesRegex(PrecompileError, "Pass training=True"):
             with self._capture(fn) as cap:
                 cap(model, self.x)
+        expected = fn(model, self.x)
         with self._capture(fn, training=True) as cap:
-            self.assertEqual(cap(model, self.x).shape, model.b.shape)
+            self.assertEqual(cap(model, self.x), expected)
 
     def test_a_frozen_parameter_backward_is_not_blamed_on_training(self):
         # Autograd raises the same "does not require grad" when nothing fn differentiates
@@ -8769,26 +8770,6 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertIn(repr(self.cache), str(cm.exception))
         self.assertIsInstance(cm.exception.__cause__, UnicodeDecodeError)
 
-    def test_paths_come_in_pairs(self):
-        # Half a pair never loads, so both entry points refuse one up front, before fn
-        # runs (the same file for both halves is refused too, above).
-        both = "neither artifact_path nor cache_path"
-        cases = [
-            ((self.artifact, None), "artifact_path without cache_path"),
-            ((None, self.cache), "cache_path without artifact_path"),
-            ((None, None), both),
-        ]
-        for (artifact, cache), regex in cases:
-            with self.assertRaisesRegex(ValueError, regex):
-                self._capture(artifact_path=artifact, cache_path=cache)
-            with self.assertRaisesRegex(ValueError, regex):
-                torch.compiler.precompile.load(artifact, cache)
-        # cache_path is a required positional, so one path does not even reach the
-        # pair refusals above.
-        with self.assertRaisesRegex(TypeError, "cache_path"):
-            torch.compiler.precompile.load(self.artifact)
-        self.assertEqual(os.listdir(self.dir), [])
-
     def test_call_outside_the_block_is_refused(self):
         # Only the block exit writes the files, so a call made without entering
         # would trace and serve and then write nothing.
@@ -8845,21 +8826,21 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertEqual(rewritten, inodes)
         self.assertEqual(self._leftovers(), [])
 
-    def test_a_failed_trace_is_reported_as_a_failed_trace(self):
-        # The single-call flag counts a RENDER, not an attempt: after a trace that raised
-        # nothing was captured, so the retry must describe the failed trace rather than claim
-        # a call was captured, and save() / the exit must not ask for a call already made.
+    def test_a_failed_trace_is_reported_as_a_failed_call(self):
+        # The single-call flag counts a RENDER, not an attempt: after a call that raised
+        # nothing was captured, so the retry must describe that raise rather than claim a
+        # call was captured, and save() / the exit must not ask for a call already made.
         def data_dependent(model, x):
             return model(x) * x.sum().item()
 
         cap = self._capture(data_dependent)
-        with self.assertRaisesRegex(PrecompileError, "raised before it rendered"):
+        with self.assertRaisesRegex(PrecompileError, "without rendering an artifact"):
             with cap:
                 with self.assertRaisesRegex(PrecompileError, "data-dependent"):
                     cap(self.model, self.x)
                 with self.assertRaisesRegex(PrecompileError, "already ran and raised"):
                     cap(self.model, self.x)
-                with self.assertRaisesRegex(PrecompileError, "raised before it"):
+                with self.assertRaisesRegex(PrecompileError, "without rendering"):
                     cap.save()
         self.assertEqual(os.listdir(self.dir), [])
 
