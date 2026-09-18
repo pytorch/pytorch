@@ -542,6 +542,7 @@
 # /test/test_model_exports_to_core_aten.py
 # /test/test_module_tracker.py
 # /test/test_monitor.py
+# /test/test_multigpu.py
 # /test/test_multiprocessing.py
 # /test/test_multiprocessing_spawn.py
 # /test/test_namedtuple_return_api.py
@@ -608,7 +609,6 @@
 # /test/test_cuda_expandable_segments.py
 # /test/test_cuda_graph_debug.py
 # /test/test_cuda_graph_utils.py
-# /test/test_cuda_multigpu.py
 # /test/test_cuda_nvml_based_avail.py
 # /test/test_cuda_primary_ctx.py
 # /test/test_cuda_sanitizer.py
