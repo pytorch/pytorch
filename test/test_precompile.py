@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.utils._pytree as _pytree
@@ -684,12 +685,24 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "control-flow subgraph"):
             torch.compiler.precompile(f, torch.randn(4))
 
-    def test_while_loop_rejected(self):
-        # torch.while_loop is the other HOP that refusal names, and it never reaches the
-        # post-trace get_attr check: its fake kernel enters
-        # mode.shape_env.ignore_fresh_unbacked_symbols(), which on a static capture (no
-        # ShapeEnv) raises an AttributeError mid-trace. It must still be refused with the
-        # same PrecompileError, not leak that internal error.
+        # Branches returning differing INT values merge to a symint instead, which asserts
+        # a ShapeEnv the static capture does not have and so never reaches the get_attr
+        # check above. Same refusal, not a raw AssertionError.
+        def g(x):
+            return torch.cond(x.sum() > 0, lambda t: 1, lambda t: 2, (x,))
+
+        with self.assertRaisesRegex(PrecompileError, "control-flow subgraph") as cm:
+            _precompile_pair(g, torch.randn(4))
+        self.assertIsInstance(cm.exception.__cause__, AssertionError)
+
+    @parametrize("carry", ("tensor", "int"))
+    def test_while_loop_rejected(self, carry):
+        # torch.while_loop is the other HOP that refusal names, and neither spelling reaches
+        # the post-trace get_attr check: both want the ShapeEnv a static capture lacks. A
+        # TENSOR carry dies in the fake kernel's ignore_fresh_unbacked_symbols()
+        # (AttributeError); an INT carry (while_loop's own docstring spelling) dies earlier,
+        # in the proxy path that unspecializes it (AssertionError). Both must come back as
+        # the control-flow PrecompileError, not leak the internal error.
         def f(x):
             def cond_fn(i, v):
                 return i < 3
@@ -697,15 +710,16 @@ class TestPrecompile(TestCase):
             def body_fn(i, v):
                 return i + 1, v + 1
 
-            return torch.while_loop(cond_fn, body_fn, (torch.tensor(0), x))
+            init = torch.tensor(0) if carry == "tensor" else 0
+            return torch.while_loop(cond_fn, body_fn, (init, x))
 
         with self.assertRaisesRegex(PrecompileError, "control-flow subgraph") as cm:
             _precompile_pair(f, torch.randn(4))
         # The message is byte-identical to the post-trace get_attr refusal's, so pin the
-        # cause too: only this clause chains an AttributeError, and without it a
-        # while_loop that stopped needing a ShapeEnv would leave the test green and the
-        # relabel dead.
-        self.assertIsInstance(cm.exception.__cause__, AttributeError)
+        # cause too: only these clauses chain one of these types, and without them a
+        # while_loop that stopped needing a ShapeEnv would leave the test green, relabel dead.
+        expected = AttributeError if carry == "tensor" else AssertionError
+        self.assertIsInstance(cm.exception.__cause__, expected)
 
     def test_load_falls_back_when_cache_unreconstructable(self):
         # The cache is only an acceleration; python_code always runs standalone. A
@@ -2403,13 +2417,18 @@ class TestPrecompile(TestCase):
         cases = [
             # Each regex carries the layout AND its diagnosis, so one branch cannot
             # stand in for another (every one of them opens "has <layout> layout").
-            (
-                x.to_mkldnn(),
-                r"user input 0 has torch._mkldnn layout.*comes back STRIDED",
-            ),
             (x.to_sparse(), r"user input 0 has torch.sparse_coo layout.*reports 0 nnz"),
             (x.to_sparse_csr(), r"user input 0 has torch.sparse_csr layout.*0 nnz"),
         ]
+        # mkldnn tensors cannot be built in a build without MKL-DNN (macOS CI).
+        mkldnn = torch.backends.mkldnn.is_available()
+        if mkldnn:
+            cases.append(
+                (
+                    x.to_mkldnn(),
+                    r"user input 0 has torch._mkldnn layout.*comes back STRIDED",
+                )
+            )
         for t, message in cases:
             with (
                 self.subTest(case=message),
@@ -2420,18 +2439,28 @@ class TestPrecompile(TestCase):
         # The model half is named the same way: torch.utils.mkldnn.to_mkldnn registers the
         # converted weight as a BUFFER, and before this refusal that capture died inside
         # the TorchScript interpreter ("itensor_view_from_dense expects CPU tensor input").
-        from torch.utils.mkldnn import to_mkldnn
+        if mkldnn:
+            from torch.utils.mkldnn import to_mkldnn
 
-        with self.assertRaisesRegex(
-            PrecompileError,
-            r"buffer weight has torch._mkldnn layout.*comes back STRIDED",
+            with self.assertRaisesRegex(
+                PrecompileError,
+                r"buffer weight has torch._mkldnn layout.*comes back STRIDED",
+            ):
+                _precompile_pair(
+                    lambda m, t: m(t.to_mkldnn()).to_dense(),
+                    to_mkldnn(torch.nn.Linear(4, 4)),
+                    x,
+                    backend="eager",
+                )
+
+        # The pinned member of that table needs an accelerator to CONSTRUCT, so its refusal
+        # -- the one whose deletion ships a wrong artifact rather than an error -- goes
+        # unexercised on CPU. The probe DISPATCHES, so answering True reaches it anyway.
+        with (
+            mock.patch.object(torch.Tensor, "is_pinned", return_value=True),
+            self.assertRaisesRegex(PrecompileError, "user input 0 is in pinned memory"),
         ):
-            _precompile_pair(
-                lambda m, t: m(t.to_mkldnn()).to_dense(),
-                to_mkldnn(torch.nn.Linear(4, 4)),
-                x,
-                backend="eager",
-            )
+            _precompile_pair(lambda t: t.sum(), x, backend="eager")
 
         # The sibling idiom -- fn PINNING a tensor instead of being handed a pinned one --
         # is refused as a missing fake kernel: FakeTensorMode declines aten._pin_memory
@@ -2547,12 +2576,12 @@ class TestPrecompile(TestCase):
         # The same probe raises a TypeError, not a RuntimeError, for the decline protocol
         # PyTorch documents (every __torch_dispatch__ handler returning NotImplemented ->
         # "Multiple dispatch failed"), which torch.masked.MaskedTensor does for is_pinned.
-        # Both raises are swallowed, so the probe neither escapes the public API nor costs
-        # a capture that fake tracing supports.
+        # Every raise the probe can make is swallowed, so it neither escapes the public API
+        # nor costs a supported capture; the filter covers the MaskedTensor build only.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             mt = torch.masked.as_masked_tensor(torch.randn(3, 4), torch.randn(3, 4) > 0)
-            code, cache = _precompile_pair(lambda t: t.sum(), mt, backend="eager")
+        code, _ = _precompile_pair(lambda t: t.sum(), mt, backend="eager")
         self.assertIn("aten.sum", code)
 
     def test_capture_inside_another_trace_refused(self):
