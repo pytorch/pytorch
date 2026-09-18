@@ -1942,7 +1942,13 @@ class TestUtilityFunsCuda(_BaseTestCase):
         self.assertSetEqual({i.name for i in graph.graph.initializer}, {"w_cpu"})
 
 
-instantiate_device_type_tests(TestUtilityFunsCuda, globals(), only_for=("cuda",))
+for params in _OPSET_PARAM:
+    # The name needs to match the parameterized_class name.
+    instantiate_device_type_tests(
+        globals()[f"TestUtilityFunsCuda_opset_{params['opset_version']}"],
+        globals(),
+        only_for=("cuda",),
+    )
 
 if __name__ == "__main__":
     common_utils.run_tests()
