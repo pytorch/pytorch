@@ -16,6 +16,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 )
 from torch.distributed.tensor import init_device_mesh, Shard
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
@@ -28,6 +29,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    HardwareClassification,
     IS_LINUX,
     MI200_ARCH,
     run_tests,
@@ -69,6 +71,8 @@ class TestFullyShardOverlap(FSDPTest):
     test that the overlapped time is less than a precisely calculated time.
     """
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(2, torch.get_device_module(device_type).device_count())
@@ -78,7 +82,7 @@ class TestFullyShardOverlap(FSDPTest):
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         "Sleep is not supported on this device",
     )
-    def test_fully_shard_training_overlap(self):
+    def test_fully_shard_training_overlap(self, device):
         torch.manual_seed(42)
 
         # Use non-trivial comm. time but still shorter than compute time
@@ -192,7 +196,7 @@ class TestFullyShardOverlap(FSDPTest):
         self.assertLessEqual(fwd_bwd_time, ref_fwd_bwd_time)
 
     @skip_if_lt_x_gpu(2)
-    def test_fully_shard_backward_comm_overlap(self):
+    def test_fully_shard_backward_comm_overlap(self, device):
         """Exercise backward with reduce-scatter sharing the shard process
         group and with reduce-scatter opted in to a dedicated process group via
         set_separate_reduce_scatter_group.
@@ -274,7 +278,7 @@ class TestFullyShardOverlap(FSDPTest):
         _time_fn(fsdp_bwd)
 
     @skip_if_lt_x_gpu(2)
-    def test_set_separate_reduce_scatter_group(self):
+    def test_set_separate_reduce_scatter_group(self, device):
         """Reduce-scatter shares the shard PG by default; enabling gives it a
         dedicated PG (one communicator shared across same-rank-set meshes), and
         disabling resets to the shared PG."""
@@ -324,7 +328,7 @@ class TestFullyShardOverlap(FSDPTest):
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         "Sleep is not supported on this device",
     )
-    def test_fully_shard_post_optim_event_overlap(self):
+    def test_fully_shard_post_optim_event_overlap(self, device):
         torch.manual_seed(42)
 
         # Use non-trivial comm. time but still shorter than compute time
@@ -420,6 +424,8 @@ class LinearWithSleep(nn.Module):
 
 
 class TestFullyShardPerParamMeshOverlap(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -491,7 +497,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         "Sleep is not supported on this device",
     )
-    def test_fully_shard_per_param_mesh_training_overlap(self):
+    def test_fully_shard_per_param_mesh_training_overlap(self, device):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=False)
 
     # Hangs on MI200: RCCL deadlocks when three communicators make
@@ -502,7 +508,7 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
         not hasattr(torch.get_device_module(device_type), "_sleep"),
         "Sleep is not supported on this device",
     )
-    def test_fully_shard_per_param_mesh_no_grad_input_overlap(self):
+    def test_fully_shard_per_param_mesh_no_grad_input_overlap(self, device):
         self._test_per_param_mesh_overlap(simulate_no_grad_input=True)
 
     def _test_per_param_mesh_overlap(self, simulate_no_grad_input: bool):
@@ -649,6 +655,20 @@ class TestFullyShardPerParamMeshOverlap(FSDPTest):
             lambda msg: f"{msg}\nFSDP/replicate ratio {fsdp_time / rep_time:.2f} >= 1.5; "
             f"per-group RS state may not be preventing cross-group stalls",
         )
+
+
+instantiate_device_type_tests(
+    TestFullyShardOverlap,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardPerParamMeshOverlap,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
