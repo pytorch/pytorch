@@ -29,6 +29,7 @@ from torch import inf, nan
 from itertools import product, combinations, permutations, chain
 from functools import partial
 from torch import multiprocessing as mp
+from torch.profiler import kineto_available
 from torch.testing import make_tensor
 from torch.testing._internal.common_optimizers import (
     optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
@@ -3427,6 +3428,43 @@ class TestTorchDeviceType(TestCase):
             out = view.t().contiguous()
             self.assertEqual(out.cpu(), view.cpu().t().contiguous(), atol=0, rtol=0)
 
+    @onlyCUDA
+    @dtypes(torch.bool, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("layout", ("aligned", "word_aligned", "src_offset", "dst_offset", "src_pitch", "dst_pitch", "grid_stride"))
+    def test_copy_transpose_tiled_vectorized(self, device, dtype, layout):
+        h, w = (2052, 2060) if layout == "word_aligned" else (2064, 2096)
+        if layout == "grid_stride":
+            vec = 4 // torch.empty((), dtype=dtype).element_size()
+            h, w = (32 * 65535 + 4) * vec, 4 * vec
+        src_offset = int(layout == "src_offset")
+        dst_offset = int(layout == "dst_offset")
+        src_pad = 1 if layout == "src_pitch" else 16
+        dst_pad = 1 if layout == "dst_pitch" else 16
+        src = make_tensor((h, w + src_pad), device=device, dtype=dtype)[:, src_offset:src_offset + w]
+        dst = torch.empty((w, h + dst_pad), device=device, dtype=dtype)[:, dst_offset:dst_offset + h]
+        dst.copy_(src.t())
+        self.assertEqual(dst.cpu().contiguous().view(torch.uint8),
+                         src.cpu().t().contiguous().view(torch.uint8))
+
+    @onlyCUDA
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @dtypes(torch.bool, torch.uint8, torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("case", ("below", "at", "offset", "pitch"))
+    def test_copy_transpose_tiled_small(self, device, dtype, case):
+        es = torch.empty((), dtype=dtype).element_size()
+        h, w = 512 // es, 496 if case == "below" else 512
+        offset = int(case == "offset")
+        pad = 1 if case == "pitch" else 16
+        src = make_tensor((h, w + pad), device=device, dtype=dtype)[:, offset:offset + w]
+        dst = torch.empty((w, h), device=device, dtype=dtype)
+        with torch.profiler.profile(activities=[
+                torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
+            dst.copy_(src.t())
+            torch.cuda.synchronize()
+        tiled = any("transpose_copy_tiled_kernel" in event.name for event in prof.events())
+        self.assertEqual(tiled, case == "at" and es < 4)
+        self.assertEqual(dst.cpu().view(torch.uint8), src.cpu().t().contiguous().view(torch.uint8))
+
     # Shapes that must NOT take the tiled path, to guard the dispatch check.
     @onlyCUDA
     @dtypes(torch.float32)
@@ -3441,7 +3479,7 @@ class TestTorchDeviceType(TestCase):
         casted = big.t().to(torch.float64)
         self.assertEqual(casted.cpu(), big.cpu().t().to(torch.float64), atol=0, rtol=0)
 
-    # Pins the 4 MB dispatch threshold and the element-size switch.
+    # Pins the FP32 dispatch threshold and the element-size switch.
     @onlyCUDA
     def test_copy_transpose_tiled_boundary(self, device):
         # 1024x1024 fp32 is exactly 4 MB, the first size that takes the tiled
