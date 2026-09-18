@@ -1,7 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 import tempfile
+import threading
+from contextlib import contextmanager
 from typing import Any, IO
 
 import torch
@@ -23,6 +26,9 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.api import CheckpointException
+from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
+from torch.distributed.checkpoint.filesystem import FileSystem
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -154,6 +160,70 @@ class TestDistributedStateDictSaveLoad(TestCase):
             )
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+
+class _FailOnWriterThreadFileSystem(FileSystem):
+    """Raises from ``create_stream`` on the writer threads spawned by ``_write_data``.
+
+    The main thread blocks in its first ``create_stream`` until a spawned thread has
+    failed. That ordering is what makes the test deterministic: the main thread cannot
+    drain ``file_queue`` and starve the spawned thread of work.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.thread_failed = threading.Event()
+
+    @contextmanager
+    def create_stream(self, path, mode):
+        if threading.current_thread() is not threading.main_thread():
+            self.thread_failed.set()
+            raise OSError("injected create_stream failure")
+        if not self.thread_failed.wait(timeout=300):
+            raise AssertionError("writer thread never reached create_stream")
+        with super().create_stream(path, mode) as stream:
+            yield stream
+
+
+class TestFileSystemWriterThreadFailure(TestCase):
+    def _writer(self, path: str) -> FileSystemWriter:
+        # thread_count=2 spawns one writer thread alongside the main thread, and
+        # single_file_per_rank=False gives each write item its own file so both
+        # threads have work to pick up.
+        writer = FileSystemWriter(path=path, thread_count=2, single_file_per_rank=False)
+        writer.fs = _FailOnWriterThreadFileSystem()
+        return writer
+
+    def test_write_data_future_fails(self) -> None:
+        state_dict = {"a": torch.arange(4.0), "b": torch.arange(6.0)}
+
+        with tempfile.TemporaryDirectory() as path:
+            fs_writer = self._writer(path)
+            planner = DefaultSavePlanner()
+            planner.set_up_planner(state_dict, is_coordinator=True)
+            fs_writer.set_up_storage_writer(is_coordinator=True)
+
+            plan = fs_writer.prepare_local_plan(planner.create_local_plan())
+            plan = planner.finish_plan(fs_writer.prepare_global_plan([plan])[0])
+
+            fut = fs_writer.write_data(plan, planner)
+            with self.assertRaisesRegex(OSError, "injected create_stream failure"):
+                fut.wait()
+
+    def test_save_does_not_publish_metadata(self) -> None:
+        state_dict = {"a": torch.arange(4.0), "b": torch.arange(6.0)}
+
+        with tempfile.TemporaryDirectory() as path:
+            with self.assertRaisesRegex(
+                CheckpointException, "injected create_stream failure"
+            ):
+                save(
+                    state_dict=state_dict,
+                    storage_writer=self._writer(path),
+                    no_dist=True,
+                )
+
+            self.assertNotIn(".metadata", os.listdir(path))
 
 
 class TestDistributedStateDictSaveLoadRot13(TestCase):
