@@ -107,6 +107,29 @@ bool registerGilChecker() {
 static bool registered = registerGilChecker();
 #endif // USE_C10D_NCCL
 
+#ifdef USE_C10D_GLOO
+
+std::optional<std::array<int64_t, 3>> get_python_gc_counts() {
+  if (!Py_IsInitialized()) {
+    return std::nullopt;
+  }
+  pybind11::gil_scoped_acquire gil;
+  py::tuple counts =
+      py::module_::import("gc").attr("get_count")().cast<py::tuple>();
+  return std::array<int64_t, 3>{
+      counts[0].cast<int64_t>(),
+      counts[1].cast<int64_t>(),
+      counts[2].cast<int64_t>()};
+}
+
+bool registerGcCountGetter() {
+  c10d::get_gc_count_getter() = &get_python_gc_counts;
+  return true;
+}
+
+static bool registered_gc_count_getter = registerGcCountGetter();
+#endif // USE_C10D_GLOO
+
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
 // TODO: move this somewhere more generally useful
 template <typename T>
