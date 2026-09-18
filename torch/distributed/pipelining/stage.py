@@ -3,7 +3,6 @@
 import logging
 import operator
 import warnings
-import weakref
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
@@ -13,7 +12,6 @@ import torch.distributed as dist
 import torch.distributed.config as dist_config
 import torch.fx as fx
 import torch.nn as nn
-from torch._logging import warning_once
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
@@ -50,6 +48,7 @@ from ._backward import (
     stage_backward_weight,
 )
 from ._debug import map_debug_info
+from ._p2p import _DirectedRankEdge, _warn_if_eager_nccl
 from ._recv_buffers import (
     _assign_recv_info_buffers,
     _clear_unlaunched_recv_infos,
@@ -99,76 +98,6 @@ def _normalize_model_output_as_tuple(output: Any) -> tuple[Any]:
     return output_tuple
 
 
-# Cache of per-direction P2P communicators, keyed (weakly) by the PP process
-# group they are derived from. Looped/V schedules construct several stage chunks
-# per rank that share one PP group; they must share the same forward/backward
-# comms (and issue the split_group collective only once) so creation stays
-# consistent and cheap across all ranks. Stage chunks are constructed serially
-# within a rank, so the first miss performs the split and the rest hit the cache.
-# The key is a weakref, so entries are
-# dropped automatically once the parent group is destroyed (e.g. via
-# destroy_process_group / reinitialization), avoiding stale dead communicators.
-_PP_DIRECTION_GROUP_CACHE: "weakref.WeakKeyDictionary[dist.ProcessGroup, tuple[dist.ProcessGroup, dist.ProcessGroup]]" = weakref.WeakKeyDictionary()
-
-
-def _warn_if_eager_nccl(group: dist.ProcessGroup | None) -> None:
-    if dist.get_backend(group) not in {"nccl", "nccl2"}:
-        return
-    warning_once(
-        logger,
-        "Pipeline parallelism is using an eager NCCL communicator. Consider "
-        'creating its process group with backend="nccl-lazy" so peer '
-        "communicators are initialized lazily and traffic to different peers "
-        "can overlap.",
-    )
-
-
-def _build_p2p_direction_groups(
-    group: dist.ProcessGroup | None,
-) -> tuple[dist.ProcessGroup, dist.ProcessGroup]:
-    """Create two communicators over the same ranks as ``group``, one per data-flow
-    direction: ``downstream`` carries traffic flowing ``r -> r+1`` (forward
-    activations) and ``upstream`` carries ``r -> r-1`` (backward gradients).
-
-    Pipeline P2P normally shares a single communicator for both directions, which
-    serializes every send/recv in one FIFO. Coalescing makes a single mixed
-    send+recv batch deadlock-free, but across *separate* batches (pipeline skew,
-    looped / V schedules, skip connections) the shared FIFO can still form a
-    dependency cycle and deadlock. Routing the two directions onto separate
-    communicators / streams removes that cross-batch coupling and restores
-    full-duplex bandwidth.
-
-    Uses ``split_group``, which is collective over ``group``'s own ranks (not the
-    whole world), so it composes with PP as a sub-axis of a larger device mesh.
-    Requires the default process group to be device-bound (e.g.
-    ``init_process_group(..., device_id=...)``), which ``split_group`` needs for
-    NCCL; torchcomms binds the device automatically.
-    """
-    parent = group if group is not None else dist.distributed_c10d._get_default_group()
-    cached = _PP_DIRECTION_GROUP_CACHE.get(parent)
-    if cached is not None:
-        return cached
-
-    split_ranks = [list(range(dist.get_world_size(parent)))]
-    # split_group splits the parent's communicator, so the default process group
-    # must be device-bound (NCCL) -- torchcomms binds the device automatically. If
-    # it is not, split_group raises its own device error.
-    downstream = dist.split_group(
-        parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_downstream"
-    )
-    upstream = dist.split_group(
-        parent_pg=group, split_ranks=split_ranks, group_desc="pp_p2p_upstream"
-    )
-    # All parent ranks are members of the single split.
-    if not isinstance(downstream, dist.ProcessGroup):
-        raise AssertionError(f"expected dist.ProcessGroup, got {type(downstream)}")
-    if not isinstance(upstream, dist.ProcessGroup):
-        raise AssertionError(f"expected dist.ProcessGroup, got {type(upstream)}")
-    logger.info("Pipeline P2P: using per-direction (downstream/upstream) communicators")
-    _PP_DIRECTION_GROUP_CACHE[parent] = (downstream, upstream)
-    return downstream, upstream
-
-
 class _PipelineStageBase(ABC):
     """Base class for pipeline stages.
 
@@ -210,29 +139,20 @@ class _PipelineStageBase(ABC):
         self.device = device
         self.group = group
 
-        _warn_if_eager_nccl(group)
-
-        # Downstream (data flowing r -> r+1: forward activations) and upstream
-        # (r -> r-1: backward gradients) P2P communicators. Auto-enabled when
-        # TorchComms is in use (its split path is always available and the
-        # single-comm FIFO deadlock is most acute there); the config flag
-        # torch.distributed.config.pipeline_per_direction_p2p (env
-        # TORCH_DISTRIBUTED_PIPELINE_PER_DIRECTION_P2P) force-enables it on other
-        # backends. When disabled both alias ``self.group`` so behavior is
-        # byte-for-byte unchanged.
-        self.p2p_per_direction = (
-            dist_config.pipeline_per_direction_p2p
+        # Directed physical rank-edge communicators. Auto-enabled when
+        # TorchComms is in use; the config flag
+        # torch.distributed.config.pipeline_per_edge_p2p (env
+        # TORCH_DISTRIBUTED_PIPELINE_PER_EDGE_P2P) force-enables it on other
+        # backends. When disabled every P2P op uses ``self.group``.
+        self.p2p_per_edge = (
+            dist_config.pipeline_per_edge_p2p
             or dist.distributed_c10d._use_torchcomms_enabled()
         )
-        self._downstream_group: dist.ProcessGroup | None
-        self._upstream_group: dist.ProcessGroup | None
-        if self.p2p_per_direction:
-            self._downstream_group, self._upstream_group = _build_p2p_direction_groups(
-                group
-            )
-        else:
-            self._downstream_group = group
-            self._upstream_group = group
+        if not self.p2p_per_edge:
+            _warn_if_eager_nccl(group)
+        # Keys are (source group rank, destination group rank). Opposite
+        # directions need distinct communicators even when they share one peer.
+        self._p2p_edge_groups: dict[_DirectedRankEdge, dist.ProcessGroup] = {}
 
         self.dw_builder = dw_builder
 
@@ -288,6 +208,24 @@ class _PipelineStageBase(ABC):
         # DTensor support: consolidated stage metadata container
         # Contains inputs, outputs, input_grads, output_grads metadata
         self._stage_meta = _StageMeta()
+
+    @property
+    def _parent_group(self) -> dist.ProcessGroup:
+        """Return the parent group used by opt-in per-edge P2P setup.
+
+        Stages without an explicit group resolve the default group here. The
+        legacy shared-communicator path deliberately does not consult this
+        property, so single-process schedules can run without initializing a
+        default process group.
+
+        Returns:
+            The explicit pipeline process group or the default process group.
+        """
+        return (
+            self.group
+            if self.group is not None
+            else dist.distributed_c10d._get_default_group()
+        )
 
     @property
     def has_backward(self) -> bool:
@@ -414,42 +352,81 @@ class _PipelineStageBase(ABC):
             peer_rank,
         )
 
+    def _get_p2p_group(
+        self, source_stage: int, destination_stage: int
+    ) -> dist.ProcessGroup | None:
+        """Resolve the communicator for one directed logical-stage edge.
+
+        Args:
+            source_stage: Logical stage sending the tensor.
+            destination_stage: Logical stage receiving the tensor.
+
+        Returns:
+            The shared parent group when per-edge mode is disabled, otherwise
+            the child group keyed by the source and destination group ranks.
+
+        Raises:
+            RuntimeError: If same-rank stages reach the P2P path, or the
+                schedule uses a non-adjacent logical-stage edge for which no
+                directed child was created.
+        """
+        if not self.p2p_per_edge:
+            return self.group
+        source_rank = self.stage_index_to_group_rank[source_stage]
+        destination_rank = self.stage_index_to_group_rank[destination_stage]
+        if source_rank == destination_rank:
+            raise RuntimeError(
+                "Same-rank pipeline stages must use local transfer, not P2P"
+            )
+        try:
+            return self._p2p_edge_groups[(source_rank, destination_rank)]
+        except KeyError as error:
+            raise RuntimeError(
+                "Missing directed pipeline communicator for group ranks "
+                f"{source_rank}->{destination_rank}; per-edge P2P supports "
+                "adjacent logical-stage communication only"
+            ) from error
+
     def _get_recv_ops(
         self,
         recv_infos: tuple[_RecvInfo, ...],
-        group: dist.ProcessGroup | None,
     ) -> list[dist.P2POp]:
         """Build one direction's receive operations transactionally.
 
         Args:
             recv_infos: Descriptors for the tensors received by this stage.
-            group: The direction-specific process group for these receives.
-                Forward receives use the upstream group and backward receives
-                use the downstream group.
 
         Returns:
-            Receive operations whose buffers remain owned by ``recv_infos``.
+            Receive operations whose peer and direction-specific communicator
+            are derived from each descriptor's logical-stage edge. Their
+            buffers remain owned by ``recv_infos``.
 
         Raises:
             Exception: Propagates peer-resolution, allocation, and operation-
                 construction failures after releasing every buffer acquired by
                 this call. No operation has been submitted at this boundary.
         """
-        peer_ranks: list[int | None] = []
+        peers: list[tuple[int, dist.ProcessGroup | None] | None] = []
         for info in recv_infos:
             if info.is_root_arg or info.tensor_meta is None:
-                peer_ranks.append(None)
+                peers.append(None)
                 continue
             if info.source is None:
                 raise AssertionError("expected info.source to be not None")
-            peer_ranks.append(self._resolve_peer_global_rank(info.source))
+            peers.append(
+                (
+                    self._resolve_peer_global_rank(info.source),
+                    self._get_p2p_group(info.source, self.stage_index),
+                )
+            )
 
         ops: list[dist.P2POp] = []
         acquired: list[_RecvInfo] = []
         try:
-            for info, peer_global_rank in zip(recv_infos, peer_ranks, strict=True):
-                if peer_global_rank is None:
+            for info, peer in zip(recv_infos, peers, strict=True):
+                if peer is None:
                     continue
+                peer_global_rank, group = peer
                 buffer = info.allocate_buffer(self.device)
                 acquired.append(info)
                 ops.append(dist.P2POp(dist.irecv, buffer, peer_global_rank, group))
@@ -576,7 +553,7 @@ class _PipelineStageBase(ABC):
         """
         recv_infos: tuple[_RecvInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
-        return self._get_recv_ops(recv_infos, self._downstream_group)
+        return self._get_recv_ops(recv_infos)
 
     def get_bwd_recv_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -587,7 +564,7 @@ class _PipelineStageBase(ABC):
             return []
 
         recv_infos = self.grad_recv_info[bwd_chunk_id]
-        return self._get_recv_ops(recv_infos, self._upstream_group)
+        return self._get_recv_ops(recv_infos)
 
     def _clear_unlaunched_fwd_recv(self, microbatch_index: int) -> None:
         """Release forward buffers when their receive batch was not submitted."""
@@ -625,7 +602,7 @@ class _PipelineStageBase(ABC):
                         dist.isend,
                         send_tensor,
                         peer_global_rank,
-                        self._downstream_group,
+                        self._get_p2p_group(self.stage_index, dst),
                     )
                 )
 
@@ -707,7 +684,10 @@ class _PipelineStageBase(ABC):
                 peer_global_rank = self._resolve_peer_global_rank(grad_recv_stage)
                 ops.append(
                     dist.P2POp(
-                        dist.isend, send_tensor, peer_global_rank, self._upstream_group
+                        dist.isend,
+                        send_tensor,
+                        peer_global_rank,
+                        self._get_p2p_group(self.stage_index, grad_recv_stage),
                     )
                 )
             elif grad is None:
@@ -721,7 +701,12 @@ class _PipelineStageBase(ABC):
                 )
                 peer_global_rank = self._resolve_peer_global_rank(grad_recv_stage)
                 ops.append(
-                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                    dist.P2POp(
+                        dist.isend,
+                        send_tensor,
+                        peer_global_rank,
+                        self._get_p2p_group(self.stage_index, grad_recv_stage),
+                    )
                 )
         return ops
 
@@ -1197,32 +1182,50 @@ class _PipelineStageBase(ABC):
                 )
 
     def _get_init_p2p_neighbors_ops(self) -> list[dist.P2POp]:
-        """
-        Get the operations to initialize the p2p communicators between previous and next stages.
-        This is done so by creating a dummy tensor and sending it to the next stage and receiving
-        from the previous stage.
+        """Build operations that initialize legacy parent-group P2P paths.
+
+        This path initializes the shared parent communicator used when per-edge
+        P2P is disabled. Per-edge setup instead initializes the parent
+        explicitly, creates its directed child groups, and preconnects those
+        children during schedule setup; using a child here would be
+        circular because the children do not exist yet.
+
+        Returns:
+            Dummy sends and receives for adjacent cross-rank logical stages.
+
+        Raises:
+            PipeliningMetadataError: If an adjacent logical stage has no rank
+                assignment.
         """
         ops: list[dist.P2POp] = []
-        next_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index + 1)
-        prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
 
-        # Separate recv buffers per direction: with per-direction P2P the
-        # downstream and upstream recvs run concurrently on different
-        # communicators/streams, so they must not share a buffer (concurrent
-        # writes = data race). The send buffer is only read, so it can be shared.
-        downstream_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
-        upstream_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
+        def group_rank(stage_index: int) -> int:
+            try:
+                return self.stage_index_to_group_rank[stage_index]
+            except KeyError as error:
+                raise PipeliningMetadataError(
+                    f"Missing pipeline-group rank for neighboring stage {stage_index}"
+                ) from error
+
+        next_stage_peer = group_rank(self.stage_index + 1) if not self.is_last else None
+        prev_stage_peer = (
+            group_rank(self.stage_index - 1) if not self.is_first else None
+        )
+
+        # Both receives may be enqueued before either completes, so they need
+        # distinct destinations. The send buffer is read-only and can be shared.
+        prev_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
+        next_recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
         send_tensor = torch.tensor(
             self.stage_index, device=self.device, dtype=torch.float32
         )
-        # downstream traffic (r -> r+1: forward activations) -> downstream comm
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.irecv,
-                    downstream_recv_tensor,
-                    group_peer=prev_stage_peer_rank,
-                    group=self._downstream_group,
+                    prev_recv_tensor,
+                    group_peer=prev_stage_peer,
+                    group=self.group,
                 )
             )
         if not self.is_last:
@@ -1230,28 +1233,27 @@ class _PipelineStageBase(ABC):
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
-                    group_peer=next_stage_peer_rank,
-                    group=self._downstream_group,
+                    group_peer=next_stage_peer,
+                    group=self.group,
                 )
             )
 
-        # upstream traffic (r -> r-1: backward gradients) -> upstream comm
         if not self.is_first:
             ops.append(
                 dist.P2POp(
                     dist.isend,
                     send_tensor,
-                    group_peer=prev_stage_peer_rank,
-                    group=self._upstream_group,
+                    group_peer=prev_stage_peer,
+                    group=self.group,
                 )
             )
         if not self.is_last:
             ops.append(
                 dist.P2POp(
                     dist.irecv,
-                    upstream_recv_tensor,
-                    group_peer=next_stage_peer_rank,
-                    group=self._upstream_group,
+                    next_recv_tensor,
+                    group_peer=next_stage_peer,
+                    group=self.group,
                 )
             )
 
@@ -1816,7 +1818,7 @@ class PipelineStage(_PipelineStageBase):
         dist.recv_object_list(
             objects,
             src=self._resolve_peer_global_rank(src_stage),
-            group=self.group,
+            group=self._get_p2p_group(src_stage, self.stage_index),
             device=self.device,
             use_batch=True,
         )
@@ -1831,7 +1833,7 @@ class PipelineStage(_PipelineStageBase):
         dist.send_object_list(
             [meta],
             dst=self._resolve_peer_global_rank(dst_stage),
-            group=self.group,
+            group=self._get_p2p_group(self.stage_index, dst_stage),
             device=self.device,
             use_batch=True,
         )
@@ -2343,7 +2345,7 @@ class PipelineStage(_PipelineStageBase):
         if self._inference_mode is None:
             raise PipeliningMetadataError(
                 f"Stage {self.stage_index}: inference mode not set. "
-                f"Run warmup vote protocol first."
+                "Initialize the pipeline distributed state first."
             )
 
         fwd_meta_output: _StageForwardMeta | None = None
