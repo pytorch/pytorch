@@ -280,7 +280,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
         model = nn.Sequential(
             nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
         )
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(globals()["device"])
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
         replicate(model)
@@ -1148,10 +1148,9 @@ class TestReplicateTPTraining(FSDPTest):
     ):
         dp_mesh, tp_mesh = global_mesh["dp_replicate"], global_mesh["tp"]
         dp_pg = dp_mesh._flatten().get_group()  # used for `replicate()`
-
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
-        ref_model = copy.deepcopy(model).to(device)
+        ref_model = copy.deepcopy(model).to(globals()["device"])
 
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
 
@@ -1185,7 +1184,7 @@ class TestReplicateTPTraining(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 
         torch.manual_seed(42 + dp_pg.rank() + 1)
-        device = device
+        device = globals()["device"]
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)
             losses: list[torch.Tensor] = []
