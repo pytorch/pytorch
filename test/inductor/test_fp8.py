@@ -202,7 +202,6 @@ class TestFP8Types(TestCase):
         self.assertNotIn("'in_ptr0': '*fp8e4nv'", code)
 
     @onlyCUDA
-    @skipIfRocm
     @config.patch({"force_disable_caches": True})
     def test_float8_e4m3fn_uint8_storage_arithmetic_falls_back(self, device):
         bits = torch.arange(256, device=device, dtype=torch.uint8)
@@ -331,7 +330,6 @@ class TestFP8Types(TestCase):
             self.assertNotIn(utils.triton_type(fp8_dtype), "\n".join(code))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @skipIfRocm
     @parametrize(
         "src_dtype",
         (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
@@ -340,6 +338,8 @@ class TestFP8Types(TestCase):
     def test_int_to_float8_cast(
         self, src_dtype: torch.dtype, dst_dtype: torch.dtype, device: torch.device
     ):
+        dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device=device)
+
         def fp8_cast(x):
             return x.to(dtype=dst_dtype)
 
