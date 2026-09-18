@@ -163,28 +163,13 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
 
         matched: list[tuple] = []
-        prefetch_mode = config.nvgemm_prefetch
-        prefer_prefetch = prefetch_mode == "1"
-
-        def enabled_prefetch_variant(kernel) -> bool:
-            return prefetch_mode == "autotune" or (
-                getattr(kernel.metadata.design, "use_prefetch", False)
-                == prefer_prefetch
-            )
-
         for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                if enabled_prefetch_variant(kernel):
+                if not getattr(kernel.metadata.design, "use_prefetch", False):
                     matched.append((kernel, runtime))
-
-        if not matched and prefer_prefetch:
-            for key, runtime in config_runtimes.items():
-                for kernel in config_to_kernels.get(key, ()):
-                    if not getattr(kernel.metadata.design, "use_prefetch", False):
-                        matched.append((kernel, runtime))
 
         if not matched:
             log.debug(
@@ -195,19 +180,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         matched.sort(key=lambda x: x[1])
         selected = matched[:count]
         result = [k for k, _ in selected]
-        if prefetch_mode == "autotune":
-            selected_keys = OrderedSet(
-                key
-                for kernel in result
-                if (key := _make_config_key_from_kernel_design(kernel.metadata.design))
-                is not None
-            )
-            result.extend(
-                kernel
-                for key in selected_keys
-                for kernel in config_to_kernels[key]
-                if kernel not in result
-            )
 
         # nvMatmulHeuristics currently ranks only 128-wide MMA tiles for the
         # large-M NVFP4 projections used by FLUX.2.  A 256x192 tile with a
@@ -216,6 +188,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # to profile for each kernel family.
         targeted_configs: OrderedSet[ConfigKey] = OrderedSet()
         all_kernel_variants_configs: OrderedSet[ConfigKey] = OrderedSet()
+        prefetch_configs: OrderedSet[ConfigKey] = OrderedSet()
         if (
             dtype_a == torch.float4_e2m1fn_x2
             and dtype_b == torch.float4_e2m1fn_x2
@@ -241,6 +214,8 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (128, 128, 1, 2),
                 )
             )
+            if n <= 16384:
+                prefetch_configs.add((128, 128, 1, 2))
 
         # In the swapped orientation, N is the original token count.  A full
         # 120-candidate Qwen3-32B sweep at M=128, timed with 16 CUDA-graph
@@ -263,6 +238,8 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             # can retain the vendored block-scaled implementation instead of
             # accidentally selecting an incompatible first entry.
             all_kernel_variants_configs.update(medium_m_swap_configs)
+            if m <= 16384:
+                prefetch_configs.update(((256, 64, 2, 2), (128, 64, 2, 2)))
 
         # Once a small-M projection is transposed, the original token count is
         # the kernel's N dimension. nvMatmulHeuristics' CUTLASS3 discovery set
@@ -366,19 +343,34 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         for key, key_kernels in config_to_kernels.items():
             if key in all_kernel_variants_configs:
                 for kernel in key_kernels:
-                    if enabled_prefetch_variant(kernel) and kernel not in result:
+                    if (
+                        not getattr(kernel.metadata.design, "use_prefetch", False)
+                        and kernel not in result
+                    ):
                         result.append(kernel)
             elif key not in selected_keys and key in targeted_configs:
-                preferred = [
-                    kernel for kernel in key_kernels if enabled_prefetch_variant(kernel)
-                ]
-                if not preferred and prefer_prefetch:
-                    preferred = [
+                non_prefetch = next(
+                    (
                         kernel
                         for kernel in key_kernels
                         if not getattr(kernel.metadata.design, "use_prefetch", False)
-                    ]
-                result.extend(kernel for kernel in preferred if kernel not in result)
+                    ),
+                    None,
+                )
+                if non_prefetch is not None:
+                    result.append(non_prefetch)
+            if key in prefetch_configs:
+                prefetch = next(
+                    (
+                        kernel
+                        for kernel in key_kernels
+                        if getattr(kernel.metadata.design, "use_prefetch", False)
+                    ),
+                    None,
+                )
+                if prefetch is not None and prefetch not in result:
+                    result.append(prefetch)
+
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
         )

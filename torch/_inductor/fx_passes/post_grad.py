@@ -26,7 +26,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, inductor_prims, ir, pattern_matcher  # noqa: F401
+from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -55,6 +55,7 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
+    is_bf16x9_matmul,
     is_gpu,
     is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
@@ -330,6 +331,20 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.spmd_check import spmd_check
 
         spmd_check(gm)
+
+    wait_tensor = getattr(torch.ops._c10d_functional, "wait_tensor", None)
+    if wait_tensor is not None:
+        waits = gm.graph.find_nodes(
+            op="call_function",
+            target=wait_tensor.default,
+            sort=False,
+        )
+        if waits:
+            from torch._inductor.fx_passes.bucketing import deduplicate_wait_tensors
+
+            GraphTransformObserver(gm, "deduplicate_wait_tensors").apply_graph_pass(
+                functools.partial(deduplicate_wait_tensors, waits=waits)
+            )
 
     if config.aten_distributed_optimizations.allow_comms_decompositions:
         from torch._inductor.fx_passes.decomp_comms import decomp_comms
@@ -998,6 +1013,10 @@ def is_valid_mm_plus_mm(match: Match):
 
     if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
         return False
+    if is_bf16x9_matmul(mat1_val.device.type, mat1_val.dtype) or is_bf16x9_matmul(
+        mat3_val.device.type, mat3_val.dtype
+    ):
+        return False
 
     *_b1, m1, k1 = mat1_val.shape
     *_b2, k2, n1 = mat2_val.shape
@@ -1251,14 +1270,80 @@ def slice_noop(self, dim=0, start=None, end=None, step=1):
     return False
 
 
-@register_noop_decomp(aten.slice_scatter, 1)
+def _slice_scatter_noop_replacement(node):
+    """Return ``self`` when ``src`` is exactly the slice being overwritten.
+
+    Functionalization can produce split/getitem/slice_scatter chains that copy
+    an unmodified view back to the same range of its base.  Replacing such a
+    scatter with the base avoids materializing the whole tensor.  Fall back to
+    the historical full-replacement behavior (replace with ``src``).
+    """
+    self = get_arg_value(node, 0)
+    src = get_arg_value(node, 1)
+    if not isinstance(self, torch.fx.Node) or not isinstance(src, torch.fx.Node):
+        return src
+    if src.target is not operator.getitem or not isinstance(src.args[0], torch.fx.Node):
+        return src
+
+    split = src.args[0]
+    if split.target is not aten.split_with_sizes.default or split.args[0] is not self:
+        return src
+    split_sizes = get_arg_value(split, 1, "split_sizes")
+    split_dim = get_arg_value(split, 2, "dim")
+    index = get_arg_value(src, 1)
+    scatter_dim = get_arg_value(node, 2, "dim")
+    start = get_arg_value(node, 3, "start")
+    end = get_arg_value(node, 4, "end")
+    step = get_arg_value(node, 5, "step")
+    if split_dim is None:
+        split_dim = 0
+    if scatter_dim is None:
+        scatter_dim = 0
+    if step is None:
+        step = 1
+    if (
+        not isinstance(split_sizes, (list, tuple))
+        or not all(isinstance(size, int) for size in split_sizes)
+        or not isinstance(index, int)
+        or not isinstance(split_dim, int)
+        or not isinstance(scatter_dim, int)
+        or (start is not None and not isinstance(start, int))
+        or (end is not None and not isinstance(end, int))
+        or (step is not None and not isinstance(step, int))
+    ):
+        return src
+    self_val = self.meta.get("val")
+    if not isinstance(self_val, torch.Tensor):
+        return src
+    ndim = self_val.dim()
+    if ndim == 0:
+        return src
+    split_dim %= ndim
+    scatter_dim %= ndim
+    if split_dim != scatter_dim or step != 1 or not 0 <= index < len(split_sizes):
+        return src
+    expected_start = sum(split_sizes[:index])
+    expected_end = expected_start + split_sizes[index]
+    if start is None:
+        start = 0
+    if end is None:
+        end = 2**63 - 1
+    if start == expected_start and end == expected_end:
+        return self
+    return src
+
+
+@register_noop_decomp(aten.slice_scatter, _slice_scatter_noop_replacement)
 def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
+    if not -self.dim() <= dim < self.dim():
+        return False
+    dim %= self.dim()
     if start is None:
         start = 0
     if end is None:
         end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
-    if (
+    full_replacement = (
         self.shape == src.shape
         and start == 0
         and (
@@ -1266,9 +1351,18 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
             or statically_known_true(end >= slice_scatter_dim_size)
         )
         and step == 1
-    ):
-        return True
-    return False
+    )
+    partial_self_replacement = (
+        step == 1
+        and self.dim() == src.dim()
+        and all(
+            statically_known_true(sym_eq(src.shape[d], self.shape[d]))
+            for d in range(self.dim())
+            if d != dim
+        )
+        and statically_known_true(sym_eq(src.shape[dim], end - start))
+    )
+    return full_replacement or partial_self_replacement
 
 
 @register_noop_decomp(aten.repeat)
@@ -1305,7 +1399,7 @@ def pow_noop(a, b):
     return isinstance(b, int) and b == 1
 
 
-@register_noop_decomp([aten.cat], lambda args: args[0][0])
+@register_noop_decomp([aten.cat], lambda node: node.args[0][0])
 def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
@@ -1357,7 +1451,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if isinstance(src_index, int):
                 src = node.args[src_index]
             else:
-                src = src_index(node.args)
+                src = src_index(node)
             if not isinstance(src, torch.fx.Node):
                 continue
 
@@ -1486,8 +1580,9 @@ def _propagate_triton_eager_input_vals(
         return
 
     _, eager_kwargs = eager_input_vals
+    dropped = ("tensors_to_clone", "tensor_bases")
     mutation_eager_kwargs = {
-        key: value for key, value in eager_kwargs.items() if key != "tensors_to_clone"
+        key: value for key, value in eager_kwargs.items() if key not in dropped
     }
     # The dense decomposition introduces clones plus the mutation HOP, but only
     # the mutation HOP should receive the eager-mode tensor metadata.
@@ -2124,8 +2219,8 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
 
     Restrict this rewrite to the NVGEMM path: other scaled-mm backends do not
     uniformly expose ``scale_result`` through Inductor yet.  The vendored
-    Blackwell block-scaled kernel consumes a 0-D FP32 tensor through its alpha
-    argument without changing the GEMM result shape or dtype.
+    Blackwell block-scaled kernel consumes one FP32 value through its alpha
+    argument, including 0-D and all-ones-shaped tensors.
     """
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
@@ -2135,14 +2230,12 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
         return False
 
     output_scale = match.kwargs["output_scale"]
-    if not isinstance(output_scale, torch.fx.Node):
-        return False
     scale_val = output_scale.meta.get("val")
     if not (
         isinstance(scale_val, torch.Tensor)
         and scale_val.device.type == "cuda"
         and scale_val.dtype == torch.float32
-        and scale_val.ndim == 0
+        and scale_val.numel() == 1
     ):
         return False
 
@@ -2216,7 +2309,7 @@ def _fold_scaled_mm_output_scale(
     out_dtype,
     output_scale,
 ) -> None:
-    """Replace a scaled GEMM and scalar multiply with an internal fused op.
+    """Move a scalar multiply into ``aten._scaled_mm.scale_result``.
 
     Doing this before lowering is important for QKV projections: their scaled
     output is split into multiple consumers, which prevents the scheduler's
@@ -2224,13 +2317,13 @@ def _fold_scaled_mm_output_scale(
     """
 
     def repl(mat_a, mat_b, scale_a, scale_b, out_dtype, output_scale):
-        return inductor_prims.nvgemm_scaled_mm_output_scale(
+        return aten._scaled_mm.default(
             mat_a,
             mat_b,
-            scale_a,
-            scale_b,
-            output_scale,
-            out_dtype,
+            scale_a=scale_a,
+            scale_b=scale_b,
+            scale_result=output_scale,
+            out_dtype=out_dtype,
         )
 
     counters["inductor"]["scaled_mm_output_scale_fused"] += 1

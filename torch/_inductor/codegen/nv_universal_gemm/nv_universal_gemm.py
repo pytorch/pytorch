@@ -46,7 +46,6 @@ from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._inductor.virtualized import V
 from torch._logging import getArtifactLogger
-from torch.utils._ordered_set import OrderedSet
 
 
 log = getArtifactLogger(__name__, "output_code")
@@ -83,6 +82,30 @@ class GemmVariant(Enum):
 
             return DENSE_GEMM_REDUCTION_CAPABILITIES.supports_contract(plan)
         return False
+
+
+def _nvgemm_cudagraph_unroll(
+    variant: GemmVariant,
+    input_dtype: torch.dtype,
+    output_shape: torch.Size | tuple[int, ...],
+) -> int:
+    """Return one common CUDA-graph unroll for an NVGEMM problem.
+
+    Candidate-dependent unrolls would make the fixed replay overhead differ
+    across choices, so this policy depends only on the GEMM problem.  The
+    scoped value is intentionally limited to the decode-range NVFP4 cases
+    measured in LLM inference; BF16 and larger GEMMs retain the generic
+    setting.
+    """
+    unroll = config.autotune_cudagraph_unroll
+    if (
+        variant == GemmVariant.SCALED_GEMM
+        and input_dtype == torch.float4_e2m1fn_x2
+        and len(output_shape) == 2
+        and output_shape[0] <= 256
+    ):
+        unroll = max(unroll, config.nvgemm_autotune_cudagraph_unroll)
+    return unroll
 
 
 def _nvgemm_cold_cache_pool_size(
@@ -187,7 +210,9 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
                 config.autotune_cudagraph_benchmarking and config.max_autotune
             )
             if use_cudagraphs:
-                unroll = config.autotune_cudagraph_unroll
+                unroll = _nvgemm_cudagraph_unroll(
+                    self.variant, input_tensors[0].dtype, out.shape
+                )
                 pool_size = _nvgemm_cold_cache_pool_size(
                     self.variant, input_tensors, out.shape, unroll
                 )
@@ -212,15 +237,9 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
                         next_fn = (next_fn + 1) % pool_size
 
                     fn = run_rotating_weights
-                devices = OrderedSet(
-                    [tensor.device for tensor in (*input_tensors, out)]
+                res = benchmarker.benchmark_gpu_with_cuda_graph(
+                    fn, cudagraph_unroll=unroll
                 )
-                if len(devices) != 1:
-                    raise AssertionError(f"Can not mix devices {devices}")
-                with torch.cuda.device(next(iter(devices))):
-                    res = benchmarker.benchmark_gpu_with_cuda_graph(
-                        fn, cudagraph_unroll=unroll
-                    )
             else:
                 res = self.do_bench(fn, *input_tensors, out=out)
         finally:

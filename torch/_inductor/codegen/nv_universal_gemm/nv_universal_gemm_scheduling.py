@@ -1106,17 +1106,6 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     input_node.get_dtype()
                 ).removeprefix("torch.")
 
-            if kernel.output_scale_node is not None:
-                input_node = kernel.output_scale_node
-                param_name = input_node.get_name()
-                precompile_shapes[param_name] = [int(s) for s in input_node.get_size()]
-                precompile_strides[param_name] = [
-                    int(s) for s in input_node.get_stride()
-                ]
-                precompile_dtypes[param_name] = str(
-                    input_node.get_dtype()
-                ).removeprefix("torch.")
-
             out_layout = cast(Layout, ctb.layout)
             precompile_shapes["output"] = [int(s) for s in out_layout.size]
             precompile_strides["output"] = [int(s) for s in out_layout.stride]

@@ -91,6 +91,13 @@ fi
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$tag" in
+  pytorch-linux-jammy-cuda12.6-cudnn9-py3.11-gcc11)
+    CUDA_VERSION=12.6.3
+    ANACONDA_PYTHON_VERSION=3.11
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
@@ -100,7 +107,7 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.0.2
+    CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
@@ -132,15 +139,23 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.4-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.4.0
+    CUDA_VERSION=13.4.1
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
+  pytorch-linux-jammy-cuda13.4-cudnn9-py3.12-gcc11)
+    CUDA_VERSION=13.4.0
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    KATEX=yes
+    TRITON=yes
+    INSTALL_MINGW=yes
+    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
-    CUDA_VERSION=13.0.2
+    CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
@@ -148,7 +163,7 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
-    CUDA_VERSION=13.0.2
+    CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     KATEX=yes
@@ -156,7 +171,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks)
-    CUDA_VERSION=13.0.2
+    CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
@@ -164,7 +179,7 @@ case "$tag" in
     INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm)
-    CUDA_VERSION=13.0.2
+    CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
@@ -197,11 +212,11 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.14
     CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
+  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3.11)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
     else
-      ANACONDA_PYTHON_VERSION=3.12
+      ANACONDA_PYTHON_VERSION=3.11
     fi
     GCC_VERSION=13
     ROCM_VERSION=10.0
@@ -213,12 +228,12 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
-  pytorch-linux-noble-rocm-preview-py3)
+  pytorch-linux-noble-rocm-preview-py3.12)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=10.1.0a20260805
-    THEROCK_INDEX_URL="https://rocm.nightlies.amd.com/whl-multi-arch/"
-    USE_MSLK=0
+    ROCM_VERSION=10.1.0a20260903
+    THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
+    USE_MSLK=1
     TRITON=yes
     KATEX=yes
     PYTORCH_ROCM_ARCH="gfx950"
@@ -234,6 +249,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     XPU_VERSION=2026.1
+    OMIX_VERSION=0.3.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else
@@ -288,7 +304,7 @@ case "$tag" in
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
-    CUDA_VERSION=13.0.2
+    CUDA_VERSION=13.0.3
     CLANG_VERSION=18
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
@@ -357,10 +373,10 @@ case "$tag" in
   ;;
 esac
 
-# ubuntu/Dockerfile provisions Python from a deadsnakes venv keyed on
-# PYTHON_VERSION, while the rocm/xpu images still express it as
-# ANACONDA_PYTHON_VERSION (they keep conda). Mirror the value so both flavors
-# get what they expect.
+# The ubuntu and ubuntu-rocm images provision Python from a deadsnakes venv
+# keyed on PYTHON_VERSION, while the xpu image still expresses it as
+# ANACONDA_PYTHON_VERSION (it keeps conda). Mirror the value so every flavor
+# gets what it expects.
 if [ -z "${PYTHON_VERSION}" ]; then
   PYTHON_VERSION="${ANACONDA_PYTHON_VERSION}"
 fi
@@ -426,6 +442,7 @@ build_image() {
        --build-arg "TSAN=${TSAN}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
+       --build-arg "OMIX_VERSION=${OMIX_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \

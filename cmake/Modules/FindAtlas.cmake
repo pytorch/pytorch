@@ -5,7 +5,7 @@
 #
 # The following are set after configuration is done:
 #  Atlas_FOUND
-#  Atlas_INCLUDE_DIRS
+#  Atlas_INCLUDE_DIR
 #  Atlas_LIBRARIES
 #  Atlas_LIBRARYRARY_DIRS
 
@@ -27,6 +27,7 @@ find_path(Atlas_CBLAS_INCLUDE_DIR   NAMES cblas.h   PATHS ${Atlas_INCLUDE_SEARCH
 find_path(Atlas_CLAPACK_INCLUDE_DIR NAMES clapack.h PATHS ${Atlas_INCLUDE_SEARCH_PATHS})
 
 find_library(Atlas_CBLAS_LIBRARY NAMES  ptcblas_r ptcblas cblas_r cblas       PATHS ${Atlas_LIB_SEARCH_PATHS})
+find_library(Atlas_F77BLAS_LIBRARY NAMES ptf77blas_r ptf77blas f77blas_r f77blas PATHS ${Atlas_LIB_SEARCH_PATHS})
 find_library(Atlas_BLAS_LIBRARY NAMES   atlas_r   atlas                       PATHS ${Atlas_LIB_SEARCH_PATHS})
 find_library(Atlas_LAPACK_LIBRARY NAMES lapack alapack_r alapack lapack_atlas PATHS ${Atlas_LIB_SEARCH_PATHS})
 
@@ -35,6 +36,7 @@ set(LOOKED_FOR
   Atlas_CLAPACK_INCLUDE_DIR
 
   Atlas_CBLAS_LIBRARY
+  Atlas_F77BLAS_LIBRARY
   Atlas_BLAS_LIBRARY
   Atlas_LAPACK_LIBRARY
 )
@@ -44,7 +46,7 @@ find_package_handle_standard_args(Atlas DEFAULT_MSG ${LOOKED_FOR})
 
 if(ATLAS_FOUND)
   set(Atlas_INCLUDE_DIR ${Atlas_CBLAS_INCLUDE_DIR} ${Atlas_CLAPACK_INCLUDE_DIR})
-  set(Atlas_LIBRARIES ${Atlas_LAPACK_LIBRARY} ${Atlas_CBLAS_LIBRARY} ${Atlas_BLAS_LIBRARY})
+  set(Atlas_LIBRARIES ${Atlas_LAPACK_LIBRARY} ${Atlas_F77BLAS_LIBRARY} ${Atlas_CBLAS_LIBRARY} ${Atlas_BLAS_LIBRARY})
   mark_as_advanced(${LOOKED_FOR})
 
   message(STATUS "Found Atlas (include: ${Atlas_CBLAS_INCLUDE_DIR}, library: ${Atlas_BLAS_LIBRARY})")
