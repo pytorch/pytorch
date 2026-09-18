@@ -13,8 +13,9 @@ from torch.distributed.checkpoint.quantized_hf_storage import (
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict_from_keys
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard, zeros
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     run_tests,
     TestCase,
 )
@@ -38,6 +39,8 @@ class MyTestModule(torch.nn.Module):
 
 
 class TestSingleRankSaveLoad(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_save(self) -> None:
         try:
@@ -275,19 +278,22 @@ class TestSingleRankSaveLoad(TestCase):
 
 
 class TestDistributedHFSafetensorsConsolidation(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    def test_consolidate_to_one_file(self) -> None:
+    def test_consolidate_to_one_file(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
         import safetensors
 
+        device_type = torch.device(device).type
         global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
         mesh_shape = (self.world_size,)
-        mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+        mesh_1d = init_device_mesh(device_type, mesh_shape)
 
         # Create local tensor with row-wise sharding
         rows_per_rank = global_tensor.shape[0] // self.world_size
@@ -350,28 +356,29 @@ for p1 in TWO_D_PLACEMENTS:
             TWO_D_TO_TWO_D_PLACEMENTS.append((p1, p2))
 
 
-@instantiate_parametrized_tests
 class TestDTensorReshardPlacementChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
     """
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_1d_to_1d_reshard_placement_change(self) -> None:
+    def test_1d_to_1d_reshard_placement_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
         CHECKPOINT_DIR = self.temp_dir
+        device_type = torch.device(device).type
 
         for one_d_to_one_d_placements in ONE_D_TO_ONE_D_PLACEMENTS:
             original_placement, new_placement = one_d_to_one_d_placements
 
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (self.world_size,)
-            device_mesh = init_device_mesh(self.device_type, mesh_shape)
+            device_mesh = init_device_mesh(device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor, device_mesh, placements=original_placement
             )
@@ -417,18 +424,19 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
-    def test_2d_to_2d_reshard_placement_change(self) -> None:
+    def test_2d_to_2d_reshard_placement_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
         CHECKPOINT_DIR = self.temp_dir
+        device_type = torch.device(device).type
         for two_d_to_two_d_placements in TWO_D_TO_TWO_D_PLACEMENTS:
             original_placement, new_placement = two_d_to_two_d_placements
 
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (2, self.world_size // 2)
-            mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+            mesh_2d = init_device_mesh(device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor,
                 mesh_2d,
@@ -472,20 +480,22 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     """
     Test DCP reshard for DTensor with placements changes and mesh_tensor change.
     """
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    def test_1d_to_2d_reshard_mesh_change(self) -> None:
+    def test_1d_to_2d_reshard_mesh_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
         CHECKPOINT_DIR = self.temp_dir
+        device_type = torch.device(device).type
         for placements_1d in ONE_D_PLACEMENTS:
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (self.world_size,)
-            mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+            mesh_1d = init_device_mesh(device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor, mesh_1d, placements=placements_1d
             )
@@ -500,7 +510,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             for placements_2d in TWO_D_PLACEMENTS:
                 mesh_shape = (2, self.world_size // 2)
-                mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+                mesh_2d = init_device_mesh(device_type, mesh_shape)
 
                 zero_dtensor = zeros(
                     [4, 4], device_mesh=mesh_2d, placements=placements_2d
@@ -527,16 +537,17 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(4)
-    def test_2d_to_1d_reshard_mesh_change(self) -> None:
+    def test_2d_to_1d_reshard_mesh_change(self, device) -> None:
         if importlib.util.find_spec("safetensors") is None:
             print("safetensors not installed")
             return
 
         CHECKPOINT_DIR = self.temp_dir
+        device_type = torch.device(device).type
         for placements_2d in TWO_D_PLACEMENTS:
             global_tensor = torch.arange(16, dtype=torch.float).view(4, 4)
             mesh_shape = (2, self.world_size // 2)
-            mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+            mesh_2d = init_device_mesh(device_type, mesh_shape)
             dtensor = distribute_tensor(
                 global_tensor, mesh_2d, placements=placements_2d
             )
@@ -552,7 +563,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
             for placements_1d in ONE_D_PLACEMENTS:
                 mesh_shape = (self.world_size,)
-                mesh_1d = init_device_mesh(self.device_type, mesh_shape)
+                mesh_1d = init_device_mesh(device_type, mesh_shape)
 
                 zero_dtensor = zeros(
                     [4, 4], device_mesh=mesh_1d, placements=placements_1d
@@ -579,7 +590,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @skip_if_lt_x_gpu(2)
-    def test_dtensor_checkpoint_resharding_with_empty_shard(self):
+    def test_dtensor_checkpoint_resharding_with_empty_shard(self, device):
         """
         Test dtensor checkpoint resharding with dtensor containing empty shards.
         """
@@ -587,8 +598,9 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             print("safetensors not installed")
             return
 
-        tensor = torch.rand(1).to(self.device_type)
-        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        device_type = torch.device(device).type
+        tensor = torch.rand(1).to(device_type)
+        mesh = init_device_mesh(device_type, (self.world_size,))
         dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
         ref_state_dict = {"dtensor": dtensor}
 
@@ -599,14 +611,34 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
             ),
         )
 
-        tensor = torch.rand(1).to(self.device_type)
-        mesh_2 = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        tensor = torch.rand(1).to(device_type)
+        mesh_2 = init_device_mesh(device_type, (2, self.world_size // 2))
         dtensor = distribute_tensor(tensor, mesh_2, [Shard(0), Shard(0)])
         state_dict = {"dtensor": dtensor}
         dist_cp.load(
             state_dict=state_dict,
             storage_reader=dist_cp.HuggingFaceStorageReader(self.temp_dir),
         )
+
+
+instantiate_device_type_tests(
+    TestDistributedHFSafetensorsConsolidation,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorReshardPlacementChange,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestDTensorReshardMeshChange,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
