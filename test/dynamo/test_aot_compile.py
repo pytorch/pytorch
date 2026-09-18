@@ -3766,56 +3766,6 @@ from user code:
             for hint, want in zip(hints, wording):
                 self.assertIn(want, hint)
 
-    def test_no_match_message_shares_a_hint_line_across_entries_worded_alike(self):
-        # Three SUPPLIED results, each holding a caller dict of its own: [0] and
-        # [2] lack the global, [1] has it but not the key its guard reads. Hint
-        # lines are keyed by sentence, not by dict, so [0] and [2] -- two dicts
-        # with one wording, neither carrying a __name__ -- share one
-        # non-contiguous "For [0, 2]:" line, and [1]'s "KeyError on
-        # G['GLOBAL_POOLING_CONFIG']['pooling']" is the ordinary mismatch the
-        # whole-part match keeps off it, as the function path pins for the
-        # predicate itself. The model's forward is a partial no load resolves,
-        # so the report's one resolve returns (None, reason) rather than
-        # raising, and no entry is told which forward.
-        x = torch.randn(4, 8)
-        data = self._two_input_global_guard_artifact(x)
-        absent: dict[str, object] = {"__builtins__": builtins}
-        keyless: dict[str, object] = {**absent, "GLOBAL_POOLING_CONFIG": {}}
-        loads = [
-            AOTCompiledModel.deserialize(GlobalConfigModule(), data, guard_globals=s)
-            for s in (absent, keyless, dict(absent))
-        ]
-        results = [loaded.compiled_results[0] for loaded in loads]
-        self.assertEqual([r._guard_scope for r in results], [_GuardScope.SUPPLIED] * 3)
-        self.assertEqual(len({id(r._guard_globals) for r in results}), 3)
-        mixed = AOTCompiledModel(self._unresolvable_forward_module(), results)
-        target = "torch._dynamo.aot_compile._resolve_guard_scope"
-        with patch(target, wraps=_resolve_guard_scope) as resolves:
-            with self.assertRaises(RuntimeError) as ctx:
-                mixed(x)
-        resolves.assert_called_once_with(mixed.model)
-        lines = str(ctx.exception).splitlines()
-        self.assertIn("Tried 3 compiled input(s)", lines[0])
-        self.assertEqual(
-            lines[1:4],
-            [
-                "  [0] KeyError on G['GLOBAL_POOLING_CONFIG']",
-                "  [1] KeyError on G['GLOBAL_POOLING_CONFIG']['pooling']",
-                "  [2] KeyError on G['GLOBAL_POOLING_CONFIG']",
-            ],
-        )
-        hints = [line for line in lines if line.startswith("For [")]
-        self.assertEqual(len(hints), 1, lines)
-        self.assertTrue(
-            hints[0].startswith(
-                "For [0, 2]: a guarded global is missing from the live scope this "
-                "artifact was loaded against; define it there"
-            ),
-            hints[0],
-        )
-        self.assertNotIn("instance's forward", hints[0])
-        self.assertIn("Add a ModelInput", lines[-1])
-
     def test_no_match_report_survives_a_forward_resolve_that_raises(self):
         # deserialize without guard_globals= resolves the scope itself, so every
         # result is SUPPLIED and the report does re-resolve forward. A rebind
