@@ -18,9 +18,10 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 
 
 device_type = torch.device(get_devtype())
@@ -55,6 +56,8 @@ def _tp_shard_fn(param):
 
 
 class TestFullyShardDTensor(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         if torch.accelerator.is_available():
@@ -97,7 +100,7 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_dtensor_train_parity(self):
+    def test_dtensor_train_parity(self, device):
         """Train parity for FSDP/HSDP/DDP with DTensors on SPMD meshes."""
         ws = self.world_size
         world_mesh = init_device_mesh(
@@ -256,7 +259,7 @@ class TestFullyShardDTensor(FSDPTest):
             dist.barrier()
 
     @skip_if_lt_x_gpu(2)
-    def test_sharded_param_correctness_1d(self):
+    def test_sharded_param_correctness_1d(self, device):
         """Verify sharded param mesh and placements for FSDP on 1D mesh."""
         mesh = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
@@ -277,7 +280,7 @@ class TestFullyShardDTensor(FSDPTest):
             self.assertIsInstance(param.placements[0], Shard)
 
     @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_dtensor_sharded_params(self):
+    def test_fsdp_tp_dtensor_sharded_params(self, device):
         """Verify sharded param mesh and placements for FSDP+TP on 2D mesh."""
         dp_size = 2
         tp_size = self.world_size // dp_size
@@ -344,7 +347,7 @@ class TestFullyShardDTensor(FSDPTest):
                 self.assertIsInstance(param.placements[1], Replicate)
 
     @skip_if_lt_x_gpu(4)
-    def test_reduce_scatter_unused_dtensor_param(self):
+    def test_reduce_scatter_unused_dtensor_param(self, device):
         class TwoExpertParams(nn.Module):
             def __init__(self, ep_mesh) -> None:
                 super().__init__()
@@ -383,7 +386,7 @@ class TestFullyShardDTensor(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_non_replicate_dp_placement(self):
+    def test_validation_non_replicate_dp_placement(self, device):
         """Error when a param has non-Replicate placement on the DP shard dim."""
         mesh = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
@@ -406,7 +409,7 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_invalid_dim_names(self):
+    def test_validation_invalid_dim_names(self, device):
         """Error when dp_mesh_dims references nonexistent mesh dim names."""
         mesh = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
@@ -421,7 +424,7 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_mesh_mismatch(self):
+    def test_validation_mesh_mismatch(self, device):
         """Error when param DTensor mesh differs from the mesh passed to fully_shard."""
         mesh1 = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
@@ -446,13 +449,13 @@ class TestFullyShardDTensor(FSDPTest):
                 dp_mesh_dims=DataParallelMeshDims(shard="fsdp"),
             )
 
-    def test_validation_at_least_one_required(self):
+    def test_validation_at_least_one_required(self, device):
         """Error when neither shard nor replicate is set."""
         with self.assertRaisesRegex(ValueError, "At least one of shard or replicate"):
             DataParallelMeshDims()
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_spmd_mesh_non_dtensor_params(self):
+    def test_validation_spmd_mesh_non_dtensor_params(self, device):
         """Error when dp_mesh_dims is provided but params are not DTensors."""
         mesh = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
@@ -467,7 +470,7 @@ class TestFullyShardDTensor(FSDPTest):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_validation_reshard_after_forward_int_spmd(self):
+    def test_validation_reshard_after_forward_int_spmd(self, device):
         """Error when reshard_after_forward is int with SPMD mesh."""
         mesh = init_device_mesh(
             device_type.type, (self.world_size,), mesh_dim_names=("fsdp",)
@@ -484,6 +487,13 @@ class TestFullyShardDTensor(FSDPTest):
                 dp_mesh_dims=DataParallelMeshDims(shard="fsdp"),
             )
 
+
+instantiate_device_type_tests(
+    TestFullyShardDTensor,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
     run_tests()
