@@ -1059,13 +1059,15 @@ ldl_diagonal_panel_fused_kernel(
     // L21 = L21 @ inv(D)
     // NOTE: keeping D11 and det as scalar_t as to not cause desyncs
     // between U12 and D
+    bool D_is_singular = false;
     if (pivot_rank == 1) {
       auto D11 = dLD[LinOff(curr_step, curr_step, lda)];
-      if (tid == 0 && ldl::abs(D11) == static_cast<real_t>(0) && *dinfo == 0) {
-        *dinfo = curr_step + 1;
-      }
-      for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
-        dLD[LinOff(i, curr_step, lda)] /= D11;
+      if (ldl::abs(D11) == static_cast<real_t>(0)) {
+        D_is_singular = true;
+      } else {
+        for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
+          dLD[LinOff(i, curr_step, lda)] /= D11;
+        }
       }
     } else {
       // NOTE: D stores inv(D) * det(D)
@@ -1076,20 +1078,25 @@ ldl_diagonal_panel_fused_kernel(
 
       // scale by det(D)
       auto det = D[0][0] * D[1][1] - D[0][1] * D[1][0];
-      if (tid == 0 && ldl::abs(det) == static_cast<real_t>(0) && *dinfo == 0) {
-        *dinfo = curr_step + 1;
-      }
-      D[1][1] /= det;
-      D[0][0] /= det;
-      D[0][1] /= det;
-      D[1][0] /= det;
+      if (ldl::abs(det) == static_cast<real_t>(0)) {
+        D_is_singular = true;
+      } else {
+        D[1][1] /= det;
+        D[0][0] /= det;
+        D[0][1] /= det;
+        D[1][0] /= det;
 
-      for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
-        auto l0 = dLD[LinOff(i, curr_step + 0, lda)];
-        auto l1 = dLD[LinOff(i, curr_step + 1, lda)];
-        dLD[LinOff(i, curr_step + 0, lda)] = l0 * D[0][0] + l1 * D[1][0];
-        dLD[LinOff(i, curr_step + 1, lda)] = l0 * D[0][1] + l1 * D[1][1];
+        for (int i = curr_step + pivot_rank + tid; i < n; i += BS) {
+          auto l0 = dLD[LinOff(i, curr_step + 0, lda)];
+          auto l1 = dLD[LinOff(i, curr_step + 1, lda)];
+          dLD[LinOff(i, curr_step + 0, lda)] = l0 * D[0][0] + l1 * D[1][0];
+          dLD[LinOff(i, curr_step + 1, lda)] = l0 * D[0][1] + l1 * D[1][1];
+        }
       }
+    }
+    // Update info if singular and if detected for the first time
+    if (D_is_singular && tid == 0 && *dinfo == 0) {
+      *dinfo = curr_step + 1;
     }
     __syncthreads();
     // }
