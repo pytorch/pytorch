@@ -518,7 +518,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/FlightRecorder.cpp",
-    "torch/csrc/distributed/c10d/FSDPUtils.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopy.cpp",
     "torch/csrc/distributed/c10d/hooks/FlightRecorderHook.cpp",
     "torch/csrc/distributed/c10d/hooks/NanCheckHook.cpp",
     "torch/csrc/distributed/c10d/Functional.cpp",
@@ -773,8 +773,8 @@ libtorch_cuda_core_sources = [
 
 # These files are the only ones that are supported on Windows.
 libtorch_cuda_distributed_base_sources = [
-    "torch/csrc/distributed/c10d/FSDPUtilsCUDA.cpp",
-    "torch/csrc/distributed/c10d/FSDPUtilsKernels.cu",
+    "torch/csrc/distributed/fsdp/CollectiveCopyCUDA.cpp",
+    "torch/csrc/distributed/fsdp/CollectiveCopyKernels.cu",
     "torch/csrc/distributed/c10d/reducer_cuda.cpp",
 ]
 

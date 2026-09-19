@@ -2,7 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/ops/empty.h>
 #include <c10/util/TypeCast.h>
-#include <torch/csrc/distributed/c10d/FSDPUtilsCUDA.hpp>
+#include <torch/csrc/distributed/fsdp/CollectiveCopyCUDA.hpp>
 #include <algorithm>
 #include <cstring>
 #include <type_traits>

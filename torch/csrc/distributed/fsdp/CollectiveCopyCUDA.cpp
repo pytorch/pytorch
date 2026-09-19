@@ -4,8 +4,8 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/distributed/c10d/FSDPUtils.hpp>
-#include <torch/csrc/distributed/c10d/FSDPUtilsCUDA.hpp>
+#include <torch/csrc/distributed/fsdp/CollectiveCopy.hpp>
+#include <torch/csrc/distributed/fsdp/CollectiveCopyCUDA.hpp>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 #include <cmath>
