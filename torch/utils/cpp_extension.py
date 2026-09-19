@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
 import glob
+import hashlib
 import importlib
 import importlib.abc
 import importlib.util
@@ -2491,6 +2492,18 @@ def _get_hipcc_path():
     else:
         return _join_rocm_home('bin', 'hipcc')
 
+def _ninja_build_key(*parts: list[str] | None) -> str:
+    """Stable digest of the source and object paths for a Ninja build."""
+    digest = hashlib.sha256()
+    for part in parts:
+        # A None flag list and an empty one mean the same thing to the writer.
+        for item in (part or ()):
+            digest.update(item.encode())
+            digest.update(b'\0')
+        digest.update(b'\1')
+    return digest.hexdigest()[:16]
+
+
 def _write_ninja_file_and_compile_objects(
         sources: list[str],
         objects,
@@ -2519,6 +2532,11 @@ def _write_ninja_file_and_compile_objects(
         raise AssertionError(
             "cannot have both SYCL and CUDA files in the same extension"
         )
+    # Separate extensions must not share Ninja files. Keep the directory stable
+    # across flag changes so Ninja sees the previous command for these outputs,
+    # including rules that do not write a dependency log.
+    build_directory = os.path.join(
+        build_directory, '.ninja-' + _ninja_build_key(sources, objects))
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)
