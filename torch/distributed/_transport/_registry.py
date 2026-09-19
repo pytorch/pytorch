@@ -16,6 +16,8 @@ _ENTRY_POINT_GROUP = "torch.distributed.transports"
 _BUILTIN_ENTRY_POINTS = {
     "nixl": "torch.distributed._transport._nixl:NIXLTransport",
     "tcp": "torch.distributed._transport._tcp:TCPTransport",
+    "torchcomms": "torch.distributed._transport._torchcomms:TorchCommsTransport",
+    "ucxx": "torch.distributed._transport._ucxx:UCXXTransport",
 }
 
 TransportFactory = Callable[..., Transport]
