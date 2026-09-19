@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from torch._guards import Source
+    from torch.compiler._precompile_types import GuardFact as _GuardFact
 
     from .types import GuardFilterEntry
 
@@ -1118,3 +1119,115 @@ def _is_noop_guard_type(guard_type: str) -> bool:
 # DuplicateInputs and StorageOverlap exprs, the dimension-marking lambda) never
 # reach the guard filter and are outside the policy as well.
 _INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_MATCH"})
+
+
+def _saved_hooks_fingerprint() -> str:
+    """
+    Name the installed saved-tensors hooks the way the guard compares them.
+
+    The guard stores ``tuple(map(id, hooks))`` when both hooks are fx
+    GraphModules and ``None`` otherwise, so plain-Python hooks, and no hooks at
+    all, are one value to it and must be one value here, or the report shows a
+    'varies' line for a guard that passes either way. Inlineable hooks are
+    named by their rendered graph rather than by address, since an id cannot
+    go in a committed, diffable file. KNOWN TRADEOFF: two distinct GraphModules
+    with identical code read as one hook set here while the guard tells them
+    apart, so the report may call that guard invariant when it is not.
+    """
+    try:
+        from torch._functorch._aot_autograd.utils import (
+            saved_tensors_hooks_are_inlineable,
+            top_saved_tensors_hooks,
+        )
+
+        hooks = top_saved_tensors_hooks()
+        if not saved_tensors_hooks_are_inlineable(hooks):
+            return "hooks=None"
+        return "hooks=(" + ", ".join(_hash_text(hook.code) for hook in hooks) + ")"
+    except Exception:
+        # Distinct from the "" that means "the rendered code already names the
+        # check": a failed read must not merge two variants.
+        return "hooks=<unreadable>"
+
+
+def _value_fingerprint(entry: GuardFilterEntry) -> str:
+    """
+    What the guard checks, when the rendered code does not say.
+
+    TENSOR_MATCH is the case that matters: its code_list carries only the
+    _dynamo_*_indices hasattr checks, while everything it really compares lives
+    in the C++ leaf. Without those two specializations of one frame look
+    identical and wrongly land in the intersection, so this mirrors TensorCheck
+    -- python type and the full dispatch key set included, since a Parameter
+    against a Tensor, a conjugated view against a plain one, or an
+    inference-mode tensor against a no_grad one, splits a compilation exactly
+    as dtype does. KNOWN GAP: that leaf checks nothing for a dim the compile
+    made dynamic, so under ``dynamic=True`` the concrete shape here is narrower
+    than the guard and a shape-generic TENSOR_MATCH is reported as varying
+    rather than invariant.
+
+    An identity guard needs one too, because ``_normalize`` strips the id its
+    code renders: without a name for the object, two variants holding different
+    callables at one source collapse into one fact and are reported as an
+    invariant neither of them holds.
+
+    Every other guard takes its value from its own rendered code, which names
+    it, so fingerprinting it again SPLITS identical guards: TYPE_MATCH on an
+    unspecialized int checks only that the int is an int, and stamping 1 on one
+    variant and 2 on the next demotes a real invariant into two identical
+    'varies' lines. So every branch dispatches on the guard type, never on the
+    value's: the NOT_NONE_MATCH Dynamo installs on an optimizer's .grad, or a
+    TYPE_MATCH on a tensor attribute, holds a tensor whose shape and dtype it
+    never checks.
+    """
+    if entry.guard_type == "AUTOGRAD_SAVED_TENSORS_HOOKS":
+        # Its code renders tuple(map(id, hooks)), which _normalize has to erase
+        # or the file churns -- but erasing it alone would merge two variants
+        # that differ ONLY in their hooks and report the guard that split them
+        # as an invariant. Put back a discriminator derived from what the hooks
+        # ARE rather than where they live, which is both stable across
+        # processes and still telling.
+        return _saved_hooks_fingerprint()
+    if entry.guard_type == "GRAD_MODE":
+        # Global-state guards carry no name, code or value, so two variants of
+        # one frame that differ only in grad mode render identically and land
+        # in the intersection. The filter runs in the traced frame's own state.
+        return f"grad_enabled={torch.is_grad_enabled()}"
+    if entry.guard_type == "DETERMINISTIC_ALGORITHMS":
+        # Same as GRAD_MODE: the two fields GlobalStateGuard snapshots for it.
+        warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+        return f"deterministic={torch.are_deterministic_algorithms_enabled()}, warn_only={warn_only}"
+    if not entry.has_value:
+        return ""
+    value = entry.value
+    if entry.guard_type == "TENSOR_MATCH" and isinstance(value, torch.Tensor):
+        # Render exactly what TensorCheck stores (notably the TLS-adjusted
+        # dispatch key set, not the tensor's own) rather than reconstructing it.
+        # The fact's source already names the tensor, so no name goes in.
+        from .guards import convert_to_concrete_values, get_tensor_guard_code_part
+
+        try:
+            return get_tensor_guard_code_part(
+                value,
+                "<value>",
+                convert_to_concrete_values(value.size()),
+                convert_to_concrete_values(value.stride()),
+                type(value),
+                torch._C._dispatch_keys(value),
+            )
+        except Exception:
+            # A subclass whose __torch_function__ refuses attribute reads got
+            # here; type() is the one read that cannot raise.
+            return f"type={type(value).__name__}, <unrenderable>"
+    if entry.guard_type in _IDENTITY_GUARD_TYPES or any(
+        d in _IDENTITY_GUARD_TYPES for d in entry.derived_guard_types
+    ):
+        return _object_identity(value)
+    return ""
+
+
+def _fact_order(fact: _GuardFact) -> tuple[str, str, str, str]:
+    # value is part of the key: once the boilerplate code parts are filtered a
+    # TENSOR_MATCH renders no code, so two shape specializations would otherwise
+    # tie and sort unstably, making the file differ run to run.
+    return (fact.source, fact.guard_type, " ".join(fact.code), fact.value)
