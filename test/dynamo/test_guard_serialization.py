@@ -1227,6 +1227,33 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIs(out.local_scope["dt"], torch.float32)
         self.assertEqual(out.local_scope["t"].dtype, torch.float32)
 
+    @unittest.skipIf(
+        not (
+            torch.distributed.is_available() and torch.distributed.is_gloo_available()
+        ),
+        "requires gloo",
+    )
+    def test_an_unguarded_process_group_backend_is_pruned(self):
+        # A c10d Backend is not a ProcessGroup: one the guard tree does not
+        # reach failed the dump with "cannot pickle 'ProcessGroupGloo' object"
+        # instead of pruning to the sentinel. Built directly, so no default
+        # process group is needed.
+        from torch._C._distributed_c10d import HashStore, ProcessGroupGloo
+
+        pg = ProcessGroupGloo(HashStore(), 0, 1)
+        self.assertIsInstance(pg, torch._C._distributed_c10d.Backend)
+        self.assertNotIsInstance(pg, torch._C._distributed_c10d.ProcessGroup)
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"pg": pg})
+        out = load_guards_state(buf.getvalue())["pg"]
+        self.assertIsInstance(out, _Missing)
+        self.assertEqual(out._reason, "unsupported")
+        # A GUARDED one (a TYPE_MATCH on a process-group local) is not pruned:
+        # the rebuilt guard would compare against the sentinel and never match.
+        # It fails the dump instead, which pickle_guards_state reports as a bypass.
+        with self.assertRaisesRegex(TypeError, "cannot pickle"):
+            GuardsStatePickler({id(pg): pg}, {}, {}, {}, io.BytesIO()).dump({"pg": pg})
+
     def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
         # raised ValueError out of the pickler for an empty cell. Pickler-level

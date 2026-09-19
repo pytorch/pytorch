@@ -4218,6 +4218,10 @@ def _get_unsupported_types() -> tuple[type, ...]:
     )
     try:
         ret += (torch._C._distributed_c10d.ProcessGroup,)
+        # A concrete backend -- ProcessGroupNCCL, ProcessGroupGloo -- is bound
+        # as a subclass of Backend, NOT of ProcessGroup, so the line above misses
+        # it and an unguarded one fails the whole frame with "cannot pickle".
+        ret += (torch._C._distributed_c10d.Backend,)
     except AttributeError:
         pass
     return ret
@@ -4767,7 +4771,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("capsule",)
 
         elif isinstance(obj, _get_unsupported_types()):
-            return _Missing, ("unsupported",)
+            # Only when no guard reads it: a guarded one (TYPE_MATCH on a
+            # process-group local) must fail the dump loudly below rather than
+            # load as a sentinel the rebuilt guard can never match.
+            if id(obj) not in self.guard_tree_values:
+                return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__.split("."):
