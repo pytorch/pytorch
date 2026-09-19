@@ -22,6 +22,7 @@ from torch._inductor.select_algorithm import PartialRender
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -542,6 +543,193 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compile_calls, 1)
         compiled.assert_called_once_with("second")
 
+    @parametrize("raises", (False, True))
+    def test_precompile_flydsl_restores_environment(self, raises):
+        from torch._inductor.runtime.flydsl_cache import precompile_flydsl
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        seen = []
+
+        def kernel(*, mat1, output, stream, compile_only):
+            self.assertIsInstance(mat1, FakeTensor)
+            self.assertEqual(mat1.shape, (2, 3))
+            self.assertEqual(mat1.stride(), (4, 1))
+            self.assertEqual(output.dtype, torch.bfloat16)
+            self.assertTrue(compile_only)
+            self.assertEqual(stream, 0)
+            self.assertEqual(os.environ["COMPILE_ONLY"], "1")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx950")
+            seen.append(True)
+            if raises:
+                raise RuntimeError("compile failed")
+
+        with mock.patch.dict(
+            os.environ, {"COMPILE_ONLY": "0", "FLYDSL_GPU_ARCH": "gfx942"}
+        ):
+
+            def precompile():
+                precompile_flydsl(
+                    kernel,
+                    {"mat1": (2, 3), "output": (2, 5)},
+                    {"mat1": (4, 1), "output": (5, 1)},
+                    {"mat1": "float32", "output": "bfloat16"},
+                    "gfx950",
+                )
+
+            if raises:
+                with self.assertRaisesRegex(RuntimeError, "compile failed"):
+                    precompile()
+            else:
+                precompile()
+            self.assertEqual(os.environ["COMPILE_ONLY"], "0")
+            self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "gfx942")
+        self.assertEqual(seen, [True])
+
+    @parametrize("kind", ("mm", "grouped_mm", "mxfp8_grouped_mm"))
+    def test_flydsl_precompile_fake_tensors(self, kind):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        import flydsl.compiler as flyc
+        import flydsl.expr as fx
+        import jinja2
+
+        from torch._inductor.kernel.mm_common import load_kernel_template
+
+        namespace = dict(
+            torch=torch,
+            flyc=flyc,
+            fx=fx,
+            GEMM_M=256,
+            GEMM_N=256,
+            GEMM_K=512,
+            GEMM_G=2,
+            GEMM_DTYPE_ID=2,
+            TILE_M=128,
+            TILE_N=128,
+            TILE_K=64,
+            STAGES=2,
+            M_WAVES=1,
+            N_WAVES=4,
+            GROUP_M=0,
+            USE_HALF_TILE_INTERLEAVED=False,
+            A_IS_TRANSPOSED=False,
+            B_IS_TRANSPOSED=True,
+            BLOCK_R=64,
+            BLOCK_C=128,
+        )
+        source = jinja2.Template(load_kernel_template(f"flydsl_{kind}")).render(
+            gen_defines=lambda: "",
+            def_kernel=lambda *names: f"def kernel_main({','.join(names)}, output, stream):",
+            get_output=lambda: "output",
+            kernel_name="kernel",
+        )
+        exec(compile(source, "<flydsl precompile test>", "exec"), namespace)
+        shapes = {"mat1": (256, 512), "mat2": (512, 256), "output": (256, 256)}
+        strides = {"mat1": (512, 1), "mat2": (1, 512), "output": (256, 1)}
+        dtypes = dict.fromkeys(shapes, "bfloat16")
+        if kind != "mm":
+            shapes.update(mat2=(2, 512, 256), offs=(2,))
+            strides.update(mat2=(131072, 256, 1), offs=(1,))
+            dtypes["offs"] = "int32"
+        if kind == "mxfp8_grouped_mm":
+            strides["mat2"] = (131072, 1, 512)
+            dtypes.update(
+                mat1="float8_e4m3fn",
+                mat2="float8_e4m3fn",
+                scale_a="float8_e8m0fnu",
+                scale_b="float8_e8m0fnu",
+            )
+            shapes.update(scale_a=(256, 16), scale_b=(2, 4096))
+            strides.update(scale_a=(16, 1), scale_b=(4096, 1))
+        # Exercise the real compiler with metadata only, including on hosts
+        # without a GPU. A normal flyc.compile call attempts to execute.
+        with mock.patch.object(
+            torch.cuda,
+            "get_device_properties",
+            side_effect=AssertionError("device queried"),
+        ):
+            namespace["kernel_precompile"](
+                shapes, strides, dtypes, flydsl_gpu_arch="gfx950"
+            )
+
+    @parametrize("block_m", (2, 4, 8))
+    def test_grouped_row_tile_upper_bound(self, block_m):
+        from itertools import product
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.grouped_config import (
+            grouped_row_tiles_upper_bound,
+        )
+
+        for total in range(9):
+            for groups in range(1, 5):
+                actual_max = max(
+                    sum((rows + block_m - 1) // block_m for rows in partition)
+                    for partition in product(range(total + 1), repeat=groups)
+                    if sum(partition) == total
+                )
+                self.assertEqual(
+                    grouped_row_tiles_upper_bound(total, groups, block_m),
+                    actual_max,
+                )
+
+    def test_precompile_flydsl_concurrent_dispatch(self):
+        from torch._inductor.runtime.flydsl_cache import precompile_flydsl
+
+        precompile_started = threading.Event()
+        release_precompile = threading.Event()
+        cold_started = threading.Event()
+        cold_compiler_started = threading.Event()
+        warm_dispatch = mock.Mock()
+        cold_jit = SimpleNamespace()
+
+        def precompile_kernel(**kwargs):
+            precompile_started.set()
+            self.assertTrue(release_precompile.wait(5))
+
+        def cold_compiler(*args):
+            cold_compiler_started.set()
+            self.assertNotEqual(os.environ.get("COMPILE_ONLY"), "1")
+            return mock.Mock()
+
+        def cold_launch():
+            cold_started.set()
+            return run_cached_flydsl(
+                cold_jit,
+                constexpr_param=_CacheParam(),
+                compiler=cold_compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        # Supply a dispatch argument because the cache keys include its device.
+        dispatch = SimpleNamespace(device=SimpleNamespace(index=0))
+        warm_jit = SimpleNamespace()
+        run_cached_flydsl(
+            warm_jit,
+            constexpr_param=_CacheParam(),
+            compiler=lambda *args: warm_dispatch,
+            dispatch_args=(dispatch,),
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            precompile = pool.submit(precompile_flydsl, precompile_kernel, {}, {}, {})
+            try:
+                self.assertTrue(precompile_started.wait(5))
+                run_cached_flydsl(
+                    warm_jit,
+                    constexpr_param=_CacheParam(),
+                    compiler=mock.Mock(
+                        side_effect=AssertionError("unexpected compile")
+                    ),
+                    dispatch_args=(dispatch,),
+                )
+                warm_dispatch.assert_called_once_with(dispatch)
+                cold = pool.submit(cold_launch)
+                self.assertTrue(cold_started.wait(5))
+                self.assertFalse(cold_compiler_started.wait(0.05))
+            finally:
+                release_precompile.set()
+            precompile.result()
+            cold.result()
+
     def _assert_compiled_mm(
         self,
         a,
@@ -598,9 +786,9 @@ class TestFlyDSLTemplate(TestCase):
                 a = torch.randn(m, k, device="cuda", dtype=dtype)
                 b = torch.randn(n, k, device="cuda", dtype=dtype)
                 code = self._assert_compiled_mm(a, b)
-                self.assertIn(".mark_layout_dynamic()", code)
+                self.assertIn("flydsl_tensor_arg", code)
                 self.assertNotIn("mat2.transpose(0, 1)", code)
-                self.assertIn("_inductor_tensor_arg(mat2)", code)
+                self.assertIn("flydsl_tensor_arg(mat2)", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)
 
@@ -898,7 +1086,7 @@ class TestFlyDSLTemplate(TestCase):
         ) as grid_size:
             code = self._assert_compiled_grouped_mm(a, b, offs)
         grid_size.assert_called_once()
-        self.assertIn("FLYDSL_COMPILE_ONLY", code)
+        self.assertIn("precompile_flydsl", code)
         self.assertIn("_precompile", code)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
@@ -1108,6 +1296,407 @@ class TestFlyDSLTemplate(TestCase):
         self.assertNotIn("async_compile.flydsl", code)
         self.assertIn("extern_kernels._grouped_mm", code)
         self.assertEqual(result, fn(a_unaligned_base, b, offs), atol=3e-2, rtol=3e-2)
+
+    # ------------------------------------------------------------------
+    # MXFP8 ragged grouped GEMM (aten._scaled_grouped_mm_v2)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _mxfp8_quantize(x, block=32):
+        """Cast the last dim of `x` to MXFP8: e4m3 data + e8m0 block scales.
+
+        Returns (fp8 data, e8m0 scales, f32 scales) -- the f32 scales are the
+        exact values the e8m0 ones encode, so a reference can dequantize
+        without re-deriving the exponent.
+        """
+        k = x.shape[-1]
+        blocks = x.reshape(*x.shape[:-1], k // block, block)
+        amax = blocks.abs().amax(-1)
+        # e4m3 max is 448 = 2**8.8; take the exponent that maps amax below it.
+        exponent = torch.floor(torch.log2(amax.clamp(min=1e-30))).to(torch.int32) - 7
+        exponent = exponent.clamp(-127, 127)
+        scale_f32 = torch.exp2(exponent.float())
+        data = (
+            (blocks / scale_f32.unsqueeze(-1))
+            .clamp(-448, 448)
+            .to(torch.float8_e4m3fn)
+            .reshape(*x.shape[:-1], k)
+        )
+        scale_e8m0 = (exponent + 127).to(torch.uint8).view(torch.float8_e8m0fnu)
+        return data, scale_e8m0, scale_f32
+
+    @classmethod
+    def _mxfp8_grouped_reference(cls, a, a_scale, b, b_scale, offs, block=32):
+        """Dequantize and matmul per group, in f32."""
+        m, k = a.shape
+        g, n = b.shape[0], b.shape[1]
+        a_deq = a.float().reshape(m, k // block, block) * a_scale.unsqueeze(-1)
+        b_deq = b.float().reshape(g, n, k // block, block) * b_scale.unsqueeze(-1)
+        a_deq = a_deq.reshape(m, k)
+        b_deq = b_deq.reshape(g, n, k)
+        out = torch.zeros(m, n, device=a.device, dtype=torch.float32)
+        start = 0
+        for group in range(g):
+            end = int(offs[group])
+            if end > start:
+                out[start:end] = a_deq[start:end] @ b_deq[group].t()
+            start = end
+        return out.to(torch.bfloat16)
+
+    @classmethod
+    def _make_mxfp8_grouped_inputs(cls, group_sizes, k, n, device="cuda"):
+        offs = torch.tensor(group_sizes, device=device, dtype=torch.int32).cumsum(0)
+        offs = offs.to(torch.int32)
+        m = int(sum(group_sizes))
+        g = len(group_sizes)
+        a_hp = torch.randn(m, k, device=device) * 0.5
+        # The weight is generated as [G, N, K] row-major and handed to the op
+        # as the [G, K, N] view of it, which is the layout every scaled GEMM
+        # already requires of mat_b.
+        b_hp = torch.randn(g, n, k, device=device) * 0.5
+        a, a_scale, a_scale_f32 = cls._mxfp8_quantize(a_hp)
+        b, b_scale, b_scale_f32 = cls._mxfp8_quantize(b_hp)
+        reference = cls._mxfp8_grouped_reference(a, a_scale_f32, b, b_scale_f32, offs)
+        return (
+            a,
+            b.transpose(-2, -1),
+            a_scale,
+            b_scale.reshape(g, -1),
+            offs,
+            reference,
+        )
+
+    @staticmethod
+    def _scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs, **kwargs):
+        return F.scaled_grouped_mm(
+            a,
+            b,
+            a_scale,
+            ScalingType.BlockWise1x32,
+            b_scale,
+            ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.NO_SWIZZLE,
+            swizzle_b=SwizzleType.NO_SWIZZLE,
+            offs=offs,
+            output_dtype=torch.bfloat16,
+            **kwargs,
+        )
+
+    def test_flydsl_mxfp8_grouped_gemm_config_schema(self):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        # Non-autotuned selection is the tile the kernel's own heuristic picks,
+        # not a fixed one -- so it has to be shape-dependent.
+        with (
+            mock.patch.object(
+                flydsl_heuristics,
+                "get_default_mxfp8_grouped_gemm_config",
+                return_value=flydsl_heuristics.FlyDSLMXFP8GroupedGemmConfig(64, 128),
+            ),
+            mock.patch.object(flydsl_heuristics, "_make_mxfp8_grouped_gemm_param"),
+            torch._inductor.config.patch(flydsl_enable_autotuning=False),
+        ):
+            selected = flydsl_heuristics.get_mxfp8_grouped_gemm_configs(
+                512, 2048, 2048, 8
+            )
+        self.assertEqual(selected, [{"BLOCK_R": 64, "BLOCK_C": 128}])
+
+        with (
+            mock.patch.object(flydsl_heuristics, "_make_mxfp8_grouped_gemm_param"),
+            torch._inductor.config.patch(flydsl_enable_autotuning=True),
+        ):
+            exhaustive = flydsl_heuristics.get_mxfp8_grouped_gemm_configs(
+                512, 2048, 2048, 8
+            )
+        self.assertEqual(len(exhaustive), 6)
+        self.assertIn({"BLOCK_R": 256, "BLOCK_C": 256}, exhaustive)
+        self.assertIn({"BLOCK_R": 64, "BLOCK_C": 128}, exhaustive)
+
+    @parametrize(
+        "k,n,g,block_r,block_c,expected",
+        (
+            (2048, 2048, 8, 256, 256, True),
+            (2048, 2048, 8, 64, 128, True),
+            # K must be a whole number of 128-element pipeline steps...
+            (2080, 2048, 8, 256, 256, False),
+            # ...and there must be at least four of them (2 prologue, 2 tails).
+            (384, 2048, 8, 256, 256, False),
+            # A 128-wide tile only pays when it divides N.
+            (2048, 1408, 8, 256, 128, True),
+            (2048, 1344, 8, 256, 128, False),
+            # Tiles the kernel does not implement.
+            (2048, 2048, 8, 32, 256, False),
+            (2048, 2048, 8, 256, 64, False),
+        ),
+    )
+    def test_flydsl_mxfp8_grouped_gemm_shape_validation(
+        self, k, n, g, block_r, block_c, expected
+    ):
+        from torch._inductor.heuristics.template import flydsl as flydsl_heuristics
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        valid = flydsl_heuristics.is_mxfp8_grouped_gemm_config_valid_for_shape(
+            n, k, g, {"BLOCK_R": block_r, "BLOCK_C": block_c}
+        )
+        self.assertEqual(valid, expected)
+
+    @parametrize(
+        "case",
+        (
+            "a_dtype",
+            "out_dtype",
+            "scale_dtype",
+            "b_not_k_major",
+            "a_padded_stride",
+            "scale_a_padded_stride",
+            "scale_b_wrong_shape",
+            "offs_dtype",
+            "k_not_scale_aligned",
+        ),
+    )
+    def test_flydsl_mxfp8_grouped_gate_rejects_invalid_inputs(self, case):
+        """The gate rejects everything the kernel's layout contract excludes.
+
+        Driven through fake IR nodes rather than a compile so it runs without a
+        GPU, and -- more to the point -- without ATen, which has no MXFP8
+        grouped kernel on ROCm to fall back to.
+        """
+        from torch._inductor.kernel import mm_grouped
+
+        m, k, n, g = 512, 2048, 256, 4
+        scale_k = k // 32
+
+        def node(size, stride, dtype, offset=0):
+            return SimpleNamespace(
+                get_size=lambda: size,
+                get_stride=lambda: stride,
+                get_dtype=lambda: dtype,
+                get_layout=lambda: SimpleNamespace(offset=offset),
+            )
+
+        fp8 = torch.float8_e4m3fn
+        e8m0 = torch.float8_e8m0fnu
+        mat_a = node([m, k], [k, 1], fp8)
+        mat_b = node([g, k, n], [k * n, 1, k], fp8)
+        scale_a = node([m, scale_k], [scale_k, 1], e8m0)
+        scale_b = node([g, n * scale_k], [n * scale_k, 1], e8m0)
+        offs = node([g], [1], torch.int32)
+        out_dtype = torch.bfloat16
+
+        if case == "a_dtype":
+            mat_a = node([m, k], [k, 1], torch.float8_e5m2)
+        elif case == "out_dtype":
+            out_dtype = torch.float16
+        elif case == "scale_dtype":
+            scale_a = node([m, scale_k], [scale_k, 1], torch.float32)
+        elif case == "b_not_k_major":
+            mat_b = node([g, k, n], [k * n, n, 1], fp8)
+        elif case == "a_padded_stride":
+            mat_a = node([m, k], [k + 32, 1], fp8)
+        elif case == "scale_a_padded_stride":
+            scale_a = node([m, scale_k], [scale_k + 4, 1], e8m0)
+        elif case == "scale_b_wrong_shape":
+            scale_b = node([g, n, scale_k], [n * scale_k, scale_k, 1], e8m0)
+        elif case == "offs_dtype":
+            offs = node([g], [1], torch.int64)
+        elif case == "k_not_scale_aligned":
+            mat_a = node([m, k + 16], [k + 16, 1], fp8)
+
+        layout = SimpleNamespace(
+            stride=[n, 1],
+            dtype=out_dtype,
+            size=[m, n],
+            device=torch.device("cpu"),
+        )
+        sizevars = SimpleNamespace(
+            statically_known_equals=lambda x, y: x == y,
+            statically_known_multiple_of=lambda x, y: x % y == 0,
+        )
+        with (
+            V.set_graph_handler(SimpleNamespace(sizevars=sizevars)),
+            mock.patch.object(
+                mm_grouped, "use_flydsl_gemm_template", return_value=True
+            ),
+            mock.patch.object(mm_grouped, "is_unaligned", return_value=False),
+        ):
+            result = mm_grouped.get_flydsl_mxfp8_grouped_mm_template_kwargs(
+                mat_a, mat_b, scale_a, scale_b, offs, layout, True
+            )
+        self.assertEqual(result, [])
+
+    def _assert_compiled_mxfp8_grouped_mm(
+        self, group_sizes, k, n, *, expect_flydsl: bool = True
+    ):
+        from torch._inductor.utils import run_and_get_code
+
+        a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_grouped_inputs(
+            group_sizes, k, n
+        )
+
+        def fn(a, b, a_scale, b_scale, offs):
+            return self._scaled_grouped_mm_mxfp8(a, b, a_scale, b_scale, offs)
+
+        torch._dynamo.reset()
+        result, (code,) = run_and_get_code(
+            torch.compile(fn, backend="inductor"), a, b, a_scale, b_scale, offs
+        )
+        assertion = self.assertIn if expect_flydsl else self.assertNotIn
+        assertion("async_compile.flydsl", code)
+        # Rows past the last group are written by no block and are not part of
+        # the result, so only the grouped region is compared.
+        rows = int(offs[-1])
+        self.assertEqual(
+            result[:rows].float(), reference[:rows].float(), atol=6e-2, rtol=6e-2
+        )
+        return code
+
+    @parametrize(
+        "group_sizes,k,n",
+        (
+            ([512, 300, 700, 1000], 2048, 2048),
+            ([512] * 8, 4096, 4096),
+            # Empty groups, and a group boundary inside a row tile.
+            ([0, 1024, 0, 512, 2048, 128, 0, 896], 2048, 2048),
+            # The minimum K the pipeline supports: 4 steps of 128.
+            ([256] * 4, 512, 2048),
+            # N that only the 128-wide tile divides.
+            ([1, 3, 7, 15, 31, 63, 127, 255], 2048, 1408),
+        ),
+    )
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=False,
+    )
+    def test_flydsl_mxfp8_grouped_mm_e2e(self, group_sizes, k, n):
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        code = self._assert_compiled_mxfp8_grouped_mm(group_sizes, k, n)
+        self.assertIn("flydsl_tensor_arg", code)
+        self.assertIn("_precompile", code)
+        self.assertIn("precompile_flydsl", code)
+        self.assertNotIn("FLYDSL_COMPILE_ONLY", code)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    @torch._inductor.config.patch(
+        max_autotune_gemm=True,
+        max_autotune_gemm_backends="FLYDSL",
+        flydsl_enable_autotuning=True,
+        autotune_in_subproc=False,
+    )
+    def test_flydsl_mxfp8_grouped_mm_autotune_e2e(self):
+        """Autotuning walks every tile the kernel implements, and each is correct."""
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        self._assert_compiled_mxfp8_grouped_mm([512, 300, 700, 1000], 2048, 2048)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA/ROCm not available")
+    @unittest.skipIf(torch.version.hip is None, "requires ROCm")
+    def test_flydsl_mxfp8_grouped_mm_tile_parity_e2e(self):
+        """Every tile must agree bitwise, on the shapes that once did not.
+
+        The N_ACCUMS=4 tiles (BLOCK_R=64, and 128x128) computed a small
+        fraction of elements wrong until `wait_barrier` was made to wait on
+        lgkmcnt as well as vmcnt: an s2r fragment issued in one cluster and
+        consumed in the next could cross the barrier still outstanding. Only
+        the MFMAs in between covered that gap, so exactly the tiles with four
+        accumulators broke. `pick_block_r` can return those tiles, so this
+        pins the property rather than trusting it.
+        """
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        import flydsl.compiler as flyc
+
+        group_sizes = [1, 3, 7, 15, 31, 63, 127, 255]
+        k, n, g = 2048, 1408, len(group_sizes)
+        a, b, a_scale, b_scale, offs, reference = self._make_mxfp8_grouped_inputs(
+            group_sizes, k, n
+        )
+        # The kernel wants B as a stack of [N, K] planes, the layout the
+        # lowering hands it after the template's permute.
+        weight = b.permute(0, 2, 1)
+        rows = int(offs[-1])
+        outputs = {}
+        for block_r in (64, 128, 256):
+            for block_c in (128, 256):
+                param = module.make_mxfp8_grouped_gemm_param_and_validate(
+                    k, n, g, block_r, block_c
+                )
+                if param is None:
+                    continue
+                out = torch.zeros(a.shape[0], n, dtype=torch.bfloat16, device=a.device)
+                module.launch_mxfp8_grouped_gemm_gfx950(
+                    out,
+                    a,
+                    weight,
+                    a_scale,
+                    b_scale.reshape(g, n, -1),
+                    offs,
+                    param,
+                    torch.cuda.current_stream(),
+                    tensor_arg=lambda t: flyc.from_torch_tensor(
+                        t
+                    ).mark_layout_dynamic(),
+                )
+                outputs[(block_r, block_c)] = out
+        self.assertGreaterEqual(len(outputs), 4)
+
+        tiles = list(outputs)
+        base = outputs[tiles[0]]
+        for tile in tiles[1:]:
+            differing = int((outputs[tile][:rows] != base[:rows]).sum())
+            self.assertEqual(
+                differing,
+                0,
+                f"tile {tile} disagrees with {tiles[0]} on {differing} elements",
+            )
+        self.assertEqual(
+            base[:rows].float(), reference[:rows].float(), atol=6e-2, rtol=6e-2
+        )
+
+    def test_flydsl_mxfp8_grouped_mm_row_windows(self):
+        """A token dim past the int32 operand limit is split, not truncated."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        param = module.make_mxfp8_grouped_gemm_param(2048, 2048, 2, 256, 256)
+        total_m = 1 << 22
+        offs = torch.tensor([total_m // 2, total_m], dtype=torch.int32)
+        windows = list(
+            module._row_windows(total_m, param.k, param.n, offs, param.block_r)
+        )
+        # M * K here is 2**33, so this must split.
+        self.assertGreater(len(windows), 1)
+        covered = 0
+        for row_start, rows, window_offs in windows:
+            # Disjoint, contiguous, and never splitting a row tile.
+            self.assertEqual(row_start, covered)
+            self.assertEqual(rows % param.block_r, 0)
+            # Offsets are rebased into the window and clamped to it, so a group
+            # straddling the boundary ends at `rows` here and starts at 0 next.
+            self.assertEqual(int(window_offs.max()), rows)
+            self.assertGreaterEqual(int(window_offs.min()), 0)
+            covered += rows
+        self.assertEqual(covered, total_m)
 
 
 if __name__ == "__main__":
