@@ -23,13 +23,17 @@ from torch._precompile import (
     PrecompiledRunnable as PrecompiledRunnable,
     PrecompileError as PrecompileError,
 )
-from torch.compiler._precompile_types import GuardFact, PrecompileSummary
+from torch.compiler._precompile_types import (
+    FrameInvariants,
+    GuardFact,
+    PrecompileSummary,
+)
 
 
 # The two tracers come from torch._precompile, which is under `from __future__ import
 # annotations`, so their annotations are still strings that only resolve against THAT
 # module's globals: resolve them BEFORE the re-homing below points typing.get_type_hints
-# (which resolves through a class's __module__) at this module instead. The two
+# (which resolves through a class's __module__) at this module instead. The three
 # _precompile_types classes need nothing -- that module has no future-annotations import,
 # so their annotations are already objects. Only __annotations__ is rewritten here;
 # dataclasses.fields() keeps the original strings, read from __dataclass_fields__.
@@ -42,7 +46,13 @@ for _t in (MakeFxTracer, DynamoTracer):
 # module their home so introspection (test_public_bindings, Sphinx) resolves them under
 # torch.compiler.precompile, where they are re-exported; that rewrites their __module__
 # process-globally, and the public spelling is the only one either module documents.
-for _t in (MakeFxTracer, DynamoTracer, PrecompileSummary, GuardFact):
+for _t in (
+    MakeFxTracer,
+    DynamoTracer,
+    PrecompileSummary,
+    FrameInvariants,
+    GuardFact,
+):
     _t.__module__ = "torch.compiler.precompile"
 
 
@@ -63,5 +73,6 @@ __all__ = [
     "MakeFxTracer",
     "DynamoTracer",
     "PrecompileSummary",
+    "FrameInvariants",
     "GuardFact",
 ]
