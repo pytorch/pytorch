@@ -2814,7 +2814,7 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
-instantiate_device_type_tests(TestMeta, globals())
+instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):
