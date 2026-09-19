@@ -49,12 +49,8 @@ class SkipPatternTest(TestBase):
     """
 
     @inductor_config.patch(split_reductions=False)
-    def test_dimension_too_close(self):
-        """
-        Skip if the two reduction size are too close.
-        We require one reduction dimension to be much larger so we can split
-        that dimension and make it efficient.
-        """
+    def test_workload_too_small(self):
+        """768x768 is 0.6Mi elements, under the 5Mi strict threshold."""
 
         def f(x):
             out1 = x.sum(dim=1)
@@ -129,9 +125,6 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("shape", ((4096, 8192), (4096, 16384), (8192, 16384)))
     def test_wide_reduction_fuses_in_strict_mode(self, shape):
-        """Wide reductions (large ncol, nrow < ncol*2) should use mix-order
-        fusion in the default (strict) mode, now that the `nrow >= ncol*2`
-        gate is removed."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -153,9 +146,6 @@ class MixOrderReductionTest(TestBase):
 
     @parametrize("shape", ((6144, 4000), (8192, 6144)))
     def test_flat_reduction_fuses_in_strict_mode(self, shape):
-        """A relatively flat reduction (nrow >= 4096, nrow < ncol*2) should use
-        mix-order fusion in the default (strict) mode, now that the
-        `nrow >= ncol*2` gate is removed."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -176,9 +166,6 @@ class MixOrderReductionTest(TestBase):
         )
 
     def test_wide_reduction_respects_row_floor(self):
-        """Strict mode still requires nrow >= 4096: with too few rows there is
-        not enough parallelism to split the other reduction across, so the
-        shape is left unfused (guards against over-fusing 2048x8192)."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
@@ -221,8 +208,8 @@ class MixOrderReductionTest(TestBase):
             "same-order reductions must not be classified as mix-order",
         )
 
-    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
-    def test_square_mix_order_reductions_non_strict(self):
+    def test_square_mix_order_reductions(self):
+        """8192x8192 clears both strict checks, so no non-strict override."""
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
