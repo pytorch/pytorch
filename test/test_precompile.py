@@ -621,9 +621,10 @@ class TestPrecompile(TestCase):
         # Nothing ran before an ordinary refusal, so the error carries no result.
         self.assertIsNone(PrecompileError("refused").result)
 
-    def test_make_fx_capture_refuses_a_partial(self):
+    def test_make_fx_capture_constructor(self):
         # A partial hides its bound arguments from the capture, so it is refused
-        # up front with the fix, rather than failing later as a baked constant.
+        # up front with the fix, rather than failing later as a baked constant; the
+        # tracer name is refused too, since the constructor reads the MakeFxTracer.
         from torch._precompile import _MakeFxCapture, MakeFxTracer
 
         def step(model, x):
@@ -632,10 +633,18 @@ class TestPrecompile(TestCase):
         bound = functools.partial(step, torch.nn.Linear(2, 2))
         table: dict = {}
         tracer = MakeFxTracer(decompositions=table)
-        kwargs = {"backend": "eager", "tracer": tracer, "training": False}
         with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
-            _MakeFxCapture(bound, "m.py", "m.cache", **kwargs)
-        cap = _MakeFxCapture(step, "m.py", "m.cache", **kwargs)
+            _MakeFxCapture(
+                bound, "m.py", "m.cache", backend="eager", tracer=tracer, training=False
+            )
+        name = "make_fx"
+        with self.assertRaisesRegex(PrecompileError, "not the tracer name"):
+            _MakeFxCapture(
+                step, "m.py", "m.cache", backend="eager", tracer=name, training=False
+            )
+        cap = _MakeFxCapture(
+            step, "m.py", "m.cache", backend="eager", tracer=tracer, training=False
+        )
         self.assertIs(cap.__enter__(), cap)
         self.assertIs(cap._module._decompositions, table)
         self.assertFalse(cap._traced)
@@ -927,6 +936,12 @@ class TestPrecompile(TestCase):
         # refused on the resume name and the live one keeps serving; the rows
         # below scrub the live artifact first.
         self.assertEqual(build()(model, x), expected)
+        # A live torch.compile binds its resume function, untagged, under a name
+        # this artifact also mints: the build must refuse, not rebind it.
+        resume_name = frames[1]["resume_names"][0]
+        with mock.patch.dict(scope, {resume_name: lambda *args: None}):
+            with self.assertRaisesRegex(PrecompileError, resume_name):
+                build()
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
             other = _b64({f"{k}_other": v for k, v in backends.items()})
