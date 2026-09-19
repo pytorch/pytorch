@@ -216,6 +216,35 @@ class TestUtils(TestCase):
             "1",
         )
 
+    def test_check_rng_sync_internal_dispatch(self):
+        # cuda/xpu generators use the Philox (seed, offset) check; every other
+        # device — cpu and third-party (privateuse1) backends alike — must fall
+        # back to comparing full generator state tensors instead of raising
+        # NotImplementedError.
+        import torch.distributed.collective_utils as collective_utils
+
+        group = mock.sentinel.group
+        for device_type, expect_philox in [
+            ("cuda", True),
+            ("xpu", True),
+            ("cpu", False),
+            ("privateuse1", False),
+        ]:
+            generator = mock.MagicMock()
+            generator.device.type = device_type
+            with mock.patch.object(
+                collective_utils, "_check_philox_rng_sync"
+            ) as philox_check, mock.patch.object(
+                collective_utils, "_check_cpu_rng_sync"
+            ) as cpu_check:
+                collective_utils._check_rng_sync_internal(generator, group)
+            if expect_philox:
+                philox_check.assert_called_once_with(generator, group)
+                cpu_check.assert_not_called()
+            else:
+                cpu_check.assert_called_once_with(generator, group)
+                philox_check.assert_not_called()
+
 
 instantiate_parametrized_tests(TestCollectiveUtils)
 
