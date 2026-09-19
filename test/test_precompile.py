@@ -424,6 +424,334 @@ class TestPrecompile(TestCase):
         self.assertFalse(cap._traced)
         self.assertIsNone(cap._rendered)
 
+    def test_inlined_forward_warns_unless_told_not_to(self):
+        # exec of an artifact is untrusted input on the load path and warns on
+        # every load; only the capture-time self-load of source this process just
+        # rendered turns the warning off.
+        from torch._precompile import _make_inlined_forward
+
+        code = "def forward(x):\n    return x + 1\n"
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            self.assertEqual(_make_inlined_forward(code)(1), 2)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("about to EXEC python_code", cm.output[0])
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            self.assertEqual(_make_inlined_forward(code, warn=False)(1), 2)
+
+    def test_multigraph_frames_record_every_dynamo_frame(self):
+        # The entry is codes[0], where CompilePackage records the captured
+        # callable and reads it back from, so neither a bypassed entry nor a
+        # same-named helper frame moves it. A bypassed code keeps its record
+        # without variants: the frame ahead of a bypassed continuation still
+        # LOAD_GLOBALs its resume name, and its guarded codes are dead.
+        from torch._dynamo.package import (
+            _DynamoCacheEntry,
+            _DynamoCodeCacheEntry,
+            _GuardedCodeCacheEntry,
+            SerializedCode,
+            SourceInfo,
+        )
+        from torch._precompile import _multigraph_frames
+
+        def forward(x):
+            return x
+
+        def helper(x):
+            return x
+
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+            return _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(fn.__code__),
+                python_module=__name__,
+                function_names=[resume_name] if resume_name else [],
+                guarded_codes=list(variants),
+                import_sources={"__import_torch": "torch"},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=resume_name is not None,
+                bypassed=bypassed,
+            )
+
+        variant = _GuardedCodeCacheEntry(
+            guards_state=b"",
+            dynamo_code=SerializedCode.from_code_object(helper.__code__),
+        )
+        entry = _DynamoCacheEntry(
+            codes=[
+                code_entry(forward, variants=[variant], bypassed=True),
+                code_entry(forward),  # a submodule's forward: same co_name
+                code_entry(helper, "__resume_at_12_3", [variant]),
+                code_entry(helper, "__resume_at_40_7", [variant], bypassed=True),
+            ],
+            source_info=SourceInfo(inlined_sources=set()),
+            device_type="cpu",
+            fn_name="Model.forward",
+        )
+        frames = _multigraph_frames(entry)
+        self.assertEqual([f["is_entry"] for f in frames], [True, False, False, False])
+        self.assertEqual([f["bypassed"] for f in frames], [True, False, False, True])
+        self.assertEqual(
+            [f["resume_names"] for f in frames],
+            [[], [], ["__resume_at_12_3"], ["__resume_at_40_7"]],
+        )
+        self.assertEqual([len(f["variants"]) for f in frames], [0, 0, 1, 0])
+        self.assertEqual(frames[2]["variants"][0]["dynamo_code"], variant.dynamo_code)
+        self.assertEqual(frames[0]["code"].co_name, "forward")
+        self.assertEqual(frames[0]["import_sources"], {"__import_torch": "torch"})
+
+    def test_reachable_frames_follow_resume_names(self):
+        # A continuation is reachable only through a reachable parent's bytecode
+        # (nested code objects included), so carrying a resume name is not
+        # enough: one named only by an unreachable helper is just as dead.
+        from torch._dynamo.package import SerializedCode
+        from torch._precompile import _reachable_frames, _serving_mode
+
+        ns = {}
+        exec(
+            "def entry(x): return __resume_at_12_3(x)\n"
+            "def cont_a(x): return (lambda: __resume_at_40_7(x))()\n"
+            "def cont_b(x): return x\n"
+            "def helper(x): return __resume_at_99_1(x)\n",
+            ns,
+        )
+
+        def frame(name, resume_names=(), is_entry=False, nvariants=1):
+            code = SerializedCode.from_code_object(ns[name].__code__)
+            return {
+                "is_entry": is_entry,
+                "bypassed": nvariants == 0,
+                "code": code,
+                "python_module": "m",
+                "import_sources": {},
+                "resume_names": list(resume_names),
+                "variants": [{"guards_state": b"", "dynamo_code": code}] * nvariants,
+            }
+
+        entry = frame("entry", is_entry=True)
+        cont_a = frame("cont_a", ["__resume_at_12_3"])
+        cont_b = frame("cont_b", ["__resume_at_40_7"])
+        helper = frame("helper")
+        # orphan is named only by the unreachable helper; nothing names stray.
+        orphan = frame("cont_b", ["__resume_at_99_1"])
+        stray = frame("cont_b", ["__resume_at_7_7"])
+        frames = [entry, cont_a, cont_b, helper, orphan, stray]
+        self.assertEqual(_reachable_frames(frames), {0, 1, 2})
+        self.assertEqual(_serving_mode(frames), "installed")
+        self.assertEqual(_serving_mode([entry, cont_a, cont_b]), "standalone")
+        # A reachable continuation with no variant (bypassed) would raise on the
+        # captured path in a standalone artifact, so that capture installs.
+        bypassed = frame("cont_a", ["__resume_at_12_3"], nvariants=0)
+        self.assertEqual(_reachable_frames([entry, bypassed, cont_b]), {0, 1})
+        self.assertEqual(_serving_mode([entry, bypassed, cont_b]), "installed")
+
+    def test_no_dispatchable_graph_names_the_cause(self):
+        # An entry frame with no variants has two very different causes. If
+        # Dynamo BYPASSED the frame, saying so beats the thin-wrapper advice,
+        # which in that case is simply wrong; a bypassed helper or continuation
+        # says nothing about the entry.
+        from torch._dynamo.package import (
+            _DynamoCacheEntry,
+            _DynamoCodeCacheEntry,
+            _GuardedCodeCacheEntry,
+            SerializedCode,
+            SourceInfo,
+        )
+        from torch._precompile import _multigraph_frames, _reject_uninstallable_entry
+
+        def fwd_loss_bwd(x):
+            return x
+
+        def helper(x):
+            return x
+
+        scale = 2
+
+        def step(x):
+            return x * scale
+
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+            return _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(fn.__code__),
+                python_module=__name__,
+                function_names=[resume_name] if resume_name else [],
+                guarded_codes=list(variants),
+                import_sources={},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=resume_name is not None,
+                bypassed=bypassed,
+            )
+
+        def reject(fn_name, codes):
+            entry = _DynamoCacheEntry(
+                codes=codes,
+                source_info=SourceInfo(inlined_sources=set()),
+                device_type="cpu",
+                fn_name=fn_name,
+            )
+            _reject_uninstallable_entry(_multigraph_frames(entry), entry)
+
+        variant = _GuardedCodeCacheEntry(
+            guards_state=b"",
+            dynamo_code=SerializedCode.from_code_object(helper.__code__),
+        )
+        healthy = code_entry(fwd_loss_bwd, variants=[variant])
+        bypassed = code_entry(fwd_loss_bwd, variants=[variant], bypassed=True)
+        thin = code_entry(fwd_loss_bwd)
+        dead_helper = code_entry(helper, bypassed=True)
+        dead_cont = code_entry(helper, "__resume_at_12_3", bypassed=True)
+        msg = "entry frame was BYPASSED during capture.*precompile_cache_bypass"
+        with self.assertRaisesRegex(PrecompileError, msg):
+            reject("fwd_loss_bwd", [bypassed])
+        # A bypassed HELPER beside a variant-less entry is the thin-wrapper case.
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            reject("fwd_loss_bwd", [thin, dead_helper])
+        # A healthy entry beside a bypassed continuation has nothing to refuse,
+        # and neither has an empty capture.
+        reject("fwd_loss_bwd", [healthy, dead_cont])
+        reject("fwd_loss_bwd", [])
+        with self.assertRaisesRegex(PrecompileError, r"closes over \['scale'\]"):
+            reject("step", [code_entry(step, variants=[variant])])
+
+    def test_multigraph_driver_dispatches_captured_frames(self):
+        # The standalone driver rebuilds each frame's f_locals for the guard
+        # check, so the shapes it has to bind are all here: a keyword-only
+        # default the call omits, *args, and a continuation closing over a cell
+        # of the entry frame (x, which rows() captures).
+        import inspect
+        from unittest import mock
+
+        from torch import _precompile_driver as driver
+        from torch._dynamo.package import CompilePackage, load_guards_state
+        from torch._dynamo.precompile_context import EagerCacheArtifact
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+        from torch._precompile import _b64, _multigraph_frames, _serving_mode
+
+        def step(model, x, *rest, scale=2.0):
+            y = model(x) * scale
+            torch._dynamo.graph_break()
+
+            def rows():
+                return x.shape[0]
+
+            return y + rows() + len(rest)
+
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        package = CompilePackage(step)
+        compiled = torch._dynamo.optimize(
+            backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
+        )(step)
+        # The second call recompiles only the continuation (len(rest) is a
+        # constant in its graph), so that frame carries two variants whose
+        # outputs differ by one: dispatch has to pick, not just run.
+        expected = compiled(model, x)
+        expected_rest = compiled(model, x, torch.ones(1))
+        self.assertNotEqual(expected, expected_rest)
+        frames = _multigraph_frames(package.cache_entry())
+        shape = [(f["bypassed"], len(f["variants"])) for f in frames]
+        self.assertEqual(_serving_mode(frames), "standalone", shape)
+        self.assertEqual([len(f["variants"]) for f in frames], [1, 2])
+        backends = {
+            backend_id: EagerCacheArtifact(key=backend_id, content=backend)
+            for backend_id, backend in package.cached_backends.items()
+        }
+        torch._dynamo.reset()
+        # A serving process never traced, so the names Dynamo minted into this
+        # module during capture must not be what makes the guards pass.
+        scope = step.__globals__
+        minted = ("__compiled_fn", "__resume_at", "__builtins_dict__", "__import_")
+        removed = {n: scope.pop(n) for n in list(scope) if n.startswith(minted)}
+        self.addCleanup(scope.update, removed)
+        # The records name this module, which is __main__ under a script run and
+        # the driver refuses that; serve them from an importable alias of it.
+        module = "precompile_test_captured_module"
+        alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
+        self.addCleanup(alias.stop)
+        alias.start()
+        main_frames = [{**f, "python_module": "__main__"} for f in frames]
+        for frame in frames:
+            frame["python_module"] = module
+
+        ns = {
+            "__name__": "precompile_test_artifact",
+            # An artifact-namespace name the captured module also binds: the
+            # module's binding is the one the rebuilt bytecode must LOAD_GLOBAL.
+            "torch": None,
+            "_FRAMES": _b64(frames),
+            "_BACKENDS": _b64(backends),
+            "_ENTRY_BINDING": _b64(
+                {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
+            ),
+            "_DYNAMO_PYTHON_VERSION": tuple(sys.version_info[:2]),
+            "TORCH_VERSION": torch.__version__,
+        }
+        exec(inspect.getsource(driver._build_multigraph_forward), ns)
+        build = ns["_build_multigraph_forward"]
+        forward = build()
+        self.assertEqual(forward(model, x), expected)
+        self.assertEqual(forward(model, x, scale=2.0), expected)
+        self.assertEqual(forward(model, x, torch.ones(1)), expected_rest)
+        # The builtins dict Dynamo guards through is re-minted in the frames'
+        # own namespace, not the artifact module's.
+        guards_state = load_guards_state(frames[1]["variants"][0]["guards_state"])
+        key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertNotIn(key, ns)
+        # Neither call was captured: the entry frame refuses the first, the
+        # continuation (guarding len(rest)) the second. There is no compiler
+        # behind the artifact, so both are coverage gaps rather than recompiles.
+        with self.assertRaisesRegex(PrecompileError, "no captured variant of 'step'"):
+            forward(model, x, scale=3.0)
+        resume_miss = "no captured variant of 'torch_dynamo_resume_in_step"
+        with self.assertRaisesRegex(PrecompileError, resume_miss):
+            forward(model, x, torch.ones(1), torch.ones(1))
+        # A frame with no variant is diagnosed by cause, not as a coverage gap:
+        # at build for the entry, at the call that reaches a continuation.
+        bypassed = [{**f, "bypassed": True, "variants": []} for f in frames]
+        with mock.patch.dict(ns, {"_FRAMES": _b64(bypassed)}):
+            with self.assertRaisesRegex(PrecompileError, "'step' was BYPASSED"):
+                build()
+        trivial = [frames[0], {**frames[1], "variants": []}]
+        with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
+            with self.assertRaisesRegex(PrecompileError, "produced no guarded code"):
+                build()(model, x)
+        foreign = (
+            ("_DYNAMO_PYTHON_VERSION", (3, 9)),
+            ("TORCH_VERSION", "0.0"),
+            ("_FRAMES", _b64(main_frames)),
+        )
+        for name, value in foreign:
+            with mock.patch.dict(ns, {name: value}):
+                with self.assertRaisesRegex(PrecompileError, "Regenerate the artifact"):
+                    build()
+
+    def test_entry_binding_records_defaults(self):
+        from torch._precompile import _entry_binding
+
+        def step(model, x, scale=2.0, *, mode="sum"):
+            return model(x) * scale
+
+        def plain(model, x):
+            return model(x)
+
+        self.assertEqual(
+            _entry_binding(step), {"defaults": (2.0,), "kwdefaults": {"mode": "sum"}}
+        )
+        self.assertEqual(_entry_binding(plain), {"defaults": None, "kwdefaults": None})
+
+    def test_emit_multigraph_driver_source_is_a_complete_section(self):
+        import ast
+
+        from torch._precompile import _DRIVER_MAIN, _emit_multigraph_driver_source
+
+        source = _emit_multigraph_driver_source()
+        self.assertTrue(source.endswith(_DRIVER_MAIN))
+        body = ast.parse(source).body
+        kinds = [type(node).__name__ for node in body]
+        self.assertEqual(kinds, ["FunctionDef", "Assign", "If"])
+        self.assertEqual(body[0].name, "_build_multigraph_forward")
+        self.assertEqual(ast.unparse(body[1]), "forward = _build_multigraph_forward()")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
