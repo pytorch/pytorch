@@ -4318,6 +4318,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         self._missing_cache: dict[str, _Missing] = {}
         self._globals_snapshots: dict[int, dict[str, Any]] = {}
         self._pruned_cells: dict[int, types.CellType] = {}
+        # The object reducer_override was last handed, so a failure inside a
+        # __reduce__ can be attributed to a value rather than only to a type.
+        self.last_reduced: Any = None
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4677,6 +4680,8 @@ class GuardsStatePickler(FunctionPicklerBase):
     ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
 
+        self.last_reduced = obj
+
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
 
@@ -4982,6 +4987,59 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
+def _offending_value_path(state: Any, target: Any) -> str:
+    """Best-effort attribute path to the value that could not be pickled.
+
+    The error names WHAT failed and never WHERE it lives, which in a large model
+    means bisecting by hand across multi-minute captures. The pickler records
+    the object it was reducing, so this walks the guard state's two scopes
+    breadth-first and reports the first path holding THAT object -- by
+    identity, not by type, which would report a same-typed bystander instead.
+
+    Best-effort by construction: it is a diagnostic appended to an error that is
+    already being raised, so any failure here must stay silent rather than mask
+    the real one.
+    """
+    try:
+        if target is None:
+            return ""
+        graph = state.output_graph
+        queue = collections.deque(
+            [(f"local_scope[{k!r}]", v) for k, v in graph.local_scope.items()]
+            + [(f"global_scope[{k!r}]", v) for k, v in graph.global_scope.items()]
+        )
+        seen: set[int] = set()
+        while queue and len(seen) < 20000:
+            path, value = queue.popleft()
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            if value is target:
+                return f"\n  reached via: {path}"
+            if isinstance(value, (list, tuple, set, frozenset)):
+                queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
+            elif isinstance(value, dict):
+                for i, (k, v) in enumerate(value.items()):
+                    if isinstance(k, (str, int)):
+                        queue.append((f"{path}[{k!r}]", v))
+                    else:
+                        queue.append((f"{path}.keys()[{i}]", k))
+                        queue.append((f"{path}.values()[{i}]", v))
+            # Per node: one object whose __dict__ read raises (a type-level
+            # __dict__ property, a proxy) must not end the whole walk.
+            attributes: list[tuple[str, Any]] = []
+            try:
+                attributes = list((_instance_dict(value) or {}).items())
+            except Exception:
+                pass
+            for name, child in attributes:
+                if not name.startswith("__"):
+                    queue.append((f"{path}.{name}", child))
+    except Exception:
+        return ""
+    return ""
+
+
 def pickle_guards_state(
     state: GuardsState,
     builder: GuardBuilder,
@@ -4990,6 +5048,7 @@ def pickle_guards_state(
     empty_values = {}
     missing_values = {}
     guard_tree_values = builder.guard_tree_values
+    pickler: GuardsStatePickler | None = None
 
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
@@ -5050,8 +5109,14 @@ def pickle_guards_state(
         # asserts mid-iteration, subclasses assert in __tensor_flatten__, users
         # assert in __reduce__ and properties. Each is a legitimate limit of
         # what a package can carry, reported as a bypass rather than failing
-        # the compile.
-        raise torch._dynamo.exc.PackageError(f"{type(e).__name__}: {e}") from e
+        # the compile. Name the original type so the reason stays diagnosable
+        # in the bypass message, and the PATH to the offending value, because a
+        # type alone ("cannot pickle 'generator' object") is not actionable in
+        # a model with a thousand-frame guard tree.
+        last = pickler.last_reduced if pickler is not None else None
+        raise torch._dynamo.exc.PackageError(
+            f"{type(e).__name__}: {e}{_offending_value_path(state, last)}"
+        ) from e
     return buf.getvalue()
 
 

@@ -1393,6 +1393,50 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(wrapper): wrapper}, {}, {}, {}, buf).dump({"w": wrapper})
         self.assertIsInstance(load_guards_state(buf.getvalue())["w"].config, dict)
 
+    def test_unpicklable_guarded_attribute_names_its_path(self):
+        # A type alone ("cannot pickle 'generator' object") is not actionable in
+        # a model with a thousand-frame guard tree; the path is.
+        from torch._dynamo.guards import pickle_guards_state
+
+        h = _HolderWithGenerator()
+        graph = types.SimpleNamespace(
+            guards=[], local_scope={"h": h}, global_scope={}, guard_on_key_order=set()
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(h): h, id(h.it): h.it}, value_guarded_containers={}
+        )
+        with self.assertRaisesRegex(
+            PackageError,
+            r"cannot pickle 'generator' object\n  reached via: local_scope\['h'\]\.it",
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
+    def test_offending_value_path_is_found_by_identity(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        holder = types.SimpleNamespace(deep=types.SimpleNamespace())
+        # A same-typed decoy a type-based search would have reported instead.
+        holder.deep.decoy = (n for n in range(3))
+        holder.deep.it = (n for n in range(3))
+        graph = types.SimpleNamespace(local_scope={"p": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['p'].deep.it", _offending_value_path(state, holder.deep.it)
+        )
+        self.assertEqual(_offending_value_path(state, object()), "")
+
+    def test_offending_value_path_never_masks_the_real_error(self):
+        # It is a diagnostic appended to an error already being raised, so any
+        # failure inside it must stay silent.
+        from torch._dynamo.guards import _offending_value_path
+
+        class _Exploding:
+            @property
+            def output_graph(self):
+                raise RuntimeError("boom")
+
+        self.assertEqual(_offending_value_path(_Exploding(), object()), "")
+
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
         # torch.float32 registered the one dtype object as missing, and every
