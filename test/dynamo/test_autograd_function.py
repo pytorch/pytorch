@@ -3488,8 +3488,14 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         expected = fn(x, dx)
         self.assertEqual(expected, torch.zeros(4))
 
+        torch._dynamo.utils.counters.clear()
         actual = torch.compile(fn, backend=backend)(x, dx)
+
         self.assertEqual(actual, expected)
+        # The value is only right because apply() broke; assert the mechanism
+        # so a silently-inlined forward() cannot pass this test.
+        breaks = torch._dynamo.utils.counters["graph_break"]
+        self.assertTrue(any("custom `jvp`" in gb for gb in breaks))
 
     def test_jvp_custom_rule_fullgraph_raises(self):
         """A dropped custom jvp must be loud, never a silently wrong tangent."""
@@ -3562,11 +3568,13 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual, expected)
         self.assertGreater(cnt.frame_count, cold_frame_count)
 
-    def test_custom_jvp_with_forward_grad_disabled_does_not_graph_break(self):
-        """A dual level with forward grad off cannot consult jvp, so no break.
+    def test_custom_jvp_with_forward_grad_disabled_still_graph_breaks(self):
+        """Forward grad mode is deliberately not part of the break predicate.
 
-        `_set_fwd_grad_enabled(False)` makes `make_dual` a no-op, so the tangent
-        is dropped by forward AD itself and the custom rule is never reached.
+        `_set_fwd_grad_enabled(False)` does rule out the jvp being reached, but
+        nothing guards that flag, so skipping the break here would cache a graph
+        that inlines forward(); see the re-enable test below. Breaking on the
+        dual level alone costs an unnecessary break in this rare configuration.
         """
 
         def fn(x, dx):
@@ -3574,12 +3582,35 @@ class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
                 out = SinWithZeroJvp.apply(fwAD.make_dual(x, dx))
                 return fwAD.unpack_dual(out).primal
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         x, dx = torch.randn(4), torch.randn(4)
-        actual = torch.compile(fn, backend=cnt, fullgraph=True)(x, dx)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "custom `jvp`"):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x, dx)
 
-        self.assertEqual(actual, torch.sin(x))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(torch.compile(fn, backend="aot_eager")(x, dx), torch.sin(x))
+
+    def test_custom_jvp_after_forward_grad_re_enabled_at_same_level(self):
+        """Re-enabling forward grad at an unchanged dual level must stay correct.
+
+        The dual level guard passes across both calls, and no guard covers
+        forward grad mode, so had the predicate consulted that flag the warm-up
+        would have cached a graph with forward() inlined and the second call
+        would have returned cos(x)*dx instead of the custom rule's zeros.
+        """
+
+        def fn(x):
+            return SinWithZeroJvp.apply(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        x, dx = torch.randn(4), torch.randn(4)
+
+        with fwAD.dual_level():
+            with fwAD._set_fwd_grad_enabled(False):
+                opt_fn(x)
+            actual = fwAD.unpack_dual(opt_fn(fwAD.make_dual(x, dx))).tangent
+            expected = fwAD.unpack_dual(fn(fwAD.make_dual(x, dx))).tangent
+
+        self.assertEqual(expected, torch.zeros(4))
+        self.assertEqual(actual, expected)
 
     def test_custom_jvp_backward_mode_still_uses_custom_backward(self):
         """The reverse-mode path must be untouched by the forward-AD fix.

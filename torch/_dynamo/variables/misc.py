@@ -39,7 +39,7 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from torch._dynamo.variables.base import MutationType
 from torch._dynamo.variables.lists import TupleVariable
-from torch._guards import Guard, Source
+from torch._guards import Source
 
 from .. import config, graph_break_hints, trace_rules, variables
 from ..bytecode_transformation import (
@@ -1151,15 +1151,18 @@ def produce_trampoline_autograd_apply(fn_cls: Any) -> Callable[..., Any]:
 
 
 def _forward_ad_active() -> bool:
-    """Whether forward-mode AD can propagate tangents at the current tracing point.
+    """Whether a forward-AD level is live at the current tracing point.
 
     A dual level covers both entry points: `torch.func.jvp` enters one via
-    `_jvp_with_argnums`, and `dual_level()` is one. Forward grad mode is checked
-    too because `_set_fwd_grad_enabled(False)` makes `make_dual` a no-op, so no
-    jvp rule is consulted however many levels are live.
+    `_jvp_with_argnums`, and `dual_level()` is one. Forward grad mode is
+    deliberately not consulted, even though `_set_fwd_grad_enabled(False)` makes
+    `make_dual` a no-op and so rules out the jvp being reached: no guard covers
+    that flag, so a graph compiled with it off is reused once it is turned back
+    on at the same level, which is the silent wrongness this check exists to
+    prevent. Breaking on the level alone keeps the decision a function of state
+    the guard below pins.
     """
-    level = torch.autograd.forward_ad._current_level
-    return level >= 0 and torch._C._is_fwd_grad_enabled()
+    return torch.autograd.forward_ad._current_level >= 0
 
 
 class AutogradFunctionVariable(VariableTracker):
@@ -1286,11 +1289,12 @@ class AutogradFunctionVariable(VariableTracker):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            # Not breaking was a decision about ambient forward-AD state, which
-            # nothing guards by default. Pin the dual level so entering one later
+            # Not breaking was a decision about the ambient dual level, which
+            # nothing guards by default. Pin it so entering a level later
             # recompiles instead of reusing a graph that inlined forward() and
-            # dropped the jvp.
-            install_guard(Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL))  # type: ignore[arg-type]
+            # dropped the jvp. The level is always -1 here, since any live level
+            # takes the break above.
+            install_guard(GlobalStateSource().make_guard(GuardBuilder.DUAL_LEVEL))
 
         if requires_grad and torch.is_grad_enabled():
             source = self.fn_cls_source
