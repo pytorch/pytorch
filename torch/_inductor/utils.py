@@ -4616,10 +4616,23 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
         V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
         return True
 
+    # An unbacked bound comes from a torch._check, which isn't reliably enforced
+    # at runtime, so the static e <= int_max proof below can't be trusted.
+    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+    if has_free_unbacked_symbols(e):
+        return False
+
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    # Backward can't rely on the caller's check_leq guard to recompile to int64:
+    # it may be elided when a sibling kernel's numel dominates e, and the
+    # backward runs via the autograd engine, not re-dispatched through Dynamo.
+    if V.graph.is_backward:
+        return False
 
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.
