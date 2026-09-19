@@ -2920,7 +2920,7 @@ class TestMetaKernelRegistrations(TestCase):
 
 
 instantiate_device_type_tests(TestMeta, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for="cuda")
+instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for=("cuda", "xpu"), allow_xpu=True)
 
 
 def print_op_str_if_not_supported(op_str):
