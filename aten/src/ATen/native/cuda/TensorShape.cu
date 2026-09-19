@@ -12,6 +12,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_chunk_cat_native.h>
+#include <ATen/ops/_chunk_cat_with_prefixes_native.h>
+#include <ATen/ops/_split_with_sizes_copy_with_prefixes_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/split_with_sizes_copy_native.h>
 #endif
@@ -491,24 +493,34 @@ get_chunk_cat_metadata(
     int64_t dim,
     int64_t num_chunks,
     int64_t dst_elem_size,
-    int64_t src_elem_size) {
+    int64_t src_elem_size,
+    IntArrayRef num_leading_dims = {}) {
   TORCH_CHECK(
       dst_elem_size % src_elem_size == 0,
       "get_chunk_cat_metadata error: only support dst_elem_size % src_elem_size == 0");
   auto num_tensors = tensors.size();
-  int64_t leading_dim = get_leading_dim(tensors[0].sizes(), dim);
+  int64_t leading_dim = num_leading_dims.empty()
+      ? get_leading_dim(tensors[0].sizes(), dim)
+      : 1;
+  int64_t num_inputs = num_tensors;
+  if (!num_leading_dims.empty()) {
+    num_inputs = 0;
+    for (const auto i : c10::irange(num_tensors)) {
+      num_inputs += get_leading_dim(tensors[i].sizes(), num_leading_dims[i]);
+    }
+  }
   std::vector<int64_t> pad_tensor_chunk_sizes;
   std::vector<int64_t> num_blocks_per_tensor_chunk;
   std::vector<int64_t> start_block_idx_per_tensor_chunk{0};
   std::vector<int64_t> actual_tensor_sizes;
   std::vector<int64_t> tensor_idx_to_start_tensor_bytes{0};
   std::vector<int64_t> srcs;
-  pad_tensor_chunk_sizes.reserve(num_tensors);
-  num_blocks_per_tensor_chunk.reserve(num_tensors);
-  start_block_idx_per_tensor_chunk.reserve(num_tensors + 1);
-  actual_tensor_sizes.reserve(num_tensors);
-  tensor_idx_to_start_tensor_bytes.reserve(num_tensors + 1);
-  srcs.reserve(num_tensors);
+  pad_tensor_chunk_sizes.reserve(num_inputs);
+  num_blocks_per_tensor_chunk.reserve(num_inputs);
+  start_block_idx_per_tensor_chunk.reserve(num_inputs + 1);
+  actual_tensor_sizes.reserve(num_inputs);
+  tensor_idx_to_start_tensor_bytes.reserve(num_inputs + 1);
+  srcs.reserve(num_inputs);
   // block_idx_to_tensor_idx cannot be reserved since the number of blocks is
   // data dependent
   std::vector<int64_t> block_idx_to_tensor_idx;
@@ -516,25 +528,35 @@ get_chunk_cat_metadata(
   int64_t chunk_size = 0;
   for (const auto i : c10::irange(num_tensors)) {
     const at::Tensor& tensor = tensors[i];
-    srcs.push_back(reinterpret_cast<int64_t>(tensor.data_ptr()));
     auto sizes = tensor.sizes();
+    const auto input_dim = num_leading_dims.empty() ? dim : num_leading_dims[i];
+    const auto num_prefixes = num_leading_dims.empty()
+        ? 1
+        : get_leading_dim(sizes, input_dim);
     auto [pad_size_along_dim, trailing_numel] =
-        get_pad_size(sizes, dim, num_chunks);
+        get_pad_size(sizes, input_dim, num_chunks);
     const int64_t pad_tensor_chunk_size =
         pad_size_along_dim * trailing_numel * dst_elem_size / num_chunks;
-    pad_tensor_chunk_sizes.push_back(pad_tensor_chunk_size);
-    chunk_size += pad_tensor_chunk_size;
     // Number of blocks required to process this tensor chunk.
     const int64_t num_blocks =
         detail::div_up(pad_tensor_chunk_size, detail::BYTES_PER_BLOCK);
-    num_blocks_per_tensor_chunk.push_back(num_blocks);
-    start_block_idx_per_tensor_chunk.push_back(
-        start_block_idx_per_tensor_chunk.back() + num_blocks);
-    block_idx_to_tensor_idx.insert(
-        block_idx_to_tensor_idx.end(), num_blocks, i);
-    tensor_idx_to_start_tensor_bytes.push_back(
-        tensor_idx_to_start_tensor_bytes.back() + pad_tensor_chunk_size);
-    actual_tensor_sizes.push_back(sizes[dim] * trailing_numel * src_elem_size);
+    const int64_t actual_size = sizes[input_dim] * trailing_numel * src_elem_size;
+    const auto src = reinterpret_cast<int64_t>(tensor.data_ptr());
+    // Describe each prefix directly instead of constructing tensor views.
+    for (const auto prefix : c10::irange(num_prefixes)) {
+      const auto input_idx = srcs.size();
+      srcs.push_back(src + prefix * actual_size);
+      pad_tensor_chunk_sizes.push_back(pad_tensor_chunk_size);
+      chunk_size += pad_tensor_chunk_size;
+      num_blocks_per_tensor_chunk.push_back(num_blocks);
+      start_block_idx_per_tensor_chunk.push_back(
+          start_block_idx_per_tensor_chunk.back() + num_blocks);
+      block_idx_to_tensor_idx.insert(
+          block_idx_to_tensor_idx.end(), num_blocks, input_idx);
+      tensor_idx_to_start_tensor_bytes.push_back(
+          tensor_idx_to_start_tensor_bytes.back() + pad_tensor_chunk_size);
+      actual_tensor_sizes.push_back(actual_size);
+    }
   }
   const int64_t num_blocks_per_chunk = start_block_idx_per_tensor_chunk.back();
   const int64_t slice_size = num_chunks * chunk_size;
@@ -560,7 +582,8 @@ void _chunk_cat_out_cuda_contiguous(
     int64_t num_chunks,
     Tensor& out,
     int64_t dst_elem_size,
-    int64_t src_elem_size) {
+    int64_t src_elem_size,
+    IntArrayRef num_leading_dims = {}) {
   const auto device = tensors[0].device();
   // `get_chunk_cat_metadata` must return vectors and `pack_vecs` cannot be
   // moved into `get_chunk_cat_metadata`. Otherwise `packed` would point to
@@ -579,7 +602,12 @@ void _chunk_cat_out_cuda_contiguous(
        pad_tensor_chunk_sizes,
        num_blocks_per_tensor_chunk] =
           get_chunk_cat_metadata(
-              tensors, dim, num_chunks, dst_elem_size, src_elem_size);
+              tensors,
+              dim,
+              num_chunks,
+              dst_elem_size,
+              src_elem_size,
+              num_leading_dims);
   auto packed = pack_vecs(
       {&srcs,
        &block_idx_to_tensor_idx,
@@ -589,8 +617,10 @@ void _chunk_cat_out_cuda_contiguous(
        &pad_tensor_chunk_sizes,
        &num_blocks_per_tensor_chunk},
       device);
-  std::vector<int64_t> view_sizes = get_chunk_cat_out_sizes(
-      tensors[0].sizes(), dim, num_chunks, chunk_size, dst_elem_size);
+  std::vector<int64_t> view_sizes = num_leading_dims.empty()
+      ? get_chunk_cat_out_sizes(
+            tensors[0].sizes(), dim, num_chunks, chunk_size, dst_elem_size)
+      : std::vector<int64_t>{num_chunks, chunk_size / dst_elem_size};
   at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
@@ -616,26 +646,22 @@ void _chunk_cat_out_cuda_contiguous(
 } // namespace detail
 
 // See [CUDA fast path for split_with_sizes_copy.out]
-void split_with_sizes_copy_out_cuda_contiguous_no_cast(
-    const at::Tensor& self,
-    at::IntArrayRef split_sizes,
-    int64_t dim,
-    at::TensorList out) {
-  const auto device = self.device();
-  const auto src_base_addrs =
-      detail::get_split_base_addrs(self, split_sizes, dim);
-  const auto dst_base_addrs = detail::get_dst_addrs(out);
-  const auto src_stride = detail::get_chunk_stride(self, dim);
-  const auto split_chunk_sizes =
-      detail::get_split_chunk_sizes(self, split_sizes, dim);
-  const auto num_chunks = detail::get_num_chunks(self, dim);
-
+static void split_with_sizes_copy_out_cuda_contiguous(
+    const Device& device,
+    const std::vector<int64_t>& src_base_addrs,
+    const std::vector<int64_t>& dst_base_addrs,
+    const std::vector<int64_t>& split_chunk_sizes,
+    int64_t src_stride,
+    int64_t num_chunks) {
   // Calculate the number of blocks required for the first chunk across all
   // splits, assuming each thread only processes BYTES_PER_THREAD bytes.
   int64_t num_blocks = 0;
   for (const auto& split_chunk_size : split_chunk_sizes) {
     num_blocks += detail::div_up(
         split_chunk_size, detail::BLOCK_SIZE * detail::BYTES_PER_THREAD);
+  }
+  if (num_blocks == 0 || num_chunks == 0) {
+    return;
   }
 
   // Calculate the maximum number of blocks to launch. Only consider
@@ -665,7 +691,7 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
   std::vector<int64_t> block_idx_to_split_idx;
   std::vector<int64_t> blocks_cumsums{0};
   block_idx_to_split_idx.reserve(num_blocks);
-  for (size_t split_idx = 0; split_idx < split_sizes.size(); ++split_idx) {
+  for (size_t split_idx = 0; split_idx < split_chunk_sizes.size(); ++split_idx) {
     const auto blocks = detail::div_up(
         split_chunk_sizes[split_idx],
         detail::BLOCK_SIZE * detail::BYTES_PER_THREAD * iters_per_chunk);
@@ -698,6 +724,68 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
       src_stride,
       num_chunks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void split_with_sizes_copy_out_cuda_contiguous_no_cast(
+    const Tensor& self,
+    IntArrayRef split_sizes,
+    int64_t dim,
+    TensorList out) {
+  split_with_sizes_copy_out_cuda_contiguous(
+      self.device(),
+      detail::get_split_base_addrs(self, split_sizes, dim),
+      detail::get_dst_addrs(out),
+      detail::get_split_chunk_sizes(self, split_sizes, dim),
+      detail::get_chunk_stride(self, dim),
+      detail::get_num_chunks(self, dim));
+}
+
+void _split_with_sizes_copy_with_prefixes_cuda_(
+    TensorList out,
+    const Tensor& self,
+    IntArrayRef split_sizes,
+    IntArrayRef num_prefixes,
+    int64_t num_chunks) {
+  check_split_with_sizes_copy_with_prefixes_inputs(
+      self, split_sizes, num_prefixes, num_chunks, out);
+  std::vector<int64_t> srcs;
+  std::vector<int64_t> dsts;
+  std::vector<int64_t> chunk_sizes;
+  int64_t num_splits = 0;
+  for (const auto i : c10::irange(split_sizes.size())) {
+    if (split_sizes[i] > 0) {
+      num_splits += num_prefixes[i];
+    }
+  }
+  srcs.reserve(num_splits);
+  dsts.reserve(num_splits);
+  chunk_sizes.reserve(num_splits);
+  auto src = reinterpret_cast<int64_t>(self.const_data_ptr());
+  for (const auto i : c10::irange(out.size())) {
+    if (split_sizes[i] == 0) {
+      continue;
+    }
+    const int64_t chunk_size =
+        split_sizes[i] / num_prefixes[i] * self.element_size();
+    const auto dst = reinterpret_cast<int64_t>(out[i].data_ptr());
+    for (const auto prefix : c10::irange(num_prefixes[i])) {
+      srcs.push_back(src + prefix * chunk_size);
+      dsts.push_back(dst + prefix * num_chunks * chunk_size);
+      chunk_sizes.push_back(chunk_size);
+    }
+    src += split_sizes[i] * self.element_size();
+  }
+  split_with_sizes_copy_out_cuda_contiguous(
+      self.device(),
+      srcs,
+      dsts,
+      chunk_sizes,
+      self.numel() / num_chunks * self.element_size(),
+      num_chunks);
+  // The void TensorList schema needs explicit version-counter updates.
+  for (const auto& tensor : out) {
+    tensor.unsafeGetTensorImpl()->bump_version();
+  }
 }
 
 void split_with_sizes_copy_out_cuda(
@@ -832,6 +920,32 @@ Tensor& _chunk_cat_out_cuda(
         tensors[0].element_size());
   } else {
     at::native::_chunk_cat_out(tensors, dim, num_chunks, out);
+  }
+  return out;
+}
+
+Tensor& _chunk_cat_with_prefixes_cuda_(
+    Tensor& out,
+    TensorList tensors,
+    IntArrayRef num_leading_dims,
+    int64_t num_chunks) {
+  check_chunk_cat_with_prefixes_inputs(
+      tensors, num_leading_dims, num_chunks, out);
+  if (!detail::all_contiguous(tensors)) {
+    return at::native::_chunk_cat_with_prefixes_(
+        out, tensors, num_leading_dims, num_chunks);
+  }
+  const auto src_elem_size = tensors[0].element_size();
+  const auto dst_elem_size = out.element_size();
+  if (tensors[0].scalar_type() == kBFloat16 && out.scalar_type() == kFloat) {
+    detail::_chunk_cat_out_cuda_contiguous<float, BFloat16>(
+        tensors, 0, num_chunks, out, dst_elem_size, src_elem_size, num_leading_dims);
+  } else if (tensors[0].dtype() == out.dtype()) {
+    detail::_chunk_cat_out_cuda_contiguous<char, char>(
+        tensors, 0, num_chunks, out, dst_elem_size, src_elem_size, num_leading_dims);
+  } else {
+    return at::native::_chunk_cat_with_prefixes_(
+        out, tensors, num_leading_dims, num_chunks);
   }
   return out;
 }

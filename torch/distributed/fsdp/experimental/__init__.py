@@ -9,8 +9,8 @@ import math
 
 import torch
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _copy_all_gather_outputs,
     _reassemble_all_gather_outputs,
+    _ReduceScatterInputs,
     AllGatherResult,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
@@ -31,7 +31,7 @@ def all_gather_output_fn_for_nonzero_dim_shards(
     """Optimize all-gather output copies for ``Shard(1)`` and higher shard dimensions.
 
     For supported layouts, copy gathered rank shards directly into contiguous
-    views of the final outputs, avoiding temporary buffers and a separate
+    regions of the final outputs, avoiding temporary buffers and a separate
     reassembly. All-gather extensions, post-forward shards, and other unsupported
     layouts use temporary outputs followed by reassembly. ``Shard(0)`` parameters
     use the usual copy path, so groups may mix shard dimensions.
@@ -42,6 +42,7 @@ def all_gather_output_fn_for_nonzero_dim_shards(
     all_gather_output = all_gather_result.all_gather_output
     device = all_gather_output.device
     copy_outputs: list[torch.Tensor] = []
+    num_prefixes: list[int] = []
     reorder_infos: list[tuple[FSDPParam, list[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         all_gather_result.param_all_gather_input_numels,
@@ -56,6 +57,7 @@ def all_gather_output_fn_for_nonzero_dim_shards(
         shard_dim = fsdp_param.fsdp_placement.dim
         if shard_dim == 0:
             copy_outputs.extend(outputs)
+            num_prefixes.extend([1] * len(outputs))
             continue
 
         num_leading_elements = math.prod(
@@ -66,30 +68,24 @@ def all_gather_output_fn_for_nonzero_dim_shards(
             and num_leading_elements > 0
             and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
         ):
-            # Each prefix indexes a contiguous suffix sharded on its dim 0.
-            # Copy rank chunks directly into these views of the final buffer.
-            copy_outputs.extend(
-                view
-                for tensor in outputs
-                for view in tensor.view(num_leading_elements, -1).unbind(0)
-            )
+            copy_outputs.extend(outputs)
+            num_prefixes.extend([num_leading_elements] * len(outputs))
             continue
 
         # Extension and post-forward shard layouts may require a separate reorder.
         outputs = [torch.empty_like(t) for t in outputs]
         copy_outputs.extend(outputs)
+        num_prefixes.extend([1] * len(outputs))
         reorder_infos.append((fsdp_param, outputs))
-    # Split sizes use collective-buffer elements, or bytes for mixed dtypes.
-    copy_split_sizes = [
-        t.numel() * t.element_size() // (world_size * all_gather_output.element_size())
-        for t in copy_outputs
-    ]
-    _copy_all_gather_outputs(
-        all_gather_output,
-        copy_split_sizes,
-        copy_outputs,
-        world_size,
-    )
+    non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
+    with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
+        torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+            copy_outputs,
+            all_gather_output,
+            all_gather_result.all_gather_input_split_sizes,
+            num_prefixes,
+            world_size,
+        )
     _reassemble_all_gather_outputs(reorder_infos, world_size)
 
 
@@ -97,11 +93,11 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> list[torch.Size]:
+) -> _ReduceScatterInputs:
     """Optimize reduce-scatter inputs for ``Shard(1)`` and higher shard dimensions.
 
-    Pass contiguous unsharded gradients to the dimension-0 copy operation through
-    contiguous views, avoiding an intermediate chunk-and-concatenate reorder.
+    Copy contiguous unsharded gradients using native prefix metadata, avoiding
+    Tensor views and an intermediate chunk-and-concatenate reorder.
     Noncontiguous gradients use the usual chunk-and-concatenate path.
     Nonzero-dimension sharding must be even. ``Shard(0)`` gradients and groups of
     size one use the usual preparation, so groups may mix shard dimensions.
@@ -109,8 +105,8 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
     Register with :meth:`torch.distributed.fsdp.FSDPModule.set_reduce_scatter_input_fn`,
     which documents the callback contract.
     """
-    copy_in_grads: list[torch.Tensor] = []
     padded_unsharded_sizes: list[torch.Size] = []
+    num_leading_dims: list[int] = []
     for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
         shard_dim = fsdp_param.fsdp_placement.dim
         if world_size > 1 and shard_dim != 0:
@@ -120,7 +116,7 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
                     f"{world_size=}"
                 )
             if unsharded_grad.is_contiguous():
-                copy_in_grads.extend(unsharded_grad.flatten(0, shard_dim - 1).unbind(0))
+                num_leading_dims.append(shard_dim)
                 # Even nonzero-dim shards need no padding.
                 padded_unsharded_sizes.append(unsharded_grad.size())
                 continue
@@ -129,9 +125,8 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
                 dim=0,
             )
             unsharded_grads[i] = unsharded_grad
-        copy_in_grads.append(unsharded_grad)
+        num_leading_dims.append(0)
         padded_unsharded_sizes.append(
             _get_dim0_padded_size(unsharded_grad.size(), world_size)
         )
-    unsharded_grads[:] = copy_in_grads
-    return padded_unsharded_sizes
+    return _ReduceScatterInputs(padded_unsharded_sizes, num_leading_dims)
