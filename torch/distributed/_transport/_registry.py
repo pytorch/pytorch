@@ -131,6 +131,13 @@ def new_transport(
             work.wait()
             torch.testing.assert_close(received, weights)
             # Coordinate with peers before closing either endpoint.
+
+
+        # Inside an asyncio application, after registration and metadata exchange:
+        async def push_weights(trainer, source, remote):
+            await trainer.write_async(source.to_view(), remote, timeout=30.0)
+            # Coordinate with peers before cleanup; cancellation does not cancel DMA.
+            await trainer.close_async(timeout=30.0)
     """
     name = backend.lower()
     factory = _find_factory(name)

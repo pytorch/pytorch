@@ -14,11 +14,13 @@ from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import torch
 
-from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from ._blocking import _BlockingTransport
 
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
+
+    from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Work
 
 
 _T = TypeVar("_T")
@@ -133,7 +135,7 @@ class _CudaBuffer:
         }
 
 
-class UCXXTransport(Transport):
+class UCXXTransport(_BlockingTransport):
     """One-sided transport emulated with UCXX tagged messages."""
 
     def __init__(
