@@ -373,6 +373,22 @@ class OpDispatcher:
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
+                first_arg, first_local_arg = (
+                    cast(dtensor.DTensor, args[0]),
+                    cast(torch.Tensor, local_tensor_args[0]),
+                )
+                if (
+                    not first_local_arg.is_meta
+                    and first_local_arg.device.type != mesh.device_type
+                ):
+                    # The mesh RNG tracker cannot advance a different device's RNG.
+                    raise RuntimeError(
+                        f"DTensor random op {op_call} requires the local tensor device "
+                        f"({first_local_arg.device}) to match the device mesh "
+                        f"({mesh.device_type}). Use a device mesh matching the local "
+                        "tensor device."
+                    )
+
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
                     # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
                     # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
@@ -388,11 +404,6 @@ class OpDispatcher:
                     random._rng_tracker = random.OffsetBasedRNGTracker(
                         mesh, run_state_sync
                     )
-
-                first_arg, first_local_arg = (
-                    cast(dtensor.DTensor, args[0]),
-                    cast(torch.Tensor, local_tensor_args[0]),
-                )
 
                 # If the user provided a generator, we hook it up to our RNG manager, but we also pop it from kwargs
                 # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
