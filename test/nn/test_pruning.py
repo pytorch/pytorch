@@ -369,6 +369,14 @@ class TestPruningNN(NNTestCase):
         hook = next(iter(m._forward_pre_hooks.values()))
         self.assertEqual(hook._tensor_name, "weight")
 
+        # Iterative prune then remove: `_orig` stays in the first-apply slot.
+        m2 = nn.Conv3d(2, 2, 2)
+        original = list(m2.state_dict().keys())
+        prune.l1_unstructured(m2, name="weight", amount=0.1)
+        prune.ln_structured(m2, name="weight", amount=0.3, n=2, dim=0)
+        prune.remove(m2, name="weight")
+        self.assertEqual(list(m2.state_dict().keys()), original)
+
     def test_pruning_container(self):
         # create an empty container
         container = prune.PruningContainer()
@@ -620,6 +628,62 @@ class TestPruningNN(NNTestCase):
 
                     self.assertEqual(pruned_t, final_t)
 
+    def test_remove_pruning_preserves_parameter_order(self):
+        r"""``prune.remove`` must restore the original parameter order.
+
+        See https://github.com/pytorch/pytorch/issues/85397
+        """
+        module = nn.Conv2d(1, 6, 3)
+        original = list(module.state_dict().keys())
+        self.assertEqual(original, ["weight", "bias"])
+        prune.random_unstructured(module, name="weight", amount=0.3)
+        with self.subTest("apply keeps _orig in the original slot"):
+            self.assertEqual(
+                list(module.state_dict().keys()),
+                ["weight_orig", "bias", "weight_mask"],
+            )
+        prune.remove(module, name="weight")
+        self.assertEqual(list(module.state_dict().keys()), original)
+
+        with self.subTest("Linear bias"):
+            module = nn.Linear(4, 3)
+            original = list(module.state_dict().keys())
+            prune.random_unstructured(module, name="bias", amount=0.3)
+            prune.remove(module, name="bias")
+            self.assertEqual(list(module.state_dict().keys()), original)
+
+        with self.subTest("Linear weight then bias"):
+            module = nn.Linear(4, 3)
+            original = list(module.state_dict().keys())
+            prune.random_unstructured(module, name="weight", amount=0.3)
+            prune.random_unstructured(module, name="bias", amount=0.3)
+            prune.remove(module, name="weight")
+            prune.remove(module, name="bias")
+            self.assertEqual(list(module.state_dict().keys()), original)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(4, 3)
+                self.bn = nn.BatchNorm1d(3)
+
+        with self.subTest("nested module"):
+            m = M()
+            original = list(dict(m.named_parameters()).keys())
+            prune.random_unstructured(m.fc, name="weight", amount=0.3)
+            prune.remove(m.fc, name="weight")
+            self.assertEqual(list(dict(m.named_parameters()).keys()), original)
+
+        with self.subTest("LSTM _flat_weights"):
+            lstm = nn.LSTM(8, 8)
+            original = list(dict(lstm.named_parameters()).keys())
+            prune.l1_unstructured(lstm, "weight_ih_l0", 0.5)
+            prune.remove(lstm, "weight_ih_l0")
+            self.assertEqual(list(dict(lstm.named_parameters()).keys()), original)
+            self.assertTrue(
+                all(isinstance(p, nn.Parameter) for p in lstm._flat_weights)
+            )
+
     def test_remove_pruning_exception(self):
         r"""Removing from an unpruned tensor throws an assertion error"""
         modules = [nn.Linear(5, 7), nn.Conv3d(2, 2, 2)]
@@ -743,6 +807,7 @@ class TestPruningNN(NNTestCase):
         for m in modules:
             for name in names:
                 with self.subTest(m=m, name=name):
+                    original_order = list(m._parameters)
                     with mock.patch(
                         "torch.nn.utils.prune.L1Unstructured.compute_mask"
                     ) as compute_mask:
@@ -753,6 +818,7 @@ class TestPruningNN(NNTestCase):
                         self.assertTrue(name in dict(m.named_parameters()))
                         self.assertFalse(name + "_mask" in dict(m.named_buffers()))
                         self.assertFalse(name + "_orig" in dict(m.named_parameters()))
+                        self.assertEqual(list(m._parameters), original_order)
 
     def test_pruning_serialization_model(self):
         # create a model
