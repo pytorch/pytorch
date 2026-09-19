@@ -314,9 +314,9 @@ class FunctionPicklerBase(pickle.Pickler):
         )
 
     @staticmethod
-    def _fqn_resolves(fn: types.FunctionType) -> bool:
-        """Whether pickling fn by reference (import __module__, walk __qualname__)
-        lands back on fn. False for a <locals> function, a functools.wraps
+    def _fqn_resolves(fn: types.FunctionType | type) -> bool:
+        """Whether pickling fn (a function or a class) by reference (import
+        __module__, walk __qualname__) lands back on fn. False for a <locals> one, a functools.wraps
         wrapper (it carries the wrappee's names), an exec-created function, or
         a module absent from sys.modules; pickling those by reference fails at
         dump with PicklingError (a bare AttributeError from the C pickler for a
