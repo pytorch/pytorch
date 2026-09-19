@@ -2,6 +2,8 @@
 
 import copy
 import functools
+import hashlib
+import io
 import os
 import pickle
 import tempfile
@@ -368,6 +370,155 @@ class TestPrecompileSessionSummary(torch._inductor.test_case.TestCase):
                 session, require_no_risky_drops=False, require_no_dropped_guards=True
             )
         self.assertTrue(self._gate(session, require_no_risky_drops=False).complete)
+
+
+class _RenderChild(torch.nn.Module):
+    def forward(self, x):
+        y = x * 2
+        torch._dynamo.graph_break()
+        return y + 1
+
+
+class _RenderParent(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.child = _RenderChild()
+
+    def forward(self, x):
+        return self.child(x) - 1
+
+
+def _render_with_tensor_default(x, bias=torch.ones(1)):
+    return x + bias
+
+
+class TestPrecompileRender(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def _session(self, fn, **kwargs):
+        from torch._dynamo.precompile_package import precompile_capture
+
+        kwargs.setdefault("backend", "eager")
+        kwargs.setdefault("dynamic", False)
+        return precompile_capture(fn, **kwargs)
+
+    def _forward(self, python_code):
+        from torch._precompile import _make_inlined_forward
+
+        return _make_inlined_forward(python_code, "precompile.load", warn=False)
+
+    def test_standalone_artifact_serves_every_captured_variant(self):
+        from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
+
+        model = _SessionStep()
+        session = self._session(model)
+        xs = [torch.randn(2, 4), torch.randn(3, 4)]
+        with session as cap:
+            for x in xs:
+                cap(x)
+        python_code, cache = session.snapshot_artifact()
+        self.assertIn('SERVING_MODE = "standalone"', python_code)
+        self.assertIn('TRACER = "dynamo"', python_code)
+        self.assertIn("BACKEND = 'eager'", python_code)
+        self.assertIn("FRAMES = [\n    ('forward', 2),\n]", python_code)
+        self.assertIn("_FRAMES = ", python_code)
+        self.assertIn("_BACKENDS = ", python_code)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertEqual(blob["format"], _CACHE_FORMAT)
+        self.assertEqual(blob["version"], _CACHE_VERSION)
+        self.assertEqual(blob["tracer"], "dynamo")
+        self.assertEqual(blob["backend"], "eager")
+        self.assertEqual(
+            blob["code_hash"], hashlib.sha256(python_code.encode()).hexdigest()
+        )
+        self.assertIsNone(blob["artifact"])
+        forward = self._forward(python_code)
+        for x in xs:  # the entry is forward(self, x): the model is passed again
+            self.assertEqual(forward(model, x), model(x))
+
+    def test_a_graph_break_in_the_entry_frame_stays_standalone(self):
+        session = self._session(_session_breaks)
+        with session as cap:
+            cap(torch.ones(3))
+        python_code, _ = session.snapshot_artifact()
+        self.assertIn('SERVING_MODE = "standalone"', python_code)
+        forward = self._forward(python_code)
+        self.assertEqual(forward(torch.ones(3)), torch.ones(3) * 2 + 3)
+
+    def test_inductor_subgraphs_render_as_readable_source(self):
+        model = _SessionStep()
+        session = self._session(model, backend="inductor", keep_graphs=True)
+        x = torch.randn(3, 4)
+        # An inference capture: with grad enabled AOTAutograd lowers the
+        # backward lazily and records the bundle only once one runs.
+        with session as cap, torch.no_grad():
+            cap(x)
+        python_code, cache = session.snapshot_artifact()
+        self.assertIn("_SUBGRAPHS = {}", python_code)
+        self.assertIn("def call_s0(", python_code)
+        self.assertIn("] = call_s0", python_code)
+        self.assertIn("READABLE below", python_code)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertEqual(blob["backend"], "inductor")
+        forward = self._forward(python_code)
+        with torch.no_grad():  # the variant was captured, and is guarded, under no_grad
+            self.assertEqual(forward(model, x), model(x))
+
+    def test_snapshot_mid_block_leaves_the_capture_open(self):
+        model = _SessionStep()
+        session = self._session(model)
+        with session as cap:
+            cap(torch.randn(2, 4))
+            first, _ = session.snapshot_artifact()
+            self.assertIn("('forward', 1)", first)
+            cap(torch.randn(3, 4))
+            second, _ = session.snapshot_artifact()
+            self.assertIn("('forward', 2)", second)
+        self.assertIn("('forward', 2)", session.snapshot_artifact()[0])
+
+    def test_a_break_inside_a_child_frame_needs_the_installed_mode(self):
+        from torch._precompile import PrecompileError
+
+        # Without nested graph breaks the child's frame is compiled on its own,
+        # out of reach of the entry's bytecode: only the installed serving mode
+        # can dispatch it, and this build refuses rather than serving it eager.
+        with torch._dynamo.config.patch(nested_graph_breaks=False):
+            session = self._session(_RenderParent())
+            with session as cap:
+                cap(torch.ones(3))
+        self.assertEqual(len(session._package.cache_entry().codes), 4)
+        with self.assertRaisesRegex(PrecompileError, "not available yet"):
+            session.snapshot_artifact()
+
+    def test_a_frame_without_variants_is_uncovered_and_refused(self):
+        from torch._dynamo.exc import PackageError
+
+        # With nested graph breaks (the default in this harness) the child's
+        # continuation is recorded as a frame Dynamo never compiled a variant
+        # for, which require_complete reports as an uncovered frame.
+        session = self._session(_RenderParent())
+        with session as cap:
+            cap(torch.ones(3))
+        summary = session.summary()
+        self.assertTrue(summary.uncovered_frames)
+        self.assertFalse(summary.complete)
+        with self.assertRaisesRegex(PackageError, "produced NO guarded code"):
+            session.snapshot_artifact()
+        python_code, _ = session.snapshot_artifact(require_complete=False)
+        self.assertIn('SERVING_MODE = "standalone"', python_code)
+
+    def test_a_tensor_default_is_refused_before_capture(self):
+        from torch._precompile import (
+            _reject_uninstallable_entry_defaults,
+            PrecompileError,
+        )
+
+        with self.assertRaisesRegex(PrecompileError, "tensor default argument"):
+            _reject_uninstallable_entry_defaults(_render_with_tensor_default)
+        _reject_uninstallable_entry_defaults(_session_breaks)
+        _reject_uninstallable_entry_defaults(functools.partial(_session_breaks))
 
 
 if __name__ == "__main__":
