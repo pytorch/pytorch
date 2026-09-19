@@ -109,8 +109,9 @@ namespace {
         "  reason: ", *schema_difference,
         has_unsupported_symint_signature
             ? "\n  SymInt parameters must use the supported C++ signatures: "
-              "pass SymInt by value and SymIntArrayRef directly (not as "
-              "const SymIntArrayRef&)."
+              "pass SymInt and std::optional<SymInt> by value, and "
+              "SymIntArrayRef and OptionalSymIntArrayRef directly (not as "
+              "const references)."
             : "");
     }
   }
