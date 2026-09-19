@@ -91,13 +91,15 @@ it.
 #    ``if``/``for`` over a static (Python ``int``) value and shape-dependent branching on
 #    a static size are resolved at trace time and baked. A control-flow HOP is the
 #    exception, as far as its branch choice is not already a Python constant:
-#    ``torch.while_loop``, and a ``torch.cond`` whose predicate is a TENSOR or a SymBool,
-#    is REFUSED outright rather than specialized, because neither backend can lower the
-#    captured subgraph it traces into. A ``torch.cond`` whose predicate is a PYTHON
-#    CONSTANT (e.g. a comparison of static sizes, which yields a bool) never reaches the
-#    HOP at all: outside Dynamo ``torch.cond`` short-circuits to the taken branch, so it
-#    SPECIALIZES like any other Python ``if`` -- measured, the capture holds only the taken
-#    branch's ops and no subgraph, so it is silent, exactly like a baked ``if``.
+#    ``torch.while_loop``, and a ``torch.cond`` whose predicate is a TENSOR, is REFUSED
+#    outright rather than specialized, because neither backend can lower the captured
+#    subgraph it traces into; a SymBool predicate needs a ShapeEnv, so it arises only on
+#    the unbacked path (below), where it is refused too. A ``torch.cond`` whose predicate
+#    is a PYTHON CONSTANT (e.g. a comparison of static sizes, which yields a bool) never
+#    reaches the HOP at all: outside Dynamo ``torch.cond`` short-circuits to the taken
+#    branch, so it SPECIALIZES like any other Python ``if`` -- measured, the capture holds
+#    only the taken branch's ops and no subgraph, so it is silent, exactly like a baked
+#    ``if``.
 #    Shapes are static BY DEFAULT (capture runs make_fx in its "fake" mode, so each size is
 #    baked as a concrete constant). What is NOT silently baked is a data-dependent op --
 #    ``.item()``, ``.nonzero()``, a Python ``if`` over a TENSOR VALUE: under fake tracing
@@ -1106,10 +1108,11 @@ def _fakeify_with_unbacked(
     pb_labels, user_labels = labels[: len(pb_flat)], labels[len(pb_flat) :]
     with fake_mode:
         fake_pb = [
-            _fakeify_input(fake_mode, t, lbl) for t, lbl in zip(pb_flat, pb_labels)
+            _fakeify_input(fake_mode, t, lbl)
+            for t, lbl in zip(pb_flat, pb_labels, strict=True)
         ]
         fake_user: list[object] = []
-        for leaf, per, label in zip(user_flat, marks, user_labels):
+        for leaf, per, label in zip(user_flat, marks, user_labels, strict=True):
             if not isinstance(leaf, torch.Tensor):
                 fake_user.append(leaf)
             elif not per:
@@ -1327,8 +1330,11 @@ def _check_no_constant_tensors(gm: torch.fx.GraphModule) -> None:
 
 def _control_flow_refusal(detail: str) -> PrecompileError:
     return PrecompileError(
-        "precompile cannot lower a captured control-flow subgraph (e.g. from "
-        f"torch.cond / torch.while_loop); not supported yet. {detail}"
+        "precompile does not support control-flow HOPs (e.g. from torch.cond / "
+        "torch.while_loop) yet: the trace either fails inside the HOP or captures a "
+        "control-flow subgraph neither backend can lower. Move the control flow out of "
+        "fn, or -- where the branch really is static -- make the predicate a Python "
+        f"constant, which specializes like a Python if. {detail}"
     )
 
 
@@ -1830,8 +1836,9 @@ def _capture(
                 # (the spelling in its own docstring) takes the proxy path, which
                 # unspecializes it into an unbacked symint, and torch.cond merges differing
                 # int values or output sizes across its branches the same way. Same refusal
-                # as the get_attr check below; only while_loop/cond raise these messages.
-                # These two spellings are the whole scope of the relabel: a torch.cond whose
+                # as the get_attr check below; only control-flow HOPs raise these messages
+                # -- torch.switch too, which merges its branches through cond's helper.
+                # These two messages are the whole scope of the relabel: a torch.cond whose
                 # branches disagree in some OTHER way (a differing output pytree spec or
                 # dtype, a non-fake or quantized/sparse/conjugate operand) fails inside the
                 # HOP with its own message and reaches the caller raw, as its own error.
