@@ -269,6 +269,9 @@ int munmap(void* addr, size_t length) {
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sched.h>
+#endif
 #endif // _WIN32
 
 #include <fcntl.h>
@@ -967,6 +970,23 @@ inline bool envFlagIsEnabled(const char* env) {
   return value != "0" && value != "false";
 }
 
+// Number of CPUs this process is allowed to run on, or 0 when that is not
+// known. This mirrors c10::TaskThreadPoolBase::defaultNumThreads, which cannot
+// be reused here because this header must not depend on c10. Worth keeping:
+// under a cpuset or taskset restriction std::thread::hardware_concurrency()
+// still reports the whole host, which is exactly the case where oversubscribing
+// hurts.
+inline size_t cpuset_cpu_count() {
+#if defined(__linux__)
+  cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
+  if (sched_getaffinity(0, sizeof(cpu_set), &cpu_set) == 0) {
+    return static_cast<size_t>(CPU_COUNT(&cpu_set));
+  }
+#endif
+  return 0;
+}
+
 // Returns a PinnedStagingPool when pinned async constant copies are enabled
 // and host pinning succeeds. Returns nullptr otherwise so callers fall back to
 // the synchronous copy path. Per-buffer size comes from
@@ -1031,10 +1051,18 @@ inline std::unique_ptr<PinnedStagingPool> tryMakeConstantsStagingPool(
       torch::aot_inductor::pinnedAsyncConstantsCopyCpuThreads();
   // Staging is memory-bandwidth bound and the shared H2D stream already
   // serializes copies across concurrently loading models, so more copy threads
-  // than cores only adds contention. hardware_concurrency() may report 0.
-  const size_t max_cpu_copy_threads = std::min(
-      PinnedStagingPool::kMaxCpuCopyThreads,
-      static_cast<size_t>(std::max(std::thread::hardware_concurrency(), 1u)));
+  // than the process may run on only adds contention.
+  size_t max_cpu_copy_threads = PinnedStagingPool::kMaxCpuCopyThreads;
+  // hardware_concurrency() is allowed to return 0, and it reports the host
+  // topology rather than the CPUs this process is confined to.
+  const size_t hardware_threads = std::thread::hardware_concurrency();
+  if (hardware_threads > 0) {
+    max_cpu_copy_threads = std::min(max_cpu_copy_threads, hardware_threads);
+  }
+  const size_t cpuset_threads = cpuset_cpu_count();
+  if (cpuset_threads > 0) {
+    max_cpu_copy_threads = std::min(max_cpu_copy_threads, cpuset_threads);
+  }
   const size_t cpu_copy_threads = std::min(
       explicit_cpu_copy_threads > 0 ? explicit_cpu_copy_threads
                                     : env_cpu_copy_threads,
