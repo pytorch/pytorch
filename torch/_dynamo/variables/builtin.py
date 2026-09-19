@@ -568,13 +568,17 @@ _VALUE_INDEPENDENT_TYPES = frozenset(
 
 # __instancecheck__ hooks that provably do not read the instance value: the
 # Protocol hook looks only at attribute presence, and the typing alias hook
-# forwards to __subclasscheck__(type(obj)). Only these may be answered with a
-# representative instance; an arbitrary hook may read the value itself.
+# forwards to __subclasscheck__(type(obj)). Only these may be answered from the
+# type alone; an arbitrary hook may read the value itself. Looked up defensively
+# because they are private: a future typing change must not turn importing
+# dynamo into an AttributeError.
 _VALUE_INDEPENDENT_INSTANCECHECKS = frozenset(
-    {
-        typing._ProtocolMeta.__instancecheck__,
-        typing._BaseGenericAlias.__instancecheck__,  # type: ignore[attr-defined]
-    }
+    hook
+    for hook in (
+        getattr(getattr(typing, name, None), "__instancecheck__", None)
+        for name in ("_ProtocolMeta", "_BaseGenericAlias")
+    )
+    if hook is not None
 )
 
 
@@ -2810,9 +2814,24 @@ class BuiltinVariable(BaseBuiltinVariable):
             # one defined directly. For a plain class this yields
             # type.__instancecheck__, whose answer is issubclass() below.
             instancecheck = getattr(type(member), "__instancecheck__", None)
-            value = NO_SUCH_SUBOBJ
-            if instancecheck is not type.__instancecheck__:
-                value = arg.get_real_python_backed_value()
+            # A class based hook reads only type(obj), so issubclass() is exact
+            # and a lazy constant keeps its weaker TYPE_MATCH guard. For the
+            # exact builtins in _VALUE_INDEPENDENT_TYPES an attribute based hook
+            # cannot see per-instance state either, and they cannot spoof
+            # __class__ -- the one thing ABCMeta's hook sees that issubclass()
+            # does not. Everything else needs the object itself.
+            answered_by_type = instancecheck is type.__instancecheck__ or (
+                arg_type in _VALUE_INDEPENDENT_TYPES
+                and (
+                    instancecheck is abc.ABCMeta.__instancecheck__
+                    or instancecheck in _VALUE_INDEPENDENT_INSTANCECHECKS
+                )
+            )
+            value = (
+                NO_SUCH_SUBOBJ
+                if answered_by_type
+                else arg.get_real_python_backed_value()
+            )
             if value is not NO_SUCH_SUBOBJ:
                 try:
                     val = isinstance(value, member)

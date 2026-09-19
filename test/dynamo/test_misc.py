@@ -9382,22 +9382,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         )
         self.assertEqual(opt_fn(x), plain_member_matches_first(x))
 
-        # Reaching a member with an __instancecheck__ hook realizes a lazy
-        # constant and guards its value, so it recompiles once per value. A
-        # plain member matching first keeps the weaker type-only guard.
+        # A str cannot carry the attribute the Protocol reads, so the answer
+        # comes from the type in either member order and the lazy constant keeps
+        # its type-only guard. Neither spelling may specialize on the value.
         def plain_first(x, v):
             return x + 1 if isinstance(v, (str, HasReal)) else x - 1
 
         def hooked_first(x, v):
             return x + 1 if isinstance(v, (HasReal, str)) else x - 1
 
-        for fn, expected_frames in ((plain_first, 1), (hooked_first, 2)):
+        for fn in (plain_first, hooked_first):
             torch._dynamo.reset()
             cnt = CompileCounter()
             opt_fn = torch.compile(fn, backend=cnt)
             for value in ("hello", "world"):
                 self.assertEqual(opt_fn(x, value), fn(x, value))
-            self.assertEqual(cnt.frame_count, expected_frames)
+            self.assertEqual(cnt.frame_count, 1, msg=fn.__name__)
 
     def test_isinstance_protocol_without_issubclass_graph_breaks(self):
         @typing.runtime_checkable
@@ -9411,6 +9411,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # A function is built during tracing, so Dynamo has no Python object
             # to run the Protocol's __instancecheck__ on, and unlike a list a
             # function carries a __dict__, so its type does not answer either.
+            # main answered False here by comparing class identity, which
+            # happens to match eager for this case and contradicts it whenever
+            # the attribute is present. Breaking is the honest answer.
             return x + 1 if isinstance(inner, HasPorts) else x - 1
 
         x = torch.ones(3)
@@ -9488,6 +9491,56 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         mod = torch.nn.Linear(3, 3)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(x, mod), fn(x, mod))
+
+    def test_isinstance_does_not_specialize_value_independent_constant(self):
+        # Neither hook can see anything about a str that its type does not
+        # already fix, so the answer must not realize the constant and guard
+        # its value. Both spellings used to recompile once per value.
+        @typing.runtime_checkable
+        class HasReal(typing.Protocol):
+            real: int
+
+        def protocol_member(t, v):
+            return t + 1 if isinstance(v, HasReal) else t - 1
+
+        def abc_member(t, v):
+            return t + 1 if isinstance(v, collections.abc.Sequence) else t - 1
+
+        t = torch.randn(3)
+        for fn in (protocol_member, abc_member):
+            torch._dynamo.reset()
+            cnt = CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt)
+            for v in ("a", "b", "c", "d"):
+                self.assertEqual(opt_fn(t, v), fn(t, v), msg=v)
+            self.assertEqual(cnt.frame_count, 1, msg=fn.__name__)
+
+    def test_isinstance_instancecheck_raises_non_str_args(self):
+        # Exception args are not all strings; a raw int used to reach the
+        # variable-tracker machinery and fail with an internal AttributeError.
+        class NonStrMeta(type):
+            def __subclasscheck__(cls, subclass):
+                raise TypeError("msg", 42)
+
+            def __instancecheck__(cls, instance):
+                raise TypeError("msg", 42)
+
+        class C(metaclass=NonStrMeta):
+            pass
+
+        class Obj:
+            pass
+
+        def fn(x, o):
+            try:
+                isinstance(o, C)
+            except TypeError:
+                return x + 1
+            return x - 1
+
+        x, o = torch.ones(3), Obj()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, o), fn(x, o))
 
     def test_isinstance_non_runtime_checkable_protocol_raises(self):
         class NotRuntime(typing.Protocol):
