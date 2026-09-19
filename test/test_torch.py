@@ -11256,20 +11256,21 @@ class TestCrossDeviceCopy(TestCase):
     # Regression test for https://github.com/pytorch/pytorch/issues/194344
     # A dtype-converting device-to-host copy read from the wrong source
     # address when the source was a view with a nonzero storage offset.
-    def test_copy_cast_source_offset(self, device):
-        for src_dtype, dst_dtype in (
-            (torch.half, torch.float),
-            (torch.bfloat16, torch.float),
-            (torch.float, torch.half),
-            (torch.short, torch.int),
-        ):
-            input_cpu = torch.randn(1 << 20).to(src_dtype)
-            input_device = input_cpu.to(device)
-            for src_offset in (1, 2, 64, 256, 4096, 65536):
-                expected = input_cpu[src_offset:src_offset + 64].to(dst_dtype)
-                fused = input_device[src_offset:src_offset + 64].to("cpu", dst_dtype)
-                self.assertEqual(fused, expected)
-            self.assertEqual(input_device.cpu(), input_cpu)
+    # Covers every converting (src != dst) pair over all_types_and(half,
+    # bfloat16), since the issue reports the bug for any converting pair,
+    # not just a handful of dtype combinations.
+    @dtypes(*((src, dst)
+              for src, dst in product(all_types_and(torch.half, torch.bfloat16), repeat=2)
+              if src != dst))
+    def test_copy_cast_source_offset(self, device, dtypes):
+        src_dtype, dst_dtype = dtypes
+        input_cpu = torch.randn(1 << 17).to(src_dtype)
+        input_device = input_cpu.to(device)
+        for src_offset in (1, 2, 64, 256, 4096, 65536):
+            expected = input_cpu[src_offset:src_offset + 64].to(dst_dtype)
+            fused = input_device[src_offset:src_offset + 64].to("cpu", dst_dtype)
+            self.assertEqual(fused, expected)
+        self.assertEqual(input_device.cpu(), input_cpu)
 
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
