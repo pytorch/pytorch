@@ -4285,11 +4285,12 @@ def _pickles_by_default(obj: Any) -> bool:
     )
 
 
-# The exact-container bookkeeping nn.Module.__init__ installs: __getattr__
-# indexes the three dicts for every attribute outside __dict__ (parameters,
-# buffers, submodules) and state_dict/named_buffers read
-# _non_persistent_buffers_set. Hook OrderedDicts are not listed: they are pruned
-# unless a guard reads them, and nn.Module.__setstate__ only checks their presence.
+# What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
+# breaks the module itself: __getattr__ indexes the three dicts for every name
+# outside __dict__, and __setattr__/__delattr__ index all four on any
+# assignment. The hook OrderedDicts are pruned deliberately, unless a guard
+# reads them: state_dict()/load_state_dict() on a loaded module then raise, the
+# accepted cost of keeping a module with a local-lambda hook serializable.
 _NN_MODULE_STATE_ATTRS = frozenset(
     {"_parameters", "_buffers", "_modules", "_non_persistent_buffers_set"}
 )
@@ -4770,7 +4771,7 @@ class GuardsStatePickler(FunctionPicklerBase):
 
             if type(obj).__qualname__ == type(obj).__name__:
                 return NotImplemented
-            if obj.__class__.__getstate__ == torch.nn.Module.__getstate__:
+            if obj.__class__.__getstate__ is torch.nn.Module.__getstate__:
                 return type(self)._unpickle_module, (obj.__getstate__(),)
 
         elif inspect.ismodule(obj):
@@ -4934,9 +4935,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
-        What the object itself reads back at load stays: the containers
-        nn.Module.__getattr__ indexes, and everything on an object whose own
-        __setstate__/__reduce__ may read any attribute (the callers check that).
+        What the object itself reads back at load stays: for a module, the
+        containers in _NN_MODULE_STATE_ATTRS. Precondition: the callers have
+        checked that no custom __setstate__/__reduce__ may read any attribute.
         """
         is_module = isinstance(obj, torch.nn.Module)
         for name, attr in (_instance_dict(obj) or {}).items():
