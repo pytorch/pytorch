@@ -4992,9 +4992,20 @@ def _offending_value_path(state: Any, target: Any) -> str:
 
     The error names WHAT failed and never WHERE it lives, which in a large model
     means bisecting by hand across multi-minute captures. The pickler records
-    the object it was reducing, so this walks the guard state's two scopes
-    breadth-first and reports the first path holding THAT object -- by
-    identity, not by type, which would report a same-typed bystander instead.
+    the object it was reducing, so this walks the guard state breadth-first and
+    reports the first path holding THAT object -- by identity, not by type,
+    which would report a same-typed bystander instead.
+
+    Searched from ``state``, because that is what gets pickled. Rooting only at
+    the two scopes searched a handful of objects on a real capture while the
+    pickler walked the whole output graph, its guards and its guard-tree
+    values, so a value living anywhere else -- a lock on a compiler internal,
+    say -- was unreachable however well the scopes were preserved. The scopes
+    stay as SEEDS, ahead of ``state`` in the queue, so the common case still
+    reports the short readable path rather than a long one through the graph.
+    Guards are slotted dataclasses whose create_fn is a functools.partial, so
+    slots and partials are descended too; modules are not, since they pickle
+    by name and their dicts lead to the whole of sys.modules.
 
     Best-effort by construction: it is a diagnostic appended to an error that is
     already being raised, so any failure here must stay silent rather than mask
@@ -5007,16 +5018,20 @@ def _offending_value_path(state: Any, target: Any) -> str:
         queue = collections.deque(
             [(f"local_scope[{k!r}]", v) for k, v in graph.local_scope.items()]
             + [(f"global_scope[{k!r}]", v) for k, v in graph.global_scope.items()]
+            + [("state", state)]
         )
         seen: set[int] = set()
-        while queue and len(seen) < 20000:
+        # Higher than the scope-only walk needed: the whole guard state is
+        # orders of magnitude larger, and this runs once, on a path that is
+        # already raising.
+        while queue and len(seen) < 200000:
             path, value = queue.popleft()
             if id(value) in seen:
                 continue
             seen.add(id(value))
             if value is target:
                 return f"\n  reached via: {path}"
-            if isinstance(value, (list, tuple, set, frozenset)):
+            if isinstance(value, (list, tuple, set, frozenset, OrderedSet)):
                 queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
             elif isinstance(value, dict):
                 for i, (k, v) in enumerate(value.items()):
@@ -5025,6 +5040,13 @@ def _offending_value_path(state: Any, target: Any) -> str:
                     else:
                         queue.append((f"{path}.keys()[{i}]", k))
                         queue.append((f"{path}.values()[{i}]", v))
+            elif isinstance(value, functools.partial):
+                # Guard.create_fn is a partial whose arguments the pickler walks.
+                queue.append((f"{path}.func", value.func))
+                queue.extend((f"{path}.args[{i}]", v) for i, v in enumerate(value.args))
+                queue.extend(
+                    (f"{path}.keywords[{k!r}]", v) for k, v in value.keywords.items()
+                )
             elif isinstance(value, types.FunctionType):
                 # A function a guard is rooted at is pickled by value, defaults,
                 # kwdefaults and closure cells included (its __dict__ is walked
@@ -5046,11 +5068,27 @@ def _offending_value_path(state: Any, target: Any) -> str:
                     except ValueError:  # an empty cell
                         continue
                     queue.append((f"{path}.__closure__[{name!r}]", contents))
+            if inspect.ismodule(value):
+                # Pickled by name, so nothing inside it is in the artifact; its
+                # dict leads to sys.modules and would saturate the walk.
+                continue
             # Per node: one object whose __dict__ read raises (a type-level
             # __dict__ property, a proxy) must not end the whole walk.
             attributes: list[tuple[str, Any]] = []
             try:
-                attributes = list((_instance_dict(value) or {}).items())
+                instance_dict = _instance_dict(value)
+                if instance_dict is not None:
+                    attributes = list(instance_dict.items())
+                else:
+                    # A slotted object (Guard is a slots dataclass) has no
+                    # __dict__; its state lives in the slots along the MRO.
+                    for klass in type(value).__mro__:
+                        slots = klass.__dict__.get("__slots__", ())
+                        for name in (slots,) if isinstance(slots, str) else slots:
+                            try:
+                                attributes.append((name, getattr(value, name)))
+                            except AttributeError:  # an unset slot
+                                pass
             except Exception:
                 pass
             for name, child in attributes:
