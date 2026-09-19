@@ -49,6 +49,7 @@ class KnapsackEvaluator:
             node_graph (nx.DiGraph): A directed graph representing the recomputable forward nodes.
             saved_nodes_set (Set[str]): A set of node names that are saved.
             peak_memory_after_forward_pass (float): The peak memory usage after the forward pass.
+            Must include the memory of every node in saved_nodes_set.
         """
         current_memory = [
             (peak_memory_after_forward_pass, "Initial Peak/Current Memory")
@@ -80,7 +81,10 @@ class KnapsackEvaluator:
                     dependency
                     # pyrefly: ignore [bad-unpacking]
                     for dependency, v in node_graph.in_edges(node)
-                    if dependency not in already_computed
+                    if (
+                        dependency not in already_computed
+                        and dependency not in saved_nodes_set
+                    )
                 ]
             )
             while predecessor_queue:
