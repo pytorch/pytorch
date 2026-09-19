@@ -234,6 +234,9 @@ class TritonBundler:
 
         from torch._inductor.async_compile import CompiledTritonKernels
         from torch._inductor.codecache import StaticAutotunerFuture
+        from torch._inductor.runtime.static_triton_launcher import (
+            MissingTritonKernelError,
+        )
 
         log.info("Loading %d statically launchable autotuners", len(static_autotuners))
         kernel_names = []
@@ -243,7 +246,7 @@ class TritonBundler:
                     # Make sure the cubin path exists and is valid
                     for compile_result in result.kernel.compile_results:
                         compile_result.reload_cubin_path()
-                except RuntimeError:
+                except MissingTritonKernelError:
                     log.warning(
                         "Failed to reload cubin file statically launchable autotuner %s",
                         result.kernel_name,
