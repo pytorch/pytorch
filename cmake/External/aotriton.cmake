@@ -11,13 +11,17 @@ if(NOT __AOTRITON_INCLUDED)
   # But they must be listed from lower version to higher version
   set(__AOTRITON_VER "0.14b")
   set(__AOTRITON_BUILD_VARIANTS "")
+  # Note in this file rocm<X.Y> actually matches the HIP version
+  # ROCm 7.0 nightlies shipped two incompatible HIP versions, 6.5 and
+  # 7.0, so the ROCm version alone cannot select a compatible package
+  # The rocm prefix stays only because renaming to hip may break things.
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
       "manylinux_2_28"  # rocm7.1
       "manylinux_2_28"  # rocm7.2
       "manylinux_2_28"  # rocm7.14
-      "manylinux_2_28"  # rocm7.16
+      "manylinux_2_28"  # "rocm7.16" ROCM 10.0
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.4"
