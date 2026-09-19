@@ -10411,8 +10411,12 @@ class FallbackKernel(ExternKernelAlloc):
             return create_direct_output(example_output)
 
         else:
+            # No tensor in or out, so there is no device to inherit and nothing to
+            # run on but the host. An op that produces no output keeps None above --
+            # its placement is decided by the scheduler, and forcing a device there
+            # moves stream and event HOPs out of the stream block they belong to.
             if not device:
-                raise AssertionError("Not sure where to find device info")
+                device = torch.device("cpu")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
