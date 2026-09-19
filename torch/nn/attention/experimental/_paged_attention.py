@@ -35,8 +35,11 @@ class PagedAttention:
         n_pages: int,
         page_size: int,
         max_batch_size: int,
-        device: str = "cuda",
+        device: str | torch.device | None = None,
     ) -> None:
+        if device is None:
+            device = torch.accelerator.current_accelerator() or torch.device("cpu")
+
         # number of pages
         self.n_pages = n_pages
 
