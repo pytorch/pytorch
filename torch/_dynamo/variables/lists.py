@@ -751,8 +751,8 @@ class BaseListVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # list/tuple/namedtuple __reversed__: reverse iterator over items.
-        return ListIteratorVariable(
+        # list __reversed__: reverse iterator over items.
+        return ListReverseIteratorVariable(
             list(reversed(self.items)),
             mutation_type=ValueMutationNew(),
         )
@@ -2609,6 +2609,37 @@ class DequeReverseIteratorVariable(BaseListIteratorVariable):
 
     def python_type(self) -> type:
         return type(reversed(collections.deque()))
+
+
+class ListReverseIteratorVariable(BaseListIteratorVariable):
+    # PyListRevIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3960
+    _cpython_type = type(reversed([]))
+
+    def python_type(self) -> type:
+        return type(reversed([]))
+
+    def as_python_constant(self) -> Any:
+        if self.index > 0:
+            raise NotImplementedError
+        return reversed(list(reversed([x.as_python_constant() for x in self.items])))
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            # pyrefly: ignore [bad-argument-type]
+            lambda: codegen.append_output(
+                codegen.create_load_python_module(reversed)  # type: ignore[arg-type]
+            )
+        )
+        if not self.is_exhausted:
+            remaining_items = list(reversed(self.items[self.index :]))
+        else:
+            # pyrefly: ignore [implicit-any]
+            remaining_items = []
+        codegen.foreach(remaining_items)
+        codegen.append_output(
+            create_instruction("BUILD_LIST", arg=len(remaining_items))
+        )
+        codegen.extend_output(create_call_function(1, False))
 
 
 class RangeIteratorVariable(IteratorVariable):
