@@ -530,6 +530,13 @@ class OptimizedModule(torch.nn.Module):
         # Mimic python's default behavior for objects without a length
         raise TypeError(f"{type(self._orig_mod).__name__} does not support len()")
 
+    def __bool__(self) -> bool:
+        # Mirror the truthiness of the wrapped module. Without this, ``bool()``
+        # falls back to ``__len__`` (added to proxy ``len()``), which raises
+        # ``TypeError`` for modules that are not ``Sized`` such as a plain
+        # ``nn.Module``.
+        return bool(self._orig_mod)
+
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self.dynamo_ctx, DisableContext):
