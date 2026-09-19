@@ -31,6 +31,7 @@ from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocmVersionInRange,
     TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -692,6 +693,7 @@ class ElasticLaunchTest(TestCase):
     # happens via torchrun, not MultiProcessTestCase, so the conftest heuristic
     # (see test/conftest.py) can't detect it; mark it multigpu explicitly.
     @pytest.mark.multigpu
+    @skipIfRocmVersionInRange([7, 14], [10, 2], "rocprofiler-sdk visibility conflict")
     def test_virtual_local_rank(self):
         """
         Test that virtual-local-rank ensures consistent device IDs across ranks.

@@ -205,7 +205,7 @@ class FSDPParamGroup:
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
         # specify it, possibly at construction time before lazy init
-        self._all_reduce_hook_stream: torch.cuda.Stream | None = None
+        self._all_reduce_hook_stream: torch.Stream | None = None
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
@@ -464,8 +464,11 @@ class FSDPParamGroup:
                 tensor = fsdp_param.all_gather_outputs[0]
                 alloc_storage(tensor)
 
-                # find alternative way to check if tensor.is_inference
-                with torch.autograd._unsafe_preserve_version_counter(tensor):
+                with (
+                    torch.autograd._unsafe_preserve_version_counter(tensor)
+                    if not tensor.is_inference()
+                    else contextlib.nullcontext()
+                ):
                     tensor.copy_(all_gather_input)
 
         else:
@@ -688,7 +691,7 @@ class FSDPParamGroup:
                     if isinstance(self.mesh_info, DDPMeshInfo)
                     else None
                 )
-                all_reduce_stream: torch.cuda.Stream
+                all_reduce_stream: torch.Stream
                 if all_reduce_pg is None and self._all_reduce_hook_stream is not None:
                     # this means the native HSDP is not enabled,
                     # but user may want to have a custom HSDP setup
@@ -1025,11 +1028,16 @@ class FSDPParamGroup:
             if existing is not None:
                 new_groups[ranks] = existing
             else:
-                new_groups[ranks] = dist.new_group(
+                new_group = dist.new_group(
                     list(ranks),
                     use_local_synchronization=True,
                     group_desc="fsdp_reduce_scatter",
                 )
+                if new_group == dist.GroupMember.NON_GROUP_MEMBER:
+                    raise AssertionError(
+                        f"Current rank was not included in process group {ranks}"
+                    )
+                new_groups[ranks] = new_group
         mesh_info.reduce_scatter_process_group = new_groups[ranks]
 
     @property

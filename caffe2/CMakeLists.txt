@@ -1,3 +1,12 @@
+# CMake build instrumentation wraps all custom commands with ctest
+# --instrument. ATen codegen custom_command in this directory generates
+# a long command that causes ctest to fail with "Argument list too long".
+# Setting RULE_LAUNCH_CUSTOM to empty prevents custom commands in this
+# directory from being wrapped.
+if(USE_CMAKE_INSTRUMENTATION)
+  set_property(DIRECTORY PROPERTY RULE_LAUNCH_CUSTOM "")
+endif()
+
 # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
@@ -354,7 +363,6 @@ add_custom_command(
     --tags-path "aten/src/ATen/native/tags.yaml"
     $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
     $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
-    --force_schema_registration
     --gen_lazy_ts_backend
     ${GEN_PER_OPERATOR_FLAG}
   DEPENDS
@@ -385,15 +393,19 @@ add_custom_target(
   DEPENDS ${TORCH_GENERATED_CODE}
   )
 
-# Generate torch/profiler/_cupti/_cupti_stubs.py (the CUPTI CUpti_Activity*FieldIds and
+# Generate torch/profiler/_cuspy/_cupti_stubs.py (the CUPTI CUpti_Activity*FieldIds and
 # CUpti_ActivityAttribute enums) from the CUPTI ABI header shipped by nvidia-cuda-cupti.
 # gen_cupti_stubs.py resolves the header itself (tools.setup_helpers.cupti.find_cupti_header,
 # which applies the version floor) and writes the module only when a sufficiently-new header
 # is present -- otherwise it skips and clears any stale output. It parses the header with the
 # clang python bindings from the libclang wheel (a build dep; bundles libclang.so, loaded
 # automatically). We run it at configure time and gate on whether the stub file was produced.
+# CUPTI_STUBS_GENERATED records that success so the native .pftrace encoder's build deps
+# (perfetto SDK + zlib, below) are only pulled in when Cuspy is actually usable --
+# without the stubs it is unavailable at runtime, so the encoder would be dead weight.
+set(CUPTI_STUBS_GENERATED FALSE)
 if(USE_CUDA AND BUILD_PYTHON)
-  set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cupti/_cupti_stubs.py")
+  set(CUPTI_STUBS_PY "${TORCH_SRC_DIR}/profiler/_cuspy/_cupti_stubs.py")
   # Re-run configure (which re-runs codegen below) when the codegen or the header resolver
   # changes. The resolved CUPTI header is added as a dependency too, once the script reports it.
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -406,14 +418,23 @@ if(USE_CUDA AND BUILD_PYTHON)
     OUTPUT_VARIABLE CUPTI_STUBS_OUT
     ERROR_VARIABLE CUPTI_STUBS_ERR)
   if(NOT CUPTI_STUBS_RC EQUAL 0)
-    # A real codegen failure (e.g. header present but libclang broken); the CUPTI monitor will
+    # A real codegen failure (e.g. header present but libclang broken); Cuspy will
     # be unavailable, but it degrades gracefully at runtime so this is not fatal to the build.
-    message(WARNING "CUPTI stub codegen failed; the CUPTI monitor will be unavailable:\n${CUPTI_STUBS_OUT}${CUPTI_STUBS_ERR}")
+    message(WARNING "CUPTI stub codegen failed; Cuspy will be unavailable:\n${CUPTI_STUBS_OUT}${CUPTI_STUBS_ERR}")
   elseif(EXISTS "${CUPTI_STUBS_PY}")
     message(STATUS "Generated CUPTI stub module: ${CUPTI_STUBS_PY}")
+    set(CUPTI_STUBS_GENERATED TRUE)
+    # The generated module is gitignored, so scikit-build-core's package walk
+    # drops it from the wheel (gitignore semantics; torch/version.py has an
+    # explicit install rule in torch/CMakeLists.txt for the same reason).
+    # Without this the wheel ships torch/profiler/_cuspy/ WITHOUT the stubs
+    # and importing Cuspy dies with ModuleNotFoundError; editable
+    # installs mask it (redirect mode reads the source tree). DESTINATION is
+    # relative to the install prefix, which the wheel maps to torch/.
+    install(FILES "${CUPTI_STUBS_PY}" DESTINATION "profiler/_cuspy")
     # Regenerate when the resolved header (or its version header) changes: adding them to
     # CMAKE_CONFIGURE_DEPENDS makes a later build auto-reconfigure and re-run the codegen.
-    string(REGEX MATCH "CUPTI_MONITOR_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
+    string(REGEX MATCH "CUSPY_STUBS_HEADER=([^\r\n]+)" _ "${CUPTI_STUBS_OUT}")
     if(CMAKE_MATCH_1)
       get_filename_component(CUPTI_INCLUDE_DIR "${CMAKE_MATCH_1}" DIRECTORY)
       set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -751,6 +772,7 @@ if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.cpp)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_mps.mm)
+  list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/mps/shim_common.cpp)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_runner/model_container_runner_mps.cpp)
   if(CAN_COMPILE_METAL)
       file(TOUCH ${CMAKE_BINARY_DIR}/caffe2/aten/src/ATen/metallib_dummy.cpp)
@@ -941,12 +963,14 @@ endif(USE_LLVM AND LLVM_FOUND)
 set(DUMMY_EMPTY_FILE ${CMAKE_BINARY_DIR}/empty.cpp)
 
 if(MSVC)
-  set(DUMMY_FILE_CONTENT "__declspec(dllexport) int ignore_this_library_placeholder(){return 0\\;}")
+  set(DUMMY_FILE_CONTENT "__declspec(dllexport) int ignore_this_library_placeholder(){return 0;}")
 else()
   set(DUMMY_FILE_CONTENT "")
 endif()
 
-file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
+# file(GENERATE) is copy-if-different, so re-configuring does not bump the
+# mtime and force a torch_cpu/torch relink.
+file(GENERATE OUTPUT ${DUMMY_EMPTY_FILE} CONTENT "${DUMMY_FILE_CONTENT}")
 
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
@@ -983,8 +1007,11 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
-  # IntraNodeComm loads libamd_smi at runtime via dlopen (avoids linking amd_smi
-  # which would cause bus errors if Python amdsmi loads a different copy).
+  # On ROCm < 7.14 IntraNodeComm loads libamd_smi at runtime via dlopen, because
+  # linking it would put its rsmi_* re-exports in the global scope and
+  # interpose the librocm_smi64 symbols RCCL resolves there. On ROCm >= 7.14
+  # RCCL no longer references rsmi_* at all, so there is nothing to interpose
+  # and amd_smi is linked directly (see cmake/Dependencies.cmake).
   if(USE_DISTRIBUTED)
     target_link_libraries(torch_hip PRIVATE ${CMAKE_DL_LIBS})
   endif()
@@ -1013,6 +1040,11 @@ elseif(USE_CUDA)
   endif()
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
+
+  # native-AOT: embed the AOT-exported DSL kernels into torch_cuda. ONE include and no
+  # logic here: tools/native_aot/gen_aot_lib.py decides everything and emits this file.
+  # OPTIONAL, so a tree that embeds nothing does nothing.
+  include("${CMAKE_BINARY_DIR}/native_aot/native_aot.cmake" OPTIONAL)
 
   if(USE_CUFILE)
     target_link_libraries(torch_cuda PRIVATE torch::cufile)
@@ -1079,6 +1111,7 @@ elseif(USE_CUDA)
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     # Add torch_cpu as a dependency to ensure ATen headers are available
@@ -1201,18 +1234,29 @@ if(USE_XPU)
     endif()
   endif()
   execute_process(
-    COMMAND git fetch --quiet
+    COMMAND git rev-parse HEAD
     WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
+    OUTPUT_VARIABLE TORCH_XPU_OPS_CURRENT_COMMIT
+    RESULT_VARIABLE _exitcode
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+    set(TORCH_XPU_OPS_CURRENT_COMMIT "")
   endif()
-  execute_process(
-    COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
-    WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
-    RESULT_VARIABLE _exitcode)
-  if(NOT _exitcode EQUAL 0)
-    message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+  if(NOT TORCH_XPU_OPS_CURRENT_COMMIT STREQUAL TORCH_XPU_OPS_COMMIT)
+    execute_process(
+      COMMAND git fetch --quiet
+      WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to fetch ${TORCH_XPU_OPS_REPO_URL}")
+    endif()
+    execute_process(
+      COMMAND git checkout --quiet ${TORCH_XPU_OPS_COMMIT}
+      WORKING_DIRECTORY ${TORCH_XPU_OPS_DIR}
+      RESULT_VARIABLE _exitcode)
+    if(NOT _exitcode EQUAL 0)
+      message(FATAL_ERROR "Fail to checkout ${TORCH_XPU_OPS_REPO_URL} to ${TORCH_XPU_OPS_COMMIT}")
+    endif()
   endif()
 
   set(TORCH_XPU_OPS_INCLUDE_DIRS
@@ -1220,6 +1264,20 @@ if(USE_XPU)
       ${TORCH_SRC_DIR}/csrc/api/include
       ${Caffe2_CPU_INCLUDE}
       ${Caffe2_XPU_INCLUDE})
+  # Keep the torch-xpu-ops compute target Python-ABI-agnostic so unified
+  # manywheel jobs can reuse SYCL/C++ objects across Python versions. Future
+  # Python bindings should use a separate ABI-specific target.
+  if(DEFINED Python_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python_INCLUDE_DIRS})
+  endif()
+  if(DEFINED Python3_INCLUDE_DIRS)
+    list(REMOVE_ITEM TORCH_XPU_OPS_INCLUDE_DIRS ${Python3_INCLUDE_DIRS})
+  endif()
+  # Some Python-derived include paths (for example NumPy/site-packages entries)
+  # can still arrive through transitive include sets and vary per CPython ABI.
+  # Strip them so FindSYCL custom-command scripts stay stable across iterations.
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)site-packages(/|$)")
+  list(FILTER TORCH_XPU_OPS_INCLUDE_DIRS EXCLUDE REGEX "(^|/)python[0-9.]+(/|$)")
   # Pass the target as a dependency so that ATen headers generation
   # could be followed by torch-xpu-ops build.
   # 1. Sources in torch-xpu-ops depend on generated ATen headers.
@@ -1373,6 +1431,29 @@ target_include_directories(torch_cpu PRIVATE
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/nlohmann/include)
 
+# The native .pftrace encoder's only extra build dep (perfetto) is pulled in
+# just when the CUPTI stubs were generated above (CUPTI_STUBS_GENERATED): the
+# encoder is useless without Cuspy, which is unavailable at runtime
+# absent the stubs. TORCH_CUPTI_PFTRACE selects the real encoder in
+# cuspy_pftrace.cpp; without it that TU compiles a dependency-free stub that
+# raises, so perfetto is not required. (Compression uses the in-tree miniz,
+# already on torch_cpu's include path above, so it needs no gating.)
+if(CUPTI_STUBS_GENERATED)
+  target_compile_definitions(torch_cpu PRIVATE TORCH_CUPTI_PFTRACE)
+  # Perfetto SDK amalgamation: Cuspy's native .pftrace encoder
+  # (cuspy_pftrace.cpp) builds traces via protozero. perfetto.cc is one
+  # self-contained TU; --gc-sections drops the unused tracing SDK so only the
+  # protozero runtime (~15KB) survives in the final binary. Warnings are
+  # suppressed for the vendored source (torch_cpu builds with -Werror).
+  target_include_directories(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/perfetto/sdk)
+  target_sources(torch_cpu PRIVATE
+    ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc)
+  set_source_files_properties(
+    ${TORCH_ROOT}/third_party/perfetto/sdk/perfetto.cc
+    PROPERTIES COMPILE_FLAGS "-w")
+endif()
+
 install(DIRECTORY
   "${TORCH_SRC_DIR}/csrc"
   "${TORCH_SRC_DIR}/headeronly"
@@ -1503,14 +1584,7 @@ if(USE_ROCM)
       foreach(_arch ${PYTORCH_ROCM_ARCH})
         list(FIND ROCSHMEM_SUPPORTED_ARCH "${_arch}" _rocsmem_supported_idx)
         if(NOT _rocsmem_supported_idx EQUAL -1)
-          # rocSHMEM device archives are commonly built for gfx90a xnack variants,
-          # so map plain gfx90a to gfx90a:xnack-/gfx90a:xnack+ to match device
-          # symbols during HIP RDC link.
-          if(_arch STREQUAL "gfx90a")
-            list(APPEND _torch_rocshmem_build_arches "gfx90a:xnack-" "gfx90a:xnack+")
-          else()
-            list(APPEND _torch_rocshmem_build_arches "${_arch}")
-          endif()
+          list(APPEND _torch_rocshmem_build_arches "${_arch}")
         endif()
       endforeach()
       if(_torch_rocshmem_build_arches)
@@ -1520,6 +1594,7 @@ if(USE_ROCM)
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/rocshmem_extension.cu"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
+          "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemoryKernels.cu"
           "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
         )
         set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
@@ -1743,6 +1818,11 @@ if(USE_XPU)
   target_link_libraries(torch PUBLIC torch_xpu_library)
 endif()
 
+torch_optimize_layout_if_enabled(torch_cpu)
+if(USE_CUDA)
+  torch_optimize_layout_if_enabled(torch_cuda)
+endif()
+
 if(PRINT_CMAKE_DEBUG_INFO)
   print_target_properties(torch)
   print_target_properties(torch_cpu)
@@ -1879,6 +1959,28 @@ endif()
 if(USE_ROCM)
   # Add Caffe2 HIP include dirs (extended with ATen include dirs by this point).
   target_include_directories(torch_hip PRIVATE ${Caffe2_HIP_INCLUDE})
+
+  if(BUILD_SHARED_LIBS AND UNIX AND ROCM_PATH MATCHES "[\\/]_rocm_sdk_")
+    # Source-built TheRock wheels bypass manywheel repair. Add flat and
+    # per-target package-relative LLVM paths so torch_hip can resolve libomp.so.
+    set(_torch_hip_rocm_rpaths
+      "${_rpath_portable_origin}/../../_rocm_sdk_core/lib/llvm/lib")
+    file(GLOB _rocm_libomp_candidates
+      "${ROCM_PATH}/lib/llvm/lib/*/libomp.so")
+    foreach(_rocm_libomp IN LISTS _rocm_libomp_candidates)
+      get_filename_component(_rocm_libomp_dir "${_rocm_libomp}" DIRECTORY)
+      get_filename_component(_rocm_libomp_triple "${_rocm_libomp_dir}" NAME)
+      list(APPEND _torch_hip_rocm_rpaths
+        "${_rpath_portable_origin}/../../_rocm_sdk_core/lib/llvm/lib/${_rocm_libomp_triple}")
+    endforeach()
+    set_property(TARGET torch_hip APPEND PROPERTY
+      INSTALL_RPATH ${_torch_hip_rocm_rpaths})
+    unset(_rocm_libomp_candidates)
+    unset(_rocm_libomp)
+    unset(_rocm_libomp_dir)
+    unset(_rocm_libomp_triple)
+    unset(_torch_hip_rocm_rpaths)
+  endif()
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
@@ -2132,6 +2234,17 @@ if(MSVC)
     FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
     SET(tmp_path "../${tmp_path}")
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
+  endforeach()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # CUTLASS defines unused host helpers in generated kernels. Keep the warning,
+  # but do not promote this third-party diagnostic to an error.
+  foreach(tmp ${MEM_EFF_ATTENTION_CUDA_SOURCES})
+    if(tmp MATCHES "/mem_eff_attention/kernels/")
+      FILE(RELATIVE_PATH tmp_path "${PROJECT_SOURCE_DIR}" "${tmp}")
+      SET(tmp_path "../${tmp_path}")
+      set_source_files_properties(
+        ${tmp_path} PROPERTIES COMPILE_OPTIONS "-Xcompiler=-Wno-error=unused-function")
+    endif()
   endforeach()
 endif()
 endif()

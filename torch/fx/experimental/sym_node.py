@@ -211,9 +211,21 @@ class SymNode:
 
     @property
     def expr(self) -> sympy.Basic:
+        # Fast path for a constant, where replace() cannot do anything and is
+        # expensive: a SymBool that has settled on one asks for its expr 25k
+        # times in one inductor compile. These are class attributes, so no
+        # sympy import is needed - importing it here would pull sympy into
+        # `import torch` and cost ~0.3s of startup, which is also why this is
+        # is_Boolean and is_Atom (exactly sympy.true / sympy.false) rather than
+        # an identity check, and is_Number rather than is_number, which walks
+        # the tree uncached.
         if (
             isinstance(self._expr, int)
-            or self._expr.is_number  # pyrefly: ignore[missing-attribute]
+            or self._expr.is_Number  # pyrefly: ignore[missing-attribute]
+            or (
+                self._expr.is_Boolean  # pyrefly: ignore[missing-attribute]
+                and self._expr.is_Atom  # pyrefly: ignore[missing-attribute]
+            )
         ):
             return self._expr
         if self.shape_env is None:
@@ -1398,6 +1410,18 @@ def method_to_operator(method: str) -> Callable[..., object]:
     return METHOD_TO_OPERATOR[method]
 
 
+def _coerce_hint(pytype: type | None, out_hint: object) -> object:
+    """Narrow a hint computed from the operands to the result's python type."""
+    if (
+        pytype is not None
+        and out_hint is not _NO_HINT
+        and out_hint is not None
+        and not isinstance(out_hint, SymTypes)
+    ):
+        return pytype(out_hint)  # type: ignore[arg-type]
+    return out_hint
+
+
 def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
     func = lru_cache(256)(func)
 
@@ -1488,6 +1512,44 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             )
         if not isinstance(other, SymNode):
             raise AssertionError(f"Expected SymNode, got {type(other)}")
+
+        # See Note [symbolic op memo] in symbolic_shapes.py. The cache holds the
+        # result expression, never the SymNode. Given
+        #   s1: a = x.size()[0] + 1
+        #   s2: b = x.size()[0] + 1
+        # a and b must wrap different SymNodes, so that the two sites refer to
+        # different graph nodes as their producers. While tracing, the tracer
+        # keeps a table mapping each SymNode object to the graph node that
+        # produced it, and two SymNodes with the same expression are told apart
+        # only by object identity, so handing the same one to both sites makes
+        # s2 refer to the node created at s1 as its producer.
+        shape_env = self.shape_env
+        cache = None
+        cache_key = None
+        if shape_env is not None:
+            cache = shape_env._symop_cache
+            cache_key = (
+                method,
+                self._expr,
+                other._expr,
+                shape_env._replacements_version_counter,
+            )
+            cached = cache.get(cache_key)
+            if cached is not None:
+                out, pytype, optimized_summation = cached
+                out_hint = _coerce_hint(pytype, out_hint)
+                fx_node, _ = shape_env._create_fx_call_function(
+                    op, (self.fx_node, other.fx_node)
+                )
+                return SymNode(
+                    out,
+                    shape_env,
+                    pytype,
+                    out_hint,  # type: ignore[arg-type]
+                    fx_node=fx_node,
+                    optimized_summation=optimized_summation,
+                )
+
         optimized_summation = False
         try:
             if method == "mod":
@@ -1571,13 +1633,7 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
         else:
             pytype = self.pytype
 
-        if (
-            pytype is not None
-            and out_hint is not _NO_HINT
-            and out_hint is not None
-            and not isinstance(out_hint, SymTypes)
-        ):
-            out_hint = pytype(out_hint)  # type: ignore[arg-type]
+        out_hint = _coerce_hint(pytype, out_hint)
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
@@ -1595,6 +1651,8 @@ def _make_node_magic(method: str, func: Callable[..., sympy.Basic]) -> None:
             fx_node=fx_node,
             optimized_summation=optimized_summation,  # see Note [optimized_summation]
         )
+        if cache is not None:
+            cache[cache_key] = (out, pytype, optimized_summation)
         return result
 
     @capture_provenance
