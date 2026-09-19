@@ -400,8 +400,8 @@ def _build_multigraph_forward():
     calls the first that matches, so an artifact serves only what it captured
     and mutates nothing. A continuation is reached the way Dynamo emits it --
     the entry bytecode does LOAD_GLOBAL on the resume name -- so binding the
-    resume dispatcher under that name in this module's namespace is all the
-    wiring the graph-break path needs.
+    resume dispatcher under that name in the frames' shared namespace is all
+    the wiring the graph-break path needs.
 
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
@@ -452,6 +452,16 @@ def _build_multigraph_forward():
         )
 
     def _import(module_name):
+        if module_name == "__main__":
+            # import_module("__main__") succeeds in every process and hands back
+            # whatever script is running, whose globals are not the capturing
+            # script's; the guards would check the wrong objects silently.
+            raise _PrecompileError(
+                "precompile: this artifact was captured from a function defined "
+                "in the capturing script's __main__ module, which no other "
+                "process can import. Regenerate the artifact from a function "
+                "defined in an importable module."
+            )
         try:
             return importlib.import_module(module_name)
         except ImportError as _e:
@@ -468,17 +478,18 @@ def _build_multigraph_forward():
     backends = pickle.loads(base64.b64decode(_BACKENDS))
     entry_binding = pickle.loads(base64.b64decode(_ENTRY_BINDING))
 
-    # One namespace, this module's own dict, holds every name the transformed
-    # bytecode can reach: the globals of the module the frames were compiled in
-    # (all of them -- a continuation is installed into the globals of the frame
-    # that names it, so a standalone artifact's frames share the entry's
-    # module), Dynamo's import aliases, the compiled subgraphs and the resume
-    # dispatchers bound below. Seeding READS the user's module as of load time;
-    # the artifact never binds a name there.
-    ns = globals()
+    # One namespace holds every name the transformed bytecode can reach: the
+    # globals of the module the frames were compiled in (all of them -- a
+    # continuation is installed into the globals of the frame that names it, so
+    # a standalone artifact's frames share the entry's module), Dynamo's import
+    # aliases, the compiled subgraphs and the resume dispatchers bound below.
+    # It is a fresh dict, not this module's, so the artifact's own names (the
+    # metadata constants, ``forward``) never shadow a same-named user global and
+    # nothing the driver binds lands in the artifact module. Seeding READS the
+    # user's module as of load time; the artifact never binds a name there.
+    ns = {}
     for _frame in frames:
-        for _k, _v in vars(_import(_frame["python_module"])).items():
-            ns.setdefault(_k, _v)
+        ns.update(vars(_import(_frame["python_module"])))
         for _alias, _module_name in _frame["import_sources"].items():
             ns[_alias] = _import(_module_name)
     for _backend_id, _artifact in backends.items():
@@ -495,6 +506,34 @@ def _build_multigraph_forward():
                 f"{list(target.co_freevars)!r}, which a self-contained artifact "
                 f"cannot rebuild. Regenerate it from a module-level function."
             )
+        if not frame["variants"]:
+            # Nothing to dispatch, for one of two reasons the coverage-gap
+            # error below would misdiagnose: adding examples fixes neither.
+            # _serving_mode sends a capture that reaches such a frame to
+            # installed serving, so in a standalone artifact the record is dead
+            # unless it is the entry; a dead continuation must still bind its
+            # resume names, so its refusal is deferred to a call.
+            if frame["bypassed"]:
+                cause = (
+                    "was BYPASSED during capture (its guards could not be "
+                    "serialized, or a backend artifact was missing when the "
+                    "package was saved)"
+                )
+                advice = " Dynamo logged why; fix that and recapture."
+            else:
+                cause = "produced no guarded code (Dynamo ran it eager as trivial)"
+                advice = ""
+            msg = (
+                f"precompile: {target.co_name!r} {cause}, so the artifact has no "
+                f"variant of it to serve and no example can cover it.{advice}"
+            )
+            if is_entry:
+                raise _PrecompileError(msg)
+
+            def refuse(*args, **kwargs):
+                raise _PrecompileError(msg)
+
+            return refuse
         # A code object carries no defaults, so the entry gets them back from
         # the artifact; a defaulted parameter the call omits is otherwise absent
         # from f_locals and every guard on it misses.
