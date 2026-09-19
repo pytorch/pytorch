@@ -1328,11 +1328,13 @@ def add(x, y):
     def test_import_alias_is_not_bound_to_a_non_module_import(self):
         # sys.modules accepts any object and __import__ hands it back verbatim.
         # IMPORT_NAME rejects it before import_source binds the alias, so the
-        # traced globals never hold the non-module and a second trace after the
-        # entry is swapped for another non-module graph breaks the same way
-        # instead of tripping the alias check on two nameless objects.
+        # traced globals never hold the non-module, and a later trace after a
+        # real module has replaced the entry binds the alias to that module
+        # rather than tracing it through a slot still holding the non-module.
         name = "torch_test_package_import_alias_non_module"
         alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        module.VALUE = 1
         args = (torch.randn(3, 2),)
 
         def fn(x):
@@ -1341,15 +1343,19 @@ def add(x, y):
             return x + taken.VALUE
 
         try:
-            for entry in (object(), object()):
-                torch._dynamo.reset()
-                sys.modules[name] = entry
-                with self.assertRaisesRegex(Unsupported, "Bad import result"):
-                    torch.compile(fn, backend="eager", fullgraph=True)(*args)
-                self.assertNotIn(alias, fn.__globals__)
+            sys.modules[name] = object()
+            with self.assertRaisesRegex(Unsupported, "Bad import result"):
+                torch.compile(fn, backend="eager", fullgraph=True)(*args)
+            self.assertNotIn(alias, fn.__globals__)
+            torch._dynamo.reset()
+            sys.modules[name] = module
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(*args), compiled(*args))
+            self.assertIs(fn.__globals__[alias], module)
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
+            _import_module.cache_clear()
             torch._dynamo.reset()
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
