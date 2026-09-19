@@ -1146,7 +1146,8 @@ def add(x, y):
         # not put the memoized module back: its graph is specialized on the
         # live one, which is what __import__ hands IMPORT_NAME, and the alias
         # roots its guards, so a change to the live module has to fail them.
-        # The sibling below pins the memo written back and the change unseen.
+        # The sibling below keeps install()'s module when neither it nor the
+        # memo is the live entry.
         ctx = DiskDynamoStore()
         name = "torch_test_package_import_alias_installed"
         alias = f"__import_{name}"
@@ -1436,9 +1437,9 @@ def add(x, y):
         # from: the graph holds the live module's VALUE, which __import__
         # pushed, and the guards read the memo's. A change to the live module
         # goes unseen -- the compiled function diverges from eager, with no
-        # recompile -- and a change to the memo recompiles. The parent has
-        # this for every empty slot and this commit keeps it; PR #197046 binds
-        # the live entry and turns the divergence into a recompile.
+        # recompile -- and a change to the memo recompiles. Every empty slot
+        # has this before and after this commit; PR #197046 binds the live
+        # entry and turns the divergence into a recompile.
         name = "torch_test_package_import_alias_stale_memo"
         alias = f"__import_{name}"
         old = types.ModuleType(name)
@@ -1487,10 +1488,12 @@ def add(x, y):
         # by reading that attribute through the alias, off the memo, which
         # lacks it. Guard.create re-raises, _compile_inner wraps, and the
         # wrapper is not a soft failure, so the compile dies with no eager
-        # fallback. The memo's own, not the skip arm's: the parent has it for
-        # every empty slot, and an installed module left in the slot is only a
-        # second object the guards may read. PR #197046 binds the live entry,
-        # and the read then compiles.
+        # fallback. Every empty slot has this before and after this commit.
+        # The skip arm adds one direction of it: an installed module left in
+        # the slot is a second object the guards read, so an attribute the
+        # memo and the live entry have and it lacks dies the same way where
+        # the parent's write-back compiled. PR #197046 binds the live entry,
+        # and both reads then compile.
         name = "torch_test_package_import_alias_stale_attr"
         alias = f"__import_{name}"
         old = types.ModuleType(name)
@@ -1786,8 +1789,8 @@ def add(x, y):
             sys.modules[name] = module
             fn.__globals__[alias] = "not a module"
             refused = (
-                f"alias {alias} for {name} is already bound to a str "
-                f"in the globals of {fn.__globals__['__name__']}"
+                f"alias {re.escape(alias)} for {re.escape(name)} is already bound "
+                f"to a str in the globals of {re.escape(fn.__globals__['__name__'])}"
             )
             with self.assertRaisesRegex(AssertionError, refused):
                 torch.compile(fn, backend="eager")(*args)
@@ -1832,11 +1835,14 @@ def add(x, y):
             self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
             for entry in package._codes.values():
                 self.assertNotIn(alias, entry.import_sources)
+            self.assertTrue(any(e.import_sources for e in package._codes.values()))
             for backend_id, backend in package.cached_backends.items():
                 ctx.record_eager_backend(backend_id, backend)
             ctx.save_package(package, self.path())
             torch._dynamo.reset()
             package, backends = ctx.load_package(fn, self.path())
+            for entry in package._codes.values():
+                self.assertNotIn(alias, entry.import_sources)
             package.install(backends)
             self.assertIs(fn.__globals__[alias], foreign)
         finally:
