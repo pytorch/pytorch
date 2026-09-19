@@ -503,7 +503,7 @@ class GemmEpilogueCuteDSLOpOverrides(CuteDSLOpOverrides):
     ) -> CuteDSLArg:
         x_cse = CuteDSLOpOverrides._get_cse_var(x)
         if x_cse is not None and x_cse.dtype == dtype:
-            return x
+            return x_cse
         return CuteDSLOpOverrides.to_dtype(
             x,
             dtype,
