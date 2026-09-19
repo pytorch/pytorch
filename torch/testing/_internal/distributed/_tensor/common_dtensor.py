@@ -632,15 +632,6 @@ def skip_unless_torch_gpu(method: T) -> T:
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
-def _get_device_type(world_size: int) -> str:
-    if (
-        not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
-        or DEVICE_COUNT < world_size
-    ):
-        return "cpu"
-    return DEVICE_TYPE
-
-
 class DTensorTestMixin:
     """Shared test helpers for DTensorTestBase and DTensorContinuousTestBase."""
 
@@ -650,7 +641,13 @@ class DTensorTestMixin:
 
     @property
     def device_type(self) -> str:
-        return _get_device_type(self.world_size)
+        if (
+            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+            or DEVICE_COUNT < self.world_size
+        ):
+            return "cpu"
+        else:
+            return DEVICE_TYPE
 
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
@@ -700,14 +697,15 @@ class DTensorTestMixin:
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        device_type = _get_device_type(cls.world_size)
-        backend = dist.get_default_backend_for_device(device_type)
+        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Bind accelerator ranks unless the test falls back to CPU.
-        if _get_device_type(world_size) != "cpu" and torch.accelerator.is_available():
+        # Set device before initializing process group to ensure
+        # each rank is bound to the correct GPU. However, if world_size > device_count,
+        # we skip the test.
+        if torch.accelerator.is_available():
             if world_size > torch.accelerator.device_count():
                 sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:

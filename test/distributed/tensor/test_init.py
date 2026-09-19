@@ -15,16 +15,12 @@ from torch.distributed.tensor import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorContinuousTestBase,
-    LocalDTensorContinuousTestBase,
-    NUM_DEVICES,
+    DTensorTestBase,
     with_comms,
 )
 
 
-class DTensorInitOpsTest(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
-
+class DTensorInitOpsTest(DTensorTestBase):
     def _run_init_op(self, init_op, *args, **kwargs):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -59,8 +55,10 @@ class DTensorInitOpsTest(DTensorContinuousTestBase):
         self.assertEqual(expected, dtensor.to_local())
 
 
-class DTensorConstructorTest(DTensorContinuousTestBase):
-    world_size = 4
+class DTensorConstructorTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
 
     def _run_init_op(self, init_op, dist_init_op, eq_op, *args, **kwargs):
         # 1d mesh test
@@ -411,7 +409,6 @@ class DTensorConstructorTest(DTensorContinuousTestBase):
 
 DTensorConstructorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorConstructorTest,
-    base_class=LocalDTensorContinuousTestBase,
     skipped_tests=[
         # Non-contigous sub-meshes are not supported
         "test_zeros_submesh",
