@@ -69,6 +69,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     DictGetItemSource,
     GetItemSource,
+    RandomCall,
     RandomValueSource,
     TypeMROSource,
     TypeSource,
@@ -1951,25 +1952,49 @@ def call_random_fn(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
-    from .builder import VariableBuilder
-
     random_obj = getattr(fn, "__self__", None)
     if random_obj in tx.output.side_effects:
         random_var = tx.output.side_effects[random_obj]
-        if isinstance(random_var, variables.RandomVariable):
+        from .misc import SourcedRandomVariable
+
+        if not isinstance(random_var, SourcedRandomVariable):
+            if isinstance(random_var, variables.RandomVariable):
+                return random_var.call_method(tx, fn.__name__, args, kwargs)
+        elif random_var.state_known:
+            # The draw must advance the constant-folded state. fn reaches the
+            # generator by identity, but the call is replayed through the
+            # generator's source.
+            install_guard(random_var.source.make_guard(GuardBuilder.ID_MATCH))
             return random_var.call_method(tx, fn.__name__, args, kwargs)
 
-    args = [x.as_python_constant() for x in args]
-    kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+    return trace_random_call(tx, fn, args, kwargs)
+
+
+def trace_random_call(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any] | Source,
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+    example_value: Any = None,
+) -> VariableTracker:
+    """Record a random draw that the prologue replays on every call.
+
+    ``fn`` may be the Source of the callable, in which case the prologue
+    reconstructs it and ``example_value`` must be given.
+    """
+    from .builder import VariableBuilder
+
+    python_args, python_kwargs = variables.RandomVariable.constant_args(args, kwargs)
     random_call_index = len(tx.output.random_calls)
     # NB: it is probably not important for the example_value to be exactly correct,
     # we just need the right type
-    example_value = fn(*args, **kwargs)
+    if example_value is None:
+        if isinstance(fn, Source):
+            raise AssertionError("a source-backed random call needs an example value")
+        example_value = fn(*python_args, **python_kwargs)
     source = RandomValueSource(random_call_index)
-    tx.output.random_calls.append((fn, args, kwargs))  # type: ignore[arg-type]
-    # TODO: arguably, this should route to wrap_symint/wrap_symfloat
-    # (currently hypothetical), but I'm not going to poke my hand in
-    # this nest for now
+    tx.output.random_calls.append(RandomCall(fn, python_args, python_kwargs))
+    # Floats become unbacked SymFloats; ints are still wrapped as 0-d tensors.
     return VariableBuilder(tx, source).wrap_unspecialized_primitive(example_value)
 
 
@@ -3383,6 +3408,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and all(k.is_python_constant() for k in args)
             and all(v.is_python_constant() for v in kwargs.values())
         ):
+            if (
+                self.source is not None
+                and not tx.export
+                # Inside a higher-order op body, keep the path below.
+                and tx.output.current_tracer.parent is None
+                and variables.RandomVariable.is_supported_random_obj(
+                    self.value.__self__  # type: ignore[attr-defined]
+                )
+            ):
+                # Go through the generator, like random.shuffle, so the draw is
+                # replayed on the generator reached from this source.
+                random_var = VariableTracker.build(
+                    tx, self.value.__self__, AttrSource(self.source, "__self__")
+                )
+                return random_var.call_method(tx, self.value.__name__, args, kwargs)
             return call_random_fn(tx, self.value, args, kwargs)  # type: ignore[arg-type]
         elif istype(self.value, types.MethodType):
             func = self.value.__func__

@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
+import itertools
 import math
+import operator
 import random
 import subprocess
 import sys
@@ -18,17 +20,23 @@ import torch._functorch.config as functorch_config
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.comptime import comptime
+from torch._dynamo.exc import Unsupported, UserError
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+from torch._dynamo.utils import counters
 from torch._dynamo.variables.functions import _TIME_FUNCTION_NAMES
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
     skipIfWindows,
 )
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -63,9 +71,53 @@ _TIME_FUNCTION_TEST_CASES = tuple(
 )
 
 
+_RANDOM_TEST_POPULATION = [3, 1, 2]
+_RANDOM_TEST_RNG = random.Random(0)
+
+
 @torch._dynamo.config.patch(assume_static_by_default=False)
 @instantiate_parametrized_tests
 class UnspecTests(torch._dynamo.test_case.TestCase):
+    def _assert_module_random_parity(
+        self,
+        fn,
+        *args,
+        repeats=3,
+        seed=0,
+        fullgraph=False,
+        expect_graph_break=None,
+        backend="eager",
+    ):
+        # Compiled calls must match eager call by call, and leave the
+        # generators in the same state.
+        torch._dynamo.reset()
+        counters.clear()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=fullgraph)
+
+        def run(f):
+            random.seed(seed)
+            _RANDOM_TEST_RNG.seed(seed)
+            results = [f(*args) for _ in range(repeats)]
+            return results, (random.getstate(), _RANDOM_TEST_RNG.getstate())
+
+        expected, expected_state = run(fn)
+        # Compile before seeding in case compilation itself draws from random.
+        opt_fn(*args)
+        actual, actual_state = run(opt_fn)
+        self.assertEqual(actual, expected)
+        # 1, 1.0 and True compare equal but must keep their types.
+        self.assertEqual(repr(actual), repr(expected))
+        self.assertEqual(actual_state, expected_state)
+        if expect_graph_break is not None:
+            graph_broke = bool(counters["graph_break"] or counters["unimplemented"])
+            self.assertEqual(graph_broke, expect_graph_break)
+        return expected, actual
+
+    def _assert_fullgraph_unsupported(self, fn, *args, regex, exc=Unsupported):
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(exc, regex):
+            torch.compile(fn, backend="eager", fullgraph=True)(*args)
+
     def test_time_function_names(self):
         self.assertEqual(_TIME_FUNCTION_NAMES, _EXPECTED_TIME_FUNCTION_NAMES)
 
@@ -492,43 +544,581 @@ else:
             opt_fn()
 
     def test_random_module_shuffle_sample(self):
-        # Module-level random.shuffle/random.sample must trace under fullgraph
-        # (exercised by the CPython dict/list tests). Like an explicit Random
-        # object, the global RNG state is snapshotted at compile time, so assert
-        # structural correctness rather than cross-run reproducibility.
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             items = list(range(10))
             random.shuffle(items)
-            picks = random.sample("abcdefghij", 4)
-            return items, picks, x + 1
+            picks = random.sample(tuple(range(10)), 4)
+            empty = []
+            random.shuffle(empty)
+            no_picks = random.sample(tuple(range(3)), 0)
+            # Constants read from globals are guarded, so they replay too.
+            from_global = list(_RANDOM_TEST_POPULATION)
+            random.shuffle(from_global)
+            # Up to 256 results are replayed.
+            limit = list(range(256))
+            random.shuffle(limit)
+            floats = [0.0, -0.5, 1.0, -2.5]
+            random.shuffle(floats)
+            return (
+                items,
+                picks,
+                empty,
+                no_picks,
+                from_global,
+                random.sample(_RANDOM_TEST_POPULATION, 2),
+                limit,
+                floats,
+                random.sample(list(range(1000)), 256),
+                random.sample(range(10**6), 3),
+                random.random(),
+                x + 1,
+            )
 
-        random.seed(0)
-        items, picks, _ = fn(torch.zeros(2))
-        self.assertEqual(sorted(items), list(range(10)))
-        self.assertEqual(len(picks), 4)
-        self.assertEqual(len(set(picks)), 4)
-        self.assertTrue(all(p in "abcdefghij" for p in picks))
+        _, results = self._assert_module_random_parity(
+            fn, torch.zeros(2), fullgraph=True
+        )
+        self.assertNotEqual(results[0][:2], results[1][:2])
 
-    def test_random_module_seed_shuffle(self):
-        # Module-level random.seed is bound to the global random.Random instance
-        # and must trace under fullgraph rather than graph-breaking on a skipped
-        # function. A seed() inside the compiled region makes the subsequent
-        # shuffle deterministic, matching the CPython test_sort
-        # TestOptimizedCompares pattern (seed(0) then shuffle).
-        @torch.compile(backend="eager", fullgraph=True)
+    @parametrize("seeded", [False, True])
+    def test_random_module_aliases(self, seeded):
+        # Imported and module-level names are bound to one generator; their
+        # calls, including seed, are replayed in order on it.
+        from random import randint, sample, seed, shuffle
+
+        shuffle_alias = random.shuffle
+
         def fn(x):
-            items = list(range(10))
+            if seeded:
+                seed(1)
+            first, second, third = [1, 2, 3], [4, 5, 6], [7, 8, 9]
+            shuffle(first)
+            picks = sample(range(10), 3)
+            shuffle_alias(second)
+            random.shuffle(third)
+            return first, picks, second, third, x + random.random() + randint(0, 9)
+
+        self._assert_module_random_parity(fn, torch.zeros(1), fullgraph=True)
+
+    def test_random_instance_replay(self):
+        # A random.Random read from outside the frame (an argument or a global)
+        # is replayed like the module-level generator.
+        def fn(x, rng):
+            items, more = [1, 2, 3, 4], [5, 6, 7]
+            rng.shuffle(items)
+            _RANDOM_TEST_RNG.shuffle(more)
+            picks = rng.sample(range(10), 2)
+            return items, more, picks, x + rng.random(), _RANDOM_TEST_RNG.randint(0, 9)
+
+        def run(f):
+            rng = random.Random(0)
+            _RANDOM_TEST_RNG.seed(0)
+            results = [f(torch.zeros(1), rng) for _ in range(3)]
+            return results, rng.getstate(), _RANDOM_TEST_RNG.getstate()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn(torch.zeros(1), random.Random(0))
+        self.assertEqual(run(opt_fn), run(fn))
+
+    def test_random_module_bound_method_guards(self):
+        # Another receiver or method recompiles.
+        def fn(op):
+            items = [1, 2, 3]
+            try:
+                op(items)
+            except TypeError:
+                pass
+            return items, random.random()
+
+        def run(f):
             random.seed(0)
+            rng = random.Random(1)
+            ops = [random.shuffle, rng.shuffle, random.seed, random.shuffle]
+            return [f(op) for op in ops], random.getstate(), rng.getstate()
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        self.assertEqual(run(opt_fn), run(fn))
+        self.assertEqual(counter.frame_count, 3)
+
+    @parametrize("seeded", [False, True])
+    def test_random_module_alias_of_global(self, seeded):
+        # An argument that is (or is not) the global generator at trace time
+        # must not be treated as one later; after a seed, the global results
+        # are also constant-folded.
+        def fn(rng):
+            if seeded:
+                random.seed(0)
+            items, more = [1, 2, 3], [4, 5, 6]
+            rng.shuffle(more)
             random.shuffle(items)
-            return items, x + 1
+            return items, more
 
-        compiled_items, _ = fn(torch.zeros(2))
+        def run(f):
+            random.seed(0)
+            other = random.Random(5)
+            global_rng = random.shuffle.__self__
+            results = [f(global_rng), f(other), f(global_rng), f(other)]
+            return results, random.getstate(), other.getstate()
 
-        expected = list(range(10))
+        self.assertEqual(run(torch.compile(fn, backend="eager")), run(fn))
+
+    @parametrize("form", ["method", "function"])
+    @parametrize("op", ["permute", "transpose", "sum", "select", "reshape", "repeat"])
+    def test_random_module_static_metadata(self, op, form):
+        # Random sizes are traced. Random dims are data-dependent: fullgraph
+        # fails and ordinary compilation falls back to eager.
+        def fn(x):
+            dims = list(range(x.ndim))
+            random.shuffle(dims)
+            sizes = [1, 2, 4]
+            random.shuffle(sizes)
+            args, kwargs = {
+                "permute": ((dims,), {}),
+                "transpose": ((dims[0], dims[1]), {}),
+                "sum": ((), {"dim": dims[0]}),
+                "select": ((dims[0], 0), {}),
+                "reshape": ((sizes,), {}),
+                "repeat": ((sizes,), {}),
+            }[op]
+            if form == "method":
+                return getattr(x, op)(*args, **kwargs)
+            func = torch.Tensor.repeat if op == "repeat" else getattr(torch, op)
+            return func(x, *args, **kwargs)
+
+        x = torch.randn(2, 2, 2)
+        traced = op in ("reshape", "repeat")
+        self._assert_module_random_parity(
+            fn, x, fullgraph=traced, expect_graph_break=not traced
+        )
+        if not traced:
+            self._assert_fullgraph_unsupported(
+                fn, x, regex="data-dependent", exc=UserError
+            )
+
+    @parametrize(
+        "kind",
+        ["setitem", "getitem", "operator_getitem", "draw", "tuple_get", "tuple_set"],
+    )
+    def test_random_module_list_index(self, kind):
+        # A list of runtime ints indexes like the list of Python ints.
+        def fn(mask):
+            prune = random.sample(list(range(mask.shape[0])), 2)
+            if kind == "getitem":
+                return mask[prune], prune
+            if kind == "operator_getitem":
+                return operator.getitem(mask, prune), prune
+            if kind == "tuple_get":
+                return mask.view(1, -1)[:, prune], prune
+            if kind == "tuple_set":
+                result = mask.clone().view(1, -1)
+                result[:, prune] = False
+                return result, prune
+            if kind == "draw":
+                prune = [random.randint(0, 3), prune[0]]
+            result = mask.clone()
+            result[prune] = False
+            return result, prune
+
+        self._assert_module_random_parity(
+            fn, torch.ones(4, dtype=torch.bool), fullgraph=True
+        )
+
+    def test_random_module_sample_scalar_tensor_index(self):
+        def fn(x):
+            index = random.sample(range(x.shape[0]), 1)[0]
+            result = x.clone()
+            result[index] = 7
+            return result, x[index, :]
+
+        self._assert_module_random_parity(
+            fn, torch.arange(8).reshape(4, 2), fullgraph=True
+        )
+
+    @parametrize("kind", ["shuffle_int", "shuffle_float", "draw"])
+    def test_random_module_scalar_type_queries(self, kind):
+        def fn(x):
+            if kind == "shuffle_int":
+                items = [1, 2, 3]
+                random.shuffle(items)
+                item = items[0]
+            elif kind == "shuffle_float":
+                items = [0.5, 1.5, 2.5]
+                random.shuffle(items)
+                item = items[0]
+            else:
+                item = random.randint(1, 3)
+            checks = (
+                isinstance(item, int),
+                isinstance(item, float),
+                isinstance(item, (int, float)),
+                isinstance(item, torch.Tensor),
+                type(item) is int,
+                type(item) is float,
+                hasattr(item, "is_integer"),
+                hasattr(item, "bit_length"),
+                hasattr(item, "__name__"),
+            )
+            return [x + (1 if check else 2) for check in checks]
+
+        self._assert_module_random_parity(fn, torch.zeros(1), fullgraph=True)
+
+    def test_symint_hasattr(self):
+        def fn(x, n):
+            return x + (1 if hasattr(n, "__name__") else 2) + hasattr(n, "bit_length")
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        self.assertEqual(opt_fn(torch.zeros(1), 5), fn(torch.zeros(1), 5))
+        self.assertEqual(opt_fn(torch.zeros(1), 6), fn(torch.zeros(1), 6))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "kind",
+        [
+            "strings",
+            "mixed",
+            "bool",
+            "nan",
+            "negative_zero",
+            "big_int",
+            "tensors",
+            "shuffled_twice",
+            "shuffle_257",
+            "sample_257",
+            "range_sample_257",
+            "range_big",
+            "shuffle_non_list",
+            "sample_counts",
+            "draw_dynamic_arguments",
+            "list_index_mixed",
+            "list_index_numpy",
+            "hash_shuffle",
+            "hash_draw",
+            "hash_tuple_key",
+            "int_add",
+            "int_sum",
+            "int_floordiv",
+            "int_float",
+            "custom_instancecheck",
+            "tuple_index",
+            "getstate",
+        ],
+    )
+    def test_random_module_falls_back(self, kind):
+        # Cases that cannot be represented faithfully run eagerly and, where a
+        # dedicated graph break exists, raise it under fullgraph.
+        class Meta(type):
+            def __instancecheck__(cls, value):
+                return value > 1
+
+        class Big(metaclass=Meta):
+            pass
+
+        populations = {
+            "strings": ["a", "b", "c"],
+            "mixed": [True, 1, 2.0],
+            "bool": [True, True, False],
+            "nan": [1.0, float("nan"), 2.0],
+            "negative_zero": [0.0, -0.0, 1.0],
+            "big_int": [2**70, 1],
+            "shuffle_257": list(range(257)),
+        }
+
+        def fn(x, n):
+            items = [3, 1, 2]
+            random.shuffle(items)
+            if kind in populations:
+                values = list(populations[kind])
+                random.shuffle(values)
+                return values, x + 1
+            if kind == "tensors":
+                values = [x + i for i in range(3)]
+                random.shuffle(values)
+                return values
+            if kind == "shuffled_twice":
+                random.shuffle(items)
+                return items
+            if kind == "sample_257":
+                return random.sample(list(range(300)), 257)
+            if kind == "range_sample_257":
+                return random.sample(range(300), 257)
+            if kind == "range_big":
+                return random.sample(range(2**63, 2**63 + 10), 3)
+            if kind == "shuffle_non_list":
+                try:
+                    random.shuffle((1, 2, 3))
+                except TypeError as e:
+                    return str(e), x + 1
+            if kind == "sample_counts":
+                return random.sample(["a", "b"], counts=[2, 1], k=2), x + 1
+            if kind == "draw_dynamic_arguments":
+                return x + _RANDOM_TEST_RNG.randint(0, n)
+            if kind == "list_index_mixed":
+                return torch.arange(4)[[items[0], 1]]
+            if kind == "list_index_numpy":
+                return np.arange(4)[items[:2]]
+            if kind.startswith("hash_"):
+                key = {"hash_shuffle": items[0], "hash_draw": random.randint(1, 3)}
+                if kind == "hash_tuple_key":
+                    return x * len({(items[0], items[1]), (items[1], items[2])})
+                mapping = {1: "a", 2: "b", 3: "c", 4: "d"}
+                return mapping.get(key[kind], "MISS"), key[kind] in {1, 2}
+            if kind.startswith("int_"):
+                # The traced 0-d int64 tensor could overflow, or give a float32
+                # result with a float.
+                return {
+                    "int_add": lambda: items[0] + 1,
+                    "int_sum": lambda: sum(items),
+                    "int_floordiv": lambda: items[0] // 2,
+                    "int_float": lambda: items[0] + 0.1,
+                }[kind]()
+            if kind == "custom_instancecheck":
+                return x + (1 if isinstance(items[0], Big) else 2)
+            if kind == "tuple_index":
+                order = [0] * n + [1] * n
+                random.shuffle(order)
+                lists = ([], [])
+                its = itertools.tee(iter(range(n)))
+                for i in order:
+                    lists[i].append(next(its[i]))
+                return lists
+            state = random.getstate()
+            first = random.random()
+            random.setstate(state)
+            return first, random.random()
+
+        regex = {
+            "shuffle_non_list": "random.shuffle on a non-list sequence",
+            "sample_counts": "random.sample with counts",
+            "draw_dynamic_arguments": "Random draw with non-constant arguments",
+            "list_index_mixed": "list index of unspecialized scalars",
+            "list_index_numpy": "list index of unspecialized scalars",
+            "hash_shuffle": "Unspecialized Python scalar used as hash key",
+            "hash_draw": "Unspecialized Python scalar used as hash key",
+            "hash_tuple_key": "Unspecialized Python scalar used as hash key",
+            "getstate": "Random state read while unknown",
+        }.get(kind, "Random sequence requires eager execution")
+        args = (torch.ones(1), 5)
+        self._assert_module_random_parity(
+            fn, *args, repeats=10, expect_graph_break=True
+        )
+        if not kind.startswith(("int_", "custom", "tuple")):
+            self._assert_fullgraph_unsupported(fn, *args, regex=regex)
+
+    def test_random_module_python_errors(self):
+        # Invalid calls raise the same exceptions as eager.
+        def fn(x):
+            items = [1, 2, 3]
+            random.shuffle(items)
+            errors = []
+            calls = [
+                lambda: random.randint(3, 1),
+                lambda: random.seed([1]),
+                lambda: random.setstate((99, *random.Random(0).getstate()[1:])),
+            ]
+            state = random.Random(0).getstate()
+            calls.append(
+                lambda: random.setstate((state[0], (2**64,) + state[1][1:], state[2]))
+            )
+            for population, k in [
+                (range(3), -1),
+                (range(3), 4),
+                ((), 1),
+                (range(3), 1.5),
+                (range(3), 4.5),
+            ]:
+                calls.append(lambda p=population, k=k: random.sample(p, k))
+            if sys.version_info >= (3, 11):
+                calls.append(lambda: random.sample({1, 2, 3}, 2))
+            for call in calls:
+                try:
+                    call()
+                    errors.append(None)
+                except (TypeError, ValueError, OverflowError) as e:
+                    errors.append(type(e).__name__)
+            return (
+                items,
+                errors,
+                random.sample(range(10), k=3),
+                random.sample([1, 2, 3], k=1),
+                x + random.random(),
+            )
+
+        self._assert_module_random_parity(fn, torch.zeros(1), fullgraph=True)
+
+    def test_random_module_large_sequence_is_cached(self):
+        def fn(x):
+            x = x + 1
+            items = list(range(5000))
+            random.shuffle(items)
+            return x + items[0]
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        x = torch.zeros(1)
         random.seed(0)
-        random.shuffle(expected)
-        self.assertEqual(compiled_items, expected)
+        expected = [fn(x) for _ in range(6)]
+        random.seed(0)
+        actual = [opt_fn(x) for _ in range(3)]
+        frame_count = counter.frame_count
+        actual += [opt_fn(x) for _ in range(3)]
+        self.assertEqual(actual, expected)
+        self.assertEqual(counter.frame_count, frame_count)
+
+    def test_random_module_sample_symbolic_size(self):
+        # UnspecTests makes int inputs dynamic, so k arrives as a SymInt and is
+        # specialized: each k compiles once.
+        def fn(x, k):
+            return random.sample(range(10), k), x + 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+        for k in (2, 3, 4, 2):
+            random.seed(0)
+            expected = fn(torch.zeros(1), k)
+            random.seed(0)
+            self.assertEqual(opt_fn(torch.zeros(1), k), expected)
+        self.assertEqual(counter.frame_count, 3)
+
+    @parametrize("kind", ["shuffle", "sample"])
+    def test_random_module_export_sequence(self, kind):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                items = list(range(5))
+                if kind == "shuffle":
+                    random.shuffle(items)
+                    chosen = items[0]
+                else:
+                    chosen = random.sample(items, 1)[0]
+                return x + chosen
+
+        exported = torch.export.export(Model(), (torch.ones(1),), strict=True)
+        # Export records the trace-time result as a constant.
+        results = [exported.module()(torch.ones(1)).item() for _ in range(5)]
+        self.assertEqual(len(set(results)), 1)
+        self.assertIn(results[0], {1.0, 2.0, 3.0, 4.0, 5.0})
+
+    def test_random_module_sort_full_shuffle(self):
+        def fn(x):
+            ints, floats = list(range(20)), [i / 4 for i in range(1, 21)]
+            int_copy, float_copy = list(ints), list(floats)
+            random.shuffle(ints)
+            ints.sort(reverse=True)
+            random.shuffle(float_copy)
+            random.shuffle(int_copy)
+            return ints, sorted(int_copy), sorted(float_copy), x + random.random()
+
+        self._assert_module_random_parity(fn, torch.zeros(1), fullgraph=True)
+
+    @parametrize("kind", ["partial", "key", "two_shuffles", "sample", "duplicate"])
+    def test_random_module_sort_not_folded(self, kind):
+        def fn():
+            data = list(range(10))
+            random.shuffle(data)
+            if kind == "partial":
+                return sorted(data[:5])
+            if kind == "key":
+                return sorted(data, key=lambda v: -v)
+            if kind == "sample":
+                return sorted(random.sample(range(10), 10))
+            if kind == "duplicate":
+                return sorted(data + data[:1])
+            other = list(range(10))
+            random.shuffle(other)
+            return sorted(data[:5] + other[5:])
+
+        self._assert_module_random_parity(fn, expect_graph_break=True)
+
+    def test_random_module_seeded_sequence(self):
+        # After an in-frame constant seed the results are constants, so any
+        # population can be traced.
+        def fn(x):
+            random.seed(0)
+            first = random.random(), random.randint(0, 9)
+            items = ["a", "b", "c", "d"]
+            random.shuffle(items)
+            random.seed(a=1)
+            items += random.sample(["p", "q", "r"], 2)
+            random.setstate(random.Random(2).getstate())
+            state = random.getstate()
+            draw = random.random()
+            random.setstate(state)
+            return (
+                first,
+                items,
+                random.sample(range(1000), 3),
+                draw,
+                x + random.random(),
+            )
+
+        _, results = self._assert_module_random_parity(
+            fn, torch.zeros(1), fullgraph=True
+        )
+        self.assertEqual(results[0], results[1])
+
+    @parametrize("seed_call", ["no_args", "none", "none_keyword"])
+    def test_random_module_entropy_seed(self, seed_call):
+        # seed() and seed(None) draw from OS entropy, so the state stays unknown.
+        def seed():
+            if seed_call == "no_args":
+                random.seed()
+            elif seed_call == "none":
+                random.seed(None)
+            else:
+                random.seed(a=None)
+
+        def draw():
+            seed()
+            return random.random()
+
+        opt_draw = torch.compile(draw, backend="eager", fullgraph=True)
+        self.assertNotEqual(opt_draw(), opt_draw())
+
+        def shuffle_after_seed():
+            seed()
+            items = ["a", "b", "c"]
+            random.shuffle(items)
+            return items
+
+        self._assert_fullgraph_unsupported(
+            shuffle_after_seed, regex="Random sequence requires eager execution"
+        )
+
+    def test_random_module_seed_does_not_survive_graph_break(self):
+        def fn():
+            random.seed(0)
+            torch._dynamo.graph_break()
+            items = ["a", "b", "c"]
+            random.shuffle(items)
+            return items
+
+        self._assert_module_random_parity(fn, expect_graph_break=True)
+        self.assertTrue(
+            any(
+                "Random sequence requires eager execution" in reason
+                for reason in counters["graph_break"]
+            )
+        )
+
+    @parametrize("keyword", [False, True])
+    def test_random_module_setstate_from_input(self, keyword):
+        def fn(x, state):
+            if keyword:
+                random.setstate(state=state)
+            else:
+                random.setstate(state)
+            return x + random.random()
+
+        opt_fn = torch.compile(fn, backend="eager")
+        for seed in range(4):
+            state = random.Random(seed).getstate()
+            self.assertEqual(opt_fn(torch.zeros(1), state), fn(torch.zeros(1), state))
+        self._assert_fullgraph_unsupported(
+            fn,
+            torch.zeros(1),
+            random.Random(0).getstate(),
+            regex="Random state set from a non-constant value",
+        )
 
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash
@@ -1422,6 +2012,34 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, scaler)
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
+
+    @dtypes(torch.float32, torch.float64, torch.int64)
+    def test_random_float_precision(self, device, dtype):
+        # Random floats keep binary64 precision and promote like Python floats
+        # (int64 tensor + float is float32). Inductor misreads an input whose
+        # dtype differs from the traced one.
+        if not (HAS_CPU if self.device_type == "cpu" else HAS_GPU):
+            raise unittest.SkipTest("requires inductor")
+        from torch._inductor.utils import device_supports_fp64
+
+        if not device_supports_fp64(torch.device(device)):
+            raise unittest.SkipTest("Inductor passes Python floats as fp32")
+
+        def fn(x):
+            values = [0.12345678901234567, 1.2345678901234567, 2.345678901234567]
+            shuffled = list(values)
+            random.shuffle(shuffled)
+            picked = random.sample(values, 1)[0]
+            return x + picked, x + shuffled[0], x + random.random(), shuffled
+
+        x = torch.ones(2, device=device, dtype=dtype)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        opt_fn(x)
+        for seed in range(3):
+            random.seed(seed)
+            expected = fn(x)
+            random.seed(seed)
+            self.assertEqual(opt_fn(x), expected, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(UnspecTestsDevice, globals(), allow_xpu=True)

@@ -689,6 +689,36 @@
       ]
     }
   ],
+  "GB4415": [
+    {
+      "Gb_type": "random.shuffle on a non-list sequence",
+      "Context": "shuffle({seq})",
+      "Explanation": "Only lists are shuffled during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4486": [
+    {
+      "Gb_type": "random.sample with counts",
+      "Context": "sample({args}, {kwargs})",
+      "Explanation": "The counts argument of random.sample is not traced.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB4770": [
+    {
+      "Gb_type": "Random draw with non-constant arguments",
+      "Context": "random.{name}({args}, {kwargs})",
+      "Explanation": "Only draws with constant arguments are replayed at runtime.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB5696": [
     {
       "Gb_type": "Comprehension graph break with extra stack values",
@@ -843,6 +873,46 @@
       "Explanation": "Attempted to construct an Enum value that is non-constant (e.g. int, string) or is not an acceptable value for the Enum. Acceptable values for Enum `{cls_type}`: {list(cls_type)}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB8759": [
+    {
+      "Gb_type": "Unspecialized Python scalar used as hash key",
+      "Context": "hashing {self}",
+      "Explanation": "A Python scalar traced as a tensor (e.g. a result of random.shuffle) cannot preserve value-based hashing.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB5313": [
+    {
+      "Gb_type": "Random state set from a non-constant value",
+      "Context": "random.{name}({args})",
+      "Explanation": "The new generator state is only known at runtime.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB3423": [
+    {
+      "Gb_type": "Random state read while unknown",
+      "Context": "random.getstate()",
+      "Explanation": "The generator state is only known at runtime.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB3796": [
+    {
+      "Gb_type": "Tensor.{op_name} with a list index of unspecialized scalars",
+      "Context": "{op_name} {self} {key}",
+      "Explanation": "Only a flat list of integers is supported as an index when it contains Python scalars traced as tensors (e.g. results of random.sample).",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -4122,6 +4192,16 @@
       ]
     }
   ],
+  "GB6457": [
+    {
+      "Gb_type": "Random sequence requires eager execution",
+      "Context": "{name} with {result_size} results",
+      "Explanation": "This random sequence cannot be represented faithfully in the graph. Only short results from populations of constant ints or floats (no NaN or -0.0) are replayed at runtime.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0246": [
     {
       "Gb_type": "Attempted to use `torch.nn.functional.one_hot` with data-dependent output shape",
@@ -6399,6 +6479,16 @@
       "Context": "expr: {expr}",
       "Explanation": "Expected `expr` to be a symbolic variable or constant.",
       "Hints": []
+    }
+  ],
+  "GB8346": [
+    {
+      "Gb_type": "Guard on a runtime random value",
+      "Context": "{guard.create_fn_name()} on {guard.name}",
+      "Explanation": "Random values are regenerated on every call, so code that depends on a specific value cannot be compiled.",
+      "Hints": [
+        "Avoid specializing on the result of a random call."
+      ]
     }
   ],
   "GB7286": [

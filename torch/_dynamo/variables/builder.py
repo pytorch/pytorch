@@ -62,7 +62,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
-from torch._guards import TracingContext
+from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import (
@@ -157,7 +157,6 @@ from ..source import (
     NonSerializableSetGetItemSource,
     NumpyTensorSource,
     OptimizerSource,
-    RandomValueSource,
     SkipGuardSource,
     Source,
     SubclassAttrListSource,
@@ -282,6 +281,7 @@ from .misc import (
     RandomClassVariable,
     RandomVariable,
     SavedTensorBox,
+    SourcedRandomVariable,
     StringFormatVariable,
     TypingVariable,
     WeakRefVariable,
@@ -896,14 +896,21 @@ class VariableBuilder:
             dup_guard = make_dupe_guard(self.source, result.source)
             if dup_guard is not None:
                 self.install_guards(dup_guard)
-            elif is_from_attr_proxy_source(self.source) or (
-                result.source is not None and is_from_attr_proxy_source(result.source)
+            elif (
+                is_from_attr_proxy_source(self.source)
+                or (
+                    result.source is not None
+                    and is_from_attr_proxy_source(result.source)
+                )
+                # Calls on a random generator are replayed through the source it
+                # was first seen from.
+                or isinstance(result, SourcedRandomVariable)
             ):
                 if result.source is None:
                     raise AssertionError("Tracked AttrProxy module must have a source")
                 # make_dupe_guard cannot relate local and global sources. Reusing
                 # the tracker still requires both sources to resolve to the same
-                # base module, so pin each source to its compile-time object.
+                # object, so pin each source to its compile-time object.
                 install_guard(
                     self.source.make_guard(GuardBuilder.ID_MATCH),
                     result.source.make_guard(GuardBuilder.ID_MATCH),
@@ -1540,18 +1547,25 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodType)
-            and value.__name__ in ("shuffle", "sample", "seed")
+            and value.__name__ in ("shuffle", "sample", "seed", "getstate", "setstate")
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
         ):
-            # Module-level random.shuffle/random.sample/random.seed are methods
-            # bound to the module-global random.Random instance. The
+            # Module-level random.shuffle/sample/seed/getstate/setstate are
+            # methods bound to the module-global random.Random instance. The
             # scalar-returning helpers (random.random/randint/randrange/uniform)
-            # already have a dedicated RandomValueSource path in
-            # UserDefinedObjectVariable; these return sequences or mutate the RNG
-            # state instead, so route them through RandomVariable to model the
-            # RNG state rather than skipping into the random module.
+            # are routed to the generator by UserDefinedObjectVariable; these
+            # return sequences or mutate the RNG state, so route them through the
+            # generator (reached via __self__), whose calls are replayed at
+            # runtime.
             random_self = value.__self__
+            # The method name selects different handling (shuffle vs seed).
+            if self.source:
+                install_guard(
+                    AttrSource(self.source, "__func__").make_guard(
+                        GuardBuilder.CLOSURE_MATCH
+                    )
+                )
             obj_source = self.source and AttrSource(self.source, "__self__")
             obj_vt = VariableTracker.build(self.tx, random_self, obj_source)
             return GetAttrVariable(obj_vt, value.__name__, py_type=type(value))
@@ -1924,8 +1938,16 @@ class VariableBuilder:
         elif istype(value, random.Random) and RandomVariable.is_supported_random_obj(
             value
         ):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = RandomVariable(value, source=self.source)
+            if self.tx.export:
+                # Export records the trace-time results as constants.
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                result = RandomVariable(value, source=self.source)
+            else:
+                # Calls are replayed on the object at this source, and after a
+                # constant seed each tracker assumes no other tracker draws from
+                # its generator, so guard identity.
+                self.install_guards(GuardBuilder.ID_MATCH)
+                result = SourcedRandomVariable(value, source=self.source)
             self.tx.output.side_effects.track_mutable(value, result)
             return result
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
@@ -3539,7 +3561,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
 
-        if isinstance(self.get_source(), RandomValueSource):
+        if self.get_source().guard_source is GuardSource.RANDOM_VALUE:
             raise AssertionError(
                 "RandomValueSource is not supported for symint wrapping"
             )
@@ -3629,9 +3651,8 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
 
-        # TODO: Switch RandomValueSource over to use this, this is more
-        # accurate
-        if isinstance(self.get_source(), RandomValueSource):
+        # Random values use _wrap_random_float instead.
+        if self.get_source().guard_source is GuardSource.RANDOM_VALUE:
             raise AssertionError(
                 "RandomValueSource is not supported for symfloat wrapping"
             )
@@ -3742,9 +3763,14 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
+        if (
+            type(value) is float
+            and self.get_source().guard_source is GuardSource.RANDOM_VALUE
+        ):
+            return self._wrap_random_float(value)
+
         wrapped_value = torch.tensor(value)
-        if not isinstance(self.get_source(), RandomValueSource):
-            install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
+        install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}
         options.update({"raw_value": value})
@@ -3805,6 +3831,45 @@ class VariableBuilder:
                 example_strong_ref=wrapped_value,
             )
         return unspec_var
+
+    def _wrap_random_float(self, value: float) -> VariableTracker:
+        # Like wrap_symfloat, pass the value as a float64 tensor and read it
+        # back with item(), which keeps binary64 precision and Python scalar
+        # type promotion. The SymFloat is unbacked because the value is
+        # regenerated on every call and cannot be guarded on.
+        source = self.get_source()
+        if self.tx.export:
+            raise AssertionError(
+                f"Dynamo attempts to add additional input during export: value={value}, source={source}"
+            )
+        wrapped_value = torch.tensor(value, dtype=torch.float64)
+        example_value = wrap_to_fake_tensor_and_record(
+            wrapped_value, tx=self.tx, is_tensor=False, source=source
+        )
+        proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+            type(wrapped_value),
+            example_value,
+            source=source,
+        )
+        proxy.node.meta["grapharg"] = GraphArg(
+            source,
+            wrapped_value,
+            pass_arg_as_tensor=True,
+            fake_tensor=example_value,
+            is_tensor=False,
+            example_strong_ref=wrapped_value,
+        )
+        # See wrap_symfloat for why this uses root_tracer.
+        item = self.tx.output.root_tracer.create_proxy(
+            "call_method", "item", (proxy,), {}
+        )
+        return SymNodeVariable.create(
+            self.tx,
+            item,
+            self.tx.output.shape_env.create_unbacked_symfloat(),
+            source=source,
+        )
 
 
 def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:

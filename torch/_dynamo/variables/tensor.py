@@ -1981,6 +1981,62 @@ class TensorVariable(VariableTracker):
     def method___index__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.nb_index_impl(tx)
 
+    def _lower_unspecialized_list_index(
+        self, tx: "InstructionTranslatorBase", op_name: str, key: VariableTracker
+    ) -> VariableTracker:
+        # A short list of 0-d tensors is indexed like a tuple (one element per
+        # dimension), unlike the list of Python ints it stands for, so a list
+        # of integer scalars traced as tensors (e.g. results of random.sample)
+        # is stacked into the equivalent 1-D index tensor. In a tuple key, a
+        # 0-d integer tensor behaves like an int, but lists are lowered too.
+        if isinstance(key, variables.TupleVariable) and any(
+            isinstance(item, variables.ListVariable) for item in key.items
+        ):
+            return variables.TupleVariable(
+                [
+                    self._lower_unspecialized_list_index(tx, op_name, item)
+                    if isinstance(item, variables.ListVariable)
+                    else item
+                    for item in key.items
+                ]
+            )
+        if not isinstance(key, variables.ListVariable):
+            return key
+        found = False
+
+        def check(value: VariableTracker) -> None:
+            nonlocal found
+            found = found or isinstance(value, UnspecializedPythonVariable)
+
+        VariableTracker.visit(check, key.items)
+        if not found:
+            return key
+        # The stacked index would turn an ndarray result into a tensor.
+        if not isinstance(self, NumpyNdarrayVariable) and all(
+            isinstance(item, UnspecializedPythonVariable)
+            and item.as_proxy().node.meta["example_value"].dtype == torch.int64
+            for item in key.items
+        ):
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.stack,
+                    ([item.as_proxy() for item in key.items],),
+                    {},
+                ),
+            )
+        unimplemented(
+            gb_type=f"Tensor.{op_name} with a list index of unspecialized scalars",
+            context=f"{op_name} {self} {key}",
+            explanation="Only a flat list of integers is supported as an index "
+            "when it contains Python scalars traced as tensors (e.g. results "
+            "of random.sample).",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
     def method___getitem__(
         self,
         tx: "InstructionTranslatorBase",
@@ -1988,6 +2044,12 @@ class TensorVariable(VariableTracker):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
+
+        if args:
+            args = (
+                self._lower_unspecialized_list_index(tx, "__getitem__", args[0]),
+                *args[1:],
+            )
 
         if isinstance(args[0], SymNodeVariable):
             # Standard indexing will force specialization due to
@@ -2081,6 +2143,8 @@ class TensorVariable(VariableTracker):
         key: VariableTracker,
         value: VariableTracker,
     ) -> VariableTracker:
+        key = self._lower_unspecialized_list_index(tx, "__setitem__", key)
+
         proxy = tx.output.create_proxy(
             "call_function",
             operator.setitem,
@@ -3006,6 +3070,13 @@ class SymNodeVariable(VariableTracker):
         else:
             return type(self.sym_num)
 
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # This stands for an int, float or bool; check an instance, since some
+        # attributes (e.g. __name__) exist only on the type.
+        return ConstantVariable.create(hasattr(self.python_type()(), name))
+
     def is_symnode_like(self) -> bool:
         return True
 
@@ -3678,6 +3749,25 @@ class UnspecializedPythonVariable(TensorVariable):
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # TensorVariable hashes by identity, but this stands for a Python
+        # number, which hashes by value.
+        unimplemented(
+            gb_type="Unspecialized Python scalar used as hash key",
+            context=f"hashing {self}",
+            explanation="A Python scalar traced as a tensor (e.g. a result of "
+            "random.shuffle) cannot preserve value-based hashing.",
+            hints=[*graph_break_hints.FUNDAMENTAL],
+        )
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # See BuiltinVariable.call_isinstance for why only sourced values qualify.
+        if self.source is not None and self.raw_value is not None:
+            return ConstantVariable.create(hasattr(self.raw_value, name))
+        return super().call_obj_hasattr(tx, name)
 
     @classmethod
     def from_tensor_variable(

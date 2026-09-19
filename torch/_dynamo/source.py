@@ -226,6 +226,42 @@ class SyntheticLocalSource(Source):
         return f"SYNTHETIC_LOCAL[{_esc_str(self.local_name, apply_repr=True)}]"
 
 
+class RandomCallResult(enum.Enum):
+    """What a replayed random call produces as its random value."""
+
+    # The call's return value (random.random, random.sample).
+    RETURN_VALUE = enum.auto()
+    # A copy of args[0] after the call mutates it in place (random.shuffle).
+    MUTATED_ARG = enum.auto()
+    # None: the call only changes the generator state (random.seed).
+    EFFECT_ONLY = enum.auto()
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class RandomCall:
+    """A random call that the prologue replays, in order, before the graph.
+
+    ``RandomValueSource(i)`` is the value produced by ``random_calls[i]``.
+
+    ``fn`` is either the callable or the Source of a callable that the
+    prologue reconstructs, so the call runs on the object the frame sees at
+    runtime (e.g. ``G['random'].shuffle.__self__.sample``).
+    """
+
+    fn: Callable[..., Any] | Source
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    result: RandomCallResult = RandomCallResult.RETURN_VALUE
+
+    def __call__(self, fn: Callable[..., Any]) -> Any:
+        if self.result is RandomCallResult.MUTATED_ARG:
+            arg = list(self.args[0])
+            fn(arg, *self.args[1:], **self.kwargs)
+            return arg
+        value = fn(*self.args, **self.kwargs)
+        return None if self.result is RandomCallResult.EFFECT_ONLY else value
+
+
 @dataclass_with_cached_hash(frozen=True)
 class RandomValueSource(Source):
     random_call_index: int
