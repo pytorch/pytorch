@@ -474,6 +474,51 @@ class TestPrecompile(TestCase):
         self.assertEqual(frames[0]["code"].co_name, "forward")
         self.assertEqual(frames[0]["import_sources"], {"__import_torch": "torch"})
 
+    def test_reachable_frames_follow_resume_names(self):
+        # A continuation is reachable only through a reachable parent's bytecode
+        # (nested code objects included), so carrying a resume name is not
+        # enough: one named only by an unreachable helper is just as dead.
+        from torch._dynamo.package import SerializedCode
+        from torch._precompile import _reachable_frames, _serving_mode
+
+        ns = {}
+        exec(
+            "def entry(x): return __resume_at_12_3(x)\n"
+            "def cont_a(x): return (lambda: __resume_at_40_7(x))()\n"
+            "def cont_b(x): return x\n"
+            "def helper(x): return __resume_at_99_1(x)\n",
+            ns,
+        )
+
+        def frame(name, resume_names=(), is_entry=False, nvariants=1):
+            code = SerializedCode.from_code_object(ns[name].__code__)
+            return {
+                "is_entry": is_entry,
+                "bypassed": nvariants == 0,
+                "code": code,
+                "python_module": "m",
+                "import_sources": {},
+                "resume_names": list(resume_names),
+                "variants": [{"guards_state": b"", "dynamo_code": code}] * nvariants,
+            }
+
+        entry = frame("entry", is_entry=True)
+        cont_a = frame("cont_a", ["__resume_at_12_3"])
+        cont_b = frame("cont_b", ["__resume_at_40_7"])
+        helper = frame("helper")
+        # orphan is named only by the unreachable helper; nothing names stray.
+        orphan = frame("cont_b", ["__resume_at_99_1"])
+        stray = frame("cont_b", ["__resume_at_7_7"])
+        frames = [entry, cont_a, cont_b, helper, orphan, stray]
+        self.assertEqual(_reachable_frames(frames), {0, 1, 2})
+        self.assertEqual(_serving_mode(frames), "installed")
+        self.assertEqual(_serving_mode([entry, cont_a, cont_b]), "standalone")
+        # A reachable continuation with no variant (bypassed) would raise on the
+        # captured path in a standalone artifact, so that capture installs.
+        bypassed = frame("cont_a", ["__resume_at_12_3"], nvariants=0)
+        self.assertEqual(_reachable_frames([entry, bypassed, cont_b]), {0, 1})
+        self.assertEqual(_serving_mode([entry, bypassed, cont_b]), "installed")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.

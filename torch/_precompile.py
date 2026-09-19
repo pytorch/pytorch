@@ -210,6 +210,7 @@ import hashlib
 import io
 import logging
 import pickle
+import types
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 
@@ -1469,6 +1470,59 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
         }
         for i, code in enumerate(entry.codes)
     ]
+
+
+def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
+    """Indices of the frames a standalone driver can actually dispatch.
+
+    The entry is reachable, and a continuation is reachable only once some
+    ALREADY reachable frame's bytecode names it. Asking merely whether a frame
+    carries a resume name is not the same question: a continuation whose parent
+    is itself unreachable is just as dead, and counting it as covered
+    under-reports how much of the artifact will run eager.
+    """
+    from torch._dynamo.package import SerializedCode
+
+    def named_globals(frame: dict[str, Any]) -> set[str]:
+        # co_names of every variant's bytecode, nested code objects included.
+        # co_consts is acyclic (a code object cannot contain itself).
+        out: set[str] = set()
+        stack = [
+            SerializedCode.to_code_object(variant["dynamo_code"])
+            for variant in frame["variants"]
+        ]
+        while stack:
+            code = stack.pop()
+            out.update(code.co_names)
+            stack.extend(c for c in code.co_consts if isinstance(c, types.CodeType))
+        return out
+
+    reachable = {i for i, frame in enumerate(frames) if frame["is_entry"]}
+    named: set[str] = set()
+    pending = list(reachable)
+    while pending:
+        named |= named_globals(frames[pending.pop()])
+        grew = {
+            i
+            for i, frame in enumerate(frames)
+            if i not in reachable and any(n in named for n in frame["resume_names"])
+        }
+        reachable |= grew
+        pending.extend(grew)
+    return reachable
+
+
+def _serving_mode(frames: list[dict[str, Any]]) -> str:
+    """``"standalone"`` when a source artifact serves every captured frame.
+
+    A frame it cannot reach would run eager, silently giving up the compiled
+    variant; a frame it reaches but has no variant of (a bypassed continuation)
+    would raise on the very path capture exercised. Either way the capture is
+    served by installing instead, which has a compiler behind it.
+    """
+    reachable = _reachable_frames(frames)
+    covered = {i for i, frame in enumerate(frames) if frame["variants"]}
+    return "standalone" if covered == reachable else "installed"
 
 
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
