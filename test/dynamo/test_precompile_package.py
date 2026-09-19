@@ -5,6 +5,8 @@ import collections
 import dataclasses
 import enum
 import functools
+import importlib.machinery
+import importlib.util
 import os
 import re
 import site
@@ -788,6 +790,278 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         with mock.patch.object(precompile_package, "__file__", None):
             torch_roots.cache_clear()
             self.assertEqual(torch_roots(), ())  # frozen: no directory to anchor to
+
+    def test_classify_file_places_a_path_by_the_roots_it_lies_under(self):
+        classify, norm = precompile_package._classify_file, precompile_package._norm
+        patch_module = functools.partial(mock.patch.object, precompile_package)
+        paths = sysconfig.get_paths()
+        stdlib_root = paths["stdlib"]
+        stdlib_graphlib = os.path.join(stdlib_root, "graphlib.py")
+        torch_in_stdlib = os.path.join(stdlib_root, "torch", "__init__.py")
+        # The verdict is cached per (file, flag), and files below are judged
+        # under more than one root set.
+        self._clear_root_caches()
+        self.addCleanup(classify.cache_clear)
+        classify.cache_clear()
+        self.assertIs(classify(stdlib_graphlib, True), True)
+        # The torch arm reads the torch roots, not the stdlib ones, and the
+        # stdlib dir itself is never a pip target.
+        self.assertIs(classify(torch.__file__, False), True, "torch arm")
+        self.assertIs(classify(torch.__file__, True), False, "stdlib arm")
+        self.assertIs(classify(torch_in_stdlib, False), False)
+        # The install-root exclusion is the stdlib arm's alone: torch ships
+        # platform wheels (Root-Is-Purelib: false), so a pip-installed torch
+        # lies under platlib. In a wheel install that file IS torch.__file__,
+        # judged already by the torch-arm row, so the cache is cleared first.
+        platlib_torch = os.path.join(paths["platlib"], "torch")
+        installed_torch = norm(os.path.join(platlib_torch, "__init__.py"))
+        install_roots = precompile_package._install_roots()
+        self.assertTrue(precompile_package._within(installed_torch, install_roots))
+        classify.cache_clear()
+        with patch_module("_torch_roots", return_value=(norm(platlib_torch),)):
+            self.assertIs(classify(installed_torch, False), True)
+        # A frozen app bundles the stdlib and every third party under one root,
+        # which PyInstaller also names in sys._stdlib_dir and in the __file__ it
+        # gives the CPython-frozen modules, so no path is evidence for the
+        # stdlib arm; the torch arm keeps its root, torch's own package
+        # directory, and still tells torch from the rest of the bundle. The flag
+        # is True under PyInstaller and cx_Freeze and a string under py2exe.
+        for flag in (True, "console_exe"):
+            classify.cache_clear()
+            with mock.patch.object(sys, "frozen", flag, create=True):
+                self.assertIsNone(classify(stdlib_graphlib, True), flag)
+                self.assertIs(classify(torch.__file__, False), True, flag)
+                self.assertIs(classify(stdlib_graphlib, False), False, flag)
+        classify.cache_clear()
+        self.assertIs(classify(stdlib_graphlib, True), True, "after the clear")
+        # Evidence in neither direction: a relative path would resolve against
+        # a cwd it was not recorded under, and no file has a NUL in its name
+        # (posixpath.realpath raises ValueError on one; from 3.11.5/3.12 on,
+        # gh-106242, ntpath.realpath returns the path unresolved instead, and
+        # the Windows block below replays what _within would make of that).
+        self.assertIsNone(classify("graphlib.py", True))
+        self.assertIsNone(classify("graphlib.py", False))
+        self.assertIsNone(classify(os.path.join(stdlib_root, "graph\x00lib.py"), True))
+        # Before 3.13 ntpath.isabs accepts a driveless path (its LEGACY BUG),
+        # which realpath resolves against the current drive; replay the Windows
+        # path module here so the gates are pinned on every platform. The root
+        # finders do not work under this patch, so they are patched to a Windows
+        # stdlib. The first two rows return at a gate (without the NUL gate the
+        # unresolved path lies under that root and is waived); the last one gets
+        # as far as _INSTALL_DIR_NAMES, which is what needs the Windows
+        # separator: _norm yields backslashes, so splitting the part below the
+        # root on "/" would leave one component that names nothing.
+        import ntpath
+
+        nul_under_lib = "C:\\Python312\\Lib\\graphlib.py\x00C:\\evil\\evil.py"
+        win_installed = r"c:\python312\lib\vendored\site-packages\graphlib.py"
+        with (
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch.object(os, "path", ntpath),
+            mock.patch.object(os, "sep", "\\"),
+            patch_module("_install_roots", return_value=()),
+            patch_module("_stdlib_roots", return_value=(r"c:\python312\lib",)),
+        ):
+            self.assertIsNone(classify(r"\Lib\graphlib.py", True))
+            self.assertIsNone(classify(nul_under_lib, True))
+            self.assertIs(classify(win_installed, True), False)
+        # purelib nests inside stdlib (conda) or platstdlib (venv), so the
+        # install-root exclusion is what refuses an installed file; with no
+        # install root known, _INSTALL_DIR_NAMES still does, at any depth below
+        # the root and case folded since normcase is the identity on posix and a
+        # macOS filesystem is not case-sensitive. Under no stdlib root at all
+        # the file is elsewhere. These rows are spelled through a directory that
+        # cannot pre-exist, so that _norm cannot resolve them out of the stdlib
+        # root and into the terminal False instead.
+        nested = os.path.join(stdlib_root, "vendored", "graphlib", "__init__.py")
+        with patch_module("_install_roots", return_value=()):
+            for dir_name in ("site-packages", "dist-packages", "Site-Packages"):
+                installed = os.path.join(stdlib_root, "vendored", dir_name, "g.py")
+                self.assertIs(classify(installed, True), False, dir_name)
+            self.assertIs(classify(nested, True), True, "nothing installed there")
+            with patch_module("_stdlib_roots", return_value=()):
+                self.assertIs(classify(os.path.join(stdlib_root, "os.py"), True), False)
+        classify.cache_clear()
+        roots = (norm(os.path.join(stdlib_root, "vendored")),)
+        with patch_module("_install_roots", return_value=roots):
+            self.assertIs(classify(nested, True), False, "vendored is an install root")
+        # _INSTALL_DIR_NAMES is matched below the stdlib root the file is under,
+        # so an interpreter bundled inside another environment's site-packages
+        # keeps its own stdlib. Spelled on a tree of its own: a real
+        # <stdlib>/site-packages that is a symlink out of the stdlib (a
+        # relocated site-packages, a Windows junction) would resolve the bundled
+        # root out from under the outer one and stop the two nesting.
+        with tempfile.TemporaryDirectory() as tmp:
+            bundled = os.path.join(tmp, "site-packages", "runtime", "lib")
+            in_bundled = os.path.join(bundled, "graphlib.py")
+            below = os.path.join(bundled, "site-packages", "graphlib.py")
+            with (
+                patch_module("_install_roots", return_value=()),
+                patch_module("_stdlib_roots", return_value=(norm(bundled),)),
+            ):
+                self.assertIs(classify(in_bundled, True), True)
+                self.assertIs(classify(below, True), False)
+            # Of nested stdlib roots the outermost is matched, so the part below
+            # it is the longest and the check the strictest.
+            classify.cache_clear()
+            with (
+                patch_module("_install_roots", return_value=()),
+                patch_module("_stdlib_roots", return_value=(norm(tmp), norm(bundled))),
+            ):
+                self.assertIs(classify(in_bundled, True), False)
+            # The path is resolved before it is judged, which is what the root
+            # finders' own docstrings rely on: unresolved, this one names an
+            # install directory, and every venv or symlink-farm __file__ would
+            # be judged by where its link sits rather than where the file is.
+            classify.cache_clear()
+            with (
+                patch_module("_install_roots", return_value=()),
+                patch_module("_stdlib_roots", return_value=(norm(tmp),)),
+            ):
+                unresolved = os.path.join(tmp, "site-packages", os.pardir, "g.py")
+                self.assertIs(classify(unresolved, True), True)
+
+    def test_located_reads_the_file_from_the_module_dict(self):
+        located, machinery = precompile_package._located, importlib.machinery
+        builtin, frozen = machinery.BuiltinImporter, machinery.FrozenImporter
+        stdlib_root = sysconfig.get_paths()["stdlib"]
+        installed = os.path.join(stdlib_root, "site-packages", "graphlib.py")
+        self._clear_root_caches()
+        self.addCleanup(precompile_package._classify_file.cache_clear)
+        precompile_package._classify_file.cache_clear()
+        graphlib = types.ModuleType("graphlib")
+        graphlib.__file__ = installed
+        self.assertIs(located(graphlib, "graphlib", True), False)
+        graphlib.__file__ = os.path.join(stdlib_root, "graphlib.py")
+        self.assertIs(located(graphlib, "graphlib", True), True)
+        # The flag reaches the file arm: the torch shape, a torch module on disk.
+        on_disk = types.ModuleType("torch")
+        on_disk.__file__ = torch.__file__
+        self.assertIs(located(on_disk, "torch", False), True)
+        self.assertIs(located(on_disk, "torch", True), False)
+
+        # Only the module dict is read. A class attribute is not in it (torch.ops
+        # is a ModuleType subclass whose __file__ is the class's "_ops.py"), and
+        # getattr would run a PEP 562 module __getattr__, user code a lint must
+        # not run: ModuleType seeds __spec__ and __loader__ into the dict, so
+        # both are deleted for that read to be reachable at all.
+        class Shadow(types.ModuleType):
+            __file__ = installed
+
+        self.assertIsNone(located(Shadow("graphlib"), "graphlib", True))
+        self.assertNotIn("__file__", vars(torch.ops))
+        self.assertIsNone(located(torch.ops, "torch.ops", False))
+        raising = types.ModuleType("graphlib")
+        raising.__getattr__ = mock.Mock(side_effect=RuntimeError("no such attribute"))
+        del raising.__spec__, raising.__loader__
+        self.assertIsNone(located(raising, "graphlib", True))
+        raising.__getattr__.assert_not_called()
+        # importlib.util.LazyLoader leaves a _LazyModule whose __getattribute__
+        # executes the module body on any attribute read, __dict__ included;
+        # the dict is read through object, so the body stays unrun.
+        eager, util = mock.Mock(**{"create_module.return_value": None}), importlib.util
+        wrapped = util.LazyLoader(eager)
+        lazy_spec = util.spec_from_file_location("graphlib", installed, loader=wrapped)
+        lazy = util.module_from_spec(lazy_spec)
+        wrapped.exec_module(lazy)
+        self.assertIs(located(lazy, "graphlib", True), False)
+        eager.exec_module.assert_not_called()
+        self.assertIsNone(located(types.ModuleType("graphlib"), "graphlib", True))
+        # sys.modules can hold any object: object's __dict__ read raises
+        # AttributeError on a slotted proxy (its __getattr__ is not consulted),
+        # spec.loader is user code on a hand-rolled spec, and a __file__ that is
+        # not a string would raise from isabs.
+        odd = types.ModuleType("graphlib")
+        odd.__file__ = 42
+        self.assertIsNone(located(odd, "graphlib", True))
+
+        class Proxy:
+            __slots__ = ()
+
+            def __getattr__(self, attr):
+                raise RuntimeError(attr)
+
+        self.assertIsNone(located(Proxy(), "graphlib", True))
+        odd.__spec__ = Proxy()
+        self.assertIsNone(located(odd, "graphlib", True))
+        odd.__file__ = os.path.join(stdlib_root, "graphlib.py")
+        self.assertIs(located(odd, "graphlib", True), True)  # the loader is not needed
+        # A __loader__ in the dict is read first, so the spec is never touched.
+        spec_poisoned = types.ModuleType("sys")
+        spec_poisoned.__spec__ = Proxy()
+        spec_poisoned.__loader__ = builtin
+        self.assertIs(located(spec_poisoned, "sys", True), True)
+        # A placed __file__ decides before the loader is read. The real
+        # importlib._bootstrap has both: importlib/__init__.py gives it a stdlib
+        # __file__, its __loader__ is FrozenImporter, and the frozen table knows
+        # it only as _frozen_importlib. The converse is an installed file under
+        # a built-in name.
+        bootstrap = types.ModuleType("importlib._bootstrap")
+        bootstrap.__file__ = os.path.join(stdlib_root, "importlib", "_bootstrap.py")
+        bootstrap.__loader__ = frozen
+        self.assertIsNone(frozen.find_spec("importlib._bootstrap"))
+        self.assertIs(located(bootstrap, "importlib._bootstrap", True), True)
+        shadow_sys = types.ModuleType("sys")
+        shadow_sys.__file__ = installed
+        shadow_sys.__loader__ = builtin
+        self.assertIs(located(shadow_sys, "sys", True), False)
+        # A __file__ that cannot be placed (not a string, or relative) is no
+        # evidence, so the loader is still read.
+        unplaced = (("sys", 42, builtin), ("zipimport", "zipimport.py", frozen))
+        for name, file, loader in unplaced:
+            with_loader = types.ModuleType(name)
+            with_loader.__file__ = file
+            with_loader.__loader__ = loader
+            self.assertIs(located(with_loader, name, True), True, name)
+        # In a frozen app the file arm is no evidence (see _classify_file), so
+        # a module CPython itself freezes keeps its waiver through the loader.
+        # zipimport, not os: os is only frozen from 3.11 on (gh-45020).
+        frozen_zip = types.ModuleType("zipimport")
+        frozen_zip.__file__ = os.path.join(stdlib_root, "zipimport.py")
+        frozen_zip.__loader__ = frozen
+        with mock.patch.object(sys, "frozen", True, create=True):
+            self.assertIs(located(frozen_zip, "zipimport", True), True)
+        precompile_package._classify_file.cache_clear()
+        # Built in or frozen, the table is keyed on the full dotted name, and
+        # looked up under the caller's name, not the module's __name__ (the
+        # sys.modules entry for os.path is posixpath).
+        self.assertIs(located(sys, "sys", True), True)
+        self.assertIs(located(sys, "sys.sub", True), False)
+        zipimport = types.ModuleType("zipimport")
+        zipimport.__loader__ = frozen
+        self.assertIs(located(zipimport, "zipimport.sub", True), False)
+        sub = types.ModuleType("sys.sub")
+        sub.__spec__ = machinery.ModuleSpec("sys.sub", builtin, origin="built-in")
+        self.assertIs(located(sub, "sys.sub", True), False)
+        frozen_rows = {"zipimport": True, "zipimport.sub": False, "graphlib": False}
+        for name, expected in frozen_rows.items():
+            by_spec = types.ModuleType(name)
+            by_spec.__spec__ = machinery.ModuleSpec(name, frozen, origin="frozen")
+            self.assertIs(located(by_spec, name, True), expected, name)
+        # find_spec raises ImportError on an excluded or invalid frozen table
+        # entry; a raise anywhere in _located is None, never a lint's error.
+        with mock.patch.object(frozen, "find_spec", side_effect=ImportError):
+            self.assertIsNone(located(zipimport, "zipimport", True))
+        # Both arms compare the loader by identity, so a __loader__ whose __eq__
+        # answers true for anything (mock.ANY is a stdlib object of exactly that
+        # shape) takes neither waiver, and its __eq__ never runs at all.
+        lying_eq = types.ModuleType("sys")
+        lying_eq.__loader__ = mock.ANY
+        self.assertIsNone(located(lying_eq, "sys", True))
+        # __loader__ alone in the dict, with no spec, is the same evidence, and
+        # both arms answer under either flag: the torch shape is an embedding
+        # that registers torch._C through PyImport_AppendInittab.
+        for name, loader in (("sys", builtin), ("zipimport", frozen)):
+            by_loader = types.ModuleType(name)
+            by_loader.__loader__ = loader
+            for stdlib in (True, False):
+                self.assertIs(located(by_loader, name, stdlib), True, (name, stdlib))
+        self.assertNotIn("torch._C", sys.builtin_module_names)
+        inittab = (*sys.builtin_module_names, "torch._C")
+        with mock.patch.object(sys, "builtin_module_names", inittab):
+            embedded = types.ModuleType("torch._C")
+            embedded.__loader__ = builtin
+            self.assertIs(located(embedded, "torch._C", False), True)
 
     def test_reads_a_builtin_keys_on_where_the_read_comes_from(self):
         reads_a_builtin = precompile_package._reads_a_builtin
