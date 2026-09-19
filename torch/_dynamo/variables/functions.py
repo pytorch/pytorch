@@ -201,11 +201,16 @@ class FunctionSpec:
         off += 1 if self.varargs_name else 0
         self.varkw_name = vn[off] if code.co_flags & CO_VARKEYWORDS else None
 
-    def update_defaults(self, func: FunctionType) -> None:
+    def update_defaults(
+        self,
+        func: FunctionType,
+        defaults: tuple[object, ...],
+        kwdefaults: dict[str, object],
+    ) -> None:
         # Defaults can change from function call to function call. So re-update
         # them on every call.
-        self.defaults = func.__defaults__ or ()
-        self.kwdefaults = func.__kwdefaults__ or {}
+        self.defaults = defaults
+        self.kwdefaults = kwdefaults
 
         # Map positional-default names → their index in self.defaults
         self.pos_default_map = dict(
@@ -226,18 +231,38 @@ class BindArgsTypeError(TypeError):
 
 
 def bind_args_cached(
+    vt: VariableTracker,
     func: FunctionType,
     tx: "InstructionTranslatorBase",
     fn_source: Source | None,
-    args: Sequence[Any],
-    kwargs: dict[str, Any],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
 ) -> dict[str, VariableTracker]:
     spec = _get_spec(func)
+
+    se = tx.output.side_effects
+    pending_defaults = func.__defaults__ or ()
+    pending_kwdefaults = func.__kwdefaults__ or {}
+
+    if se.has_pending_mutation_of_attr(vt, "__defaults__"):
+        d = vt.tp_getattro_impl(tx, "__defaults__")
+        pending_defaults = (
+            tuple(d.items) if isinstance(d, variables.TupleVariable) else ()
+        )
+    if se.has_pending_mutation_of_attr(vt, "__kwdefaults__"):
+        kd = vt.tp_getattro_impl(tx, "__kwdefaults__")
+        pending_kwdefaults = (
+            {key.vt.as_python_constant(): val for key, val in kd.items.items()}
+            if isinstance(kd, variables.ConstDictVariable)
+            else {}
+        )
 
     # Fast path: simple positional-only, no defaults, no varargs/varkw
     # This is the common case for small utility functions called repeatedly.
     if (
-        len(args) == spec.arg_count
+        pending_defaults is None
+        and pending_kwdefaults is None
+        and len(args) == spec.arg_count
         and not func.__defaults__
         and not kwargs
         and not spec.varargs_name
@@ -250,7 +275,7 @@ def bind_args_cached(
         }
 
     # Full path with all features
-    spec.update_defaults(func)
+    spec.update_defaults(func, pending_defaults, pending_kwdefaults)
     ba = {}
     rem_kw = dict(kwargs)
     guarded_pos_defaults_len = False
@@ -271,7 +296,7 @@ def bind_args_cached(
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.pos_default_map:
             idx = spec.pos_default_map[name]
-            if fn_source and not guarded_pos_defaults_len:
+            if fn_source and pending_defaults is None and not guarded_pos_defaults_len:
                 # The parameter-to-default mapping depends on __defaults__
                 # length; guard it without wrapping every default value.
                 install_guard(
@@ -281,9 +306,13 @@ def bind_args_cached(
                 )
                 guarded_pos_defaults_len = True
             default_source = None
-            if fn_source and not (
-                ConstantVariable.is_literal(spec.defaults[idx])
-                and config.skip_guards_on_constant_func_defaults
+            if (
+                fn_source
+                and pending_defaults is None
+                and not (
+                    ConstantVariable.is_literal(spec.defaults[idx])
+                    and config.skip_guards_on_constant_func_defaults
+                )
             ):
                 default_source = DefaultsSource(fn_source, idx)
             ba[name] = wrap_bound_arg(tx, spec.defaults[idx], default_source)
@@ -305,7 +334,7 @@ def bind_args_cached(
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name in spec.kwdefaults:
             kwdefault_source = None
-            if fn_source:
+            if fn_source and pending_kwdefaults is None:
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
@@ -664,7 +693,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         root_tx = parent.output.root_tx
 
         source = self.get_source()
-        result = bind_args_cached(fn, root_tx, source, args, kwargs)  # type: ignore[arg-type]
+        result = bind_args_cached(self, fn, root_tx, source, args, kwargs)
 
         init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
