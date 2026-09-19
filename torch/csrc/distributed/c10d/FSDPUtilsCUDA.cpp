@@ -1,3 +1,4 @@
+#include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/TensorShape.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -7,9 +8,24 @@
 #include <torch/csrc/distributed/c10d/FSDPUtils.hpp>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <cmath>
 
 namespace c10d::fsdp {
 namespace {
+
+struct ChunkCatMetadata {
+  int64_t chunk_size = 0;
+  int64_t leading_dim = 1;
+  int64_t num_blocks_per_chunk = 0;
+  int64_t slice_size = 0;
+  std::vector<int64_t> srcs;
+  std::vector<int64_t> block_idx_to_tensor_idx;
+  std::vector<int64_t> tensor_idx_to_start_tensor_bytes;
+  std::vector<int64_t> start_block_idx_per_tensor_chunk;
+  std::vector<int64_t> actual_tensor_sizes;
+  std::vector<int64_t> pad_tensor_chunk_sizes;
+  std::vector<int64_t> num_blocks_per_tensor_chunk;
+};
 
 void split_with_sizes_copy_with_prefixes_cuda(
     at::TensorList out,
@@ -47,13 +63,44 @@ void split_with_sizes_copy_with_prefixes_cuda(
     }
     src += split_sizes[i] * elem_size;
   }
-  at::native::detail::launch_split_with_sizes_copy(
-      input.device(),
-      srcs,
-      dsts,
-      chunk_sizes,
-      input.numel() / num_chunks * elem_size,
-      num_chunks);
+  if (!srcs.empty()) {
+    const auto bytes_per_block = at::native::detail::kChunkCatBytesPerBlock;
+    int64_t num_blocks = 0;
+    for (const auto chunk_size : chunk_sizes) {
+      num_blocks += (chunk_size + bytes_per_block - 1) / bytes_per_block;
+    }
+    const auto* properties = at::cuda::getCurrentDeviceProperties();
+    const int64_t max_blocks =
+        static_cast<int64_t>(properties->multiProcessorCount) *
+        properties->maxThreadsPerMultiProcessor /
+        at::native::detail::kCopyThreadsPerBlock * 2;
+    const int64_t iter_factor =
+        (num_blocks * num_chunks + max_blocks - 1) / max_blocks;
+    int64_t chunks_per_block = std::ceil(std::sqrt(iter_factor));
+    chunks_per_block = std::min(chunks_per_block, num_chunks);
+    const int64_t iters_per_chunk =
+        (iter_factor + chunks_per_block - 1) / chunks_per_block;
+    std::vector<int64_t> block_idx_to_split_idx;
+    std::vector<int64_t> blocks_cumsums{0};
+    block_idx_to_split_idx.reserve(num_blocks);
+    const int64_t bytes_per_block_iter = bytes_per_block * iters_per_chunk;
+    for (const auto i : c10::irange(chunk_sizes.size())) {
+      const auto blocks =
+          (chunk_sizes[i] + bytes_per_block_iter - 1) / bytes_per_block_iter;
+      block_idx_to_split_idx.insert(
+          block_idx_to_split_idx.end(), blocks, static_cast<int64_t>(i));
+      blocks_cumsums.push_back(blocks_cumsums.back() + blocks);
+    }
+    auto packed = at::native::detail::pack_vecs(
+        {&dsts, &srcs, &chunk_sizes, &block_idx_to_split_idx, &blocks_cumsums},
+        input.device());
+    at::native::detail::launch_split_with_sizes_copy(
+        packed.second,
+        blocks_cumsums.back(),
+        num_chunks / chunks_per_block,
+        input.numel() / num_chunks * elem_size,
+        num_chunks);
+  }
   for (const auto& tensor : out) {
     if (!tensor.is_inference()) {
       torch::autograd::impl::bump_version(tensor);
@@ -83,9 +130,7 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
     num_inputs += c10::multiply_integers(
         tensors[i].sizes().slice(0, num_leading_dims[i]));
   }
-  at::native::detail::ChunkCatMetadata metadata;
-  metadata.leading_dim = 1;
-  metadata.chunk_size = 0;
+  ChunkCatMetadata metadata;
   metadata.srcs.reserve(num_inputs);
   metadata.pad_tensor_chunk_sizes.reserve(num_inputs);
   metadata.num_blocks_per_tensor_chunk.reserve(num_inputs);
@@ -113,7 +158,7 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
     const int64_t actual_size = sizes[dim] * trailing_numel * src_elem_size;
     const auto src = reinterpret_cast<int64_t>(tensor.const_data_ptr());
     for (const auto prefix : c10::irange(num_prefixes)) {
-      const auto input_idx = metadata.srcs.size();
+      const auto input_idx = static_cast<int64_t>(metadata.srcs.size());
       metadata.srcs.push_back(src + prefix * actual_size);
       metadata.pad_tensor_chunk_sizes.push_back(chunk_size);
       metadata.chunk_size += chunk_size;
@@ -132,7 +177,24 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
   metadata.slice_size = num_chunks * metadata.chunk_size;
   at::native::resize_output(
       out, {num_chunks, metadata.chunk_size / dst_elem_size});
-  at::native::detail::launch_chunk_cat(out, metadata, num_chunks, src_dtype);
+  auto packed = at::native::detail::pack_vecs(
+      {&metadata.srcs,
+       &metadata.block_idx_to_tensor_idx,
+       &metadata.tensor_idx_to_start_tensor_bytes,
+       &metadata.start_block_idx_per_tensor_chunk,
+       &metadata.actual_tensor_sizes,
+       &metadata.pad_tensor_chunk_sizes,
+       &metadata.num_blocks_per_tensor_chunk},
+      out.device());
+  at::native::detail::launch_chunk_cat(
+      out,
+      packed.second,
+      metadata.num_blocks_per_chunk,
+      num_chunks,
+      metadata.leading_dim,
+      metadata.slice_size,
+      metadata.chunk_size,
+      src_dtype);
   if (!out.is_inference()) {
     torch::autograd::impl::bump_version(out);
   }

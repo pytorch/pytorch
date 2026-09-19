@@ -44,6 +44,7 @@ namespace detail {
 static constexpr int64_t BLOCK_SIZE = 128;
 static constexpr int64_t BYTES_PER_THREAD = 16;
 static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
+static_assert(BLOCK_SIZE == kCopyThreadsPerBlock);
 static_assert(BYTES_PER_BLOCK == kChunkCatBytesPerBlock);
 
 static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
@@ -476,7 +477,19 @@ static inline int64_t get_chunk_size(
 }
 
 // Get metadata for chunk_cat.
-ChunkCatMetadata get_chunk_cat_metadata(
+std::tuple<
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>>
+get_chunk_cat_metadata(
     TensorList tensors,
     int64_t dim,
     int64_t num_chunks,
@@ -528,7 +541,7 @@ ChunkCatMetadata get_chunk_cat_metadata(
   }
   const int64_t num_blocks_per_chunk = start_block_idx_per_tensor_chunk.back();
   const int64_t slice_size = num_chunks * chunk_size;
-  return {
+  return std::make_tuple(
       chunk_size,
       leading_dim,
       num_blocks_per_chunk,
@@ -539,26 +552,37 @@ ChunkCatMetadata get_chunk_cat_metadata(
       std::move(start_block_idx_per_tensor_chunk),
       std::move(actual_tensor_sizes),
       std::move(pad_tensor_chunk_sizes),
-      std::move(num_blocks_per_tensor_chunk)};
+      std::move(num_blocks_per_tensor_chunk));
 }
 
 // See [CUDA kernel for chunk_cat_cuda]
 template <typename dst_t, typename src_t>
-static void launch_chunk_cat_typed(
-    const Tensor& out,
-    const ChunkCatMetadata& metadata,
-    int64_t num_chunks) {
-  const auto& [chunk_size,
-               leading_dim,
-               num_blocks_per_chunk,
-               slice_size,
-               srcs,
-               block_idx_to_tensor_idx,
-               tensor_idx_to_start_tensor_bytes,
-               start_block_idx_per_tensor_chunk,
-               actual_tensor_sizes,
-               pad_tensor_chunk_sizes,
-               num_blocks_per_tensor_chunk] = metadata;
+void _chunk_cat_out_cuda_contiguous(
+    TensorList tensors,
+    int64_t dim,
+    int64_t num_chunks,
+    Tensor& out,
+    int64_t dst_elem_size,
+    int64_t src_elem_size) {
+  const auto device = tensors[0].device();
+  // `get_chunk_cat_metadata` must return vectors and `pack_vecs` cannot be
+  // moved into `get_chunk_cat_metadata`. Otherwise `packed` would point to
+  // vectors allocated inside `get_chunk_cat_metadata` which become out of local
+  // scope.
+  auto
+      [chunk_size,
+       leading_dim,
+       num_blocks_per_chunk,
+       slice_size,
+       srcs,
+       block_idx_to_tensor_idx,
+       tensor_idx_to_start_tensor_bytes,
+       start_block_idx_per_tensor_chunk,
+       actual_tensor_sizes,
+       pad_tensor_chunk_sizes,
+       num_blocks_per_tensor_chunk] =
+          get_chunk_cat_metadata(
+              tensors, dim, num_chunks, dst_elem_size, src_elem_size);
   auto packed = pack_vecs(
       {&srcs,
        &block_idx_to_tensor_idx,
@@ -567,7 +591,10 @@ static void launch_chunk_cat_typed(
        &actual_tensor_sizes,
        &pad_tensor_chunk_sizes,
        &num_blocks_per_tensor_chunk},
-      out.device());
+      device);
+  std::vector<int64_t> view_sizes = get_chunk_cat_out_sizes(
+      tensors[0].sizes(), dim, num_chunks, chunk_size, dst_elem_size);
+  at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
   detail::chunk_cat_cuda_kernel<<<
@@ -585,55 +612,33 @@ static void launch_chunk_cat_typed(
       /*num_blocks_per_tensor_chunk=*/packed.second[6],
       slice_size,
       chunk_size,
-      sizeof(dst_t) / sizeof(src_t));
+      dst_elem_size / src_elem_size);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void launch_chunk_cat(
-    const Tensor& out,
-    const ChunkCatMetadata& metadata,
-    int64_t num_chunks,
-    ScalarType src_dtype) {
-  if (src_dtype == kBFloat16 && out.scalar_type() == kFloat) {
-    launch_chunk_cat_typed<float, BFloat16>(out, metadata, num_chunks);
-  } else {
-    TORCH_INTERNAL_ASSERT(src_dtype == out.scalar_type());
-    launch_chunk_cat_typed<char, char>(out, metadata, num_chunks);
-  }
-}
-
-void _chunk_cat_out_cuda_contiguous(
-    TensorList tensors,
-    int64_t dim,
-    int64_t num_chunks,
-    Tensor& out,
-    int64_t dst_elem_size,
-    int64_t src_elem_size) {
-  auto metadata = get_chunk_cat_metadata(
-      tensors, dim, num_chunks, dst_elem_size, src_elem_size);
-  auto view_sizes = get_chunk_cat_out_sizes(
-      tensors[0].sizes(), dim, num_chunks, metadata.chunk_size, dst_elem_size);
-  at::native::resize_output(out, view_sizes);
-  launch_chunk_cat(out, metadata, num_chunks, tensors[0].scalar_type());
-}
+} // namespace detail
 
 // See [CUDA fast path for split_with_sizes_copy.out]
-void launch_split_with_sizes_copy(
-    const Device& device,
-    const std::vector<int64_t>& src_base_addrs,
-    const std::vector<int64_t>& dst_base_addrs,
-    const std::vector<int64_t>& split_chunk_sizes,
-    int64_t src_stride,
-    int64_t num_chunks) {
+void split_with_sizes_copy_out_cuda_contiguous_no_cast(
+    const at::Tensor& self,
+    at::IntArrayRef split_sizes,
+    int64_t dim,
+    at::TensorList out) {
+  const auto device = self.device();
+  const auto src_base_addrs =
+      detail::get_split_base_addrs(self, split_sizes, dim);
+  const auto dst_base_addrs = detail::get_dst_addrs(out);
+  const auto src_stride = detail::get_chunk_stride(self, dim);
+  const auto split_chunk_sizes =
+      detail::get_split_chunk_sizes(self, split_sizes, dim);
+  const auto num_chunks = detail::get_num_chunks(self, dim);
+
   // Calculate the number of blocks required for the first chunk across all
   // splits, assuming each thread only processes BYTES_PER_THREAD bytes.
   int64_t num_blocks = 0;
   for (const auto& split_chunk_size : split_chunk_sizes) {
     num_blocks += detail::div_up(
         split_chunk_size, detail::BLOCK_SIZE * detail::BYTES_PER_THREAD);
-  }
-  if (num_blocks == 0 || num_chunks == 0) {
-    return;
   }
 
   // Calculate the maximum number of blocks to launch. Only consider
@@ -663,7 +668,7 @@ void launch_split_with_sizes_copy(
   std::vector<int64_t> block_idx_to_split_idx;
   std::vector<int64_t> blocks_cumsums{0};
   block_idx_to_split_idx.reserve(num_blocks);
-  for (size_t split_idx = 0; split_idx < split_chunk_sizes.size(); ++split_idx) {
+  for (size_t split_idx = 0; split_idx < split_sizes.size(); ++split_idx) {
     const auto blocks = detail::div_up(
         split_chunk_sizes[split_idx],
         detail::BLOCK_SIZE * detail::BYTES_PER_THREAD * iters_per_chunk);
@@ -696,22 +701,6 @@ void launch_split_with_sizes_copy(
       src_stride,
       num_chunks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-} // namespace detail
-
-void split_with_sizes_copy_out_cuda_contiguous_no_cast(
-    const Tensor& self,
-    IntArrayRef split_sizes,
-    int64_t dim,
-    TensorList out) {
-  detail::launch_split_with_sizes_copy(
-      self.device(),
-      detail::get_split_base_addrs(self, split_sizes, dim),
-      detail::get_dst_addrs(out),
-      detail::get_split_chunk_sizes(self, split_sizes, dim),
-      detail::get_chunk_stride(self, dim),
-      detail::get_num_chunks(self, dim));
 }
 
 void split_with_sizes_copy_out_cuda(
@@ -802,7 +791,7 @@ Tensor _chunk_cat_cuda(TensorList tensors, int64_t dim, int64_t num_chunks) {
             .new_empty(chunk_size * num_chunks * leading_dim / elem_size)
             .view(view_sizes);
     // Type-agnostic copy since out and input tensors have the same type.
-    detail::_chunk_cat_out_cuda_contiguous(
+    detail::_chunk_cat_out_cuda_contiguous<char, char>(
         tensors, dim, num_chunks, out, elem_size, elem_size);
     return out;
   } else {
@@ -827,7 +816,7 @@ Tensor& _chunk_cat_out_cuda(
     // _chunk_cat_out_cuda_contiguous should also support other types, thanks to
     // static_cast_with_inter_type. Here, we dispatch to BFloat16 in and float32
     // out since it is the only known use case.
-    detail::_chunk_cat_out_cuda_contiguous(
+    detail::_chunk_cat_out_cuda_contiguous<float, BFloat16>(
         tensors,
         dim,
         num_chunks,
@@ -837,7 +826,7 @@ Tensor& _chunk_cat_out_cuda(
   } else if (
       both_input_output_contiguous && tensors[0].dtype() == out.dtype()) {
     // Type-agnostic copy since out and input tensors have the same type.
-    detail::_chunk_cat_out_cuda_contiguous(
+    detail::_chunk_cat_out_cuda_contiguous<char, char>(
         tensors,
         dim,
         num_chunks,
@@ -849,5 +838,78 @@ Tensor& _chunk_cat_out_cuda(
   }
   return out;
 }
+
+namespace detail {
+
+void launch_split_with_sizes_copy(
+    ArrayRef<int64_t*> ptrs,
+    int64_t num_blocks,
+    int64_t num_chunk_groups,
+    int64_t src_stride,
+    int64_t num_chunks) {
+  dim3 blocks(num_blocks, num_chunk_groups, 1);
+  dim3 threads(BLOCK_SIZE, 1, 1);
+  split_with_sizes_copy_out_contiguous_no_cast_kernel<<<
+      blocks,
+      threads,
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      /*dst_base_addrs=*/reinterpret_cast<char**>(ptrs[0]),
+      /*src_base_addrs=*/reinterpret_cast<char**>(ptrs[1]),
+      /*split_chunk_sizes=*/ptrs[2],
+      /*block_idx_to_split_idx=*/ptrs[3],
+      /*blocks_cumsums=*/ptrs[4],
+      src_stride,
+      num_chunks);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+template <typename dst_t, typename src_t>
+static void launch_chunk_cat_typed(
+    const Tensor& out,
+    ArrayRef<int64_t*> ptrs,
+    dim3 blocks,
+    int64_t slice_size,
+    int64_t chunk_size) {
+  dim3 threads(BLOCK_SIZE, 1, 1);
+  chunk_cat_cuda_kernel<<<
+      blocks,
+      threads,
+      0,
+      at::cuda::getCurrentCUDAStream()>>>(
+      /*srcs=*/reinterpret_cast<src_t**>(ptrs[0]),
+      reinterpret_cast<dst_t*>(out.data_ptr()),
+      /*block_idx_to_tensor_idx=*/ptrs[1],
+      /*tensor_idx_to_start_tensor_bytes=*/ptrs[2],
+      /*start_block_idx_per_tensor_chunk=*/ptrs[3],
+      /*actual_tensor_sizes=*/ptrs[4],
+      /*pad_tensor_chunk_sizes=*/ptrs[5],
+      /*num_blocks_per_tensor_chunk=*/ptrs[6],
+      slice_size,
+      chunk_size,
+      sizeof(dst_t) / sizeof(src_t));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void launch_chunk_cat(
+    const Tensor& out,
+    ArrayRef<int64_t*> ptrs,
+    int64_t num_blocks_per_chunk,
+    int64_t num_chunks,
+    int64_t leading_dim,
+    int64_t slice_size,
+    int64_t chunk_size,
+    ScalarType src_dtype) {
+  dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
+  if (src_dtype == kBFloat16 && out.scalar_type() == kFloat) {
+    launch_chunk_cat_typed<float, BFloat16>(
+        out, ptrs, blocks, slice_size, chunk_size);
+  } else {
+    TORCH_INTERNAL_ASSERT(src_dtype == out.scalar_type());
+    launch_chunk_cat_typed<char, char>(out, ptrs, blocks, slice_size, chunk_size);
+  }
+}
+
+} // namespace detail
 
 } // namespace at::native
