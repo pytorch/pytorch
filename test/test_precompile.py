@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import functools
 import importlib
 import inspect
 import io
@@ -619,19 +620,20 @@ class TestPrecompile(TestCase):
     def test_make_fx_capture_refuses_a_partial(self):
         # A partial hides its bound arguments from the capture, so it is refused
         # up front with the fix, rather than failing later as a baked constant.
-        import functools
-
-        from torch._precompile import _MakeFxCapture
+        from torch._precompile import _MakeFxCapture, MakeFxTracer
 
         def step(model, x):
             return model(x)
 
         bound = functools.partial(step, torch.nn.Linear(2, 2))
-        kwargs = {"backend": "eager", "decompositions": None, "training": False}
+        table: dict = {}
+        tracer = MakeFxTracer(decompositions=table)
+        kwargs = {"backend": "eager", "tracer": tracer, "training": False}
         with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
             _MakeFxCapture(bound, "m.py", "m.cache", **kwargs)
         cap = _MakeFxCapture(step, "m.py", "m.cache", **kwargs)
         self.assertIs(cap.__enter__(), cap)
+        self.assertIs(cap._module._decompositions, table)
         self.assertFalse(cap._traced)
         self.assertIsNone(cap._rendered)
 
