@@ -84,16 +84,13 @@ from torch._vendor.quack.reduce import block_reduce
 
 
 # Defaults for the kernel's two shape knobs, which a caller may override (see
-# `fused_grad_logits_into`). Measured on H100 over threads x tiles in
-# {256, 512, 1024} x {1, 4, 8, 16, 32} at 20 (Bc, V) chunk shapes and both
-# buffer layouts: no setting wins everywhere. A wide block pays off only on
-# long rows (V >= 32000); staging peaks around 8 tiles there and degrades past
-# it, steeply on short rows. (512, 4) is the middle of both axes -- the worst
-# setting at no shape measured, at most 1.39x behind the per-shape best -- and
-# the stake is small either way: where the split can be measured cleanly the
-# chunked loop spends ~85% of its time in its three cuBLAS GEMMs and under 10%
-# here, so the best setting at the loop's own chunk shapes is worth under 2%
-# end to end.
+# `fused_grad_logits_into`). Measured by calling this kernel directly from a
+# captured CUDA graph, on H100 and B200 and in both dtypes, over Bc in
+# {1024, 2048, 4096} x V in {4096, 8192, 16384, 32000, 65536}: (512, 8) is both
+# faster and lower energy per call at all 28 points, by 1.4-12.2% and 3.3-8.5%
+# respectively. The stake end to end is smaller than that -- this kernel is
+# 4-25% of a chunked call and the rest is three cuBLAS GEMMs -- so it is worth
+# 0.1-2.9% of a call.
 #
 # Legal ranges, as opposed to preferences: `threads_per_block` must be a
 # multiple of 32 and at most 1024, both because a CUDA block stops there and
@@ -102,7 +99,7 @@ from torch._vendor.quack.reduce import block_reduce
 # any positive integer -- the write-ordering argument below holds for every
 # group size.
 _DEFAULT_THREADS_PER_BLOCK = 512
-_DEFAULT_TILES_PER_STAGE = 4
+_DEFAULT_TILES_PER_STAGE = 8
 
 _TORCH_TO_CUTE = {
     torch.float32: Float32,
