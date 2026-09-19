@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import time
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import auto, Enum
@@ -305,12 +304,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                         f"Expected AsyncSaveResponse, got {type(async_save_response_or_future)}"
                     )
                 save_future = async_save_response_or_future.upload_completion
-            # wait for the future to complete
-            t = time.monotonic()
-            while not save_future.done():
-                time.sleep(1)
-                print(f"still waiting... {time.monotonic() - t}")
-
             save_future.result()
         else:
             DCP.save(sd, checkpoint_id=self.temp_dir)
