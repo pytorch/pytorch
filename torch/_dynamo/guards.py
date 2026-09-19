@@ -4228,11 +4228,18 @@ def _is_shared_constant(value: Any) -> bool:
     reference as missing would turn EVERY other reference -- the dtype inside
     every tensor's reducer payload, a code object's constant -- into the
     sentinel. FunctionPicklerBase._is_literal names exactly those values (by
-    exact type, so an IntEnum member or a str subclass is still pruned); the
-    empty tuple is the one container CPython shares the same way, and a class
-    is one object too (torch.Tensor is the pytype of every tensor payload).
+    exact type, so an IntEnum member or a str subclass is still pruned). The
+    empty tuple is the one container CPython shares the same way (an empty
+    frozenset is not); it matters for the module attribute loop, since a pytree
+    leaf is never a tuple. A class is one object too (torch.Tensor is the pytype
+    of every tensor payload); that matters for the local-scope leaf loop, since
+    the module loop skips every callable. A class that pickle cannot find by
+    name (a <locals> class) stays prunable: pickling it by reference would fail
+    the dump, and the artifact would import its module at load.
     """
-    if inspect.isclass(value) or (type(value) is tuple and not value):
+    if type(value) is tuple and not value:
+        return True
+    if inspect.isclass(value) and FunctionPicklerBase._fqn_resolves(value):
         return True
     return FunctionPicklerBase._is_literal(value)
 
