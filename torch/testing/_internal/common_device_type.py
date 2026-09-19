@@ -1302,7 +1302,10 @@ def instantiate_device_type_tests(
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             # Ports non-test member. Setup / teardown have already been handled above
             elif name not in device_type_test_class.__dict__:
-                nontest = getattr(generic_test_class, name)
+                # Avoid invoking descriptors while copying members to the generated
+                # class. In particular, getattr() unwraps staticmethod and classmethod,
+                # changing how they bind when accessed through a test instance.
+                nontest = inspect.getattr_static(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
 
         # Mimics defining the instantiated class in the caller's file
