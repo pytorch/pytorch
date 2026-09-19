@@ -15,6 +15,7 @@ from torch._native.ops.linear_cross_entropy import cutedsl_impl
 from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -429,6 +430,66 @@ class TestLinearCrossEntropyOverride(TestCase):
             # Absolute only: these gradients hold near-zero elements, where a
             # relative bound is dominated by division rather than by error.
             self.assertEqual(a, b, atol=1e-3, rtol=0, msg=f"{name} disagrees")
+
+    @unittest.skipIf(
+        not TEST_CUDA or not cutedsl_impl._arch_supported(),
+        "no kernel variant is eligible on this device, so there is no kernel "
+        "path to test -- the call would fall back to eager",
+    )
+    def test_empty_batch_returns_a_zeroed_weight_gradient(self):
+        """`grad_linear_weight` is left uninitialized because the first chunk
+        writes it outright. An empty batch has no first chunk, so the early
+        return is the one path where that allocation has to be zeroed, and the
+        only place where skipping the fill would be visible as a wrong result.
+
+        `fill_uninitialized_memory` is what gives this teeth: `torch.empty`
+        otherwise tends to hand back zeroed pages, and the assertion would pass
+        whether or not the allocation is guarded. Deterministic mode is safe
+        here only because an empty batch returns before the chunk loop, whose
+        `index_add_` has no deterministic implementation.
+        """
+        import torch.nn.modules.linear_cross_entropy as lce_module
+
+        in_features, num_classes = 64, 512
+        input = torch.zeros(
+            0, in_features, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        linear_weight = torch.randn(
+            num_classes, in_features, device="cuda", dtype=torch.bfloat16
+        ).requires_grad_()
+        target = torch.zeros(0, device="cuda", dtype=torch.int64)
+        options = LinearCrossEntropyOptions(
+            acc_policy="compact",
+            acc_dtype=torch.float32,
+            chunking_method=None,
+            batch_chunk_size=8,
+        )
+
+        with (
+            unittest.mock.patch.object(
+                lce_module,
+                "_linear_cross_entropy_batch_chunked_accumulator",
+                wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
+            ) as accumulator,
+            DeterministicGuard(True, fill_uninitialized_memory=True),
+        ):
+            loss = torch.nn.functional.linear_cross_entropy(
+                input, linear_weight, target, options=options
+            )
+            self.assertEqual(
+                accumulator.call_count,
+                0,
+                "the call fell back to the accumulator, so this asserted the "
+                "eager path's allocation rather than the override's",
+            )
+        loss.backward()
+
+        self.assertTrue(torch.isnan(loss), "mean over an empty batch is nan")
+        self.assertTrue(
+            torch.equal(linear_weight.grad, torch.zeros_like(linear_weight.grad)),
+            "the weight gradient is not zeroed on the path that has no chunk "
+            "to write it",
+        )
 
     @unittest.skipIf(
         not TEST_CUDA or not cutedsl_impl._arch_supported(),
