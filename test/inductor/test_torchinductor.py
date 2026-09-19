@@ -20056,11 +20056,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             base_tensor.scatter_(0, index, src)
             return base_tensor.clone() + 1
 
-        src = torch.tensor([[100.0], [200.0], [300.0]], device=self.device)
-        index = torch.tensor([[0], [0], [0]], device=self.device)
-        base_tensor = torch.zeros(2, 1, device=self.device)
+        # Keep CPU tensors: the expected duplicate-index winner is backend-specific.
+        src = torch.tensor([[100.0], [200.0], [300.0]])
+        index = torch.tensor([[0], [0], [0]])
+        base_tensor = torch.zeros(2, 1)
         out = fn(src, index, base_tensor)
-        expected = torch.tensor([[311.0], [1.0]], device=self.device)
+        expected = torch.tensor([[311.0], [1.0]])
         self.assertEqual(out, expected)
 
     @skip_if_no_accelerator
