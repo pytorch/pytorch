@@ -144,7 +144,7 @@ class TestTransportRegistry(TestCase):
         with patch.object(
             _registry, "_iter_entry_points", return_value=iter([entry_point])
         ):
-            self.assertEqual(available_transports(), ("external",))
+            self.assertEqual(available_transports(), ("external", "nixl"))
 
 
 class _ManualWork(_work._PollingWork):
