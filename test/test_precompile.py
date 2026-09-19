@@ -855,15 +855,24 @@ class TestPrecompile(TestCase):
         resume_miss = "no captured variant of 'torch_dynamo_resume_in_step"
         with self.assertRaisesRegex(PrecompileError, resume_miss):
             forward(model, x, torch.ones(1), torch.ones(1))
-        # A zero-variant continuation is diagnosed by cause (trivial or BYPASSED),
-        # not as a coverage gap, at the call that reaches it; the build succeeds
-        # where the entry would refuse.
+        # Rebuilding the same artifact rebinds its names. Any other artifact of
+        # this module mints the same names (the counters run per capturing
+        # process), so loading it beside a live one is refused; the rows below
+        # are such artifacts and scrub the live one first.
+        self.assertEqual(build()(model, x), expected)
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
+            with self.assertRaisesRegex(PrecompileError, "one standalone artifact"):
+                build()
+            # A zero-variant continuation is diagnosed by cause (trivial or
+            # BYPASSED), not as a coverage gap, at the call that reaches it; the
+            # build succeeds where the entry would refuse.
+            scrub()
             with self.assertRaisesRegex(PrecompileError, "produced no guarded code"):
                 build()(model, x)
         bypassed = [frames[0], {**frames[1], "bypassed": True, "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(bypassed)}):
+            scrub()
             forward_bypassed = build()
         with self.assertRaisesRegex(PrecompileError, "was BYPASSED"):
             forward_bypassed(model, x)
@@ -873,6 +882,7 @@ class TestPrecompile(TestCase):
         dead["python_module"] = "precompile_test_no_such_module"
         dead["resume_names"] = ["__resume_at_dead"]
         with mock.patch.dict(ns, {"_FRAMES": _b64(frames + [dead])}):
+            scrub()
             self.assertEqual(build()(model, x), expected)
         self.assertNotIn("__resume_at_dead", scope)
 
