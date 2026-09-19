@@ -704,10 +704,10 @@ def compile_to_python(
     backend contract behind ``torch.compiler.precompile``.
 
     This is an INTERNAL layered-contract entry point, not an end-user API. End users
-    should call ``torch.compiler.precompile``; this function only emits the inductor
-    piece of the artifact and assumes its caller (the AOT layer) wraps it. It lives in
-    ``torch._inductor`` (a private, leading-underscore module), so it is exposed for
-    the AOT layer to import, not as a stable public surface.
+    should call ``torch.compiler.precompile.capture``; this function only emits the
+    inductor piece of the artifact and assumes its caller (the AOT layer) wraps it. It
+    lives in ``torch._inductor`` (a private, leading-underscore module), so it is
+    exposed for the AOT layer to import, not as a stable public surface.
 
     ``inner_python`` is the Inductor output module exposing ``call(args) -> outs``
     for the post-AOTAutograd inner graph (dense, functionalized). It is the inductor
