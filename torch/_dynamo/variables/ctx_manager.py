@@ -1094,13 +1094,7 @@ class AutocastModeVariable(ContextWrappingVariable):
             bound_args = signature.bind(*args, **kwargs)
             bound_args.apply_defaults()
             arguments = dict(bound_args.arguments)
-            for name, parameter in signature.parameters.items():
-                if parameter.kind is inspect.Parameter.VAR_KEYWORD:
-                    arguments.update(arguments.pop(name))
-
-            arguments.setdefault(
-                "device_type", torch._C._get_privateuse1_backend_name()
-            )
+            arguments["device_type"] = torch._C._get_privateuse1_backend_name()
             target_values = []
             for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
                 arg = arguments[key]
