@@ -56,6 +56,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
@@ -2050,7 +2051,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
 
 @instantiate_parametrized_tests
-class TestFullyShardReduceOpWorldSize1(FSDPTest):
+class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return 1
