@@ -126,7 +126,7 @@ from .polyfills import (
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
-from .replay_record import DummyModule, ExecutionRecorder
+from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
@@ -2510,6 +2510,21 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
+            # Before import_source, which binds the result into the traced
+            # frame's globals: a non-module sys.modules entry stays out of them.
+            # Only this arm can take the check: a replayed value is a DummyModule,
+            # not a ModuleType, so it would refuse every replay -- and needs none,
+            # add_local_mod having rejected non-modules when the record was written.
+            # pyrefly: ignore [unbound-name]
+            if not isinstance(value, types.ModuleType):
+                unimplemented(
+                    gb_type="Bad import result",
+                    # pyrefly: ignore [unbound-name]
+                    context=typestr(value),
+                    explanation="Import result is not a Python module.",
+                    hints=[],
+                )
+
             if level != 0:
                 pkg = self.calc_package()
                 module_name = self.resolve_name(module_name, pkg, level)
@@ -2529,18 +2544,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
             self.exec_recorder.add_local_mod(recorded_name, value)
 
-        # pyrefly: ignore [unbound-name]
-        if isinstance(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name, bad-argument-type]
-            self.push(PythonModuleVariable(value, source=source))
-        else:
-            unimplemented(
-                gb_type="Bad import result",
-                # pyrefly: ignore [unbound-name]
-                context=typestr(value),
-                explanation="Import result is not a Python module.",
-                hints=[],
-            )
+        # pyrefly: ignore [unbound-name, bad-argument-type]
+        self.push(PythonModuleVariable(value, source=source))
 
     # fb internal 3.12 opcode
     EAGER_IMPORT_NAME = IMPORT_NAME
