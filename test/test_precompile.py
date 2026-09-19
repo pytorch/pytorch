@@ -4278,6 +4278,7 @@ class TestPrecompileCaptureFiles(TestCase):
             self.model,
             self.model.forward,
             functools.partial(_files_fn, self.model),
+            functools.partial(_files_fn, [self.model]),
             functools.partial(_files_fn, x=self.x),
             functools.partial(self.model),
             functools.partial(functools.partial(self.model.forward)),
@@ -4366,10 +4367,11 @@ class TestPrecompileCaptureFiles(TestCase):
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
     def test_load_checks_the_cache_envelope_and_primes_from_it(self):
-        # Three things load() documents that the round trips do not pin, since a cache is
+        # Four things load() documents that the round trips do not pin, since a cache is
         # acceleration only and nothing FAILS without one: the bundle is really handed to the
-        # inductor caches (an eager pair's is None and hands nothing over), the backend tag is
-        # an integrity check like code_hash, and a foreign format only DEGRADES to JIT.
+        # inductor caches (an eager pair's is None and hands nothing over), a bundle they
+        # REJECT is not fatal, the backend tag is an integrity check like code_hash, and a
+        # foreign format only DEGRADES to JIT.
         real = torch.compiler.load_cache_artifacts
         for backend, calls in (("eager", 0), ("inductor", 1)):
             with self._capture(backend=backend) as cap:
@@ -4379,6 +4381,16 @@ class TestPrecompileCaptureFiles(TestCase):
             blob = torch.load(io.BytesIO(self._read(self.cache)), weights_only=True)
             handed = [c.args for c in spy.call_args_list]
             self.assertEqual(handed, [(blob["artifact"],)] * calls)
+
+        # The priming is acceleration only, so a bundle the inductor caches REJECT (a stale
+        # one, one from another build) degrades to JIT with a warning rather than failing.
+        with mock.patch(
+            "torch.compiler.load_cache_artifacts", side_effect=RuntimeError("stale")
+        ):
+            with self.assertLogs("torch._precompile", level="WARNING") as logs:
+                f = load(self.artifact, self.cache)
+        self.assertIn("could not prime the cache", "\n".join(logs.output))
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
 
         def rewrite(**edits):
             buf = io.BytesIO()
@@ -4461,6 +4473,14 @@ class TestPrecompileCaptureFiles(TestCase):
                 pass
         with self.assertRaisesRegex(PrecompileError, "capture is spent"):
             cap(self.model, self.x)
+        self.assertEqual(os.listdir(self.dir), [])
+
+    def test_save_before_the_block_is_refused(self):
+        # A block that never ran is not a spent one: save() reports the block it is
+        # missing, not one that "already ran".
+        cap = self._capture()
+        with self.assertRaisesRegex(PrecompileError, "capture is not active"):
+            cap.save()
         self.assertEqual(os.listdir(self.dir), [])
 
     def test_save_outside_the_block_is_refused(self):
