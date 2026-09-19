@@ -1,18 +1,14 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
-
 import torch
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.inductor_utils import HAS_TRITON
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
 
-HAS_CUDA = torch.cuda.is_available()
-
-
-class TestTorchbindAOTI(TestCase):
+class TestTorchbindAOTIDevice(TestCase):
     """Verify that torchbind constants embedded in an AOTI .pt2 are reachable
     via AOTIModelPackageLoader.get_custom_objs() after load.
 
@@ -21,6 +17,8 @@ class TestTorchbindAOTI(TestCase):
     toggles). Before this accessor existed, the IValues lived in
     OSSProxyExecutor::custom_objs_ with no public way out.
     """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @classmethod
     def setUpClass(cls):
@@ -40,9 +38,9 @@ class TestTorchbindAOTI(TestCase):
 
         return M()
 
-    @unittest.skipIf(HAS_CUDA and not HAS_TRITON, "requires triton on CUDA builds")
-    def test_custom_objs_exposed_through_loader(self):
-        device = "cuda" if HAS_CUDA else "cpu"
+    def test_custom_objs_exposed_through_loader(self, device):
+        if device != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton on accelerator builds")
         m = self._make_model().to(device)
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
@@ -65,15 +63,15 @@ class TestTorchbindAOTI(TestCase):
             msg=lambda msg: f"{msg}\nExpected a torchbind ScriptObject, got {type(any_torchbind)}",
         )
 
-    @unittest.skipIf(HAS_CUDA and not HAS_TRITON, "requires triton on CUDA builds")
-    def test_mutating_custom_obj_after_load_affects_run(self):
+    def test_mutating_custom_obj_after_load_affects_run(self, device):
+        if device != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton on accelerator builds")
         # The central contract: IValues returned by get_custom_objs() share
         # intrusive_ptr ownership with the live entries inside
         # OSSProxyExecutor::custom_objs_, so mutating state on the returned
         # custom-class instance affects subsequent run() invocations.
         # Forward computes self.attr.add_tensor(x) + x, where Foo.add_tensor
         # returns (x + y) * z. Foo.increment(k) does x += k, y += k.
-        device = "cuda" if HAS_CUDA else "cpu"
         m = self._make_model().to(device)  # Foo(10, 20), so x+y == 30
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
@@ -102,14 +100,15 @@ class TestTorchbindAOTI(TestCase):
         after = loader.run([x])[0]
         torch.testing.assert_close(after, 40 * x + x)
 
-    @unittest.skipIf(HAS_CUDA and not HAS_TRITON, "requires triton on CUDA builds")
-    def test_custom_objs_empty_when_no_torchbind(self):
+    def test_custom_objs_empty_when_no_torchbind(self, device):
+        if device != "cpu" and not HAS_TRITON:
+            self.skipTest("requires triton on accelerator builds")
+
         # A plain model with no torchbind attrs should yield an empty map.
         class Plain(torch.nn.Module):
             def forward(self, x):
                 return x + 1
 
-        device = "cuda" if HAS_CUDA else "cpu"
         m = Plain().to(device)
         x = torch.randn(2, 3, device=device)
         ep = torch.export.export(m, (x,), strict=False)
@@ -119,6 +118,10 @@ class TestTorchbindAOTI(TestCase):
         loader = torch._C._aoti.AOTIModelPackageLoader(pt2_path, "model", False, 1, -1)
         self.assertEqual(loader.get_custom_objs(), {})
 
+
+instantiate_device_type_tests(
+    TestTorchbindAOTIDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
