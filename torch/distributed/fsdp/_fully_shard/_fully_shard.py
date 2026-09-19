@@ -730,6 +730,12 @@ class FSDPModule:
         buffer allocation, the native copy, and communication. All-gather
         copy-out is unaffected.
 
+        The built-in nonzero-dimension callback instead returns an internal
+        ``_ReduceScatterInputs`` containing the padded sizes and the number of
+        leading dimensions to treat as contiguous prefixes for each copy input.
+        FSDP passes those tensors and metadata directly to the native copy,
+        without expanding the inputs into Tensor views in Python.
+
         Args:
             fn (Callable): Function that prepares reduce-scatter inputs.
             recurse (bool): Whether to also set the function for all nested FSDP
