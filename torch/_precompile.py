@@ -113,10 +113,10 @@ it.
 #    one can be synthesized for it -- a ``torch.library.custom_op`` tagged
 #    ``torch.Tag.inplace`` or ``torch.Tag.out``, or one that only mutates its arguments and
 #    returns nothing, gets a trivial fake impl and captures without a ``register_fake``, so
-#    declare the mutation (``mutates_args``) and the tags accurately. Refused
-#    is a ``fn`` that reads a tensor's DATA -- ``.data_ptr()``, or a NumPy conversion
-#    (``.numpy()``, ``np.asarray(t)``, ``t.__array__()``) -- since a fake tensor has no
-#    real memory behind it, where a real trace would have run the kernel. Fake tracing also
+#    declare the mutation (``mutates_args``) and the tags accurately. A ``fn`` that reads a
+#    tensor's DATA -- ``.data_ptr()``, or a NumPy conversion
+#    (``.numpy()``, ``np.asarray(t)``, ``t.__array__()``) -- fails too, since a fake tensor
+#    has no real memory behind it, where a real trace would have run the kernel. Fake tracing also
 #    constrains the example INPUTS themselves: every example tensor (user input, param or
 #    buffer) must be representable as a fake tensor, so one the meta converter cannot
 #    represent -- a quantized tensor, a lazy-device tensor, a legacy batched tensor, a
@@ -359,8 +359,7 @@ class PrecompileError(RuntimeError):
     Raised when capture, lowering, ``load``, or a runtime call violates the precompile
     contract -- e.g. a tensor baked as a constant (invariant 1), an unsupported /
     effectful op, a data-dependent op the fake-tensor capture cannot know (``.item()``,
-    ``.nonzero()``, a branch over a tensor value), a read of a traced tensor's data
-    (``.data_ptr()``, ``.numpy()`` / ``np.asarray()``), an
+    ``.nonzero()``, a branch over a tensor value), an
     example input that cannot be represented as a fake tensor (a quantized tensor) or whose
     metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
     input, none of which capture supports on either path (invariant 3), a capture
@@ -1628,43 +1627,6 @@ def _capture(
                     "float(num_batches_tracked) -- so go by the underlying op named below."
                     f"{mark_hint} Underlying: {(str(e).splitlines() or [''])[0]}"
                 ) from e
-            except RuntimeError as e:
-                # One failure here is ours to explain: a read of a fake tensor's data
-                # (what the config patch above buys us). Anything else is fn's own.
-                first = (str(e).splitlines() or [""])[0]
-                # Match the fake-specific texts, not the generic "Cannot access data
-                # pointer" prefix: a REAL tensor with no storage (e.g. a sparse tensor fn
-                # closes over) raises "...of Tensor that doesn't have storage" from the same
-                # c10 code and must reach the caller unrelabeled. The three matched, as
-                # measured on this tree: .data_ptr() hits StorageImpl, which names
-                # FakeTensor; a kernel that dereferences a fake (e.g. tensor_split with
-                # tensor indices) hits TensorImpl's typed data_ptr_impl, which reports
-                # uninitialized storage instead -- that message is not fake-exclusive in
-                # principle, but no real tensor reaches it on the paths capture constructs
-                # (a sparse one takes the doesn't-have-storage arm, a meta one returns 0,
-                # and a storage-freed input is fakeified before any kernel sees it); and a
-                # NumPy conversion (t.numpy(), np.asarray(t), t.__array__()) is rejected
-                # earlier by tensor_numpy.cpp, which blames "tensor subclasses" -- usually
-                # capture's own FakeTensor, but it CAN be one the caller wrote (the check
-                # is is_python_dispatch()), which is why the refusal points at Underlying:
-                # rather than asserting whose it is.
-                reads_fake_data = (
-                    "Cannot access data pointer of Tensor (e.g." in str(e)
-                    or "its data is not allocated yet" in str(e)
-                    or ".numpy() is not supported for tensor subclasses" in str(e)
-                )
-                if reads_fake_data:
-                    raise PrecompileError(
-                        "precompile: fn reads a tensor's data -- its data pointer "
-                        "(.data_ptr(), or a kernel that dereferences one) or a NumPy "
-                        "conversion (.numpy(), np.asarray(), __array__) -- which the "
-                        "fake-tensor trace cannot provide: the traced tensors have no data "
-                        "behind them, and the tensor subclass a NumPy conversion blames may "
-                        "be capture's own FakeTensor rather than one you wrote -- check "
-                        "Underlying:. Move the read out of fn, or wrap that kernel in a "
-                        f"custom op with a registered fake impl. Underlying: {first}"
-                    ) from e
-                raise
     finally:
         for a, g in zip(real_flat, saved_grads):
             if isinstance(a, torch.Tensor):
@@ -3082,14 +3044,12 @@ class _PrecompileApi:
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked as a constant (invariant 1), effectful ops (invariant 4), a
         data-dependent op a static (fake-tensor) capture cannot know -- ``.item()``,
-        ``.nonzero()``, a Python branch over a tensor value -- a read of a traced
-        tensor's data (``.data_ptr()``,
-        ``.numpy()`` / ``np.asarray()``), an example input the fake trace cannot represent
-        (a quantized tensor) or whose metadata it silently drops (a pinned, mkldnn or
-        sparse tensor), a nested example input, none of which capture supports on either
-        path (invariant 3), a capture attempted inside another trace (invariant 3 in the
-        Note has the reason), and -- for the inductor backend -- a runtime input whose
-        stride / memory format differs from the example's (invariant 6).
+        ``.nonzero()``, a Python branch over a tensor value -- an example input the fake
+        trace cannot represent (a quantized tensor) or whose metadata it silently drops
+        (a pinned, mkldnn or sparse tensor), a nested example input, none of which capture
+        supports on either path (invariant 3), a capture attempted inside another trace
+        (invariant 3 in the Note has the reason), and -- for the inductor backend -- a
+        runtime input whose stride / memory format differs from the example's (invariant 6).
 
         A call served from the artifact IGNORES the serving process's ambient autocast:
         whatever the capture ran under is already baked in (ATen casts for ``"eager"``,
