@@ -2824,6 +2824,38 @@ class TestVmapOperators(Namespace.TestVmapBase):
             in_dims=(None, 0),
         )
 
+    def test_block_diag_batch_size_0(self):
+        # Regression test for #192024: batch size 0 crashed in at::cat.
+        def op(*tensors):
+            return torch.block_diag(*tensors)
+
+        x = torch.rand(0, 3)
+        y = torch.rand(0, 4)
+        self.assertEqual(vmap(op)(x, y).shape, (0, 2, 7))
+        self.assertEqual(vmap(op)(x).shape, (0, 1, 3))
+        self.assertEqual(vmap(op)(torch.rand(0, 2, 3)).shape, (0, 2, 3))
+        s0 = torch.rand(0)
+        self.assertEqual(vmap(op)(s0, s0.clone()).shape, (0, 2, 2))
+        unbatched = torch.rand(4)
+        self.assertEqual(vmap(op, in_dims=(0, None))(x, unbatched).shape, (0, 2, 7))
+        y64 = torch.rand(0, 4, dtype=torch.float64)
+        self.assertEqual(vmap(op)(x, y64).dtype, torch.float64)
+        # sum() would promote these to int64 if the batching rule did not pin the dtype
+        for dtype in (torch.bool, torch.int32):
+            b = torch.zeros(0, 3, dtype=dtype)
+            self.assertEqual(vmap(op)(b, b.clone()).dtype, dtype)
+        x2, y2 = torch.rand(2, 0, 3), torch.rand(2, 0, 4)
+        self.assertEqual(vmap(vmap(op))(x2, y2).shape, (2, 0, 2, 7))
+        self.assertEqual(vmap(vmap(op))(torch.rand(0, 2, 3)).shape, (0, 2, 1, 3))
+        for batch in (0, 1):
+            with self.assertRaisesRegex(RuntimeError, "2 or fewer dimensions"):
+                vmap(op)(torch.rand(batch, 2, 3, 4))
+        xg = x.clone().requires_grad_()
+        result = vmap(op)(xg, y)
+        self.assertTrue(result.requires_grad)
+        result.sum().backward()
+        self.assertEqual(xg.grad, torch.zeros_like(xg))
+
     def test_slice(self):
         test = self._vmap_view_test
         B0, B1, B2 = 7, 11, 13
