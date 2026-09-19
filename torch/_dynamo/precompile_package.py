@@ -154,13 +154,20 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         # CatchErrorsWrapper asks for this clone only for a frame under an
         # active DDP module in ddp_optimizer mode (the default, optimize_ddp=True).
-        raise PackageError(
-            "Cannot precompile a DistributedDataParallel forward with "
-            f"torch._dynamo.config.optimize_ddp={torch._dynamo.config.optimize_ddp!r}: "
-            "DDPOptimizer compiles the graph one bucket at a time and no bucket "
-            "records a backend under the id the package saves, so the capture "
-            "could not serialize this frame"
-        )
+        if self._inner_convert._package is None:
+            return super()._clone_with_backend
+
+        def refuse(backend: WrapBackendDebug) -> ConvertFrame:
+            raise PackageError(
+                "Cannot precompile a DistributedDataParallel forward with "
+                f"torch._dynamo.config.optimize_ddp={torch._dynamo.config.optimize_ddp!r}: "
+                "DDPOptimizer compiles the graph one bucket at a time and no bucket "
+                "records a backend under the id the package saves. Set "
+                'torch._dynamo.config.optimize_ddp="no_optimization" to precompile '
+                "a DDP forward (this disables DDPOptimizer's comm/compute overlap)"
+            )
+
+        return refuse
 
     def __call__(
         self,
