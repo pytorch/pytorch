@@ -2573,7 +2573,6 @@ class TestFP8Matmul(TestCase):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/164271")
     @onlyCUDA
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support row-wise scaling")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -2589,14 +2588,13 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y / y_scales, e4m3_type)
 
         cu_count = torch.cuda.get_device_properties().multi_processor_count
-        carveout = 66 if torch.version.cuda else cu_count // 8
 
         # Warm up so hipBLASLt's one-time init kernel does not appear in the profile trace below.
         scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
         torch.cuda.synchronize()
 
         with tempfile.NamedTemporaryFile() as f:
-            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
+            with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]) as prof:
                 self.assertIsNone(torch._C._get_sm_carveout_experimental())
                 scaled_mm_wrap(x_fp8, y_fp8, scale_a=x_scales, scale_b=y_scales, out_dtype=torch.bfloat16)
                 torch._C._set_sm_carveout_experimental(0)
@@ -2612,28 +2610,34 @@ class TestFP8Matmul(TestCase):
             prof.export_chrome_trace(f.name)
             if torch.version.hip:
                 with open(f.name) as file:
-                    events = [evt for evt in json.load(file)["traceEvents"] if evt.get("cat", "") == "kernel"]
-                # events were returned out of order; need to be sorted on "ts" timestamp
-                events = sorted(events, key=lambda x: x['ts'])
-                # ROCm carveout is invisible except for kernels running slower on fewer CUs
-                no_carveout, carveout_0, carveout, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
-                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):  # noqa: SIM222
-                    # something went wrong, print more info to help debug flaky test
-                    print("ROCm debug info for test_honor_sm_carveout")
-                    print("cu_count", cu_count)
-                    print("no_carveout", no_carveout)
-                    print("carveout_0", carveout_0)
-                    print("carveout", carveout)
-                    print("no_carveout_again", no_carveout_again)
-                self.assertTrue(no_carveout < carveout)
-                self.assertTrue(carveout_0 < carveout)
-                self.assertTrue(no_carveout_again < carveout)
-                # ROCm carveout will create new streams when enabled, and go back to the original stream when disabled
-                no_carveout, carveout_0, carveout, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
-                self.assertTrue(no_carveout == no_carveout_again)
-                self.assertTrue(no_carveout == carveout_0)
-                self.assertTrue(no_carveout != carveout)
-                self.assertTrue(carveout_0 != carveout)
+                    trace = json.load(file)["traceEvents"]
+                # Attribute kernels to the four _scaled_mm calls through the External id
+                # kineto stamps on both the cpu op and its kernels, instead of assuming the
+                # trace holds exactly four kernel events (#164271: a dropped or extra kernel
+                # record made the unpack raise). Each call's GEMM is its longest kernel.
+                mm_ops = sorted(
+                    (evt for evt in trace if evt.get("cat") == "cpu_op" and evt.get("name", "").startswith("aten::_scaled_mm")),
+                    key=lambda evt: evt["ts"],
+                )
+                self.assertEqual(len(mm_ops), 4, f"expected four _scaled_mm ops in the trace, got {len(mm_ops)}")
+                gemms = []
+                for op in mm_ops:
+                    ext_id = op["args"]["External id"]
+                    kernels = [evt for evt in trace if evt.get("cat") == "kernel" and evt.get("args", {}).get("External id") == ext_id]
+                    self.assertTrue(kernels, f"no kernel recorded for _scaled_mm External id {ext_id}")
+                    gemms.append(max(kernels, key=lambda evt: float(evt.get("dur", 0.0))))
+                # The ROCm carveout is a CU-masked stream. The carved GEMM runs slower on
+                # fewer CUs, but that ordering depends on whatever else is on the GPU
+                # (it inverted next to a co-tenant process locally), so the durations
+                # are only reported; the assertions check that the carved call ran on a
+                # different stream and the others returned to the original one.
+                durations = [float(evt.get("dur", 0.0)) for evt in gemms]
+                info = f"cu_count={cu_count} durations(us) no_carveout={durations[0]} carveout_0={durations[1]} carveout={durations[2]} no_carveout_again={durations[3]}"
+                no_carveout, carveout_0, carveout, no_carveout_again = [int(evt.get("tid", 0)) for evt in gemms]
+                self.assertTrue(no_carveout == no_carveout_again, info)
+                self.assertTrue(no_carveout == carveout_0, info)
+                self.assertTrue(no_carveout != carveout, info)
+                self.assertTrue(carveout_0 != carveout, info)
             else:
                 with open(f.name) as file:
                     no_carveout, carveout_0, carveout_66, no_carveout_again = [
