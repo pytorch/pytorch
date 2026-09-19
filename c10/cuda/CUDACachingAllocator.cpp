@@ -1871,7 +1871,17 @@ class DeviceCachingAllocator {
             // should be able to reclaim cached memory.
             || (C10_LIKELY(!is_capture_context()) &&
                 release_cached_blocks(context, {0, 0}) &&
-                alloc_block(params, true, context, lock));
+                // release_cached_blocks() runs synchronize_and_free_events(),
+                // which waits on pending stream events (e.g. from
+                // record_stream) and returns those blocks to the pool. A block
+                // large enough to satisfy this request may now be available in
+                // the pool even though a fresh cudaMalloc is still impossible
+                // (its segment is pinned by a live block and the device is
+                // full). Re-search the pool before attempting another
+                // cudaMalloc so we do not raise a spurious OOM on a request the
+                // pool can already satisfy. See pytorch/pytorch#189504.
+                (get_free_block(params) ||
+                 alloc_block(params, true, context, lock)));
       }
     }
 
@@ -3894,6 +3904,10 @@ class DeviceCachingAllocator {
       return false;
     p.block = *it;
     pool.erase_from_blocks(p.block);
+    // A pool hit is a successful allocation. Clear any stale error left by a
+    // prior failed alloc_block() in the same malloc() retry chain, so callers
+    // (e.g. alloc_found_block) see params.err == cudaSuccess. See #189504.
+    p.err = cudaSuccess;
     return true;
   }
 
