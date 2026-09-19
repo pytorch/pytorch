@@ -2416,14 +2416,15 @@ class InstructionTranslatorBase(
     # InstructionTranslator - so it should be safe to do. graph_break_ok is not
     # part of its key (which is why this is not @cache_method, whose key is the
     # whole argument tuple): it is read only when the alias slot is taken, which
-    # a memo hit rules out, so keying on it would only run the body a second
-    # time for a name two callers both resolve.
+    # a memo hit rules out because the memo is written only past that check (a
+    # refusal memoizes nothing), so keying on it would only run the body a
+    # second time for a name two callers both resolve.
     def import_source(
         self, module_name: str, graph_break_ok: bool = False
     ) -> GlobalSource:
         """
         Create an alias to a module for use in guards. A slot already holding
-        something other than the resolved module is a hard error unless
+        something other than the resolved module is an AssertionError unless
         graph_break_ok says the caller can graph break there.
         """
         if (memo := self._import_source_memo.get(module_name)) is not None:
@@ -2498,7 +2499,7 @@ class InstructionTranslatorBase(
                     hints=[
                         f"Remove or rename the global {alias} from the globals of {scope}.",
                         "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
-                        "Without fullgraph=True, Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame until torch._dynamo.reset().",
+                        "When this graph break is not raised as an error, Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame until torch._dynamo.reset().",
                     ],
                 )
         # Recorded only once the check has passed: the package entry outlives a

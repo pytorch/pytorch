@@ -1307,7 +1307,7 @@ def add(x, y):
         # The first hint names the module whose globals hold the slot -- the
         # root frame's, which an inlined callee's own module is not.
         hint = f"Remove or rename the global {alias} from the globals of {scope}."
-        cached = "Without fullgraph=True, Dynamo caches this frame's outcome"
+        cached = "When this graph break is not raised as an error, Dynamo caches"
         args = (torch.randn(3, 2),)
         try:
             sys.modules[name] = module
@@ -1410,6 +1410,7 @@ def add(x, y):
                 torch.compile(nameless_fn, backend=cnt)(*args)
             self.assertEqual(cnt.frame_count, 2)
         finally:
+            _import_module.cache_clear()
             torch._dynamo.reset()
 
     def test_import_alias_taken_in_a_torch_package_slot_is_a_hard_error(self):
