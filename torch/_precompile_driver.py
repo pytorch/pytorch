@@ -418,6 +418,7 @@ def _build_multigraph_forward():
     import types
 
     import torch
+    from torch._dynamo.output_graph import get_builtins_dict
     from torch._dynamo.package import (
         load_guard_manager,
         load_guards_state,
@@ -574,6 +575,17 @@ def _build_multigraph_forward():
         variants = []
         for guarded in frame["variants"]:
             guards_state = load_guards_state(guarded["guards_state"])
+            # A kept guard on a builtin is rooted at the global Dynamo minted
+            # for the builtins dict, a name no module's vars() holds, so a load
+            # has to seed it or every variant misses with a KeyError on it. The
+            # LIVE builtins of this process, the way CompilePackage.install and
+            # AOTCompiledFunction seed it for the other two serving modes: the
+            # guard is an id match on a builtin, which a snapshot would fail.
+            builtins_key = (
+                guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+            )
+            if builtins_key:
+                ns[builtins_key] = get_builtins_dict(ns)
             manager = load_guard_manager(guards_state, target, ns)
             body = SerializedCode.to_code_object(guarded["dynamo_code"])
             variants.append((manager, body))
