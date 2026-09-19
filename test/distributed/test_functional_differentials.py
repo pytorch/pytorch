@@ -1028,12 +1028,9 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
 
     @with_comms
     def test_all_reduce_coalesced_compile(self):
-        """coalesced sum/avg backward flows grad through wait_tensors under compile.
+        """Test that all_reduce_coalesced backward works with torch.compile.
 
-        Companion to the min/max coalesced test: min/max exposed the missing
-        wait_tensors autograd via all-zero grads, but wait_tensors sits on the
-        forward path of every coalesced reduce, so the non-extremum ops must
-        backprop through it too.
+        Test sum/avg only and leave min/max in the dedicated coalesced test.
         """
         shape = (3, 3)
         group_name = dist.group.WORLD.group_name
