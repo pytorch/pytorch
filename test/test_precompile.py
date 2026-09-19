@@ -189,6 +189,177 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
             GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc mod.fn", False)
 
+    def test_summary_pickle_and_hash(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # A fully populated summary round-trips through pickle (which resolves
+        # the class through its __module__) and hashes equal to its copy.
+        risky = (("ID_MATCH", "self.act"),)
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        summary = PrecompileSummary(
+            frames=3,
+            resume_functions=1,
+            guarded_codes=4,
+            backend_graphs=3,
+            bypassed=("gen",),
+            truncated=("loop (m.py:12)",),
+            uncovered_frames=("helper",),
+            wont_generalize=("n",),
+            dropped_guards=(("HASATTR", "m"),) + risky,
+            kept_guards=(("EQUALS_MATCH", "n"), ("TENSOR_MATCH", "x")),
+            risky_dropped_guards=risky,
+            policy_dropped_guards=(policy,),
+            dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
+            capture_errors=("RuntimeError: boom",),
+        )
+        clone = pickle.loads(pickle.dumps(summary))
+        self.assertEqual(clone, summary)
+        self.assertEqual(hash(clone), hash(summary))
+        # Every clause at once: the notes come first and the shouted frame
+        # failures last, so a failure never sits between two notes.
+        self.assertExpectedInline(
+            str(summary),
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
+        # Keyword-only: four leading ints would otherwise transpose silently.
+        with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
+            PrecompileSummary(3, 1, 4, 3)
+
+    def test_summary_guard_lists_aggregate_over_frames(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # Two frames' guards on the builtin len are one slot (the producer
+        # normalizes the per-compile counter out of the builtins-dict key). One
+        # frame's caller filter rejected it and the drop told that frame's
+        # variants apart, so it is risky (the risky-drop lint waives a builtin
+        # read the ordinary way); the other frame's invariance policy dropped
+        # it, which the policy may do to a BUILTIN_MATCH: the slot sits in all
+        # three lists.
+        # The relations hold per frame and the type checks nothing, so the
+        # report still constructs and counts the slot once.
+        act = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        check = "___check_obj_id(G['__builtins_dict___<n>']['len'], <id>), type=<class 'builtin_function_or_method'>"
+        summary = PrecompileSummary(
+            frames=2,
+            resume_functions=0,
+            guarded_codes=2,
+            backend_graphs=2,
+            dropped_guards=(act,),
+            risky_dropped_guards=(act,),
+            policy_dropped_guards=(act,),
+            dropped_guard_code=(act + (check,),),
+        )
+        self.assertEqual(summary.dropped_guard_types, {"BUILTIN_MATCH": 1})
+        self.assertExpectedInline(
+            str(summary),
+            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'BUILTIN_MATCH': 1} (0 kept), RISKY drops ["BUILTIN_MATCH G['__builtins_dict___<n>']['len']"], 1 policy-dropped guard""",
+        )
+
+    def test_summary_complete_requires_every_term(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        def summary(**kw):
+            base = dict(frames=1, resume_functions=0, guarded_codes=1, backend_graphs=1)
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+        self.assertFalse(summary(bypassed=("f",)).complete)
+        self.assertFalse(summary(truncated=("f",)).complete)
+        self.assertFalse(summary(uncovered_frames=("f",)).complete)
+        # Coverage only: the guard fields never make a capture incomplete.
+        risky = (("ID_MATCH", "self.act"),)
+        flagged = summary(dropped_guards=risky, risky_dropped_guards=risky)
+        self.assertTrue(flagged.complete)
+        pinned = summary(wont_generalize=("n",), kept_guards=(("EQUALS_MATCH", "n"),))
+        self.assertTrue(pinned.complete)
+
+    def test_summary_digest_and_guard_type_counts(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # The fixtures list slots sorted; the tallies render in first-appearance
+        # order. A value-pinned source is one a kept value-equality guard
+        # on a bare name pins, so each such fixture keeps that guard too.
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        plain = PrecompileSummary(
+            frames=2,
+            resume_functions=1,
+            guarded_codes=3,
+            backend_graphs=2,
+            dropped_guards=(
+                ("HASATTR", "m"),
+                ("ID_MATCH", "G['fn']"),
+                ("ID_MATCH", "G['g']"),
+            ),
+            kept_guards=(
+                ("EQUALS_MATCH", "scale"),
+                ("TENSOR_MATCH", "x"),
+                ("TYPE_MATCH", "x"),
+            ),
+            policy_dropped_guards=(policy,),
+            # For programmatic consumers: the digest below does not mention it.
+            dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
+            wont_generalize=("scale",),
+        )
+        self.assertEqual(plain.dropped_guard_types, {"HASATTR": 1, "ID_MATCH": 2})
+        kept = {"EQUALS_MATCH": 1, "TENSOR_MATCH": 1, "TYPE_MATCH": 1}
+        self.assertEqual(plain.kept_guard_types, kept)
+        self.assertExpectedInline(
+            str(plain),
+            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 2} (3 kept), 1 policy-dropped guard, 1 value-pinned source""",
+        )
+        # No optional clause: kept guards show up only beside the drops.
+        clean = PrecompileSummary(
+            frames=1,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            kept_guards=(("TENSOR_MATCH", "x"),),
+        )
+        self.assertExpectedInline(
+            str(clean),
+            """1 frame (0 from graph breaks), 1 guarded code, 1 backend graph""",
+        )
+        # The risky slots are dropped slots too; the digest names them whole,
+        # since a dropped ID_MATCH and its HASATTR companion share a source.
+        # Only the first non-empty line of the first capture error is shown.
+        risky = (("HASATTR", "self.act"), ("ID_MATCH", "self.act"))
+        bad = PrecompileSummary(
+            frames=3,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            bypassed=("gen",),
+            truncated=("loop (m.py:12)",),
+            uncovered_frames=("helper",),
+            dropped_guards=risky,
+            risky_dropped_guards=risky,
+            capture_errors=("\nRuntimeError: boom\nHint: do not.",),
+        )
+        self.assertExpectedInline(
+            str(bad),
+            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
+        # The list clauses stop at five entries and count the rest, so the
+        # digest stays one line however many frames a model has.
+        wide = PrecompileSummary(
+            frames=8,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            uncovered_frames=tuple(f"f{i}" for i in range(7)),
+            dropped_guards=risky,
+            risky_dropped_guards=risky,
+            capture_errors=("RuntimeError: boom", "TypeError: bad", "ValueError: no"),
+        )
+        self.assertExpectedInline(
+            str(wide),
+            """8 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 7 UNCOVERED: ['f0', 'f1', 'f2', 'f3', 'f4'] +2 more, 3 CAPTURE ERRORS: 'RuntimeError: boom' +2 more""",
+        )
+
     def test_constant_tensor_is_rejected(self):
         captured = torch.randn(3)
         with self.assertRaisesRegex(PrecompileError, "hard-coded"):
@@ -3024,91 +3195,6 @@ class TestPrecompile(TestCase):
 
 class TestPrecompilePublicSurface(TestCase):
     """The public module surface and the report types: nothing here traces."""
-
-    def _summary(self, **kwargs):
-        from torch.compiler.precompile import PrecompileSummary
-
-        fields = dict(frames=2, resume_functions=1, guarded_codes=3, backend_graphs=2)
-        return PrecompileSummary(**{**fields, **kwargs})
-
-    def test_summary_guard_type_counts(self):
-        summary = self._summary(
-            dropped_guards=(
-                ("TENSOR_MATCH", "L['x']"),
-                ("TENSOR_MATCH", "L['y']"),
-                ("HASATTR", "L['m'].w"),
-            ),
-            kept_guards=(("TYPE_MATCH", "L['x']"), ("TYPE_MATCH", "L['y']")),
-        )
-        self.assertEqual(
-            summary.dropped_guard_types(), {"TENSOR_MATCH": 2, "HASATTR": 1}
-        )
-        self.assertEqual(summary.kept_guard_types(), {"TYPE_MATCH": 2})
-        self.assertEqual(self._summary().dropped_guard_types(), {})
-        self.assertEqual(self._summary().kept_guard_types(), {})
-
-    def test_summary_complete(self):
-        # complete gates an artifact, so every way a capture can be incomplete has to
-        # flip it: no guarded code at all, a frame that hit the recompile limit, was
-        # bypassed or never reached, a call that raised, and (because allow_empty_graphs
-        # lets a frame that compiled nothing still count as a guarded code) no graph.
-        self.assertTrue(self._summary().complete)
-        for field in ("bypassed", "truncated", "uncovered_frames", "capture_errors"):
-            with self.subTest(field=field):
-                self.assertFalse(self._summary(**{field: ("f",)}).complete)
-        self.assertFalse(self._summary(guarded_codes=0).complete)
-        self.assertFalse(self._summary(backend_graphs=0).complete)
-        # Dropped guards are reported apart, so they deliberately do NOT flip it:
-        # adding any of these would leave essentially every real capture incomplete.
-        drops = ("dropped_guards", "risky_dropped_guards", "policy_dropped_guards")
-        for field in drops:
-            with self.subTest(field=field):
-                self.assertTrue(self._summary(**{field: (("HASATTR", "s"),)}).complete)
-        self.assertTrue(self._summary(wont_generalize=("w",)).complete)
-
-    def test_summary_str(self):
-        self.assertEqual(
-            str(self._summary()),
-            "2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs",
-        )
-        rendered = str(
-            self._summary(
-                bypassed=("b",),
-                truncated=("t",),
-                uncovered_frames=("u",),
-                wont_generalize=("w",),
-                dropped_guards=(("HASATTR", "L['m'].w"),),
-                risky_dropped_guards=(("HASATTR", "L['m'].risky"),),
-                policy_dropped_guards=(("TYPE_MATCH", "L['m'].policy"),),
-                capture_errors=("boom",),
-            )
-        )
-        self.assertIn("dropped guards {'HASATTR': 1}", rendered)
-        # Type AND source, so it is not read as the histogram one label over.
-        self.assertIn("""RISKY drops ["HASATTR on L['m'].risky"]""", rendered)
-        self.assertIn("1 policy drops", rendered)
-        self.assertIn("1 UNCOVERED: ['u']", rendered)
-        self.assertIn("1 value-pinned guards", rendered)
-        self.assertIn(">=1 TRUNCATED: ['t']", rendered)
-        self.assertIn("1 BYPASSED: ['b']", rendered)
-        self.assertIn("1 CAPTURE ERROR(S)", rendered)
-
-    def test_summary_types_pickle(self):
-        # These reports get stashed next to an artifact (a torch.save'd diagnostics
-        # record, a capture farm). A previous revision pointed their __module__ at
-        # torch.compiler, which does not export them, so pickle could not resolve them.
-        from torch.compiler._precompile_types import GuardFact, PrecompileSummary
-
-        fact = GuardFact(
-            guard_type="TYPE_MATCH",
-            source="L['x']",
-            code=("code",),
-            value="is int",
-            enforced=True,
-        )
-        summary = PrecompileSummary(1, 0, 1, 1)
-        for obj in (fact, summary):
-            self.assertEqual(pickle.loads(pickle.dumps(obj)), obj)
 
     def test_tracer_annotations_resolve_after_the_re_home(self):
         # torch/compiler/precompile.py pre-resolves the two tracers' annotations before
