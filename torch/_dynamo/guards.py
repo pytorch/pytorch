@@ -4223,6 +4223,43 @@ def _get_unsupported_types() -> tuple[type, ...]:
     return ret
 
 
+def _is_interned_singleton(value: Any) -> bool:
+    """Whether pruning ``value`` would poison unrelated references to it.
+
+    Pruning is keyed by ``id()``, which asks "is this the same OBJECT" when the
+    question it means is "is this the same REFERENCE". For an interned value the
+    two come apart: ``torch.float32`` is one object, so an unguarded attribute
+    holding it registers that id as missing and EVERY other reference to that
+    dtype -- including ones the artifact genuinely needs -- then resolves to the
+    sentinel, and the artifact fails to load with "empty_strided(): argument
+    'dtype' must be torch.dtype, not _Missing".
+
+    These are also exactly the values pruning gains nothing from: they are
+    immutable, trivially picklable, and a handful of bytes. So skip them rather
+    than make identity carry a distinction it cannot.
+    """
+    if isinstance(value, (tuple, frozenset)) and not value:
+        # () is one object process-wide, so pruning it by id would turn every
+        # empty tuple in the state into the sentinel.
+        return True
+    return isinstance(
+        value,
+        (
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+            type(None),
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+        ),
+    )
+
+
 class GuardsStatePickler(FunctionPicklerBase):
     def __init__(
         self,
@@ -4653,6 +4690,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                     continue
                 if callable(attr):
                     continue
+                if _is_interned_singleton(attr):
+                    continue
                 self.missing_values[id(attr)] = attr
 
             # DDP module is a special case because it tries to restore unneeded
@@ -4846,7 +4885,7 @@ def pickle_guards_state(
                         empty_values[id(base)] = base
                     except:  # noqa: E722
                         pass
-            elif id(leaf) not in guard_tree_values:
+            elif id(leaf) not in guard_tree_values and not _is_interned_singleton(leaf):
                 # TODO See if we have lift this branch as the first one.
                 # Prune more objects in pytree hierarchy.
                 missing_values[id(leaf)] = leaf
