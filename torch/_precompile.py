@@ -205,7 +205,6 @@ it.
 from __future__ import annotations
 
 import dataclasses
-import functools
 import hashlib
 import io
 import logging
@@ -278,13 +277,7 @@ class PrecompileError(RuntimeError):
     effectful op, a non-tensor output the inductor backend cannot lower, or a runtime
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
-
-    ``result`` is what ``fn`` returned when the capture call that raised this had
-    already run before the refusal fired, so the return value is not lost; ``None``
-    otherwise.
     """
-
-    result: object = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -352,53 +345,6 @@ class Capture:
 
     def __call__(self, *args: object, **kwargs: object) -> object:
         raise NotImplementedError
-
-
-class _MakeFxCapture(Capture):
-    r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
-
-    Takes the :class:`MakeFxTracer` the caller passed as ``tracer=`` and forwards
-    its ``decompositions`` to the ``PrecompiledModule`` it builds for ``fn``. Only
-    the constructor and ``__enter__`` exist so far: the constructor refuses a
-    partial, builds that module, and records the paths and the
-    ``_traced``/``_rendered`` state the capture drives. ``__call__`` and
-    ``__exit__`` still raise ``NotImplementedError`` from :class:`Capture`; the
-    one-call rule they will enforce is the one :class:`MakeFxTracer` documents.
-    """
-
-    def __init__(
-        self,
-        fn: Callable[..., object],
-        artifact_path: str,
-        cache_path: str,
-        *,
-        backend: str,
-        tracer: MakeFxTracer,
-        # Unread until the follow-up's __call__: it runs the one traced call under
-        # torch.enable_grad() when True (torch.no_grad() otherwise), the only mode in
-        # which make_fx builds a .backward() in fn as graph ops (see the grad-mode
-        # comment in _capture). It is not a serve-time or lowering knob: the grads
-        # ride out as extra outputs of one flat graph (invariant 5), so the lowering
-        # stays on AOTAutograd's inference path (to_standalone_python.py pins no_grad)
-        # and both drivers serve the artifact with grad disabled.
-        training: bool,
-    ) -> None:
-        if isinstance(fn, functools.partial):
-            raise PrecompileError(
-                "precompile cannot capture a partial. Pass the underlying function "
-                "and give its bound arguments as call arguments."
-            )
-        self._module = PrecompiledModule(
-            fn, backend=backend, tracer="make_fx", decompositions=tracer.decompositions
-        )
-        self._artifact_path = artifact_path
-        self._cache_path = cache_path
-        self._training = training
-        self._traced = False
-        self._rendered: tuple[str, bytes] | None = None
-
-    def __enter__(self) -> Self:
-        return self
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -1491,10 +1437,9 @@ class PrecompiledModule(PrecompiledRunnable):
         tracer: str = "make_fx",
         decompositions: dict | None = None,
     ) -> None:
-        # ``fn`` is the whole computation: an nn.Module, or a callable that takes the
-        # module(s) it uses as positional arguments (e.g. ``lambda m, x: m(x)``, or a
-        # training step that computes a loss and torch.autograd.grad); a module it
-        # closed over instead would be baked in as constants (invariant 1).
+        # ``fn`` is the whole computation: an nn.Module, or a callable that closes
+        # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
+        # step that computes a loss and torch.autograd.grad).
         self._fn = fn
         self._backend = backend
         self._tracer = tracer
