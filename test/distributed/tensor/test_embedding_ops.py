@@ -14,9 +14,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorContinuousTestBase,
-    LocalDTensorContinuousTestBase,
-    NUM_DEVICES,
+    DTensorTestBase,
     with_comms,
 )
 
@@ -32,9 +30,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 funcol = torch.ops.c10d_functional
 
 
-class TestEmbeddingOp(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
-
+class TestEmbeddingOp(DTensorTestBase):
     def _apply_sharding(self, embedding_mod, shard_dim, device_mesh):
         def shard_embedding_fn(name, module, device_mesh):
             for name, param in module.named_parameters():
@@ -266,7 +262,6 @@ class TestEmbeddingOp(DTensorContinuousTestBase):
 
 TestEmbeddingOpWithLocalTensor = create_local_tensor_test_class(
     TestEmbeddingOp,
-    base_class=LocalDTensorContinuousTestBase,
 )
 
 if __name__ == "__main__":
