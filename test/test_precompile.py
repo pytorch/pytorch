@@ -2430,9 +2430,11 @@ class TestPrecompile(TestCase):
             PrecompileError, "guard on a value this capture"
         ) as cm:
             _precompile_pair(branches_on_item, m, x)
-        # The refusal must name the VALUE symbol (an unbacked float, zuf0 > 0.0), not the
-        # marked dim (u0 > 4) -- the marked-dim case produces the same top line verbatim.
-        self.assertRegex(str(cm.exception), r"Underlying:.*zuf\d+ > 0\.0")
+        # The refusal must name the VALUE symbol (an unbacked float, zuf0), not the marked
+        # dim (u0) -- the marked-dim case produces the same top line verbatim. The zuf
+        # prefix is the whole claim; how sympy renders the 0.0 it is compared against is
+        # not precompile's behavior, so it is left out.
+        self.assertRegex(str(cm.exception), r"Underlying:.*zuf\d+ >")
 
     def test_dynamic_shapes_eager_rejected(self):
         m = torch.nn.Linear(4, 3).eval()
@@ -3883,9 +3885,15 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
             _precompile_pair(equal_branch, model, x)
         self.assertNotIn("mark_unbacked", str(cm.exception))
+        # The body is path-specific too: on the unbacked path it must diagnose a missing
+        # fake rule, not the .item()/control-flow cause that only a static capture has.
+        self.assertIn("no fake rule under a ShapeEnv", str(cm.exception))
         with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
             _precompile_pair(equal_branch, model, torch.randn(4, 4), backend="eager")
         self.assertIn("mark_unbacked", str(cm.exception))
+        # The static hint covers the VALUE half of the family the clause catches, not just
+        # the shape-producing half: a .item() is capturable on the unbacked path too.
+        self.assertIn("A data-dependent value (.item())", str(cm.exception))
 
     def test_user_runtime_error_from_fn_propagates_unchanged(self):
         # Capture catches EVERY RuntimeError out of the trace to relabel the two it
