@@ -4453,6 +4453,7 @@ from user code:
         # The entry line quotes none of [0]'s raise; the caveat names and quotes it.
         quoted = "[0] <RuntimeError: the first pass is unhappy>"
         self.assertIn(f"Fix the raise out of {quoted} first", message)
+        self.assertEqual(message.count("the first pass is unhappy"), 1, message)
         self.assertIn("[0]'s guard check raised while checking this call", message)
         self.assertEqual(sum(ln.startswith("  [") for ln in lines), 2, lines)
 
@@ -5319,9 +5320,7 @@ from user code:
         # second pair. RaisesThenHits(raises=1) is the colliding key that raises
         # on the scan and answers after it, so the tree rejects on the second
         # pass and the report's re-check quotes that rejection.
-        model = torch.compile(DictBranchModule(), fullgraph=True, backend="eager")
-        x = torch.randn(3, 3)
-        model._aot_compile([ModelInput(args=(x, {}), kwargs={}, contexts=[])])
+        model, x = self._aot_compile_dict_branches({})
         key = RaisesThenHits(raises=1)
         with self.assertRaises(RuntimeError) as ctx:
             model(x, {key: 1})
@@ -5340,6 +5339,34 @@ from user code:
         self.assertTrue(advice.endswith(caveat), advice)
         self.assertEqual(message.count("boom on compare 1"), 1, message)
         self.assertNotIn("Every guard tree raised", message)
+
+    def test_no_match_message_caveat_reads_the_opt_out_snapshot(self):
+        # The caveat names the entries enabled in the `enabled` snapshot, and this
+        # is the read in the report a fresh one can be told apart from: the gates
+        # above run before any user code, while [1]'s check_verbose -- user code
+        # under the entry loop -- opts [1] out before returning the rejection the
+        # advice rests on. [1] is the only untrusted answered entry, so a fresh
+        # read drops it and leaves the sentence naming no tree at all.
+        self._hide_leaked_dynamo_globals()
+        one = "the scan is unhappy"
+
+        class OptsOutUnderTheReport(RaisesOnceThenRejects):
+            def check_verbose(self, f_locals):
+                results[1].disable_guard_check()
+                return super().check_verbose(f_locals)
+
+        raiser = RaisingTree("every pass is unhappy")
+        model = self._model_with_stub_trees(raiser, OptsOutUnderTheReport(one))
+        results = model.forward.compiled_results
+        with self.assertRaises(RuntimeError) as ctx:
+            model(torch.randn(3, 3))
+        message = str(ctx.exception)
+        lines = message.splitlines()
+        self.assertFalse(results[1]._guard_check_enabled)
+        self.assertIn("  [1] stub guard rejected", lines)
+        advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
+        caveat = CAVEAT_AFTER_A_RAISE.format("", f"[1] <RuntimeError: {one}>")
+        self.assertTrue(advice.endswith(caveat), advice)
 
     def test_no_match_message_caveat_skips_an_opted_out_raise_then_rejection(self):
         # [0] enabled and [1] opted out both raised on the scan and rejected on
