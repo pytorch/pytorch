@@ -1803,18 +1803,15 @@ Tensor asarray(
   // Check whether 'obj' exposes a '__dlpack__' method, preferring it over the
   // buffer protocol so dtype, device, and shape come from the producer.
   if (!tensor.defined() && PyObject_HasAttrString(obj, "__dlpack__")) {
-    // Resolved outside the try: a failure here is a broken torch install, not
-    // a producer that cannot export, and must not be swallowed.
+    // Resolved outside the try so a broken install propagates instead of
+    // silently falling back.
     auto from_dlpack =
         py::module::import("torch").attr("utils").attr("dlpack").attr(
             "from_dlpack");
     try {
       tensor = from_dlpack(py::handle(obj)).cast<Tensor>();
-    } catch (py::error_already_set& e) {
-      // The producer cannot export (unsupported dtype/device, or data that
-      // only works via the buffer/sequence paths); fall back to those.
-      e.restore();
-      PyErr_Clear();
+      // NOLINTNEXTLINE(bugprone-empty-catch)
+    } catch (const py::error_already_set&) {
     }
   }
 
