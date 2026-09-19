@@ -595,6 +595,12 @@ static int THPVariable_setitem_impl(
 
   {
     pybind11::gil_scoped_release no_gil;
+    if constexpr (std::is_same_v<T, Scalar>) {
+      if (at::indexing::try_dispatch_masked_fill_(
+              sliced, variableIndices, value)) {
+        return 0;
+      }
+    }
     Tensor valueTensor = asTensor(value, self_);
     SymIntArrayRef valueSizes = valueTensor.sym_sizes();
     SymIntArrayRef slicedValueSizes =

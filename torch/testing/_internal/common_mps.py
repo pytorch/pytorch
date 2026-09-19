@@ -23,20 +23,10 @@ if torch.backends.mps.is_available():
         # ops below are xfailed for complex32/complex64. Drill this list down as
         # complex support is added.
         UNSUPPORTED_COMPLEX_OPS = {
-            "__rpow__",
             "addr",
-            "as_stridedpartial_views",
-            "cdouble",
             "cholesky_inverse",
-            "double",
-            "empty_like",
             "float_power",
             "geqrf",
-            "jiterator_2inputs_2outputs",
-            "jiterator_4inputs_with_extra_args",
-            "jiterator_binary",
-            "jiterator_binary_return_by_ref",
-            "jiterator_unary",
             "linalg.eig",
             "linalg.eigvals",
             "linalg.inv",
@@ -44,37 +34,16 @@ if torch.backends.mps.is_available():
             "linalg.ldl_factor",
             "linalg.ldl_factor_ex",
             "linalg.ldl_solve",
-            "linalg.lu_solve",
             "linalg.matrix_power",
             "linalg.matrix_sqrth",
-            "linalg.solve",
-            "linalg.solve_ex",
-            "linalg.solve_triangular",
             "linalg.tensorinv",
-            "linalg.tensorsolve",
             "log_softmaxwith_dtype",
-            "lu_solve",
-            "new_empty",
-            "new_empty_strided",
-            "nn.functional.alpha_dropout",
             "nn.functional.channel_shuffle",
             "nn.functional.conv3d",
-            "nn.functional.dropout",
-            "nn.functional.dropout2d",
-            "nn.functional.dropout3d",
-            "nn.functional.feature_alpha_dropoutwith_train",
-            "nn.functional.padreplicate_negative",
-            "nn.functional.silucomplex",
             "ormqr",
-            "pow",
-            "randint",
             "renorm",
-            "resize_",
-            "resize_as_",
             "sparse.sampled_addmm",
-            "to",
             "to_sparse",
-            "triangular_solve",
         }
 
         MACOS_BEFORE_14_4_XFAILLIST = {
@@ -92,9 +61,11 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
+            # No 5-D bicubic sampler on MPS. float32 only: f16/bf16 are skipped below.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": [torch.float32],
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "frexp": None,
             "hash_tensor": None,
             "heaviside": None,
             # "kthvalue": None,
@@ -276,7 +247,6 @@ if torch.backends.mps.is_available():
                 torch.bool,
                 torch.int8,
             ],
-            "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
@@ -382,20 +352,12 @@ if torch.backends.mps.is_available():
             # logcumsumexp on complex inputs disagrees with CPU at branch
             # cuts (off by 2*pi); shifted RNG exposed a sample on the cut.
             "logcumsumexp": [torch.complex64],
-            # `nn.functional.dropout` keeps a complex64 entry because the
-            # MPS dropout kernel doesn't support complex inputs at all (the
-            # shape comparison would fail to even run).
-            "nn.functional.dropout": [torch.complex64],
             # See https://github.com/pytorch/pytorch/issues/111479
             "nn.functional.multi_head_attention_forward": [
                 torch.float32,
                 torch.float16,
                 torch.bfloat16,
             ],
-            # zero to negative integer powers are undefined
-            "__rpow__": [torch.int8, torch.int16, torch.int32, torch.int64],
-            "resize_": [torch.float16, torch.float32, torch.bfloat16],
-            "resize_as_": [torch.float16, torch.float32, torch.bfloat16],
             # CPU Errors:
             "addr": [
                 torch.bool,
@@ -572,16 +534,13 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
-            "_chunk_cat": [torch.float16, torch.float32],
+            # No 5-D bicubic sampler on MPS; the grad leg fails in its forward call.
+            # TODO: drop this when MPS has 5-D bicubic.
+            "nn.functional.grid_sample": [torch.float32],
             "sparse.mmreduce": [torch.float32],  # csr not supported
             "linalg.householder_product": None,
             "linalg.lstsq": [torch.float32],
             "linalg.lstsqgrad_oriented": [torch.float32],
-            "geqrf": None,
-            "unique_consecutive": [torch.float16, torch.float32],
-            "scalar_tensor": [torch.float16, torch.float32],
-            "igamma": None,  # currently not supported for any device
-            "igammac": None,  # currently not supported for any device
             # Correctness issues
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
@@ -609,37 +568,13 @@ if torch.backends.mps.is_available():
             # sign choices.
             "pca_lowrank": [torch.float32],
             # CPU errors
-            # derivative for zeta is not implemented
-            "special.zeta": None,
-            # derivative for aten::floor_divide is not implemented on CPU
-            "floor_divide": [torch.float16, torch.float32],
-            # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
-            "histogramdd": [torch.float16, torch.float32],
-            # derivative for aten::histogram is not implemented
-            "histogram": [torch.float16, torch.float32],
             # 'bool' object is not iterable
             "allclose": [torch.float16, torch.float32],
             "equal": [torch.float16, torch.float32],
             # 'float' object is not iterable
             "item": [torch.float16, torch.float32],
-            # cpu error: grad requires non-empty inputs
-            "randn": [torch.float16, torch.float32],
-            "signal.windows.bartlett": [torch.float32],
-            "signal.windows.blackman": [torch.float32],
-            "signal.windows.cosine": [torch.float32],
-            "signal.windows.exponential": [torch.float32],
-            "signal.windows.gaussian": [torch.float32],
-            "signal.windows.general_cosine": [torch.float32],
-            "signal.windows.general_hamming": [torch.float32],
-            "signal.windows.hamming": [torch.float32],
-            "signal.windows.hann": [torch.float32],
-            "signal.windows.kaiser": [torch.float32],
-            "signal.windows.nuttall": [torch.float32],
-            "eye": [torch.float16, torch.float32],
             # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
             "to_sparse": None,
-            # Exception: the derivative for '_unique2' is not implemented.
-            "unique": None,
         }
 
         SKIPLIST_GRAD = {
@@ -701,31 +636,6 @@ if torch.backends.mps.is_available():
 
         return ops
 
-    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
-        # Error input samples do not take a dtype argument.
-        XFAILLIST = {
-            # Exceptions are not raised
-            "__rmod__",
-            "__rsub__",
-            "__rpow__",
-            "clamp_max",
-            "clamp_min",
-            "masked_scatter",
-            # MPS does not support tensor dimensions > 16
-            "amax",
-            "amin",
-            "aminmax",
-        }
-
-        def addDecorator(op: OpInfo, d: DecorateInfo) -> None:
-            op.decorators = op.decorators + (d,)
-
-        for op in ops:
-            key = op.name + op.variant_test_name
-            if key in XFAILLIST:
-                addDecorator(op, DecorateInfo(unittest.expectedFailure))
-
-        return ops
 else:
 
     def mps_ops_modifier(
@@ -737,7 +647,4 @@ else:
         return ops
 
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
-        return ops
-
-    def mps_ops_error_inputs_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         return ops
