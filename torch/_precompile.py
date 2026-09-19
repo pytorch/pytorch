@@ -140,8 +140,14 @@ it.
 #    non-strict trace follows the single path taken for the example inputs: Python
 #    ``if``/``for`` over a static (Python ``int``) value and shape-dependent branching on
 #    a static size are resolved at trace time and baked. A control-flow HOP is the
-#    exception: ``torch.cond`` / ``torch.while_loop`` is REFUSED outright rather than
-#    specialized, because neither backend can lower the captured subgraph it traces into.
+#    exception, as far as its branch choice is not already a Python constant:
+#    ``torch.while_loop``, and a ``torch.cond`` whose predicate is a TENSOR or a SymBool,
+#    is REFUSED outright rather than specialized, because neither backend can lower the
+#    captured subgraph it traces into. A ``torch.cond`` whose predicate is a PYTHON
+#    CONSTANT (e.g. a comparison of static sizes, which yields a bool) never reaches the
+#    HOP at all: outside Dynamo ``torch.cond`` short-circuits to the taken branch, so it
+#    SPECIALIZES like any other Python ``if`` -- measured, the capture holds only the taken
+#    branch's ops and no subgraph, so it is silent, exactly like a baked ``if``.
 #    Shapes are static BY DEFAULT (capture runs make_fx in its "fake" mode, so each size is
 #    baked as a concrete constant). What is NOT silently baked is a data-dependent op --
 #    ``.item()``, ``.nonzero()``, a Python ``if`` over a TENSOR VALUE: under fake tracing
@@ -2161,6 +2167,10 @@ def _capture(
                 # unspecializes it into an unbacked symint, and torch.cond merges differing
                 # int values or output sizes across its branches the same way. Same refusal
                 # as the get_attr check below; only while_loop/cond raise these messages.
+                # These two spellings are the whole scope of the relabel: a torch.cond whose
+                # branches disagree in some OTHER way (a differing output pytree spec or
+                # dtype, a non-fake or quantized/sparse/conjugate operand) fails inside the
+                # HOP with its own message and reaches the caller raw, as its own error.
                 first = (str(e).splitlines() or [""])[0]
                 if first in (
                     "Must provide a fake_mode with shape_env.",
@@ -2216,8 +2226,15 @@ def _capture(
                         "fake-tensor trace cannot provide: the traced tensors have no data "
                         "behind them, and the tensor subclass a NumPy conversion blames may "
                         "be capture's own FakeTensor rather than one you wrote -- check "
-                        "Underlying:. Move the read out of fn, or wrap that kernel in a "
-                        f"custom op with a registered fake impl. Underlying: {first}"
+                        "Underlying:. Move the read out of fn; for a KERNEL that "
+                        "dereferences a fake, wrap it in an opaque custom op with a "
+                        "registered fake impl -- a raw Triton kernel launch, whose launcher "
+                        "takes .data_ptr() of every argument, has a dedicated form: wrap it "
+                        "in a torch.library.triton_op and call it through "
+                        "torch.library.wrap_triton. See https://pytorch.org/tutorials/"
+                        "advanced/custom_ops_landing_page.html, which the typed C++ message "
+                        "also points at on a line Underlying: does not keep. Underlying: "
+                        f"{first}"
                     ) from e
                 # The full prefix custom_ops.py emits, so a user RuntimeError that merely
                 # mentions a fake impl cannot collide.

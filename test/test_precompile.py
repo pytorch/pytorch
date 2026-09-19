@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_NUMPY,
     TestCase,
 )
 
@@ -3428,6 +3429,7 @@ class TestPrecompile(TestCase):
         self.assertNotIsInstance(cm.exception, PrecompileError)
         self.assertIn("doesn't have storage", str(cm.exception))
 
+    @unittest.skipIf(not TEST_NUMPY, "test requires numpy")
     def test_capture_refuses_a_numpy_conversion(self):
         # A NumPy conversion reads the traced tensor's data exactly as .data_ptr() does,
         # but tensor_numpy.cpp rejects it earlier and blames "tensor subclasses", which
@@ -3435,9 +3437,11 @@ class TestPrecompile(TestCase):
         # so that text is matched too and relabeled. This is everyday logging/metric code
         # (loss.detach().cpu().numpy()) inside a forward, and unrelabeled it sent the user
         # after a subclass that does not exist. np.asarray(t) funnels through __array__, so
-        # calling that directly covers it and keeps the test independent of numpy being
-        # importable. All three cases hit the same production substring, so they pin the
-        # relabel for the three spellings a user writes, not three distinct branches.
+        # calling that directly covers it, so the test needs no numpy IMPORT -- but it
+        # still needs numpy to be AVAILABLE: tensor_numpy.cpp checks availability before the
+        # subclass gate, and its "Numpy is not available" text is not one the clause matches.
+        # All three cases hit the same production substring, so they pin the relabel for the
+        # three spellings a user writes, not three distinct branches.
         model = torch.nn.Linear(4, 4)
         for name, read in (
             ("numpy", lambda t: t.numpy()),
