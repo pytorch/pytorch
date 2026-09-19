@@ -51,6 +51,13 @@ if graph.find_nodes(op="call_function", target=aten.set_.default):
 
 Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
 
+## Order of random operations
+With the default `fallback_random=False`, Inductor uses functional RNG lowering whose state is represented explicitly. Passes may reorder independent random operations in this mode, provided they preserve their explicit operands and data dependencies and do not duplicate or remove them.
+
+When `fallback_random=True`, random operations consume the global CUDA RNG state, so all passes must preserve their relative order. Before `_chain_random_ops_for_ordering` runs, passes preserve the relative graph-list order of random operations, even when the graph is temporarily not topologically sorted. After it adds explicit control dependencies between random operations, passes preserve their order by respecting those dependencies. Passes may move deterministic nodes around random operations, but they must not reorder the random operations relative to one another.
+
+Before chaining, passes must also avoid introducing dependencies that require the opposite RNG order. For example, if the graph-list order is `rng_1` followed by `rng_2`, introducing a dependency `rng_2 -> rng_1` conflicts with the later ordering dependency `rng_1 -> rng_2` and creates a cycle during `_chain_random_ops_for_ordering` before `stable_topological_sort` runs.
+
 ## Tensor layouts
 The following invariants apply to intermediate tensors when Inductor is the backend; they are not general FX graph invariants:
 
