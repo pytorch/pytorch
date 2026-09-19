@@ -1842,6 +1842,8 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
+        * :func:`torch.histogram` when called on a CUDA tensor
+        * :func:`torch.histogramdd` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
         * :func:`torch.median` with indices output when called on a CUDA tensor
