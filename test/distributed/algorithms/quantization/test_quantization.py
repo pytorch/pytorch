@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 
 import torch
 import torch.cuda
@@ -10,7 +11,7 @@ import torch.distributed.algorithms._quantization.quantization as quant
 from torch.distributed.algorithms._quantization.quantization import DQuantType
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
-    MultiProcessTestCase,
+    MultiProcContinuousTest,
     requires_gloo,
     requires_nccl,
     skip_if_lt_x_gpu,
@@ -65,36 +66,31 @@ if TEST_WITH_DEV_DBG_ASAN:
 BACKEND = os.environ["BACKEND"]
 if BACKEND == "gloo" or BACKEND == "nccl":
 
-    class DistQuantizationTests(MultiProcessTestCase):
-        def setUp(self):
-            super().setUp()
-            self._spawn_processes()
-            torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+    @unittest.skipIf(
+        not dist.is_backend_available(BACKEND)
+        or (
+            BACKEND == "nccl"
+            and torch.cuda.device_count() < int(os.environ["WORLD_SIZE"])
+        ),
+        "Requested distributed backend or devices unavailable",
+    )
+    class DistQuantizationTests(MultiProcContinuousTest):
+        world_size = int(os.environ["WORLD_SIZE"])
+        timeout = dist.distributed_c10d._get_default_timeout(BACKEND)
 
-        def tearDown(self):
-            super().tearDown()
-            try:
-                os.remove(self.file_name)
-            except OSError:
-                pass
+        @classmethod
+        def backend_str(cls):
+            return BACKEND
 
         @property
         def op_timeout_sec(self):
             return 1
-
-        @property
-        def world_size(self):
-            return int(os.environ["WORLD_SIZE"])
 
         @requires_gloo()
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports all_gather_fp16"
         )
         def test_all_gather_fp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
-            )
             group = list(range(self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
@@ -106,10 +102,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             BACKEND != "gloo", "Only gloo backend supports all_gather_fp16"
         )
         def test_all_gather_bfp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="gloo"
-            )
             group = list(range(self.world_size))
             group_id = dist.group.WORLD
             self._test_all_gather(
@@ -123,10 +115,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm_multiprocess
         def test_all_to_all_fp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -139,6 +127,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 dtype=torch.float32,
                 qtype=DQuantType.FP16,
             )
+            dist.destroy_process_group(group_id)
 
         @requires_nccl()
         @skip_but_pass_in_sandcastle_if(
@@ -147,10 +136,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm_multiprocess
         def test_all_to_all_bfp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -163,6 +148,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 dtype=torch.float32,
                 qtype=DQuantType.BFP16,
             )
+            dist.destroy_process_group(group_id)
 
         @requires_nccl()
         @skip_but_pass_in_sandcastle_if(
@@ -170,10 +156,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_all_to_all_single_fp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -186,6 +168,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 dtype=torch.float32,
                 qtype=DQuantType.FP16,
             )
+            dist.destroy_process_group(group_id)
 
         @requires_nccl()
         @skip_but_pass_in_sandcastle_if(
@@ -193,10 +176,6 @@ if BACKEND == "gloo" or BACKEND == "nccl":
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_all_to_all_single_bfp16(self):
-            store = dist.FileStore(self.file_name, self.world_size)
-            dist.init_process_group(
-                store=store, rank=self.rank, world_size=self.world_size, backend="nccl"
-            )
             group = list(range(self.world_size))
             group_id = dist.new_group(range(self.world_size))
             rank_to_GPU = init_multigpu_helper(self.world_size, BACKEND)
@@ -209,6 +188,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                 dtype=torch.float32,
                 qtype=DQuantType.BFP16,
             )
+            dist.destroy_process_group(group_id)
 
         def _test_all_gather(
             self,
