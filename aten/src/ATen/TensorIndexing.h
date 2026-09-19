@@ -358,14 +358,19 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
         mask = index;
         for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = num_ind + j;
+          // Compare the extents symbolically: an unbacked extent has no hint,
+          // so resolving the equality as int64_t would specialize a
+          // data-dependent size. expect_true defers it instead.
           TORCH_CHECK_INDEX(
-              index.size(j) == self.size(srcIdx),
+              index.sym_size(j)
+                  .sym_eq(self.sym_size(srcIdx))
+                  .expect_true(__FILE__, __LINE__),
               "The shape of the mask ",
-              index.sizes(),
+              index.sym_sizes(),
               " at index ",
               j,
               " does not match the shape of the indexed tensor ",
-              self.sizes(),
+              self.sym_sizes(),
               " at index ",
               srcIdx);
         }
