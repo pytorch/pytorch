@@ -361,11 +361,11 @@ class Capture:
 class _MakeFxCapture(Capture):
     r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
 
-    A make_fx trace records the ATen ops of ONE execution of ``fn``, so this
-    captures exactly one call and refuses a second -- there is no notion of
-    guards or recompiled variants here, and thus nothing a further call could
-    add. The Dynamo front-end is what captures several calls, with the graph
-    breaks and recompilations between them.
+    Only the constructor and ``__enter__`` exist so far: the constructor refuses
+    a partial, builds the ``PrecompiledModule`` for ``fn``, and records the paths
+    and the ``_traced``/``_rendered`` state the capture drives. ``__call__`` and
+    ``__exit__`` still raise ``NotImplementedError`` from :class:`Capture`; the
+    one-call rule they will enforce is the one :class:`MakeFxTracer` documents.
     """
 
     def __init__(
