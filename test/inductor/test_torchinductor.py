@@ -17278,6 +17278,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertIn("def triton_", code)
             self.assertNotIn("torch.ops.aten.clone.default(", code)
 
+    @skipCPUIf(True, "CUDA bool copy layout behavior")
+    @parametrize("copy_kind", ["clone", "copy_"])
+    def test_noncontiguous_bool_storage_copy_matches_eager(self, copy_kind):
+        def fn(mask):
+            if copy_kind == "clone":
+                copied = mask.clone()
+            else:
+                copied = torch.empty_like(mask)
+                copied.copy_(mask)
+            return copied.view(torch.uint8)
+
+        raw = torch.tensor(
+            [2, 99, 3, 99, 4, 99, 255, 99],
+            dtype=torch.uint8,
+            device=self.device,
+        )
+        mask = raw.view(torch.bool)[::2]
+        expected = fn(mask)
+        actual = torch.compile(fn, fullgraph=True)(mask)
+        self.assertEqual(actual, expected)
+
     @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile

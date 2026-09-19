@@ -4066,9 +4066,13 @@ def clone(x, *, memory_format=None):
     # Let the downstream op handle the input stride as needed.
     # CUDA eager can copy noncanonical bool storage bytes without normalizing
     # them to 0 or 1. BooleanCopy preserves those bytes in Triton codegen.
+    input_layout = x.maybe_get_layout()
     node_cls = (
         ir.BooleanCopy
-        if x.get_dtype() == torch.bool and x.get_device().type == "cuda"
+        if x.get_dtype() == torch.bool
+        and x.get_device().type == "cuda"
+        and input_layout is not None
+        and input_layout.is_contiguous()
         else Pointwise
     )
 
