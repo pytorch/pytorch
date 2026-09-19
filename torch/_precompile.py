@@ -1525,6 +1525,62 @@ def _serving_mode(frames: list[dict[str, Any]]) -> str:
     return "standalone" if covered == reachable else "installed"
 
 
+def _reject_uninstallable_entry(frames: list[dict[str, Any]], entry: Any) -> None:
+    """Refuse a capture whose entry the artifact could not rebuild or serve.
+
+    The multi-graph driver rebuilds the entry from its code object, which
+    carries no closure, so a closure entry cannot be built at all. That is a
+    capture-time fact and is refused here rather than at load on the serving
+    machine. (Defaults, which the code object does not carry either, are
+    recorded into the artifact rather than refused.) An entry with no
+    dispatchable variant is refused too, naming which of its two causes applies.
+    """
+    from torch._dynamo.package import SerializedCode
+
+    entry_frame = next((f for f in frames if f["is_entry"]), None)
+    if entry_frame is None:
+        return
+    if entry_frame["bypassed"]:
+        # Dynamo logged why when it bypassed the frame; the thin-wrapper advice
+        # below would send the caller restructuring code that was never the
+        # problem.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}: the "
+            f"entry frame was BYPASSED during capture (its guards could not be "
+            f"serialized, or a backend artifact was missing when the package was "
+            f"saved), so no variant of it can be served. Dynamo logged the reason: "
+            f"look for the package-bypass warning, or the precompile_cache_bypass / "
+            f"dynamo_cache_bypass artifacts under tlparse. Fix that rather than "
+            f"restructuring the captured callable."
+        )
+    if not entry_frame["variants"]:
+        # Handing precompile a bare nn.Module compiles Dynamo's own wrapper
+        # frame (external_utils.wrap_inline's `inner`) rather than the module:
+        # every graph lands there, closing over the module, and the entry frame
+        # itself holds nothing. Load cannot rebuild that closure, and `inner`'s
+        # code object is shared by every wrap_inline in the process, so serving
+        # it would let an unrelated frame hit these guards.
+        raise PrecompileError(
+            f"precompile captured no dispatchable graph for {entry.fn_name!r}. The "
+            f"entry frame produced no guarded code, so the artifact would serve "
+            f"nothing. This happens when the captured callable is a thin wrapper -- "
+            f"an nn.Module, or a forward that immediately delegates -- where Dynamo "
+            f"compiles the wrapper's inner frame instead. Capture the function that "
+            f"CALLS the model, e.g. "
+            f"precompile.capture(lambda m, x: m(x), ...) and calling cap(model, x)."
+        )
+    code = SerializedCode.to_code_object(entry_frame["code"])
+    if code.co_freevars:
+        raise PrecompileError(
+            f"precompile cannot build a self-contained artifact for {entry.fn_name!r}: "
+            f"it closes over {list(code.co_freevars)!r}, and this capture has to rebuild "
+            f"the entry from its code object, which cannot restore a closure. Capture a "
+            f"module-level function that takes what it needs as arguments, e.g. "
+            f"precompile.capture(step, ...), calling cap(model, x), with "
+            f"'def step(model, x): return model(x)'."
+        )
+
+
 def _assert_supported(gm: torch.fx.GraphModule) -> None:
     """Enforce invariant 4 of Note [precompile programming model]: reject boundary
     effects the AOT backend's standalone composition does not handle. Detected
