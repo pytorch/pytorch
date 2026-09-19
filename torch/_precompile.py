@@ -3129,11 +3129,11 @@ def load(
     precompile captures. A cache whose ``format``/``version`` does not match (a
     foreign or different-build envelope) is NOT fatal: the cache is acceleration
     only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
-    A half that cannot be READ or decoded -- a missing file, or the two paths passed
-    the wrong way round, whose cache bytes then fail to decode as source -- is a
-    ``PrecompileError`` too, with the original error as its ``__cause__``. A pair no
-    entry point can use raises ``ValueError`` instead: one file named for both halves,
-    or a path that is not a regular file.
+    A half that cannot be READ at all -- a missing file -- or a ``python_code`` half that
+    is not utf-8 -- the two paths passed the wrong way round -- is a ``PrecompileError``
+    too, with the original error as its ``__cause__``. A pair no entry point can use
+    raises ``ValueError`` instead: one file named for both halves, or a path that is not
+    a regular file.
     """
     # The telemetry key names the public spelling the module switch installs, and is
     # also the entry-point name the diagnostics carry.
