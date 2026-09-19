@@ -25,13 +25,18 @@ yet.
 
 from __future__ import annotations
 
+import functools
+import os
+import site
+import sys
+import sysconfig
 from typing import TYPE_CHECKING
 
 from .guards import CheckFunctionManager
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     from .types import GuardFilterEntry
 
@@ -101,3 +106,134 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
             )
         )
     return keep
+
+
+def _norm(path: str) -> str:
+    """
+    realpath then normcase. A relative path resolves against the process cwd,
+    so a recorded ``__file__`` is gated with isabs before it gets here and every
+    root candidate comes through ``_norm_absolute``; this module's own
+    ``__file__`` is taken as read because it is always the path finder's
+    spelling, absolute since bpo-43105 (3.10+): the finder that keeps a relative
+    one, zipimport, cannot load torch (torch._C is an extension module), and a
+    frozen torch has no ``__file__`` at all. os is different: frozen since 3.11,
+    its ``__file__`` is spelled from sys._stdlib_dir, relative under a relative
+    home until site.abs_paths() re-anchors it at startup, which -S skips.
+    """
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _norm_absolute(paths: Iterable[object]) -> set[str]:
+    """
+    The ``_norm`` of every absolute str among ``paths``; anything else is
+    dropped rather than resolved. The interpreter's own metadata can be
+    relative: a venv whose pyvenv.cfg ``home`` is relative or a relative
+    PYTHONHOME leaves sys.base_prefix, sys._stdlib_dir and every sysconfig
+    path relative (os.__file__ alone is re-anchored, by site.abs_paths()),
+    a relative PYTHONUSERBASE the user site. Resolved, such a root would sit
+    wherever the process cwd was at the first call and stay cached there,
+    so a writer and a reader on one interpreter could classify differently.
+    """
+    return {_norm(p) for p in paths if isinstance(p, str) and os.path.isabs(p)}
+
+
+@functools.cache
+def _stdlib_roots() -> tuple[str, ...]:
+    """
+    Where this interpreter's own library lives, sorted, so the first root a path
+    lies under is the outermost (``_classify_file`` reads it that way). os is
+    unquestionably stdlib, so its directory is the direct evidence and the only
+    one that stays right when the stdlib is a zip, where that root is the whole
+    archive and a third party bundled into it is waived with the stdlib;
+    sysconfig and sys._stdlib_dir cover a build where os is frozen with no
+    __file__ (``_classify_file`` skips the stdlib arm under ``sys.frozen``, so
+    an app bundle does not use them). An install root can nest inside one of
+    these (see ``_install_roots``), so a path under both is third party: an
+    install root wins over a stdlib root.
+    """
+    roots: list[object] = []
+    os_file = getattr(os, "__file__", None)
+    if isinstance(os_file, str) and os.path.isabs(os_file):
+        # The directory the file resolves into, not the one it was imported
+        # from: in a venv over a symlink-farm prefix (a Nix, Guix or Spack
+        # profile) os.py is a per-file link into the store, sysconfig and
+        # sys._stdlib_dir already name the farm, and every consumer normalizes
+        # the file it asks about.
+        roots.append(os.path.dirname(_norm(os_file)))
+    roots.append(getattr(sys, "_stdlib_dir", None))  # 3.11+
+    paths = sysconfig.get_paths()
+    roots += [paths["stdlib"], paths["platstdlib"]]
+    if sys.platform == "win32":
+        # The stdlib's C extensions live beside Lib, not under it.
+        roots.append(os.path.join(sys.base_prefix, "DLLs"))
+    return tuple(sorted(_norm_absolute(roots)))
+
+
+@functools.cache
+def _install_roots() -> tuple[str, ...]:
+    """
+    Where a third party lands. This is the load-bearing exclusion: purelib is
+    NESTED inside stdlib in a conda layout and inside platstdlib in a venv (on
+    a --with-platlibdir=lib64 build it is platlib that nests, purelib living
+    under lib instead), so without it every pip-installed package is under a
+    stdlib root.
+    """
+    paths = sysconfig.get_paths()
+    roots: list[object] = [paths["purelib"], paths["platlib"]]
+    for name in ("getsitepackages", "getusersitepackages"):
+        try:
+            got = getattr(site, name)()
+            roots += [got] if isinstance(got, str) else list(got)
+        except Exception:
+            continue  # an old-virtualenv site.py lacks it, or it cannot answer
+    # On Windows getsitepackages() lists the bare prefix, which the whole stdlib
+    # sits under; a directory a stdlib root lies strictly under is not an
+    # install root. A candidate that IS a stdlib root stays one, on purpose:
+    # dropping it would leave a third party installed into the stdlib directory
+    # itself under no install root and waived with the stdlib, while keeping it
+    # only reads the stdlib as third party.
+    stdlib = _stdlib_roots()
+    normed = _norm_absolute(roots)
+    above = {r for r in normed for s in stdlib if s.startswith(r + os.sep)}
+    return tuple(sorted(normed - above))
+
+
+@functools.cache
+def _torch_roots() -> tuple[str, ...]:
+    """
+    Every directory torch's own submodules come from. An editable build splits
+    them -- torch/__init__.py out of the source tree, _C.so and version.py out
+    of site-packages -- and torch.__path__ is exactly that set. The gate rules
+    out a substituted sys.modules['torch'] only: its __path__ is ignored unless
+    the torch package directory this file sits under (two levels up, past
+    _dynamo) is among the entries, and then every absolute entry is adopted,
+    one a third party appended to the real torch's included; a relative entry
+    is dropped (``_norm_absolute``). That directory has two spellings, both of
+    them roots: resolved as a directory, and two levels up from where this file
+    resolves. They differ in a per-file symlink farm (see ``_stdlib_roots``),
+    where torch.__path__ names the farm and every consumer asks about a file
+    that resolves into the store. The second is taken only while the file still
+    resolves to <root>/_dynamo/<file>: a link that flattens the depth would make
+    an ancestor of unrelated code a torch root, and then the resolved file lies
+    under no root rather than under too wide a one.
+    """
+    own_file = globals().get("__file__")
+    if not own_file:
+        return ()  # frozen torch: no directory to anchor to
+    own_dir = os.path.dirname(own_file)
+    own = os.path.dirname(own_dir)
+    roots = {_norm(own)}
+    resolved = _norm(own_file)
+    tail = os.path.join(os.path.basename(own_dir), os.path.basename(own_file))
+    if resolved.endswith(os.sep + os.path.normcase(tail)):
+        roots.add(os.path.dirname(os.path.dirname(resolved)))
+    search = getattr(sys.modules.get("torch"), "__path__", None) or ()
+    listed = _norm_absolute(search)
+    if roots & listed:
+        roots |= listed
+    return tuple(sorted(roots))
+
+
+def _within(path: str, roots: tuple[str, ...]) -> bool:
+    """Prefix test over ``_norm``-ed paths; the caller normalizes both sides."""
+    return any(path == r or path.startswith(r + os.sep) for r in roots)
