@@ -26,7 +26,7 @@ from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import _read_artifact, _write_artifact
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.compiler import PrecompiledRunnable, PrecompileError
-from torch.compiler.precompile import MakeFxTracer
+from torch.compiler.precompile import DynamoTracer, MakeFxTracer
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -3196,6 +3196,22 @@ class TestPrecompile(TestCase):
 class TestPrecompilePublicSurface(TestCase):
     """The public module surface and the report types: nothing here traces."""
 
+    def test_tracer_annotations_resolve_after_the_re_home(self):
+        # torch/compiler/precompile.py pre-resolves the two tracers' annotations before
+        # re-homing their __module__: torch._precompile is under `from __future__ import
+        # annotations`, so its string annotations resolve against THAT module while
+        # get_type_hints resolves through __module__. DynamoTracer only: MakeFxTracer's
+        # one annotation is all-builtin and could not catch a missed pre-resolution.
+        import typing
+        from collections.abc import Callable, Sequence
+        from typing import Any
+
+        self.assertEqual(
+            typing.get_type_hints(DynamoTracer)["guard_filter_fn"],
+            Callable[[Sequence[Any]], Sequence[bool]] | None,
+        )
+        self.assertEqual(typing.get_type_hints(DynamoTracer)["recompile_limit"], int)
+
     def test_default_tracer_is_make_fx(self):
         default = (
             inspect.signature(torch.compiler.precompile.capture)
@@ -3213,11 +3229,12 @@ class TestPrecompilePublicSurface(TestCase):
         self.assertIs(
             torch.compiler.precompile, sys.modules["torch.compiler.precompile"]
         )
-        # The loaded-handle class is exported beside PrecompileError, with the
-        # __module__ naming that home: the docs autoclass directive and
+        # The two loaded-handle classes are exported beside PrecompileError, with the
+        # __module__ naming that home: the docs autoclass directives and
         # test_public_bindings.test_correct_module_names both key on it.
-        self.assertIn("PrecompiledRunnable", torch.compiler.__all__)
-        self.assertEqual(PrecompiledRunnable.__module__, "torch.compiler")
+        for name in ("PrecompiledRunnable", "PrecompiledCallable"):
+            self.assertIn(name, torch.compiler.__all__)
+            self.assertEqual(getattr(torch.compiler, name).__module__, "torch.compiler")
         # __all__ IS the frozen surface: pin it exactly, resolve every name through the
         # module (dropped or listed-but-missing fails here), and check the re-homed __module__.
         self.assertEqual(
@@ -3227,6 +3244,9 @@ class TestPrecompilePublicSurface(TestCase):
                 "load",
                 "Capture",
                 "MakeFxTracer",
+                "DynamoTracer",
+                "PrecompileSummary",
+                "GuardFact",
             ],
         )
         for name in torch.compiler.precompile.__all__:
@@ -3238,6 +3258,78 @@ class TestPrecompilePublicSurface(TestCase):
         # The retired entry point: precompile is a module, so the call itself fails.
         with self.assertRaisesRegex(TypeError, "not callable"):
             torch.compiler.precompile(lambda x: x + 1, torch.randn(3))
+
+    def test_precompiled_callable_protocol(self):
+        # Nothing in this build produces a PrecompiledCallable, so construct it over a
+        # stand-in to pin the documented surface: it installs, it delegates the call /
+        # unload / compile count, `with` unloads on exit, and a dynamo PackageError or
+        # RecompileError out of any entry point surfaces as a PrecompileError.
+        from torch._dynamo.exc import PackageError, RecompileError
+
+        class _Installed:
+            def __init__(self):
+                self.log = []
+
+            def __call__(self, x):
+                return x + 1
+
+            def __enter__(self):
+                self.log.append("enter")
+
+            def unload(self):
+                self.log.append("unload")
+
+            def serve_time_compiles(self):
+                return 3
+
+        installed = _Installed()
+        handle = torch.compiler.PrecompiledCallable(installed)
+        self.assertIsInstance(handle, torch.compiler.PrecompiledRunnable)
+        self.assertTrue(handle.installed)
+        with handle as entered:
+            self.assertIs(entered, handle)
+            self.assertEqual(handle(torch.ones(2)), torch.full((2,), 2.0))
+            self.assertEqual(handle.serve_time_compiles(), 3)
+        self.assertEqual(installed.log, ["enter", "unload"])
+        handle.unload()
+        self.assertEqual(installed.log, ["enter", "unload", "unload"])
+
+        class _Raises:
+            def __init__(self, exc):
+                self._exc = exc
+
+            def __call__(self, *args):
+                raise self._exc
+
+            def __enter__(self):
+                raise self._exc
+
+            def unload(self):
+                raise self._exc
+
+            def serve_time_compiles(self):
+                raise self._exc
+
+        # The whole enforcement of the translation: every public entry point goes through
+        # _call, and both dynamo-private types it converts are exercised.
+        for exc in (PackageError("bad package"), RecompileError("guard miss")):
+            with self.subTest(exc=type(exc).__name__):
+                broken = torch.compiler.PrecompiledCallable(_Raises(exc))
+                with self.assertRaisesRegex(PrecompileError, str(exc)) as cm:
+                    broken(torch.ones(2))
+                self.assertIs(cm.exception.__cause__, exc)
+                with self.assertRaisesRegex(PrecompileError, str(exc)):
+                    broken.__enter__()
+                with self.assertRaisesRegex(PrecompileError, str(exc)):
+                    broken.unload()
+                with self.assertRaisesRegex(PrecompileError, str(exc)):
+                    broken.serve_time_compiles()
+        # And ONLY those two: a user exception out of a served artifact reaches the
+        # caller unchanged rather than relabelled as a precompile failure.
+        with self.assertRaisesRegex(ValueError, "mine"):
+            torch.compiler.PrecompiledCallable(_Raises(ValueError("mine")))(
+                torch.ones(2)
+            )
 
 
 class _FilesModel(torch.nn.Module):
@@ -3580,6 +3672,14 @@ class TestPrecompileCaptureFiles(TestCase):
     def test_non_tracer_is_refused(self):
         with self.assertRaisesRegex(TypeError, "must be a MakeFxTracer"):
             self._capture(tracer="make_fx")
+
+    def test_dynamo_tracer_is_refused_in_this_build(self):
+        # DynamoTracer is part of the surface, but precompile.capture() refuses it until
+        # the front-end lands; the refusal names the tracer to pass instead.
+        msg = "not available in this build.*MakeFxTracer"
+        with self.assertRaisesRegex(PrecompileError, msg):
+            self._capture(tracer=DynamoTracer())
+        self.assertEqual(os.listdir(self.dir), [])
 
     def test_unknown_backend_is_refused(self):
         msg = "backend must be 'inductor' or 'eager'"

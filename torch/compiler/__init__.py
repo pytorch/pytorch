@@ -16,14 +16,15 @@ from torch._higher_order_ops.invoke_subgraph import (
 # ``precompile.capture(fn, artifact_path=..., cache_path=...)`` is a context manager
 # that writes a ``(python_code, cache)`` artifact when the block exits CLEANLY having
 # captured at least one call (a block that raised writes nothing), and
-# ``precompile.load(...)`` reloads one as the handle re-exported here,
-# ``PrecompiledRunnable``. Distinct from
+# ``precompile.load(...)`` reloads one as one of the two handles re-exported here,
+# ``PrecompiledRunnable`` or ``PrecompiledCallable``. Distinct from
 # ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
 # guard-serialization caching mode), despite the shared word.
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
 from torch._precompile import (
+    PrecompiledCallable as PrecompiledCallable,
     PrecompiledRunnable as PrecompiledRunnable,
     PrecompileError as PrecompileError,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "cudagraph_mark_warmup_incomplete",
     "load_compiled_function",
     "precompile",
+    "PrecompiledCallable",
     "PrecompiledRunnable",
     "PrecompileError",
     "wrap_numpy",
