@@ -613,7 +613,25 @@ def sample_inputs_linalg_cholesky_inverse(
         single_pd,
         batch_pd,
     )
-    test_cases = (torch.linalg.cholesky(a, upper=False) for a in inputs)
+    test_cases = [torch.linalg.cholesky(a, upper=False) for a in inputs]
+    if op_info.name == "cholesky_inverse":
+        # Regression sample for https://github.com/pytorch/pytorch/issues/196682.
+        # Unlike the nearly diagonal factors above, its order-one off-diagonal
+        # entries expose the noncommuting matrix products in the JVP formula.
+        # Keep it specific to cholesky_inverse: cholesky_solve also reuses this
+        # generator, but its factor derivative fails for non-diagonal inputs.
+        nontrivial_factor = torch.tensor(
+            [[2.0, 0.0, 0.0], [0.5, 1.5, 0.0], [-0.25, 0.75, 1.25]],
+            dtype=dtype,
+            device=device,
+        )
+        if dtype.is_complex:
+            nontrivial_factor = nontrivial_factor + 1j * torch.tensor(
+                [[0.0, 0.0, 0.0], [0.25, 0.0, 0.0], [-0.5, 0.125, 0.0]],
+                dtype=dtype,
+                device=device,
+            )
+        test_cases.append(nontrivial_factor)
     for l in test_cases:
         # generated lower-triangular samples
         l.requires_grad = requires_grad
