@@ -2585,6 +2585,65 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
 
+    def test_rnn_cell_native_rank_validation(self):
+        input_size, hidden_size = 5, 3
+        x2d = torch.randn(1, input_size)
+        x1d = torch.randn(input_size)
+        hx2d = torch.randn(1, hidden_size)
+        hx3d = torch.randn(1, hidden_size, 1)
+
+        lstm_w_ih = torch.randn(4 * hidden_size, input_size)
+        lstm_w_hh = torch.randn(4 * hidden_size, hidden_size)
+        lstm_b_ih = torch.randn(4 * hidden_size)
+        lstm_b_hh = torch.randn(4 * hidden_size)
+        lstm_hx = (hx2d, hx2d)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D input"):
+            torch.lstm_cell(x1d, lstm_hx, lstm_w_ih, lstm_w_hh, lstm_b_ih, lstm_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            torch.lstm_cell(x2d, (hx3d, hx2d), lstm_w_ih, lstm_w_hh, lstm_b_ih, lstm_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden1"):
+            torch.lstm_cell(x2d, (hx2d, hx3d), lstm_w_ih, lstm_w_hh, lstm_b_ih, lstm_b_hh)
+
+        gru_w_ih = torch.randn(3 * hidden_size, input_size)
+        gru_w_hh = torch.randn(3 * hidden_size, hidden_size)
+        gru_b_ih = torch.randn(3 * hidden_size)
+        gru_b_hh = torch.randn(3 * hidden_size)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D input"):
+            torch.gru_cell(x1d, hx2d, gru_w_ih, gru_w_hh, gru_b_ih, gru_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            torch.gru_cell(x2d, hx3d, gru_w_ih, gru_w_hh, gru_b_ih, gru_b_hh)
+
+        rnn_w_ih = torch.randn(hidden_size, input_size)
+        rnn_w_hh = torch.randn(hidden_size, hidden_size)
+        rnn_b_ih = torch.randn(hidden_size)
+        rnn_b_hh = torch.randn(hidden_size)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D input"):
+            torch.rnn_tanh_cell(x1d, hx2d, rnn_w_ih, rnn_w_hh, rnn_b_ih, rnn_b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            torch.rnn_tanh_cell(x2d, hx3d, rnn_w_ih, rnn_w_hh, rnn_b_ih, rnn_b_hh)
+
+    def test_rnn_cell_module_rank_validation(self):
+        # Unbatched input with 2D hidden: Python unsqueeze produces 3D hidden, caught in native checks.
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            nn.LSTMCell(5, 3)(torch.randn(5), (torch.randn(3, 3), torch.randn(3, 3)))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            nn.GRUCell(5, 3)(torch.randn(5), torch.randn(3, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden0"):
+            nn.RNNCell(5, 3)(torch.randn(5), torch.randn(3, 3))
+
+        # Batched input with hx[1] rank mismatch only.
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D hidden1"):
+            nn.LSTMCell(5, 3)(torch.randn(3, 5), (torch.randn(3, 3), torch.randn(3)))
+
     def test_Transformer_cell(self):
         # this is just a smoke test; these modules are implemented through
         # autograd so no Jacobian test is needed
