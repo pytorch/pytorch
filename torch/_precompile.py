@@ -204,6 +204,7 @@ it.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
 import logging
@@ -223,6 +224,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from typing_extensions import Self
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -276,6 +278,73 @@ class PrecompileError(RuntimeError):
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
     """
+
+
+@dataclasses.dataclass(frozen=True)
+class MakeFxTracer:
+    """The ``make_fx`` capture front-end, passed as ``tracer=`` to a precompile capture.
+
+    A NON-STRICT single make_fx trace: it records the ATen ops of ONE execution of
+    ``fn``, so a ``capture`` with this tracer takes exactly one call and refuses a
+    second, and control flow and shapes are specialized to that call (the source of
+    the programming-model contract). Part of the prototype ``torch.compiler.precompile``
+    API, so it may change without a deprecation cycle.
+
+    ``decompositions`` is an optional decomposition table (a dict mapping each
+    ``OpOverload`` to a decomposition function) forwarded to ``make_fx`` as its
+    ``decomposition_table``; it is specific to this tracer (Dynamo lowers through the
+    backend instead).
+    """
+
+    decompositions: dict | None = None
+
+
+class PrecompiledRunnable:
+    """What ``torch.compiler.precompile.load`` returns.
+
+    A callable with the captured ``fn``'s calling convention that can also be
+    entered as a context manager and unloaded. A standalone artifact installs
+    nothing, so for it ``__enter__``/``__exit__``/:meth:`unload` are no-ops;
+    ``installed`` is ``True`` on the shape that installs onto the captured code
+    objects. Part of the prototype ``torch.compiler.precompile`` API, so it may
+    change without a deprecation cycle.
+    """
+
+    installed: bool = False
+    """Whether calling this handle installs onto the captured code objects."""
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.unload()
+
+    def unload(self) -> None:
+        """Remove whatever this loaded artifact installed; a no-op when it installed nothing."""
+
+
+class Capture:
+    r"""The caller-driven capture ``torch.compiler.precompile.capture`` returns.
+
+    Part of the prototype ``torch.compiler.precompile`` API, so it may change
+    without a deprecation cycle. Enter it as a context manager to arm the
+    capture, call it exactly as you would ``fn`` inside the block -- each call
+    runs for real, folds what it exercised into the capture, and returns what
+    ``fn`` returned -- and the artifact is written once, to the ``artifact_path``
+    / ``cache_path`` files, when the block exits.
+    """
+
+    def __enter__(self) -> Self:
+        raise NotImplementedError
+
+    def __exit__(self, *exc: object) -> None:
+        raise NotImplementedError
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        raise NotImplementedError
 
 
 def _dense_shape(t: object) -> tuple[int, ...] | None:
@@ -1357,7 +1426,7 @@ def _unsupported(reason: str) -> PrecompileError:
     )
 
 
-class PrecompiledModule:
+class PrecompiledModule(PrecompiledRunnable):
     """Internal holder for a precompiled computation / a loaded runnable."""
 
     def __init__(
@@ -1539,15 +1608,15 @@ class PrecompiledModule:
                 ) from e
             raise
 
-    def __call__(self, *args: object) -> object:
-        # A PrecompiledModule is runnable only after load(); precompile() itself
-        # returns (python_code, cache) rather than a runnable.
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        # A PrecompiledModule is runnable only after load(); a capture instead
+        # renders (python_code, cache) rather than a runnable.
         if self._loaded_forward is None:
             raise PrecompileError(
                 "this object is not runnable; build one with "
                 "torch.compiler.precompile.load(python_code, cache)."
             )
-        return self._loaded_forward(*args)
+        return self._loaded_forward(*args, **kwargs)
 
     def to_python_code(self) -> str:
         """Return the self-contained, executable Python artifact as a string.
