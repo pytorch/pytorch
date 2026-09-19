@@ -211,24 +211,13 @@ def _is_privateuse1_autocast(value: Any) -> bool:
         value, torch.amp.autocast_mode.autocast
     ):
         return False
-    if value is not _get_privateuse1_autocast():
-        return False
-    # Keep wrappers whose autocast semantics are not exposed by the standard
-    # argument names on the generic user-defined class path.
-    try:
-        parameters = inspect.signature(value).parameters
-    except (TypeError, ValueError):
-        return False
-    return all(name in parameters for name in ("dtype", "enabled", "cache_enabled"))
+    return value is _get_privateuse1_autocast() and getattr(
+        value, "_dynamo_autocast_passthrough", False
+    )
 
 
 def _install_privateuse1_autocast_guards() -> None:
     torch_source = ImportSource("torch")
-    backend_name_source = CallFunctionNoArgsSource(
-        AttrSource(AttrSource(torch_source, "_C"), "_get_privateuse1_backend_name")
-    )
-    install_guard(backend_name_source.make_guard(GuardBuilder.EQUALS_MATCH))
-
     device_type = torch._C._get_privateuse1_backend_name()
     autocast_source = AttrSource(
         AttrSource(AttrSource(torch_source, device_type), "amp"), "autocast"
@@ -713,32 +702,40 @@ class BaseTorchVariable(VariableTracker):
 class TorchCtxManagerClassVariable(BaseTorchVariable):
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    _nonvar_fields = {
+        "is_privateuse1_autocast",
+        *BaseTorchVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self, value: Any, *, is_privateuse1_autocast: bool = False, **kwargs: Any
+    ) -> None:
         super().__init__(value, **kwargs)
-        if _is_privateuse1_autocast(value):
-            _install_privateuse1_autocast_guards()
+        self.is_privateuse1_autocast = is_privateuse1_autocast
 
     def __repr__(self) -> str:
         return f"TorchCtxManagerClassVariable({self.value})"
 
     @staticmethod
-    def is_matching_cls(value: Any) -> bool:
+    def matching_cls_kind(value: Any) -> str | None:
+        # Check the registered entrypoint before unwrapping it.  Some backend
+        # classes look like Dynamo wrappers to is_function().
+        if _is_privateuse1_autocast(value):
+            return "privateuse1_autocast"
         # Unwrap if it's a functools.lru_cache wrapper
         value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        return (
-            # Context manager type or function with @contextmanager is callable
-            callable(value)
-            and (
-                hashable(value)  # accesses value.__hash__()
-                and (
-                    value in supported_ctx_manager_classes
-                    or _is_privateuse1_autocast(value)
-                )
-            )
-        )
+        if not callable(value) or not hashable(value):
+            return None
+        if value in supported_ctx_manager_classes:
+            return "supported"
+        return None
+
+    @staticmethod
+    def is_matching_cls(value: Any) -> bool:
+        return TorchCtxManagerClassVariable.matching_cls_kind(value) is not None
 
     def call_function(
         self,
@@ -854,11 +851,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in (
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ) or _is_privateuse1_autocast(self.value):
+        elif (
+            self.value
+            in (
+                torch.amp.autocast_mode.autocast,
+                torch.cuda.amp.autocast,
+                torch.cpu.amp.autocast,
+            )
+            or self.is_privateuse1_autocast
+        ):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
