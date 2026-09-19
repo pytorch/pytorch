@@ -162,9 +162,9 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
     (cache-primed) path always, plus -- on inductor only -- the inlined path that
     strips the artifact to force JIT from python_code. The eager backend has a single
     driver, so it yields the default path alone."""
-    yield "default", torch.compiler.precompile.load(code, cache)
+    yield "default", _load_pair(code, cache)
     if backend == "inductor":
-        yield "inlined", torch.compiler.precompile.load(code, _strip_artifact(cache))
+        yield "inlined", _load_pair(code, _strip_artifact(cache))
 
 
 # precompile drives make_fx internally, which cannot symbolically trace a
@@ -1817,12 +1817,12 @@ class TestPrecompile(TestCase):
 
         m = WithBuf("buf").eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda mm, t: mm(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda mm, t: mm(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("BUFFER_NAMES = ['buf']", code)
         renamed = WithBuf("buf2").eval()  # same params, buffer renamed (same shape)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "do not match the traced model"):
             f_c(renamed, x)
 
@@ -1835,14 +1835,16 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
         if path == "eager":
-            code, cache = torch.compiler.precompile(
-                lambda mm, t: mm(t), m, x, backend="eager"
-            )
+            with _CaptureToFiles(lambda mm, t: mm(t), backend="eager") as cap:
+                cap(m, x)
+            code, cache = cap.result()
         else:
-            code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+            with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+                cap(m, x)
+            code, cache = cap.result()
             if path == "inlined":
                 cache = _strip_artifact(cache)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "dtype"):
             f_c(m, x.double())
 
@@ -1852,10 +1854,10 @@ class TestPrecompile(TestCase):
         # artifact rejects a cuda input up front, like the inductor backend.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)  # cpu example
-        code, cache = torch.compiler.precompile(
-            lambda mm, t: mm(t), m, x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, t: mm(t), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "device"):
             f_c(m, x.cuda())
 
@@ -1867,11 +1869,11 @@ class TestPrecompile(TestCase):
         # per-leaf shape). Make that best-effort gap explicit.
         m = torch.nn.Linear(4, 3).eval()
         inp = _UnserializableCtxInput(torch.randn(5, 4), torch.randn(5, 4))
-        code, cache = torch.compiler.precompile(
-            lambda model, h: model(h.a + h.b), m, inp
-        )
+        with _CaptureToFiles(lambda model, h: model(h.a + h.b)) as cap:
+            cap(m, inp)
+        code, cache = cap.result()
         self.assertIn("IN_SPEC = None", code)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         t = torch.randn(5, 4)
         # The traced structure (the custom node) and a plain list of the same two leaves
         # have distinct pytree structures but the same flattened leaves/shapes; both run.
@@ -1890,7 +1892,9 @@ class TestPrecompile(TestCase):
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(8, 4)
         mark_unbacked(x, 0, max=16)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("USER_INPUT_BOUNDS = [{0: (None, 16)}]", code)
         if path == "inlined":
             blob = torch.load(io.BytesIO(cache), weights_only=True)
@@ -1898,7 +1902,7 @@ class TestPrecompile(TestCase):
             buf = io.BytesIO()
             torch.save(blob, buf)
             cache = buf.getvalue()
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         with self.assertRaisesRegex(PrecompileError, "max"):
             f_c(m, torch.randn(32, 4))
         xt = torch.randn(8, 4)
@@ -1920,10 +1924,12 @@ class TestPrecompile(TestCase):
 
         x = torch.randn(64)
         with functorch_config.patch(functionalize_rng_ops=True):
-            code, cache = torch.compiler.precompile(
-                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
-            )
-            f_c = torch.compiler.precompile.load(code, cache)
+            with _CaptureToFiles(
+                lambda a: torch.nn.functional.dropout(a, 0.5, training=True)
+            ) as cap:
+                cap(x)
+            code, cache = cap.result()
+            f_c = _load_pair(code, cache)
             torch.manual_seed(0)
             out = f_c(x)
         torch.manual_seed(0)
@@ -1942,9 +1948,9 @@ class TestPrecompile(TestCase):
         # backend (no assert_size_stride backstop) silently returned a wrong-shaped tensor.
         m = torch.nn.Linear(4, 3).eval()  # M = 3
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         bad = torch.nn.Linear(4, 7).eval()  # K = 7 != 3, same param names
 
         for label, f_c in _default_and_inlined_loaders(code, cache, backend):
@@ -1963,9 +1969,9 @@ class TestPrecompile(TestCase):
         # same way test_param_shape_mismatch_rejected covers the shape branch.
         m = torch.nn.Linear(4, 3).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         bad = torch.nn.Linear(4, 3).eval().half()  # same shape, different dtype
 
         for label, f_c in _default_and_inlined_loaders(code, cache, backend):
@@ -1994,9 +2000,9 @@ class TestPrecompile(TestCase):
 
         m = WithBuf(3, torch.float32).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend=backend
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend=backend) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("BUFFER_NAMES = ['b']", code)
         # Same buffer name and count, but a different SHAPE / DTYPE.
         bad_shape = WithBuf(5, torch.float32).eval()
@@ -2018,7 +2024,9 @@ class TestPrecompile(TestCase):
         # backend is layout-flexible and ACCEPTS the same non-contiguous weight.
         m = torch.nn.Linear(8, 5).eval()
         x = torch.randn(4, 8)
-        code, cache = torch.compiler.precompile(lambda model, t: model(t), m, x)
+        with _CaptureToFiles(lambda model, t: model(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
 
         def with_noncontig_weight():
             run = torch.nn.Linear(8, 5).eval()
@@ -2030,25 +2038,18 @@ class TestPrecompile(TestCase):
             run.weight = torch.nn.Parameter(nc)
             return run
 
-        def loaders():
-            yield "cached", torch.compiler.precompile.load(code, cache)
-            yield (
-                "inlined",
-                torch.compiler.precompile.load(code, _strip_artifact(cache)),
-            )
-
-        for label, f_c in loaders():
+        for label, f_c in _default_and_inlined_loaders(code, cache, "inductor"):
             with self.subTest(path=label):
                 with self.assertRaisesRegex(
                     PrecompileError, r"memory format.*PARAMETER/BUFFER.*layout"
                 ):
                     f_c(with_noncontig_weight(), x)
         # The eager backend accepts the same non-contiguous weight (layout-flexible).
-        ecode, ecache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend="eager"
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, x)
+        ecode, ecache = cap.result()
         run = with_noncontig_weight()
-        self.assertEqual(torch.compiler.precompile.load(ecode, ecache)(run, x), run(x))
+        self.assertEqual(_load_pair(ecode, ecache)(run, x), run(x))
 
     def test_unbacked_equality_shared_vs_independent_shape_id(self):
         # MAJOR1 (invariant 3 DANGER note): two mark_unbacked dims that the graph requires
@@ -2070,10 +2071,10 @@ class TestPrecompile(TestCase):
         ys = torch.randn(8, 4)
         mark_unbacked(xs, 0, shape_id="b")
         mark_unbacked(ys, 0, shape_id="b")
-        code_s, cache_s = torch.compiler.precompile(
-            lambda mm, a, b: mm(a) + b, m, xs, ys
-        )
-        f_s = torch.compiler.precompile.load(code_s, cache_s)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, xs, ys)
+        code_s, cache_s = cap.result()
+        f_s = _load_pair(code_s, cache_s)
         xt, yt = torch.randn(8, 4), torch.randn(8, 4)
         self.assertEqual(f_s(m, xt, yt), m(xt) + yt)  # matched sizes work
         with self.assertRaisesRegex(PrecompileError, "shape or memory format"):
@@ -2084,10 +2085,10 @@ class TestPrecompile(TestCase):
         yi = torch.randn(8, 4)
         mark_unbacked(xi, 0)
         mark_unbacked(yi, 0)
-        code_i, cache_i = torch.compiler.precompile(
-            lambda mm, a, b: mm(a) + b, m, xi, yi
-        )
-        f_i = torch.compiler.precompile.load(code_i, cache_i)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, xi, yi)
+        code_i, cache_i = cap.result()
+        f_i = _load_pair(code_i, cache_i)
         xm, ym = torch.randn(10, 4), torch.randn(10, 4)
         self.assertEqual(f_i(m, xm, ym), m(xm) + ym)  # matched sizes work
         out = f_i(m, torch.randn(10, 4), torch.randn(12, 4))  # mismatch NOT rejected
@@ -2098,14 +2099,21 @@ class TestPrecompile(TestCase):
         # clone), so a caller holding a prior p.grad reference -- or optimizer state keyed
         # on grad identity -- is not invalidated. Warm up a backward to populate .grad,
         # snapshot the object identity, precompile a backward step on the same model, and
-        # assert p.grad is still the SAME object afterward.
+        # assert p.grad is still the SAME object afterward. Capture runs the step once for
+        # real (caller-driven contract), so the served artifact also scatters its grads
+        # with an in-place p.grad += g: on exit .grad holds two backwards' worth of
+        # gradient, and that accumulate is the second mechanism the assertIs covers (the
+        # first being capture's snapshot/restore around the trace).
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
         m(x).sum().backward()  # warmup populates .grad
         g = m.weight.grad
         self.assertIsNotNone(g)
-        torch.compiler.precompile(lambda mm, t: mm(t).sum().backward(), m, x)
+        with _CaptureToFiles(
+            lambda mm, t: mm(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
         self.assertIs(m.weight.grad, g)  # same object, not a clone
 
     def test_precompile_error_public_binding(self):
@@ -2122,7 +2130,8 @@ class TestPrecompile(TestCase):
         # via the public torch.compiler.PrecompileError alias.
         captured = torch.randn(3)
         with self.assertRaisesRegex(torch.compiler.PrecompileError, "hard-coded"):
-            torch.compiler.precompile(lambda x: x + captured, torch.randn(3))
+            with _CaptureToFiles(lambda x: x + captured) as cap:
+                cap(torch.randn(3))
 
     def test_single_trust_warning_on_inlined_load(self):
         # On the inlined load path (an eager artifact has an empty cache, so there is
@@ -2131,11 +2140,11 @@ class TestPrecompile(TestCase):
         # "exactly once" guards against the EXEC warning being duplicated on this load.
         m = torch.nn.Sequential(torch.nn.Linear(4, 3)).eval()
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t), m, x, backend="eager"
-        )
+        with _CaptureToFiles(lambda model, t: model(t), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
         with self.assertLogs("torch._precompile", level="WARNING") as cm:
-            torch.compiler.precompile.load(code, cache)
+            _load_pair(code, cache)
         exec_warnings = [line for line in cm.output if "EXEC" in line]
         self.assertEqual(
             len(exec_warnings), 1, f"expected one EXEC warning, got: {cm.output}"
@@ -2158,15 +2167,20 @@ class TestPrecompile(TestCase):
 
         m = Tied()
         t = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t).sum().backward(), m, t
-        )
+        with _CaptureToFiles(
+            lambda model, t: model(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, t)
+        code, cache = cap.result()
         self.assertIn("PARAM_NAMES = ['l1.weight']", code)  # tie collapsed to one
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # deepcopy'd reference and the loaded artifact each see exactly one backward.
+        m.zero_grad(set_to_none=True)
 
         ref = copy.deepcopy(m)  # deepcopy preserves the tie within the object graph
         ref(t).sum().backward()
 
-        torch.compiler.precompile.load(code, cache)(m, t)  # one call: tied grad
+        _load_pair(code, cache)(m, t)  # one call: tied grad
         self.assertEqual(m.l1.weight.grad, ref.l1.weight.grad)
         self.assertIs(m.l1.weight, m.l2.weight)  # still one tensor at runtime
 
@@ -2178,11 +2192,13 @@ class TestPrecompile(TestCase):
         m1 = torch.nn.Linear(4, 4)
         m2 = torch.nn.Linear(4, 3)
         t = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(lambda a, b, t: b(a(t)), m1, m2, t)
+        with _CaptureToFiles(lambda a, b, t: b(a(t))) as cap:
+            cap(m1, m2, t)
+        code, cache = cap.result()
         self.assertIn("MODULE_POSITIONS = [0, 1]", code)
         self.assertIn("m0.weight", code)  # first module's params prefixed m0.*
         self.assertIn("m1.weight", code)  # second module's params prefixed m1.*
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m1, m2, t), m2(m1(t)))
 
     def test_frozen_param_keeps_none_grad(self):
@@ -2202,14 +2218,19 @@ class TestPrecompile(TestCase):
 
         m = M()
         t = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t).sum().backward(), m, t
-        )
+        with _CaptureToFiles(
+            lambda model, t: model(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, t)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # deepcopy'd reference and the loaded artifact each see exactly one backward.
+        m.zero_grad(set_to_none=True)
 
         ref = copy.deepcopy(m)
         ref(t).sum().backward()
 
-        torch.compiler.precompile.load(code, cache)(m, t)
+        _load_pair(code, cache)(m, t)
         for p in m.frozen.parameters():
             self.assertIsNone(p.grad)  # frozen: never harvested
         for p in m.trainable.parameters():
@@ -2228,14 +2249,16 @@ class TestPrecompile(TestCase):
         torch.manual_seed(0)
         m = torch.nn.Linear(4, 3)  # params require grad at capture
         x = torch.randn(5, 4)
-        code, cache = torch.compiler.precompile(
-            lambda mm, t: mm(t).sum().backward(), m, x
-        )
+        with _CaptureToFiles(
+            lambda mm, t: mm(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         run = torch.nn.Linear(4, 3)
         run.load_state_dict(m.state_dict())
         for p in run.parameters():
             p.requires_grad_(False)  # flip OFF at runtime -- must be a no-op
-        torch.compiler.precompile.load(code, cache)(run, x)
+        _load_pair(code, cache)(run, x)
         self.assertIsNotNone(run.weight.grad)  # still scattered despite the flip
         ref = torch.nn.Linear(4, 3)
         ref.load_state_dict(m.state_dict())
@@ -3950,11 +3973,20 @@ class TestPrecompileNumerics(TestCase):
 
         a = make_tensor((4, 4), device=device, dtype=torch.float32)
         b = make_tensor((4, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(f, a, b)
-        self.assertIsInstance(code, str)
-        self.assertIsInstance(cache, bytes)
+        with _CaptureToFiles(f) as cap:
+            cap(a, b)
+        # Both halves were written with content (the adapter reads them back from
+        # disk), and the cache carries a compiled artifact on this device (an
+        # uncacheable capture leaves artifact None, which would silently push every
+        # load below onto the inlined path). The envelope's key set is
+        # device-independent and pinned by test_cache_holds_only_artifact.
+        code, cache = cap.result()
+        self.assertGreater(len(code), 0)
+        self.assertGreater(len(cache), 0)
+        blob = torch.load(io.BytesIO(cache), weights_only=True)
+        self.assertIsNotNone(blob["artifact"])
 
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         out = f_c(a, b)
         ref = f(a, b)
         self.assertEqual(out[0], ref[0])
@@ -3972,8 +4004,10 @@ class TestPrecompileNumerics(TestCase):
 
         m = M().to(device).eval()
         x = make_tensor((5, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_multiple_module_args(self, device):
@@ -3984,14 +4018,14 @@ class TestPrecompileNumerics(TestCase):
         x = make_tensor((2, 4), device=device, dtype=torch.float32)
         ref = b(torch.relu(a(x)))
 
-        code, cache = torch.compiler.precompile(
-            lambda ma, mb, x: mb(torch.relu(ma(x))), a, b, x
-        )
+        with _CaptureToFiles(lambda ma, mb, x: mb(torch.relu(ma(x)))) as cap:
+            cap(a, b, x)
+        code, cache = cap.result()
         self.assertIn(
             "PARAM_NAMES = ['m0.weight', 'm0.bias', 'm1.weight', 'm1.bias']", code
         )
 
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(a, b, x), ref)
 
     def test_inplace_on_intermediate_is_allowed(self, device):
@@ -4000,8 +4034,10 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.ReLU(inplace=True))
         m.to(device).eval()
         x = make_tensor((5, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_training_backward_harvest_matches_eager(self, device):
@@ -4025,8 +4061,14 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, model, x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(model, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract), so the example
+        # model already carries one backward; reset so what we measure below is the
+        # loaded artifact's own scatter, matching one eager step.
+        model.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
 
         # The model is passed at runtime (no weights baked); the artifact mutates
         # model.parameters().grad in place, returning fn's result (None).
@@ -4071,8 +4113,13 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, model, x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(model, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's scatter, matching one eager step.
+        model.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         f_c(model, x, target)
         for (n, p), (_, rp) in zip(model.named_parameters(), ref.named_parameters()):
             if rp.grad is None:
@@ -4098,8 +4145,14 @@ class TestPrecompileNumerics(TestCase):
         def train_step(ma, mb, x, target):
             loss_fn(mb(torch.relu(ma(x))), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, a, b, x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(a, b, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset both
+        # models so the check sees only the loaded artifact's scatter.
+        a.zero_grad(set_to_none=True)
+        b.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         f_c(a, b, x, target)
         for (n, p), (_, rp) in zip(a.named_parameters(), ref_a.named_parameters()):
             if rp.grad is None:
@@ -4127,8 +4180,10 @@ class TestPrecompileNumerics(TestCase):
         m = Tied().to(device)
         x = make_tensor((3, 4), device=device, dtype=torch.float32)
 
-        code, cache = torch.compiler.precompile(lambda model, x: model(x), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
         # The tied weight is lifted once (single name), so it is one graph input.
         self.assertIn("PARAM_NAMES = ['a.weight']", code)
@@ -4139,10 +4194,15 @@ class TestPrecompileNumerics(TestCase):
         ref(x).sum().backward()
         ref_grad = ref.a.weight.grad
 
-        code, cache = torch.compiler.precompile(
-            lambda model, x: model(x).sum().backward(), m, x
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(
+            lambda model, x: model(x).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's single scatter onto the tie.
+        m.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         f_c(m, x)
         self.assertEqual(m.a.weight.grad, ref_grad)
         # The tie means a.weight and b.weight are the same object, so b sees it too.
@@ -4155,8 +4215,10 @@ class TestPrecompileNumerics(TestCase):
 
         a = make_tensor((4, 4), device=device, dtype=torch.float32)
         b = make_tensor((4, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(f, a, b, backend="eager")
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(f, backend="eager") as cap:
+            cap(a, b)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         out = f_c(a, b)
         ref = f(a, b)
         self.assertEqual(out[0], ref[0])
@@ -4166,10 +4228,10 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU())
         m.to(device).eval()
         x = make_tensor((5, 4), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(
-            lambda model, x: model(x), m, x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda model, x: model(x), backend="eager") as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(m, x), m(x))
 
     def test_backend_eager_training_harvest(self, device):
@@ -4189,10 +4251,13 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(
-            train_step, model, x, target, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, backend="eager", training=True) as cap:
+            cap(model, x, target)
+        code, cache = cap.result()
+        # Capture runs the step once for real (caller-driven contract); reset so the
+        # check below sees only the loaded artifact's own scatter.
+        model.zero_grad(set_to_none=True)
+        f_c = _load_pair(code, cache)
         out = f_c(model, x, target)
         self.assertIsNone(out)
         for p, rg in zip(model.parameters(), ref_grads):
@@ -4214,10 +4279,10 @@ class TestPrecompileNumerics(TestCase):
         ref_out = ref(x)
         ref_rm = ref[1].running_mean.clone()
 
-        code, cache = torch.compiler.precompile(
-            lambda m, xx: m(xx), fresh(), x, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda m, xx: m(xx), backend="eager") as cap:
+            cap(fresh(), x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         run = fresh()
         self.assertEqual(f_c(run, x), ref_out)
         self.assertEqual(run[1].running_mean, ref_rm)
@@ -4229,8 +4294,10 @@ class TestPrecompileNumerics(TestCase):
             return torch.relu(x).masked_fill(x < 0, float("-inf"))
 
         x = make_tensor((8,), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(f, x, backend="eager")
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(f, backend="eager") as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), f(x))
 
     def test_batchnorm_train_with_backward(self, device):
@@ -4259,8 +4326,10 @@ class TestPrecompileNumerics(TestCase):
         def train_step(model, x, target):
             loss_fn(model(x), target).backward()
 
-        code, cache = torch.compiler.precompile(train_step, fresh(), x, target)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(train_step, training=True) as cap:
+            cap(fresh(), x, target)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         run = fresh()
         f_c(run, x, target)
         for p, rg in zip(run.parameters(), ref_grads):
@@ -4271,16 +4340,20 @@ class TestPrecompileNumerics(TestCase):
         # An output that is a view of an input goes through AOTAutograd's output-
         # alias epilogue; precompile reproduces it.
         x = make_tensor((2, 3), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda a: a.t(), x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.t()) as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), x.t())
 
     def test_input_mutation_supported(self, device):
         # In-place input mutation is reflected on the passed tensor (and matches
         # eager), via AOTAutograd's mutation handling composed into the artifact.
         scratch = make_tensor((4,), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda a: a.add_(1.0), scratch)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.add_(1.0)) as cap:
+            cap(scratch)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         x = torch.zeros(4, device=device)
         out = f_c(x)
         self.assertEqual(x, torch.ones(4, device=device))
@@ -4297,10 +4370,12 @@ class TestPrecompileNumerics(TestCase):
 
         x = make_tensor((64,), device=device, dtype=torch.float32)
         with functorch_config.patch(functionalize_rng_ops=True):
-            code, cache = torch.compiler.precompile(
-                lambda a: torch.nn.functional.dropout(a, 0.5, training=True), x
-            )
-            f_c = torch.compiler.precompile.load(code, cache)
+            with _CaptureToFiles(
+                lambda a: torch.nn.functional.dropout(a, 0.5, training=True)
+            ) as cap:
+                cap(x)
+            code, cache = cap.result()
+            f_c = _load_pair(code, cache)
             out = f_c(x)
         self.assertEqual(out.shape, x.shape)
         self.assertTrue((out == 0).any())
@@ -4308,8 +4383,9 @@ class TestPrecompileNumerics(TestCase):
     def test_batchnorm_train_buffer_mutation(self, device):
         # A stateful module (BatchNorm in training mode) mutates its running stats.
         # precompile reflects that onto the runtime model's buffers and matches eager
-        # -- the mutation handling comes from AOTAutograd's codegen -- while CAPTURE
-        # leaves the example model's buffers alone.
+        # -- the mutation handling comes from AOTAutograd's codegen -- while the TRACE
+        # leaves the example model's buffers alone (the served call in the block is
+        # what advances them, once).
         def fresh():
             torch.manual_seed(0)
             m = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.BatchNorm1d(4))
@@ -4319,23 +4395,24 @@ class TestPrecompileNumerics(TestCase):
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         example = fresh()
         bn = example[1]
-        pre_rm = bn.running_mean.clone()
-        pre_rv = bn.running_var.clone()
-        pre_nbt = bn.num_batches_tracked.clone()
-        code, cache = _precompile_pair(lambda model, xx: model(xx), example, x)
-        # Capture reparametrizes the module with FAKE params/buffers (invariants 1 and 2),
-        # so the example module's running stats must not move; a real trace advanced them.
-        self.assertEqual(bn.running_mean, pre_rm)
-        self.assertEqual(bn.running_var, pre_rv)
-        self.assertEqual(bn.num_batches_tracked, pre_nbt)
+        with _CaptureToFiles(lambda model, xx: model(xx)) as cap:
+            cap(example, x)
+        code, cache = cap.result()
 
         ref = fresh()
         ref_out = ref(x)
         ref_rm = ref[1].running_mean.clone()
         ref_rv = ref[1].running_var.clone()
         ref_nbt = ref[1].num_batches_tracked.clone()
+        # Capture reparametrizes FAKE params/buffers in (invariant 3), so the trace
+        # leaves the example module's running stats alone; only the one served call
+        # inside the block advances them, exactly as the single eager call above did
+        # (a real-tensor trace would have advanced them a second time).
+        self.assertEqual(bn.running_mean, ref_rm)
+        self.assertEqual(bn.running_var, ref_rv)
+        self.assertEqual(bn.num_batches_tracked, ref_nbt)
 
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         run = fresh()
         out = f_c(run, x)
         self.assertEqual(out, ref_out)
@@ -4350,14 +4427,16 @@ class TestPrecompileNumerics(TestCase):
         # mutated inputs go through AOTAutograd's now-codegen'd synthetic-base wrapper.
         fn = lambda a, b: (a.mul_(2.0), a + b)[1]  # noqa: E731
         t = make_tensor((4,), device=device, dtype=torch.float32)
-        # Capture traces on fakes and leaves t alone; only the served artifact mutates
-        # its input, so give each run its own clone of t.
+        # The capture call serves the artifact it just rendered on the real args, so
+        # cap(t, t) below doubles t in place; take both clones before the block.
         ref = t.clone()
         ref_out = fn(ref, ref)
         run = t.clone()
 
-        code, cache = torch.compiler.precompile(fn, t, t)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(fn) as cap:
+            cap(t, t)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         out = f_c(run, run)
         self.assertEqual(out, ref_out)
 
@@ -4371,14 +4450,16 @@ class TestPrecompileNumerics(TestCase):
         m.to(device).eval()
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)  # dim 0 dynamic
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         blob["artifact"] = None
         buf = io.BytesIO()
         torch.save(blob, buf)
-        f_i = torch.compiler.precompile.load(code, buf.getvalue())
+        f_i = _load_pair(code, buf.getvalue())
         for bs in (8, 16, 1):
             xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
             self.assertEqual(f_c(m, xt), m(xt))  # cached path
@@ -4392,10 +4473,12 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Linear(4, 3).to(device)
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(
-            lambda model, t: model(t).sum().backward(), m, x
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(
+            lambda model, t: model(t).sum().backward(), training=True
+        ) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         for bs in (8, 16, 5):
             run = torch.nn.Linear(4, 3).to(device)
             run.load_state_dict(m.state_dict())
@@ -4415,8 +4498,10 @@ class TestPrecompileNumerics(TestCase):
         y = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0, shape_id="b")
         mark_unbacked(y, 0, shape_id="b")
-        code, cache = torch.compiler.precompile(lambda mm, a, b: mm(a) + b, m, x, y)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, a, b: mm(a) + b) as cap:
+            cap(m, x, y)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         for bs in (8, 16, 3):
             xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
             yt = make_tensor((bs, 4), device=device, dtype=torch.float32)
@@ -4429,9 +4514,11 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Linear(4, 3).to(device).eval()
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0, strict=True)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
         self.assertIn("USER_INPUT_SHAPES = [(None, 4)]", code)
-        f_c = torch.compiler.precompile.load(code, cache)
+        f_c = _load_pair(code, cache)
         for bs in (8, 16, 2):
             xt = make_tensor((bs, 4), device=device, dtype=torch.float32)
             self.assertEqual(f_c(m, xt), m(xt))
@@ -4442,8 +4529,10 @@ class TestPrecompileNumerics(TestCase):
         m = torch.nn.Linear(4, 3).to(device).eval()
         x = make_tensor((8, 4), device=device, dtype=torch.float32)
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(lambda mm, t: mm(t), m, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda mm, t: mm(t)) as cap:
+            cap(m, x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         xt = make_tensor((0, 4), device=device, dtype=torch.float32)
         self.assertEqual(f_c(m, xt), m(xt))
 
@@ -4457,8 +4546,10 @@ class TestPrecompileNumerics(TestCase):
         x = x.to(memory_format=torch.channels_last)
         self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
         mark_unbacked(x, 0)
-        code, cache = torch.compiler.precompile(lambda t: torch.relu(t) * 2.0, x)
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda t: torch.relu(t) * 2.0) as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         xt = make_tensor((5, 3, 4, 4), device=device, dtype=torch.float32)
         xt = xt.to(memory_format=torch.channels_last)
         out = f_c(xt)
@@ -4474,16 +4565,17 @@ class TestPrecompileNumerics(TestCase):
         self.assertFalse(x.is_contiguous())
         mark_unbacked(x, 0)
         with self.assertRaisesRegex(PrecompileError, "memory format"):
-            torch.compiler.precompile(lambda t: t.contiguous() * 2.0, x)
+            with _CaptureToFiles(lambda t: t.contiguous() * 2.0) as cap:
+                cap(x)
 
     def test_eager_backend_input_mutation(self, device):
         # The eager backend replays the raw ATen graph, so input mutation is reflected on
         # the passed tensor and matches eager, like the inductor backend.
         scratch = make_tensor((4,), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(
-            lambda a: a.add_(1.0), scratch, backend="eager"
-        )
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.add_(1.0), backend="eager") as cap:
+            cap(scratch)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         x = torch.zeros(4, device=device)
         out = f_c(x)
         self.assertEqual(x, torch.ones(4, device=device))
@@ -4493,8 +4585,10 @@ class TestPrecompileNumerics(TestCase):
         # The eager backend reproduces an output that aliases an input (a view), matching
         # eager, via the raw ATen replay.
         x = make_tensor((2, 3), device=device, dtype=torch.float32)
-        code, cache = torch.compiler.precompile(lambda a: a.t(), x, backend="eager")
-        f_c = torch.compiler.precompile.load(code, cache)
+        with _CaptureToFiles(lambda a: a.t(), backend="eager") as cap:
+            cap(x)
+        code, cache = cap.result()
+        f_c = _load_pair(code, cache)
         self.assertEqual(f_c(x), x.t())
 
 
