@@ -3,6 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -99,6 +100,24 @@ static PyObject* THPDtype_to_complex(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPDtype_is_differentiable_type(
+    PyObject* _unused,
+    PyObject* dtype) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(dtype),
+      "dtype must be a torch.dtype (got ",
+      Py_TYPE(dtype)->tp_name,
+      ")");
+  const auto scalar_type = reinterpret_cast<THPDtype*>(dtype)->scalar_type;
+  if (torch::autograd::isDifferentiableType(scalar_type)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 typedef PyObject* (*getter)(PyObject*, void*);
 
 static const std::initializer_list<PyGetSetDef> THPDtype_properties = {
@@ -135,6 +154,12 @@ static const std::initializer_list<PyMethodDef> THPDtype_methods = {
     {"to_complex", THPDtype_to_complex, METH_NOARGS, nullptr},
     {nullptr} /* Sentinel */
 };
+
+static PyMethodDef THPDtype_is_differentiable_type_method = {
+    "_is_differentiable_type",
+    THPDtype_is_differentiable_type,
+    METH_O,
+    nullptr};
 
 static PyObject* THPDtype_repr(THPDtype* self) {
   return THPUtils_packString(std::string("torch.") + self->name);
@@ -193,4 +218,13 @@ void THPDtype_init(PyObject* module) {
       PyDict_SetItemString(THPDtypeType.tp_dict, "__module__", torch_name) >=
       0);
   PyType_Modified(&THPDtypeType);
+
+  auto is_differentiable_type = THPObjectPtr(
+      PyCFunction_New(&THPDtype_is_differentiable_type_method, nullptr));
+  TORCH_CHECK_PYTHON(is_differentiable_type);
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(
+          module,
+          "_is_differentiable_type",
+          is_differentiable_type.release()) >= 0);
 }
