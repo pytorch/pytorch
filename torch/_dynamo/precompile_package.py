@@ -44,6 +44,7 @@ from torch.compiler._precompile_types import PrecompileSummary
 from torch.utils._config_module import ConfigModule
 
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
+from .convert_frame import ConvertFrame
 from .exc import PackageError
 from .guards import CheckFunctionManager
 from .source import (
@@ -62,8 +63,18 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
 
+    from .convert_frame import ConvertFrameReturn
+    from .hooks import Hooks
     from .package import _DynamoCacheEntry
-    from .types import GuardFilterEntry
+    from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
+    from .variables.builder import FrameStateSizeEntry
+
+
+# Built once: config.patch() allocates a class and a ContextVar each time it is
+# called, and this runs on every frame Dynamo compiles for a package.
+_ALLOW_EMPTY_GRAPHS = torch._dynamo.config._make_closure_patcher(
+    allow_empty_graphs=True
+)
 
 
 @contextlib.contextmanager
@@ -115,6 +126,39 @@ def _capture_config(training: bool) -> Iterator[None]:
         torch._dynamo.config.patch(allow_empty_graphs=True),
     ):
         yield
+
+
+class _AllowEmptyGraphsConvertFrame(ConvertFrame):
+    """The package's frame converter, compiling its frames with allow_empty_graphs.
+
+    An uncovered no-op branch must become a guarded variant rather than Dynamo's
+    ordinary eager-only SkipFrame: a skip applies to the code object, so one
+    fallback call permanently skips that frame and no later call can capture
+    its other variants. Applied here as well as in _capture_config so the
+    package's frames get it -- with the object-lifetime side effect noted there
+    -- whenever this converter compiles them, including recompiles of a loaded
+    artifact outside any capture-config scope. Beneath CatchErrorsWrapper
+    rather than replacing it: frames its skipfile checks reject never pay the
+    patch, and this frame stays out of the user stack dynamo_start reports.
+    A frame under DistributedDataParallel with optimize_ddp="ddp_optimizer" is
+    handled by the next commit in this stack, which overrides _clone_with_backend.
+    """
+
+    def __call__(
+        self,
+        frame: DynamoFrameType,
+        cache_entry: CacheEntry | None,
+        hooks: Hooks,
+        frame_state: dict[str, int | FrameStateSizeEntry],
+        skip: int = 0,
+    ) -> ConvertFrameReturn:
+        revert = _ALLOW_EMPTY_GRAPHS()
+        try:
+            return super().__call__(
+                frame, cache_entry, hooks, frame_state, skip=skip + 1
+            )
+        finally:
+            revert()
 
 
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
