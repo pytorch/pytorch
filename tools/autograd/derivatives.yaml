@@ -1156,7 +1156,7 @@
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      self: grad.to(self.scalar_type()).expand_symint(self.sym_sizes()) / self.sym_numel()
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
@@ -1164,7 +1164,7 @@
       result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
+  self: mean_backward(grad.to(self.scalar_type()), self.sym_sizes(), dim, self.sym_numel(), keepdim)
   result: auto_linear
 
 - name: median(Tensor self) -> Tensor
@@ -1423,11 +1423,11 @@
   result: auto_element_wise
 
 - name: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: prod_backward(grad, self.to(grad.scalar_type()), result)
+  self: prod_backward(grad, self.to(grad.scalar_type()), result).to(self.scalar_type())
   result: (prod_backward(at::ones({}, result.options()).expand_as(result), self_p.to(result.scalar_type()), result) * self_t.conj()).sum().conj()
 
 - name: prod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim)
+  self: prod_backward(grad, self.to(grad.scalar_type()), result, dim, keepdim).to(self.scalar_type())
   result: (prod_backward(at::ones({}, result.options()).expand_as(result), self_p.to(result.scalar_type()), result, dim, keepdim) * self_t.conj()).sum(dim, keepdim).conj()
 
 - name: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
@@ -1714,7 +1714,7 @@
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: grad.expand_symint(self.sym_sizes())
+      self: grad.to(self.scalar_type()).expand_symint(self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this with grad.expand_as(self) when that is supported
@@ -1724,7 +1724,7 @@
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
+      self: sum_backward(grad.to(self.scalar_type()), self.sym_sizes(), dim, keepdim)
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this function once semantics for nested tensor expand have been settled on
