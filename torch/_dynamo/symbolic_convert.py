@@ -2421,7 +2421,9 @@ class InstructionTranslatorBase(
         """
         Create an alias to a module for use in guards. A slot already holding
         something other than the resolved module is an AssertionError unless
-        graph_break_ok says the caller can graph break there.
+        graph_break_ok says the caller can graph break there, except a module
+        of the same name, which is accepted and replaced by the resolved module
+        only when that module is the live sys.modules entry.
         """
         if (memo := self._import_source_memo.get(module_name)) is not None:
             return memo
@@ -2449,10 +2451,15 @@ class InstructionTranslatorBase(
             # waited for it, and importing it here would block on its module
             # lock under compile_lock, an order importlib's deadlock check cannot see.
             value = sys.modules.get(module_name)
-            if value is None and module_name in _import_source_cache:
-                value = _import_source_cache[module_name]
-            elif value is None:
-                value = importlib.import_module(module_name)
+            if value is None:
+                cached = _import_source_cache.get(module_name)
+                if cached is not None:
+                    value = cached
+                else:
+                    # The one path left that enters the import machinery: the
+                    # first resolution of a name absent from sys.modules runs
+                    # the module body inside the trace with compile_lock held.
+                    value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
             cacheable = True
 

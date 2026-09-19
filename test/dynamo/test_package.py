@@ -1481,9 +1481,12 @@ def add(x, y):
         # which is never a sys.modules key; import_source resolves it through
         # the importer registry keyed by that same name, so the registry's
         # module is the one the name resolves to now, and a same-named module a
-        # writer left in the slot is accepted and replaced by it. The alias is
-        # reached through an inlined call: the packaged function's global read
-        # roots at its own module, not the frame's.
+        # writer left in the slot is accepted and replaced by it. The registry
+        # is keyed by the module's own mangled __name__, so module_name ==
+        # value_name here, and this pins the acceptance rather than the
+        # value_name widening. The alias is reached through an inlined call: the
+        # packaged function's global read roots at its own module, not the
+        # frame's.
         name = "torch_test_package_import_alias_packaged"
         path = os.path.join(self.path(), "alias.pt")
         src = "SCALE = 2\n\ndef helper(x):\n    return x * SCALE\n"
@@ -1508,6 +1511,7 @@ def add(x, y):
             self.assertNotIn(mangled, _import_source_cache)
         finally:
             fn.__globals__.pop(alias, None)
+            torch.package.package_importer._package_imported_modules.pop(mangled, None)
             torch._dynamo.reset()
 
     def test_import_alias_the_trace_left_alone_is_recorded_for_install(self):
@@ -1595,7 +1599,7 @@ def add(x, y):
             _import_source_cache.pop(name, None)
             torch._dynamo.reset()
 
-    def test_import_alias_of_an_empty_slot_reads_an_attribute_the_cached_module_lacks(
+    def test_import_alias_of_an_empty_slot_reads_an_attribute_only_the_live_module_has(
         self,
     ):
         # The loud form of the parent's staleness, from an empty slot: the
@@ -2234,8 +2238,8 @@ def add(x, y):
 
             return x + shim.VALUE
 
-        def resolve(ctx):
-            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+        def resolve(comptime_ctx):
+            tx = comptime_ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
             tx.import_source(name, True)
 
         def probe(x):
