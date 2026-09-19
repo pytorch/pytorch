@@ -2966,10 +2966,12 @@ Tensor mse_loss_double_backward(
     int64_t reduction) {
   auto grad_input = 2 * grad;
   if (reduction == at::Reduction::Mean) {
-    // Out-of-place: under forward AD `grad` can be an efficient ZeroTensor
-    // (e.g. the target carries no tangent), `2 * grad` stays one, and
-    // ZeroTensors are immutable.
-    grad_input = grad_input / input.sym_numel();
+    // Under forward AD `grad` can be an efficient ZeroTensor (e.g. the target
+    // carries no tangent). `2 * grad` stays one, and ZeroTensors are immutable.
+    grad_input =
+        grad_input._is_zerotensor() || areAnyTensorSubclassLike({grad_input})
+        ? grad_input.div(input.sym_numel())
+        : grad_input.div_(input.sym_numel());
   }
   return grad_input;
 }

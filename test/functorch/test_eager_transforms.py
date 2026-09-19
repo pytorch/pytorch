@@ -3133,6 +3133,13 @@ class TestJvp(TestCase):
         _, expected = jvp(grad(reference), (w,), (v,))
         self.assertEqual(hvp, expected)
 
+        # Same through plain forward AD, where the ZeroTensor is not wrapped
+        w.requires_grad_()
+        with fwAD.dual_level():
+            w_dual = fwAD.make_dual(w, v)
+            (g,) = torch.autograd.grad(loss(w_dual), w_dual, create_graph=True)
+            self.assertEqual(fwAD.unpack_dual(g).tangent, expected)
+
 
 @markDynamoStrictTest
 class TestLinearize(TestCase):
