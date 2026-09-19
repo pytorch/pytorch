@@ -28,7 +28,7 @@ from torch._dynamo.package import (
     SystemInfo,
 )
 
-from . import convert_frame
+from . import convert_frame, external_utils
 from .aot_compile_types import (
     BundledAOTAutogradSerializableCallable,
     SerializableCallable,
@@ -54,6 +54,16 @@ _EXTERNAL_DATA_HINT = (
 # mapping and serving the graph a value no guard checked; dict.get takes this
 # default instead, in the one lookup a live scope needs.
 _UNBOUND = object()
+
+# What a raise can cost the tree it came out of, as the no-match report's caveat
+# states it. Hedged, because only a throw skips the reset on
+# check_nopybind_template's exits: a tree that returns with an error set (the
+# SystemError _unwrapped_raise reads through) reset on its way out, and neither
+# the last-resort veto nor this clause tells the two apart.
+_STALE_AFTER_THROW = (
+    "a C++ throw out of a tree can leave that tree's relational guard state "
+    "stale, so its next check can reject a call it fits or accept one it does not"
+)
 
 
 # A guard failure that is exactly a missing top-level global: the verbose code
@@ -972,8 +982,13 @@ class AOTCompiledFunction:
             namespace = _module_namespace_name(self._guard_globals or {})
             named = "" if namespace is None else f", here vars({namespace})"
             where = (
-                f"the globals of the function {forward} resolves to, which is "
-                f"the dict the guards hold{named}"
+                # A rebind to a Dynamo wrapper is resolved THROUGH it
+                # (_resolve_guard_scope), so the sentence sends the reader through too.
+                f"the globals of the function {forward} resolves to, seen through "
+                "the wrappers torch.compile, torch._dynamo.disable, run and "
+                "optimize return and through any functools.wraps'd "
+                "torch._dynamo.external_utils function to the function they wrap, "
+                f"which is the dict the guards hold{named}"
                 if forward is not None
                 else f"the live scope this artifact was loaded against{named}"
             )
@@ -1400,9 +1415,12 @@ def _resolve_guard_scope(
     # attribute keeps winning the lookup), but object.__setattr__ can; refusing
     # here also keeps get_traced_fn's Module branch, whose hook reads can raise
     # AttributeError on an uninitialized module, off this path entirely.
+    from torch._dynamo.eval_frame import _static_getattr, innermost_fn
+
     forward = model.forward
-    # Describe forward in a bounded way that avoids dumping the entire module
-    # repr (functools.partial embeds the module's full repr).
+    # Describe forward AS GIVEN, not what the unwrap below reached, in a bounded
+    # way that avoids dumping the entire module repr (functools.partial embeds
+    # the module's full repr).
     forward_type = type(forward).__name__
     forward_qualname = getattr(forward, "__qualname__", "")
     described = (
@@ -1415,32 +1433,101 @@ def _resolve_guard_scope(
             "that module's forward, rooting the guards in its defining namespace; "
             "bind a plain function or bound method as model.forward instead"
         )
+    # innermost_fn follows the _torchdynamo_orig_callable chain the wrappers
+    # torch.compile, torch._dynamo.disable, run, optimize and optimize_assert
+    # return carry. A compile that wrapped its target in external_utils.wrap_inline
+    # (config.wrap_top_frame, or a forward defined under torch/) ends that chain
+    # on wrap_inline's inner, which only forwards to what it wraps, so a function
+    # OWNING external_utils' dict is followed to its __wrapped__, one hop per
+    # stacked compile. Keyed on the dict's identity, not __module__ (functools.wraps
+    # copies it): torch._dynamo.decorators' wraps'd wrappers are the root frame a
+    # capture traces, so they stay put. A bound method owns no __globals__ for
+    # _static_getattr (object.__getattribute__) to read, so one is never hopped.
+    resolved = innermost_fn(forward)
+    while _static_getattr(resolved, "__globals__") is vars(external_utils):
+        wrapped = _static_getattr(resolved, "__wrapped__")
+        if wrapped is None:
+            # wrap_dunder_call_ctx_manager's inner skips functools.wraps on purpose,
+            # as does wrap_inline_with_error_on_graph_break's wrapper, which only
+            # compile_wrapper._torchdynamo_inline holds: no public API binds it.
+            hopped = resolved is not forward
+            via = "resolves through a Dynamo wrapper to" if hopped else "is"
+            return None, (
+                f"{described} {via} a torch._dynamo.external_utils function with "
+                "no __wrapped__ to see through to the forward it wraps -- the "
+                "wrapper torch._dynamo.error_on_graph_break, patch_dynamo_config, "
+                "dont_skip_tracing, disable_nested_graph_breaks and "
+                "override_cudagraphs return skips functools.wraps; bind the "
+                "forward that decorator wrapped as model.forward instead"
+            )
+        resolved = wrapped
+    # torch.compile(mod).forward wraps the module's DISPATCH, not the forward
+    # the capture traced: the module itself under config.wrap_top_frame or a
+    # skip rule (OptimizedModule._initialize hands it to wrap_inline), which
+    # only the hop can reach, or otherwise the bound nn.Module.__call__, whose
+    # __func__ owns torch.nn.modules.module's namespace and fails the namespace
+    # test below. So does mod.forward = other.__call__ with no wrapper in
+    # front, a shape a capture did record that namespace for: refusing forgoes
+    # that agreement rather than seed a process-wide torch namespace.
+    if isinstance(resolved, torch.nn.Module):
+        return None, (
+            f"{described} resolves through a Dynamo wrapper to an nn.Module, "
+            "the module's dispatch rather than its forward; bind that module's "
+            "forward, or a wrapper over the forward rather than over the "
+            "module, as model.forward instead"
+        )
+    # get_traced_fn raises RuntimeError on a callable that is neither a
+    # function nor a method, and its __self__ branch returns __func__
+    # unchecked, so a C-implemented bound method (a tensor's sum) raises
+    # AttributeError there or on the __globals__ read.
     try:
-        # The __globals__ read is inside the try because get_traced_fn's
-        # __self__ branch returns __func__ unchecked.
-        traced_fn = convert_frame.get_traced_fn(forward)[0]
+        traced_fn = convert_frame.get_traced_fn(resolved)[0]
         scope = traced_fn.__globals__
     except (RuntimeError, AttributeError):
+        if resolved is forward:
+            return None, (
+                f"get_traced_fn cannot resolve {described} to a Python function; "
+                "make model.forward a plain function or bound method so its own "
+                "globals are used instead"
+            )
+        # torch.compile over a functools.partial or a tensor method wraps it in
+        # wrap_inline (no source file, not a function), so the unwrap lands on
+        # it; the cannot-resolve advice above would describe the
+        # compile_wrapper, a plain function that resolves fine.
         return None, (
-            f"get_traced_fn cannot resolve {described} to a Python function; "
-            "make model.forward a plain function or bound method so its own "
-            "globals are used instead"
+            f"{described} resolves through a Dynamo wrapper to an instance of "
+            f"{type(resolved).__name__}, which get_traced_fn cannot resolve to "
+            "a Python function; bind a plain function or bound method as "
+            "model.forward instead"
         )
     # A forward that resolves to a function torch itself defines -- the
     # nn.Module.forward a module never overrode, _LazyGraphModule._lazy_forward
-    # before a real recompile, the wrapper torch.compile(mod.forward) returns --
-    # owns a torch module's namespace, which a load must neither root guards in
-    # nor seed: the seeding is permanent and installs no CleanupHook. The test
-    # is the namespace, not the function's __module__, which functools.wraps
-    # copies; a GraphModule's forward is exec'd into a private per-instance copy
-    # of its codegen globals, no module's namespace, and resolves.
+    # before a real recompile, the bound Module._wrapped_call_impl a wrapper over
+    # the module's dispatch hops to -- owns a torch module's namespace, which a
+    # load must neither root guards in nor seed: the seeding is permanent and
+    # installs no CleanupHook. The test is the namespace, not the function's
+    # __module__, which functools.wraps copies; a GraphModule's forward is
+    # exec'd into a private per-instance copy of its codegen globals, no
+    # module's namespace, and resolves.
     namespace = _module_namespace_name(scope)
     if namespace is not None and namespace.partition(".")[0] == "torch":
+        hopped = resolved is not forward
+        via = "resolves through a Dynamo wrapper to" if hopped else "resolves to"
+        what = traced_fn.__qualname__
+        wrapped = _static_getattr(traced_fn, "__wrapped__")
+        code = _static_getattr(traced_fn, "__code__")
+        if wrapped is not None and code is not None:
+            # functools.wraps copied the wrappee's __qualname__ onto the wrapper
+            # (a class-body @torch.compiler.wrap_numpy forward binds external_utils'
+            # wrap), which would read "X resolves to X". co_qualname is 3.11+.
+            what = (
+                f"{getattr(code, 'co_qualname', code.co_name)}, a functools.wraps'd "
+                f"wrapper over {getattr(wrapped, '__qualname__', what)}"
+            )
         return None, (
-            f"{described} resolves to {traced_fn.__qualname__}, whose globals "
-            f"are {namespace}'s namespace, a torch module a load neither roots "
-            "guards in nor seeds; bind the module's own forward, defined outside "
-            "torch, as model.forward instead"
+            f"{described} {via} {what}, whose globals are {namespace}'s namespace, "
+            "a torch module a load neither roots guards in nor seeds; bind the "
+            "module's own forward, defined outside torch, as model.forward instead"
         )
     return scope, None
 
@@ -1788,12 +1875,14 @@ class AOTCompiledModel:
     define; a ``fix or drop that artifact`` line naming the first input that
     raised of those nobody opted out, when one did; and -- when some checked
     tree reached an answer, or the artifact holds no input at all -- the advice
-    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept. When
-    no checked tree ever answered and two or more trees raised, a line saying
-    every guard tree raised replaces it, unless an opted-out result's line has
-    already said the raise withheld it; a single raiser's own line already says
-    as much. When some guard tree raised in dispatch, the last raise of the
-    first input that raised is the
+    to add a ``ModelInput`` or check which guards ``guard_filter_fn`` kept.
+    When every rejection that advice rests on followed a raise from its own
+    tree, it says so and says to fix the raise first; when no checked tree ever
+    answered and two or more trees raised, a line saying every guard tree
+    raised replaces it, unless an opted-out result's line has already said the
+    raise withheld it; a single raiser's own line already says as much. When
+    some guard tree raised in dispatch, the last raise of the first input that
+    raised is the
     ``__cause__`` of the ``RuntimeError`` rather than the exception the caller
     sees: an ``except RuntimeError`` (a ``TORCH_CHECK``) catches the report
     with the tree's raise one hop down, and an ``except SystemError`` no longer
@@ -1801,8 +1890,9 @@ class AOTCompiledModel:
     ``KeyboardInterrupt`` or ``SystemExit`` still reaches the caller as itself.
     A raise only out of ``check_verbose`` here is quoted on its line and
     chained nowhere; so is one recorded in dispatch that the next evaluation of
-    the same tree answered, until the caveat a follow-up change appends to the
-    advice names those trees and quotes their raises.
+    the same tree answered: the caveat says only that a raise came before the
+    rejection the advice rests on, and a follow-up change makes it name those
+    trees and quote their raises.
     """
 
     model: torch.nn.Module
@@ -1916,6 +2006,8 @@ class AOTCompiledModel:
         unanswered: set[int] = set()
         # Indices that ever reached an answer, which a ModelInput could have covered.
         answered: set[int] = set()
+        # Answered with no raise of their own on record (see warn_swallowed).
+        trusted: set[int] = set()
         # Per-result bindings, filled on first use, kept for the re-check and report.
         bound: dict[int, dict[str, object]] = {}
         # The first result is bound and checked inline, as at a single-result
@@ -1945,6 +2037,7 @@ class AOTCompiledModel:
                 answer = False
             else:
                 answered.add(0)
+                trusted.add(0)
             if answer:
                 # The guard manager already passed; go through _serve rather
                 # than result(), which would re-run the ~0.85us guard eval on
@@ -1984,8 +2077,11 @@ class AOTCompiledModel:
             if answer:
                 return True
             # Recorded on a rejection only: an accept serves and builds no report.
+            # Measured 0.06us for the four against a 1.3us check().
             unanswered.discard(i)
             answered.add(i)
+            if i not in raised:
+                trusted.add(i)
             return False
 
         for i, result in enumerate(results[1:], 1):
@@ -2044,6 +2140,7 @@ class AOTCompiledModel:
             raised=raised,
             unanswered=unanswered,
             answered=answered,
+            trusted=trusted,
             bound=bound,
             enabled=enabled,
         )
@@ -2064,6 +2161,7 @@ class AOTCompiledModel:
         raised: dict[int, Exception],
         unanswered: set[int],
         answered: set[int],
+        trusted: set[int],
         bound: dict[int, dict[str, object]],
         enabled: list[bool],
     ) -> str:
@@ -2104,6 +2202,7 @@ class AOTCompiledModel:
         # An entry that answered in either dispatch pass rejected this call, so a
         # ModelInput could have covered it even where its line below is a raise.
         coverable = any(results[i]._guard_check_enabled for i in answered)
+        trusted_rejection = any(results[i]._guard_check_enabled for i in trusted)
         withheld = not all(enabled)
         for i, result in enumerate(results):
             if not enabled[i]:
@@ -2125,9 +2224,10 @@ class AOTCompiledModel:
                 # survives in the chain when it was recorded first of all, and in
                 # the footer's fix-or-drop line when it was recorded first of the
                 # inputs nobody opted out. When it is neither -- another checked
-                # tree raised before it -- this report carries that raise nowhere,
-                # until the caveat a follow-up change appends to the advice
-                # names such trees and quotes their raises.
+                # tree raised before it -- this report carries that raise
+                # nowhere: the caveat below says only that a raise came before
+                # the rejection the advice rests on, and a follow-up change
+                # makes it name such trees and quote their raises.
                 lines.append(_raised_line(i, raised[i]))
                 continue
             manager = result._live_guard_manager()
@@ -2201,12 +2301,20 @@ class AOTCompiledModel:
         # An artifact holding no inputs at all -- which deserialize() accepts --
         # has no entry to answer, and adding an input is exactly the advice for it.
         if coverable or not results:
-            lines.append(
+            advice = (
                 "Add a ModelInput covering this call, or check whether "
                 "guard_filter_fn kept a guard this call cannot satisfy -- both "
                 "belong to the process that compiles the artifacts, which need "
                 "not be the one that loaded them."
             )
+            if coverable and not trusted_rejection:
+                # Keyed on what dispatch recorded, not on the entry lines: the
+                # re-check may have printed a raise or an accept instead.
+                advice += (
+                    " Fix the raise first: every rejection this advice rests on "
+                    f"followed a raise from its own tree, and {_STALE_AFTER_THROW}."
+                )
+            lines.append(advice)
         if len(raised) > 1 and not withheld and not coverable:
             # `not coverable`: no checked tree answered, so every entry line above
             # is a raise and the advice above is off. Not beside a withheld line,
@@ -2290,22 +2398,39 @@ class AOTCompiledModel:
 
         There is no live scope only when ``model.forward`` does not resolve to a
         Python function of its own: ``get_traced_fn`` cannot resolve it, or it is
-        an ``nn.Module``, or it resolves to a function torch itself defines, whose
-        globals are a torch module's namespace; guards then resolve against the
-        scope rebuilt from the artifact, where they check nothing useful, and a
-        guard rooted at any global but those aliases and that key warns to say
-        so, naming the cause.
+        an ``nn.Module``, as given or reached through a Dynamo wrapper (the
+        module's dispatch under ``config.wrap_top_frame``), or it is a
+        ``torch._dynamo.external_utils`` function with no ``__wrapped__`` to see
+        through (``torch._dynamo.error_on_graph_break``'s wrapper), or it resolves
+        to a function torch itself defines, whose globals are a torch module's
+        namespace (the module's dispatch otherwise, ``torch.compile(mod).forward``,
+        included), or the target a Dynamo wrapper is seen through to does not
+        resolve itself; guards then resolve against the scope rebuilt from the
+        artifact, where they check nothing useful, and a guard rooted at any
+        global but those aliases and that key warns to say so, naming the cause.
 
-        The function ``model.forward`` resolves to is the outermost one bound as
-        ``forward``: a ``functools.wraps``'d decorator over it, in the class body
-        or rebound on the instance, resolves to the decorator's own function, so
-        the scope is the decorator's module. That is the scope a capture of the
-        decorated forward records as well -- Dynamo traces the decorator as the
-        root frame -- so an artifact captured through the same decorator loads
-        and reads that module's guarded globals live, and one captured from the
-        undecorated forward fails its global guards there, with ``KeyError on
-        G['NAME']`` and a hint naming that module; load an artifact onto the
-        forward it was captured from.
+        The function ``model.forward`` resolves to is the one bound as ``forward``
+        seen through Dynamo's own wrappers -- the ones ``torch.compile``,
+        ``torch._dynamo.disable``, ``run``, ``optimize`` and ``optimize_assert``
+        return, and any function defined in ``torch._dynamo.external_utils`` that
+        carries ``__wrapped__``, of which ``torch.compiler.wrap_numpy`` and
+        ``torch._dynamo.disable(recursive=False)`` are the two a caller applies --
+        but not through any other wrapper the caller applied: a
+        ``functools.wraps``'d decorator over it, in the class body or rebound on
+        the instance, resolves to the decorator's own function, so the scope is
+        the decorator's module. That is the scope a capture of the decorated
+        forward records as well -- Dynamo traces the decorator as the root frame
+        -- so an artifact captured through the same decorator loads and reads
+        that module's guarded globals live, and one captured from the undecorated
+        forward fails its global guards there, with ``KeyError on G['NAME']`` and
+        a hint naming that module; load an artifact onto the forward it was
+        captured from.
+        ``wrap_numpy`` rebound on the instance is seen through, so the scope is
+        the forward's own module -- what an artifact captured from the
+        undecorated forward, the only artifact that shape can load, recorded;
+        applied in the class body it binds a method, which is not seen through
+        and resolves to ``wrap`` in ``external_utils``' own namespace, refused as
+        any torch namespace is.
 
         ``guard_globals``, when supplied, is that scope instead of anything
         resolved from ``model.forward``, so a caller who wants neither the live
