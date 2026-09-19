@@ -56,9 +56,17 @@ build_rocm_ck_wheel() {
   # substitutes plain variables, so the helper sets them and runs the same
   # configure_file in cmake script mode.
   #
-  # One header serves three targets: gfx942,gfx950,gfx1250. Arch-specific macros
-  # are unioned.
+  # One header serves every target listed, with arch-specific macros unioned.
   #
+  # These mirror torch/_inductor/config.py `rocm.ck_supported_arch`, NOT the arch
+  # list the wheel is built for. use_ck_template() rejects anything outside
+  # ck_supported_arch before a kernel is emitted, so an arch the wheel ships for
+  # but CK will not serve -- gfx1030, gfx1100, gfx1201 and the rest of the
+  # manywheel list -- must not appear here: it would union in macros such as
+  # CK_USE_WMMA for hardware the backend never reaches. Extend this when
+  # ck_supported_arch is extended, not before.
+  local ck_gpu_targets="gfx90a;gfx942;gfx950"
+
   # Referenced via ROCM_UTILS_DIR, not a relative path: callers run from the
   # pytorch root and this function has already pushd'd into $ck_dir.
   local ck_config_generator="${ROCM_UTILS_DIR}/generate_ck_config_h.cmake"
@@ -67,11 +75,11 @@ build_rocm_ck_wheel() {
     popd >/dev/null || true
     return 1
   fi
-  echo "Generating include/ck/config.h for gfx942;gfx950;gfx1250"
+  echo "Generating include/ck/config.h for ${ck_gpu_targets}"
   if ! cmake \
       -D "CK_SOURCE_DIR=${ck_dir}" \
       -D "CK_OUTPUT=${ck_dir}/include/ck/config.h" \
-      -D "CK_GPU_TARGETS=gfx942;gfx950;gfx1250" \
+      -D "CK_GPU_TARGETS=${ck_gpu_targets}" \
       -P "$ck_config_generator"; then
     echo "build_rocm_ck_wheel: failed to generate ck/config.h" >&2
     popd >/dev/null || true

@@ -16,7 +16,7 @@
 # calls the same configure_file. Invoke with:
 #
 #   cmake -D CK_SOURCE_DIR=<ck> -D CK_OUTPUT=<out/ck/config.h> \
-#         -D CK_GPU_TARGETS="gfx942;gfx950;gfx1250" \
+#         -D CK_GPU_TARGETS="gfx90a;gfx942;gfx950" \
 #         -P generate_ck_config_h.cmake
 #
 # The rules below MIRROR composable_kernel/CMakeLists.txt (the arch blocks around
