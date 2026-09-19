@@ -406,7 +406,8 @@ def _build_multigraph_forward():
     functions, bound the way install binds them. A continuation is reached the
     way Dynamo emits it -- the entry bytecode does LOAD_GLOBAL on the resume
     name -- so binding the resume dispatcher under that name in the module is
-    all the wiring the graph-break path needs.
+    all the wiring the graph-break path needs. A load refused partway through
+    leaves the names it had already seeded in that module.
 
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
@@ -612,6 +613,11 @@ def _build_multigraph_forward():
                 except ValueError:
                     pass
             f_locals.update(bind_locals(signature, *args, **kwargs))
+            # inspect.signature spells a comprehension's iterator ".N" as
+            # "implicitN"; the guards are rooted at the bytecode name.
+            for name in target.co_varnames[: target.co_argcount]:
+                if name.startswith("."):
+                    f_locals[name] = f_locals.pop("implicit" + name[1:])
             # A tag-safe root's fast path (GuardManager::check_nopybind) can
             # refuse without running its tree and disarms itself; check twice.
             for _ in range(2):
@@ -656,9 +662,12 @@ def _build_multigraph_forward():
         if _frame["is_entry"]:
             entry = dispatcher
         # A continuation is reached by LOAD_GLOBAL from the frame ahead of it,
-        # in the module both were compiled in (Dynamo records a continuation
-        # under its parent's module). A dead record whose module no live frame
-        # opened has no frame left to name it, so it binds nothing.
+        # in the module both were compiled in: Dynamo records a continuation
+        # under its parent's module, except under config.nested_graph_breaks
+        # (default False), where an inlined frame's continuation is recorded
+        # under the inlined function's module while the root frame's bytecode
+        # does the LOAD_GLOBAL. A dead record whose module no live frame opened
+        # has no frame left to name it, so it binds nothing.
         scope = scopes.get(_frame["python_module"])
         if scope is not None:
             for _name in _frame["resume_names"]:
