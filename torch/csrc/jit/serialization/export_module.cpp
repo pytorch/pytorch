@@ -935,7 +935,9 @@ void ExportModule(
 
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
-  mobile::Module mobile_m = jitModuleToMobile(m, getOptionsFromGlobal());
+  CompilationOptions options = getOptionsFromGlobal();
+  options.inline_fork_wait = true;
+  mobile::Module mobile_m = jitModuleToMobile(m, options);
   for (const auto& method : mobile_m.get_methods()) {
     for (const auto& op : method.function().get_code().op_names_) {
       opnames.emplace(
