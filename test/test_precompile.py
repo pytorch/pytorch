@@ -399,6 +399,20 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "not runnable"):
             PrecompiledModule(lambda x: x)(1)
 
+    def test_inlined_forward_warns_unless_told_not_to(self):
+        # exec of an artifact is untrusted input on the load path and warns on
+        # every load; only the capture-time self-load of source this process just
+        # rendered turns the warning off.
+        from torch._precompile import _make_inlined_forward
+
+        code = "def forward(x):\n    return x + 1\n"
+        with self.assertLogs("torch._precompile", level="WARNING") as cm:
+            self.assertEqual(_make_inlined_forward(code)(1), 2)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("about to EXEC python_code", cm.output[0])
+        with self.assertNoLogs("torch._precompile", level="WARNING"):
+            self.assertEqual(_make_inlined_forward(code, warn=False)(1), 2)
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
