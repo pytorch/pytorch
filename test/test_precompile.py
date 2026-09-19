@@ -13,6 +13,8 @@ import torch
 import torch.utils._pytree as _pytree
 from torch._dynamo.decorators import mark_dynamic, mark_unbacked
 from torch._precompile import PrecompileError
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -48,6 +50,12 @@ _pytree.register_pytree_node(
 )
 
 
+def _precompile_pair(fn, *args, **kwargs):
+    """Public-API entry point for the tests added with the fake-tensor capture, behind one
+    indirection so the tracer/module switch above this commit re-points it in one place."""
+    return torch.compiler.precompile(fn, *args, **kwargs)
+
+
 def _strip_artifact(cache: bytes) -> bytes:
     """Return the cache envelope with its compiled artifact removed, forcing load()
     onto the inlined (no-cache) path that JIT-compiles from python_code. Many tests
@@ -75,6 +83,195 @@ def _default_and_inlined_loaders(code: str, cache: bytes, backend: str):
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompile(TestCase):
+    def test_guard_fact_pickle_and_hash(self):
+        from torch.compiler._precompile_types import GuardFact
+
+        # A fact is a value: pickle round-trips it and equal facts hash equal.
+        fact = GuardFact(
+            guard_type="ID_MATCH",
+            source="G['fn']",
+            code=("___check_obj_id(G['fn'], <id>), type=<class 'function'>",),
+            value="is @m.py:3#abc mod.fn",
+            enforced=False,
+        )
+        clone = pickle.loads(pickle.dumps(fact))
+        self.assertEqual(clone, fact)
+        self.assertEqual(hash(clone), hash(fact))
+        # Keyword-only: three str fields in a row would otherwise transpose silently.
+        with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
+            GuardFact("ID_MATCH", "G['fn']", (), "is @m.py:3#abc mod.fn", False)
+
+    def test_summary_pickle_and_hash(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # A fully populated summary round-trips through pickle (which resolves
+        # the class through its __module__) and hashes equal to its copy.
+        risky = (("ID_MATCH", "self.act"),)
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        summary = PrecompileSummary(
+            frames=3,
+            resume_functions=1,
+            guarded_codes=4,
+            backend_graphs=3,
+            bypassed=("gen",),
+            truncated=("loop (m.py:12)",),
+            uncovered_frames=("helper",),
+            wont_generalize=("n",),
+            dropped_guards=(("HASATTR", "m"),) + risky,
+            kept_guards=(("EQUALS_MATCH", "n"), ("TENSOR_MATCH", "x")),
+            risky_dropped_guards=risky,
+            policy_dropped_guards=(policy,),
+            dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
+            capture_errors=("RuntimeError: boom",),
+        )
+        clone = pickle.loads(pickle.dumps(summary))
+        self.assertEqual(clone, summary)
+        self.assertEqual(hash(clone), hash(summary))
+        # Every clause at once: the notes come first and the shouted frame
+        # failures last, so a failure never sits between two notes.
+        self.assertExpectedInline(
+            str(summary),
+            """3 frames (1 from graph breaks), 4 guarded codes, 3 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (2 kept), RISKY drops ['ID_MATCH self.act'], 1 policy-dropped guard, 1 value-pinned source, 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
+        # Keyword-only: four leading ints would otherwise transpose silently.
+        with self.assertRaisesRegex(TypeError, "takes 1 positional argument"):
+            PrecompileSummary(3, 1, 4, 3)
+
+    def test_summary_guard_lists_aggregate_over_frames(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # Two frames' guards on the builtin len are one slot (the producer
+        # normalizes the per-compile counter out of the builtins-dict key). One
+        # frame's caller filter rejected it and the drop told that frame's
+        # variants apart, so it is risky (the risky-drop lint waives a builtin
+        # read the ordinary way); the other frame's invariance policy dropped
+        # it, which the policy may do to a BUILTIN_MATCH: the slot sits in all
+        # three lists.
+        # The relations hold per frame and the type checks nothing, so the
+        # report still constructs and counts the slot once.
+        act = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        check = "___check_obj_id(G['__builtins_dict___<n>']['len'], <id>), type=<class 'builtin_function_or_method'>"
+        summary = PrecompileSummary(
+            frames=2,
+            resume_functions=0,
+            guarded_codes=2,
+            backend_graphs=2,
+            dropped_guards=(act,),
+            risky_dropped_guards=(act,),
+            policy_dropped_guards=(act,),
+            dropped_guard_code=(act + (check,),),
+        )
+        self.assertEqual(summary.dropped_guard_types, {"BUILTIN_MATCH": 1})
+        self.assertExpectedInline(
+            str(summary),
+            """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'BUILTIN_MATCH': 1} (0 kept), RISKY drops ["BUILTIN_MATCH G['__builtins_dict___<n>']['len']"], 1 policy-dropped guard""",
+        )
+
+    def test_summary_complete_requires_every_term(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        def summary(**kw):
+            base = dict(frames=1, resume_functions=0, guarded_codes=1, backend_graphs=1)
+            base.update(kw)
+            return PrecompileSummary(**base)
+
+        self.assertTrue(summary().complete)
+        self.assertFalse(summary(backend_graphs=0).complete)
+        self.assertFalse(summary(guarded_codes=0).complete)
+        self.assertFalse(summary(capture_errors=("boom",)).complete)
+        self.assertFalse(summary(bypassed=("f",)).complete)
+        self.assertFalse(summary(truncated=("f",)).complete)
+        self.assertFalse(summary(uncovered_frames=("f",)).complete)
+        # Coverage only: the guard fields never make a capture incomplete.
+        risky = (("ID_MATCH", "self.act"),)
+        flagged = summary(dropped_guards=risky, risky_dropped_guards=risky)
+        self.assertTrue(flagged.complete)
+        pinned = summary(wont_generalize=("n",), kept_guards=(("EQUALS_MATCH", "n"),))
+        self.assertTrue(pinned.complete)
+
+    def test_summary_digest_and_guard_type_counts(self):
+        from torch.compiler._precompile_types import PrecompileSummary
+
+        # The fixtures list slots sorted; the tallies render in first-appearance
+        # order. A value-pinned source is one a kept value-equality guard
+        # on a bare name pins, so each such fixture keeps that guard too.
+        policy = ("BUILTIN_MATCH", "G['__builtins_dict___<n>']['len']")
+        plain = PrecompileSummary(
+            frames=2,
+            resume_functions=1,
+            guarded_codes=3,
+            backend_graphs=2,
+            dropped_guards=(
+                ("HASATTR", "m"),
+                ("ID_MATCH", "G['fn']"),
+                ("ID_MATCH", "G['g']"),
+            ),
+            kept_guards=(
+                ("EQUALS_MATCH", "scale"),
+                ("TENSOR_MATCH", "x"),
+                ("TYPE_MATCH", "x"),
+            ),
+            policy_dropped_guards=(policy,),
+            # For programmatic consumers: the digest below does not mention it.
+            dropped_guard_code=(("HASATTR", "m", "hasattr(L['m'], 'act')"),),
+            wont_generalize=("scale",),
+        )
+        self.assertEqual(plain.dropped_guard_types, {"HASATTR": 1, "ID_MATCH": 2})
+        kept = {"EQUALS_MATCH": 1, "TENSOR_MATCH": 1, "TYPE_MATCH": 1}
+        self.assertEqual(plain.kept_guard_types, kept)
+        self.assertExpectedInline(
+            str(plain),
+            """2 frames (1 from graph breaks), 3 guarded codes, 2 backend graphs, dropped guards {'HASATTR': 1, 'ID_MATCH': 2} (3 kept), 1 policy-dropped guard, 1 value-pinned source""",
+        )
+        # No optional clause: kept guards show up only beside the drops.
+        clean = PrecompileSummary(
+            frames=1,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            kept_guards=(("TENSOR_MATCH", "x"),),
+        )
+        self.assertExpectedInline(
+            str(clean),
+            """1 frame (0 from graph breaks), 1 guarded code, 1 backend graph""",
+        )
+        # The risky slots are dropped slots too; the digest names them whole,
+        # since a dropped ID_MATCH and its HASATTR companion share a source.
+        # Only the first non-empty line of the first capture error is shown.
+        risky = (("HASATTR", "self.act"), ("ID_MATCH", "self.act"))
+        bad = PrecompileSummary(
+            frames=3,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            bypassed=("gen",),
+            truncated=("loop (m.py:12)",),
+            uncovered_frames=("helper",),
+            dropped_guards=risky,
+            risky_dropped_guards=risky,
+            capture_errors=("\nRuntimeError: boom\nHint: do not.",),
+        )
+        self.assertExpectedInline(
+            str(bad),
+            """3 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 1 UNCOVERED: ['helper'], >=1 TRUNCATED: ['loop (m.py:12)'], 1 BYPASSED: ['gen'], 1 CAPTURE ERROR: 'RuntimeError: boom'""",
+        )
+        # The list clauses stop at five entries and count the rest, so the
+        # digest stays one line however many frames a model has.
+        wide = PrecompileSummary(
+            frames=8,
+            resume_functions=0,
+            guarded_codes=1,
+            backend_graphs=1,
+            uncovered_frames=tuple(f"f{i}" for i in range(7)),
+            dropped_guards=risky,
+            risky_dropped_guards=risky,
+            capture_errors=("RuntimeError: boom", "TypeError: bad", "ValueError: no"),
+        )
+        self.assertExpectedInline(
+            str(wide),
+            """8 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 7 UNCOVERED: ['f0', 'f1', 'f2', 'f3', 'f4'] +2 more, 3 CAPTURE ERRORS: 'RuntimeError: boom' +2 more""",
+        )
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
@@ -2054,6 +2251,148 @@ class TestPrecompile(TestCase):
         ref.load_state_dict(m.state_dict())
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
+
+    def test_nested_input_refused(self):
+        # A nested example input is refused up front with a named PrecompileError rather
+        # than the raw internal error one produces further down (a static capture has no
+        # ShapeEnv to mint the jagged ragged dim's symbolic nested int, and nothing below
+        # the trace has a nested representation on either path). The refusal runs
+        # ahead of the recorded-shape reads, so the strided layout (whose .shape read
+        # raises inside NestedTensorImpl) takes the same path. It is capture-WIDE, so the
+        # unbacked path -- whose ShapeEnv could fakeify a jagged input, but which has no
+        # nested representation downstream either -- gets the same refusal, and its
+        # message claims a restriction rather than that the tensor is unfakeifiable.
+        model = torch.nn.Linear(3, 3)
+        parts = [torch.randn(2, 3), torch.randn(4, 3)]
+        for layout in (torch.jagged, torch.strided):
+            nt = torch.nested.nested_tensor(parts, layout=layout)
+            with (
+                self.subTest(layout=layout),
+                self.assertRaisesRegex(
+                    PrecompileError, "user input 0 is a nested tensor"
+                ),
+            ):
+                _precompile_pair(lambda m, t: m(t), model, nt, backend="eager")
+        # Unbacked capture is inductor-only, so this case takes the default backend; the
+        # marked input is the dense one, the nested one is refused before any tracing.
+        x = torch.randn(4, 3)
+        mark_unbacked(x, 0)
+        nt = torch.nested.nested_tensor(parts, layout=torch.jagged)
+        with self.assertRaisesRegex(PrecompileError, "user input 1 is a nested tensor"):
+            _precompile_pair(lambda m, t, u: m(t), model, x, nt)
+
+        # A nested BUFFER is refused by name too, which is what pins the refusal ahead of
+        # the recorded param/buffer shape reads: those read t.shape, so a STRIDED nested
+        # buffer would otherwise escape as the raw NestedTensorImpl error.
+        class HasNestedBuffer(torch.nn.Module):
+            def __init__(self, nt):
+                super().__init__()
+                self.lin = torch.nn.Linear(3, 3)
+                self.register_buffer("nt", nt)
+
+            def forward(self, t):
+                return self.lin(t)
+
+        for layout in (torch.jagged, torch.strided):
+            mod = HasNestedBuffer(torch.nested.nested_tensor(parts, layout=layout))
+            with (
+                self.subTest(buffer_layout=layout),
+                self.assertRaisesRegex(PrecompileError, "buffer nt is a nested tensor"),
+            ):
+                _precompile_pair(
+                    lambda m, t: m(t), mod, torch.randn(2, 3), backend="eager"
+                )
+
+        # ... and a nested PARAMETER of either layout, the other half of input_labels'
+        # model side: param_shapes reads t.shape just as buffer_shapes does, so the
+        # strided one is the case that escaped before the refusal moved ahead of it.
+        class HasNestedParam(torch.nn.Module):
+            def __init__(self, nt):
+                super().__init__()
+                self.p = torch.nn.Parameter(nt)
+
+            def forward(self, t):
+                return t
+
+        for layout in (torch.jagged, torch.strided):
+            mod = HasNestedParam(torch.nested.nested_tensor(parts, layout=layout))
+            with (
+                self.subTest(param_layout=layout),
+                self.assertRaisesRegex(
+                    PrecompileError, "parameter p is a nested tensor"
+                ),
+            ):
+                _precompile_pair(
+                    lambda m, t: m(t), mod, torch.randn(2, 3), backend="eager"
+                )
+
+    def test_capture_inside_another_trace_refused(self):
+        # An ambient fake mode outranks the one the UNBACKED path builds, and no foreign mode
+        # passes allow_fallback_kernels=False, so a meta-less op would be run for real again;
+        # one built under DEFAULT config (as here, and as an AOTAutograd / inductor trace
+        # builds its own) also lacks the unsafe-data-ptr-access snapshot, so a .data_ptr()
+        # read bakes 0 instead of raising. So an unbacked capture refuses up front, on a fn
+        # that captures cleanly on its own, rather than tracing under a foreign contract.
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        marked = torch.randn(3, 4)
+        mark_unbacked(marked, 0)
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with torch._guards.tracing(torch._guards.TracingContext(fake_mode)):
+            with self.assertRaisesRegex(
+                PrecompileError, "unbacked capture cannot run inside another trace"
+            ):
+                _precompile_pair(lambda m, t: m(t), model, marked)
+            # The STATIC path traces on the real example tensors (make_fx's "real" mode
+            # resolves no fake mode at all), so it has no mode of its own to lose to the
+            # ambient one and is NOT refused.
+            _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
+        # detect_fake_mode also ranks the dispatch-mode stack, so an enclosing
+        # `with FakeTensorMode()` -- no TracingContext at all -- gets the same named refusal
+        # rather than the mode-mismatch AssertionError inside detect_fake_mode.
+        with FakeTensorMode():
+            with self.assertRaisesRegex(
+                PrecompileError, "unbacked capture cannot run inside another trace"
+            ):
+                _precompile_pair(lambda m, t: m(t), model, marked)
+        _precompile_pair(lambda m, t: m(t), model, marked)
+
+    def test_unbacked_capture_refuses_a_data_ptr_read(self):
+        # The unbacked mode is built inside the
+        # fake_tensor_allow_unsafe_data_ptr_access patch, so a .data_ptr() read in fn is
+        # refused instead of returning a meaningless value. The refusal comes out of the
+        # trace RAW here; the commit above relabels it as a PrecompileError.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def reads_pointer(mm, t):
+            t.data_ptr()
+            return mm(t)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer") as cm:
+            _precompile_pair(reads_pointer, m, x)
+        self.assertNotIsInstance(cm.exception, PrecompileError)
+
+    def test_unbacked_capture_refuses_a_meta_less_op_in_an_allowlisted_namespace(self):
+        # The other unbacked-mode hardening: allow_fallback_kernels=False. An op with no
+        # meta/fake kernel in an ALLOWLISTED namespace (aten, prims, quantized, ...) would
+        # otherwise have FakeTensorMode's unsafe fallback run its real kernel on
+        # zero-filled substitutes and bake whatever shape that produced. The op is called
+        # on the UNMARKED input on purpose: the fallback declines symbolic-sized arguments
+        # by itself, so only a static one exercises the flag. Raw out of the trace here too.
+        from torch._subclasses.fake_tensor import UnsupportedOperatorException
+        from torch.library import _scoped_library
+
+        m = torch.nn.Linear(4, 3).eval()
+        x, y = torch.randn(8, 4), torch.randn(2, 3)
+        mark_unbacked(x, 0)
+        with _scoped_library("quantized", "FRAGMENT") as qlib:
+            qlib.define("mlprecompile_unbacked_no_meta(Tensor x) -> Tensor")
+            qlib.impl("mlprecompile_unbacked_no_meta", lambda t: t * 2, "CPU")
+            op = torch.ops.quantized.mlprecompile_unbacked_no_meta
+            with self.assertRaises(UnsupportedOperatorException):
+                _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")
