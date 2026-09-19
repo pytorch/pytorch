@@ -18,7 +18,7 @@ import threading
 import time
 import traceback
 from collections import defaultdict
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
@@ -1985,6 +1985,33 @@ def _partition_joint_graph_into_fw_bw(
     if callable(torch._functorch.config.joint_custom_pass):
         # pyrefly: ignore [bad-assignment]
         fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
+
+    # Recomputing a read of an input the forward mutates is not equivalent to
+    # saving it, so the partitioner has to know which inputs those are. It cannot
+    # always infer this from the graph: the mutation is only visible there when it
+    # is kept in-graph as a copy_ epilogue. Stash it on meta rather than widening
+    # the partition_fn signature, which custom partitioners also implement.
+    # Tokens for effectful ops are prepended to the graph inputs, so a position in
+    # input_info is num_tokens placeholders further along. Resolve to node names
+    # here, where that offset is known, rather than making the partitioner reason
+    # about which index space it has been handed.
+    _placeholders = fx_g.graph.find_nodes(op="placeholder")
+
+    def _input_names(indices: Iterable[int]) -> list[str]:
+        return [
+            _placeholders[num_tokens + i].name
+            for i in indices
+            if 0 <= num_tokens + i < len(_placeholders)
+        ]
+
+    fx_g.meta["aot_mutated_input_names"] = _input_names(
+        i for i, info in enumerate(fw_metadata.input_info) if info.mutates_data
+    )
+    # Buffers can also be mutated by a region other than this one -- another
+    # compiled graph, or eager code -- which never shows up in input_info here.
+    fx_g.meta["aot_buffer_input_names"] = _input_names(
+        aot_config.buffer_input_indices or []
+    )
 
     fw_module, bw_module = partition_fn(
         fx_g,
