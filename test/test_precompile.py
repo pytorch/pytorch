@@ -349,27 +349,36 @@ class TestPrecompile(TestCase):
         meta = _parse_artifact_metadata(src + "_x = f()\n")
         self.assertEqual(meta["TRACER"], "dynamo")
 
-    def test_artifact_neutralizes_ambient_autocast(self):
+    @parametrize("backend", ["eager", "inductor"])
+    def test_artifact_neutralizes_ambient_autocast(self, backend):
         # The casts a capture ran under are baked into the artifact, but the graph
         # still re-dispatches at serve time, so the driver runs it with autocast
-        # excluded and leaves the caller's autocast state as it found it. The eager
-        # graph's aten.addmm.default is autocast-registered; inductor's addmm.out
-        # is not, so that backend cannot show the second cast on CPU.
+        # excluded and leaves the caller's autocast state as it found it. addbmm is
+        # AutocastCPU-registered and an inductor fallback with no decomposition, so
+        # both artifacts re-dispatch through aten.addbmm.default and each backend's
+        # guard is load-bearing (without it inductor's assert_tensor_metadata trips).
         from torch._precompile import PrecompiledModule
 
-        model = torch.nn.Linear(4, 3)
-        x = torch.randn(5, 4)
-        compiled = PrecompiledModule(lambda m, x: m(x), backend="eager")
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(3, 3))
+
+            def forward(self, x):
+                return torch.addbmm(self.bias, x, x.transpose(1, 2))
+
+        model = Model()
+        x = torch.randn(2, 3, 4)
+        expected = model(x)
+        compiled = PrecompiledModule(lambda m, x: m(x), backend=backend)
         compiled._compile((model, x))
         ns: dict[str, object] = {"__name__": "precompile_test_artifact"}
         exec(compile(compiled.to_python_code(), "<artifact>", "exec"), ns)
         forward = ns["forward"]
-        expected = forward(model, x)
         with torch.autocast("cpu", dtype=torch.bfloat16):
-            self.assertEqual(model(x).dtype, torch.bfloat16)
             out = forward(model, x)
-            self.assertTrue(torch.is_autocast_enabled("cpu"))
-            self.assertEqual(torch.get_autocast_dtype("cpu"), torch.bfloat16)
+            self.assertEqual(model(x).dtype, torch.bfloat16)
+        self.assertFalse(torch.is_autocast_enabled("cpu"))
         self.assertEqual(out.dtype, torch.float32)
         self.assertEqual(out, expected)
 
