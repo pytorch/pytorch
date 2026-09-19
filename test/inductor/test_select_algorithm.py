@@ -1307,8 +1307,8 @@ class TestTemplateRender(TestCase):
         kernel.num_buffers_warp_spec = 0
 
         with patch.object(
-            select_algorithm,
-            "triton_meta_device_props",
+            select_algorithm.DeviceProperties,
+            "create",
             return_value=unittest.mock.MagicMock(),
         ):
             TritonTemplateKernel.jit_lines(kernel)

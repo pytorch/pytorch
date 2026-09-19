@@ -177,17 +177,12 @@ has_side_effect(torch.ops.streams.synchronize_event.default)
 
 
 @custom_op("streams::synchronize_device", mutates_args=())
-def synchronize_device(device_type: str, device_index: int | None) -> None:
-    device = (
-        torch.device(device_type)
-        if device_index is None
-        else torch.device(device_type, device_index)
-    )
-    torch.accelerator.synchronize(device)
+def synchronize_device(device_type: str, device_index: int) -> None:
+    torch.accelerator.synchronize(torch.device(device_type, device_index))
 
 
 @synchronize_device.register_fake
-def _(device_type: str, device_index: int | None) -> None:
+def _(device_type: str, device_index: int) -> None:
     pass
 
 
