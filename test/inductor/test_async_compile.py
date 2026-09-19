@@ -393,6 +393,25 @@ def test_flydsl_loader_main(value, stream):
             self.assertTrue(AsyncCompile._ready_future.done())
             self.assertTrue(AsyncCompile.use_process_pool())
 
+    def test_dead_process_pool_is_rebuilt(self):
+        # A pool that was shut down (or whose sidecar died) must not be handed
+        # out forever; the cached factory should rebuild it instead.
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method="subprocess", compile_threads=2):
+            pool = AsyncCompile.process_pool()
+            self.assertTrue(pool.running)
+            pool.shutdown()
+            self.assertFalse(pool.running)
+
+            rebuilt = AsyncCompile.process_pool()
+            self.assertIsNot(rebuilt, pool)
+            self.assertTrue(rebuilt.running)
+            self.assertEqual(
+                rebuilt.submit(AsyncCompile._get_ready).result(timeout=120), "ready"
+            )
+        shutdown_compile_workers()
+
     def test_subprocess_pool_registers_multiprocessing_finalizer(self):
         class FakeSubprocPool:
             def __init__(self, *args, **kwargs):
