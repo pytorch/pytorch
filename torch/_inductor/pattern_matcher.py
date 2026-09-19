@@ -61,7 +61,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import canonicalize_dim, is_integer_dtype
 from torch._subclasses.fake_tensor import (
     is_fake_tensor,
     maybe_get_fake_constant,
@@ -590,33 +590,31 @@ class Ignored(PatternExpr):
 
 class CanonicalDims(PatternExpr):
     """
-    Match a burned-in list of dim indices, treating negative dims as
-    equivalent to their positive spelling.  `rank` is the rank of the tensor
-    the op consumes, captured when the pattern was traced; the matched graph's
-    tensor is trusted to have the same rank (for permute the dims length
-    enforces it, for reductions the surrounding pattern pins it).  Dims are
-    compared order-sensitively; fine for permute (order is the semantics) and
-    for the single-dim reductions traced today, but multi-dim reduction dims
-    are semantically unordered and would need a per-op sort.
+    Match a burned-in list of dim indices modulo spelling (dim=-1 vs dim=3).
+    `rank` is the rank of the tensor the op consumes, captured when the
+    pattern was traced; the matched tensor is trusted to have the same rank
+    (it is either a pattern input the trace ran with or a node whose
+    expected_meta pins it).  Dims are compared order-sensitively; fine for
+    permute (order is the semantics) and for the single-dim reductions traced
+    today, but multi-dim reduction dims are semantically unordered and would
+    need a per-op sort.
     """
 
     def __init__(self, dims: Sequence[int], rank: int) -> None:
         super().__init__()
-        if rank <= 0:
-            raise AssertionError(f"expected positive rank, got {rank}")
         self.rank = rank
-        self.dims = [d % rank for d in dims]
+        self.dims = tuple(canonicalize_dim(rank, d) for d in dims)
 
     def __repr__(self) -> str:
-        return f"CanonicalDims({self.dims!r}, {self.rank})"
+        return f"CanonicalDims({list(self.dims)!r}, {self.rank})"
 
     def _match(self, node: NodeOrConstant, ctx: MatchContext) -> MatchResult:
-        if (
-            isinstance(node, (list, tuple))
-            and all(type(d) is int for d in node)
-            and [d % self.rank for d in node] == self.dims
-        ):
-            return Match(ctx, self)
+        if isinstance(node, (list, tuple)) and all(type(d) is int for d in node):
+            try:
+                if tuple(canonicalize_dim(self.rank, d) for d in node) == self.dims:
+                    return Match(ctx, self)
+            except IndexError:
+                pass
         return FailedMatch("canonical_dims: {} != {}", node, self.dims)
 
     def pattern_eq(self, other: object) -> bool:
@@ -1081,9 +1079,9 @@ class _TargetArgsExpr(_TargetExpr):
         sizes, dtype, device = self.expected_meta
         val = node.meta.get("val", node.meta.get("example_value"))
         if not isinstance(val, torch.Tensor):
-            # graphs without fake metadata (e.g. raw dynamo graphs) keep the
-            # pre-expected_meta behavior of matching on structure alone
-            return True
+            # size lists were wildcarded on the strength of this check, so a
+            # node without fake metadata cannot be validated
+            return False
         if val.dtype != dtype or val.device != device or val.dim() != len(sizes):
             return False
         return all(statically_known_true(a == b) for a, b in zip(val.shape, sizes))
@@ -1731,7 +1729,7 @@ def _return_true(match: Match) -> bool:
     return True
 
 
-def log_trace_failure(search_fn: Callable[..., Any], e: RuntimeError) -> None:
+def log_trace_failure(search_fn: Callable[..., Any], e: Exception) -> None:
     log.info(
         "Replacement pattern %s failed to apply due to shape mismatch: %s",
         search_fn.__name__,
@@ -2045,7 +2043,7 @@ def register_replacement(
                             sym_args + args,
                             get_decomp_fn=get_decomp_fn,
                         )
-                    except RuntimeError as e:
+                    except Exception as e:
                         log_trace_failure(search_fn, e)
                         return False
 
@@ -2075,7 +2073,10 @@ def register_replacement(
                         specific_graph = trace_fn(
                             search_fn, args, get_decomp_fn=get_decomp_fn
                         )
-                    except RuntimeError as e:
+                    except Exception as e:
+                        # the coarse match admits candidates whose shapes do
+                        # not fit search_fn at all (e.g. a rank-3 graph
+                        # against a pattern that indexes query.size(3))
                         log_trace_failure(search_fn, e)
                         return False
 
@@ -2827,15 +2828,15 @@ def _not_implemented(*args: object, **kwargs: object) -> NoReturn:
     raise NotImplementedError
 
 
-# The dims list of these ops selects which computation is performed but has
-# equivalent spellings (dim=-1 vs dim=3), so under match_node_meta it is
-# matched via CanonicalDims instead of literally.
-_DIM_LIST_FNS = (aten.permute.default, aten.amax.default, aten.sum.dim_IntList)
-
-# The size list of these ops echoes tensor shapes and has many equivalent
-# spellings (-1 vs concrete, sym exprs); under match_node_meta the entries are
-# wildcarded and the op's semantics are pinned by expected_meta instead.
-_SIZE_LIST_FNS = (aten.view.default, aten._unsafe_view.default, aten.expand.default)
+def _int_list_elem_type(t: Any) -> type | None:
+    """torch.IntType or torch.SymIntType for an int[]/SymInt[] schema type."""
+    if isinstance(t, torch.OptionalType):
+        t = t.getElementType()
+    if isinstance(t, torch.ListType):
+        elem_type = type(t.getElementType())
+        if elem_type in (torch.IntType, torch.SymIntType):
+            return elem_type
+    return None
 
 
 def fx_to_pattern(
@@ -2941,10 +2942,7 @@ def fx_to_pattern(
                 process_arg_fn = process_arg_fn_impl
 
             if match_node_meta:
-                rank = self._dims_rank(target, args)
-                if rank is not None:
-                    args = (args[0], CanonicalDims(args[1], rank), *args[2:])
-                args = self._wildcard_size_list(target, args)
+                args = self._match_node_meta_args(target, args)
             args, kwargs = pytree.tree_map(process_arg_fn, (args, kwargs))
             if list in ignore_types:
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
@@ -2957,43 +2955,65 @@ def fx_to_pattern(
                     result.expected_meta = (tuple(val.shape), val.dtype, val.device)
             return result
 
-        def _wildcard_size_list(
+        def _match_node_meta_args(
             self, target: Any, args: Sequence[Any]
         ) -> Sequence[Any]:
-            if (
-                target not in _SIZE_LIST_FNS
-                or len(args) < 2
-                or not isinstance(args[1], (list, tuple))
-            ):
+            """
+            Size lists (`SymInt[] size`/`shape`) have many equivalent spellings
+            (-1 vs concrete, sym exprs), so their entries are wildcarded and the
+            op's semantics are pinned by expected_meta instead.  Dim lists
+            (`int[] dim`/`dims`) are matched modulo rank (dim=-1 vs dim=3).
+            """
+            node = self._current_node
+            if not isinstance(target, torch._ops.OpOverload) or node is None:
                 return args
-            sizes = [
+            args = list(args)
+            for i, schema_arg in enumerate(target._schema.arguments[: len(args)]):
+                elem_type = _int_list_elem_type(schema_arg.real_type)
+                if elem_type is None or not isinstance(args[i], (list, tuple)):
+                    continue
+                if schema_arg.name in ("size", "shape"):
+                    args[i] = self._wildcard_size_list(args[i], node)
+                elif schema_arg.name in ("dim", "dims") and elem_type is torch.IntType:
+                    # SymInt[] dims (e.g. aten.tile) are counts, not indices
+                    args[i] = self._canonical_dims(args[i], node)
+            return tuple(args)
+
+        def _wildcard_size_list(
+            self, sizes: Sequence[Any], node: torch.fx.Node
+        ) -> Sequence[Any]:
+            # Only when the traced output shape is `sizes`, so that
+            # expected_meta pins the wildcarded entries (as_strided_scatter's
+            # size, say, describes a window of the output instead).
+            val = node.meta.get("val")
+            if not isinstance(val, torch.Tensor) or len(sizes) != val.ndim:
+                return sizes
+            for x, s in zip(sizes, val.shape):
+                if type(x) is int and x != -1 and not statically_known_true(x == s):
+                    return sizes
+            return [
                 x
                 if isinstance(x, PatternExpr) or x in inv_scalar_workaround
                 else Ignored()
-                for x in args[1]
+                for x in sizes
             ]
-            return (args[0], sizes, *args[2:])
 
-        def _dims_rank(self, target: Any, args: Sequence[Any]) -> int | None:
-            """Rank context for _DIM_LIST_FNS, or None to fall back to process_arg."""
-            if target not in _DIM_LIST_FNS or len(args) < 2:
-                return None
-            dims = args[1]
-            if not (
-                isinstance(dims, (list, tuple)) and all(type(d) is int for d in dims)
-            ):
-                return None
-            if any(d in inv_scalar_workaround for d in dims):
-                # the dim is a captured pattern input (e.g. prepare_softmax's
-                # `dim`), not a constant to match
-                return None
-            if target is aten.permute.default:
-                return len(dims) or None
-            node = self._current_node
-            if node is None or not isinstance(node.args[0], torch.fx.Node):
-                return None
-            val = node.args[0].meta.get("val")
-            return val.ndim if isinstance(val, torch.Tensor) and val.ndim > 0 else None
+        def _canonical_dims(
+            self, dims: Sequence[Any], node: torch.fx.Node
+        ) -> Sequence[Any] | CanonicalDims:
+            if not all(type(d) is int and d not in inv_scalar_workaround for d in dims):
+                # a dim in scalar_workaround is a captured pattern input (e.g.
+                # prepare_softmax's `dim`), not a constant to match
+                return dims
+            self_node = node.args[0]
+            self_val = (
+                self_node.meta.get("val")
+                if isinstance(self_node, torch.fx.Node)
+                else None
+            )
+            if not isinstance(self_val, torch.Tensor):
+                return dims
+            return CanonicalDims(dims, self_val.ndim)
 
         def run_node(self, n: torch.fx.Node) -> Any:
             self._current_node = n

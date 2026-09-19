@@ -929,6 +929,39 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    def _test_pattern_fails_with_lower_rank_inputs(self):
+        # Rank-3 inputs whose views mirror _sfdp_pattern_24's op structure
+        # coarse-match the 4-D-traced pattern (its view sizes are wildcards),
+        # so the match-time re-trace runs search_fn on them and indexes
+        # query.size(3).  The candidate must be rejected, not crash compile.
+        n_head, seq_len, head_size = 2, 16, 32
+
+        def dot_prod_attention(query, key, value, attn_mask):
+            bs_heads = query.size(0) * n_head
+            q = query.view(bs_heads, seq_len, head_size)
+            k = key.view(bs_heads, seq_len, head_size)
+            v = value.view(bs_heads, seq_len, head_size)
+            attn_weights = torch.bmm(q, k.transpose(1, 2))
+            attn_weights = attn_weights.view(-1, n_head, seq_len, seq_len) + attn_mask
+            attn_weights = attn_weights.view(bs_heads, seq_len, seq_len)
+            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1)
+            return torch.bmm(attn_weights, v).view(-1, n_head, seq_len * head_size)
+
+        tensor_shape = (4, n_head, seq_len * head_size)
+        args = [
+            *[torch.randn(tensor_shape, device=self.device) for _ in range(3)],
+            torch.randn((1, 1, seq_len, seq_len), device=self.device),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_fuse_pattern=False,
+            has_dropout=False,
+            check_train=False,
+        )
+        self.assertEqual(counters["inductor"]["fuse_attention"], 0)
+
     def _test_pattern_fuses_with_symint_scale(self):
         # A SymInt scale is a scalar the fused kernel accepts. _check_common
         # only marks dim 0 dynamic, so the scale is taken from that dim.
@@ -2117,6 +2150,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         )
         test_pattern_fails_with_non_last_dim_softmax_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
         test_pattern_fails_with_mismatched_view_grouping_gpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
+        test_pattern_fails_with_lower_rank_inputs_gpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
+        )
         test_sdpa_rewriter_11_gpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
         )
@@ -2269,6 +2305,9 @@ if HAS_CPU:
         )
         test_pattern_fails_with_non_last_dim_softmax_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_non_last_dim_softmax
         test_pattern_fails_with_mismatched_view_grouping_cpu = TestSDPAPatternRewriterTemplate._test_pattern_fails_with_mismatched_view_grouping
+        test_pattern_fails_with_lower_rank_inputs_cpu = (
+            TestSDPAPatternRewriterTemplate._test_pattern_fails_with_lower_rank_inputs
+        )
         test_sdpa_rewriter_11_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_11
         )
