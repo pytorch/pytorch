@@ -15,7 +15,7 @@ class BasePruningMethod(ABC):
     such as :meth:`compute_mask` and :meth:`apply`.
     """
 
-    _tensor_name: str
+    _tensor_name: str | None
 
     def __call__(self, module, inputs):
         r"""Multiply the mask into original tensor and store the result.
@@ -300,12 +300,23 @@ class PruningContainer(BasePruningMethod):
         # check that we're adding a pruning method to the container
         if not isinstance(method, BasePruningMethod) and method is not None:
             raise TypeError(f"{type(method)} is not a BasePruningMethod subclass")
-        elif method is not None and self._tensor_name != method._tensor_name:
+        # `_tensor_name` may be unset on either side (a container built
+        # incrementally, or a fresh method not yet applied to a module); only
+        # two known names must agree, and the first known name wins.
+        existing_name = getattr(self, "_tensor_name", None)
+        method_name = getattr(method, "_tensor_name", None) if method is not None else None
+        if (
+            existing_name is not None
+            and method_name is not None
+            and existing_name != method_name
+        ):
             raise ValueError(
                 "Can only add pruning methods acting on "
-                f"the parameter named '{self._tensor_name}' to PruningContainer {self}."
-                + f" Found '{method._tensor_name}'"
+                f"the parameter named '{existing_name}' to PruningContainer {self}."
+                + f" Found '{method_name}'"
             )
+        if existing_name is None and method_name is not None:
+            self._tensor_name = method_name
         # if all checks passed, add to _pruning_methods tuple
         self._pruning_methods += (method,)  # type: ignore[operator]
 
@@ -1130,9 +1141,7 @@ def global_unstructured(
     # use the canonical pruning methods to compute the new mask, even if the
     # parameter is now a flattened out version of `parameters`
     container = PruningContainer()
-    container._tensor_name = "temp"  # to make it match that of `method`
     method = pruning_method(**kwargs)
-    method._tensor_name = "temp"  # to make it match that of `container`
     if method.PRUNING_TYPE != "unstructured":
         raise TypeError(
             'Only "unstructured" PRUNING_TYPE supported for '
