@@ -5052,7 +5052,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             dtype == torch.bool
             and self.current_node is not None
             and isinstance(self.current_node.node, ir.ComputedBuffer)
-            and isinstance(self.current_node.node.data, ir.StorageCopy)
+            and isinstance(self.current_node.node.data, ir.BooleanCopy)
             and V.graph.get_current_device_or_throw().type == "cuda"
             and not should_unwrap_unspec_arg(name)
         )
@@ -5310,7 +5310,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         var = self.args.output(name)
         original_index = index
         dtype = V.graph.get_dtype(name)
-        # For a StorageCopy, store the raw byte while the logical value remains
+        # For a BooleanCopy, store the raw byte while the logical value remains
         # available through store_cache for fused consumers:
         #   tl.store(out_ptr.to(tl.pointer_type(tl.int8)) + index, raw, mask)
         storage_copy = (
@@ -5318,7 +5318,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             and mode is None
             and self.current_node is not None
             and isinstance(self.current_node.node, ir.ComputedBuffer)
-            and isinstance(self.current_node.node.data, ir.StorageCopy)
+            and isinstance(self.current_node.node.data, ir.BooleanCopy)
             and V.graph.get_current_device_or_throw().type == "cuda"
         )
         if storage_copy:
