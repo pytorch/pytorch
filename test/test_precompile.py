@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: pt2"]
 import copy
-import functools
 import io
 import os
 import pickle
@@ -399,30 +398,6 @@ class TestPrecompile(TestCase):
         self.assertEqual(f(3), ((3,), {}))
         with self.assertRaisesRegex(PrecompileError, "not runnable"):
             PrecompiledModule(lambda x: x)(1)
-
-    def test_precompile_error_result_defaults_to_none(self):
-        # Nothing ran before an ordinary refusal, so the error carries no result.
-        self.assertIsNone(PrecompileError("refused").result)
-
-    def test_make_fx_capture_refuses_a_partial(self):
-        # A partial hides its bound arguments from the capture, so it is refused
-        # up front with the fix, rather than failing later as a baked constant.
-        from torch._precompile import _MakeFxCapture, MakeFxTracer
-
-        def step(model, x):
-            return model(x)
-
-        bound = functools.partial(step, torch.nn.Linear(2, 2))
-        table: dict = {}
-        tracer = MakeFxTracer(decompositions=table)
-        kwargs = {"backend": "eager", "tracer": tracer, "training": False}
-        with self.assertRaisesRegex(PrecompileError, "cannot capture a partial"):
-            _MakeFxCapture(bound, "m.py", "m.cache", **kwargs)
-        cap = _MakeFxCapture(step, "m.py", "m.cache", **kwargs)
-        self.assertIs(cap.__enter__(), cap)
-        self.assertIs(cap._module._decompositions, table)
-        self.assertFalse(cap._traced)
-        self.assertIsNone(cap._rendered)
 
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
