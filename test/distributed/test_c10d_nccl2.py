@@ -582,10 +582,13 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce(pg)
 
         if self.rank == 0:
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
             # Nobody else joins, so this can never complete and the watchdog
             # trips. Without the tear-down the process must survive and the
             # timeout must become readable through get_error().
-            dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+            dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
             deadline = time.time() + 60
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
@@ -609,7 +612,10 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce(pg)
 
         if self.rank == 0:
-            dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
+            dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
             deadline = time.time() + 60
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
@@ -635,6 +641,7 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce(pg)
 
         if self.rank == 0:
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
             work = dist.all_reduce(
                 torch.ones(1024, device=self.device), group=pg, async_op=True
             )
@@ -766,7 +773,10 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
             self._check_all_reduce(pg)
             path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
             if self.rank == 0:
-                dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+                dist.set_timeout(timedelta(milliseconds=1), group=pg)
+                dist.all_reduce(
+                    torch.ones(1024, device=self.device), group=pg, async_op=True
+                )
                 dump = None
                 deadline = time.time() + 60
                 while dump is None and time.time() < deadline:
