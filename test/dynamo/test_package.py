@@ -1229,6 +1229,8 @@ def add(x, y):
             exp.save_source_string(name, src)
         packaged = torch.package.PackageImporter(path).import_module(name)
         mangled = packaged.__name__
+        registry = torch.package.package_importer._package_imported_modules
+        self.addCleanup(registry.pop, mangled, None)
         alias = mangled.replace(">", "_").replace("<", "_").replace(".", "_dot_")
         args = (torch.randn(3, 2),)
 
@@ -1243,7 +1245,6 @@ def add(x, y):
             self.assertEqual(fn.__globals__[alias], "not a module")
         finally:
             fn.__globals__.pop(alias, None)
-            torch.package.package_importer._package_imported_modules.pop(mangled, None)
             torch._dynamo.reset()
 
     def test_import_alias_taken_for_an_inlined_callees_module_is_a_hard_error(self):
