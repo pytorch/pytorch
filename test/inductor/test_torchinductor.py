@@ -17216,6 +17216,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         y = torch.randn(8, 8, device=self.device)
         self.common(fn, (x, y), reference_in_float=False)
 
+    def test_bool_dtypeview_copy_preserves_storage(self):
+        # https://github.com/pytorch/pytorch/issues/193760
+        def fn(x, y):
+            return x.view(torch.bool).copy_(y.view(torch.bool)).view(torch.float32)
+
+        x = torch.randn(8, 8, device=self.device)
+        y = torch.randn(8, 8, device=self.device)
+        self.common(fn, (x, y), reference_in_float=False)
+
+    def test_bool_dtypeview_clone_preserves_storage(self):
+        # https://github.com/pytorch/pytorch/issues/193760
+        def fn(x):
+            cloned = x.clone()
+            return cloned.view(torch.uint8)
+
+        raw = torch.arange(256, dtype=torch.uint8, device=self.device)
+        self.common(fn, (raw.view(torch.bool),), reference_in_float=False)
+
     @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile

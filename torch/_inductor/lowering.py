@@ -4064,6 +4064,13 @@ def clone(x, *, memory_format=None):
     # Don't materialize the layout here based on memory_format,
     # as we want to give the scheduler opportunity to perform layout optimization.
     # Let the downstream op handle the input stride as needed.
+    if x.get_dtype() == torch.bool:
+        # Bool inputs can contain arbitrary storage bytes, but pointwise loads
+        # normalize them to 0 or 1. Use ATen clone to preserve the bytes.
+        return fallback_handler(aten.clone.default, add_to_fallback_set=False)(
+            x, memory_format=memory_format
+        )
+
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
