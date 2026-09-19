@@ -925,14 +925,14 @@ _IDENTITY_GUARD_TYPES = frozenset(
 )
 
 
-# Guards that pin an input's SHAPE, VALUE or KIND, or ambient state the graph
-# was traced under, never policy-dropped even when they held identically across
-# every captured variant. A drop is licensed by "it discriminated nothing", but
-# with a single example nothing CAN discriminate, and what would disappear is
-# the check that the runtime input looks like the captured one at all. A dropped
-# shape guard crashes inside a kernel on inductor and can quietly miscompute on
-# eager; a dropped value guard serves the captured branch to every other value
-# with correct-looking numerics.
+# Guards that pin an input's SHAPE, VALUE or KIND: compared across variants,
+# and never policy-dropped even when they held identically across every captured
+# variant. A drop is licensed by "it discriminated nothing", but with a single
+# example nothing CAN discriminate, and what would disappear is the check that
+# the runtime input looks like the captured one at all. A dropped shape guard
+# crashes inside a kernel on inductor and can quietly miscompute on eager; a
+# dropped value guard serves the captured branch to every other value with
+# correct-looking numerics.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
         "TENSOR_MATCH",
@@ -965,22 +965,6 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # reference-type opaque object.
         "TYPE_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
-        # Ambient state (installed on GlobalStateSource, not an input): the
-        # graph specialized on utils_device.CURRENT_DEVICE; captured under the
-        # default None and served under set_default_device("cuda"), it returns
-        # CPU tensors with no refusal. The next three are the same shape, and
-        # GlobalStateGuard::init snapshots none of the four. The vmap level the
-        # graph baked in (output_graph.functorch_layers, itself serialized)
-        # lives in BatchedTensorImpl, not in the keys TENSOR_MATCH compares.
-        "DEFAULT_DEVICE",
-        "FUNCTORCH_STACK_MATCH",
-        # The traced level is a graph constant (_exit_dual_level(level=N));
-        # under another _current_level unpack_dual returns no tangent.
-        "DUAL_LEVEL",
-        # The predicate that installs it also bakes the pack/unpack subgraphs
-        # into the graph; a hook-free capture served under inlineable hooks
-        # skips them with no refusal.
-        "AUTOGRAD_SAVED_TENSORS_HOOKS",
         # Membership, key-set, length and iterator-position facts, each a branch
         # the graph specialized on.
         "COUNT_ITERATOR_MATCH",
@@ -993,8 +977,8 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "SET_CONTAINS",
         "SET_NOT_CONTAINS",
         "TUPLE_ITERATOR_LEN",
-        # Installed on a module's empty hook dicts under every config; its leaf,
-        # a SEQUENCE_LENGTH on the dict, exists only when
+        # Installed on a module's empty hook dicts whatever the config; its
+        # leaf, a SEQUENCE_LENGTH on the dict, exists only when
         # skip_nnmodule_hook_guards is off. Never dropped either way: with the
         # leaf it pins a length, and without one dropping the entry buys nothing.
         "EMPTY_NN_MODULE_HOOKS_DICT",
@@ -1006,14 +990,15 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
 )
 
 
-# Guards whose C++ leaf compares something no fingerprint in this module reads:
-# subclass metadata, a DTensor placement, an opaque object's guard values, a raw
-# DispatchKeySet, the symbolic shape environment, or process-wide state the leaf
-# snapshots for itself (GlobalStateGuard's state, the torch-function mode
-# stack). Calling two of these equal is how the report ends up asserting a
-# precondition that does not hold, so they are never compared and are reported
-# as undetermined. They are never dropped either: a policy may drop only what
-# its droppable set names, and these are in no such set.
+# Guards that check process or ambient state, or metadata, that no fingerprint
+# in this module reads and their filter entry cannot expose: the leaf snapshots
+# it for itself (GlobalStateGuard's state, the torch-function mode stack,
+# CURRENT_DEVICE) or compares subclass metadata, a DTensor placement, an opaque
+# object's guard values, a raw DispatchKeySet or the symbolic shape environment.
+# Calling two of these equal is how the report ends up asserting a precondition
+# that does not hold, so they are never compared and are reported as
+# undetermined. They are never dropped either: a policy may drop only what its
+# droppable set names, and these are in no such set.
 _UNMODELLED_GUARD_TYPES = frozenset(
     {
         "DISPATCH_KEY_SET_MATCH",
@@ -1029,6 +1014,29 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "SHAPE_ENV",
         "TENSOR_SUBCLASS_METADATA_MATCH",
         "TORCH_FUNCTION_STATE",
+        # Ambient state the graph was traced under, installed on
+        # GlobalStateSource rather than on an input and outside
+        # GlobalStateGuard::init's snapshot. Never dropped: each fails silently
+        # when missing. Never compared: GlobalStateSource's name is "", so
+        # make_guard_filter_entry yields has_value=False and a per-call MISSING
+        # sentinel without reading a value, and two of the four are
+        # add_lambda_guard closures with no value to expose at all. The graph
+        # specialized on utils_device.CURRENT_DEVICE, which the C++ leaf
+        # snapshots for itself; captured under the default None and served
+        # under set_default_device("cuda"), it returns CPU tensors with no
+        # refusal.
+        "DEFAULT_DEVICE",
+        # The vmap level the graph baked in (output_graph.functorch_layers,
+        # itself serialized) lives in BatchedTensorImpl, not in the keys
+        # TENSOR_MATCH compares.
+        "FUNCTORCH_STACK_MATCH",
+        # The traced level is a graph constant (_exit_dual_level(level=N));
+        # under another _current_level unpack_dual returns no tangent.
+        "DUAL_LEVEL",
+        # The predicate that installs it also bakes the pack/unpack subgraphs
+        # into the graph; a hook-free capture served under inlineable hooks
+        # skips them with no refusal.
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
     }
 )
 
