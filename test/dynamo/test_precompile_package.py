@@ -2452,6 +2452,51 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(compiled_variants(_AllowEmptyGraphsConvertFrame), 2)
         self.assertFalse(torch._dynamo.config.allow_empty_graphs)
 
+    def test_allow_empty_graphs_convert_frame_refuses_a_ddp_optimizer_frame(self):
+        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+        from torch._dynamo.testing import CompileCounter
+        from torch.nn.parallel import DistributedDataParallel
+
+        def fn(x):
+            return x.sin()
+
+        # A stub active DDP module takes CatchErrorsWrapper down its DDPOptimizer
+        # branch, the one that asks the converter for a clone.
+        ddp_module = types.SimpleNamespace(bucket_bytes_cap=25 * 1024 * 1024)
+        for optimize_ddp in (True, "ddp_optimizer", "no_optimization"):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            optimize_ctx = torch._dynamo.optimize(counter)
+            wrapper = optimize_ctx.callback
+            built = wrapper._torchdynamo_orig_backend
+            wrapper._torchdynamo_orig_backend = _AllowEmptyGraphsConvertFrame(
+                built._torchdynamo_orig_backend,
+                wrapper.hooks,
+                package=CompilePackage(fn),
+                recompile_limit=built._recompile_limit,
+            )
+            with (
+                torch._dynamo.config.patch(optimize_ddp=optimize_ddp),
+                mock.patch.object(
+                    DistributedDataParallel, "_active_ddp_module", ddp_module
+                ),
+            ):
+                if optimize_ddp == "no_optimization":
+                    optimize_ctx(fn)(torch.ones(2))
+                    self.assertEqual(counter.frame_count, 1)
+                else:
+                    with self.assertRaisesRegex(PackageError, r"optimize_ddp="):
+                        optimize_ctx(fn)(torch.ones(2))
+                    self.assertEqual(counter.frame_count, 0)
+            self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+        # Without a package the DDP clone keeps the subclass, hooks and limit.
+        plain = _AllowEmptyGraphsConvertFrame(counter, wrapper.hooks, recompile_limit=3)
+        clone = plain._clone_with_backend(counter)
+        self.assertIs(type(clone), _AllowEmptyGraphsConvertFrame)
+        self.assertIs(clone._hooks, wrapper.hooks)
+        self.assertEqual(clone._recompile_limit, 3)
+
     def test_allow_empty_graphs_convert_frame_reverts_the_flag_when_the_compile_raises(
         self,
     ):
