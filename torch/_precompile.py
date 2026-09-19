@@ -1555,36 +1555,47 @@ def _capture(
                 raise PrecompileError(
                     "precompile: fn needs to guard on a value this capture holds as "
                     "unbacked -- a dim marked with mark_unbacked, or a data-dependent "
-                    "value (.item(), .nonzero()) -- which is not allowed. Do not mark "
-                    "that dim (capture it static), or restructure fn to avoid the "
-                    f"branch. Underlying: {(str(e).splitlines() or [''])[0]}"
+                    "value (.item(), .nonzero()) -- which is not allowed. For a marked "
+                    "dim, do not mark it (capture it static); a guarded data-dependent "
+                    "value is refused on either path, so for one only restructuring fn "
+                    f"helps. Underlying: {(str(e).splitlines() or [''])[0]}"
                 ) from e
             except (DataDependentOutputException, DynamicOutputShapeException) as e:
                 # A static capture has no ShapeEnv, so a value the fake trace cannot
                 # know surfaces as one of these rather than as
                 # GuardOnDataDependentSymNode: .item() and a branch over a tensor
-                # raise the first, .nonzero()/masked_select and other shape-producing
-                # ops the second. Refuse cleanly instead of leaking either. The
-                # mark_unbacked advice is for a STATIC capture only: an unbacked capture
-                # already has the ShapeEnv, so the op that reached here (e.g. aten.equal)
-                # is one no ShapeEnv can help with, and telling the caller to mark a dim
-                # they may already have marked would be a dead end.
-                mark_hint = (
-                    " A shape-producing op (.nonzero(), masked_select) can be captured by "
-                    "marking a user-input dim with torch._dynamo.decorators.mark_unbacked, "
-                    "which gives capture the ShapeEnv it needs."
-                    if fake_mode is None
-                    else ""
-                )
+                # raise the first, .nonzero()/masked_select and any other op whose fake
+                # kernel needs a dynamic size (a register_fake calling
+                # ctx.new_dynamic_size(), a jagged nested tensor built inside fn) the
+                # second. Refuse cleanly instead of leaking either. The diagnosis, not
+                # just the mark_unbacked advice, is STATIC-only: an unbacked capture
+                # already has the ShapeEnv and the arm above absorbed every guard on an
+                # unbacked symbol, so the only ops that reach here on that path are ones
+                # no ShapeEnv can fake at all (e.g. aten.equal) -- naming .item() and
+                # control flow there would misdiagnose it, and telling the caller to mark
+                # a dim they already marked would be a dead end.
+                if fake_mode is None:
+                    detail = (
+                        "a data-dependent op (.item(), .nonzero(), a Python branch over a "
+                        "tensor value), or an op whose fake kernel needs a dynamic size, "
+                        "whose result this static capture cannot know while tracing on "
+                        "fake tensors; make_fx specializes only static (Python int) "
+                        "control flow. A data-dependent value (.item()) or a "
+                        "shape-producing op (.nonzero(), masked_select) can be captured by "
+                        "marking a user-input dim with "
+                        "torch._dynamo.decorators.mark_unbacked, which gives capture the "
+                        "ShapeEnv it needs -- but only if fn never guards on the resulting "
+                        "symbol; if it does, the guard refusal applies instead."
+                    )
+                else:
+                    detail = (
+                        "a data-dependent op with no fake rule under a ShapeEnv (e.g. "
+                        "aten.equal), so tracing on fake tensors cannot know its result."
+                    )
                 raise PrecompileError(
-                    "precompile: fn performs a data-dependent operation (.item(), "
-                    ".nonzero(), masked_select, a Python branch over a tensor value) "
-                    "whose result cannot be known while tracing on fake tensors, so it "
-                    "cannot be captured; make_fx specializes only static (Python int) "
-                    "control flow. The op may be inside a module fn calls rather than in "
-                    "fn's own code -- nn.BatchNorm*(momentum=None) in train() mode reads "
-                    "float(num_batches_tracked) -- so go by the underlying op named below."
-                    f"{mark_hint} Underlying: {(str(e).splitlines() or [''])[0]}"
+                    f"precompile: fn performs {detail} The op may be inside a module fn "
+                    "calls rather than in fn's own code, so go by the underlying op named "
+                    f"below. Underlying: {(str(e).splitlines() or [''])[0]}"
                 ) from e
     finally:
         for a, g in zip(real_flat, saved_grads):
