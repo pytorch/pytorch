@@ -33,6 +33,11 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: list[int]
 
 
+class _ReduceScatterInputs(NamedTuple):
+    padded_unsharded_sizes: list[torch.Size]
+    num_leading_dims: list[int]
+
+
 lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define(
@@ -634,9 +639,15 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    padded_unsharded_sizes = prepare_reduce_scatter_inputs(
+    prepared_inputs = prepare_reduce_scatter_inputs(
         fsdp_params, unsharded_grads, world_size
     )
+    if isinstance(prepared_inputs, _ReduceScatterInputs):
+        padded_unsharded_sizes = prepared_inputs.padded_unsharded_sizes
+        num_leading_dims = prepared_inputs.num_leading_dims
+    else:
+        padded_unsharded_sizes = prepared_inputs
+        num_leading_dims = None
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
     reduce_scatter_input = reduce_scatter_comm.allocate(
@@ -645,7 +656,12 @@ def foreach_reduce(
         device=device,
     )
 
-    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
+    foreach_reduce_scatter_copy_in(
+        unsharded_grads,
+        reduce_scatter_input,
+        world_size,
+        num_leading_dims=num_leading_dims,
+    )
 
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
@@ -824,8 +840,15 @@ def foreach_reduce_scatter_copy_in(
     unsharded_grads: list[torch.Tensor],
     reduce_scatter_input: torch.Tensor,
     world_size: int,
+    *,
+    num_leading_dims: list[int] | None = None,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
+    if num_leading_dims is not None:
+        torch.ops.aten._chunk_cat_with_prefixes_(
+            reduce_scatter_input, unsharded_grads, num_leading_dims, world_size
+        )
+        return
     torch.ops.fsdp.chunk_cat(
         unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
     )

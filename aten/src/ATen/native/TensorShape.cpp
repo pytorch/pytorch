@@ -39,6 +39,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_chunk_cat_native.h>
+#include <ATen/ops/_chunk_cat_with_prefixes_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_foreach_copy.h>
@@ -53,6 +54,7 @@
 #include <ATen/ops/_sparse_broadcast_to_native.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe.h>
+#include <ATen/ops/_split_with_sizes_copy_with_prefixes_native.h>
 #include <ATen/ops/_stack_native.h>
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_unsafe_view_native.h>
@@ -3339,6 +3341,28 @@ Tensor& _chunk_cat_out(
   return out;
 }
 
+Tensor& _chunk_cat_with_prefixes_(
+    Tensor& out,
+    TensorList tensors,
+    IntArrayRef num_leading_dims,
+    int64_t num_chunks) {
+  check_chunk_cat_with_prefixes_inputs(
+      tensors, num_leading_dims, num_chunks, out);
+  std::vector<Tensor> inputs;
+  for (const auto i : c10::irange(tensors.size())) {
+    const auto dim = num_leading_dims[i];
+    if (dim == 0) {
+      inputs.push_back(tensors[i]);
+      continue;
+    }
+    auto sizes = tensors[i].sizes().slice(dim).vec();
+    sizes.insert(sizes.begin(), -1);
+    auto prefixes = tensors[i].view(sizes).unbind(0);
+    inputs.insert(inputs.end(), prefixes.begin(), prefixes.end());
+  }
+  return at::native::_chunk_cat_out(inputs, 0, num_chunks, out);
+}
+
 Tensor stack_meta(TensorList tensors, int64_t dim) {
   TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
@@ -4819,6 +4843,32 @@ void split_with_sizes_copy_out(
     at::TensorList out) {
   auto array = self.split_with_sizes(split_sizes, dim);
   copy_tensor_array_to_out("split_with_sizes_copy_out", array, out);
+}
+
+void _split_with_sizes_copy_with_prefixes_(
+    TensorList out,
+    const Tensor& self,
+    IntArrayRef split_sizes,
+    IntArrayRef num_prefixes,
+    int64_t num_chunks) {
+  check_split_with_sizes_copy_with_prefixes_inputs(
+      self, split_sizes, num_prefixes, num_chunks, out);
+  std::vector<int64_t> sizes;
+  std::vector<Tensor> outputs;
+  for (const auto i : c10::irange(out.size())) {
+    const auto size = split_sizes[i] / num_prefixes[i];
+    auto output = out[i].view({-1});
+    if (self.scalar_type() == kByte) {
+      output = output.view(kByte);
+    }
+    output = output.view({num_prefixes[i], num_chunks, size});
+    for (const auto prefix : c10::irange(num_prefixes[i])) {
+      sizes.push_back(size);
+      outputs.push_back(output.select(0, prefix));
+    }
+  }
+  at::native::split_with_sizes_copy_out(
+      self.view({num_chunks, self.numel() / num_chunks}), sizes, 1, outputs);
 }
 
 void unbind_copy_int_out(
