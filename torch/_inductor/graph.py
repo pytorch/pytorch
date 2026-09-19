@@ -485,6 +485,16 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.buffers: list[ir.Buffer] = []
         self.operations: list[ir.Operation] = []
+        # Maps FX node name -> fully-qualified module FQN string, e.g.
+        # "convolution_1" -> "L.networks.1.conv.convolution".
+        # Populated during run_node for every FX node that has nn_module_stack.
+        self.fx_fqn_map: dict[str, str] = {}
+        # FQN strings claimed by ExternKernelSchedulerNodes (e.g. convolution).
+        # Populated during codegen so Pass 2 of get_fused_kernel_module_fqn
+        # skips ops already annotated by their own extern kernel wrapper.
+        self.fx_extern_fqns: OrderedSet[str] = OrderedSet()
+        # Set per-kernel during SIMD codegen so the wrapper can bake the FQN.
+        self._current_kernel_module_fqn: str | None = None
         self.const_output_index: dict[str, int] = (
             const_output_index if const_output_index else {}
         )
@@ -2005,6 +2015,19 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cudagraphs_reason = (
                 "user CUDA MemPool contexts are not compatible with CUDA graphs"
             )
+        # Populate fx_fqn_map for n itself if it has nn_module_stack.
+        # Every FX node is processed by run_node exactly once, so iterating
+        # over n (not the accumulated origins) gives us a complete map by the
+        # time lowering finishes.
+        _stack = n.meta.get("nn_module_stack")
+        if _stack:
+            from torch._inductor.fx_passes.graph_view import (
+                _clean_stack_name,
+                _strip_instance_suffix,
+            )
+
+            _innermost = _clean_stack_name(list(_stack.values())[-1][0])
+            self.fx_fqn_map[n.name] = f"{_innermost}.{_strip_instance_suffix(n.name)}"
         with (
             ir.IRNode.current_origins(origins),
             ir.IRNode.current_stream_idx(self._get_node_stream(n)),
