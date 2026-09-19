@@ -64,13 +64,14 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
       With the default ``make_fx`` tracer, capture is non-strict and traces ``fn`` on FAKE
       tensors. Python control flow is specialized to the example inputs, and shapes are
-      static -- each size is baked in. Tracing on fakes refuses, on BOTH capture paths, a
-      read of a traced tensor's data (``.data_ptr()``, ``.numpy()``), an example input a
-      fake tensor cannot represent (quantized) or whose metadata it silently drops (pinned,
-      mkldnn, sparse), and a nested one; and, on a STATIC capture, a data-dependent op
-      (``.item()``, ``.nonzero()``, a Python branch over a tensor value). It also FAILS,
-      rather than baking a wrong answer, on an op with no meta/fake kernel, and refuses to
-      run inside another trace, whose fake mode would outrank its own.
+      static -- each size is baked in; a control-flow HOP (``torch.cond`` /
+      ``torch.while_loop``) is refused rather than specialized. Tracing on fakes also
+      refuses, on BOTH capture paths, an op with no meta/fake kernel, a read of a traced
+      tensor's data (``.data_ptr()``, ``.numpy()``), an example input a fake tensor cannot
+      represent (quantized) or whose metadata it silently drops (pinned, mkldnn, sparse),
+      and a nested one; and, on a STATIC capture, a data-dependent op (``.item()``,
+      ``.nonzero()``, a Python branch over a tensor value). It also refuses to run inside
+      another trace, whose fake mode would outrank its own.
       The exception to static shapes is a tensor dim explicitly marked unbacked (inductor
       backend only) with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before
       the call; such a dim is captured as an unbacked symint, so one artifact serves any
