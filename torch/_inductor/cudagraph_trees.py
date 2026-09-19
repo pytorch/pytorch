@@ -467,7 +467,23 @@ def cudagraphify_impl(
         fn = fn_cache.get(int_key)
         if fn is not None:
             return fn(inputs)
+
         compile_id = kwargs.get("compile_id", "")
+
+        limit = config.triton.cudagraph_dynamic_shape_rerecord_limit
+        if limit is not None and len(fn_cache) >= limit:
+            # warning_once caches on the args, so this fires once per compiled
+            # graph rather than on every call that falls back to eager.
+            torch._logging.warning_once(
+                log,
+                "[%s] Skipping cudagraph re-recording for new dynamic shapes: hit the "
+                "cudagraph_dynamic_shape_rerecord_limit of %s distinct recorded "
+                "shapes. Already-recorded shapes still replay; new shapes run eager.",
+                compile_id,
+                limit,
+            )
+            return model(inputs)
+
         if int_key is None:
             log.info(
                 "[%s] Recording cudagraph tree for graph without symints", compile_id
