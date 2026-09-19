@@ -5839,12 +5839,8 @@ def max_pool_checks(
 
 
 def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
-    """
-    Wrap the inner_fn of a pooling argmax so that it also returns the row-major
-    index into the window, which is how the offset is decoded later on. Loop
-    reordering runs after lowering and may permute the reduction ranges, so the
-    index implied by the reduction order cannot be relied upon.
-    """
+    # Loop reordering runs after lowering and may permute the reduction ranges, so
+    # the offset is returned as an explicit row-major index into the window.
     supports_logical_index_argreduce = is_triton(x) or (
         ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
     )
