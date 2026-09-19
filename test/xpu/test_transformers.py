@@ -232,6 +232,65 @@ class TestSDPAXpuOnly(NNTestCase):
 
         self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
 
+    @parametrize("dtype", [torch.half, torch.bfloat16])
+    def test_onednn_attention_broadcast_mask_last_dim(self, device, dtype):
+        tol = Tolerances(1e-2, 1e-2)
+        if dtype is torch.bfloat16:
+            tol = Tolerances(5e-2, 5e-2)
+
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+        torch.manual_seed(0)
+        query = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        key = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        value = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            head_dim,
+            device=device,
+            dtype=dtype,
+        )
+        mask_base = torch.randn(
+            batch_size, 1, seq_len, 1, device=device, dtype=dtype
+        )
+        attn_mask = mask_base.expand(batch_size, num_heads, seq_len, seq_len)
+
+        self.assertEqual(attn_mask.stride()[-1], 0)
+        with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
+            actual = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                dropout_p=0.0,
+                is_causal=False,
+            )
+
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            expected = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask.contiguous(),
+                dropout_p=0.0,
+                is_causal=False,
+            )
+
+        self.assertEqual(actual, expected, atol=tol.atol, rtol=tol.rtol)
 
 instantiate_device_type_tests(
     TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True
