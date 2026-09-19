@@ -53,7 +53,7 @@ from .source import (
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
@@ -881,6 +881,60 @@ def _is_risky_drop(
     return True
 
 
+# The guards that pin a Python value by equality. CONSTANT_MATCH is the front
+# door: it delegates a bool to BOOL_MATCH, None to NONE_MATCH, a code object to
+# ID_MATCH and everything else -- ints included -- to EQUALS_MATCH, and it is
+# the only guard method that derives into another one of these, so a slot's
+# top-level guard type is enough here. CONSTANT_SUBCLASS_MATCH pins the base
+# value of an int/float/str subclass argument; the two iterator guards pin an
+# iterator argument's exact position. Length and key-set guards
+# (SEQUENCE_LENGTH, TUPLE_ITERATOR_LEN, MAPPING_KEYS_CHECK) pin a container's
+# structure rather than a value and are deliberately not counted; the set keys
+# on guard type alone, so an EQUALS_MATCH installed on a container argument
+# itself (a dict_keys or a frozenset of torch ops, variables/builder.py) IS
+# counted, its contents being the value the artifact then serves only for.
+_VALUE_EQUALITY_GUARD_TYPES = frozenset(
+    {
+        "CONSTANT_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "EQUALS_MATCH",
+        "RANGE_ITERATOR_MATCH",
+    }
+)
+
+
+def _pins_a_value(guard_type: str, name: str) -> bool:
+    """
+    Whether this kept guard makes the artifact serve only the value it saw.
+
+    Two things have to line up, and keying on either one alone is wrong.
+
+    The guard has to be a value-equality one. TENSOR_MATCH, SHAPE_ENV and the
+    global-state guards are what every capture has and they generalize fine --
+    a TENSOR that crosses a graph break gets TENSOR_MATCH on a ``___stackN``
+    source and is emphatically not a pin.
+
+    And the source has to be a BARE name -- a plain local of some traced frame,
+    or the ``___stackN`` Dynamo gives a value crossing a graph break. Anything
+    dotted or subscripted (``self.eps``, ``model._modules['ln'].eps``,
+    ``G['CFG'].width``) is reached THROUGH an argument rather than being one,
+    which is where model config lives: every LayerNorm and Dropout contributes
+    a CONSTANT_MATCH there, so counting those would flag every model and make
+    the field noise. The EMPTY source of a guard checked against no source
+    (``GuardFact.source`` for SHAPE_ENV, GLOBAL_STATE) is not a name either.
+
+    KNOWN GAP: a constant inside a container argument is guarded on a
+    subscripted source (``dims[0]`` for ``x.sum(dim=[0])``) and is not counted.
+    ``kept_guards`` is the authoritative list; this is a lint over it.
+    """
+    return (
+        bool(name)
+        and guard_type in _VALUE_EQUALITY_GUARD_TYPES
+        and not any(c in name for c in ".[")
+    )
+
+
 # Object addresses differ every run, so they are scrubbed from rendered guard
 # facts. Keep these anchored to the call shapes that carry addresses: a bare
 # \b\d{9,}\b also eats a user constant (a dict key, a slice bound), so two
@@ -1231,3 +1285,58 @@ def _fact_order(fact: _GuardFact) -> tuple[str, str, str, str]:
     # TENSOR_MATCH renders no code, so two shape specializations would otherwise
     # tie and sort unstably, making the file differ run to run.
     return (fact.source, fact.guard_type, " ".join(fact.code), fact.value)
+
+
+def _wont_generalize(
+    kept: set[tuple[str, str]],
+    guard_sets: Mapping[tuple[str, str, int], Sequence[frozenset[_GuardFact]]],
+) -> tuple[str, ...]:
+    """Sources no captured variant will serve a new value for.
+
+    A source pinned in ONE variant is not pinned for the artifact: the union of
+    kept guards says "some graph equality-matched this", while what the warning
+    claims is "no graph will take anything else". A frame whose other variant
+    guards the same source generically -- the ordinary shape once two examples
+    are captured -- serves the new value fine, and warning about it tells the
+    caller to enumerate values that already work.
+
+    Cancellation is per frame, like every comparison in this module: a bare
+    name means nothing across frames, and ``___stack0`` names whatever crossed
+    the break in EVERY resume frame -- a tensor in one, an ``.item()`` int in
+    the next -- so a generic mention elsewhere must not erase a real pin here.
+    ``GuardFact.source`` and a kept slot's name share one spelling, the
+    ``GuardFilterEntry.name`` with local scope stripped (``L['x']`` -> ``x``).
+    A fact whose guard the filter dropped (``enforced`` False) checks nothing,
+    so its variant counts as serving the source generically, not as pinning it;
+    the drop itself is what ``dropped_guards`` reports, so the case changes
+    fields rather than disappearing. A variant's OWN companion guards on a
+    source it pins (the SEQUENCE_LENGTH beside a dict_keys EQUALS_MATCH) are
+    not a generic mention, hence the ``- here`` below.
+
+    KNOWN GAP: "reached it without pinning it" is read as "serves other
+    values", and an unspecialized int breaks that: its variant carries only a
+    TYPE_MATCH on the name, and if the trace then specializes the symbol the
+    ``L['scale'] == 3`` check is a SHAPE_ENV fact with an EMPTY source, so the
+    variant looks generic and cancels a sibling's pin that nothing serves.
+    """
+    pinned = {n for t, n in kept if _pins_a_value(t, n)}
+    if not pinned:
+        return ()
+    # A source survives if SOME frame pins it and never serves it generically;
+    # a frame that does both cancels only its own pin, not another frame's.
+    survivors: set[str] = set()
+    for variants in guard_sets.values():
+        pins: set[str] = set()
+        generic: set[str] = set()
+        for facts in variants:
+            here = {
+                f.source
+                for f in facts
+                if f.enforced and _pins_a_value(f.guard_type, f.source)
+            }
+            pins |= here
+            # A variant that reached the source without pinning it is the
+            # graph that serves other values.
+            generic |= {f.source for f in facts} - here
+        survivors |= pins - generic
+    return tuple(sorted(pinned & survivors))
