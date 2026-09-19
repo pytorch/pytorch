@@ -1147,6 +1147,31 @@ class IsolateRecompilesTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 0)
         self.assertEqual(len(_get_cache_entries_for_region(f, id_iso)), 0)
 
+    def test_isolate_recompiles_late_global_skip_overrides_region(self):
+        """A late global SKIP must override an already-recorded region strategy."""
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            return x.sin()
+
+        opt_iso = torch.compile(
+            f, backend=cnt, dynamic=False, isolate_recompiles=True
+        )
+        id_iso = opt_iso._isolate_recompiles_id
+
+        # The first call compiles and records a strategy for this region.
+        opt_iso(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, id_iso)), 1)
+
+        # A later correctness SKIP is global and must take precedence over
+        # that existing regional record. A new shape must not re-enter Dynamo.
+        torch._dynamo.eval_frame.skip_code(f.__code__)
+        x = torch.randn(4)
+        self.assertEqual(opt_iso(x), f(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(_get_cache_entries_for_region(f, id_iso)), 1)
+
     def test_isolate_recompiles_ignores_default_run_only(self):
         """Regression for the RUN_ONLY-bleed case: a prior non-isolated
         recompile-limit hit sets RUN_ONLY on extra->strategy. A later
