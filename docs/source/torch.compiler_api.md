@@ -441,7 +441,8 @@ format may change between releases without a deprecation cycle.
 
    .. py:attribute:: uncovered_frames
 
-      Frames the capture calls never reached.
+      Frames the capture ran that ended with no guarded code, so the artifact cannot
+      serve them.
 
    .. py:attribute:: wont_generalize
 

@@ -654,7 +654,10 @@ class PrecompiledCallable(PrecompiledRunnable):
     def __init__(self, compiled: Any) -> None:
         self._compiled = compiled
 
-    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+    # `method` is positional-only: a forwarded keyword of that name must not collide.
+    def _call(
+        self, method: Callable[..., Any], /, *args: object, **kwargs: object
+    ) -> Any:
         from torch._dynamo.exc import PackageError, RecompileError
 
         try:
