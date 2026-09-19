@@ -16,8 +16,9 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import run_subtests
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -45,6 +46,8 @@ def _conv_fn(
 
 
 class DistConvolutionOpsTest(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
         # hard code world size to 2
@@ -486,6 +489,9 @@ DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
         "test_conv3d_batch_shard",
     ],
 )
+
+instantiate_device_type_tests(DistConvolutionOpsTest, globals())
+instantiate_device_type_tests(DistConvolutionOpsTestWithLocalTensor, globals())
 
 if __name__ == "__main__":
     run_tests()
