@@ -2425,7 +2425,9 @@ class InstructionTranslatorBase(
         """
         Create an alias to a module for use in guards. A slot already holding
         something other than the resolved module is an AssertionError unless
-        graph_break_ok says the caller can graph break there.
+        graph_break_ok says the caller can graph break there, except a module
+        of the same name, which is accepted and replaced by the resolved
+        module.
         """
         if (memo := self._import_source_memo.get(module_name)) is not None:
             return memo
