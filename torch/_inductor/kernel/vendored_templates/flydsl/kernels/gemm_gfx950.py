@@ -9,7 +9,6 @@ import flydsl.expr as fx
 from flydsl._mlir import ir
 from flydsl._mlir.dialects import llvm
 from flydsl.expr import const_expr, range_constexpr, rocdl
-from flydsl.expr.typing import Vector
 from flydsl.runtime.device import get_rocm_arch
 
 
@@ -665,10 +664,6 @@ def make_mxfp_lds_layout(rows, block_k, is_k_major):
     return layout
 
 
-def _use_direct_store(param):
-    return param.dtype_id == GEMM_DTYPE_MXFP4 and param.use_half_tile_interleaved
-
-
 def make_mxfp_tiled_mma(param):
     if const_expr(param.dtype_id == GEMM_DTYPE_MXFP4):
         # FP4 uses the same byte fragments with half the storage K.
@@ -679,20 +674,10 @@ def make_mxfp_tiled_mma(param):
             param.mma_m, param.mma_n, param.mma_k, fx.Float8E4M3FN
         )
         k_layout = fx.make_layout((16, 2, 4), (1, 64, 16))
-    m_layout = n_layout = None
-    if const_expr(_use_direct_store(param)):
-        mr = param.block_m // 2 // param.m_waves // param.mma_m
-        nr = param.block_n // 2 // param.n_waves // param.mma_n
-        m_layout = fx.make_layout(
-            (param.mma_m, param.m_waves, mr), (1, param.mma_m * mr, param.mma_m)
-        )
-        n_layout = fx.make_layout(
-            (param.mma_n, param.n_waves, nr), (1, param.mma_n * nr, param.mma_n)
-        )
     return fx.make_tiled_mma(
         fx.make_mma_atom(op),
         fx.make_layout((param.m_waves, param.n_waves, 1), (param.n_waves, 1, 0)),
-        fx.make_tile(m_layout, n_layout, k_layout),
+        fx.make_tile(None, None, k_layout),
     )
 
 
@@ -792,8 +777,6 @@ def mxfp_gemm(
             a = fx.coalesce(frag_A[None, mi])
             b = fx.coalesce(frag_B[None, ni])
             sa, sb = a_scales[mi], b_scales[ni]
-            if const_expr(_use_direct_store(param)):
-                a, b, sa, sb = b, a, sb, sa
             fx.gemm(
                 mma_atom,
                 fx.coalesce(frag_C[None, mi, ni]),
@@ -1396,8 +1379,6 @@ def gemm_hti_gfx950_kernel(
         for ki in range_constexpr(block_k // param.mma_k):
             for ri in range_constexpr(repeats):
                 row = (ri * waves + wave) * param.mma_m + lane % param.mma_m
-                if const_expr(_use_direct_store(param)):
-                    row = (wave * repeats + ri) * param.mma_m + lane % param.mma_m
                 col = ki * (param.mma_k // MXFP_SCALE_BLOCK_K) + lane // param.mma_m
                 frag[ri, ki] = scale_view[row, offset + col].to(fx.Int32)
         return frag
@@ -1562,64 +1543,7 @@ def gemm_hti_gfx950_kernel(
     if const_expr(is_mxfp):
         mx_cshuffle_views = cshuffle_views()
 
-    def store_half_tile_row(m_part, n_part, frag_C, mi):
-        if const_expr(_use_direct_store(param)):
-            lane = tid % GFX950_WAVE_SIZE
-            rows_per_wave = half_block_m // param.m_waves
-            row = (
-                block_m_offset
-                + m_part * half_block_m
-                + wid // n_waves * rows_per_wave
-                + mi * param.mma_m
-                + lane % param.mma_m
-            )
-            col_base = block_n_offset + n_part * half_block_n + wid % n_waves * 32
-            stride = fx.Int32(fx.get_scalar(out.stride[0]))
-            halves = []
-            for ni in range_constexpr(2):
-                acc = fx.coalesce(frag_C[None, mi, ni])
-                if const_expr(param.has_bias):
-                    for vi in range_constexpr(4):
-                        col = col_base + ni * 16 + lane // 16 * 4 + vi
-                        safe_col = (col < n).select(col, 0)
-                        acc[vi] = acc[vi] + bias_buf[safe_col].to(fx.Float32)
-                halves.append(acc.load().to(shuffle_dtype).bitcast(fx.Int32))
-            words = []
-            for j in range_constexpr(2):
-                pair = rocdl.permlane16_swap(
-                    ir.Type.parse("!llvm.struct<(i32, i32)>"),
-                    fx.as_ir_value(halves[0][j]),
-                    fx.as_ir_value(halves[1][j]),
-                    False,
-                    False,
-                )
-                words.append(
-                    (
-                        fx.Int32(llvm.extractvalue(fx.Int32.ir_type, pair, [0])),
-                        fx.Int32(llvm.extractvalue(fx.Int32.ir_type, pair, [1])),
-                    )
-                )
-            reg = fx.make_rmem_tensor(fx.make_layout(8, 1), shuffle_dtype)
-            reg.store(
-                Vector.from_elements(
-                    [words[0][0], words[1][0], words[0][1], words[1][1]],
-                    fx.Int32,
-                ).bitcast(shuffle_dtype)
-            )
-            col = col_base + (lane // 16 % 2) * 16 + (lane // 32) * 8
-            dst = fx.make_view(
-                fx.get_iter(out_buf) + row * stride + col,
-                fx.make_layout(8, 1),
-            )
-            pred = fx.make_rmem_tensor(fx.make_layout(1, 1), fx.Boolean)
-            pred[0] = (row < m) & (col + 8 <= n)
-            fx.copy(cshuffle_r2g_atom, reg, dst, pred=pred)
-
     def store_half_tile(m_part, n_part, frag_C):
-        if const_expr(_use_direct_store(param)):
-            for mi in range_constexpr(half_block_m // param.m_waves // param.mma_m):
-                store_half_tile_row(m_part, n_part, frag_C, mi)
-            return
         if const_expr(is_mxfp):
             gC = make_gC(m_part, n_part)
         else:
@@ -1743,8 +1667,6 @@ def gemm_hti_gfx950_kernel(
             async_load_a_to_lds(1, next_k_tile, 0)
             rocdl.s_barrier()
         consume(k_tile + 1, c00, a0, b0)
-        if const_expr(_use_direct_store(param) and not prefetch_next):
-            store_half_tile(0, 0, c00)
         rocdl.s_barrier()
 
         b1 = load_b_fragment(1, 1, k_tile + 1)
@@ -1752,8 +1674,6 @@ def gemm_hti_gfx950_kernel(
             async_load_b_to_lds(0, next_k_tile + 1, 1)
             rocdl.s_barrier()
         consume(k_tile + 1, c01, a0, b1)
-        if const_expr(_use_direct_store(param) and not prefetch_next):
-            store_half_tile(0, 1, c01)
         rocdl.s_barrier()
 
         a1 = load_a_fragment(1, 1, k_tile + 1)
@@ -1761,8 +1681,6 @@ def gemm_hti_gfx950_kernel(
             async_load_a_to_lds(0, next_k_tile + 1, 1)
             rocdl.s_barrier()
         consume(k_tile + 1, c10, a1, b0)
-        if const_expr(_use_direct_store(param) and not prefetch_next):
-            store_half_tile(1, 0, c10)
         rocdl.s_barrier()
 
         if const_expr(prefetch_next):
@@ -1778,10 +1696,9 @@ def gemm_hti_gfx950_kernel(
 
     compute_double_tile(main_loop_end, False)
 
-    if const_expr(not _use_direct_store(param)):
-        store_half_tile(0, 0, c00)
-        store_half_tile(0, 1, c01)
-        store_half_tile(1, 0, c10)
+    store_half_tile(0, 0, c00)
+    store_half_tile(0, 1, c01)
+    store_half_tile(1, 0, c10)
     store_half_tile(1, 1, c11)
 
 
