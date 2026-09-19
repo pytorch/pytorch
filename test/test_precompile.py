@@ -413,6 +413,67 @@ class TestPrecompile(TestCase):
         with self.assertNoLogs("torch._precompile", level="WARNING"):
             self.assertEqual(_make_inlined_forward(code, warn=False)(1), 2)
 
+    def test_multigraph_frames_record_every_dynamo_frame(self):
+        # The entry is codes[0], where CompilePackage records the captured
+        # callable and reads it back from, so neither a bypassed entry nor a
+        # same-named helper frame moves it. A bypassed code keeps its record
+        # without variants: the frame ahead of a bypassed continuation still
+        # LOAD_GLOBALs its resume name, and its guarded codes are dead.
+        from torch._dynamo.package import (
+            _DynamoCacheEntry,
+            _DynamoCodeCacheEntry,
+            _GuardedCodeCacheEntry,
+            SerializedCode,
+            SourceInfo,
+        )
+        from torch._precompile import _multigraph_frames
+
+        def forward(x):
+            return x
+
+        def helper(x):
+            return x
+
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+            return _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(fn.__code__),
+                python_module=__name__,
+                function_names=[resume_name] if resume_name else [],
+                guarded_codes=list(variants),
+                import_sources={"__import_torch": "torch"},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=resume_name is not None,
+                bypassed=bypassed,
+            )
+
+        variant = _GuardedCodeCacheEntry(
+            guards_state=b"",
+            dynamo_code=SerializedCode.from_code_object(helper.__code__),
+        )
+        entry = _DynamoCacheEntry(
+            codes=[
+                code_entry(forward, variants=[variant], bypassed=True),
+                code_entry(forward),  # a submodule's forward: same co_name
+                code_entry(helper, "__resume_at_12_3", [variant]),
+                code_entry(helper, "__resume_at_40_7", [variant], bypassed=True),
+            ],
+            source_info=SourceInfo(inlined_sources=set()),
+            device_type="cpu",
+            fn_name="Model.forward",
+        )
+        frames = _multigraph_frames(entry)
+        self.assertEqual([f["is_entry"] for f in frames], [True, False, False, False])
+        self.assertEqual([f["bypassed"] for f in frames], [True, False, False, True])
+        self.assertEqual(
+            [f["resume_names"] for f in frames],
+            [[], [], ["__resume_at_12_3"], ["__resume_at_40_7"]],
+        )
+        self.assertEqual([len(f["variants"]) for f in frames], [0, 0, 1, 0])
+        self.assertEqual(frames[2]["variants"][0]["dynamo_code"], variant.dynamo_code)
+        self.assertEqual(frames[0]["code"].co_name, "forward")
+        self.assertEqual(frames[0]["import_sources"], {"__import_torch": "torch"})
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
