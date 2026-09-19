@@ -135,7 +135,7 @@ class StoreTestBase:
 
     def _test_simple_wait(self, fs):
         with self.assertRaisesRegex(RuntimeError, "[t -i]imeout"):
-            fs.wait(["bad_key"], timedelta(seconds=0.25))
+            fs.wait(["bad_key"], timedelta(milliseconds=1))
         fs.add("good_key", 1)
         fs.wait(["good_key"])
 
@@ -545,9 +545,10 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(fs.num_keys(), 5)
         fs.delete_key("key")
         self.assertEqual(fs.num_keys(), 4)
-        fs.set_timeout(timedelta(seconds=2))
+        fs.set_timeout(timedelta(milliseconds=1))
         with self.assertRaises(RuntimeError):
             fs.get("key")
+        fs.set_timeout(timedelta(seconds=2))
         fs.delete_key("key0")
         fs.delete_key("key3")
         self.assertEqual(fs.num_keys(), 2)
@@ -696,7 +697,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_barrier_timeout_expires(self):
         store = self._create_store()
         with self.assertRaisesRegex(DistStoreError, "barrier timeout"):
-            store.barrier("test_barrier_fail", 2, timedelta(seconds=0.1))
+            store.barrier("test_barrier_fail", 2, timedelta(milliseconds=1))
 
     def test_barrier_multi_worker(self):
         server_store = self._create_store()
