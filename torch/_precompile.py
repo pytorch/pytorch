@@ -292,8 +292,8 @@ it.
 # tracer: the capture front-end, orthogonal to backend, passed to capture() as a tracer
 # object. MakeFxTracer() (the default) is a non-strict trace and is the only tracer
 # implemented today -- everything above (the invariants, the contract) describes its
-# behavior. DynamoTracer is planned (a Dynamo-based front-end that analyzes Python rather
-# than specializing to one traced path); capture() refuses it with a PrecompileError.
+# behavior. A Dynamo-based front-end that analyzes Python rather than specializing to one
+# traced path is planned, and arrives with a tracer of its own.
 
 from __future__ import annotations
 
@@ -307,7 +307,6 @@ import os
 import stat
 import uuid
 import warnings
-from collections.abc import Callable, Sequence  # noqa: TC003
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 from typing_extensions import Self
@@ -325,7 +324,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from torch._functorch._aot_autograd.codegen import PySourceBuilder
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -333,8 +332,8 @@ if TYPE_CHECKING:
 
 # This module's public surface is re-exported under the compiler namespace: ``capture``,
 # ``load`` and the tracer / capture classes as ``torch.compiler.precompile``
-# (torch/compiler/precompile.py), and ``PrecompileError``, ``PrecompiledRunnable`` and
-# ``PrecompiledCallable`` as ``torch.compiler.*`` (torch/compiler/__init__.py, registered
+# (torch/compiler/precompile.py), and ``PrecompileError`` and ``PrecompiledRunnable``
+# as ``torch.compiler.*`` (torch/compiler/__init__.py, registered
 # in ``torch.compiler.__all__``); they are deliberately kept out of this private module's
 # ``__all__`` so test_public_bindings sees a consistent single public location.
 __all__: list[str] = []
@@ -415,36 +414,6 @@ class MakeFxTracer:
     decompositions: dict | None = None
 
 
-@dataclasses.dataclass(frozen=True)
-class DynamoTracer:
-    """The ``dynamo`` capture front-end, passed as ``tracer=`` to
-    :func:`torch.compiler.precompile.capture`.
-
-    Not available in this build: ``capture`` raises a :class:`PrecompileError` for this
-    tracer until the dynamo front-end lands, and :class:`MakeFxTracer` stays the default
-    until then. An execution-driven multi-graph capture that analyzes the Python
-    (bytecode) rather than tracing one path: it records graph-break continuations and
-    every guarded recompilation the calls exercise, so a capture with this tracer takes
-    as many calls as you make. Part of the prototype ``torch.compiler.precompile`` API,
-    so it may change without a deprecation cycle.
-
-    The fields configure the multi-variant capture: ``guard_filter_fn`` filters the guards
-    kept in the SERIALIZED artifact (runtime capture guards are always retained);
-    ``recompile_limit`` caps recompilations; ``dynamic`` forces dynamic shapes;
-    ``invariants`` names a file receiving the invariant report; and the ``require_*`` gates
-    refuse known coverage gaps and risky dropped guards (``require_no_dropped_guards`` is
-    off by default, since every model drops unserializable identity guards).
-    """
-
-    guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
-    recompile_limit: int = 256
-    dynamic: bool | None = None
-    invariants: str | None = None
-    require_complete: bool = True
-    require_no_risky_drops: bool = True
-    require_no_dropped_guards: bool = False
-
-
 class PrecompiledRunnable:
     """What :func:`torch.compiler.precompile.load` returns.
 
@@ -486,66 +455,6 @@ class PrecompiledRunnable:
         """
 
 
-class PrecompiledCallable(PrecompiledRunnable):
-    """Callable handle for one loaded multi-graph precompile artifact.
-
-    The handle :func:`torch.compiler.precompile.load` will return for an artifact that
-    serves by installing; it is never constructed directly, and nothing in this build
-    constructs it -- the installing artifacts arrive with the dynamo front-end.
-    ``compiled`` must be callable and expose ``__enter__``, ``unload()`` and
-    ``serve_time_compiles()``, with an ``unload()`` that is idempotent and lets a call
-    already in flight on another thread finish: teardown goes through :meth:`unload`,
-    which is what exiting this object as a context manager calls, so
-    ``compiled.__exit__`` is never invoked and need not exist. Part of the prototype
-    ``torch.compiler.precompile`` API, so it may change without a deprecation cycle.
-    """
-
-    __module__ = "torch.compiler"
-
-    installed: bool = True
-    """Serves by installing onto the captured code objects; see :meth:`unload`."""
-
-    def __init__(self, compiled: Any) -> None:
-        self._compiled = compiled
-
-    def _call(self, method: Callable[..., Any], *args: object, **kwargs: object) -> Any:
-        from torch._dynamo.exc import PackageError, RecompileError
-
-        try:
-            return method(*args, **kwargs)
-        except (PackageError, RecompileError) as e:
-            raise PrecompileError(str(e) or repr(e)) from e
-
-    def __call__(self, *args: object, **kwargs: object) -> object:
-        return self._call(self._compiled, *args, **kwargs)
-
-    def __enter__(self) -> Self:
-        self._call(self._compiled.__enter__)
-        return self
-
-    def unload(self) -> None:
-        """Remove everything this loaded artifact installed.
-
-        The precompiled entries come off the code objects and the globals the
-        artifact wrote come out of their modules, so the model recompiles
-        normally afterwards. Exiting this object as a context manager does the
-        same thing; call it directly when the artifact's lifetime is not
-        lexically scoped. Every call forwards to the artifact, whose ``unload()``
-        the protocol above requires to be idempotent and to let an in-flight call
-        finish.
-        """
-        self._call(self._compiled.unload)
-
-    def serve_time_compiles(self) -> int:
-        """Graphs this artifact compiled while SERVING, rather than served from it.
-
-        An installed artifact answers a guard miss by compiling, so a climbing
-        count means it is covering less of the workload than the capture
-        measured. Zero is the number to gate a job on.
-        """
-        return cast("int", self._call(self._compiled.serve_time_compiles))
-
-
 class Capture:
     r"""The caller-driven capture :func:`capture` returns.
 
@@ -561,8 +470,7 @@ class Capture:
     exit with nothing captured -- no call
     made, or the only call raised and was caught -- raises ``PrecompileError``
     rather than writing. Call :meth:`save` inside the
-    block to write those same files without ending the capture; with
-    :class:`DynamoTracer` that checkpoints the calls made so far, while a
+    block to write those same files without ending the capture; a
     :class:`MakeFxTracer` capture records a single call, so after a ``save()``
     that succeeded the block exit writes nothing more. The object is single-shot:
     the block is entered once, and calling, entering, saving and a CLEAN exit are
@@ -2347,7 +2255,7 @@ class PrecompiledModule(PrecompiledRunnable):
         backend: str = "inductor",
         decompositions: dict | None = None,
     ) -> None:
-        # This class renders the make_fx capture only (the DynamoTracer front-end is
+        # This class renders the make_fx capture only (a dynamo front-end would be
         # routed elsewhere before it gets here), so it takes no tracer parameter.
         # ``fn`` is the whole computation: an nn.Module, or a callable that closes
         # over the module(s) it uses (e.g. ``lambda x: model(x)``, or a training
@@ -2418,8 +2326,8 @@ class PrecompiledModule(PrecompiledRunnable):
         return obj
 
     def _compile(self, args: tuple[object, ...]) -> None:
-        # PrecompiledModule is the make_fx path only: the DynamoTracer front-end is routed
-        # to the execution-driven capture before it gets here.
+        # PrecompiledModule is the make_fx path only: a dynamo front-end would be routed
+        # to its own capture before it gets here.
         if self._backend == "eager" and _has_unbacked_marks(args):
             raise NotImplementedError(
                 "precompile: mark_unbacked (dynamic shapes) is only supported with "
@@ -3022,7 +2930,7 @@ def capture(
     *,
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
-    tracer: MakeFxTracer | DynamoTracer = MakeFxTracer(),
+    tracer: MakeFxTracer = MakeFxTracer(),
     backend: str = "inductor",
     training: bool = False,
 ) -> Capture:
@@ -3053,13 +2961,11 @@ def capture(
     Because the caller makes the calls, inputs flow through naturally and return
     values stay available, so the capture drops into an ordinary training or
     pipeline loop where intermediate values are needed. Call ``cap.save()`` inside
-    the block to write the artifact without ending the capture; with
-    :class:`DynamoTracer` that checkpoints the calls made so far (each save
-    re-renders and rewrites both files, so a job that dies mid-loop leaves a
-    working artifact for the batches it reached), while a :class:`MakeFxTracer`
-    capture records a single call, so a clean exit after a ``save()`` that succeeded
-    writes nothing more; while the LAST write attempt is one that FAILED -- the exit's
-    or a ``save()``'s -- call it again to retry that write, from outside the block too.
+    the block to write the artifact without ending the capture; a
+    :class:`MakeFxTracer` capture records a single call, so a clean exit after a
+    ``save()`` that succeeded writes nothing more; while the LAST write attempt is one
+    that FAILED -- the exit's or a ``save()``'s -- call it again to retry that write,
+    from outside the block too.
 
     Gradients and return values keep their normal eager/``torch.compile``
     semantics: precompile snapshots and clears the example tensors' ``.grad`` around
@@ -3071,12 +2977,8 @@ def capture(
     configuration. :class:`MakeFxTracer` is one non-strict ATen trace, so the
     capture takes exactly ONE call and refuses a second;
     ``MakeFxTracer.decompositions`` forwards a decomposition table to
-    ``make_fx``. :class:`DynamoTracer` is an execution-driven multi-graph capture
-    that records graph-break continuations and every guarded recompilation the
-    calls exercise, and takes as many calls as you make -- but it is not
-    available in this build yet: ``capture(..., tracer=DynamoTracer())`` raises
-    ``PrecompileError``, so ``MakeFxTracer`` is the only front-end that captures
-    here. ``training`` selects the grad mode of the captured call, whatever the
+    ``make_fx``, and it is the only front-end in this build.
+    ``training`` selects the grad mode of the captured call, whatever the
     ambient mode: ``training=True`` runs it under ``torch.enable_grad()`` so a
     ``.backward()`` in ``fn`` is captured, lowered eagerly, and scattered onto the
     model's ``.grad`` fields when the artifact runs; ``training=False`` runs it under
@@ -3105,11 +3007,10 @@ def capture(
 
     Raises ``ValueError`` for a ``backend`` outside ``{"inductor", "eager"}`` and for a
     path pair no entry point accepts (one file named for both halves, a path that is not
-    a regular file); ``TypeError`` for a ``tracer`` that is not a tracer object;
-    ``PrecompileError`` for a :class:`DynamoTracer`, which this build does not capture
-    with, and for an ``fn`` that IS a model, or that HOLDS a tensor or an ``nn.Module``
-    where this can see it -- as a bound method's ``__self__``, or bound in a
-    ``functools.partial`` (at any nesting depth) -- instead of taking it as a call
+    a regular file); ``TypeError`` for a non-:class:`MakeFxTracer` ``tracer``;
+    ``PrecompileError`` for an ``fn`` that IS a model, or that HOLDS a tensor or an
+    ``nn.Module`` where this can see it -- as a bound method's ``__self__``, or bound in
+    a ``functools.partial`` (at any nesting depth) -- instead of taking it as a call
     argument. An ``fn`` that CLOSES over the model gets past that check and is refused
     later, when its parameters bake into the graph as constants (invariant 1); pass the
     model as a call argument either way. Those are what this call raises; the capture
@@ -3136,14 +3037,8 @@ def capture(
             decompositions=tracer.decompositions,
             training=bool(training),
         )
-    if not isinstance(tracer, DynamoTracer):
-        raise TypeError(
-            "precompile.capture tracer must be a MakeFxTracer or DynamoTracer, "
-            f"got {type(tracer).__name__}."
-        )
-    raise PrecompileError(
-        "precompile.capture with tracer=DynamoTracer() is not available in this "
-        "build yet; pass tracer=MakeFxTracer()."
+    raise TypeError(
+        f"precompile.capture tracer must be a MakeFxTracer, got {type(tracer).__name__}."
     )
 
 
@@ -3183,10 +3078,7 @@ def load(
 
     The result is a :class:`torch.compiler.PrecompiledRunnable`: a make_fx artifact
     is standalone, so it installs nothing, its ``with`` / ``unload()`` are no-ops and
-    ``installed`` is ``False``. The other shape -- an artifact that serves by
-    INSTALLING onto its captured code objects, which ``installed`` reports and
-    ``unload()`` takes back out -- arrives with the dynamo tracer and is not
-    available in this build.
+    ``installed`` is ``False``.
 
     Raises ``PrecompileError`` if ``python_code`` is malformed or is not a
     ``torch.compiler.precompile`` artifact (it fails to parse, or is missing the
