@@ -58,7 +58,7 @@ from .source import (
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
 
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
@@ -66,7 +66,6 @@ if TYPE_CHECKING:
     from .convert_frame import ConvertFrameReturn
     from .hooks import Hooks
     from .package import _DynamoCacheEntry
-    from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
 
@@ -141,36 +140,7 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
     artifact outside any capture-config scope. Beneath CatchErrorsWrapper
     rather than replacing it: frames its skipfile checks reject never pay the
     patch, and this frame stays out of the user stack dynamo_start reports.
-    A frame under DistributedDataParallel with optimize_ddp="ddp_optimizer" is
-    refused by name when a package is attached: DDPOptimizer compiles the graph
-    one bucket at a time and no bucket carries the backend id the package
-    records, so the artifact could never be completed. Without a package the
-    DDP clone keeps this subclass, so the flag survives it. The stance path
-    (eval_frame._create_wrapped_callback, behind the process-wide set_stance
-    backend and the eager_then_compile stances) rebuilds a plain ConvertFrame
-    with no package at all and is outside a capture session's contract.
     """
-
-    @property
-    def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
-        # CatchErrorsWrapper asks for this clone only for a frame under an
-        # active DDP module in ddp_optimizer mode (the default, optimize_ddp=True).
-        if self._inner_convert._package is None:
-            return lambda backend: type(self)(
-                backend, self._hooks, recompile_limit=self._recompile_limit
-            )
-
-        def refuse(backend: WrapBackendDebug) -> ConvertFrame:
-            raise PackageError(
-                "Cannot precompile a DistributedDataParallel forward with "
-                f"torch._dynamo.config.optimize_ddp={torch._dynamo.config.optimize_ddp!r}: "
-                "DDPOptimizer compiles the graph one bucket at a time and no bucket "
-                "records a backend under the id the package saves. Set "
-                'torch._dynamo.config.optimize_ddp="no_optimization" to precompile '
-                "a DDP forward (this disables DDPOptimizer's comm/compute overlap)"
-            )
-
-        return refuse
 
     def __call__(
         self,
