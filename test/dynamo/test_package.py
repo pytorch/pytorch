@@ -1737,7 +1737,8 @@ def add(x, y):
         # holding something other than the module it names -- a non-module, or a
         # module of another name, which is the state two module names mangling
         # onto one alias leave it in. The condition is the user's globals, so it
-        # is a graph break, not an internal error, and the slot is left alone.
+        # is an Unsupported -- the graph break, surfaced as the error under
+        # fullgraph -- not an internal error, and the slot is left alone.
         name = "torch_test_package_import_alias_taken"
         alias = f"__import_{name}"
         module = types.ModuleType(name)
@@ -1760,6 +1761,7 @@ def add(x, y):
         # The first hint names the module whose globals hold the slot -- the
         # root frame's, which an inlined callee's own module is not.
         hint = f"Remove or rename the global {alias} from the globals of {scope}."
+        cached = "Without fullgraph=True, Dynamo caches this frame's outcome"
         args = (torch.randn(3, 2),)
         try:
             sys.modules[name] = module
@@ -1772,6 +1774,7 @@ def add(x, y):
                     ) as cm:
                         torch.compile(fn, backend="eager", fullgraph=True)(*args)
                     self.assertIn(hint, str(cm.exception))
+                    self.assertIn(cached, str(cm.exception))
                     self.assertIs(fn.__globals__[alias], bound)
         finally:
             sys.modules.pop(name, None)
