@@ -435,12 +435,19 @@ class save_on_cpu(saved_tensors_hooks):
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
             is_pinnable = device_module.is_available() and not tensor.is_sparse
-            packed = torch.empty(
-                tensor.size(),
-                dtype=tensor.dtype,
-                layout=tensor.layout,
-                pin_memory=is_pinnable,
-            )
+            # Under vmap the source is a BatchedTensor whose size() is the
+            # unbatched shape; empty_like carries the batch dim. Request
+            # contiguous_format for a contiguous pinned buffer, but only for
+            # strided tensors -- memory_format is rejected for other layouts.
+            if tensor.layout == torch.strided:
+                packed = torch.empty_like(
+                    tensor,
+                    device="cpu",
+                    pin_memory=is_pinnable,
+                    memory_format=torch.contiguous_format,
+                )
+            else:
+                packed = torch.empty_like(tensor, device="cpu", pin_memory=is_pinnable)
             packed.copy_(tensor, non_blocking=is_pinnable)
             return (tensor.device, packed)
 
