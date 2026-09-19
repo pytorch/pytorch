@@ -35,6 +35,10 @@
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
+#if defined(__FreeBSD__)
+#define HOST_NAME_MAX 256
+#endif
+
 namespace c10d {
 
 namespace {
@@ -505,7 +509,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname, lazyInit);
 }
 
-#if defined(__linux__) || defined(_WIN32)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(_WIN32)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice(bool lazyInit) {
   // Use the hostname to resolve the network address to
