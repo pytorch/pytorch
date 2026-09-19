@@ -2481,6 +2481,23 @@ class BaseListIteratorVariable(IteratorVariable):
         self.is_exhausted = True
         return list(self.items[self.index :])
 
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # listiter_len/tupleiter_len: items left, floored at 0; an exhausted
+        # iterator permanently reports 0.
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L4100-L4108
+        #
+        # A forward iterator aliases the source list and so sees its mutations.
+        # `list_reversed` copies the items instead, so a shrink of the source
+        # below the current index is not reflected here.
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.items) - self.index, 0))
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
         codegen.add_push_null(
@@ -2494,6 +2511,8 @@ class BaseListIteratorVariable(IteratorVariable):
         codegen.foreach(remaining_items)
         codegen.append_output(create_build_tuple(len(remaining_items)))
         codegen.extend_output(create_call_function(1, False))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
 
 class ListIteratorVariable(BaseListIteratorVariable):
@@ -2536,6 +2555,10 @@ class DequeIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequeiter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1936-L1941
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )
@@ -2572,6 +2595,10 @@ class DequeReverseIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequereviter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2085-L2090
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )
