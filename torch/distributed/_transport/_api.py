@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, cast, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import Any, cast, Protocol, runtime_checkable
 from typing_extensions import Self
 
 import torch
 
-from ._work import _validate_timeout, _WorkQueue, wait_all, Work
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from ._work import _validate_timeout, wait_all, Work
 
 
 @runtime_checkable
@@ -53,11 +49,13 @@ class Transport(ABC):
     ``read`` and ``write`` return zero on synchronous success. With
     ``async_op=True``, they return a :class:`torch.distributed.Work` whose
     ``wait`` blocks until completion and propagates transfer errors.
-    ``is_completed`` includes failed operations; ``get_future`` resolves to
-    an empty list on success.
+    ``is_completed`` includes failed operations. Completion is backend-driven;
+    NIXL polls native requests without a Python executor. Pending NIXL
+    ``get_future`` calls require a running asyncio loop to drive completion;
+    completed work returns a future containing an empty list.
 
-    ``read_async`` and ``write_async`` are asyncio coroutines. With a finite
-    timeout, cancellation or timeout may leave transfers pending. Use
+    ``read_async`` and ``write_async`` are asyncio coroutines. Cancellation or
+    timeout may leave transfers pending. Use
     ``wait_all`` to await batches without blocking the event loop.
 
     Operations use byte ranges, not tensor shapes or dtypes. One endpoint has
@@ -70,7 +68,11 @@ class Transport(ABC):
     lifetime: it does not cancel DMA. Pending work retains its local buffers.
     After a timeout, wait for the Work or successfully close the transport before
     reusing buffers. A timed-out close rejects new operations but retains resources
-    until pending operations and cleanup finish; close may be retried.
+    until close is retried successfully. NIXL also offers ``close_async``.
+    NIXL metadata, registration, and submission calls execute synchronously;
+    their native execution cannot be interrupted by a Python timeout.
+    Independent transfers may overlap; wait before submitting dependent or
+    overlapping reads/writes. There is no implicit completion ordering.
 
     Never resize, replace storage, or modify buffers while registered/exposed to
     a peer. The application must coordinate remote access and notify peers before
@@ -81,23 +83,7 @@ class Transport(ABC):
 
     def __init__(self, device: torch.device | str | None = None) -> None:
         self.device = torch.device(device) if device is not None else None
-        self._work_queue = _WorkQueue()
         self._default_timeout: float | None = None
-
-    def _run_transfer(
-        self,
-        operation: Callable[[], int],
-        device: torch.device,
-        *,
-        async_op: bool,
-        timeout: float | None = None,
-    ) -> int | Work:
-        return self._work_queue.run(
-            operation, device, async_op=async_op, timeout=timeout
-        )
-
-    def _close_work(self, timeout: float | None = None) -> None:
-        self._work_queue.close(timeout)
 
     def _check_device(self, device: torch.device) -> None:
         if self.device is not None and (
@@ -185,6 +171,14 @@ class Transport(ABC):
     @abstractmethod
     def close(self, *, timeout: float | None = None) -> None:
         """Drain outstanding operations and release transport resources."""
+
+    async def close_async(self, *, timeout: float | None = None) -> None:
+        """Await cleanup when supported by the backend (including NIXL).
+
+        Unlike ``close``, this must not block the event loop while waiting for
+        transfers. Blocking prototype backends do not implement this method.
+        """
+        raise NotImplementedError("async close is unsupported by this transport")
 
     def __enter__(self) -> Self:
         return self

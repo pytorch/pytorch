@@ -7,12 +7,16 @@ import socket
 import struct
 import threading
 from dataclasses import dataclass, field
-from typing import cast
+from typing import cast, TYPE_CHECKING
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import torch
 
-from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from ._blocking import _BlockingTransport
+
+
+if TYPE_CHECKING:
+    from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Work
 
 
 _MAGIC = b"PTTCP001"
@@ -169,7 +173,7 @@ class _IncomingWrite:
     received: int = 0
 
 
-class TCPTransport(Transport):
+class TCPTransport(_BlockingTransport):
     """A striped, asynchronous-I/O TCP transport."""
 
     def __init__(
