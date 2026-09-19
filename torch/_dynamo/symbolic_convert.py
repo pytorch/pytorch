@@ -260,9 +260,11 @@ ExceptionTypes: TypeAlias = (
 @functools.cache
 def _import_module(name: str) -> types.ModuleType:
     """
-    The process's first resolution of the name, kept for its lifetime: nothing
-    invalidates the memo, so after a sys.modules handover it is an older object
-    than the live entry.
+    Import the named module and cache the result. importlib.import_module()
+    seems to do some filesystem checking to validate the name so not caching
+    this can be slow. The memo is the process's first resolution of the name,
+    kept for its lifetime: nothing invalidates it, so after a sys.modules
+    handover it is an older object than the live entry.
     """
     return importlib.import_module(name)
 
@@ -2425,7 +2427,9 @@ class InstructionTranslatorBase(
         """
         Create an alias to a module for use in guards. A slot already holding
         something other than the resolved module is an AssertionError unless
-        graph_break_ok says the caller can graph break there.
+        graph_break_ok says the caller can graph break there, except a module
+        of the same name, which is accepted and replaced by the resolved module
+        only when that module is the live sys.modules entry.
         """
         if (memo := self._import_source_memo.get(module_name)) is not None:
             return memo
