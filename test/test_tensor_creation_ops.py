@@ -2824,22 +2824,18 @@ class TestTensorCreation(TestCase):
         del t
 
         # Exercise N just over 2**32 (~16 GB at int32) and a far-above case
-        # (~33 GB) when memory permits. On ROCm, launches with
-        # gridDim.x * blockDim.x >= 2^32 are not supported; on CUDA, the
-        # per-block offset used to be computed in 32-bit arithmetic and
-        # wrapped, leaving every element from index 2**32 onward unwritten.
-        # arange computes int64 values then casts down, so for int32 the
-        # values wrap mod 2**32. N = 2**32 + 3 is used so that the expected
-        # tail [0, 1, 2] differs from unwritten (zero) memory.
+        # (~33 GB) when memory permits: the per-block offset used to be
+        # computed in 32-bit arithmetic and wrapped, leaving every element
+        # from index 2**32 onward unwritten. arange computes int64 values
+        # then casts down, so for int32 the values wrap mod 2**32; N is
+        # 2**32 + 3 so that the expected tail differs from zeroed memory.
         for bigint in (2 ** 32 + 3, 2 ** 33 + 1):
             free, _ = torch.cuda.mem_get_info(device)
             if free < bigint * 4 + (3 << 30):
                 continue
             t = torch.arange(bigint, dtype=torch.int32, device=device)
             self.assertEqual(t.numel(), bigint)
-            expected_tail = torch.arange(
-                bigint - 3, bigint, dtype=torch.int64
-            ).to(torch.int32)
+            expected_tail = torch.arange(bigint - 3, bigint, dtype=torch.int64).to(torch.int32)
             self.assertEqual(t[-3:].cpu(), expected_tail)
             del t
 
