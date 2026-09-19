@@ -5025,6 +5025,27 @@ def _offending_value_path(state: Any, target: Any) -> str:
                     else:
                         queue.append((f"{path}.keys()[{i}]", k))
                         queue.append((f"{path}.values()[{i}]", v))
+            elif isinstance(value, types.FunctionType):
+                # A function a guard is rooted at is pickled by value, defaults,
+                # kwdefaults and closure cells included (its __dict__ is walked
+                # below like any other), so a failure behind one of those has
+                # to be reachable from here.
+                queue.extend(
+                    (f"{path}.__defaults__[{i}]", v)
+                    for i, v in enumerate(value.__defaults__ or ())
+                )
+                queue.extend(
+                    (f"{path}.__kwdefaults__[{k!r}]", v)
+                    for k, v in (value.__kwdefaults__ or {}).items()
+                )
+                for name, cell in zip(
+                    value.__code__.co_freevars, value.__closure__ or ()
+                ):
+                    try:
+                        contents = cell.cell_contents
+                    except ValueError:  # an empty cell
+                        continue
+                    queue.append((f"{path}.__closure__[{name!r}]", contents))
             # Per node: one object whose __dict__ read raises (a type-level
             # __dict__ property, a proxy) must not end the whole walk.
             attributes: list[tuple[str, Any]] = []
