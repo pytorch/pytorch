@@ -16,8 +16,7 @@ from torch.distributed.tensor.parallel.style import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorContinuousTestBase,
-    LocalDTensorContinuousTestBase,
+    DTensorTestBase,
     map_local_tensor_for_rank,
     MLPModule,
     MLPStacked,
@@ -33,9 +32,11 @@ class DummyModule(torch.nn.Module):
         return x
 
 
-class TensorParallelAPITests(DTensorContinuousTestBase):
-    _gpu_num = torch.accelerator.device_count()
-    world_size = _gpu_num if _gpu_num % 2 == 0 and _gpu_num > 4 else 4
+class TensorParallelAPITests(DTensorTestBase):
+    @property
+    def world_size(self):
+        gpu_num = torch.accelerator.device_count()
+        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
 
     def _compare_params(
         self,
@@ -414,7 +415,6 @@ class TensorParallelAPITests(DTensorContinuousTestBase):
 
 TensorParallelAPITestsWithLocalTensor = create_local_tensor_test_class(
     TensorParallelAPITests,
-    base_class=LocalDTensorContinuousTestBase,
     skipped_tests=[
         # Uses mesh_scatter that has local rank dependent logic
         "test_parallelize_module_src_data_rank",
