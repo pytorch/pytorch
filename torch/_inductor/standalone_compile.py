@@ -633,9 +633,10 @@ def _placeholder_fake_inputs(gm: GraphModule) -> list[Any]:
     """Return the fake ``val`` metadata of ``gm``'s placeholders -- the compile-time input
     contract for a post-AOTAutograd graph. These fake tensors already carry the
     AOTAutograd-decided static/symbolic shapes under one consistent ``FakeTensorMode``, so
-    lowering against them (rather than re-fakifying real ``example_inputs``) preserves
-    symbolic dims. A placeholder without ``val`` means ``gm`` was not traced under a
-    ``FakeTensorMode``, violating the post-AOTAutograd precondition."""
+    lowering against them (rather than re-fakifying the caller's ``example_inputs``, which
+    may be real or already fake) preserves symbolic dims. A placeholder without ``val``
+    means ``gm`` was not traced under a ``FakeTensorMode``, violating the post-AOTAutograd
+    precondition."""
     fake_inputs = []
     for node in gm.graph.nodes:
         if node.op != "placeholder":
@@ -827,7 +828,8 @@ def compile_to_python(
 
     # Lower against the placeholders' fake ``val`` metadata (the compile-time input
     # contract, carrying the graph's static/symbolic shapes under one FakeTensorMode)
-    # rather than re-fakifying ``example_inputs``, which are real and would drop symbolic
+    # rather than re-fakifying ``example_inputs``, which belong to the caller's own capture
+    # mode (real tensors for some callers, fakes for precompile) and would drop symbolic
     # dims. A post-AOTAutograd graph's shapes are already baked into this metadata, so
     # there is no separate dynamic-shapes knob.
     fake_inputs = _placeholder_fake_inputs(gm)
