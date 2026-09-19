@@ -321,14 +321,14 @@ case "$tag" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13)
-    CUDA_VERSION=13.2.1
+    CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
     KATEX=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13)
-    CUDA_VERSION=13.4.0
+    CUDA_VERSION=13.4.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
     KATEX=yes
