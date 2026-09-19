@@ -1260,6 +1260,11 @@ class Pointwise(Loops):
 
 
 @ir_dataclass
+class StorageCopy(Pointwise):
+    """A pointwise copy that preserves its input storage representation."""
+
+
+@ir_dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[Sequence[Expr]], Expr]
     scatter_mode: StoreMode = None

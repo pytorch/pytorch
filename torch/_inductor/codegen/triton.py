@@ -1257,6 +1257,8 @@ class TritonCSEVariable(CSEVariable):
             raise AssertionError("TritonCSEVariable must have dtype")
         if shape is None:
             raise AssertionError("TritonCSEVariable must have shape")
+        # Bool computation uses int1, but storage copies need the original byte.
+        self.bool_storage: TritonCSEVariable | None = None
 
     def update_on_args(self, name, args, kwargs):
         for arg in args:
@@ -5046,6 +5048,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         dtype = V.graph.get_dtype(name)
+        preserve_bool_storage = (
+            dtype == torch.bool
+            and self.current_node is not None
+            and isinstance(self.current_node.node, ir.ComputedBuffer)
+            and isinstance(self.current_node.node.data, ir.StorageCopy)
+            and V.graph.get_current_device_or_throw().type == "cuda"
+            and not should_unwrap_unspec_arg(name)
+        )
         uses_uint8_storage = use_uint8_triton_storage_for_cuda_float8_e4m3fn(dtype, var)
 
         if config.triton.enable_host_side_tma:
@@ -5152,6 +5162,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         append_broadcast = None
         shape: BlockShapeType = None
+        if preserve_bool_storage:
+            var = f"{var}.to(tl.pointer_type(tl.int8))"
 
         if should_unwrap_unspec_arg(name):
             line = var
@@ -5208,7 +5220,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 line += ".to(tl.float32)"
                 dtype = torch.float32
-            if dtype == torch.bool and torch.version.hip is None:
+            if dtype == torch.bool and not preserve_bool_storage:
                 # Workaround for https://github.com/triton-lang/triton/issues/2151
                 # tl.load returns int8 when loading from pointer to int1
                 # NOTE: Currently causes hangs on bool UTs for ROCm
@@ -5226,15 +5238,31 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         ):
             load_buffer.writeline(DeferredLine(name, "tl.debug_barrier()"))
         self._handle_pdl_before_access(load_buffer, name)
-        result_var = self.cse.generate(
-            load_buffer, make_line(line), dtype=dtype, shape=shape
-        )
+        bool_storage = None
+        if preserve_bool_storage:
+            # Keep both forms for fused storage and logical consumers:
+            #   raw = tl.load(in_ptr.to(tl.pointer_type(tl.int8)) + index)
+            #   logical = raw.to(tl.int1)
+            bool_storage = self.cse.generate(
+                load_buffer, make_line(line), dtype=torch.int8, shape=shape
+            )
+            result_var = self.cse.generate(
+                load_buffer,
+                f"{bool_storage}.to(tl.int1)",
+                dtype=dtype,
+                shape=shape,
+            )
+        else:
+            result_var = self.cse.generate(
+                load_buffer, make_line(line), dtype=dtype, shape=shape
+            )
         self._handle_pdl_after_load(load_buffer, result_var)
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         if not isinstance(result_var, TritonCSEVariable):
             raise AssertionError(f"expected TritonCSEVariable, got {type(result_var)}")
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
+        result_var.bool_storage = bool_storage
 
         if append_broadcast:
             bcast_operand = result_var
@@ -5282,6 +5310,30 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         var = self.args.output(name)
         original_index = index
         dtype = V.graph.get_dtype(name)
+        # For a StorageCopy, store the raw byte while the logical value remains
+        # available through store_cache for fused consumers:
+        #   tl.store(out_ptr.to(tl.pointer_type(tl.int8)) + index, raw, mask)
+        storage_copy = (
+            dtype == torch.bool
+            and mode is None
+            and self.current_node is not None
+            and isinstance(self.current_node.node, ir.ComputedBuffer)
+            and isinstance(self.current_node.node.data, ir.StorageCopy)
+            and V.graph.get_current_device_or_throw().type == "cuda"
+        )
+        if storage_copy:
+            if not isinstance(value, TritonCSEVariable):
+                raise AssertionError(f"expected TritonCSEVariable, got {type(value)}")
+            bool_storage = value.bool_storage
+            if bool_storage is None:
+                bool_storage = self.cse.generate(
+                    self.compute,
+                    f"{value}.to(tl.int8)",
+                    dtype=torch.int8,
+                    shape=value.shape,
+                )
+            value = bool_storage
+            var = f"{var}.to(tl.pointer_type(tl.int8))"
 
         buffer_misaligned = self._check_buffer_alignment(name, var, dtype)
 
