@@ -5364,6 +5364,8 @@ from user code:
         lines = message.splitlines()
         self.assertFalse(results[1]._guard_check_enabled)
         self.assertIn("  [1] stub guard rejected", lines)
+        # The entry line and the footer read the same snapshot as the caveat.
+        self.assertNotIn("opted out of guard checks", message)
         advice = next(ln for ln in lines if ln.startswith("Add a ModelInput"))
         caveat = CAVEAT_AFTER_A_RAISE.format("", f"[1] <RuntimeError: {one}>")
         self.assertTrue(advice.endswith(caveat), advice)
