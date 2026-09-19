@@ -406,7 +406,9 @@ class TestSplitCatAtenNormalizationPasses(TestCase):
             counters.clear()
 
 
-instantiate_device_type_tests(TestSplitCatAten, globals(), except_for="cpu")
+instantiate_device_type_tests(
+    TestSplitCatAten, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
