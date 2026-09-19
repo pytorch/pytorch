@@ -2315,24 +2315,16 @@ class AOTCompiledModel:
                 "not be the one that loaded them."
             )
             if coverable and not trusted_rejection:
-                # Keyed on what dispatch recorded, not on the entry lines: the
-                # re-check may have printed a raise or an accept instead. Named
-                # and quoted here because nothing else on the report carries
-                # such a raise: the entry line quotes the rejection, the raiser
-                # line names the FIRST enabled raiser, which need not be one of
-                # these, and the chain carries the first raise of all. Bracketed
-                # as on the entry line and joined with a semicolon: the quoted
-                # text is arbitrary user text that may hold commas, and
-                # _raise_text has a parenthetical of its own. Enabled in the
-                # `enabled` snapshot, as the entry lines and both gates above
-                # are, not by a fresh read: nobody asked about an opted-out
-                # tree's guards, its withheld line already blames the raiser,
-                # and check_verbose ran user code under the loop above, so a
-                # fresh read could drop an entry this report printed as a
-                # rejection -- naming no tree at all when it was the only one.
-                # The gates read that same snapshot, so every answered entry
-                # enabled in it raised and is here: the list is never empty, and
-                # `trusted` need not be subtracted.
+                # Keyed on what dispatch recorded, not on the entry lines: an
+                # entry line carries only the re-check's own verdict, the raiser
+                # line names the first enabled raiser, and the chain carries the
+                # last raise of the first index that raised, so nothing else on
+                # the report quotes these raises. Bracketed as on the entry line
+                # and joined with a semicolon: the quoted text is arbitrary user
+                # text that may hold commas, and _raise_text has a parenthetical
+                # of its own. Filtered on the `enabled` snapshot the entry lines
+                # and both gates read, so the list agrees with them; because the
+                # gates read that same snapshot, it is never empty.
                 untrusted = [
                     f"[{i}] <{_raise_text(raised[i])}>"
                     for i in sorted(answered)
