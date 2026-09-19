@@ -307,6 +307,10 @@ import os
 import stat
 import uuid
 import warnings
+
+# Runtime-required, not just for type checking (so NOT under TYPE_CHECKING, which is
+# what TC003 suggests): torch/compiler/precompile.py resolves the tracer dataclasses'
+# annotations against this module's globals at import time.
 from collections.abc import Callable, Sequence  # noqa: TC003
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
@@ -441,7 +445,7 @@ class DynamoTracer:
     ``recompile_limit`` caps recompilations; ``dynamic`` forces dynamic shapes;
     ``invariants`` names a file receiving the invariant report; and the ``require_*`` gates
     refuse known coverage gaps and risky dropped guards (``require_no_dropped_guards`` is
-    off by default, since every model drops unserializable identity guards).
+    off by default, since every model drops guards the serializer refuses).
     """
 
     guard_filter_fn: Callable[[Sequence[Any]], Sequence[bool]] | None = None
@@ -527,7 +531,8 @@ class PrecompiledCallable(PrecompiledRunnable):
         except (PackageError, RecompileError) as e:
             raise PrecompileError(str(e) or repr(e)) from e
 
-    def __call__(self, *args: object, **kwargs: object) -> object:
+    # `self` is positional-only for the same reason `method` is above.
+    def __call__(self, /, *args: object, **kwargs: object) -> object:
         return self._call(self._compiled, *args, **kwargs)
 
     def __enter__(self) -> Self:
