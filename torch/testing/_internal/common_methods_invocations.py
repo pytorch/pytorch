@@ -12345,7 +12345,6 @@ op_db: list[OpInfo] = [
                # torch-xpu-ops/issues/4321
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
-
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
                             dtypes=(torch.complex64, torch.complex128)),
@@ -16835,6 +16834,8 @@ op_db: list[OpInfo] = [
                          device_type='xpu'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_meta_outplace",
                          device_type='xpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestMetaCudaRef',
+                         "test_dispatch_symbolic_meta_outplace_all_strides", device_type='xpu'),
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
@@ -17672,6 +17673,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type=('xpu',)),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type=('xpu',)),
+            DecorateInfo(unittest.expectedFailure, 'TestMetaCudaRef', 'test_dispatch_symbolic_meta_outplace_all_strides',
                          device_type=('xpu',)),
         ),
     ),
