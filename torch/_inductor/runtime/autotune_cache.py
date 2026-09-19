@@ -47,9 +47,9 @@ from torch.utils._triton import has_triton
 from ..cache_key import AUTOTUNE_CACHE_KEY_STRATEGY
 from ..remote_cache import (
     create_cache,
+    create_local_cache_backend,
     JsonDataTy,
     LocalAutotuneCache,
-    LocalCacheBackend,
     RemoteCache,
     RemoteCacheJsonSerde,
 )
@@ -95,7 +95,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
 class AutotuneCacheArtifact(CacheArtifact):
     @override
     def populate_cache(self) -> None:
-        autotune_cache = LocalCacheBackend()
+        autotune_cache = create_local_cache_backend()
         key = os.path.join(cache_dir(), self.key)
         autotune_cache._put(key, self.content)
 
