@@ -64,7 +64,7 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
       With the default ``make_fx`` tracer, capture is non-strict and traces ``fn`` on FAKE
       tensors. Python control flow is specialized to the example inputs, and shapes are
-      static -- each size is baked in. Tracing on fakes refuses, on BOTH capture paths, an
+      static -- each size is baked in. Tracing on fakes REFUSES, on BOTH capture paths, an
       example input whose metadata a fake tensor silently drops (pinned, mkldnn, sparse)
       and a nested one, and it refuses to run inside another trace, whose fake mode would
       outrank its own; and, on a STATIC capture, it refuses a data-dependent op

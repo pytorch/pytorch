@@ -2703,6 +2703,9 @@ class TestPrecompile(TestCase):
         # The static hint covers the VALUE half of the family the clause catches, not just
         # the shape-producing half: a .item() is capturable on the unbacked path too.
         self.assertIn("A data-dependent value (.item())", str(cm.exception))
+        # ... and names the backend the remedy needs, so following it on an eager capture
+        # does not just trade this refusal for the inductor-only NotImplementedError.
+        self.assertIn("backend='inductor'", str(cm.exception))
 
     def test_mutating_custom_op_captures_without_a_registered_fake(self):
         # The one carve-out in "fake tracing needs a meta/fake kernel for every op": a
