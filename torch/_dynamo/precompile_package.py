@@ -140,6 +140,8 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
     artifact outside any capture-config scope. Beneath CatchErrorsWrapper
     rather than replacing it: frames its skipfile checks reject never pay the
     patch, and this frame stays out of the user stack dynamo_start reports.
+    A frame under DistributedDataParallel with optimize_ddp="ddp_optimizer" is
+    handled by the next commit in this stack, which overrides _clone_with_backend.
     """
 
     def __call__(
