@@ -2401,28 +2401,51 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     self.assertTrue(functorch_config.strict_autograd_cache)
             self.assertFalse(functorch_config.strict_autograd_cache)
 
-    def test_allow_empty_graphs_convert_frame_patches_around_the_compile(self):
+    def test_allow_empty_graphs_convert_frame_keeps_a_no_op_frame_compilable(self):
         from torch._dynamo.convert_frame import ConvertFrame
         from torch._dynamo.hooks import Hooks
+        from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
+        from torch._dynamo.testing import CompileCounter
 
-        seen = []
+        def fn(x, flag):
+            if flag:
+                return x.sin()
+            return x
 
-        def fake_convert(self, frame, cache_entry, hooks, frame_state, skip=0):
-            seen.append((torch._dynamo.config.allow_empty_graphs, skip))
-            raise RuntimeError("boom")
+        # Install a converter of the given class beneath the CatchErrorsWrapper
+        # torch._dynamo.optimize built, the way a capture session will, and
+        # count the variants of fn the backend compiles after a no-op call.
+        def compiled_variants(cls):
+            torch._dynamo.reset()
+            counter = CompileCounter()
+            optimize_ctx = torch._dynamo.optimize(counter)
+            wrapper = optimize_ctx.callback
+            built = wrapper._torchdynamo_orig_backend
+            wrapper._torchdynamo_orig_backend = cls(
+                built._torchdynamo_orig_backend,
+                wrapper.hooks,
+                recompile_limit=built._recompile_limit,
+            )
+            x = torch.ones(2)
+            optimize_ctx(fn)(x, False)
+            optimize_ctx(fn)(x, True)
+            return counter.frame_count
 
-        converter = _AllowEmptyGraphsConvertFrame(lambda gm, inputs: gm, Hooks())
-        with (
-            torch._dynamo.config.patch(allow_empty_graphs=False),
-            mock.patch.object(ConvertFrame, "__call__", fake_convert),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "boom"):
-                converter(sys._getframe(), None, Hooks(), {}, skip=1)
-            self.assertFalse(torch._dynamo.config.allow_empty_graphs)
-        # The flag was on for the compile and the extra frame is accounted for
-        # in the traceback skip count.
-        self.assertEqual(seen, [(True, 2)])
+        # The plain converter skips the code object on the empty graph, so the
+        # later sin variant is never compiled; the subclass compiles both.
+        self.assertEqual(compiled_variants(ConvertFrame), 0)
+        self.assertEqual(compiled_variants(_AllowEmptyGraphsConvertFrame), 2)
+        self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+
+        package = CompilePackage(fn)
+        converter = _AllowEmptyGraphsConvertFrame(
+            lambda gm, inputs: gm, Hooks(), package=package, recompile_limit=3
+        )
+        clone = converter._clone_with_backend(lambda gm, inputs: gm)
+        self.assertIs(type(clone), _AllowEmptyGraphsConvertFrame)
+        self.assertIs(clone._inner_convert._package, package)
+        self.assertEqual(clone._recompile_limit, 3)
 
 
 instantiate_parametrized_tests(TestPrecompilePackage)
