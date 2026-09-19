@@ -20,7 +20,7 @@ from ..graph_bytecode_inputs import (
 from ..source import CurrentStreamSource
 from .base import GetSet, Method, readonly_setter, VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import FxTracebackAnnotateVariable
+from .ctx_manager import FxTracebackAnnotateVariable, NullContextVariable
 from .lazy import LazyVariableTracker
 
 
@@ -325,9 +325,14 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     @staticmethod
     def create(
         tx: "InstructionTranslatorBase",
-        stream_to_enter: "StreamVariable",
+        stream_to_enter: "StreamVariable | ConstantVariable",
         **kwargs: dict[str, Any],
-    ) -> "StreamContextVariable":
+    ) -> "StreamContextVariable | NullContextVariable":
+        if (
+            isinstance(stream_to_enter, ConstantVariable)
+            and stream_to_enter.value is None
+        ):
+            return NullContextVariable(**kwargs)
         return StreamContextVariable(
             stream_to_enter,
             **kwargs,
