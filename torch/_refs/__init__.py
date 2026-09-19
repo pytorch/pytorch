@@ -5849,19 +5849,21 @@ def meshgrid(
     # This ref simultaneously handles two overloads (see stubs above)
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
+    if len(tensors) == 0:
+        return []
     if isinstance(tensors[0], (list, tuple)):
         if len(tensors) != 1:
             raise AssertionError(
                 f"Expected exactly 1 tensor list/tuple, got {len(tensors)}"
             )
         tensors = tuple(tensors[0])
+    if len(tensors) == 0:
+        return []
 
     torch._check(
         builtins.all(isinstance(a, TensorLike) for a in tensors),
         lambda: "meshgrid expects its inputs to be tensors",
     )
-
-    torch._check(len(tensors) > 0, lambda: "meshgrid expects a non-empty TensorList")
 
     for i in range(len(tensors) - 1):
         torch._check(
