@@ -2,9 +2,14 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
+
+
+if TYPE_CHECKING:
+    from ._all_gather_layout import AllGatherLayout
 
 
 _ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
@@ -98,9 +103,13 @@ class Comm(ABC):
 
 
 class AllGather(Comm):
+    """Interface for the all_gather comm primitive.
+
+    Set ``layout`` to customize input packing and parameter output views.
+    Backends without a layout use the default rank-major copy-in and copy-out.
     """
-    Interface for all_gather comm primitive
-    """
+
+    layout: "AllGatherLayout | None" = None
 
     @abstractmethod
     def __call__(
