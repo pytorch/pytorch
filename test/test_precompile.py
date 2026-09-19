@@ -218,23 +218,24 @@ class TestPrecompile(TestCase):
             """2 frames (0 from graph breaks), 2 guarded codes, 2 backend graphs, dropped guards {'BUILTIN_MATCH': 1} (0 kept), RISKY drops ["BUILTIN_MATCH G['__builtins_dict___<n>']['len']"], 1 policy-dropped guard""",
         )
 
-    @parametrize("mode", ["make_fx", "dynamo", "installed"])
+    @parametrize("mode", ["make_fx", "other", "dynamo", "installed"])
     def test_parse_artifact_metadata_required_set_follows_tracer(self, mode):
         # TRACER picks which calling-convention constants an artifact must carry
-        # (absent means make_fx), and an installed dynamo artifact swaps the
-        # per-frame blobs for the package blob.
+        # (absent or anything but "dynamo" means make_fx), and an installed dynamo
+        # artifact swaps the per-frame blobs for the package blob.
         from torch._precompile import _parse_artifact_metadata
 
+        make_fx = (
+            ["BUFFER_NAMES", "OUT_SPEC", "USER_INPUT_BOUNDS"],
+            ["TRACER", "_FRAMES", "_ENTRY_BINDING"],
+        )
         src, required, not_required = {
-            "make_fx": (
-                "BACKEND = 'inductor'\n",
-                ["BUFFER_NAMES", "OUT_SPEC", "USER_INPUT_BOUNDS"],
-                ["TRACER", "_FRAMES", "_ENTRY_BINDING"],
-            ),
+            "make_fx": ("BACKEND = 'inductor'\n", *make_fx),
+            "other": ("TRACER = 'other'\n", *make_fx),
             "dynamo": (
                 "TRACER = 'dynamo'\n",
-                ["FN_NAME", "FRAMES", "_FRAMES", "_BACKENDS", "_ENTRY_BINDING"],
-                ["OUT_SPEC", "SERVING_MODE", "_PACKAGE"],
+                ["FN_NAME", "_FRAMES", "_BACKENDS", "_ENTRY_BINDING", "TORCH_VERSION"],
+                ["OUT_SPEC", "TRACER", "SERVING_MODE", "_PACKAGE"],
             ),
             "installed": (
                 "TRACER = 'dynamo'\nSERVING_MODE = 'installed'\n",
@@ -272,13 +273,21 @@ class TestPrecompile(TestCase):
         meta = _parse_artifact_metadata(src)
         self.assertEqual(meta["FRAMES"], [{"is_entry": True, "variants": []}])
         # Reported but never required: the serving mode defaults for artifacts
-        # predating it, and the guard-audit sections come back as data.
+        # predating it, and graph devices and the guard-audit sections come back
+        # as data.
         self.assertEqual(meta["SERVING_MODE"], "standalone")
         self.assertNotIn("POLICY_DROPPED_GUARDS", meta)
         audit = "POLICY_DROPPED_GUARDS = ['g']\nDROPPED_GUARD_CODE = {'g': 'code'}\n"
-        meta = _parse_artifact_metadata(src + audit)
+        meta = _parse_artifact_metadata(src + audit + "GRAPH_DEVICES = ('cpu',)\n")
         self.assertEqual(meta["POLICY_DROPPED_GUARDS"], ["g"])
         self.assertEqual(meta["DROPPED_GUARD_CODE"], {"g": "code"})
+        self.assertEqual(meta["GRAPH_DEVICES"], ("cpu",))
+        # An installed artifact parses without the per-frame blobs.
+        blobs = "_FRAMES = 'blob'\n_BACKENDS = 'blob'\n"
+        package = "SERVING_MODE = 'installed'\n_PACKAGE = 'pkg'\n"
+        installed = src.replace(blobs, package) + "UNREACHABLE_WITHOUT_INSTALL = []\n"
+        meta = _parse_artifact_metadata(installed)
+        self.assertEqual((meta["SERVING_MODE"], meta["_PACKAGE"]), ("installed", "pkg"))
         # The last top-level assignment wins for the set selection and the
         # reported value alike, as it would under exec.
         shadowed = src.replace("TRACER = 'dynamo'", "TRACER = 'other'")
