@@ -4,11 +4,15 @@ import socket
 from dataclasses import dataclass
 from importlib import import_module
 from threading import Lock
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 
-from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from ._blocking import _BlockingTransport
+
+
+if TYPE_CHECKING:
+    from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Work
 
 
 def _load_backend() -> Any:
@@ -95,7 +99,7 @@ class MooncakeMemory:
         return self._reused
 
 
-class MooncakeTransport(Transport):
+class MooncakeTransport(_BlockingTransport):
     """One-sided CPU/CUDA transfers using Mooncake's P2P metadata."""
 
     def __init__(
