@@ -378,16 +378,16 @@ bool try_lookup_without_guard_eval(
 
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
-    PyObject* guarded_code,
+    GuardedCode* guarded_code,
     PyObject* backend) {
   int64_t id = get_current_isolate_recompiles_id();
   auto& entries = extra_state->cache_entry_list(id);
   std::list<CacheEntry>::iterator new_iter;
   if (use_lru) {
-    entries.emplace_front(guarded_code, backend);
+    entries.emplace_front(*guarded_code, backend);
     new_iter = entries.begin();
   } else {
-    entries.emplace_back(guarded_code, backend);
+    entries.emplace_back(*guarded_code, backend);
     new_iter = std::prev(entries.end());
   }
   new_iter->_owner = extra_state;
@@ -396,7 +396,7 @@ CacheEntry* create_cache_entry(
   extra_state->total_cache_entry_count++;
   // Set guard_manager references to extra_state and CacheEntry
   // Warning: lifetime is controlled by C++!
-  py::handle guard_manager = py::handle(guarded_code).attr("guard_manager");
+  auto& guard_manager = new_iter->guard_manager;
   guard_manager.attr("cache_entry") =
       py::cast(*new_iter, py::return_value_policy::reference);
   guard_manager.attr("extra_state") =
@@ -498,7 +498,7 @@ void _load_precompile_entry(
   extra->precompile_entries.push_back(std::move(entry));
 }
 
-void _set_lru_cache(py::object boolean) {
+void _set_lru_cache(const py::object& boolean) {
   if (py::cast<bool>(boolean)) {
     use_lru = true;
   } else {
