@@ -1493,6 +1493,25 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         graph.local_scope["mod"] = threading
         self.assertEqual(_offending_value_path(state, threading.RLock), "")
 
+    def test_unpicklable_value_reachable_only_through_a_global_is_named(self):
+        # pickle_guards_state empties global_scope before dumping when every
+        # guard is portable, so a walk that reads the scope afterwards has lost
+        # the global's name. Capturing the roots first keeps it.
+        from torch._dynamo.guards import _offending_value_path, _scope_roots
+
+        holder = types.SimpleNamespace(
+            cfg=types.SimpleNamespace(lock=threading.RLock())
+        )
+        graph = types.SimpleNamespace(local_scope={}, global_scope={"CFG": holder})
+        state = types.SimpleNamespace(output_graph=graph)
+        roots = _scope_roots(graph)
+        graph.global_scope = {}  # what the pruning does
+        self.assertEqual(_offending_value_path(state, holder.cfg.lock), "")
+        self.assertIn(
+            "global_scope['CFG'].cfg.lock",
+            _offending_value_path(state, holder.cfg.lock, roots),
+        )
+
     def test_offending_value_path_is_found_by_identity(self):
         from torch._dynamo.guards import _offending_value_path
 

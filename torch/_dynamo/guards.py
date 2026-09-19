@@ -4987,7 +4987,20 @@ def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterE
     )
 
 
-def _offending_value_path(state: Any, target: Any) -> str:
+def _scope_roots(graph: Any) -> list[tuple[str, Any]]:
+    """The named values a guard state can reach, for the diagnostic walk."""
+    return [
+        (f"local_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "local_scope", None) or {}).items()
+    ] + [
+        (f"global_scope[{k!r}]", v)
+        for k, v in (getattr(graph, "global_scope", None) or {}).items()
+    ]
+
+
+def _offending_value_path(
+    state: Any, target: Any, roots: list[tuple[str, Any]] | None = None
+) -> str:
     """Best-effort attribute path to the value that could not be pickled.
 
     The error names WHAT failed and never WHERE it lives, which in a large model
@@ -5006,6 +5019,8 @@ def _offending_value_path(state: Any, target: Any) -> str:
     Guards are slotted dataclasses whose create_fn is a functools.partial, so
     slots and partials are descended too; modules are not, since they pickle
     by name and their dicts lead to the whole of sys.modules.
+    ``roots`` lets the caller pass scope seeds captured before pruning emptied
+    ``global_scope``; by default they are read off ``state`` as it is now.
 
     Best-effort by construction: it is a diagnostic appended to an error that is
     already being raised, so any failure here must stay silent rather than mask
@@ -5014,12 +5029,9 @@ def _offending_value_path(state: Any, target: Any) -> str:
     try:
         if target is None:
             return ""
-        graph = state.output_graph
-        queue = collections.deque(
-            [(f"local_scope[{k!r}]", v) for k, v in graph.local_scope.items()]
-            + [(f"global_scope[{k!r}]", v) for k, v in graph.global_scope.items()]
-            + [("state", state)]
-        )
+        if roots is None:
+            roots = _scope_roots(state.output_graph)
+        queue = collections.deque([*roots, ("state", state)])
         seen: set[int] = set()
         # Higher than the scope-only walk needed: the whole guard state is
         # orders of magnitude larger, and this runs once, on a path that is
@@ -5108,6 +5120,7 @@ def pickle_guards_state(
     missing_values = {}
     guard_tree_values = builder.guard_tree_values
     pickler: GuardsStatePickler | None = None
+    scope_roots: list[tuple[str, Any]] | None = None
 
     # Anything raised while walking or dumping the state means a guarded value
     # cannot be serialized, which is a bypass (an error under
@@ -5137,6 +5150,12 @@ def pickle_guards_state(
             builder.value_guarded_containers,
             buf,
         )
+
+        # Snapshot the diagnostic's search roots before the pruning below
+        # empties global_scope: a value that also lives on a global is then
+        # still named by that global rather than by a long path through the
+        # output graph, or by nothing.
+        scope_roots = _scope_roots(state.output_graph)
 
         if all(
             torch.compiler.keep_portable_guards_unsafe(
@@ -5174,7 +5193,7 @@ def pickle_guards_state(
         # a model with a thousand-frame guard tree.
         last = pickler.last_reduced if pickler is not None else None
         raise torch._dynamo.exc.PackageError(
-            f"{type(e).__name__}: {e}{_offending_value_path(state, last)}"
+            f"{type(e).__name__}: {e}{_offending_value_path(state, last, scope_roots)}"
         ) from e
     return buf.getvalue()
 
