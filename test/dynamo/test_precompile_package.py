@@ -2490,6 +2490,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                         optimize_ctx(fn)(torch.ones(2))
                     self.assertEqual(counter.frame_count, 0)
             self.assertFalse(torch._dynamo.config.allow_empty_graphs)
+        # Without a package the DDP clone keeps the subclass, hooks and limit.
+        plain = _AllowEmptyGraphsConvertFrame(counter, wrapper.hooks, recompile_limit=3)
+        clone = plain._clone_with_backend(counter)
+        self.assertIs(type(clone), _AllowEmptyGraphsConvertFrame)
+        self.assertIs(clone._hooks, wrapper.hooks)
+        self.assertEqual(clone._recompile_limit, 3)
 
     def test_allow_empty_graphs_convert_frame_reverts_the_flag_when_the_compile_raises(
         self,
