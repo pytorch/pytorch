@@ -364,19 +364,21 @@ function install_flash_attn_cute() {
 }
 
 function install_cutlass_dsl() {
-  # cutlass-dsl requires Python >= 3.12
-  local py_version
-  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
-    echo "Skipping CUTLASS DSL install: requires Python >= 3.12, have $py_version"
-    return 0
+  local cutlass_dsl_package=nvidia-cutlass-dsl==4.6.2
+  if [[
+    "${DESIRED_CUDA:-}" == cu13* ||
+    "${DESIRED_CUDA:-}" == 13.* ||
+    "${CUDA_VERSION:-}" == 13.* ||
+    "${BUILD_ENVIRONMENT:-}" == *cuda13*
+  ]]; then
+    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.6.2"
   fi
 
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install nvidia-cutlass-dsl==4.6.2 apache-tvm-ffi==0.1.11
+  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.11
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
