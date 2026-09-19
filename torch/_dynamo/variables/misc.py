@@ -38,7 +38,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from torch._dynamo.variables.base import MutationType
-from torch._dynamo.variables.lists import TupleVariable, pylist_check
+from torch._dynamo.variables.lists import pylist_check, TupleVariable
 from torch._guards import Source
 
 from .. import config, graph_break_hints, trace_rules, variables
@@ -735,17 +735,20 @@ class ExceptionVariable(VariableTracker):
             if se.has_pending_mutation_of_attr(self, attr):
                 value = se.load_attr(self, attr, deleted_ok=True)
                 if not isinstance(value, variables.DeletedVariable):
-                    se.store_instance_dict_attr(
-                        self, attr, variables.DeletedVariable()
-                    )
+                    se.store_instance_dict_attr(self, attr, variables.DeletedVariable())
                     return variables.ConstantVariable.create(None)
             elif self.source is not None:
                 return super().call_method(tx, name, args, kwargs)
 
+            msg = (
+                f"'{self.exc_type.__name__}' object has no attribute '{attr}'"
+                if sys.version_info >= (3, 11)
+                else attr
+            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[f"'{self.exc_type.__name__}' object has no attribute '{attr}'"],
+                args=[msg],
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -881,9 +884,7 @@ class ExceptionVariable(VariableTracker):
         [note] = args
         if not issubclass(note.python_type(), str):
             if sys.version_info >= (3, 14):
-                msg = (
-                    f"add_note() argument must be str, not {note.python_type_name()}"
-                )
+                msg = f"add_note() argument must be str, not {note.python_type_name()}"
             else:
                 msg = f"note must be a str, not '{note.python_type_name()}'"
             raise_type_error(tx, msg)
@@ -894,16 +895,6 @@ class ExceptionVariable(VariableTracker):
             pending = se.load_attr(self, "__notes__", deleted_ok=True)
             if not isinstance(pending, variables.DeletedVariable):
                 notes = pending
-        elif self.source is not None:
-            unimplemented(
-                gb_type="BaseException.add_note on an existing exception",
-                context=f"call_method {self} add_note",
-                explanation=(
-                    "Dynamo cannot determine whether an existing exception has "
-                    "a __notes__ instance attribute."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
 
         if notes is None:
             notes = variables.ListVariable(
@@ -915,14 +906,19 @@ class ExceptionVariable(VariableTracker):
         elif not pylist_check(notes):
             raise_type_error(tx, "Cannot add note: __notes__ is not a list")
 
+        if isinstance(notes, variables.UserDefinedListVariable):
+            if notes._base_vt is None:
+                raise AssertionError("UserDefinedListVariable must have a base VT")
+            notes = notes._base_vt
         notes.call_method(tx, "append", [note], {})
         return variables.ConstantVariable.create(None)
 
     tp_methods = {
         "with_traceback": Method(with_traceback),
         "__setstate__": Method(setstate),
-        "add_note": Method(add_note),
     }
+    if sys.version_info >= (3, 11):
+        tp_methods["add_note"] = Method(add_note)
 
     def _get_args(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(

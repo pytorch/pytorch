@@ -6621,15 +6621,5 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
-  ],
-  "GB0568": [
-    {
-      "Gb_type": "BaseException.add_note on an existing exception",
-      "Context": "call_method {self} add_note",
-      "Explanation": "Dynamo cannot determine whether an existing exception has a __notes__ instance attribute.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
   ]
 }

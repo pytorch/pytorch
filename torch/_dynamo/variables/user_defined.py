@@ -4485,11 +4485,13 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         init_args = kwargs.get("init_args", [])
         self._base_vt = variables.ExceptionVariable(self.value_type, init_args)
-        self._base_methods = (
+        self._base_methods = set(
             base_exception_methods
             if isinstance(value, BaseException)
             else exception_methods
         )
+        if sys.version_info >= (3, 11):
+            self._base_methods.discard(BaseException.add_note)
 
     @property
     def fn(self) -> Callable[..., object]:
