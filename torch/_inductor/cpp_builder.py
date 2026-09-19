@@ -1481,6 +1481,10 @@ def _get_torch_related_args(
     if _IS_WINDOWS:
         libraries.append("sleef")
 
+    if sys.platform.startswith("freebsd"):
+        include_dirs.append("/usr/local/include")
+        libraries.append("sleef")
+
     return include_dirs, libraries_dirs, libraries
 
 
