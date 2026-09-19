@@ -3,6 +3,7 @@
 import builtins
 import collections
 import dataclasses
+import enum
 import functools
 import io
 import itertools
@@ -32,6 +33,7 @@ from torch._dynamo.guards import (
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
+    pickle_guards_state,
 )
 from torch._dynamo.package import CompilePackage, DynamoCache, load_guards_state
 from torch._dynamo.precompile_context import PrecompileContext
@@ -1220,6 +1222,8 @@ class _ModuleWithDtypeAttr(torch.nn.Module):
         super().__init__()
         self.dt = torch.float32
         self.dev = torch.device("cpu")
+        self.dots = ...
+        self.empty = ()
 
 
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
@@ -1530,22 +1534,38 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = _ModuleWithDtypeAttr()
         t = torch.randn(2)
         buf = io.BytesIO()
-        GuardsStatePickler({id(m): m, id(t): t}, {}, {}, {}, buf).dump({"m": m, "t": t})
+        state = {"m": m, "t": t, "dots": ..., "empty": ()}
+        GuardsStatePickler({id(m): m, id(t): t}, {}, {}, {}, buf).dump(state)
         out = load_guards_state(buf.getvalue())
         self.assertIs(out["m"].dt, torch.float32)
         self.assertEqual(out["m"].dev, torch.device("cpu"))
         self.assertEqual(out["t"].dtype, torch.float32)
+        # Ellipsis (a code constant of every `x[...]`) and () are shared too.
+        self.assertIs(out["dots"], ...)
+        self.assertEqual(out["empty"], ())
+
+    def test_a_non_literal_subclass_instance_is_still_pruned(self):
+        # The skip is by exact type: an IntEnum member is an int but not a
+        # shared literal, so an unguarded one still prunes to the sentinel.
+        class Color(enum.IntEnum):
+            RED = 1
+
+        m = _ModuleWithDtypeAttr()
+        m.color = Color.RED
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m}, {}, {}, {}, buf).dump({"m": m})
+        self.assertIsInstance(load_guards_state(buf.getvalue())["m"].color, _Missing)
 
     def test_an_unguarded_interned_singleton_local_is_not_pruned(self):
         # The other registration site: pickle_guards_state marks every
         # unguarded local-scope leaf as missing, so a bare dtype local poisoned
         # the tensors' dtype the same way.
-        from torch._dynamo.guards import pickle_guards_state
-
+        # A class is shared the same way: torch.Tensor is the pytype of every
+        # tensor payload, and the leaf loop has no callable filter.
         t = torch.randn(2)
         graph = types.SimpleNamespace(
             guards=[],
-            local_scope={"dt": torch.float32, "t": t},
+            local_scope={"dt": torch.float32, "cfg": {"cls": torch.Tensor}, "t": t},
             global_scope={},
             guard_on_key_order=set(),
         )
@@ -1555,34 +1575,33 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         state = types.SimpleNamespace(output_graph=graph)
         out = load_guards_state(pickle_guards_state(state, builder)).output_graph
         self.assertIs(out.local_scope["dt"], torch.float32)
+        self.assertIs(out.local_scope["cfg"]["cls"], torch.Tensor)
         self.assertEqual(out.local_scope["t"].dtype, torch.float32)
 
-    @unittest.skipIf(
-        not (
-            torch.distributed.is_available() and torch.distributed.is_gloo_available()
-        ),
-        "requires gloo",
-    )
-    def test_an_unguarded_process_group_backend_is_pruned(self):
-        # A c10d Backend is not a ProcessGroup: one the guard tree does not
-        # reach failed the dump with "cannot pickle 'ProcessGroupGloo' object"
-        # instead of pruning to the sentinel. Built directly, so no default
-        # process group is needed.
-        from torch._C._distributed_c10d import HashStore, ProcessGroupGloo
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_unsupported_types_prune_unless_a_guard_reads_them(self):
+        # A c10d Backend is not a ProcessGroup, so an unguarded one failed the
+        # dump instead of pruning to the sentinel. A GUARDED unsupported value
+        # (a TYPE_MATCH on a stream local) must not prune either, or the rebuilt
+        # guard compares against the sentinel forever: it is refused by name,
+        # which pickle_guards_state reports as a bypass.
+        from torch._C._distributed_c10d import FakeProcessGroup
 
-        pg = ProcessGroupGloo(HashStore(), 0, 1)
+        pg = FakeProcessGroup._create_internal(0, world_size=2)
         self.assertIsInstance(pg, torch._C._distributed_c10d.Backend)
         self.assertNotIsInstance(pg, torch._C._distributed_c10d.ProcessGroup)
-        buf = io.BytesIO()
-        GuardsStatePickler({}, {}, {}, {}, buf).dump({"pg": pg})
-        out = load_guards_state(buf.getvalue())["pg"]
-        self.assertIsInstance(out, _Missing)
-        self.assertEqual(out._reason, "unsupported")
-        # A GUARDED one (a TYPE_MATCH on a process-group local) is not pruned:
-        # the rebuilt guard would compare against the sentinel and never match.
-        # It fails the dump instead, which pickle_guards_state reports as a bypass.
-        with self.assertRaisesRegex(TypeError, "cannot pickle"):
-            GuardsStatePickler({id(pg): pg}, {}, {}, {}, io.BytesIO()).dump({"pg": pg})
+        referent = _ModuleWithDtypeAttr()
+        for obj in (pg, torch.Stream(device="cpu"), weakref.ref(referent)):
+            with self.subTest(type(obj).__name__):
+                buf = io.BytesIO()
+                GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
+                self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
+                with self.assertRaisesRegex(
+                    PackageError, f"a guard reads a {type(obj).__name__}"
+                ):
+                    GuardsStatePickler({id(obj): obj}, {}, {}, {}, io.BytesIO()).dump(
+                        {"o": obj}
+                    )
 
     def test_reduce_handles_an_empty_cell_reached_directly(self):
         # reducer_override's CellType branch read cell_contents unguarded and
