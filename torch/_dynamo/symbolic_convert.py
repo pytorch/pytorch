@@ -2412,18 +2412,23 @@ class InstructionTranslatorBase(
             )
         self.output.side_effects.store_global(variable, name, value)
 
-    # Cache note: This cache only exists for the duration of this
-    # InstructionTranslator - so it should be safe to do.
-    @cache_method
+    # Memo note: this memo only exists for the duration of this
+    # InstructionTranslator - so it should be safe to do. graph_break_ok is not
+    # part of its key (which is why this is not @cache_method, whose key is the
+    # whole argument tuple): it is read only when the alias slot is taken, which
+    # a memo hit rules out, so keying on it would only run the body a second
+    # time for a name two callers both resolve.
     def import_source(
         self, module_name: str, graph_break_ok: bool = False
     ) -> GlobalSource:
         """
         Create an alias to a module for use in guards. A slot already holding
         something other than the resolved module is a hard error unless the
-        caller can graph break there (positional: cache_method takes no
-        keyword arguments).
+        caller can graph break there.
         """
+        if (memo := self._import_source_memo.get(module_name)) is not None:
+            return memo
+
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2485,7 +2490,7 @@ class InstructionTranslatorBase(
                     offender = f"{offender} named {bound_name}"
                 # f_globals is the root frame's: an inlined callee's own module is not
                 # where the alias lives, so the message names the module whose it is.
-                scope = f_globals.get("__name__")
+                scope = f_globals.get("__name__") or "<a scope with no __name__>"
                 # A graph break only where the traced bytecode chose the name, IMPORT_NAME.
                 # Every other caller resolves a name of Dynamo's choosing -- torch's, the
                 # stdlib's, a class's __module__, an inlined callee's module -- and from
@@ -2502,7 +2507,7 @@ class InstructionTranslatorBase(
                     explanation=f"The module alias {alias} for {module_name} is already bound to "
                     f"a {offender} in the globals of {scope}, the module of the frame being compiled.",
                     hints=[
-                        f"Remove or rename the global {alias} in module {scope}.",
+                        f"Remove or rename the global {alias} from the globals of {scope}.",
                         "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
                         "Dynamo caches this frame's outcome -- skipped, or compiled up to the last checkpoint before the import -- and nothing guards this global, so fixing it later does not retrace the frame: call torch._dynamo.reset() after fixing it.",
                     ],
@@ -2521,7 +2526,9 @@ class InstructionTranslatorBase(
         if not conflict or live:
             f_globals[alias] = value
         self.output.update_co_names(alias)
-        return GlobalSource(alias)
+        source = GlobalSource(alias)
+        self._import_source_memo[module_name] = source
+        return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
         """
@@ -2620,9 +2627,9 @@ class InstructionTranslatorBase(
             # graph_break_ok: the name is the traced bytecode's own choice.
             if not fromlist:
                 top_level_module_name = module_name.partition(".")[0]
-                source = self.import_source(top_level_module_name, True)
+                source = self.import_source(top_level_module_name, graph_break_ok=True)
             else:
-                source = self.import_source(module_name, True)
+                source = self.import_source(module_name, graph_break_ok=True)
 
         if self.exec_recorder:
             # pyrefly: ignore [unbound-name]
@@ -5590,6 +5597,8 @@ class InstructionTranslatorBase(
         )
         # Per-prefix record of the most recently generated pycode varname.
         self._pycode_last_varname: dict[str, str] = {}
+        # Module name -> the alias source import_source minted for it.
+        self._import_source_memo: dict[str, GlobalSource] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
