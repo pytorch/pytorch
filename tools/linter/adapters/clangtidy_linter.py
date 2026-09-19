@@ -306,6 +306,24 @@ def main() -> None:
 
     abs_build_dir = Path(args.build_dir).resolve()
 
+    if not abs_build_dir.exists():
+        err_msg = LintMessage(
+            path="<none>",
+            line=None,
+            char=None,
+            code="CLANGTIDY",
+            severity=LintSeverity.ERROR,
+            name="command-failed",
+            original=None,
+            replacement=None,
+            description=(
+                f"Could not find build directory at {args.build_dir},"
+                " you may need to run compiler configuration first or check your workflow group settings."
+            ),
+        )
+        print(json.dumps(err_msg._asdict()), flush=True)
+        sys.exit(0)
+
     # Get the absolute path to clang-tidy and use this instead of the relative
     # path such as .lintbin/clang-tidy. The problem here is that os.chdir is
     # per process, and the linter uses it to move between the current directory
