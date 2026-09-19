@@ -519,6 +519,75 @@ class TestPrecompile(TestCase):
         self.assertEqual(_reachable_frames([entry, bypassed, cont_b]), {0, 1})
         self.assertEqual(_serving_mode([entry, bypassed, cont_b]), "installed")
 
+    def test_no_dispatchable_graph_names_the_cause(self):
+        # An entry frame with no variants has two very different causes. If
+        # Dynamo BYPASSED the frame, saying so beats the thin-wrapper advice,
+        # which in that case is simply wrong; a bypassed helper or continuation
+        # says nothing about the entry.
+        from torch._dynamo.package import (
+            _DynamoCacheEntry,
+            _DynamoCodeCacheEntry,
+            _GuardedCodeCacheEntry,
+            SerializedCode,
+            SourceInfo,
+        )
+        from torch._precompile import _multigraph_frames, _reject_uninstallable_entry
+
+        def fwd_loss_bwd(x):
+            return x
+
+        def helper(x):
+            return x
+
+        scale = 2
+
+        def step(x):
+            return x * scale
+
+        def code_entry(fn, resume_name=None, variants=(), bypassed=False):
+            return _DynamoCodeCacheEntry(
+                python_code=SerializedCode.from_code_object(fn.__code__),
+                python_module=__name__,
+                function_names=[resume_name] if resume_name else [],
+                guarded_codes=list(variants),
+                import_sources={},
+                backend_ids=[],
+                code_source=None,
+                install_to_global=resume_name is not None,
+                bypassed=bypassed,
+            )
+
+        def reject(fn_name, codes):
+            entry = _DynamoCacheEntry(
+                codes=codes,
+                source_info=SourceInfo(inlined_sources=set()),
+                device_type="cpu",
+                fn_name=fn_name,
+            )
+            _reject_uninstallable_entry(_multigraph_frames(entry), entry)
+
+        variant = _GuardedCodeCacheEntry(
+            guards_state=b"",
+            dynamo_code=SerializedCode.from_code_object(helper.__code__),
+        )
+        healthy = code_entry(fwd_loss_bwd, variants=[variant])
+        bypassed = code_entry(fwd_loss_bwd, variants=[variant], bypassed=True)
+        thin = code_entry(fwd_loss_bwd)
+        dead_helper = code_entry(helper, bypassed=True)
+        dead_cont = code_entry(helper, "__resume_at_12_3", bypassed=True)
+        msg = "entry frame was BYPASSED during capture.*precompile_cache_bypass"
+        with self.assertRaisesRegex(PrecompileError, msg):
+            reject("fwd_loss_bwd", [bypassed])
+        # A bypassed HELPER beside a variant-less entry is the thin-wrapper case.
+        with self.assertRaisesRegex(PrecompileError, "thin wrapper"):
+            reject("fwd_loss_bwd", [thin, dead_helper])
+        # A healthy entry beside a bypassed continuation has nothing to refuse,
+        # and neither has an empty capture.
+        reject("fwd_loss_bwd", [healthy, dead_cont])
+        reject("fwd_loss_bwd", [])
+        with self.assertRaisesRegex(PrecompileError, r"closes over \['scale'\]"):
+            reject("step", [code_entry(step, variants=[variant])])
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
