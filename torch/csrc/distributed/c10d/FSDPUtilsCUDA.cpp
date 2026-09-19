@@ -1,11 +1,11 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/cuda/TensorShape.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/c10d/FSDPUtils.hpp>
+#include <torch/csrc/distributed/c10d/FSDPUtilsCUDA.hpp>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 #include <cmath>
@@ -64,7 +64,7 @@ void split_with_sizes_copy_with_prefixes_cuda(
     src += split_sizes[i] * elem_size;
   }
   if (!srcs.empty()) {
-    const auto bytes_per_block = at::native::detail::kChunkCatBytesPerBlock;
+    const auto bytes_per_block = detail::kChunkCatBytesPerBlock;
     int64_t num_blocks = 0;
     for (const auto chunk_size : chunk_sizes) {
       num_blocks += (chunk_size + bytes_per_block - 1) / bytes_per_block;
@@ -72,8 +72,8 @@ void split_with_sizes_copy_with_prefixes_cuda(
     const auto* properties = at::cuda::getCurrentDeviceProperties();
     const int64_t max_blocks =
         static_cast<int64_t>(properties->multiProcessorCount) *
-        properties->maxThreadsPerMultiProcessor /
-        at::native::detail::kCopyThreadsPerBlock * 2;
+        properties->maxThreadsPerMultiProcessor / detail::kCopyThreadsPerBlock *
+        2;
     const int64_t iter_factor =
         (num_blocks * num_chunks + max_blocks - 1) / max_blocks;
     int64_t chunks_per_block = std::ceil(std::sqrt(iter_factor));
@@ -91,10 +91,10 @@ void split_with_sizes_copy_with_prefixes_cuda(
           block_idx_to_split_idx.end(), blocks, static_cast<int64_t>(i));
       blocks_cumsums.push_back(blocks_cumsums.back() + blocks);
     }
-    auto packed = at::native::detail::pack_vecs(
+    auto packed = detail::pack_vecs(
         {&dsts, &srcs, &chunk_sizes, &block_idx_to_split_idx, &blocks_cumsums},
         input.device());
-    at::native::detail::launch_split_with_sizes_copy(
+    detail::launch_split_with_sizes_copy(
         packed.second,
         blocks_cumsums.back(),
         num_chunks / chunks_per_block,
@@ -152,7 +152,7 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
     const auto trailing_numel = c10::multiply_integers(sizes.slice(dim + 1));
     const int64_t chunk_size = (sizes[dim] + num_chunks - 1) / num_chunks *
         trailing_numel * dst_elem_size;
-    const auto bytes_per_block = at::native::detail::kChunkCatBytesPerBlock;
+    const auto bytes_per_block = detail::kChunkCatBytesPerBlock;
     const int64_t num_blocks =
         (chunk_size + bytes_per_block - 1) / bytes_per_block;
     const int64_t actual_size = sizes[dim] * trailing_numel * src_elem_size;
@@ -177,7 +177,7 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
   metadata.slice_size = num_chunks * metadata.chunk_size;
   at::native::resize_output(
       out, {num_chunks, metadata.chunk_size / dst_elem_size});
-  auto packed = at::native::detail::pack_vecs(
+  auto packed = detail::pack_vecs(
       {&metadata.srcs,
        &metadata.block_idx_to_tensor_idx,
        &metadata.tensor_idx_to_start_tensor_bytes,
@@ -186,7 +186,7 @@ at::Tensor& chunk_cat_with_prefixes_cuda(
        &metadata.pad_tensor_chunk_sizes,
        &metadata.num_blocks_per_tensor_chunk},
       out.device());
-  at::native::detail::launch_chunk_cat(
+  detail::launch_chunk_cat(
       out,
       packed.second,
       metadata.num_blocks_per_chunk,

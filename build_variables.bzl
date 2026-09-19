@@ -774,6 +774,7 @@ libtorch_cuda_core_sources = [
 # These files are the only ones that are supported on Windows.
 libtorch_cuda_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FSDPUtilsCUDA.cpp",
+    "torch/csrc/distributed/c10d/FSDPUtilsKernels.cu",
     "torch/csrc/distributed/c10d/reducer_cuda.cpp",
 ]
 
