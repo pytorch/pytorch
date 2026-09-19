@@ -1155,25 +1155,7 @@ class TestFastCudaLauncher(TestCase):
             _FastCudaLauncher(0, 1, 0, arg_tys, 0)
 
 
-@requires_gpu_and_triton
-@torch._inductor.config.patch(
-    {
-        "use_static_triton_launcher": True,
-        "strict_static_triton_launcher": True,
-        "use_fast_triton_launcher": True,
-    }
-)
-class TestFastCudaLauncherCompileResult(TestCase):
-    """E2E tests verifying _FastCudaLauncher handling in torch.compile.
-
-    CUDA tests assert both correctness (output matches eager) and that the
-    _FastCudaLauncher C extension was constructed, not silently skipped. XPU
-    uses its own static launcher and must fall back without the CUDA-only fast
-    launcher.
-    """
-
-    hw_classification = HardwareClassification.CUDA
-
+class _FastLauncherCompileMixin:
     def setUp(self):
         super().setUp()
         self._config_ctx = torch._inductor.config.patch(
@@ -1209,29 +1191,24 @@ class TestFastCudaLauncherCompileResult(TestCase):
             CachingAutotuner, "_build_fast_launcher", tracking_build
         ), results
 
-    @skipIfXpu(msg="https://github.com/pytorch/pytorch/issues/181491")
-    def test_basic_compile(self, device):
-        """Verify torch.compile uses _FastCudaLauncher and produces correct output."""
-        patcher, results = self._patch_build_fast_launcher()
-        with patcher:
 
-            @torch.compile
-            def foo(x, y):
-                return x + y
+@requires_gpu_and_triton
+@torch._inductor.config.patch(
+    {
+        "use_static_triton_launcher": True,
+        "strict_static_triton_launcher": True,
+        "use_fast_triton_launcher": True,
+    }
+)
+class TestFastLauncherFallbackCompileResult(_FastLauncherCompileMixin, TestCase):
+    """Accelerator-generic: with use_fast_triton_launcher disabled, torch.compile
+    falls back to the regular static launcher on every accelerator.
 
-            x = torch.randn(10, device=device)
-            y = torch.randn(10, device=device)
-            self.assertEqual(foo(x, y), x + y)
-            if torch.device(device).type == "xpu":
-                self.assertTrue(results, "_build_fast_launcher was not reached on XPU")
-                self.assertFalse(
-                    any(results), "_FastCudaLauncher should not be built on XPU"
-                )
-            else:
-                self.assertTrue(
-                    any(results),
-                    "_FastCudaLauncher was not built by any CachingAutotuner",
-                )
+    When pytorch#181491 is fixed, the XPU fast-launcher-fallback assertions move
+    here from TestFastCudaLauncherCompileResult.test_basic_compile.
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def test_disable_fast_launcher(self, device):
         """Verify disabling the config falls back to the regular launcher."""
@@ -1251,7 +1228,40 @@ class TestFastCudaLauncherCompileResult(TestCase):
                 "_FastCudaLauncher should not be built when config is disabled",
             )
 
-    @skipIfXpu(msg="Tests CUDA device-side TMA global scratch")
+
+@requires_gpu_and_triton
+@torch._inductor.config.patch(
+    {
+        "use_static_triton_launcher": True,
+        "strict_static_triton_launcher": True,
+        "use_fast_triton_launcher": True,
+    }
+)
+class TestFastCudaLauncherCompileResult(_FastLauncherCompileMixin, TestCase):
+    """E2E tests verifying _FastCudaLauncher handling in torch.compile on CUDA:
+    assert both correctness (output matches eager) and that the
+    _FastCudaLauncher C extension was constructed, not silently skipped.
+    """
+
+    hw_classification = HardwareClassification.CUDA
+
+    def test_basic_compile(self, device):
+        """Verify torch.compile uses _FastCudaLauncher and produces correct output."""
+        patcher, results = self._patch_build_fast_launcher()
+        with patcher:
+
+            @torch.compile
+            def foo(x, y):
+                return x + y
+
+            x = torch.randn(10, device=device)
+            y = torch.randn(10, device=device)
+            self.assertEqual(foo(x, y), x + y)
+            self.assertTrue(
+                any(results),
+                "_FastCudaLauncher was not built by any CachingAutotuner",
+            )
+
     @unittest.skipIf(
         not has_triton_tma_device(),
         "requires Triton device-side TMA support",
@@ -1364,10 +1374,13 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestFastCudaLauncher, globals(), only_for=("cuda",))
 instantiate_device_type_tests(
-    TestFastCudaLauncherCompileResult,
+    TestFastLauncherFallbackCompileResult,
     globals(),
     only_for=("cuda", "xpu"),
     allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFastCudaLauncherCompileResult, globals(), only_for=("cuda",)
 )
 
 
