@@ -3633,10 +3633,10 @@ def _check_path_pair(
     Three ways a pair is refused: artifact CONTENTS passed where a path belongs (the
     in-memory ``(python_code, cache)`` pair an earlier ``load`` took under the same
     name), one file named for both halves after resolving links, and a path that exists
-    but is not a regular file. The same file for both halves is what capture() cannot do
-    at all (the cache write would clobber the source it just wrote); load() could in fact
-    degrade its way through such a pair, and refuses it so that the two entry points
-    accept exactly the same pairs.
+    but is not a regular file. The same file for both halves is what capture() cannot
+    do at all (the cache write would clobber the source it just wrote); load() could in
+    fact degrade its way through such a pair, and refuses it so that the two entry
+    points accept exactly the same pairs.
     """
     # Ahead of the path handling below, which would report a multi-kilobyte source
     # string or a cache blob as an unreadable path. Only what cannot plausibly be a
