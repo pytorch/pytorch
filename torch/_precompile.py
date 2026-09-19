@@ -513,9 +513,10 @@ class _MakeFxCapture(Capture):
     its ``decompositions`` to the ``PrecompiledModule`` it builds for ``fn``. Only
     the constructor and ``__enter__`` exist so far: the constructor refuses a
     partial and a ``tracer`` that is not a :class:`MakeFxTracer`, builds that module,
-    and records the paths and the ``_traced``/``_rendered`` state the capture drives. ``__call__`` and
-    ``__exit__`` still raise ``NotImplementedError`` from :class:`Capture`; the
-    one-call rule they will enforce is the one :class:`MakeFxTracer` documents.
+    and records the paths and the ``_traced``/``_rendered`` state the capture
+    drives. ``__call__`` and ``__exit__`` still raise ``NotImplementedError`` from
+    :class:`Capture`; the one-call rule they will enforce is the one
+    :class:`MakeFxTracer` documents.
     """
 
     def __init__(
@@ -526,10 +527,8 @@ class _MakeFxCapture(Capture):
         *,
         backend: str,
         tracer: MakeFxTracer,
-        # Unread until the follow-up's __call__ selects the grad mode of the one traced
-        # call from it; _capture traces in the caller's mode (#197289), so a backward in
-        # fn is built as graph ops only when True. Not a lowering or serve-time knob:
-        # the grads ride out as extra outputs of one flat graph (invariant 5).
+        # Stored and not yet read: the follow-up's __call__ will select the grad mode
+        # of the one traced call from it.
         training: bool,
     ) -> None:
         if isinstance(fn, functools.partial):
@@ -539,8 +538,9 @@ class _MakeFxCapture(Capture):
             )
         if not isinstance(tracer, MakeFxTracer):
             raise PrecompileError(
-                f"precompile expects a MakeFxTracer as tracer, got {tracer!r}. Pass "
-                "MakeFxTracer(...), not the tracer name."
+                f"precompile expects a MakeFxTracer instance as tracer, got {tracer!r}. "
+                "Pass MakeFxTracer(...); neither the bare class nor the tracer name "
+                "string is accepted here."
             )
         self._module = PrecompiledModule(
             fn, backend=backend, tracer="make_fx", decompositions=tracer.decompositions
