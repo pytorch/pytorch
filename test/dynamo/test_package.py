@@ -1205,8 +1205,8 @@ def add(x, y):
         # graph holds the live module's VALUE while the guards read the alias,
         # so a change to the live module goes unseen -- the compiled function
         # diverges from eager, accepted here and pinned as a divergence, and
-        # the commit directly above binds the live entry and turns it into a
-        # recompile -- and a change to the installed one recompiles.
+        # PR #197046 binds the live entry and turns it into a recompile -- and
+        # a change to the installed one recompiles.
         ctx = DiskDynamoStore()
         name = "torch_test_package_import_alias_three_way"
         alias = f"__import_{name}"
@@ -1315,9 +1315,12 @@ def add(x, y):
         # which is never a sys.modules key; import_source resolves it through
         # the importer registry keyed by that same name, so the registry's
         # module is the one the name resolves to now, and a same-named module a
-        # writer left in the slot is accepted and replaced by it. The alias is
-        # reached through an inlined call: the packaged function's global read
-        # roots at its own module, not the frame's.
+        # writer left in the slot is accepted and replaced by it. The registry
+        # is keyed by the module's own mangled __name__, so module_name ==
+        # value_name here, and this pins the acceptance rather than the
+        # value_name widening. The alias is reached through an inlined call: the
+        # packaged function's global read roots at its own module, not the
+        # frame's.
         name = "torch_test_package_import_alias_packaged"
         path = os.path.join(self.path(), "alias.pt")
         src = "SCALE = 2\n\ndef helper(x):\n    return x * SCALE\n"
@@ -1339,6 +1342,7 @@ def add(x, y):
             self.assertIs(fn.__globals__[alias], packaged)
         finally:
             fn.__globals__.pop(alias, None)
+            torch.package.package_importer._package_imported_modules.pop(mangled, None)
             torch._dynamo.reset()
 
     def test_import_alias_the_trace_left_alone_is_recorded_for_install(self):
@@ -1433,9 +1437,8 @@ def add(x, y):
         # pushed, and the guards read the memo's. A change to the live module
         # goes unseen -- the compiled function diverges from eager, with no
         # recompile -- and a change to the memo recompiles. The parent has
-        # this for every empty slot and this commit keeps it; the commit
-        # directly above binds the live entry and turns the divergence into a
-        # recompile.
+        # this for every empty slot and this commit keeps it; PR #197046 binds
+        # the live entry and turns the divergence into a recompile.
         name = "torch_test_package_import_alias_stale_memo"
         alias = f"__import_{name}"
         old = types.ModuleType(name)
@@ -1486,8 +1489,8 @@ def add(x, y):
         # wrapper is not a soft failure, so the compile dies with no eager
         # fallback. The memo's own, not the skip arm's: the parent has it for
         # every empty slot, and an installed module left in the slot is only a
-        # second object the guards may read. The commit directly above binds
-        # the live entry, and the read then compiles.
+        # second object the guards may read. PR #197046 binds the live entry,
+        # and the read then compiles.
         name = "torch_test_package_import_alias_stale_attr"
         alias = f"__import_{name}"
         old = types.ModuleType(name)
@@ -1538,7 +1541,7 @@ def add(x, y):
         # registered they agree with eager, and with a forward hook on the
         # defining module the CLOSURE_MATCH on the handle's id subscripts the
         # shim's empty dict as the guard is built and raises, with no eager
-        # fallback. Pinned as the state two commits above this one changes.
+        # fallback. Pinned as the state PR #197135 re-roots these guards.
         name = "torch.nn.modules.module"
         alias = "__import_torch_dot_nn_dot_modules_dot_module"
         real = sys.modules[name]
@@ -1909,8 +1912,8 @@ def add(x, y):
         # replaced by it. No traced bytecode reaches that arm, so a comptime
         # callback calls import_source on the live translator mid-trace, with
         # the frame's real globals and output behind it, as IMPORT_NAME does
-        # (graph_break_ok). A refused call stores nothing in cache_method's
-        # cache, which fills on the return path only.
+        # (graph_break_ok). A refused call stores nothing in _import_source_memo,
+        # which fills on the return path only.
         key = "torch_test_package_import_alias_non_module_value"
         alias = f"__import_{key}"
         value = types.SimpleNamespace(VALUE=1)
