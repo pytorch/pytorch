@@ -364,8 +364,9 @@ def _batch_chunked_kernel(
     row_max_buf = torch.empty((chunk_rows, 1), dtype=logits_dtype, device=device)
     # One slot per row of the call: the kernel writes each row's loss
     # contribution and the reduction happens once, after the loop, instead of
-    # four launches per chunk on (Bc,) data.
-    term_buf = torch.empty(num_batches, dtype=acc_dtype, device=device)
+    # four launches per chunk on (Bc,) data. The forward-only path forms the
+    # loss chunk by chunk and never reads this, so it does not allocate it.
+    term_buf = _make_empty((num_batches,), acc_dtype, device, when=compute_grads)
     weight_t = linear_weight.t()
     # `addmm` takes `self` only in `out_dtype` or in `mat1`'s dtype, which is
     # narrower than what the op accepts: with fp16 inputs the buffer is fp16, so
