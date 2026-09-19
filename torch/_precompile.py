@@ -1087,16 +1087,13 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     below as top-level literal assignments, so an AST walk + literal_eval recovers them
     safely. The cache then only needs to carry the compiled artifact.
 
-    The required constant set is tracer-dependent: the make_fx tracer emits the full
-    calling-convention set the inlined driver reads (PARAM_NAMES, OUT_SPEC, ...), while
-    the dynamo tracer's multi-graph driver rehydrates its frames from opaque blobs
-    (_FRAMES and _BACKENDS, or _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once
-    installed) and reads only _ENTRY_BINDING, the readable frame report beside the
-    blobs (FN_NAME, FRAMES, DROPPED_GUARDS, RISKY_DROPPED_GUARDS, WONT_GENERALIZE)
-    and the two versions that lock them, _DYNAMO_PYTHON_VERSION for the marshalled
-    bytecode and TORCH_VERSION for the pickled guard state; a make_fx artifact inlines
-    neither, so it carries no such lock. TRACER is absent on artifacts predating the
-    dynamo tracer, so its absence means make_fx.
+    The required set follows TRACER: absent (artifacts predating the dynamo tracer) or
+    anything but "dynamo" means the make_fx set the inlined driver reads. A dynamo
+    artifact instead carries the multi-graph driver's blobs (_FRAMES and _BACKENDS, or
+    _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once SERVING_MODE is "installed"), the
+    readable frame report beside them and the two versions that lock them,
+    _DYNAMO_PYTHON_VERSION for the marshalled bytecode and TORCH_VERSION for the
+    pickled guard state.
     """
     import ast
 
@@ -1121,21 +1118,14 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     def literal(name: str) -> object:
         try:
             return ast.literal_eval(assigns[name])
-        except (ValueError, SyntaxError) as e:
+        except (ValueError, TypeError) as e:
             raise PrecompileError(
                 f"python_code {name!r} calling-convention metadata is malformed; "
                 "it must be a Python literal."
             ) from e
 
-    # The make_fx and dynamo drivers read different calling-convention literals,
-    # so TRACER picks the required set. It is absent on artifacts predating the
-    # dynamo tracer, which are all make_fx.
     tracer = literal("TRACER") if "TRACER" in assigns else None
     if tracer == "dynamo":
-        # The multi-graph driver rehydrates every frame from _FRAMES and the
-        # subgraphs from _BACKENDS; the readable literals beside them describe
-        # what is in those blobs and are presence-checked so a truncated
-        # artifact fails here rather than deep inside the driver.
         wanted = {
             "BACKEND",
             "FN_NAME",
@@ -1149,9 +1139,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "_ENTRY_BINDING",
             "TORCH_VERSION",
         }
-        # An installed artifact carries the whole package in one blob instead of
-        # the per-frame records, so it reads a different set. SERVING_MODE is
-        # absent on artifacts predating it, which were all standalone.
         mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
         if mode == "installed":
             wanted -= {"_FRAMES", "_BACKENDS"}
@@ -1179,11 +1166,10 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         }
     # Parsed when present but never required, so older artifacts load unchanged:
     # TRACER and SERVING_MODE already selected the required set above, and
-    # GRAPH_DEVICES and the guard-audit sections come back as data.
+    # the guard-audit sections come back as data.
     optional = {
         "TRACER",
         "SERVING_MODE",
-        "GRAPH_DEVICES",
         "POLICY_DROPPED_GUARDS",
         "DROPPED_GUARD_CODE",
     }
@@ -1191,9 +1177,8 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     for name in assigns.keys() - wanted - optional - {"forward"}:
         # Not a metadata name we consume (``forward = ...`` is the multi-graph
         # driver's own binding, emitted later in this stack). Skipped by design,
-        # but log it at debug
-        # so a malformed / renamed artifact is diagnosable rather than silently
-        # dropped.
+        # but log it at debug so a malformed / renamed artifact is diagnosable
+        # rather than silently dropped.
         log.debug(
             "precompile: ignoring unrecognized top-level assignment %r while "
             "parsing artifact calling-convention metadata",
