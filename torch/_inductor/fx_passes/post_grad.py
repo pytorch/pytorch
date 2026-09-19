@@ -1389,8 +1389,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if same_tensor_meta(
                 node,
                 src,
-                skip_strides=node_storage not in output_storages,
-                skip_storage_offset=node_storage not in output_storages,
+                skip_storage_offset=True,
             ) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
