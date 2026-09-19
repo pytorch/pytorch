@@ -1183,12 +1183,7 @@ static PyObject* assert_alignment(
   TORCH_CHECK(
       nargs == 2 || nargs == 3, "expect 2 args, with 1 optional str arg");
   auto item{args[0]};
-
-  auto alignment{PyLong_AsUnsignedLong(args[1])};
-  if (alignment == static_cast<unsigned long>(-1) && PyErr_Occurred()) {
-    return nullptr;
-  }
-
+  auto alignment{THPUtils_unpackUInt64(args[1])};
   const char* op_name{
       nargs == 3 ? PyUnicode_AsUTF8AndSize(args[2], nullptr) : nullptr};
   if (nargs == 3 && !op_name) {
