@@ -450,8 +450,9 @@ class Capture:
     checkpoint everything captured so far to those same files without ending the
     capture. The object is single-shot: the block is entered once, and calling,
     entering, saving and a CLEAN exit are all refused after it (an exit carrying
-    the block's own exception is a no-op) -- saving only while the
-    LAST write attempt is one that FAILED, until a retry of it SUCCEEDS.
+    the block's own exception is a no-op) -- except that :meth:`save` stays OPEN
+    while the LAST write attempt is one that FAILED, as the retry of that write,
+    and closes again once a retry SUCCEEDS.
     """
 
     def __enter__(self) -> Self:
@@ -2906,9 +2907,13 @@ def capture(
     a ``functools.partial`` (at any nesting depth) -- instead of taking it as a call
     argument. An ``fn`` that CLOSES over the model gets past that check and is refused
     later, when its parameters bake into the graph as constants (invariant 1); pass the
-    model as a call argument either way. The capture object raises ``TypeError`` for a
-    call made with keyword arguments, and re-raises the ``OSError`` of a write that failed
-    out of the block exit or ``cap.save()`` -- the one to catch for the retry above.
+    model as a call argument either way. Those are what this call raises; the capture
+    object has its own, documented on :class:`Capture` and :meth:`Capture.save`: a
+    ``TypeError`` for a call made with keyword arguments, a ``PrecompileError`` for every
+    refusal of its state machine (a door used outside the live block, a second call, a
+    spent object, a write with nothing captured), and the re-raised ``OSError`` of a write
+    that failed out of the block exit or ``cap.save()`` -- the one to catch for the retry
+    above.
     """
     # Keyed on the module these live in TODAY; the module switch moves both keys to
     # the public torch.compiler.precompile.* spelling.
@@ -2948,8 +2953,10 @@ def load(
         format may change between releases without a deprecation cycle.
 
     Name the two files :func:`capture` wrote -- the ``python_code`` artifact and its
-    ``cache``. They load only as a matched pair (the cache carries a sha256 of exactly
-    the python_code bytes it was emitted with).
+    ``cache``. ``python_code`` alone is enough to run: the cache is honored only as its
+    matched pair (it carries a sha256 of exactly the python_code bytes it was emitted
+    with), a cache that claims a DIFFERENT capture is refused, and a cache that does not
+    decode at all is dropped with a warning (see ``Raises``).
 
     The driver runs from ``python_code`` -- the single source of truth for the whole
     calling convention. ``load`` reads ``BACKEND`` out of ``python_code``'s metadata
