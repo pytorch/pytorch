@@ -2107,9 +2107,9 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(_pins_a_value("TENSOR_MATCH", "x"))
         self.assertFalse(_pins_a_value("SEQUENCE_LENGTH", "xs"))
 
-        def fact(guard_type, source):
+        def fact(guard_type, source, live=True):
             return GuardFact(
-                guard_type=guard_type, source=source, code=(), value="", enforced=True
+                guard_type=guard_type, source=source, code=(), value="", enforced=live
             )
 
         entry = ("step", "m.py", 1)
@@ -2119,6 +2119,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ("EQUALS_MATCH", "scale"),
             ("EQUALS_MATCH", "mode"),
             ("CONSTANT_MATCH", "___stack0"),
+            ("CONSTANT_MATCH", "fn"),
             ("TENSOR_MATCH", "x"),
         }
         pinned_scale = fact("EQUALS_MATCH", "scale")
@@ -2138,6 +2139,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             # ... and the .item() int in this one. The tensor elsewhere is a
             # different local under the same bare name and must not cancel it.
             resume_b: [frozenset({fact("CONSTANT_MATCH", "___stack0")})],
+            # A variant whose value guard the filter dropped checks nothing and
+            # serves any fn, so it cancels the sibling's pin like a generic one.
+            ("gate", "m.py", 12): [
+                frozenset({fact("CONSTANT_MATCH", "fn")}),
+                frozenset({fact("CONSTANT_MATCH", "fn", live=False)}),
+            ],
         }
         self.assertEqual(_wont_generalize(kept, guard_sets), ("___stack0", "mode"))
         # A frame that pins scale in its only variant is a real pin; the entry
