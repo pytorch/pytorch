@@ -118,10 +118,25 @@ To debug memory errors, set
 hipBLAS workspaces
 ------------------
 
-Unlike CUDA, ROCm continues to cache workspaces by default.
+As on CUDA, ATen allocates a hipBLAS workspace for each operation from the HIP caching allocator and
+releases it when the operation returns. Set ``TORCH_CUBLAS_WORKSPACE_CACHE=1`` to instead retain one
+workspace for each hipBLAS handle and HIP stream, which was the default before PyTorch 2.15.
+Persistent workspaces must not be used when capturing multiple HIP graphs on the same stream.
 
-For each combination of hipBLAS handle and HIP stream, a hipBLAS workspace will be allocated if that
-handle and stream combination executes a hipBLAS kernel that requires a workspace.  In order to
+Handles returned by ``torch.cuda.current_blas_handle()`` have no workspace bound when ATen workspace
+caching is disabled. rocBLAS may then allocate a workspace of its own on demand, outside the HIP
+caching allocator. Binding a workspace afterwards frees that allocation, and neither the allocation
+nor the free is legal while a stream is capturing, so bind one with ``rocblas_set_workspace`` before
+using such a handle inside a captured graph.
+
+Create the BLAS handle before capture begins, for example with a warmup operation on the capture
+stream. ``hipblasCreate`` initializes hipBLASLt, which allocates device memory that HIP rejects on a
+capturing stream. This is independent of how workspaces are managed, and it also applies to
+TunableOp, whose tuning benchmarks must run outside capture. See
+`ROCm/rocm-libraries#11838 <https://github.com/ROCm/rocm-libraries/issues/11838>`_.
+
+When caching is enabled, a hipBLAS workspace is allocated for each combination of hipBLAS handle and
+HIP stream that executes a hipBLAS kernel requiring a workspace.  In order to
 avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
 ``torch._C._cuda_clearCublasWorkspaces()`` is called; note that it's the same function for CUDA or
 HIP. The workspace size per allocation can be specified via the environment variable
