@@ -555,98 +555,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertIn(norm(store), stdlib)
             self.assertTrue(within(norm(farm_os), stdlib))
 
-    def test_torch_roots_follow_a_symlink_farm_into_the_store(self):
-        # The same farm for torch: torch.__path__ and this file's directory
-        # both name the farm, whose subdirectories are real while every module
-        # in them is a link into the store, so a root resolved as a directory
-        # stays on the farm and matches no torch file a consumer resolves.
-        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
-        with tempfile.TemporaryDirectory() as tmp:
-            store = os.path.join(tmp, "store", "torch")
-            farm = os.path.join(tmp, "farm", "torch")
-            for rel in (("_dynamo", "precompile_package.py"), ("nn", "functional.py")):
-                os.makedirs(os.path.join(store, rel[0]), exist_ok=True)
-                os.makedirs(os.path.join(farm, rel[0]), exist_ok=True)
-                open(os.path.join(store, *rel), "w").close()
-                try:
-                    os.symlink(os.path.join(store, *rel), os.path.join(farm, *rel))
-                except (OSError, NotImplementedError):
-                    self.skipTest("symlinks unavailable")
-            own = os.path.join(farm, "_dynamo", "precompile_package.py")
-            stub = types.SimpleNamespace(__path__=[farm])
-            with (
-                mock.patch.object(precompile_package, "__file__", own),
-                mock.patch.dict(sys.modules, {"torch": stub}),
-            ):
-                self._clear_root_caches()
-                roots = torch_roots()
-            self.assertEqual(roots, tuple(sorted((norm(farm), norm(store)))))
-            functional = norm(os.path.join(farm, "nn", "functional.py"))
-            self.assertTrue(precompile_package._within(functional, roots))
-
-    def test_torch_roots_drop_a_link_that_flattens_this_files_depth(self):
-        # The resolved spelling is two levels up from where this file resolves,
-        # which is the torch directory only while the link keeps the file at
-        # <root>/_dynamo/<file>. A link to a flat patch directory would make its
-        # grandparent, which holds unrelated code, a torch root and waive every
-        # dropped guard over that code; the spelling is skipped instead, so the
-        # patched file lies under no torch root and its guards are kept.
-        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
-        with tempfile.TemporaryDirectory() as tmp:
-            base = os.path.join(tmp, "exp")
-            farm = os.path.join(base, "site-packages", "torch")
-            for sub in ((farm, "_dynamo"), (base, "patchdir"), (base, "my_project")):
-                os.makedirs(os.path.join(*sub))
-            target = os.path.join(base, "patchdir", "precompile_package.py")
-            open(target, "w").close()
-            own = os.path.join(farm, "_dynamo", "precompile_package.py")
-            try:
-                os.symlink(target, own)
-            except (OSError, NotImplementedError):
-                self.skipTest("symlinks unavailable")
-            mymod = os.path.join(base, "my_project", "mymod.py")
-            open(mymod, "w").close()
-            stub = types.SimpleNamespace(__path__=[farm])
-            with (
-                mock.patch.object(precompile_package, "__file__", own),
-                mock.patch.dict(sys.modules, {"torch": stub}),
-            ):
-                self._clear_root_caches()
-                roots = torch_roots()
-            self.assertEqual(roots, (norm(farm),))
-            self.assertFalse(precompile_package._within(norm(mymod), roots))
-            self.assertFalse(precompile_package._within(norm(own), roots))
-
-    def test_roots_drop_a_relative_interpreter_path(self):
-        # A venv whose pyvenv.cfg home is relative, or a relative PYTHONHOME,
-        # leaves sys.base_prefix, sys._stdlib_dir and every sysconfig path
-        # relative while os.__file__ alone is absolute (site.abs_paths() at
-        # startup), and a relative PYTHONUSERBASE leaves the user site so; all
-        # measured on 3.12 with nothing patched. Resolved, each would sit at the
-        # process cwd of the first call and stay cached there, so every one is
-        # dropped like a relative os.__file__: the directory os resolves into is
-        # the only stdlib root left, and there is no install root at all.
-        # sys.platform is patched onto win32 so the DLLs join is exercised too.
-        home = os.path.join("relhome", "lib", "python3.12")
-        purelib = os.path.join(home, "site-packages")
-        user_site = os.path.join("reluser", "lib", "python3.12", "site-packages")
-        paths = dict(sysconfig.get_paths())
-        paths.update(stdlib=home, platstdlib=home, purelib=purelib, platlib=purelib)
-        with (
-            mock.patch.object(sysconfig, "get_paths", return_value=paths),
-            mock.patch.object(sys, "_stdlib_dir", home, create=True),
-            mock.patch.object(sys, "base_prefix", "relhome"),
-            mock.patch.object(sys, "platform", "win32"),
-            mock.patch.object(site, "getsitepackages", return_value=[purelib]),
-            mock.patch.object(site, "getusersitepackages", return_value=user_site),
-        ):
-            self._clear_root_caches()
-            stdlib = precompile_package._stdlib_roots()
-            install = precompile_package._install_roots()
-        norm = precompile_package._norm
-        self.assertEqual(stdlib, (os.path.dirname(norm(os.__file__)),))
-        self.assertEqual(install, ())
-
     def test_stdlib_roots_take_the_archive_a_zipped_os_comes_from(self):
         # With the stdlib in a zip (py2exe, cx_Freeze, the Windows embeddable
         # build) os.__file__ is <archive>/os.py and the root is the archive
@@ -831,6 +739,98 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(stdlib, (norm(eq),))
         self.assertEqual(install, (norm(eq),))
         self.assertTrue(within(norm(os.path.join(eq, "third_party.py")), install))
+
+    def test_torch_roots_follow_a_symlink_farm_into_the_store(self):
+        # The same farm for torch: torch.__path__ and this file's directory
+        # both name the farm, whose subdirectories are real while every module
+        # in them is a link into the store, so a root resolved as a directory
+        # stays on the farm and matches no torch file a consumer resolves.
+        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "store", "torch")
+            farm = os.path.join(tmp, "farm", "torch")
+            for rel in (("_dynamo", "precompile_package.py"), ("nn", "functional.py")):
+                os.makedirs(os.path.join(store, rel[0]), exist_ok=True)
+                os.makedirs(os.path.join(farm, rel[0]), exist_ok=True)
+                open(os.path.join(store, *rel), "w").close()
+                try:
+                    os.symlink(os.path.join(store, *rel), os.path.join(farm, *rel))
+                except (OSError, NotImplementedError):
+                    self.skipTest("symlinks unavailable")
+            own = os.path.join(farm, "_dynamo", "precompile_package.py")
+            stub = types.SimpleNamespace(__path__=[farm])
+            with (
+                mock.patch.object(precompile_package, "__file__", own),
+                mock.patch.dict(sys.modules, {"torch": stub}),
+            ):
+                self._clear_root_caches()
+                roots = torch_roots()
+            self.assertEqual(roots, tuple(sorted((norm(farm), norm(store)))))
+            functional = norm(os.path.join(farm, "nn", "functional.py"))
+            self.assertTrue(precompile_package._within(functional, roots))
+
+    def test_torch_roots_drop_a_link_that_flattens_this_files_depth(self):
+        # The resolved spelling is two levels up from where this file resolves,
+        # which is the torch directory only while the link keeps the file at
+        # <root>/_dynamo/<file>. A link to a flat patch directory would make its
+        # grandparent, which holds unrelated code, a torch root and waive every
+        # dropped guard over that code; the spelling is skipped instead, so the
+        # patched file lies under no torch root and its guards are kept.
+        torch_roots, norm = precompile_package._torch_roots, precompile_package._norm
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "exp")
+            farm = os.path.join(base, "site-packages", "torch")
+            for sub in ((farm, "_dynamo"), (base, "patchdir"), (base, "my_project")):
+                os.makedirs(os.path.join(*sub))
+            target = os.path.join(base, "patchdir", "precompile_package.py")
+            open(target, "w").close()
+            own = os.path.join(farm, "_dynamo", "precompile_package.py")
+            try:
+                os.symlink(target, own)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+            mymod = os.path.join(base, "my_project", "mymod.py")
+            open(mymod, "w").close()
+            stub = types.SimpleNamespace(__path__=[farm])
+            with (
+                mock.patch.object(precompile_package, "__file__", own),
+                mock.patch.dict(sys.modules, {"torch": stub}),
+            ):
+                self._clear_root_caches()
+                roots = torch_roots()
+            self.assertEqual(roots, (norm(farm),))
+            self.assertFalse(precompile_package._within(norm(mymod), roots))
+            self.assertFalse(precompile_package._within(norm(own), roots))
+
+    def test_roots_drop_a_relative_interpreter_path(self):
+        # A venv whose pyvenv.cfg home is relative, or a relative PYTHONHOME,
+        # leaves sys.base_prefix, sys._stdlib_dir and every sysconfig path
+        # relative while os.__file__ alone is absolute (site.abs_paths() at
+        # startup), and a relative PYTHONUSERBASE leaves the user site so; all
+        # measured on 3.12 with nothing patched. Resolved, each would sit at the
+        # process cwd of the first call and stay cached there, so every one is
+        # dropped like a relative os.__file__: the directory os resolves into is
+        # the only stdlib root left, and there is no install root at all.
+        # sys.platform is patched onto win32 so the DLLs join is exercised too.
+        home = os.path.join("relhome", "lib", "python3.12")
+        purelib = os.path.join(home, "site-packages")
+        user_site = os.path.join("reluser", "lib", "python3.12", "site-packages")
+        paths = dict(sysconfig.get_paths())
+        paths.update(stdlib=home, platstdlib=home, purelib=purelib, platlib=purelib)
+        with (
+            mock.patch.object(sysconfig, "get_paths", return_value=paths),
+            mock.patch.object(sys, "_stdlib_dir", home, create=True),
+            mock.patch.object(sys, "base_prefix", "relhome"),
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch.object(site, "getsitepackages", return_value=[purelib]),
+            mock.patch.object(site, "getusersitepackages", return_value=user_site),
+        ):
+            self._clear_root_caches()
+            stdlib = precompile_package._stdlib_roots()
+            install = precompile_package._install_roots()
+        norm = precompile_package._norm
+        self.assertEqual(stdlib, (os.path.dirname(norm(os.__file__)),))
+        self.assertEqual(install, ())
 
     def test_install_roots_skip_a_site_accessor_that_raises(self):
         # A site.py that cannot answer is skipped, not propagated: this runs
@@ -1185,6 +1185,13 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         ):
             self.assertFalse(precompile_package._is_library_module(name))
 
+    @parametrize("name", _LIBRARY_NAMES)
+    def test_library_module_keeps_the_waiver_for_the_real_library(self, name):
+        precompile_package._classify_file.cache_clear()
+        self.assertTrue(
+            precompile_package._is_library_module(name), f"{name} lost its waiver"
+        )
+
     def test_library_module_needs_location_evidence_only_at_the_top(self):
         is_library = precompile_package._is_library_module
         self.addCleanup(precompile_package._classify_file.cache_clear)
@@ -1227,34 +1234,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         # waiver with no location evidence behind it, recorded here as chosen.
         with mock.patch.object(precompile_package, "_torch_roots", return_value=()):
             self.assertTrue(is_library("torch.never_imported"))
-
-    def test_normalize_scrubs_addresses_and_counters_but_not_user_constants(self):
-        # Both directions matter: anything run-varying that survives makes the
-        # committed report churn, and anything meaningful that is erased makes
-        # two variants guarding different values render one fact.
-        from torch._dynamo.precompile_package import _normalize
-
-        cases = {
-            "___check_obj_id(G['fn'], 140311678493200), type=<class 'function'>": "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
-            "G['__builtins_dict___6']['len']": "G['__builtins_dict___<n>']['len']",
-            "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
-            "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
-            "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
-            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
-            # User constants and identifiers are not addresses.
-            "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
-            "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
-            "len(L['xs']) == 6": "len(L['xs']) == 6",
-        }
-        for text, expected in cases.items():
-            self.assertEqual(_normalize(text), expected, text)
-
-    @parametrize("name", _LIBRARY_NAMES)
-    def test_library_module_keeps_the_waiver_for_the_real_library(self, name):
-        precompile_package._classify_file.cache_clear()
-        self.assertTrue(
-            precompile_package._is_library_module(name), f"{name} lost its waiver"
-        )
 
     def test_reads_a_builtin_keys_on_where_the_read_comes_from(self):
         reads_a_builtin = precompile_package._reads_a_builtin
@@ -1487,6 +1466,35 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         fake = types.SimpleNamespace(__qualname__="_user_op", __code__=bound.__code__)
         self.assertFalse(defined_where_read(fake, "_user_op", _HERE))
 
+    def test_defined_where_read_refuses_a_pseudo_filename(self):
+        defined_where_read = precompile_package._defined_where_read
+
+        # A co_filename is not always a path: an exec-generated frame records
+        # <string>, and so does a def exec'd under it, so realpath would resolve
+        # both against the cwd and waive a def whose bind no checksum covers
+        # (on 3.10 the <string> a fields-only dataclass compiles __init__ in
+        # collides the same way; from 3.11 co_qualname refuses it first). Only
+        # absolute filenames compare; a relative one, spelled so that it does
+        # resolve to this file from the cwd, and an embedded NUL on either side
+        # fail closed instead of raising.
+        pseudo = _stack("<string>")
+        exec_ns = {}
+        exec(compile("def op(x):\n    return x\n", "<string>", "exec"), exec_ns)
+        self.assertEqual(exec_ns["op"].__code__.co_filename, "<string>")
+        self.assertFalse(defined_where_read(exec_ns["op"], "op", pseudo))
+        relative = os.path.relpath(__file__)
+        self.assertTrue(os.path.samefile(relative, __file__))
+        stack = _stack(relative)
+        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
+        code = _user_op.__code__.replace(co_filename=relative)
+        relative_op = types.FunctionType(code, globals(), "_user_op")
+        self.assertFalse(defined_where_read(relative_op, "_user_op", _HERE))
+        stack = _stack(__file__ + "\x00")
+        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
+        code = _user_op.__code__.replace(co_filename=__file__ + "\x00")
+        nul_op = types.FunctionType(code, globals(), "_user_op")
+        self.assertFalse(defined_where_read(nul_op, "_user_op", _HERE))
+
     def test_defined_where_read_judges_a_class_by_its_own_methods(self):
         defined_where_read = precompile_package._defined_where_read
         # A class has no code object; its methods tell. A class statement
@@ -1665,35 +1673,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         for key in ("__annotate__", "__annotate_func__"):
             own_key = minted(key, f"Cfg.{key}")
             self.assertFalse(defined_where_read(own_key, "Cfg", _HERE), key)
-
-    def test_defined_where_read_refuses_a_pseudo_filename(self):
-        defined_where_read = precompile_package._defined_where_read
-
-        # A co_filename is not always a path: an exec-generated frame records
-        # <string>, and so does a def exec'd under it, so realpath would resolve
-        # both against the cwd and waive a def whose bind no checksum covers
-        # (on 3.10 the <string> a fields-only dataclass compiles __init__ in
-        # collides the same way; from 3.11 co_qualname refuses it first). Only
-        # absolute filenames compare; a relative one, spelled so that it does
-        # resolve to this file from the cwd, and an embedded NUL on either side
-        # fail closed instead of raising.
-        pseudo = _stack("<string>")
-        exec_ns = {}
-        exec(compile("def op(x):\n    return x\n", "<string>", "exec"), exec_ns)
-        self.assertEqual(exec_ns["op"].__code__.co_filename, "<string>")
-        self.assertFalse(defined_where_read(exec_ns["op"], "op", pseudo))
-        relative = os.path.relpath(__file__)
-        self.assertTrue(os.path.samefile(relative, __file__))
-        stack = _stack(relative)
-        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
-        code = _user_op.__code__.replace(co_filename=relative)
-        relative_op = types.FunctionType(code, globals(), "_user_op")
-        self.assertFalse(defined_where_read(relative_op, "_user_op", _HERE))
-        stack = _stack(__file__ + "\x00")
-        self.assertFalse(defined_where_read(_user_op, "_user_op", stack))
-        code = _user_op.__code__.replace(co_filename=__file__ + "\x00")
-        nul_op = types.FunctionType(code, globals(), "_user_op")
-        self.assertFalse(defined_where_read(nul_op, "_user_op", _HERE))
 
     def test_minted_global_names_match_dynamo(self):
         # The predicates lean on names Dynamo mints inline (the two prefixes
@@ -1877,6 +1856,86 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             self.assertEqual(len(risky), 1, verdicts)
             self.assertTrue(risky[0].startswith(root), verdicts)
 
+    def test_guard_policy_classification_is_total(self):
+        # A guard type in no set is KEPT, so a drop policy can only ever
+        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
+        # what makes the never-drop claim enforceable:
+        # a guard type added to GuardBuilder fails here until someone triages
+        # it into exactly one of the four sets.
+        from torch._dynamo.guards import GuardBuilder
+        from torch._dynamo.precompile_package import (
+            _IDENTITY_GUARD_TYPES,
+            _INVARIANT_DROPPABLE_GUARD_TYPES,
+            _NOOP_GUARD_TYPES,
+            _SHAPE_BEARING_GUARD_TYPES,
+            _UNMODELLED_GUARD_TYPES,
+        )
+
+        # dir() rather than vars(): a guard method added on GuardBuilderBase or
+        # a future mixin is a GuardBuilder guard type too.
+        guard_types = {
+            name
+            for name in dir(GuardBuilder)
+            if name.isupper() and callable(getattr(GuardBuilder, name))
+        }
+        sets = {
+            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
+            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
+            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
+            "_NOOP_GUARD_TYPES": _NOOP_GUARD_TYPES,
+        }
+        classified: frozenset[str] = frozenset().union(*sets.values())
+        self.assertEqual(
+            sorted(guard_types - classified),
+            [],
+            "unclassified GuardBuilder guard type(s): add each to exactly one "
+            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
+        )
+        self.assertEqual(
+            sorted(classified - guard_types),
+            [],
+            "phantom entries: no GuardBuilder method by these names",
+        )
+        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
+            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
+        # The identity guards the default filter drops are droppable by
+        # construction; a literal rewrite of the set must not lose that.
+        self.assertTrue(_IDENTITY_GUARD_TYPES <= _INVARIANT_DROPPABLE_GUARD_TYPES)
+
+    def test_noop_guard_type_follows_the_hook_guard_config(self):
+        # EMPTY_NN_MODULE_HOOKS_DICT emits nothing under the default config and
+        # a SEQUENCE_LENGTH on the hook dicts otherwise, so whether a report may
+        # treat it as a marker depends on the config the frame compiled under.
+        from torch._dynamo.precompile_package import _is_noop_guard_type
+
+        self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
+        self.assertFalse(_is_noop_guard_type("TENSOR_MATCH"))
+        self.assertTrue(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+        with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
+            self.assertFalse(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
+            self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
+
+    def test_normalize_scrubs_addresses_and_counters_but_not_user_constants(self):
+        # Both directions matter: anything run-varying that survives makes the
+        # committed report churn, and anything meaningful that is erased makes
+        # two variants guarding different values render one fact.
+        from torch._dynamo.precompile_package import _normalize
+
+        cases = {
+            "___check_obj_id(G['fn'], 140311678493200), type=<class 'function'>": "___check_obj_id(G['fn'], <id>), type=<class 'function'>",
+            "G['__builtins_dict___6']['len']": "G['__builtins_dict___<n>']['len']",
+            "G['__import_mod_140311678493200_c1']": "G['__import_mod_<id>_c<n>']",
+            "G['___unnamed_scope_140311678493200_c1']": "G['___unnamed_scope_<id>_c<n>']",
+            "G['_140311678493200_c3'] is not None": "G['_<id>_c<n>'] is not None",
+            "top_saved_tensors_hooks ids == (139, 140)": "top_saved_tensors_hooks ids == (<ids>)",
+            # User constants and identifiers are not addresses.
+            "L['dims'][0] == 140311678493200": "L['dims'][0] == 140311678493200",
+            "L['w_1_c2'] == 3": "L['w_1_c2'] == 3",
+            "len(L['xs']) == 6": "len(L['xs']) == 6",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(_normalize(text), expected, text)
+
     def test_code_fingerprint_recurses_into_container_and_nested_consts(self):
         # _code_fingerprint names a callable by its body so an ACT2FN-style table
         # can be told apart. Two lambdas can differ ONLY inside a constant the
@@ -1956,65 +2015,6 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertEqual(len(rendered), 160)
         self.assertTrue(rendered.startswith(prefix), rendered)
         self.assertNotIn("#", rendered[len(prefix) :])
-
-    def test_guard_policy_classification_is_total(self):
-        # A guard type in no set is KEPT, so a drop policy can only ever
-        # drop what _INVARIANT_DROPPABLE_GUARD_TYPES names. This test is
-        # what makes the never-drop claim enforceable:
-        # a guard type added to GuardBuilder fails here until someone triages
-        # it into exactly one of the four sets.
-        from torch._dynamo.guards import GuardBuilder
-        from torch._dynamo.precompile_package import (
-            _IDENTITY_GUARD_TYPES,
-            _INVARIANT_DROPPABLE_GUARD_TYPES,
-            _NOOP_GUARD_TYPES,
-            _SHAPE_BEARING_GUARD_TYPES,
-            _UNMODELLED_GUARD_TYPES,
-        )
-
-        # dir() rather than vars(): a guard method added on GuardBuilderBase or
-        # a future mixin is a GuardBuilder guard type too.
-        guard_types = {
-            name
-            for name in dir(GuardBuilder)
-            if name.isupper() and callable(getattr(GuardBuilder, name))
-        }
-        sets = {
-            "_SHAPE_BEARING_GUARD_TYPES": _SHAPE_BEARING_GUARD_TYPES,
-            "_UNMODELLED_GUARD_TYPES": _UNMODELLED_GUARD_TYPES,
-            "_INVARIANT_DROPPABLE_GUARD_TYPES": _INVARIANT_DROPPABLE_GUARD_TYPES,
-            "_NOOP_GUARD_TYPES": _NOOP_GUARD_TYPES,
-        }
-        classified: frozenset[str] = frozenset().union(*sets.values())
-        self.assertEqual(
-            sorted(guard_types - classified),
-            [],
-            "unclassified GuardBuilder guard type(s): add each to exactly one "
-            "policy set in torch/_dynamo/precompile_package.py (KEPT until then)",
-        )
-        self.assertEqual(
-            sorted(classified - guard_types),
-            [],
-            "phantom entries: no GuardBuilder method by these names",
-        )
-        for (a_name, a), (b_name, b) in itertools.combinations(sets.items(), 2):
-            self.assertEqual(sorted(a & b), [], f"{a_name} overlaps {b_name}")
-        # The identity guards the default filter drops are droppable by
-        # construction; a literal rewrite of the set must not lose that.
-        self.assertTrue(_IDENTITY_GUARD_TYPES <= _INVARIANT_DROPPABLE_GUARD_TYPES)
-
-    def test_noop_guard_type_follows_the_hook_guard_config(self):
-        # EMPTY_NN_MODULE_HOOKS_DICT emits nothing under the default config and
-        # a SEQUENCE_LENGTH on the hook dicts otherwise, so whether a report may
-        # treat it as a marker depends on the config the frame compiled under.
-        from torch._dynamo.precompile_package import _is_noop_guard_type
-
-        self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
-        self.assertFalse(_is_noop_guard_type("TENSOR_MATCH"))
-        self.assertTrue(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
-        with torch._dynamo.config.patch(skip_nnmodule_hook_guards=False):
-            self.assertFalse(_is_noop_guard_type("EMPTY_NN_MODULE_HOOKS_DICT"))
-            self.assertTrue(_is_noop_guard_type("GRAD_MODE"))
 
     def test_value_fingerprint_dispatches_on_the_guard_type(self):
         from torch.compiler._precompile_types import GuardFact
