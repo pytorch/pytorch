@@ -1,4 +1,8 @@
 # Owner(s): ["module: functorch"]
+import math
+
+import networkx as nx
+
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
 )
@@ -9,9 +13,12 @@ from torch._functorch._activation_checkpointing.knapsack import (
 from torch._functorch._activation_checkpointing.knapsack_evaluator import (
     KnapsackEvaluator,
 )
+from torch._functorch._activation_checkpointing.min_cut import minimum_cut
 from torch.fx.graph import Graph
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
 )
@@ -416,6 +423,61 @@ class TestActivationCheckpointingKnapsack(TestCase):
                     expected_saved,
                     expected_recomputable,
                 )
+
+
+@instantiate_parametrized_tests
+class TestMinimumCut(TestCase):
+    @parametrize(
+        "edges",
+        [
+            [("source", "a", 3), ("a", "sink", 2)],
+            [
+                ("source", "a", 5),
+                ("source", "b", 4),
+                ("a", "b", 2),
+                ("a", "sink", 3),
+                ("b", "sink", 6),
+            ],
+            [
+                ("source", "a", math.inf),
+                ("a", "b", 7),
+                ("b", "a", 11),
+                ("b", "sink", math.inf),
+            ],
+            [
+                ("source", "a", 3.5),
+                ("source", "b", 3.5),
+                ("a", "sink", 3.5),
+                ("b", "sink", 3.5),
+            ],
+        ],
+    )
+    def test_matches_networkx(self, edges: list[tuple[str, str, float]]) -> None:
+        graph = nx.DiGraph()
+        graph.add_weighted_edges_from(edges, weight="capacity")
+
+        expected_value, _ = nx.minimum_cut(graph, "source", "sink")
+        actual_value, (reachable, non_reachable) = minimum_cut(graph, "source", "sink")
+        actual_capacity = sum(
+            data["capacity"]
+            for start, end, data in graph.edges(data=True)
+            if start in reachable and end in non_reachable
+        )
+
+        self.assertEqual(actual_value, expected_value)
+        self.assertEqual(actual_capacity, expected_value)
+
+    def test_long_path_does_not_recurse(self) -> None:
+        graph = nx.DiGraph()
+        node_count = 5000
+        for node in range(node_count - 1):
+            capacity = 1 if node == node_count // 2 else math.inf
+            graph.add_edge(node, node + 1, capacity=capacity)
+
+        value, (reachable, non_reachable) = minimum_cut(graph, 0, node_count - 1)
+
+        self.assertEqual(value, 1)
+        self.assertEqual(len(reachable) + len(non_reachable), node_count)
 
 
 if __name__ == "__main__":
