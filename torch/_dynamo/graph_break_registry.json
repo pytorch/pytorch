@@ -1163,7 +1163,8 @@
       "Hints": [
         "Remove or rename the global {alias} from the globals of {scope}.",
         "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
-        "When this graph break is not raised as an error, nothing guards this global, so fixing it later does not by itself retrace the frame; a frame skipped here stays skipped until torch._dynamo.reset()."
+        "When this graph break is not raised as an error, nothing guards this global, so fixing it later does not by itself retrace the frame; a frame skipped here stays skipped until torch._dynamo.reset().",
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
       ]
     }
   ],
