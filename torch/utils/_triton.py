@@ -79,10 +79,14 @@ def _device_supports_tensor_descriptor() -> bool:
     import torch
 
     return (
-        torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
-        and not torch.version.hip
-    ) or has_triton_cpu_backend()
+        (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability() >= (9, 0)
+            and not torch.version.hip
+        )
+        or torch.xpu.is_available()
+        or has_triton_cpu_backend()
+    )
 
 
 @functools.cache
