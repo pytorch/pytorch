@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+import sys
 
 import torch
 from torch._C import _len_torch_function_stack
@@ -64,6 +65,29 @@ def _device_constructors():
     }
 
 
+def _asarray_input_has_device(obj) -> bool:
+    """Whether a ``torch.asarray`` input already carries its own device.
+
+    ``torch.asarray`` preserves the device of a device-bearing input (a tensor,
+    numpy array/scalar, DLPack producer, or buffer-protocol object); only pure
+    Python scalars and sequences fall back to the default device. This mirrors
+    ``torch.asarray``'s own input dispatch so that a set default device does not
+    override an input's device. See https://github.com/pytorch/pytorch/issues/150199.
+    """
+    if isinstance(obj, torch.Tensor):
+        return True
+    if hasattr(obj, "__dlpack__"):
+        return True
+    numpy = sys.modules.get("numpy")
+    if numpy is not None and isinstance(obj, (numpy.ndarray, numpy.generic)):
+        return True
+    try:
+        memoryview(obj)
+    except TypeError:
+        return False
+    return True
+
+
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
     def __init__(self, device) -> None:
@@ -118,6 +142,10 @@ class DeviceContext(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         if func in _device_constructors() and kwargs.get("device") is None:
+            if func is torch.asarray:
+                obj = args[0] if args else kwargs.get("obj")
+                if _asarray_input_has_device(obj):
+                    return func(*args, **kwargs)
             kwargs["device"] = self.device
         return func(*args, **kwargs)
 
