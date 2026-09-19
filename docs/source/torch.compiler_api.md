@@ -343,22 +343,30 @@ format may change between releases without a deprecation cycle.
    :func:`precompile.capture`. An execution-driven
    multi-graph capture that analyzes the Python (bytecode) rather than tracing one path: it
    records graph-break continuations and every guarded recompilation the calls exercise, so
-   a capture with this tracer takes as many calls as you make. The dynamo driver re-evaluates
-   each variant's serialized guards, but unlike make_fx it does not otherwise re-validate the
-   runtime model/inputs, so on the eager backend a drifted model or a broadcast-compatible
-   input-shape mismatch can silently miscompute where make_fx would raise; pass a model and
-   inputs matching the captured call. The dynamo artifact inlines marshalled bytecode plus a
-   pickled state blob, so it is locked to the Python version that produced it and to a
-   compatible torch build, unlike make_fx source. Frozen dataclass.
+   a capture with this tracer takes as many calls as you make. Since nothing in this build
+   produces such an artifact, what follows is what the fields and the artifact are meant to
+   mean once the front-end lands, not behavior this build can exercise. The dynamo driver
+   will re-evaluate each variant's serialized guards but, unlike make_fx, not otherwise
+   re-validate the runtime model/inputs, so on the eager backend a drifted model or a
+   broadcast-compatible input-shape mismatch may silently miscompute where make_fx raises;
+   pass a model and inputs matching the captured call. The dynamo artifact will inline
+   marshalled bytecode plus a pickled state blob rather than readable source, tying it to
+   the Python version that produced it and to a compatible torch build. Frozen dataclass.
 
    :param guard_filter_fn: Multi-graph serialization filter; returns one boolean per guard
-       entry. It composes with the default filter (which drops only the identity guards
-       that cannot be serialized), so it can drop more guards, never fewer. Live capture
-       retains all guards so later calls trigger their recompiles. Risky dropped guards are
-       rejected by default when saving, and every drop a custom filter adds beyond the
-       default's counts as risky.
-   :param recompile_limit: Maximum multi-graph variants captured per frame; defaults to 256
-       and overrides a lower ambient accumulated-recompile limit for this capture.
+       entry. It composes with the default filter (which drops every guard type
+       serialization refuses -- the identity guards ``ID_MATCH``, ``FUNCTION_MATCH``,
+       ``MODULE_MATCH``, ``NN_MODULE``, ``CLASS_MATCH`` and ``CLOSURE_MATCH``, plus
+       ``DICT_VERSION`` and ``WEAKREF_ALIVE`` -- and keeps everything else; see
+       ``torch._dynamo.precompile_package.default_guard_filter_fn`` for the exact rule), so
+       it can drop more guards, never fewer. Live capture retains all guards so later calls
+       trigger their recompiles. Risky dropped guards are rejected by default when saving,
+       and every drop a custom filter adds beyond the default's counts as risky.
+   :param recompile_limit: Maximum multi-graph variants captured per frame: it sets
+       dynamo's per-frame limit (``torch._dynamo.config.recompile_limit``, ambient default
+       8) for the capture, deliberately far above it, because a precompile wants one
+       variant per condition. It is not dynamo's ``accumulated_recompile_limit`` (default
+       256), which the capture leaves alone. Defaults to 256.
    :param dynamic: Multi-graph dynamic-shape policy forwarded to ``torch.compile``.
    :param invariants: Optional path receiving the multi-graph invariant report.
    :param require_complete: defaults to ``True``. Refuse to produce an artifact whose
@@ -369,8 +377,8 @@ format may change between releases without a deprecation cycle.
        dropped a guard whose loss could change the answer (every drop made by a custom
        ``guard_filter_fn`` counts as risky).
    :param require_no_dropped_guards: defaults to ``False``. Refuse to produce an artifact
-       that dropped any guard at all. Off by default because every model drops identity
-       guards that cannot be serialized.
+       that dropped any guard at all. Off by default because every model drops guards the
+       serializer refuses.
 
 .. py:class:: precompile.Capture
 
@@ -417,7 +425,8 @@ format may change between releases without a deprecation cycle.
 
    .. py:attribute:: frames
 
-      How many frames the capture compiled.
+      Captured frames: every frame the artifact holds an entry for, the ``bypassed``,
+      ``truncated`` and ``uncovered_frames`` ones included.
 
    .. py:attribute:: resume_functions
 
@@ -441,17 +450,22 @@ format may change between releases without a deprecation cycle.
 
    .. py:attribute:: uncovered_frames
 
-      Frames the capture ran that ended with no guarded code, so the artifact cannot
-      serve them.
+      Frames the capture ran that ended with no guarded code and were not bypassed, so
+      the artifact cannot serve them; never the same frame as a ``bypassed`` one, and the
+      remedy differs (a re-capture, where a bypassed frame re-traces).
 
    .. py:attribute:: wont_generalize
 
-      Guard sources a kept value-equality guard pins, so no captured variant served
-      another value of them.
+      Guard sources a kept value-equality guard on a bare argument name pins in some
+      variant, while no other variant of the same frame guards the source without pinning
+      it, so as captured no variant served another value. Observed, not proven: a variant
+      that never guarded the source does not count as serving other values of it.
 
    .. py:attribute:: dropped_guards
 
-      ``(guard_type, source)`` for guards the artifact omitted (could not serialize).
+      ``(guard_type, source)`` for the slots the serialized copy's guard filter rejected
+      -- which guards those are is the filter's own contract, so a custom
+      ``guard_filter_fn``'s drops land here alongside the default filter's.
 
    .. py:attribute:: kept_guards
 
@@ -467,10 +481,11 @@ format may change between releases without a deprecation cycle.
 
    .. py:attribute:: dropped_guard_code
 
-      ``(guard_type, source, rendered_check)`` for each dropped slot that renders to a
-      check. The slot's ``(guard_type, source)`` alone can be ambiguous -- a dropped
-      ``HASATTR`` may be the benign companion of a kept ``TENSOR_MATCH`` or the only thing
-      guarding an optional attribute -- the rendered check tells them apart.
+      ``(guard_type, source, rendered_check)``, one per slot of ``dropped_guards`` or
+      ``policy_dropped_guards`` whose guard rendered a check (a slot whose guard rendered
+      none has no entry). The slot's ``(guard_type, source)`` alone can be ambiguous --
+      a dropped ``HASATTR`` may be the benign companion of a kept ``TENSOR_MATCH`` or the
+      only thing guarding an optional attribute -- the rendered check tells them apart.
 
    .. py:attribute:: capture_errors
 

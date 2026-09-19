@@ -35,8 +35,10 @@ from torch.compiler._precompile_types import (
 # module's globals: resolve them BEFORE the re-homing below points typing.get_type_hints
 # (which resolves through a class's __module__) at this module instead. The three
 # _precompile_types classes need nothing -- that module has no future-annotations import,
-# so their annotations are already objects. Only __annotations__ is rewritten here;
-# dataclasses.fields() keeps the original strings, read from __dataclass_fields__.
+# so their annotations are already objects. Only __annotations__ is rewritten here:
+# dataclasses.fields() reports Field.type from __dataclass_fields__, snapshotted as a
+# string at decoration, so those strings stay torch._precompile's and do NOT resolve
+# against the __module__ set below -- read __annotations__, not Field.type.
 for _t in (MakeFxTracer, DynamoTracer):
     _t.__annotations__ = typing.get_type_hints(_t)
 
