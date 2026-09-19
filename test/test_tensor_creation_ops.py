@@ -4155,6 +4155,13 @@ class TestBufferProtocol(TestCase):
                                        r"The given buffer is not writable."):
             torch.frombuffer(byte_arr, dtype=dtype)
 
+    def test_misaligned_offset(self):
+        buffer = np.zeros(2, dtype=np.complex128)
+        with self.assertRaisesRegex(
+            ValueError, r"buffer is not aligned to element size"
+        ):
+            torch.frombuffer(buffer, dtype=torch.complex128, count=1, offset=6)
+
     def test_byte_to_int(self):
         byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte) if sys.byteorder == 'little' \
             else np.array([0, 0, 0, -1, 0, 0, 0, -1], dtype=np.byte)
