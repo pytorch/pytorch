@@ -1557,8 +1557,8 @@ def _capture(
                     "unbacked -- a dim marked with mark_unbacked, or a data-dependent "
                     "value (.item(), .nonzero()) -- which is not allowed. For a marked "
                     "dim, do not mark it (capture it static); a guarded data-dependent "
-                    "value is refused on either path, so for one only restructuring fn "
-                    f"helps. Underlying: {(str(e).splitlines() or [''])[0]}"
+                    "value is refused on either path, so for that one, only restructuring "
+                    f"fn helps. Underlying: {(str(e).splitlines() or [''])[0]}"
                 ) from e
             except (DataDependentOutputException, DynamicOutputShapeException) as e:
                 # A static capture has no ShapeEnv, so a value the fake trace cannot
@@ -1578,14 +1578,16 @@ def _capture(
                     detail = (
                         "a data-dependent op (.item(), .nonzero(), a Python branch over a "
                         "tensor value), or an op whose fake kernel needs a dynamic size, "
-                        "whose result this static capture cannot know while tracing on "
-                        "fake tensors; make_fx specializes only static (Python int) "
-                        "control flow. A data-dependent value (.item()) or a "
+                        "whose result this static capture cannot know: a fake trace has no "
+                        "real data, so a data-dependent value or size is unknown to "
+                        "it. A data-dependent value (.item()) or a "
                         "shape-producing op (.nonzero(), masked_select) can be captured by "
                         "marking a user-input dim with "
-                        "torch._dynamo.decorators.mark_unbacked, which gives capture the "
-                        "ShapeEnv it needs -- but only if fn never guards on the resulting "
-                        "symbol; if it does, the guard refusal applies instead."
+                        "torch._dynamo.decorators.mark_unbacked and capturing with "
+                        "backend='inductor' (unbacked capture is inductor-only), which "
+                        "gives capture the ShapeEnv it needs -- but only if fn never "
+                        "guards on the resulting symbol; if it does, the guard refusal "
+                        "applies instead."
                     )
                 else:
                     detail = (
