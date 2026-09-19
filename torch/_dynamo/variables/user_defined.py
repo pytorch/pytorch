@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import os
 import random
 import sys
 import threading
@@ -67,6 +68,7 @@ from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
     DictGetItemSource,
+    EnvVarSource,
     GetItemSource,
     RandomValueSource,
     TypeDictSource,
@@ -5798,6 +5800,94 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
             return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
         return super().mp_length_impl(tx)
+
+
+class EnvironVariable(MutableMappingVariable):
+    """Handles the ``os.environ`` singleton.
+
+    Reads with constant string keys (``get``, ``__getitem__``,
+    ``__contains__``) are constant-folded at trace time and guarded via an
+    ambient ``EnvVarSource`` guard so that a runtime change to the variable
+    triggers a recompile: value reads install ``GuardBuilder.ENV_MATCH``
+    (guards on the value), while ``in`` installs the weaker
+    ``GuardBuilder.ENV_CONTAINS`` (guards only on presence, so changing the
+    value of a set variable does not recompile a membership test). Reads
+    funnel through three hooks: subscript via ``mp_subscript_impl``, ``in`` via
+    ``sq_contains_impl``, and ``environ.get``/``environ.__getitem__`` attribute
+    calls (including ``os.getenv``, which inlines ``environ.get``) via
+    ``tp_getattro_impl``.
+
+    Anything else (mutation, iteration, non-constant keys) falls back to
+    regular ``MutableMappingVariable`` tracing of ``os._Environ``.
+    """
+
+    @staticmethod
+    def is_matching_object(obj: object) -> bool:
+        return obj is os.environ
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[Any],
+        kwargs: dict[str, Any],
+    ) -> VariableTracker:
+        from .constant import ConstantVariable
+
+        if (
+            name in ("get", "__getitem__")
+            and not kwargs
+            and (len(args) == 1 or (name == "get" and len(args) == 2))
+            and args[0].is_python_constant()
+            and isinstance(args[0].as_python_constant(), str)
+        ):
+            key = args[0].as_python_constant()
+            value = os.environ.get(key)
+            install_guard(EnvVarSource(key, value).make_guard(GuardBuilder.ENV_MATCH))
+            if value is not None:
+                return ConstantVariable.create(value)
+            if name == "get":
+                return args[1] if len(args) == 2 else ConstantVariable.create(None)
+            # Missing key: the guard installed above forces a recompile if the
+            # variable appears later; for now raise like ``dict.__getitem__``.
+            raise_observed_exception(KeyError, tx, args=[key])
+        return super().call_method(tx, name, args, kwargs)
+
+    # Attribute dispatch consults getsets before tp_getattro_impl, so override
+    # MutableMappingVariable's get polyfill to keep reads on the ambient guard path.
+    tp_getset = {
+        "get": GetSet(lambda s, tx: s.tp_getattro_impl(tx, "get"), readonly_setter)
+    }
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name in ("get", "__getitem__"):
+            return variables.CallMethodVariable(self, name)
+        return super().tp_getattro_impl(tx, name)
+
+    def mp_subscript_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        # Load-bearing: without this, os.environ["X"] falls back to inlining
+        # os._Environ.__getitem__, whose self._data read takes the sourced-dict
+        # guard path this class exists to avoid. Routing through call_method
+        # guards it via the ambient ENV_MATCH like the other reads.
+        return self.call_method(tx, "__getitem__", [key], {})
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        from .constant import ConstantVariable
+
+        if item.is_python_constant() and isinstance(item.as_python_constant(), str):
+            key = item.as_python_constant()
+            value = os.environ.get(key)
+            install_guard(
+                EnvVarSource(key, value).make_guard(GuardBuilder.ENV_CONTAINS)
+            )
+            return ConstantVariable.create(value is not None)
+        return super().sq_contains_impl(tx, item)
 
 
 class RandomVariable(UserDefinedObjectVariable):
