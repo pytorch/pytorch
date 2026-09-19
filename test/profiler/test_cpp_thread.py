@@ -8,7 +8,6 @@ from torch._environment import is_fbcode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
@@ -170,10 +169,6 @@ class CppThreadTest(TestCase):
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
     )
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
-    )
     def test_with_enable_profiler_in_child_thread(self, device) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, True)
@@ -188,10 +183,6 @@ class CppThreadTest(TestCase):
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
     )
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
-    )
     def test_without_enable_profiler_in_child_thread(self, device) -> None:
         self.start_profiler(False)
         cpp.start_threads(self.ThreadCount, IterationCount, False)
@@ -205,10 +196,6 @@ class CppThreadTest(TestCase):
     @skipCUDAIf(
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
-    )
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
     )
     def test_profile_memory(self, device) -> None:
         self.start_profiler(True)

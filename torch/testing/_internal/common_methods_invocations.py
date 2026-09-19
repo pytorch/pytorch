@@ -22216,6 +22216,11 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_variant_consistency_eager", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="xpu"),
+            # https://github.com/intel/torch-xpu-ops/issues/5452
+            DecorateInfo(unittest.expectedFailure, "TestMeta",
+                         "test_meta_outplace", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta",
+                         "test_comprehensive", device_type="xpu"),
             # not instantiated on mps
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
                          "test_operator", device_type="xpu"),
