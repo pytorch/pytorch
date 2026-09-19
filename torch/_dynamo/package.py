@@ -111,6 +111,22 @@ class SerializedCode:
         )
 
 
+class _Missing:
+    def __init__(self, reason: str | None = None) -> None:
+        self._reason = reason
+
+    def __repr__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    def __str__(self) -> str:
+        return f"_Missing({self._reason})"
+
+    # Sometimes _Missing object is used as the callable with functools.partial,
+    # so we add a dummy __call__ here to bypass TypeError from partial().
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return _Missing()
+
+
 class FunctionPicklerBase(pickle.Pickler):
     """Reducers for objects pickle cannot rebuild by reference: code objects,
     closure cells, python modules, bound methods, and functions rebuilt from
