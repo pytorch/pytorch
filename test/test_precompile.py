@@ -818,6 +818,12 @@ class TestPrecompile(TestCase):
         # refused on the resume name and the live one keeps serving; the rows
         # below scrub the live artifact first.
         self.assertEqual(build()(model, x), expected)
+        # A live torch.compile binds its resume function, untagged, under a name
+        # this artifact also mints: the build must refuse, not rebind it.
+        resume_name = frames[1]["resume_names"][0]
+        with mock.patch.dict(scope, {resume_name: lambda *args: None}):
+            with self.assertRaisesRegex(PrecompileError, resume_name):
+                build()
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
             other = _b64({f"{k}_other": v for k, v in backends.items()})
