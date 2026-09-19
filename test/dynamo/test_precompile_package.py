@@ -2453,6 +2453,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(torch._dynamo.config.allow_empty_graphs)
 
     def test_allow_empty_graphs_convert_frame_refuses_a_ddp_optimizer_frame(self):
+        from torch._dynamo.hooks import Hooks
         from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
         from torch._dynamo.testing import CompileCounter
@@ -2470,12 +2471,15 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             optimize_ctx = torch._dynamo.optimize(counter)
             wrapper = optimize_ctx.callback
             built = wrapper._torchdynamo_orig_backend
-            wrapper._torchdynamo_orig_backend = _AllowEmptyGraphsConvertFrame(
+            conv = _AllowEmptyGraphsConvertFrame(
                 built._torchdynamo_orig_backend,
                 wrapper.hooks,
                 package=CompilePackage(fn),
                 recompile_limit=built._recompile_limit,
             )
+            wrapper._torchdynamo_orig_backend = conv
+            # The wrapper's capability probe must still say yes with a package.
+            self.assertTrue(hasattr(conv, "_clone_with_backend"))
             with (
                 torch._dynamo.config.patch(optimize_ddp=optimize_ddp),
                 mock.patch.object(
@@ -2486,15 +2490,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                     optimize_ctx(fn)(torch.ones(2))
                     self.assertEqual(counter.frame_count, 1)
                 else:
-                    with self.assertRaisesRegex(PackageError, r"optimize_ddp="):
+                    msg = r'DistributedDataParallel forward.*optimize_ddp=.*optimize_ddp="no_optimization"'
+                    with self.assertRaisesRegex(PackageError, msg):
                         optimize_ctx(fn)(torch.ones(2))
                     self.assertEqual(counter.frame_count, 0)
             self.assertFalse(torch._dynamo.config.allow_empty_graphs)
         # Without a package the DDP clone keeps the subclass, hooks and limit.
-        plain = _AllowEmptyGraphsConvertFrame(counter, wrapper.hooks, recompile_limit=3)
-        clone = plain._clone_with_backend(counter)
+        backend, hooks = CompileCounter(), Hooks()
+        plain = _AllowEmptyGraphsConvertFrame(backend, hooks, recompile_limit=3)
+        clone = plain._clone_with_backend(backend)
         self.assertIs(type(clone), _AllowEmptyGraphsConvertFrame)
-        self.assertIs(clone._hooks, wrapper.hooks)
+        self.assertIs(clone._hooks, hooks)
         self.assertEqual(clone._recompile_limit, 3)
 
     def test_allow_empty_graphs_convert_frame_reverts_the_flag_when_the_compile_raises(
