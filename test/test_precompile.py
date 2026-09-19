@@ -2783,6 +2783,93 @@ class TestPrecompileCaptureFiles(TestCase):
         with self.assertRaisesRegex(ValueError, "backend must be"):
             self._capture(backend="nope")
 
+    def test_served_output_ignores_ambient_autocast(self):
+        # eager only: this model lowers to extern_kernels.addmm(..., out=buf0), whose
+        # out= overload has no CPU autocast registration, so the inductor artifact
+        # cannot observe the ambient state (the extern-kernel test below covers it).
+        with self._capture(backend="eager") as cap:
+            y = cap(self.model, self.x)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(self.model(self.x).dtype, torch.bfloat16)
+            z = served(self.model, self.x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+        # The inductor driver's guard is unobservable on this model, so what pins it on
+        # every build is its presence in the artifact text (the extern-kernel test below
+        # exercises it, but only where mkldnn is there to lower to).
+        with self._capture(backend="inductor") as cap:
+            cap(self.model, self.x)
+        # The driver's own emitted line, not the bare name: AOTAutograd emits a
+        # `_DisableAutocast_` guard of its own only for a capture made under autocast,
+        # so the bare substring would stop discriminating for such a capture.
+        self.assertIn(
+            "with _torch._C._DisableAutocast():", self._read(self.artifact).decode()
+        )
+
+    @unittest.skipUnless(
+        torch.backends.mkldnn.is_available() and torch._C._get_mkldnn_enabled(),
+        "the LSTM lowers to mkldnn_rnn_layer only with mkldnn built AND enabled",
+    )
+    def test_served_extern_kernel_ignores_ambient_autocast(self):
+        # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
+        # CPU autocast and which the inductor artifact calls as a fallback: without the
+        # disable the served call casts a second time, so the float32 assertion below no
+        # longer holds -- on this primitive the second cast in fact fails inside oneDNN
+        # before any dtype comes back.
+        # Inductor only: the eager driver has no extern kernels, so on that backend
+        # this is test_served_output_ignores_ambient_autocast with a bigger graph.
+        model = torch.nn.LSTM(8, 8, batch_first=True)
+        x = torch.randn(2, 3, 8)
+
+        def fn(m, t):
+            return m(t)[0]
+
+        with self._capture(fn, backend="inductor") as cap:
+            y = cap(model, x)
+        # The premise, not just the outcome: without this kernel in the artifact the
+        # assertion below holds whether or not the neutralization is there.
+        self.assertIn("mkldnn_rnn_layer", self._read(self.artifact).decode())
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
+    def test_capturing_under_autocast_bakes_the_casts_in(self):
+        # The remedy the docstrings prescribe for wanting autocast dtypes out of a
+        # served call: what the capture ran under is what the artifact replays, so a
+        # capture made inside a region serves those dtypes outside every region.
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            with self._capture() as cap:
+                y = cap(self.model, self.x)
+        self.assertEqual(y.dtype, torch.bfloat16)
+        served = load(self.artifact, self.cache)
+        self.assertEqual(served(self.model, self.x), y)
+        # ...and a region with a DIFFERENT dtype does not re-cast what is baked in: the
+        # only coverage of a bf16-baked artifact served inside an fp16 region, where a
+        # second cast would silently DOWNGRADE precision rather than upgrade it.
+        with torch.autocast("cpu", dtype=torch.float16):
+            self.assertEqual(served(self.model, self.x), y)
+
+    @unittest.skipUnless(TEST_CUDA, "CUDA has its own autocast policy and dtype")
+    def test_served_output_ignores_ambient_cuda_autocast(self):
+        # Autocast is per device -- CUDA picks float16 and has its own op allowlist --
+        # so the neutralization is covered there too. Eager only, for the same reason
+        # as the CPU test: the eager driver calls aten.addmm.default, which IS
+        # registered for CUDA autocast, while the inductor artifact calls the out=
+        # overload, which is not.
+        model = _FilesModel().cuda()
+        x = torch.randn(2, 4, device="cuda")
+        with self._capture() as cap:
+            y = cap(model, x)
+        served = load(self.artifact, self.cache)
+        with torch.autocast("cuda", dtype=torch.float16):
+            self.assertEqual(model(x).dtype, torch.float16)
+            z = served(model, x)
+        self.assertEqual(z.dtype, torch.float32)
+        self.assertEqual(z, y)
+
     @parametrize("backend", ("eager", "inductor"))
     def test_batchnorm_running_stats_update_once(self, backend):
         bn = torch.nn.BatchNorm1d(4)

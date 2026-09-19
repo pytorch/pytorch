@@ -262,6 +262,17 @@ it.
 # (artifact=None) but is still a full integrity-tagged envelope (python_code is the
 # whole runnable artifact).
 #
+# autocast: a served call IGNORES the serving process's ambient autocast, because
+# whatever the capture ran under is already baked in (ATen casts for make_fx, compiled
+# kernels for inductor) and re-dispatching under an ambient autocast would cast a second
+# time. A served call returns the capture's dtypes, not the dtypes the same eager call
+# returns inside that region, so capture under the autocast you want baked in. Both
+# drivers do it with torch._C._DisableAutocast, the one guard that excludes the whole
+# autocast dispatch keyset -- the same guard AOTAutograd emits into its own generated
+# runtime source for the same reason -- so every autocast-capable device of the serving
+# build is covered at once. Invariant 7 still holds: torch._C._DisableAutocast is a name
+# in the artifact's text, not an import.
+#
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (default) is a
 # non-strict trace and is the only tracer implemented today -- everything above (the
 # invariants, the contract) describes its behavior. "dynamo" is planned (a Dynamo-based
@@ -421,9 +432,9 @@ class Capture:
     capture, call it with the positional arguments ``fn`` takes inside the block
     (keyword arguments are refused) -- each call runs for real, is folded into the
     capture, and returns what serving the artifact produces (:func:`capture` has
-    the ``requires_grad`` contract of that served value) -- and the artifact is
-    written to the ``artifact_path`` / ``cache_path`` files when the block exits
-    CLEANLY and an in-block :meth:`save` has not already written it: the files a
+    the ``requires_grad`` and autocast contracts of that served value) -- and the
+    artifact is written to the ``artifact_path`` / ``cache_path`` files when the block
+    exits CLEANLY and an in-block :meth:`save` has not already written it: the files a
     :meth:`save` wrote stay as they are, whether the block then raised or exited
     cleanly, and a clean exit that never called the capture raises instead of
     writing. Call :meth:`save` inside the block to
@@ -1641,7 +1652,9 @@ _GENERATED_HEADER = """\
 # make_fx trace, so control flow and shapes are specialized to the example inputs,
 # and (inductor backend) each input's stride / memory format is baked too: pass
 # runtime inputs in the example's layout (.contiguous() to match a contiguous
-# example). See Note [precompile programming model] in torch/_precompile.py.
+# example). The capture's autocast is baked in too: a call through this file
+# neutralizes any autocast the calling process has on and returns the capture's
+# dtypes. See Note [precompile programming model] in torch/_precompile.py.
 #
 # It contains, in order:
 #   1. The composed graph module from aot_autograd.compile_to_python: the inlined
@@ -1651,9 +1664,9 @@ _GENERATED_HEADER = """\
 #      exposing ``call(flat_inputs) -> outputs``.
 #   2. Calling-convention metadata.
 #   3. A small driver that extracts each runtime module's params/buffers (in the
-#      same order as capture), passes them with the runtime inputs to ``call``, and
-#      scatters any harvested gradients onto the model's .grad fields. No model
-#      weights are embedded (you bring the model).
+#      same order as capture), passes them with the runtime inputs to ``call`` with the
+#      caller's autocast neutralized, and scatters any harvested gradients onto the
+#      model's .grad fields. No model weights are embedded (you bring the model).
 #
 # The companion ``cache`` returned by precompile is purely an ACCELERATION used by
 # torch.compiler.precompile.load: it primes the inductor kernel caches so exec'ing this
@@ -1850,6 +1863,8 @@ _EAGER_GENERATED_HEADER = """\
 #
 # The runtime model must be structurally identical to the traced one (only weight
 # VALUES may differ), and control flow / shapes are specialized to the example inputs.
+# The driver below neutralizes any autocast the calling process has on, so a call
+# returns the capture's dtypes.
 # See Note [precompile programming model] in torch/_precompile.py for the full contract.
 """
 
@@ -2702,11 +2717,13 @@ def capture(
     from the runtime input, inductor from the capture), so set it yourself if you depend
     on it. ``backend`` picks ``"inductor"`` (lower through AOTAutograd + Inductor into
     self-contained source plus an acceleration cache) or ``"eager"`` (inline the captured
-    ATen graph as readable source). Call ``cap.save()`` inside the block to write the
-    files before it exits; while the LAST write attempt is one that FAILED -- the exit's
-    or a ``save()``'s -- call it again to retry that write, from outside the block too.
-    The contract is Note [precompile programming model] in this module; see :func:`load`
-    for reading the pair back.
+    ATen graph as readable source). A call served from the artifact IGNORES the serving
+    process's ambient autocast, since the casts the capture ran under are already baked
+    in, so capture under the autocast you want baked in. Call ``cap.save()`` inside the
+    block to write the files before it exits; while the LAST write attempt is one that
+    FAILED -- the exit's or a ``save()``'s -- call it again to retry that write, from
+    outside the block too. The contract is Note [precompile programming model] in this
+    module; see :func:`load` for reading the pair back.
 
     Raises ``ValueError`` for a ``backend`` outside ``{"inductor", "eager"}`` and for a
     path pair no entry point accepts (one file named for both halves, a path that is not
@@ -2958,6 +2975,16 @@ class _PrecompileApi:
         (invariant 3), a capture attempted inside another trace (invariant 3 in the
         Note has the reason), and -- for the inductor backend -- a runtime input whose
         stride / memory format differs from the example's (invariant 6).
+
+        A call served from the artifact IGNORES the serving process's ambient autocast:
+        whatever the capture ran under is already baked in (ATen casts for ``"eager"``,
+        compiled kernels for ``"inductor"``), so re-dispatching under an ambient
+        ``autocast`` region would cast a second time. The reloaded callable therefore
+        returns the capture's dtypes, NOT the dtypes the same eager call returns inside
+        that region -- so capture under the autocast you want baked in. The
+        neutralization lasts for the duration of the call and covers every device this
+        build can autocast, not just the ones the captured graph names, so an op that
+        moves work to another device inside its own body is covered too.
         """
         torch._C._log_api_usage_once("torch.compiler.precompile")
         if backend not in ("inductor", "eager"):
@@ -3006,6 +3033,10 @@ class _PrecompileApi:
         precompile captures. A cache whose ``format``/``version`` does not match (a
         foreign or different-build envelope) is NOT fatal: the cache is acceleration
         only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
+
+        Calling the result IGNORES this process's ambient autocast, so it returns the
+        capture's dtypes; see ``torch.compiler.precompile``'s docstring for the full
+        contract.
         """
         torch._C._log_api_usage_once("torch.compiler.precompile.load")
         return _runnable_from_pair(
