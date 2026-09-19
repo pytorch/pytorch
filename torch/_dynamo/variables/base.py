@@ -484,7 +484,6 @@ def unmodeled_setter(
     Eager accepts the write, so raising AttributeError would diverge; graph break
     instead and let the write happen outside the graph.
     """
-    breakpoint()
     unimplemented(
         gb_type="Write to unmodeled getset/member attribute",
         context=f"{self}",
