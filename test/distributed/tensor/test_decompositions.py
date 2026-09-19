@@ -14,8 +14,7 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorContinuousTestBase,
-    NUM_DEVICES,
+    DTensorTestBase,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -247,9 +246,7 @@ class TestDecompSharding(TestCase):
         self.assertEqual(out.placements, (Replicate(),))
 
 
-class TestDecompShardingWithComms(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
-
+class TestDecompShardingWithComms(DTensorTestBase):
     @with_comms
     def test_decomp_schema_caches_static_args(self):
         """
