@@ -709,7 +709,12 @@ class TestPrecompile(TestCase):
         from unittest import mock
 
         from torch import _precompile_driver as driver
-        from torch._dynamo.package import CompilePackage
+        from torch._dynamo.output_graph import get_builtins_dict
+        from torch._dynamo.package import (
+            CompilePackage,
+            load_guards_state,
+            SerializedCode,
+        )
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
         from torch._precompile import _b64, _multigraph_frames, _serving_mode
@@ -752,7 +757,6 @@ class TestPrecompile(TestCase):
         alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
         self.addCleanup(alias.stop)
         alias.start()
-        main_frames = [{**f, "python_module": "__main__"} for f in frames]
         for frame in frames:
             frame["python_module"] = module
         binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
@@ -779,9 +783,41 @@ class TestPrecompile(TestCase):
         self.assertEqual(forward(model, x), expected)
         with self.assertRaisesRegex(PrecompileError, entry_miss):
             forward(model, x, scale=3.0)
-        with mock.patch.dict(ns, {"_FRAMES": _b64(main_frames)}):
-            with self.assertRaisesRegex(PrecompileError, "Regenerate the artifact"):
+        # The builtins dict Dynamo guards through is re-minted into the captured
+        # module, not the artifact's namespace, and a key bound to anything
+        # else is refused.
+        guards_state = load_guards_state(frames[0]["variants"][0]["guards_state"])
+        key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
+        self.assertNotIn(key, ns)
+        self.assertIs(scope[key], get_builtins_dict(scope))
+        with mock.patch.dict(scope, {key: {}}):
+            with self.assertRaisesRegex(PrecompileError, "other than the module's"):
                 build()
+        # Every other refusal is diagnosed by its cause at build: the two version
+        # locks, a __main__ or unimportable module, an entry with no variant
+        # (BYPASSED, or trivial and run eager), a closure entry, no entry at all.
+
+        def record(**edits):
+            return _b64([{**frames[0], **edits}])
+
+        def closes_over_model():
+            return model
+
+        closure = SerializedCode.from_code_object(closes_over_model.__code__)
+        refused = (
+            ("_DYNAMO_PYTHON_VERSION", (3, 9), "produced on Python 3.9"),
+            ("TORCH_VERSION", "0.0", "produced by torch 0.0"),
+            ("_FRAMES", record(python_module="__main__"), "__main__ module"),
+            ("_FRAMES", record(python_module="test_missing_module"), "not importable"),
+            ("_FRAMES", record(bypassed=True, variants=[]), "'step' was BYPASSED"),
+            ("_FRAMES", record(variants=[]), "produced no guarded code"),
+            ("_FRAMES", record(code=closure), "closes over"),
+            ("_FRAMES", record(is_entry=False), "no entry frame"),
+        )
+        for name, value, message in refused:
+            with mock.patch.dict(ns, {name: value}):
+                with self.assertRaisesRegex(PrecompileError, message):
+                    build()
 
     def test_multigraph_driver_dispatches_captured_frames(self):
         # The standalone driver rebuilds each frame's f_locals for the guard
@@ -793,8 +829,7 @@ class TestPrecompile(TestCase):
         from unittest import mock
 
         from torch import _precompile_driver as driver
-        from torch._dynamo.output_graph import get_builtins_dict
-        from torch._dynamo.package import CompilePackage, load_guards_state
+        from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_context import EagerCacheArtifact
         from torch._dynamo.precompile_package import default_guard_filter_fn
         from torch._precompile import _b64, _multigraph_frames, _serving_mode
@@ -846,7 +881,6 @@ class TestPrecompile(TestCase):
         alias = mock.patch.dict(sys.modules, {module: sys.modules[__name__]})
         self.addCleanup(alias.stop)
         alias.start()
-        main_frames = [{**f, "python_module": "__main__"} for f in frames]
         for frame in frames:
             frame["python_module"] = module
 
@@ -878,17 +912,6 @@ class TestPrecompile(TestCase):
             with self.assertRaisesRegex(PrecompileError, entry_miss):
                 forward(model, x)
         self.assertEqual(forward(model, x), expected)
-        # The builtins dict Dynamo guards through is re-minted into the captured
-        # module, not the artifact's namespace, and a key bound to anything
-        # else is refused.
-        guards_state = load_guards_state(frames[1]["variants"][0]["guards_state"])
-        key = guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
-        self.assertNotIn(key, ns)
-        self.assertIs(scope[key], get_builtins_dict(scope))
-        wrong_key = "other than the module's builtins dict"
-        with mock.patch.dict(scope, {key: {}}):
-            with self.assertRaisesRegex(PrecompileError, wrong_key):
-                build()
         # Neither call was captured: the entry frame refuses the first, the
         # continuation (guarding len(rest)) the second. There is no compiler
         # behind the artifact, so both are coverage gaps rather than recompiles.
@@ -897,12 +920,8 @@ class TestPrecompile(TestCase):
         resume_miss = "no captured variant of 'torch_dynamo_resume_in_step"
         with self.assertRaisesRegex(PrecompileError, resume_miss):
             forward(model, x, torch.ones(1), torch.ones(1))
-        # A frame with no variant is diagnosed by cause, not as a coverage gap:
-        # at build for the entry, at the call that reaches a continuation.
-        bypassed = [{**f, "bypassed": True, "variants": []} for f in frames]
-        with mock.patch.dict(ns, {"_FRAMES": _b64(bypassed)}):
-            with self.assertRaisesRegex(PrecompileError, "'step' was BYPASSED"):
-                build()
+        # A zero-variant continuation is diagnosed by cause, not as a coverage
+        # gap, at the call that reaches it (the entry refuses at build).
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
             with self.assertRaisesRegex(PrecompileError, "produced no guarded code"):
@@ -915,15 +934,6 @@ class TestPrecompile(TestCase):
         with mock.patch.dict(ns, {"_FRAMES": _b64(frames + [dead])}):
             self.assertEqual(build()(model, x), expected)
         self.assertNotIn("__resume_at_dead", scope)
-        foreign = (
-            ("_DYNAMO_PYTHON_VERSION", (3, 9)),
-            ("TORCH_VERSION", "0.0"),
-            ("_FRAMES", _b64(main_frames)),
-        )
-        for name, value in foreign:
-            with mock.patch.dict(ns, {name: value}):
-                with self.assertRaisesRegex(PrecompileError, "Regenerate the artifact"):
-                    build()
 
 
 if __name__ == "__main__":
