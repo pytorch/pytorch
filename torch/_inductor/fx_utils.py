@@ -180,6 +180,9 @@ def _is_fake_tensor_same(
         return False
 
     def any_user_may_alias(node):
+        # imported here because reinplace imports this module at load time
+        from .fx_passes.reinplace import _generalized_scatter
+
         if not isinstance(node.meta["val"], torch.Tensor):
             # analysis too complicated on lists, can support in the future
             return True
@@ -187,8 +190,7 @@ def _is_fake_tensor_same(
         for user in node.users:
             if not (
                 isinstance(user.target, torch._ops.OperatorBase)
-                or user.target
-                is torch._inductor.fx_passes.reinplace._generalized_scatter
+                or user.target is _generalized_scatter
             ):
                 return True
 
