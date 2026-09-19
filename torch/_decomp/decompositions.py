@@ -5251,7 +5251,9 @@ def binary_cross_entropy_with_logits(
 def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> bool:
     # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
 
-    t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
+    tensor1_larger = tensor1.ndim >= tensor2.ndim
+    t1 = tensor1 if tensor1_larger else tensor2.mT
+    t2 = tensor2 if tensor1_larger else tensor1
 
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -5264,19 +5266,18 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     if guard_or_false(sym_numel(t1) == 0):
         return True
 
-    t1_shape = t1.shape
-    t1_stride = t1.stride()
+    from torch._subclasses.fake_impls import _compute_stride
 
-    # Check the contiguous, we can skip the dim with size of 1
-    # as aten: https://github.com/pytorch/pytorch/blob/e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
-    expected_stride = [1]
-    for size in reversed(t1_shape[1:]):
-        expected_stride.append(size * expected_stride[-1])
-    return all(
-        guard_or_false(size == 1) or guard_or_false(left == right)
-        for left, right, size in zip(
-            t1_stride, list(reversed(expected_stride)), t1_shape
+    t1_shape = t1.shape
+    folded_shape = (reduce(operator.mul, t1_shape[:-1], 1), t1_shape[-1])
+    return (
+        _compute_stride(
+            t1_shape,
+            t1.stride(),
+            folded_shape,
+            size_oblivious=True,
         )
+        is not None
     )
 
 
