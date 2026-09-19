@@ -26,8 +26,10 @@ yet.
 from __future__ import annotations
 
 import functools
+import hashlib
 import importlib.machinery
 import os
+import re
 import site
 import sys
 import sysconfig
@@ -876,6 +878,44 @@ def _is_risky_drop(
             or _defined_where_read(value, source.global_name, stack)
         )
     return True
+
+
+# Object addresses differ every run, so they are scrubbed from rendered guard
+# facts. Keep these anchored to the call shapes that carry addresses: a bare
+# \b\d{9,}\b also eats a user constant (a dict key, a slice bound), so two
+# variants guarding different values render the same fact and invent an
+# invariant neither holds.
+_OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
+_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
+# Dynamo appends a per-process counter to the builtins dict it installs, so the
+# same guard reads __builtins_dict___6 in one compilation and ___8 in the next.
+# Of the globals Dynamo mints, only the three families in
+# aot_compile._MINTED_GLOBAL_PREFIXES can root a serializable guard: this one and
+# the two install_global_by_id shapes the pattern below covers. __compiled_fn_*
+# and __resume_at_* are codegen-only LOAD_GLOBAL targets, never guard subjects.
+_DYNAMO_COUNTER = re.compile(re.escape(_BUILTINS_DICT_PREFIX) + r"_\d+")
+# OutputGraph.install_global_by_id names a global "<prefix>_<id(value)>_c<n>",
+# so a guard reading one carries BOTH an address and a compile counter inside
+# an identifier, where neither pattern above can see it. Real models reach this
+# -- transformers' Qwen2 installs three -- and the report then differs run to
+# run, which is exactly what the "commit and diff" contract rules out. The
+# prefix can be empty (torch itself is installed as "_<id>_c<n>"), so the digit
+# width is the anchor: it is what keeps a user identifier such as w_1_c2 intact.
+_DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
+
+
+def _normalize(text: str) -> str:
+    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
+    text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
+    return _DYNAMO_COUNTER.sub(_BUILTINS_DICT_PREFIX + "_<n>", text)
+
+
+def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
+    return tuple(_normalize(part) for part in (code_list or ()))
+
+
+def _hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
 # Guards whose check IS object identity, directly or through a derived guard,
