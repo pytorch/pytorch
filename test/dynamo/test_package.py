@@ -1801,7 +1801,7 @@ def add(x, y):
         cases = (
             ("not a module", f"already bound to a str in the globals of {scope}"),
             (types.ModuleType("other.name"), "bound to a module named other.name"),
-            (nameless, "already bound to a module in the globals"),
+            (nameless, f"already bound to a module in the globals of {scope}"),
         )
         # The first hint names the module whose globals hold the slot -- the
         # root frame's, which an inlined callee's own module is not.
