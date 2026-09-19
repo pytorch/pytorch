@@ -1426,7 +1426,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                 _sfdp_extra_check(aten.mul.Scalar),
             ),
         ]
-        mask_fp32_patterns = ["pattern_16"]
+        mask_fp32_patterns = ["pattern_16", "pattern_25", "pattern_26"]
         if dtype == torch.half:
             # Add inputs of bf16 q/k/v and fp32 mask, for models like albert.
             candidates.append(
@@ -1451,6 +1451,29 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
                     ),
                 )
             )
+            # T5 patterns 25/26 with fp16 q/k/v and an fp32 mask, see #195784.
+            for t5_pattern, t5_replacement in (
+                (_sfdp_pattern_25, _sfdp_replacement_25),
+                (_sfdp_pattern_26, _sfdp_replacement_26),
+            ):
+                candidates.append(
+                    (
+                        t5_pattern,
+                        t5_replacement,
+                        [g(), g(), g(), m_float()],
+                        d,
+                        _sfdp_extra_check(disable_cuda=True),
+                    )
+                )
+                candidates.append(
+                    (
+                        t5_pattern,
+                        t5_replacement,
+                        [g_bs1(), g_bs1(), g_bs1(), m_bs1_float()],
+                        d,
+                        _sfdp_extra_check(disable_cuda=True),
+                    )
+                )
 
         for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
