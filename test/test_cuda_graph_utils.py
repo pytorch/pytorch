@@ -249,6 +249,40 @@ class TestMarkKernels(TestCase):
             self.assertEqual(set(get_kernel_annotations()), keys)
         self.assertIn(capture_id, graph._recorded_exec_ids)
 
+    def test_key_by_auto_takes_what_the_stack_reports(self):
+        """``key_by="auto"`` is "source" where the stack reports source node ids and "exec"
+        where it does not, so it never raises -- unlike "source", which insists."""
+        import torch.cuda._graph_annotations as _graph_annotations
+
+        def capture():
+            graph = torch.cuda.CUDAGraph(keep_graph=True)
+            x = torch.randn(8, device="cuda")
+            with torch.cuda.graph(
+                graph, enable_annotations=True, annotation_config={"key_by": "auto"}
+            ):
+                with mark_kernels("phase_a"):
+                    _ = x + 1
+            graph.instantiate()
+            return graph
+
+        with unittest.mock.patch.object(
+            _graph_annotations, "source_node_ids_available", return_value=False
+        ):
+            graph = capture()
+        self.assertEqual(graph._annotation_key_by, "exec")
+        self.assertEqual(
+            {k >> 32 for k in get_kernel_annotations()}, {graph._remapped_exec_id}
+        )
+
+        if not source_node_ids_available():
+            return
+        _reset_kernel_annotations()
+        graph = capture()
+        self.assertEqual(graph._annotation_key_by, "source")
+        self.assertEqual(
+            {k >> 32 for k in get_kernel_annotations()}, {graph._capture_graph_id}
+        )
+
     def test_key_by_exec_is_the_default(self):
         """The default rekeys to the exec graph, which is what a consumer reading CUPTI's
         (exec) graphNodeId needs. Guards the default against key_by's introduction."""
