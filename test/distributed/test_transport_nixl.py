@@ -1,8 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import gc
 import pickle
 import threading
+import weakref
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,7 +12,7 @@ from unittest.mock import patch
 from transport_test_utils import TransportTestMixin
 
 import torch
-from torch.distributed._transport import _nixl, new_transport
+from torch.distributed._transport import _nixl, new_transport, wait_all
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -214,11 +216,11 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             self.assertEqual(first.write(source.to_view(2, 4), remote), 0)
             self.assertEqual(first.write(source.to_view(2, 4), remote), 0)
             self.assertEqual(target_tensor[:4], torch.arange(2, 6, dtype=torch.uint8))
-            self.assertEqual(first._agent.released, 0)
+            self.assertEqual(first._agent.released, 2)
         finally:
             first.close()
             second.close()
-        self.assertEqual(first_agent.released, 1)
+        self.assertEqual(first_agent.released, 2)
 
     def test_rejects_invalid_inputs_and_cleans_up(self):
         first, second = self.make_transport_pair()
@@ -238,47 +240,36 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         self.assertEqual(first_agent.registrations, [])
 
     def test_timeout_retains_pending_transfer(self):
-        import threading
-
         first, second = self.make_transport_pair()
-        release = threading.Event()
         self.addCleanup(second.close)
         self.addCleanup(first.close)
-        self.addCleanup(release.set)
         source = first.register_memory(torch.arange(8, dtype=torch.uint8))
         target = second.register_memory(torch.zeros(8, dtype=torch.uint8))
-        remote = target.to_remote_buffer()
         agent = first._agent
-        with patch.object(
-            agent, "transfer", side_effect=lambda handle: (release.wait(5) and "DONE")
-        ):
-            work = first.write(source.to_view(), remote, async_op=True, timeout=0.01)
+        with patch.object(agent, "transfer_state", "PROC"):
+            work = first.write(
+                source.to_view(),
+                target.to_remote_buffer(),
+                async_op=True,
+                timeout=0.001,
+            )
             with self.assertRaises(TimeoutError):
                 work.wait()
             self.assertFalse(work.is_completed())
             self.assertEqual(agent.released, 0)
             with self.assertRaises(TimeoutError):
-                first.close(timeout=0.01)
+                first.close(timeout=0.001)
             self.assertTrue(agent.registrations)
-            release.set()
-            first.close(timeout=5)
+            self.assertIn(first, _nixl._live_transports)
+            with self.assertRaisesRegex(RuntimeError, "closed"):
+                first.bind()
+        first.close(timeout=1)
         self.assertTrue(work.is_completed())
         self.assertEqual(agent.registrations, [])
         self.assertEqual(agent.released, 1)
+        self.assertNotIn(first, _nixl._live_transports)
 
-    @parametrize(
-        "operation",
-        [
-            "bind",
-            "connect",
-            "register",
-            "descriptor",
-            "read",
-            "write",
-            "read_async",
-            "write_async",
-        ],
-    )
+    @parametrize("operation", ["read", "write", "read_async", "write_async"])
     def test_operation_timeout(self, operation):
         first, second = self.make_transport_pair()
         self.addCleanup(second.close)
@@ -286,58 +277,296 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         source = first.register_memory(torch.arange(8, dtype=torch.uint8))
         target = second.register_memory(torch.zeros(8, dtype=torch.uint8))
         remote = target.to_remote_buffer()
-        release = threading.Event()
-        self.addCleanup(release.set)
-        methods = {
-            "bind": ("get_agent_metadata", lambda: first.bind(timeout=0.01)),
-            "connect": (
-                "add_remote_agent",
-                lambda: first.connect(second.bind(), timeout=0.01),
-            ),
-            "register": (
-                "register_memory",
-                lambda: first.register_memory(torch.ones(9), timeout=0.01),
-            ),
-            "descriptor": (
-                "get_partial_agent_metadata",
-                lambda: source.to_remote_buffer(timeout=0.01),
-            ),
-            "read": (
-                "transfer",
-                lambda: first.read(source.to_mutable_view(), remote, timeout=0.01),
-            ),
-            "write": (
-                "transfer",
-                lambda: first.write(source.to_view(), remote, timeout=0.01),
-            ),
-            "read_async": (
-                "transfer",
-                lambda: asyncio.run(
-                    first.read_async(source.to_mutable_view(), remote, timeout=0.01)
-                ),
-            ),
-            "write_async": (
-                "transfer",
-                lambda: asyncio.run(
-                    first.write_async(source.to_view(), remote, timeout=0.01)
-                ),
-            ),
-        }
-        method, call = methods[operation]
-        if operation == "connect":
-            first._peer_name = None
-        original = getattr(first._agent, method)
+        view = (
+            source.to_mutable_view()
+            if operation.startswith("read")
+            else source.to_view()
+        )
+        with patch.object(first._agent, "transfer_state", "PROC"):
+            with self.assertRaises(TimeoutError):
+                result = getattr(first, operation)(view, remote, timeout=0.001)
+                if operation.endswith("_async"):
+                    asyncio.run(result)
+            self.assertTrue(first._pending)
+            self.assertEqual(first._agent.released, 0)
+        first.close()
 
-        def blocked(*args, **kwargs):
-            if not release.wait(5):
-                raise RuntimeError("test did not release operation")
+    def test_native_setup_runs_on_calling_thread(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        self.assertFalse(hasattr(first, "_work_queue"))
+        caller = threading.get_ident()
+        original = first._agent.register_memory
+
+        def register(*args, **kwargs):
+            self.assertEqual(threading.get_ident(), caller)
             return original(*args, **kwargs)
 
-        with patch.object(first._agent, method, side_effect=blocked):
-            with self.assertRaises(TimeoutError):
-                call()
+        with patch.object(first._agent, "register_memory", side_effect=register):
+            first.register_memory(torch.ones(8))
+
+    def test_distinct_handles_for_overlapping_requests(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        remote = target.to_remote_buffer()
+        with patch.object(first._agent, "transfer_state", "PROC"):
+            one = first.write(source.to_view(), remote, async_op=True)
+            two = first.write(source.to_view(), remote, async_op=True)
+            self.assertIsNot(one._handle, two._handle)
+            self.assertEqual(len(first._pending), 2)
+            self.assertFalse(one.is_completed())
+            self.assertFalse(two.is_completed())
+        two.wait()
+        one.wait()
+        self.assertEqual(first._agent.released, 2)
+        self.assertFalse(first._pending)
+
+    def test_asyncio_polling_and_future(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        remote = target.to_remote_buffer()
+
+        async def run():
+            first._agent.transfer_state = "PROC"
+            work = first.write(source.to_view(), remote, async_op=True)
+            future = work.get_future()
+            ready = asyncio.Event()
+            future.add_done_callback(lambda _: ready.set())
+
+            async def finish():
+                await asyncio.sleep(0.01)
+                first._agent.transfer_state = "DONE"
+
+            task = asyncio.create_task(finish())
+            await asyncio.wait_for(ready.wait(), 1)
+            await task
+            self.assertEqual(future.wait(), [])
+            await wait_all([work])
+
+        asyncio.run(run())
+
+    def test_async_close_timeout_and_retry(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        agent = first._agent
+
+        async def run():
+            with patch.object(agent, "transfer_state", "PROC"):
+                work = first.write(
+                    source.to_view(), target.to_remote_buffer(), async_op=True
+                )
+                with self.assertRaises(TimeoutError):
+                    await first.close_async(timeout=0.001)
+                self.assertTrue(agent.registrations)
+                self.assertFalse(work.is_completed())
+            await first.close_async()
+            self.assertTrue(work.is_completed())
+            self.assertFalse(agent.registrations)
+
+        asyncio.run(run())
+
+    def test_cancellation_retains_buffers(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        tensor = torch.ones(8)
+        ref = weakref.ref(tensor)
+        source = first.register_memory(tensor)
+        target = second.register_memory(torch.zeros(8))
+        remote = target.to_remote_buffer()
+
+        async def run(memory):
+            with patch.object(first._agent, "transfer_state", "PROC"):
+                task = asyncio.create_task(first.write_async(memory.to_view(), remote))
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertTrue(first._pending)
+                self.assertEqual(first._agent.released, 0)
+
+        asyncio.run(run(source))
+        del source, tensor
+        gc.collect()
+        self.assertIsNotNone(ref())
+        first.close()
+        gc.collect()
+        self.assertIsNone(ref())
+
+    def test_dropped_work_and_transport_retained_until_dma_completion(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        with patch.object(first._agent, "transfer_state", "PROC"):
+            work = first.write(
+                source.to_view(), target.to_remote_buffer(), async_op=True
+            )
+            ref = weakref.ref(work)
+            del work
+            gc.collect()
+            self.assertIsNotNone(ref())
+            self.assertIn(first, _nixl._live_transports)
+        first.close()
+        gc.collect()
+        self.assertIsNone(ref())
+
+    def test_concurrent_waiters_release_handle_once(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        work = first.write(source.to_view(), target.to_remote_buffer(), async_op=True)
+        errors = []
+
+        def wait():
+            try:
+                work.wait()
+            except BaseException as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=wait) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(first._agent.released, 1)
+
+    def test_native_terminal_failure_is_released(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        with patch.object(first._agent, "transfer_state", "ERR"):
+            work = first.write(
+                source.to_view(), target.to_remote_buffer(), async_op=True
+            )
+            with self.assertRaisesRegex(RuntimeError, "NIXL transfer failed"):
+                work.wait()
+        self.assertTrue(work.is_completed())
+        self.assertFalse(work.is_success())
+        self.assertEqual(first._agent.released, 1)
+
+    def test_cancelled_async_close_can_be_retried(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+
+        async def run():
+            with patch.object(first._agent, "transfer_state", "PROC"):
+                work = first.write(
+                    source.to_view(), target.to_remote_buffer(), async_op=True
+                )
+                task = asyncio.create_task(first.close_async())
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertTrue(first._agent.registrations)
+                self.assertFalse(work.is_completed())
+                with self.assertRaisesRegex(RuntimeError, "closed"):
+                    first.register_memory(torch.ones(8))
+            await first.close_async()
+            self.assertTrue(work.is_completed())
+
+        asyncio.run(run())
+
+    def test_handle_release_failure_rejects_new_work_until_close(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        remote = target.to_remote_buffer()
+        agent = first._agent
+        work = first.write(source.to_view(), remote, async_op=True)
+        with patch.object(
+            agent, "release_xfer_handle", side_effect=RuntimeError("release failed")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "release failed"):
+                work.wait()
+            self.assertTrue(work.is_completed())
+            self.assertFalse(first._pending)
+            self.assertEqual(len(first._transfers), 1)
+            with self.assertRaisesRegex(RuntimeError, "closed"):
+                first.write(source.to_view(), remote)
+        first.close()
+        self.assertEqual(agent.released, 1)
+        self.assertFalse(first._transfers)
+
+    def test_native_cleanup_failure_can_be_retried(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        first.register_memory(torch.ones(8))
+        first.register_memory(torch.ones(16))
+        agent = first._agent
+        original = agent.deregister_memory
+        calls = 0
+
+        def deregister(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("cleanup failed")
+            return original(*args, **kwargs)
+
+        with patch.object(agent, "deregister_memory", side_effect=deregister):
+            with self.assertRaisesRegex(RuntimeError, "cleanup failed"):
+                first.close()
+            self.assertEqual(len(agent.registrations), 1)
+            first.close()
+        self.assertEqual(agent.registrations, [])
+        self.assertEqual(calls, 3)
+
+    def test_async_poll_does_not_block_on_native_lock(self):
+        first, second = self.make_transport_pair()
+        self.addCleanup(second.close)
+        self.addCleanup(first.close)
+        source = first.register_memory(torch.ones(8))
+        target = second.register_memory(torch.zeros(8))
+        work = first.write(source.to_view(), target.to_remote_buffer(), async_op=True)
+        locked, release = threading.Event(), threading.Event()
+
+        def hold_lock():
+            with first._operation_lock:
+                locked.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=hold_lock)
+        thread.start()
+        try:
+            self.assertTrue(locked.wait(5))
+            self.assertFalse(work.is_completed())
+
+            async def run():
+                with self.assertRaises(TimeoutError):
+                    await wait_all([work], timeout=0.001)
+
+            asyncio.run(run())
+            self.assertEqual(first._agent.released, 0)
+        finally:
             release.set()
-            first.close(timeout=5)
+            thread.join(5)
+        work.wait()
+        self.assertEqual(first._agent.released, 1)
 
     @parametrize("timeout", [-1, float("nan"), float("inf")])
     def test_invalid_timeout(self, timeout):
@@ -392,7 +621,8 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         name, entries = pickle.loads(remote.metadata)
         updated = replace(remote, metadata=pickle.dumps((name, entries + entries)))
         first.write(source.to_view(), updated)
-        self.assertEqual(len(first._transfers), 2)
+        self.assertEqual(first._agent.released, 2)
+        self.assertFalse(first._transfers)
 
     def test_peer_validation(self):
         first, second = self.make_transport_pair()
