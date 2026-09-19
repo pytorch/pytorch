@@ -12,12 +12,15 @@ import torchgen.gen as gen
 from torchgen.gen import LineLoader, parse_native_yaml_struct
 from torchgen.model import (
     Annotation,
+    BackendIndex,
     BaseOperatorName,
     CustomClassType,
     DispatchKey,
     NativeFunctionsGroup,
     Type,
 )
+from torchgen.selective_build.selector import SelectiveBuilder
+from torchgen.utils import Target
 
 
 class TestCodegenModel(expecttest.TestCase):
@@ -84,6 +87,40 @@ class TestCodegenModel(expecttest.TestCase):
     ti_unop = """func: unop(Tensor self) -> Tensor
   structured_delegate: unop.out
 """
+
+    def test_structured_generate_meta_requires_explicit_kernels(self) -> None:
+        yaml_str = f"""\
+- {self.ti_unop_out}
+  structured_generate_meta: False
+- {self.ti_unop}
+"""
+        es = yaml.load(yaml_str, Loader=LineLoader)
+        parsed_yaml = parse_native_yaml_struct(es, set())
+        grouped = gen.get_grouped_native_functions(parsed_yaml.native_functions)
+        self.assertEqual(len(grouped), 1)
+        group = cast(NativeFunctionsGroup, grouped[0])
+        backend_index = BackendIndex(
+            dispatch_key=DispatchKey.Meta,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index={},
+        )
+        generate = dest.RegisterDispatchKey(
+            backend_index=backend_index,
+            target=Target.REGISTRATION,
+            selector=SelectiveBuilder.get_nop_selector(),
+            rocm=False,
+            symint=True,
+            class_method_name=None,
+            skip_dispatcher_op_registration=False,
+        )
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "structured_generate_meta=False requires explicit Meta kernels",
+        ):
+            generate(group)
 
     def test_nonstructured_ufunc(self) -> None:
         yaml_str = f"""\
