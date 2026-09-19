@@ -228,7 +228,6 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    import os
     from collections.abc import Callable, Mapping
     from typing_extensions import Self
 
@@ -283,11 +282,12 @@ class PrecompileError(RuntimeError):
     effectful op, a non-tensor output the inductor backend cannot lower, or a runtime
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
+
+    ``result`` is what the call that raised this returned, when it ran before the
+    refusal: an accumulating capture's step has already executed by the time its
+    artifact gate refuses, so the result rides on the error. ``None`` otherwise.
     """
 
-    #: What the call that raised this returned, when it ran before the refusal:
-    #: an accumulating capture's step has already executed by the time its
-    #: artifact gate refuses, so the result rides on the error. ``None`` otherwise.
     result: object = None
 
 
@@ -371,8 +371,8 @@ class _MakeFxCapture(Capture):
     def __init__(
         self,
         fn: Callable[..., object],
-        artifact_path: str | os.PathLike[str],
-        cache_path: str | os.PathLike[str],
+        artifact_path: str,
+        cache_path: str,
         *,
         backend: str,
         decompositions: dict | None,
