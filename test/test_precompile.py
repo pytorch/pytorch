@@ -137,10 +137,9 @@ _pytree.register_pytree_node(
 
 
 def _precompile_pair(fn, *args, **kwargs):
-    """Capture one call of fn through the on-disk pair; returns (python_code, cache)."""
-    with _CaptureToFiles(fn, **kwargs) as cap:
-        cap(*args)
-    return cap.result()
+    """Callable-API entry point for the tests added with the fake-tensor capture, behind
+    one indirection so the commit that retires the alias re-points it in one place."""
+    return torch.compiler._precompile_callable(fn, *args, **kwargs)
 
 
 def _strip_artifact(cache: bytes) -> bytes:
@@ -359,6 +358,30 @@ class TestPrecompile(TestCase):
             str(wide),
             """8 frames (0 from graph breaks), 1 guarded code, 1 backend graph, dropped guards {'HASATTR': 1, 'ID_MATCH': 1} (0 kept), RISKY drops ['HASATTR self.act', 'ID_MATCH self.act'], 7 UNCOVERED: ['f0', 'f1', 'f2', 'f3', 'f4'] +2 more, 3 CAPTURE ERRORS: 'RuntimeError: boom' +2 more""",
         )
+
+    def test_decompositions_kwarg(self):
+        # On the transitional callable alias: the only test of ITS decompositions=
+        # parameter, which ships until the commit above retires the alias. capture()'s
+        # side of the same knob (MakeFxTracer.decompositions) is pinned by
+        # TestPrecompileCaptureFiles.test_tracer_decompositions_are_used.
+        # The table is threaded into make_fx during capture; a custom decomposition
+        # is invoked and the result still matches eager.
+        called = []
+
+        def my_relu_decomp(x):
+            called.append(True)
+            return (x > 0) * x
+
+        decomps = {torch.ops.aten.relu.default: my_relu_decomp}
+        m = torch.nn.Sequential(torch.nn.Linear(4, 3), torch.nn.ReLU()).eval()
+        x = torch.randn(5, 4)
+        code, cache = torch.compiler._precompile_callable(
+            lambda model, x: model(x), m, x, decompositions=decomps
+        )
+        self.assertTrue(called)  # the table was used during capture
+
+        f_c = torch.compiler._precompile_callable.load(code, cache)
+        self.assertEqual(f_c(m, x), m(x))
 
     def test_constant_tensor_is_rejected(self):
         captured = torch.randn(3)
@@ -1184,6 +1207,25 @@ class TestPrecompile(TestCase):
             finally:
                 _register_effectful_op(op, None)
 
+    def test_backend_invalid_raises(self):
+        # On the transitional callable alias: the only test of ITS backend guard.
+        # capture() validates backend in its own body, which
+        # TestPrecompileCaptureFiles.test_unknown_backend_is_refused pins.
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        msg = "backend must be 'inductor' or 'eager'"
+        with self.assertRaisesRegex(ValueError, msg):
+            torch.compiler._precompile_callable(
+                lambda x, y: x + y, a, b, backend="nope"
+            )
+
+    def test_tracer_invalid_raises(self):
+        # On the transitional callable alias: capture() takes a tracer OBJECT (a bad type
+        # is a TypeError from capture itself), so the STRING spelling validated here has
+        # no file-pair equivalent to port to.
+        a, b = torch.randn(4, 4), torch.randn(4, 4)
+        with self.assertRaisesRegex(ValueError, "tracer must be 'make_fx' or 'dynamo'"):
+            torch.compiler._precompile_callable(lambda x, y: x + y, a, b, tracer="nope")
+
     def test_backend_default_is_inductor(self):
         # Constructed bare, so the adapter forwards no backend= and this is capture()'s
         # own default, not one the adapter picks.
@@ -1562,7 +1604,7 @@ class TestPrecompile(TestCase):
             return mm(t) * t.sum().item()
 
         code, cache = _precompile_pair(scale_by_item, m, x)
-        f_c = _load_pair(code, cache)
+        f_c = torch.compiler._precompile_callable.load(code, cache)
         other = torch.randn(16, 4)
         self.assertEqual(f_c(m, other), scale_by_item(m, other))
 
@@ -3159,28 +3201,55 @@ class TestPrecompile(TestCase):
             x = torch.zeros(3, 4)
             code, cache = _precompile_pair(fn, model, x, backend="eager")
             self.assertIn("mlprecompile.add_one_", code)
-            # The capture call served the artifact on the real x, so it mutated once.
+            self.assertEqual(x, torch.zeros(3, 4))  # capture ran on fakes
+            torch.compiler._precompile_callable.load(code, cache)(model, x)
             self.assertEqual(x, torch.ones(3, 4))
-            _load_pair(code, cache)(model, x)
-            self.assertEqual(x, torch.full((3, 4), 2.0))
         finally:
             add_one_._lib._destroy()
 
-    def test_input_is_mutated_exactly_once_by_the_capture_call(self):
-        # Capture traces fn on FAKE tensors (invariant 3), so the mutation fn performs
-        # during the trace never reaches the caller's tensor; the capture call then SERVES
-        # the artifact on the real args, and that serve is what mutates the real input --
-        # exactly once, as a loaded artifact does per call.
+    def test_tracer_default_and_explicit_make_fx(self):
+        # On the transitional callable alias: ITS string tracer defaults to "make_fx";
+        # passing it explicitly is equivalent and works.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        for kwargs in ({}, {"tracer": "make_fx"}):
+            code, cache = torch.compiler._precompile_callable(
+                lambda model, xx: model(xx), m, x, **kwargs
+            )
+            f_c = torch.compiler._precompile_callable.load(code, cache)
+            self.assertEqual(f_c(m, x), m(x))
+
+    def test_tracer_dynamo_not_implemented(self):
+        # On the transitional callable alias: "dynamo" is a valid (planned) value of ITS
+        # string tracer but is not implemented, so it must raise NotImplementedError
+        # rather than silently fall back to make_fx.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(5, 4)
+        with self.assertRaisesRegex(NotImplementedError, "tracer='dynamo'"):
+            torch.compiler._precompile_callable(
+                lambda model, xx: model(xx), m, x, tracer="dynamo"
+            )
+
+    def test_singleton_pickle_deepcopy_roundtrip(self):
+        # The alias is a process-wide singleton; pickle and deepcopy must round-trip to
+        # the SAME object (it carries no per-call state), and its repr is the name it is
+        # reachable under.
+        p = torch.compiler._precompile_callable
+        self.assertIs(pickle.loads(pickle.dumps(p)), p)
+        self.assertIs(copy.deepcopy(p), p)
+        self.assertEqual(repr(p), "torch.compiler._precompile_callable")
+
+    def test_example_input_is_not_mutated_by_capture(self):
+        # Capture traces fn on FAKE tensors (invariant 3), so an in-place mutation fn
+        # performs on its example user input never reaches the caller's tensor; the
+        # served artifact is what mutates a real input, exactly once per call.
         scratch = torch.zeros(4)
-        with _CaptureToFiles(lambda a: a.add_(1.0)) as cap:
-            out = cap(scratch)
+        python_code, cache = torch.compiler._precompile_callable(
+            lambda a: a.add_(1.0), scratch
+        )
+        self.assertEqual(scratch, torch.zeros(4))
+        torch.compiler._precompile_callable.load(python_code, cache)(scratch)
         self.assertEqual(scratch, torch.ones(4))
-        self.assertIs(out, scratch)
-        f = _load_pair(*cap.result())
-        f(scratch)
-        self.assertEqual(scratch, torch.full((4,), 2.0))
-        f(scratch)
-        self.assertEqual(scratch, torch.full((4,), 3.0))
 
         # The carve-out: only the tensors capture FAKEIFIES are protected. A real tensor
         # fn merely CLOSES OVER stays real, so an in-place op on it does execute during
@@ -3191,6 +3260,29 @@ class TestPrecompile(TestCase):
         with self.assertRaisesRegex(PrecompileError, "neither a graph input"):
             _precompile_pair(lambda a: a + closed_over.add_(1.0), torch.zeros(4))
         self.assertEqual(closed_over, torch.ones(4))
+
+    def test_callable_api_traces_a_backward_under_ambient_no_grad(self):
+        # The transitional callable alias keeps grad enabled around the trace whatever the
+        # caller's ambient mode (capture() has ``training=`` instead), so a training step
+        # captured inside no_grad still carries its backward and the artifact does not
+        # depend on the call site: the served gradients match the eager ones, not merely
+        # being present.
+        torch.manual_seed(0)
+        model = torch.nn.Linear(4, 2)
+        x, t = torch.randn(3, 4), torch.randn(3, 2)
+
+        def step(m, x, t):
+            torch.nn.functional.mse_loss(m(x), t).backward()
+
+        with torch.no_grad():
+            python_code, cache = _precompile_pair(step, model, x, t, backend="eager")
+        torch.compiler._precompile_callable.load(python_code, cache)(model, x, t)
+        self.assertIsNotNone(model.weight.grad)
+        ref = torch.nn.Linear(4, 2)
+        ref.load_state_dict(model.state_dict())
+        step(ref, x, t)
+        self.assertEqual(model.weight.grad, ref.weight.grad)
+        self.assertEqual(model.bias.grad, ref.bias.grad)
 
 
 class TestPrecompilePublicSurface(TestCase):
@@ -3233,6 +3325,16 @@ class TestPrecompilePublicSurface(TestCase):
             with self.subTest(name=name):
                 member = getattr(torch.compiler.precompile, name)
                 self.assertEqual(member.__module__, "torch.compiler.precompile")
+
+    def test_transitional_callable_alias_is_reachable(self):
+        # The retired callable API is kept for one commit under a PRIVATE name, so it is
+        # reachable with its error type and its in-memory loader, but it is not public
+        # surface: out of torch.compiler.__all__, hence out of test_public_bindings' walk.
+        alias = torch.compiler._precompile_callable
+        self.assertTrue(callable(alias))
+        self.assertTrue(callable(alias.load))
+        self.assertIs(alias.PrecompileError, PrecompileError)
+        self.assertNotIn("_precompile_callable", torch.compiler.__all__)
 
     def test_module_is_not_callable(self):
         # The retired entry point: precompile is a module, so the call itself fails.
@@ -4565,6 +4667,21 @@ class TestPrecompileCaptureFiles(TestCase):
         _write_artifact(self.artifact, self.cache, code, buf.getvalue())
         self.assertIn(b"\r\n", self._read(self.artifact))
         self._assert_serves()
+
+    def test_callable_api_load_still_reads_an_in_memory_pair(self):
+        python_code, cache = torch.compiler._precompile_callable(
+            _files_fn, self.model, self.x, backend="eager"
+        )
+        # The callable API traces with grad enabled, so training=True renders the
+        # same python_code; the file bytes are exactly that string on every platform.
+        with self._capture(training=True) as cap:
+            cap(self.model, self.x)
+        self.assertEqual(self._read(self.artifact), python_code.encode())
+        self.assertNotIn(b"\r", self._read(self.artifact))
+        read_back, _ = _read_artifact(self.artifact, self.cache)
+        self.assertEqual(read_back, python_code)
+        f = torch.compiler._precompile_callable.load(python_code, cache)
+        self.assertEqual(f(self.model, self.x), self.model(self.x))
 
 
 @skipIfTorchDynamo("precompile's make_fx capture is incompatible with dynamo wrapping")

@@ -23,7 +23,10 @@ from torch._higher_order_ops.invoke_subgraph import (
 # ``PrecompileError`` is also re-exported here as ``torch.compiler.PrecompileError`` so the
 # conventional ``except torch.compiler.PrecompileError`` works; its ``__module__`` is already
 # forced to "torch.compiler" in the impl module, matching this public location.
+# ``_precompile_callable`` is the retired callable API, kept reachable under this private
+# name for one commit (the commit above deletes it): not in ``__all__``, not documented.
 from torch._precompile import (
+    _precompile_callable as _precompile_callable,
     PrecompiledRunnable as PrecompiledRunnable,
     PrecompileError as PrecompileError,
 )
