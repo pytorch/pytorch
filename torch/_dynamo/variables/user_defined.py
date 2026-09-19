@@ -690,7 +690,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if meta_attr is not NO_SUCH_SUBOBJ:
             metacls_source = TypeSource(self.source) if self.source else None
             metacls_vt = VariableTracker.build(tx, type(self.value), metacls_source)
-            result = _resolve_descriptor_get(tx, meta_attr, self, metacls_vt, source)
+            result = _resolve_descriptor_get(
+                tx, meta_attr, self, metacls_vt, source, name
+            )
             if result is not None:
                 return result
             return variables.GetAttrVariable(self, name, type(meta_attr), source=source)
