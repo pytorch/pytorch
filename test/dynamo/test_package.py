@@ -1761,7 +1761,7 @@ def add(x, y):
         # The first hint names the module whose globals hold the slot -- the
         # root frame's, which an inlined callee's own module is not.
         hint = f"Remove or rename the global {alias} from the globals of {scope}."
-        cached = "Without fullgraph=True, Dynamo caches this frame's outcome"
+        cached = "When this graph break is not raised as an error, Dynamo caches"
         args = (torch.randn(3, 2),)
         try:
             sys.modules[name] = module
