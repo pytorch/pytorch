@@ -697,15 +697,18 @@ class DTensorTestMixin:
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        # Resolve the instance property without initializing the test harness.
+        device_type = object.__new__(cls).device_type
+        backend = dist.get_default_backend_for_device(device_type)
         return backend
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Set device before initializing process group to ensure
-        # each rank is bound to the correct GPU. However, if world_size > device_count,
-        # we skip the test.
-        if torch.accelerator.is_available():
+        # Bind accelerator ranks unless the test falls back to CPU.
+        if (
+            object.__new__(cls).device_type != "cpu"
+            and torch.accelerator.is_available()
+        ):
             if world_size > torch.accelerator.device_count():
                 sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:
