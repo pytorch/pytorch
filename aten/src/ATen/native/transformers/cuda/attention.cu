@@ -1845,7 +1845,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     using aotriton::v3::flash::CausalType;
     using aotriton::v3::flash::WindowValue;
 #if AOTRITON_VARLEN_BITS_API
-    using sdp::aotriton_adapter::mk_varlen_bits;
+    using sdp::aotriton_adapter::mk_varlen_bits_packed;
 #else
     using aotriton::v3::flash::VarlenType;
 #endif
@@ -1879,7 +1879,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     }
 #if AOTRITON_VARLEN_BITS_API
     if (seqstart_q.has_value()) {
-      params.varlen_bits = mk_varlen_bits(/*is_varlen=*/true, /*has_position_array=*/false);
+      params.varlen_bits = mk_varlen_bits_packed();
       params.seqinfo_q0 = mk_input_aotensor<1>(seqstart_q.value(), "seqinfo_q0");
       params.seqinfo_k0 = mk_input_aotensor<1>(seqstart_k.value(), "seqinfo_k0");
     }

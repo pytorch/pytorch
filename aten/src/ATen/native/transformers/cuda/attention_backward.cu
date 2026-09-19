@@ -679,7 +679,7 @@ _efficient_attention_backward(
     using aotriton::v3::flash::CausalType;
     using aotriton::v3::flash::WindowValue;
 #if AOTRITON_VARLEN_BITS_API
-    using sdp::aotriton_adapter::mk_varlen_bits;
+    using sdp::aotriton_adapter::mk_varlen_bits_packed;
 #else
     using aotriton::v3::flash::VarlenType;
 #endif
@@ -719,7 +719,7 @@ _efficient_attention_backward(
     params.DQ_ACC = mklazy_fp32zeros<4>(&lazy_dq_acc);
 #if AOTRITON_VARLEN_BITS_API
     if (cu_seqlens_q.has_value()) {
-      params.varlen_bits = mk_varlen_bits(/*is_varlen=*/true, /*has_position_array=*/false);
+      params.varlen_bits = mk_varlen_bits_packed();
       params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q.value(), "seqinfo_q0");
       params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k.value(), "seqinfo_k0");
     }

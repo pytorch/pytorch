@@ -333,7 +333,6 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
                std::optional<int64_t> window_size_right,
                const bool return_softmax,
                const std::optional<at::Generator>& gen_) {
-  bool strided_varlen = seqused_k.has_value();
   const bool paged_KV = block_table_.has_value();
   TORCH_CHECK(!paged_KV, "[ROCm] mha_varlen_fwd: block_table_ must be nullopt");
   TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
@@ -384,6 +383,14 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
   CHECK_SHAPE(v, total_k, num_heads_k, head_size_og);
   CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
   CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+  if (seqused_k.has_value()) {
+    // Handed to the kernel as-is, so its layout is load-bearing.
+    const auto& seqused = seqused_k.value();
+    TORCH_CHECK(seqused.dtype() == at::kInt, "seqused_k must have dtype int32");
+    CHECK_DEVICE(seqused);
+    CHECK_CONTIGUOUS(seqused);
+    CHECK_SHAPE(seqused, batch_size);
+  }
 
   // AOTriton's varlen API needs input shapes be
   // (1, num_heads, total sequence length, head dimension)
@@ -472,7 +479,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
     using aotriton::v3::flash::CausalType;
 #if AOTRITON_VARLEN_BITS_API
-    using sdp::aotriton_adapter::mk_varlen_bits;
+    using sdp::aotriton_adapter::mk_varlen_bits_packed;
+    using sdp::aotriton_adapter::mk_varlen_bits_seqused_k;
 #else
     using aotriton::v3::flash::VarlenType;
 #endif
@@ -495,24 +503,20 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
     params.persistent_atomic_counter = persistent_counter;
     params.causal_type = is_causal ? CausalType::WindowedAttention : CausalType::None;
 #if AOTRITON_VARLEN_BITS_API
-    params.varlen_bits = mk_varlen_bits(/*is_varlen=*/true, /*has_position_array=*/strided_varlen);
-    if (strided_varlen) {
-      // seqused_k holds per-batch actual kv lengths; the kernel expects cumulative
-      // offsets for seqinfo_k0 so it can compute seqlen_k via differencing.
-      // seqinfo_k1 carries the real memory offsets into the KV cache.
-      const auto& seqused = seqused_k.value();
-      const int num_seqs = seqused.size(0);
-      at::Tensor cu_seqlens_k_from_seqused = at::zeros({num_seqs + 1}, seqused.options());
-      cu_seqlens_k_from_seqused.slice(0, 1).copy_(seqused.cumsum(0));
-      params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
-      params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k_from_seqused, "seqinfo_k0");
-      params.seqinfo_q1 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q1");
+    // Each seqinfo_? slot is named by the ROLE it fills, not by the tensor the
+    // caller happens to keep there, so the two layouts differ in which tensor
+    // goes where rather than in any derived quantity.
+    params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+    if (seqused_k.has_value()) {
+      params.varlen_bits = mk_varlen_bits_seqused_k();
+      params.seqinfo_k0 = mk_input_aotensor<1>(seqused_k.value(), "seqinfo_k0");
       params.seqinfo_k1 = mk_input_aotensor<1>(cu_seqlens_k, "seqinfo_k1");
     } else {
-      params.seqinfo_q0 = mk_input_aotensor<1>(cu_seqlens_q, "seqinfo_q0");
+      params.varlen_bits = mk_varlen_bits_packed();
       params.seqinfo_k0 = mk_input_aotensor<1>(cu_seqlens_k, "seqinfo_k0");
     }
 #else
+    const bool strided_varlen = seqused_k.has_value();
     params.varlen_type = strided_varlen ? VarlenType::StridedVarlen : VarlenType::CompactVarlen;
     if (strided_varlen) {
       // seqused_k holds per-batch actual kv lengths; the kernel expects cumulative
@@ -883,7 +887,7 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using aotriton::v3::flash::CausalType;
 #if AOTRITON_VARLEN_BITS_API
-    using sdp::aotriton_adapter::mk_varlen_bits;
+    using sdp::aotriton_adapter::mk_varlen_bits_packed;
 #else
     using aotriton::v3::flash::VarlenType;
 #endif
@@ -914,7 +918,7 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
     // SWA in AOTriton Kernels is treated as "Generalized Causal masks"
     params.causal_type = is_causal || uses_swa ? CausalType::WindowedAttention : CausalType::None;
 #if AOTRITON_VARLEN_BITS_API
-    params.varlen_bits = mk_varlen_bits(/*is_varlen=*/true, /*has_position_array=*/false);
+    params.varlen_bits = mk_varlen_bits_packed();
 #else
     params.varlen_type = VarlenType::CompactVarlen;
 #endif

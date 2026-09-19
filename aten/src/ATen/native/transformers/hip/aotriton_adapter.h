@@ -148,27 +148,39 @@ inline aotriton::TensorView<0> mk_atomictensor(const int32_t* ptr)
 
 #if AOTRITON_VARLEN_BITS_API
 // AOTriton 0.14+ replaced the four-value VarlenType enum with a VarlenBits
-// bit-field struct so Q/K can each independently choose how their sequence
-// lengths are stored. PyTorch only ever needs the two symmetric Q==K shapes
-// it always has: dense (varlen_bits left zero-initialized), and stacked
-// (THD) with lengths given as a cumulative offsets array, whose start
-// position within that array is either reused directly (packed varlen) or
-// read from a second, separately strided array (seqused_k-style varlen).
-inline aotriton::v3::flash::VarlenBits mk_varlen_bits(bool is_varlen, bool has_position_array)
+// bit-field struct: Q and K each pick how their length is given and where
+// their sequence starts, independently. Dense needs no bits (zero-init).
+constexpr aotriton::v3::flash::VarlenMode mk_varlen_mode(uint32_t length, uint32_t position)
 {
-  using aotriton::v3::flash::VarlenBits;
-  using aotriton::v3::flash::VarlenMode;
-  using aotriton::v3::flash::VarlenStacked;
+  aotriton::v3::flash::VarlenMode mode{};
+  mode.stacked = aotriton::v3::flash::VarlenStacked::THD;
+  mode.length = length;
+  mode.position = position;
+  return mode;
+}
+
+// Packed varlen: one (N+1,) cumulative array per side gives that side both its
+// length (by differencing) and its start position.
+constexpr aotriton::v3::flash::VarlenBits mk_varlen_bits_packed()
+{
   using aotriton::v3::flash::VarlenLength;
   using aotriton::v3::flash::VarlenPosition;
-  if (!is_varlen) {
-    return VarlenBits{};
-  }
-  VarlenMode mode{};
-  mode.stacked = VarlenStacked::THD;
-  mode.length = VarlenLength::CUMULATIVE;
-  mode.position = has_position_array ? VarlenPosition::ARRAY : VarlenPosition::REUSE;
-  return VarlenBits{.qmode = mode, .kmode = mode};
+  const auto packed = mk_varlen_mode(VarlenLength::CUMULATIVE, VarlenPosition::REUSE);
+  return aotriton::v3::flash::VarlenBits{.qmode = packed, .kmode = packed};
+}
+
+// seqused_k against a packed KV cache: K reads its length from a (N,) array of
+// per-sequence counts (seqinfo_k0) and its start from a separate (N+1,)
+// cumulative array (seqinfo_k1). Q stays packed. No VarlenType could spell
+// this, which is why it only arrives through the struct.
+constexpr aotriton::v3::flash::VarlenBits mk_varlen_bits_seqused_k()
+{
+  using aotriton::v3::flash::VarlenLength;
+  using aotriton::v3::flash::VarlenPosition;
+  return aotriton::v3::flash::VarlenBits{
+    .qmode = mk_varlen_mode(VarlenLength::CUMULATIVE, VarlenPosition::REUSE),
+    .kmode = mk_varlen_mode(VarlenLength::INDIVIDUAL, VarlenPosition::ARRAY),
+  };
 }
 #endif // AOTRITON_VARLEN_BITS_API
 
