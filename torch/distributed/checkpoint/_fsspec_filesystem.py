@@ -1,13 +1,17 @@
 # Mypy will not try inferring the types of any 3rd party libraries installed.
 # mypy: ignore-errors
 
+import concurrent.futures
 import io
 import os
+import threading
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import fsspec
+import fsspec.asyn
 from fsspec.core import url_to_fs
 
 from torch.distributed.checkpoint._extension import StreamTransformExtension
@@ -17,6 +21,8 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemWriter,
     SerializationFormat,
 )
+from torch.distributed.checkpoint.planner import LoadPlan, LoadPlanner
+from torch.futures import Future
 
 
 if TYPE_CHECKING:
@@ -152,10 +158,158 @@ class FsspecWriter(FileSystemWriter):
 
 
 class FsspecReader(FileSystemReader):
-    def __init__(self, path: str | os.PathLike, **kwargs) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike,
+        max_batch_size: int = 64,
+        max_batch_bytes: int = 256 * 1024 * 1024,
+        cpu_workers: int | None = None,
+        **kwargs,
+    ) -> None:
+        """
+        Initialize the FsspecReader pointing to `path`.
+
+        Args:
+            path: directory or URL where the checkpoint will be read from.
+            max_batch_size: Maximum number of read items per batched cat_ranges call.
+                Defaults to 64.
+            max_batch_bytes: Maximum cumulative byte size per batched cat_ranges call
+                to bound transient memory usage. Defaults to 256 MiB.
+            cpu_workers: Number of worker threads for parallel CPU deserialization.
+                Defaults to min(16, max(1, cpu_count // local_world_size)).
+            **kwargs: Additional storage options passed to fsspec url_to_fs.
+        """
         super().__init__(path)
+        self.max_batch_size = max(1, max_batch_size)
+        self.max_batch_bytes = max(1, max_batch_bytes)
+        if cpu_workers is None:
+            local_world_size = max(1, int(os.environ.get("LOCAL_WORLD_SIZE", 1)))
+            total_cpus = os.cpu_count() or 4
+            cpu_workers = min(16, max(1, total_cpus // local_world_size))
+        self.cpu_workers = max(1, cpu_workers)
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
+
+    def _supports_batched_cat_ranges(self) -> bool:
+        if not (self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges")):
+            return False
+        # AsyncFileSystem subclasses (gcsfs, s3fs) bind the sync cat_ranges onto
+        # the instance via mirror_sync_methods, so it is not on the class.
+        if isinstance(self.fs.fs, fsspec.asyn.AsyncFileSystem):
+            return True
+        # The AbstractFileSystem fallback reopens the file per range, which is
+        # slower than the single stream per shard in FileSystemReader.read_data.
+        cat_ranges_fn = getattr(
+            self.fs.fs.cat_ranges, "__func__", self.fs.fs.cat_ranges
+        )
+        return cat_ranges_fn is not fsspec.AbstractFileSystem.cat_ranges
+
+    def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        # The batched path writes into target tensors from several threads, so
+        # it needs ``LoadPlanner.supports_parallel_load``.
+        if (
+            not plan.items
+            or not getattr(planner, "supports_parallel_load", False)
+            or not self._supports_batched_cat_ranges()
+        ):
+            return super().read_data(plan, planner)
+
+        reqs = sorted(
+            plan.items,
+            key=lambda req: (
+                self.storage_data[req.storage_index].relative_path,
+                self.storage_data[req.storage_index].offset,
+            ),
+        )
+
+        batches = []
+        batch = []
+        paths = []
+        starts = []
+        ends = []
+        batch_bytes = 0
+
+        for req in reqs:
+            item_md = self.storage_data[req.storage_index]
+            if batch and (
+                len(batch) >= self.max_batch_size
+                or batch_bytes + item_md.length > self.max_batch_bytes
+            ):
+                batches.append((paths, starts, ends, batch))
+                batch = []
+                paths = []
+                starts = []
+                ends = []
+                batch_bytes = 0
+            batch.append(req)
+            paths.append(self.fs.concat_path(self.path, item_md.relative_path))
+            starts.append(item_md.offset)
+            ends.append(item_md.offset + item_md.length)
+            batch_bytes += item_md.length
+
+        if batch:
+            batches.append((paths, starts, ends, batch))
+
+        # ``load_bytes`` mutates the planner's state_dict, so it stays
+        # serialized. The tensor path is covered by ``supports_parallel_load``,
+        # which guarantees distinct items resolve to non-overlapping storage.
+        load_bytes_lock = threading.Lock()
+
+        def fetch_batch(b):
+            bp, bs, be, br = b
+            chunks = self.fs.fs.cat_ranges(bp, bs, be, on_error="raise")
+            # ``on_error`` is advisory: fsspec honors it only since 2026.7.0 and
+            # other backends may ignore it, returning exceptions in-band.
+            # Unchecked, they reach ``io.BytesIO`` as an opaque TypeError.
+            for path, start, end, chunk in zip(bp, bs, be, chunks):
+                if isinstance(chunk, BaseException):
+                    raise RuntimeError(
+                        f"Failed to read bytes [{start}, {end}) from {path}"
+                    ) from chunk
+            return chunks, br
+
+        def process_chunk(req, chunk_data):
+            self._load_item(
+                req, io.BytesIO(chunk_data), planner, load_bytes_lock=load_bytes_lock
+            )
+
+        with (
+            concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.cpu_workers
+            ) as cpu_executor,
+            concurrent.futures.ThreadPoolExecutor(max_workers=1) as prefetch_executor,
+        ):
+            next_io: concurrent.futures.Future | None = None
+            try:
+                next_io = prefetch_executor.submit(fetch_batch, batches[0])
+
+                for idx in range(len(batches)):
+                    chunks, b_reqs = next_io.result()
+                    next_io = None
+
+                    if idx + 1 < len(batches):
+                        next_io = prefetch_executor.submit(
+                            fetch_batch, batches[idx + 1]
+                        )
+
+                    futures = [
+                        cpu_executor.submit(process_chunk, req, chunk_data)
+                        for req, chunk_data in zip(b_reqs, chunks)
+                    ]
+                    for f in futures:
+                        f.result()
+            finally:
+                # __exit__ calls shutdown(wait=True) without ``cancel_futures``,
+                # so on failure it would drain the queue instead of dropping it.
+                # Waiting is left to __exit__; the in-flight prefetch is
+                # cancelled so its result is not silently discarded.
+                if next_io is not None:
+                    next_io.cancel()
+                cpu_executor.shutdown(wait=False, cancel_futures=True)
+
+        fut: Future[None] = Future()
+        fut.set_result(None)
+        return fut
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
