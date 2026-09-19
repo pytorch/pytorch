@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import types
 import unittest
 from unittest import mock, skipUnless
 
@@ -79,6 +80,53 @@ class MockSchedulerTest(TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
         cls._exit_stack.close()
+
+
+class GetPwRedSplitsTest(MockSchedulerTest):
+    """Contract of get_pw_red_splits for members outside the group's frame."""
+
+    @staticmethod
+    def _fake_node(pw_sizes):
+        return types.SimpleNamespace(
+            _body=types.SimpleNamespace(
+                sizes=(pw_sizes, []),
+                iter_vars=[sympy.Symbol(f"p{i}") for i in range(len(pw_sizes))],
+                reduce_vars=[],
+            ),
+            is_reduction=lambda: False,
+        )
+
+    def test_unmatched_member_declines_only_with_the_flag(self):
+        # #197077: an RMSNorm-style epilogue can broadcast the per-row
+        # reduction over an extra axis, landing its pointwise product on
+        # red_numel instead of pointwise_numel or pointwise_numel * red_numel.
+        # With none_if_not_divisible the member declines gracefully; without
+        # it the assert still guards the frame contract.
+        from torch._inductor.tiling_utils import get_pw_red_splits
+
+        node = self._fake_node([sympy.Integer(4096), sympy.Integer(4)])
+
+        with self.assertRaises(AssertionError):
+            get_pw_red_splits(node, sympy.Integer(4096), sympy.Integer(16384))
+        self.assertIsNone(
+            get_pw_red_splits(
+                node,
+                sympy.Integer(4096),
+                sympy.Integer(16384),
+                none_if_not_divisible=True,
+            )
+        )
+
+    def test_member_spanning_the_full_frame_still_splits(self):
+        from torch._inductor.tiling_utils import get_pw_red_splits
+
+        node = self._fake_node([sympy.Integer(4096), sympy.Integer(16384)])
+
+        (_, pw_splits), (_, red_splits) = get_pw_red_splits(
+            node, sympy.Integer(4096), sympy.Integer(16384)
+        )
+        self.assertEqual(list(pw_splits), [sympy.Integer(4096)])
+        self.assertEqual(list(red_splits), [sympy.Integer(16384)])
 
 
 @inductor_config.patch(loop_ordering_after_fusion=True)
