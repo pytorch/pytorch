@@ -3381,15 +3381,23 @@ class TestPrecompileCaptureFiles(TestCase):
             z = served(self.model, self.x)
         self.assertEqual(z.dtype, torch.float32)
         self.assertEqual(z, y)
+        # The inductor driver's guard is unobservable on this model, so what pins it on
+        # every build is its presence in the artifact text (the extern-kernel test below
+        # exercises it, but only where mkldnn is there to lower to).
+        with self._capture(backend="inductor") as cap:
+            cap(self.model, self.x)
+        self.assertIn("_DisableAutocast", self._read(self.artifact).decode())
 
     @unittest.skipUnless(
-        torch.backends.mkldnn.is_available(), "the LSTM lowers to mkldnn_rnn_layer"
+        torch.backends.mkldnn.is_available() and torch._C._get_mkldnn_enabled(),
+        "the LSTM lowers to mkldnn_rnn_layer only with mkldnn built AND enabled",
     )
     def test_served_extern_kernel_ignores_ambient_autocast(self):
         # nn.LSTM lowers to aten.mkldnn_rnn_layer.default, which IS registered for
         # CPU autocast and which the inductor artifact calls as a fallback: without the
-        # disable the served call casts a second time and comes back in bfloat16 (or,
-        # as here, fails inside oneDNN on the mixed-dtype primitive).
+        # disable the served call casts a second time, so the float32 assertion below no
+        # longer holds -- on this primitive the second cast in fact fails inside oneDNN
+        # before any dtype comes back.
         # Inductor only: the eager driver has no extern kernels, so on that backend
         # this is test_served_output_ignores_ambient_autocast with a bigger graph.
         model = torch.nn.LSTM(8, 8, batch_first=True)
