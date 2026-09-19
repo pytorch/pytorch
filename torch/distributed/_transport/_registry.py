@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 _ENTRY_POINT_GROUP = "torch.distributed.transports"
 _BUILTIN_ENTRY_POINTS = {
     "nixl": "torch.distributed._transport._nixl:NIXLTransport",
+    "tcp": "torch.distributed._transport._tcp:TCPTransport",
 }
 
 TransportFactory = Callable[..., Transport]
