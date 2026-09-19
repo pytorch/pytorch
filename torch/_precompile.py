@@ -56,7 +56,10 @@ calls run in whatever grad mode the caller sets. ``training=True`` is what asks 
 dynamo tracer to lower the backward eagerly; the make_fx tracer instead traces through
 whatever ``.backward()`` ``fn`` runs (invariant 5). Serve the artifact under the grad mode
 it was captured in: a dynamo artifact checks it (grad mode is a ``GLOBAL_STATE`` guard),
-a make_fx artifact does not, so there the mismatch is the caller's to avoid.
+a make_fx artifact does not, so there the mismatch is the caller's to avoid. Ambient
+autocast is instead neutralized: a make_fx artifact runs its graph with autocast excluded,
+so the casts the capture ran under are baked in and the serving process's autocast state
+is neither applied a second time nor disturbed.
 
 The artifact is a self-contained, executable ``python_code`` string plus a
 companion integrity-tagged ``cache``. With ``backend="inductor"`` (the default) the
