@@ -46,8 +46,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorTestBase,
     map_local_tensor_for_rank,
+    NUM_DEVICES,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -1007,7 +1009,9 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
-class DTensorSubclassTest(DTensorTestBase):
+class DTensorSubclassTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     def _make_dtensor(self, cls, mesh):
         base = DTensor.from_local(
             torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
