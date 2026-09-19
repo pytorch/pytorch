@@ -107,6 +107,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
@@ -4312,7 +4313,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
-        ret.grad = grad
+        # A .grad the guards never read is pruned to the _Missing sentinel on
+        # the way in (only a training capture has one to prune at all); it was
+        # not guarded on, so the rebuilt tensor does not need it, but assigning
+        # the sentinel raises.
+        ret.grad = grad if isinstance(grad, torch.Tensor) else None
         return ret
 
     @classmethod
@@ -4710,7 +4715,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 obj.device,
                 pytype,
                 dispatch_keys.raw_repr(),
-                obj.grad,
+                # Whatever .grad holds, without the non-leaf warning: a plain
+                # non-leaf has None, a retained-grad non-leaf (torch.optim permits
+                # one as a param) or a fake mirroring one has a real tensor.
+                safe_grad(obj),
             )
 
         elif isinstance(obj, torch.nn.Module):
