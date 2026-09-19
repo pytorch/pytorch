@@ -2494,18 +2494,17 @@ class InstructionTranslatorBase(
                     offender = f"{offender} named {bound_name}"
                 # f_globals is the root frame's: an inlined callee's own module is not
                 # where the alias lives, so the message names the module whose it is.
-                scope = f_globals.get("__name__") or "<a scope with no __name__>"
+                owner = f_globals.get("__name__")
+                scope = owner if type(owner) is str else "<a scope with no __name__>"
                 # A graph break only where the traced bytecode chose the name,
-                # IMPORT_NAME. The codegen callers keep the hard error
-                # because an Unsupported there is not a graph break
-                # but a frame skipped after the backend ran, silent at
-                # default log levels; the error is loud but unlocated,
-                # codegen running under TracingContext.clear_frame,
-                # which attaches no user stack. The tracing-phase
-                # callers keep it too, for now: whether they should
-                # break instead is deferred, so for a module a frame
-                # both imports and inlines from, whichever caller gets
-                # here first decides.
+                # IMPORT_NAME. Two codegen callers, make_call_generated_code's pregraph-
+                # marker imports, keep the hard error because an Unsupported there is
+                # not a graph break but a frame skipped after the backend ran, silent at
+                # default log levels, and the error is loud but unlocated, that code
+                # running under TracingContext.clear_frame, which attaches no user
+                # stack. The other callers keep it too, for now: whether they should
+                # break instead is deferred, so for a module a frame both imports and
+                # inlines from, whichever caller gets here first decides.
                 if not graph_break_ok:
                     raise AssertionError(
                         f"import alias {alias} for {module_name} is already bound to "
@@ -2520,6 +2519,7 @@ class InstructionTranslatorBase(
                         f"Remove or rename the global {alias} from the globals of {scope}.",
                         "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
                         "When this graph break is not raised as an error, nothing guards this global, so fixing it later does not by itself retrace the frame; a frame skipped here stays skipped until torch._dynamo.reset().",
+                        *graph_break_hints.USER_ERROR,
                     ],
                 )
         # Recorded only once the check has passed: the package entry outlives a

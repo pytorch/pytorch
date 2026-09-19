@@ -1925,8 +1925,8 @@ def add(x, y):
             sys.modules[name] = module
             fn.__globals__[alias] = "not a module"
             refused = (
-                f"alias {alias} for {name} is already bound to a str "
-                f"in the globals of {fn.__globals__['__name__']}"
+                f"alias {re.escape(alias)} for {re.escape(name)} is already bound "
+                f"to a str in the globals of {re.escape(fn.__globals__['__name__'])}"
             )
             with self.assertRaisesRegex(AssertionError, refused):
                 torch.compile(fn, backend="eager")(*args)
@@ -1971,11 +1971,14 @@ def add(x, y):
             self.assertEqual(len(package._codes[fn.__code__].guarded_codes), 1)
             for entry in package._codes.values():
                 self.assertNotIn(alias, entry.import_sources)
+            self.assertTrue(any(e.import_sources for e in package._codes.values()))
             for backend_id, backend in package.cached_backends.items():
                 ctx.record_eager_backend(backend_id, backend)
             ctx.save_package(package, self.path())
             torch._dynamo.reset()
             package, backends = ctx.load_package(fn, self.path())
+            for entry in package._codes.values():
+                self.assertNotIn(alias, entry.import_sources)
             package.install(backends)
             self.assertIs(fn.__globals__[alias], foreign)
         finally:
