@@ -29,7 +29,6 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
     _Missing,
-    _NN_MODULE_STATE_ATTRS,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -1234,7 +1233,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         m = torch.nn.Linear(2, 2)
         pickler = GuardsStatePickler({id(m): m}, {}, {}, {}, io.BytesIO())
         pickler.dump({"m": m})
-        for name in sorted(_NN_MODULE_STATE_ATTRS):
+        for name in (
+            "_parameters",
+            "_buffers",
+            "_modules",
+            "_non_persistent_buffers_set",
+        ):
             self.assertNotIn(id(m.__dict__[name]), pickler.missing_values, name)
         self.assertIn(id(m.__dict__["_forward_hooks"]), pickler.missing_values)
 
@@ -1244,8 +1248,8 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         lstm = torch.nn.LSTM(4, 4)
         pickler = GuardsStatePickler({id(lstm): lstm}, {}, {}, {}, io.BytesIO())
         pickler.dump({"m": lstm})
-        self.assertNotIn(id(lstm._all_weights), pickler.missing_values)
-        self.assertEqual(pickler.missing_values, {})
+        for name in ("_all_weights", "_flat_weights_names", "_flat_weights"):
+            self.assertNotIn(id(lstm.__dict__[name]), pickler.missing_values, name)
 
     def test_prunes_an_unguarded_builtin_container_holding_a_generator(self):
         # The C pickler saves an exact list/dict/tuple by type and never consults
