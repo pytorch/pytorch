@@ -737,6 +737,18 @@ class TestReductions(TestCase):
                            [0, 1, 1],
                            [1, 1, 1]], device=device, dtype=torch.uint8))
 
+    def test_invalid_keyword_error_lists_only_unknown_keywords(self, device):
+        x = torch.randn(3, 3, device=device)
+        with self.assertRaises(TypeError) as context:
+            torch.mean(x, dims=(0, 1), keepdim=True)
+        incorrect_keyword_lines = [
+            line
+            for line in str(context.exception).splitlines()
+            if "some of the keywords were incorrect:" in line
+        ]
+        self.assertEqual(len(incorrect_keyword_lines), 1)
+        self.assertTrue(incorrect_keyword_lines[0].rstrip().endswith(": dims"))
+
     def test_numpy_named_args(self, device):
         x1 = torch.randn(10, device=device)
         x2 = torch.randn(10, device=device)
