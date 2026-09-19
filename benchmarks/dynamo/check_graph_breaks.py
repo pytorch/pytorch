@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import sys
 import textwrap
@@ -16,12 +17,50 @@ flaky_models = {
     "detectron2_fcos_r_50_fpn",
 }
 
+# BenchmarkRunner.check_accuracy normalizes eager_two_runs_differ to pass, so
+# a pass can legitimately have no Dynamo counters. Keep in sync with the
+# non_deterministic list in torchbench.yaml.
+PASS_WITHOUT_CAPTURE_MODELS = {"mobilenet_v3_large"}
+
+CAPTURE_OPTIONAL_STATUSES = {
+    "OOM",
+    "fail_to_run",
+    "model_fail_to_load",
+    "pass_due_to_skip",
+    "timeout",
+}
+
 
 def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
     try:
         return csv.loc[csv["name"] == model_name][field].item()
     except Exception:
         return None
+
+
+def _parse_counter(value: Any) -> int | None:
+    if pd.api.types.is_bool(value):
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value < 0 or not value.is_integer():
+        return None
+    return int(value)
+
+
+def _capture_required(model: str, actual_status: str, expected_status: str) -> bool:
+    if actual_status == "pass" and model in PASS_WITHOUT_CAPTURE_MODELS:
+        return False
+    # check_accuracy owns status changes. A matching non-pass result is a
+    # reviewed expected failure, while eager/skip/run failures may occur before
+    # Dynamo has a chance to capture a graph.
+    if actual_status == expected_status and actual_status != "pass":
+        return False
+    return not (
+        actual_status in CAPTURE_OPTIONAL_STATUSES or actual_status.startswith("eager_")
+    )
 
 
 # Dynamo metrics tracked against the expected-accuracy baselines, and how each is
@@ -39,10 +78,10 @@ def get_field(csv: pd.DataFrame, model_name: str, field: str) -> Any | None:
 # directions (fewer graphs can mean graphs were merged / fewer breaks -- an
 # improvement -- not less capture; more can mean fragmentation), and it is
 # already covered indirectly by graph_breaks (fragmentation) and calls_captured
-# (how much is captured). It is still read from the actual CSV below for the
-# dynamo_called check, just not gated.
-# A metric is only checked for models whose expected baseline has that column,
-# so baselines predating a metric are silently skipped until regenerated.
+# (how much is captured). It must be positive when capture is required, unless
+# the baseline explicitly expects zero captured ops.
+# A metric is only compared when the expected row supplies a value, preserving
+# baselines that predate a metric or leave it unavailable for a particular model.
 # Keep in sync with METRIC_COLUMNS in ci_expected_accuracy/update_expected.py
 # (the baseline writer).
 COVERAGE_DROP_TOL = 0.05  # a >5% drop in captured ops is a regression
@@ -72,6 +111,36 @@ def check_graph_breaks(
 ) -> tuple[list[str], str]:
     failed: list[str] = []
     improved: list[str] = []
+    invalid: list[str] = []
+
+    for label, csv in (("actual", actual_csv), ("expected", expected_csv)):
+        if csv.empty:
+            return [f"{label} CSV"], f"Error: {label} CSV contains no model results."
+        required = {"name", "accuracy"}
+        if label == "expected":
+            required.add("graph_breaks")
+        missing = required - set(csv.columns)
+        if missing:
+            columns = ", ".join(sorted(missing))
+            return [f"{label} CSV"], (
+                f"Error: {label} CSV is missing required columns: {columns}."
+            )
+
+        names = csv["name"]
+        for row_number, model in enumerate(names, start=2):
+            if not isinstance(model, str) or not model.strip():
+                return [f"{label} CSV"], (
+                    f"Error: {label} CSV row {row_number} has a missing or invalid "
+                    f"model name: {model!r}."
+                )
+        duplicates = names[names.duplicated(keep=False)].drop_duplicates()
+        if not duplicates.empty:
+            models = " ".join(duplicates)
+            return list(duplicates), (
+                f"Error: {label} CSV contains multiple results for: {models}."
+            )
+
+    expected_models = set(expected_csv["name"])
 
     if "rocm" in expected_filename:
         flaky_models.update(
@@ -107,15 +176,9 @@ def check_graph_breaks(
         )
 
     for model in actual_csv["name"]:
-        num_graphs = get_field(actual_csv, model, "unique_graphs")
-        dynamo_called = num_graphs is not None and int(num_graphs) != 0
-
-        expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
         flaky = model in flaky_models
 
-        # graph_breaks is the primary metric: if the model has no baseline
-        # graph_breaks entry it is missing from the baseline entirely.
-        if expected_graph_breaks is None:
+        if model not in expected_models:
             actual_graph_breaks = get_field(actual_csv, model, "graph_breaks")
             print(
                 f"{model:34}  {'MISSING:':19} "
@@ -123,25 +186,74 @@ def check_graph_breaks(
             )
             improved.append(model)
             continue
-        if not dynamo_called:
-            print(f"{model:34}  EAGER_FAILED")
+
+        actual_status = get_field(actual_csv, model, "accuracy")
+        expected_status = get_field(expected_csv, model, "accuracy")
+        if not isinstance(actual_status, str) or not actual_status.strip():
+            print(
+                f"{model:34}  {'INVALID:':19} "
+                f"accuracy={actual_status!r}, expected a result status"
+            )
+            invalid.append(model)
             continue
+        if not isinstance(expected_status, str) or not expected_status.strip():
+            print(
+                f"{model:34}  {'INVALID:':19} "
+                f"expected accuracy={expected_status!r}, expected a result status"
+            )
+            invalid.append(model)
+            continue
+
+        num_graphs_raw = get_field(actual_csv, model, "unique_graphs")
+        num_graphs = _parse_counter(num_graphs_raw)
+        capture_required = _capture_required(model, actual_status, expected_status)
+        capture_unavailable = num_graphs_raw is None or pd.isna(num_graphs_raw)
+        if num_graphs is None and (capture_required or not capture_unavailable):
+            print(
+                f"{model:34}  {'INVALID:':19} "
+                f"unique_graphs={num_graphs_raw!r}, expected a finite nonnegative integer"
+            )
+            invalid.append(model)
+            continue
+        expected_ops = _parse_counter(get_field(expected_csv, model, "calls_captured"))
+        if capture_required and num_graphs == 0 and expected_ops != 0:
+            print(
+                f"{model:34}  {'INVALID:':19} "
+                "unique_graphs=0, expected Dynamo graph capture"
+            )
+            invalid.append(model)
+            continue
+        check_metrics = capture_required or (num_graphs is not None and num_graphs > 0)
 
         model_failed = False
         model_improved = False
+        model_invalid = False
         printed_detail = False
         for field, mode in TRACKED_METRICS.items():
-            expected = get_field(expected_csv, model, field)
-            actual = get_field(actual_csv, model, field)
-            # Skip a metric absent from this baseline or the output, or whose
-            # cell is unreadable (NaN) -- get_field returns NaN for a
-            # present-but-empty cell, which must not be treated as a value.
-            if (
-                expected is None
-                or actual is None
-                or pd.isna(expected)
-                or pd.isna(actual)
-            ):
+            expected_raw = get_field(expected_csv, model, field)
+            expected_missing = expected_raw is None or pd.isna(expected_raw)
+            if field != "graph_breaks" and expected_missing:
+                continue
+            actual_raw = get_field(actual_csv, model, field)
+            expected = _parse_counter(expected_raw)
+            actual = _parse_counter(actual_raw)
+            if expected is None:
+                print(
+                    f"{model:34}  {'INVALID:':19} "
+                    f"expected {field}={expected_raw!r}, expected a finite nonnegative integer"
+                )
+                model_invalid = True
+                continue
+            if actual is None:
+                if not check_metrics and (actual_raw is None or pd.isna(actual_raw)):
+                    continue
+                print(
+                    f"{model:34}  {'INVALID:':19} "
+                    f"{field}={actual_raw!r}, expected a finite nonnegative integer"
+                )
+                model_invalid = True
+                continue
+            if not check_metrics:
                 continue
             result = _classify(actual, expected, mode)
             if result == "PASS":
@@ -157,6 +269,12 @@ def check_graph_breaks(
             print(f"{model:34}  {status:19} {field}={actual}, expected={expected}")
             printed_detail = True
 
+        if model_invalid:
+            invalid.append(model)
+            continue
+        if not check_metrics:
+            print(f"{model:34}  EAGER_FAILED")
+            continue
         if not printed_detail:
             status = "PASS_BUT_FLAKY" if flaky else "PASS"
             print(f"{model:34}  {status}")
@@ -166,7 +284,15 @@ def check_graph_breaks(
             improved.append(model)
 
     msg = ""
-    if failed or improved:
+    if invalid or failed or improved:
+        if invalid:
+            msg += textwrap.dedent(
+                f"""
+            Error: {len(invalid)} models have missing or invalid required Dynamo metrics:
+                {" ".join(invalid)}
+
+            """
+            )
         if failed:
             msg += textwrap.dedent(
                 f"""
@@ -184,16 +310,17 @@ def check_graph_breaks(
 
             """
             )
-        sha = os.getenv("SHA1", "{your CI commit sha}")
-        msg += textwrap.dedent(
-            f"""
+        if failed or improved:
+            sha = os.getenv("SHA1", "{your CI commit sha}")
+            msg += textwrap.dedent(
+                f"""
         If this change is expected, you can update `{expected_filename}` to reflect the new baseline.
         from pytorch/pytorch root, run
         `python benchmarks/dynamo/ci_expected_accuracy/update_expected.py {sha}`
         and then `git add` the resulting local changes to expected CSVs to your commit.
         """
-        )
-    return failed or improved, msg
+            )
+    return invalid or failed or improved, msg
 
 
 def main():
@@ -202,8 +329,11 @@ def main():
     parser.add_argument("--expected", type=str, required=True)
     args = parser.parse_args()
 
-    actual = pd.read_csv(args.actual)
-    expected = pd.read_csv(args.expected)
+    try:
+        actual = pd.read_csv(args.actual, dtype={"name": str})
+        expected = pd.read_csv(args.expected, dtype={"name": str})
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as e:
+        parser.error(str(e))
 
     failed, msg = check_graph_breaks(actual, expected, args.expected)
     if failed:
