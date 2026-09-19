@@ -4175,7 +4175,7 @@ class TestCase(expecttest.TestCase):
                 f"changed from {self._prev_torch_function_state} to {tf_state}"
             )
 
-        # Detect leaked mutations to the six fp32 precision flags. Tests that
+        # Detect leaked mutations to the fp32 precision flags. Tests that
         # legitimately mutate these globals must restore them themselves (e.g.
         # via recover_orig_fp32_precision or setUpClass/tearDownClass).
         # Escape hatch: PYTORCH_DISABLE_FP32_PRECISION_LEAK_CHECK=1 disables
@@ -6624,11 +6624,36 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
 
+# The legacy getter cross-checks the Float32MatmulPrecision enum against the
+# new backend-specific values and raises when they disagree, so a snapshot
+# taken while a test has them out of sync would throw from setUp/tearDown
+# instead of reporting the leak. Report a sentinel instead; restoring the
+# backend-specific values is what puts the pair back in sync.
+_INCONSISTENT_MATMUL_PRECISION = "<inconsistent legacy/new matmul precision>"
+
+
+def _get_legacy_float32_matmul_precision():
+    try:
+        return torch.get_float32_matmul_precision()
+    except RuntimeError:
+        return _INCONSISTENT_MATMUL_PRECISION
+
+
+def _set_legacy_float32_matmul_precision(value):
+    if value != _INCONSISTENT_MATMUL_PRECISION:
+        torch.set_float32_matmul_precision(value)
+
+
 # Single source of truth for which globals count as "fp32 precision state".
 # Add a new flag here and both recover_orig_fp32_precision and the TestCase
 # leak detector pick it up automatically.
 def _fp32_precision_flag_specs():
     return (
+        # Must stay first: set_float32_matmul_precision also writes the cuda
+        # and mkldnn matmul entries, so it has to be restored before them.
+        ("torch.get_float32_matmul_precision()",
+            _get_legacy_float32_matmul_precision,
+            _set_legacy_float32_matmul_precision),
         ("torch.backends.cuda.matmul.fp32_precision",
             lambda: torch.backends.cuda.matmul.fp32_precision,
             lambda v: setattr(torch.backends.cuda.matmul, "fp32_precision", v)),
