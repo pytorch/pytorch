@@ -2412,13 +2412,12 @@ class InstructionTranslatorBase(
             )
         self.output.side_effects.store_global(variable, name, value)
 
-    # Memo note: this memo only exists for the duration of this
-    # InstructionTranslator - so it should be safe to do. graph_break_ok is not
-    # part of its key (which is why this is not @cache_method, whose key is the
-    # whole argument tuple): it is read only when the alias slot is taken, which
-    # a memo hit rules out because the memo is written only past that check (a
-    # refusal memoizes nothing), so keying on it would only run the body a
-    # second time for a name two callers both resolve.
+    # Keyed by module_name alone, not the whole argument tuple as @cache_method
+    # would key it, so a later argument cannot silently split the memo. Per
+    # translator, as the decorator was, and written only past the alias check.
+    # graph_break_ok stays out of the key: a memo hit means this translator bound
+    # the alias, an inlined translator's miss finds f_globals[alias] is value,
+    # and a taken slot is decided by each caller's own flag.
     def import_source(
         self, module_name: str, graph_break_ok: bool = False
     ) -> GlobalSource:
@@ -2560,16 +2559,12 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
-            # Before import_source, which binds the result into the traced
-            # frame's globals: a non-module sys.modules entry stays out of them.
-            # Only this arm can take the check: a replayed value is a DummyModule,
-            # not a ModuleType, so it would refuse every replay -- and needs none,
-            # add_local_mod having rejected non-modules when the record was written.
-            # pyrefly: ignore [unbound-name]
+            # A non-module sys.modules entry must not reach import_source, which
+            # binds the result into the traced globals. The replay arm needs no
+            # check: its values are the DummyModules add_local_mod admitted.
             if not isinstance(value, types.ModuleType):
                 unimplemented(
                     gb_type="Bad import result",
-                    # pyrefly: ignore [unbound-name]
                     context=typestr(value),
                     explanation="Import result is not a Python module.",
                     hints=[],
