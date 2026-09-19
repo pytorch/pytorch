@@ -54,6 +54,7 @@ from ..runtime import triton_heuristics
 from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
+    DeviceProperties,
     get_warp_size,
     native_matmul_persistent_rblock,
     ReductionHint,
@@ -138,7 +139,6 @@ from .triton_utils import (
     select_tile_hint,
     should_unwrap_unspec_arg,
     signature_to_meta,
-    triton_meta_device_props,
     use_block_ptr_enabled,
     use_uint8_triton_storage_for_cuda_float8_e4m3fn,
 )
@@ -7834,13 +7834,26 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         triton_meta_signature = signature_to_meta(
             signature, size_dtype=self.index_dtype, argdefs=argdefs
         )
+        from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+        props_device = V.graph.get_current_device_or_throw()
+        if _coor_enabled():
+            # compile-on-one-rank: drop the rank-specific index so this kernel's triton_meta
+            # (hence its cache key and the generated code) is byte-identical across ranks;
+            # the launcher resolves the real device at load time.
+            # NB: torch.device("cuda").index is None, not 0 -- that None is what reaches
+            # DeviceProperties.create below. It is not merely cosmetic for the cache key:
+            # index=None is the sentinel _resolve_load_device and make_launcher
+            # (triton_heuristics.py) use to set kernel.device_agnostic, which enables the
+            # per-device module/function handles. Keeping the index here would still give
+            # byte-identical source on every rank while silently disabling those handles --
+            # a wrong-device bug that a byte-identity check would not catch.
+            props_device = torch.device(props_device.type)
         triton_meta: TritonMeta = cast(
             TritonMeta,
             {
                 "signature": triton_meta_signature,
-                "device": triton_meta_device_props(
-                    V.graph.get_current_device_or_throw()
-                ),
+                "device": DeviceProperties.create(props_device),
                 "constants": {},
                 "native_matmul": (
                     torch._inductor.config.triton.native_matmul
@@ -8714,6 +8727,11 @@ class TritonScheduling(SIMDScheduling):
 
         compile_wrapper = IndentedBuffer()
 
+        # The wrapper literal below is the dedented, stripped source; the eager
+        # submission must be the same bytes so CompiledTritonKernels (keyed on the
+        # exact string) hits at wrapper time instead of compiling the kernel twice
+        # and overwriting the same cache file.
+        src_code = "\n" + textwrap.dedent(src_code).strip() + "\n"
         if async_compile.use_process_pool():
             # The process pool is warm, we can shell out to workers right away. This
             # allows us to save the result in async_compile.CompiledTritonKernels,
