@@ -154,6 +154,9 @@ class CuTeDSLEpilogueArguments:
         result.traced_epilogue = None
         return result
 
+    def copy(self) -> CuTeDSLEpilogueArguments:
+        return self.with_tensors(self.tensors)
+
     @property
     def parameters(self) -> list[Any]:
         return list(self.tensors.values())
@@ -664,6 +667,7 @@ def _lookup_gemm_kernel(
 
     if base_kernel is None and fast:
         base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+    epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
         kernel_name,
         epilogue_args,

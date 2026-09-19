@@ -1983,19 +1983,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
     M, N, K = 512, 512, 512
 
-    def _supports_scalar_reduce(self):
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
-            NVUniversalGemmScheduling,
-        )
-
-        return NVUniversalGemmScheduling._supports_scalar_reduce()
-
-    def _assert_scalar_reduce_marker(self, code, marker):
-        if self._supports_scalar_reduce():
-            self.assertIn(marker, code)
-        else:
-            self.assertNotIn("'local_reduce': GemmReductionArguments", code)
-
     def _compile_and_check(self, fn, *args):
         torch._dynamo.reset()
         with (
@@ -2135,9 +2122,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, epilogue(a @ b))
-        self._assert_scalar_reduce_marker(code, "VendoredDenseGemmEFCOperator")
-        self._assert_scalar_reduce_marker(code, "group=16")
-        self._assert_scalar_reduce_marker(code, f"feeds_main={feeds_main}")
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn("group=16", code)
+        self.assertIn(f"feeds_main={feeds_main}", code)
 
     @parametrize(
         "case",
@@ -2173,14 +2160,14 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
             self.assertEqual(case, (1, 64, "abs_amax"))
             self.assertIn("has_epilogue=True", code)
             return
-        self._assert_scalar_reduce_marker(code, "VendoredDenseGemmEFCOperator")
-        self._assert_scalar_reduce_marker(code, f"axis={axis}")
-        self._assert_scalar_reduce_marker(code, f"group={group}")
-        self._assert_scalar_reduce_marker(code, "reduction_type=None")
-        self._assert_scalar_reduce_marker(code, "source_fn=None")
+        self.assertIn("VendoredDenseGemmEFCOperator", code)
+        self.assertIn(f"axis={axis}", code)
+        self.assertIn(f"group={group}", code)
+        self.assertIn("reduction_type=None", code)
+        self.assertIn("source_fn=None", code)
         self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
         if axis == 0 or group > 32:
-            self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_COMBINE_FN_SRC")
+            self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
 
     @parametrize(
         "axis_group",
@@ -2371,9 +2358,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_COMBINE_FN_SRC")
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
-        self._assert_scalar_reduce_marker(code, "group=64")
+        self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+        self.assertIn("group=64", code)
 
     def test_bf16_grouped_n_reduce_post_op_feeds_main(self):
         m, n, k, group = 128, 128, 64, 4
@@ -2388,7 +2375,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(code, "feeds_main=True")
+        self.assertIn("feeds_main=True", code)
         self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
 
     def test_bf16_grouped_n_reduce_raw_feed_and_finalized_output(self):
@@ -2405,9 +2392,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(code, "feeds_main=True")
+        self.assertIn("feeds_main=True", code)
         self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     def test_bf16_grouped_m_mean_feeds_main_before_output_finalizer(self):
         m, n, k, group = 128, 64, 64, 64
@@ -2424,10 +2411,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(
-            code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC"
-        )
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
+        self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     def test_bf16_grouped_n_mean_feeds_main_before_output_finalizer(self):
         m, n, k, group = 128, 128, 64, 4
@@ -2443,10 +2428,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b)
         self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(
-            code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC"
-        )
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
+        self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     def test_bf16_grouped_n_composite_reduction_defers(self):
         m, n, k, group = 128, 64, 64, 4
@@ -2527,9 +2510,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b), atol=1e-2, rtol=1e-2)
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_COMBINE_FN_SRC")
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
-        self._assert_scalar_reduce_marker(code, "group=64")
+        self.assertIn("_LOCAL_REDUCE_COMBINE_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
+        self.assertIn("group=64", code)
 
     @parametrize("operation", ("mul", "sigmoid", "gelu"))
     def test_scaled_mm_pointwise_epilogue_fusion(self, operation):
@@ -2824,7 +2807,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        self._assert_scalar_reduce_marker(code, "output=")
+        self.assertIn("output=", code)
 
         if case == (1, "sum", 32):
             if not has_triton_reduction_ordering():
@@ -2901,8 +2884,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self._assert_scalar_reduce_marker(code, "VendoredDenseBlockScaledGemmEFC")
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
+        self.assertIn("VendoredDenseBlockScaledGemmEFC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     @parametrize(
         "axis_group",
@@ -3010,14 +2993,11 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         expected = fn(a, b, scale_a, scale_b)
         self.assertEqual(result[0], expected[0])
         self.assertEqual(result[1], expected[1])
-        if self._supports_scalar_reduce():
-            self.assertIn("output=", code)
-            self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
-            self._assert_scalar_reduce_marker(code, "reduction_type=None")
-            self._assert_scalar_reduce_marker(code, "source_fn=None")
-            self.assertIn(" * ", code)
-        else:
-            self.assertNotIn("'local_reduce': GemmReductionArguments", code)
+        self.assertIn("output=", code)
+        self.assertNotIn("_LOCAL_REDUCE_SOURCE_FN_SRC", code)
+        self.assertIn("reduction_type=None", code)
+        self.assertIn("source_fn=None", code)
+        self.assertIn(" * ", code)
 
     @config.patch(emulate_precision_casts=True)
     def test_scaled_mm_grouped_reduce_rejects_intermediate_fp16(self):
@@ -3085,7 +3065,7 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self._assert_scalar_reduce_marker(code, "feeds_main=True")
+        self.assertIn("feeds_main=True", code)
         self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
 
     def test_scaled_mm_grouped_reduce_raw_feed_and_finalized_output(self):
@@ -3121,9 +3101,9 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self._assert_scalar_reduce_marker(code, "feeds_main=True")
+        self.assertIn("feeds_main=True", code)
         self.assertNotIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     def test_scaled_mm_grouped_n_mean_feeds_main_before_output_finalizer(self):
         m, n, k, group = 128, 128, 512, 4
@@ -3145,10 +3125,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
 
         result, code, _ = self._compile_and_check(fn, a, b, scale_a, scale_b)
         self.assertEqual(result, fn(a, b, scale_a, scale_b))
-        self._assert_scalar_reduce_marker(
-            code, "_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC"
-        )
-        self._assert_scalar_reduce_marker(code, "_LOCAL_REDUCE_FINALIZER_FN_SRC")
+        self.assertIn("_LOCAL_REDUCE_CONSUMER_FINALIZER_FN_SRC", code)
+        self.assertIn("_LOCAL_REDUCE_FINALIZER_FN_SRC", code)
 
     def test_matmul_add_relu_chained(self):
         """Multi-op pointwise chain (a@b + bias → relu) collapses to one
