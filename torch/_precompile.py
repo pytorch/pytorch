@@ -190,9 +190,10 @@ it.
 #    functional. precompile does not own optimizer state; bring your own optimizer and
 #    zero grads as usual. The dynamo tracer accumulates by a different route (see the
 #    tracer note): a ``.backward()`` in ``fn`` graph-breaks, so at serve time the live
-#    autograd engine runs it -- under ``training=True`` through the compiled backward
-#    the artifact carries -- and does the accumulate itself; there is no
-#    harvested-output list. What matches make_fx: the accumulate arithmetic, frozen
+#    autograd engine runs it through the compiled backward and does the accumulate
+#    itself; there is no harvested-output list (``training=True`` lowers that backward
+#    at capture even if ``fn`` never calls ``.backward()``, so serving never compiles).
+#    What matches make_fx: the in-place accumulate of the common path, frozen
 #    params keeping ``.grad = None``, and ``fn``'s own return value. What differs: the
 #    engine goes through AccumulateGrad, so tensor hooks and post-accumulate-grad hooks
 #    on the params fire; a make_fx capture silently drops them end to end (capture
