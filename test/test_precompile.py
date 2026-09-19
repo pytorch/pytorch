@@ -2705,6 +2705,29 @@ class TestPrecompile(TestCase):
             def forward(self, t):
                 return self.lin(t)
 
+        # The one capture this commit turns from succeeding into a refusal: a marked leaf
+        # whose _base is SPARSE is itself strided (so the capture-wide scan passes it) and
+        # contiguous (so the torch.empty rebuild accepted it and captured), but the meta
+        # converter refuses a view out of a sparse tensor -- which only the probe consults.
+        sparse_view = torch.randn(4, 4).to_sparse().coalesce().values()
+        mark_unbacked(sparse_view, 0)
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+        ):
+            _precompile_pair(lambda m, t: m(t) + 1, torch.nn.Identity(), sparse_view)
+
+        # And the unmarked counterpart, which reaches the same helper on the unmarked-leaf
+        # branch (x carries the mark): invariant 1 claims that refusal for both paths.
+        with self.assertRaisesRegex(
+            PrecompileError, "user input 1 cannot be represented as a fake tensor"
+        ):
+            _precompile_pair(
+                lambda m, t, u: m(t) + u.sum(),
+                model,
+                x,
+                torch.randn(4, 4).to_sparse().coalesce().values(),
+            )
+
         for marked_input in (False, True):
             t = torch.randn(4, 3)
             if marked_input:
@@ -2783,6 +2806,9 @@ class TestPrecompile(TestCase):
         # The static hint covers the VALUE half of the family the clause catches, not just
         # the shape-producing half: a .item() is capturable on the unbacked path too.
         self.assertIn("A data-dependent value (.item())", str(cm.exception))
+        # ... and names the backend the remedy needs, so following it on an eager capture
+        # does not just trade this refusal for the inductor-only NotImplementedError.
+        self.assertIn("backend='inductor'", str(cm.exception))
 
     def test_mutating_custom_op_captures_without_a_registered_fake(self):
         # The one carve-out in "fake tracing needs a meta/fake kernel for every op": a
