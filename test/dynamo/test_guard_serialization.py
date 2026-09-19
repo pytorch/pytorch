@@ -1405,26 +1405,43 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_unsupported_types_prune_unless_a_guard_reads_them(self):
         # A c10d Backend is not a ProcessGroup, so an unguarded one failed the
-        # dump instead of pruning to the sentinel. A GUARDED unsupported value
-        # (a TYPE_MATCH on a stream local) must not prune either, or the rebuilt
-        # guard compares against the sentinel forever: it is refused by name,
-        # which pickle_guards_state reports as a bypass.
-        from torch._C._distributed_c10d import FakeProcessGroup
+        # dump instead of pruning to the sentinel; a Python Backend subclass
+        # (the torch.distributed.Backend extension point) cannot be pickled
+        # either. A GUARDED unsupported value (a TYPE_MATCH on a stream local)
+        # must not prune, or the rebuilt guard compares against the sentinel
+        # forever: it is refused by name, and pickle_guards_state re-raises that
+        # PackageError unchanged as the bypass reason.
+        from torch._C._distributed_c10d import Backend, FakeProcessGroup
+
+        class PyBackend(Backend):
+            def __init__(self):
+                super().__init__(0, 1)
+                self.calls = []
 
         pg = FakeProcessGroup._create_internal(0, world_size=2)
-        self.assertIsInstance(pg, torch._C._distributed_c10d.Backend)
+        self.assertIsInstance(pg, Backend)
         self.assertNotIsInstance(pg, torch._C._distributed_c10d.ProcessGroup)
         referent = _ModuleWithDtypeAttr()
-        for obj in (pg, torch.Stream(device="cpu"), weakref.ref(referent)):
+        for obj in (pg, PyBackend(), torch.Stream(device="cpu"), weakref.ref(referent)):
             with self.subTest(type(obj).__name__):
                 buf = io.BytesIO()
                 GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
                 self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
+                graph = types.SimpleNamespace(
+                    guards=[],
+                    local_scope={"o": obj},
+                    global_scope={},
+                    guard_on_key_order=set(),
+                )
+                builder = types.SimpleNamespace(
+                    guard_tree_values={id(obj): obj}, value_guarded_containers={}
+                )
                 with self.assertRaisesRegex(
-                    PackageError, f"a guard reads a {type(obj).__name__}"
+                    PackageError,
+                    f"^a guard reads a {type(obj).__name__}, which cannot be",
                 ):
-                    GuardsStatePickler({id(obj): obj}, {}, {}, {}, io.BytesIO()).dump(
-                        {"o": obj}
+                    pickle_guards_state(
+                        types.SimpleNamespace(output_graph=graph), builder
                     )
 
     def test_reduce_handles_an_empty_cell_reached_directly(self):
