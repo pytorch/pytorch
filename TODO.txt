@@ -1,0 +1,577 @@
+# tp_setattro / tp_descr_set - remaining work
+
+Open items found while implementing `tp_descr_set_impl`. Each was confirmed by
+running the case in eager and under `torch.compile(backend="eager",
+fullgraph=True)` and diffing the two. CPython is the source of truth.
+
+## Layering (the invariant most of the items below violate)
+
+`BuiltinVariable._call_setattr` was one flat dispatcher over three CPython
+layers. The replacement keeps them separate, and a fix belongs in exactly one:
+
+  1. `PyObject_SetAttr`            -> `generic_setattr`, called by
+                                      STORE_ATTR/DELETE_ATTR and
+                                      `setattr()`/`delattr()`. Resolves the name
+                                      and dispatches *virtually*.
+  2. `type(obj)->tp_setattro`      -> `VT.tp_setattro_impl`, overridden per VT
+                                      (UDOV traces a Python `__setattr__`,
+                                      NNModuleVariable does its bookkeeping,
+                                      TensorVariable still needs one).
+  3. `PyObject_GenericSetAttr`     -> `object_generic_setattr`: descriptor step
+                                      then instance-dict step. Reached as layer
+                                      2's default *and* by every explicit
+                                      `object.__setattr__` / `super().__setattr__`
+                                      -- those are *non-virtual* and must never
+                                      re-enter layer 1 or 2.
+
+The old isinstance chain (DefaultDict / UDOV / NestedUserFunction / Exception /
+Traceback / Deque -> `call_method("__setattr__")`) has no replacement by design:
+layer 1's virtual dispatch is the chain.
+
+## Correctness
+
+- [ ] **`del obj.missing` never raises.** `object_generic_setattr`
+      (`variables/object_protocol.py`) ends in `se.store_attr(obj, name_str,
+      DeletedVariable())` with no check that the attribute exists, so deleting an
+      absent attribute silently succeeds. CPython's
+      `_PyObject_GenericSetAttrWithDict` lets `PyDict_DelItem` fail with KeyError
+      and remaps it to AttributeError. The check has to consider both the real
+      instance dict and pending side-effect mutations, since the attribute may
+      have been created or deleted earlier in the same trace.
+      ```
+      fn_del_never_set  eager="'Plain' object has no attribute 'a'"  compiled='no error'
+      fn_del_input      eager="'Plain' object has no attribute 'a'"  compiled='no error'
+      fn_del_twice      eager="'Plain' object has no attribute 'a'"  compiled=Unsupported: Attempted to read a deleted variable
+      ```
+      Only item here that produces a wrong *result* rather than a wrong message.
+
+- [ ] **no-`__dict__` error message picks the wrong arm.** CPython keys it on
+      whether the MRO lookup found anything: found but its type has no
+      `tp_descr_set` -> `'X' object attribute 'a' is read-only`; not found ->
+      `'X' object has no attribute 'a' and no __dict__ for setting new
+      attributes`. `object_generic_setattr` instead keys on `isinstance(obj,
+      UserDefinedObjectVariable)` and on whether `tp_setattro_impl` is
+      overridden, emitting `'Slotted' object has no attribute 'attr'` for both.
+      Reproduces with `__slots__ = ()` plus a plain class attribute. `attr` (the
+      `mro_lookup` result) is already in scope, so this is a two-line rewrite.
+      Second, smaller mismatch in the same messages: `python_type_name()` gives
+      the bare `__name__` where CPython uses the qualified `tp_name`.
+      ```
+      eager     "'_struct.Struct' object has no attribute 'attr' and no __dict__ for setting new attributes"
+      compiled  "'Struct' object has no attribute 'attr'"
+      eager     "attribute 'format' of '_struct.Struct' objects is not writable"
+      compiled  "attribute 'format' of 'Struct' objects is not writable"
+      ```
+
+- [x] **C descriptor objects reached through `__dict__` are wrapped as UDOV.**
+      The builder produces `UserDefinedObjectVariable` for a `property` rather
+      than `PropertyVariable`, so the descriptor protocol is not modelled on it.
+      Same for `getset_descriptor`, `member_descriptor`, `_tuplegetter`. A
+      descriptor class written in Python works through both paths - this is
+      specifically about the C types.
+      ```
+      P.__dict__["v"].__set__(o, 5)  -> Unsupported: 'property' implements '__set__' in C
+      P.__dict__["v"].__get__(o, P)  -> AttributeError: type object 'UserDefinedObjectVariable'
+                                        has no attribute 'tp_descr_get_impl'
+      ```
+
+- [x] **Base `VariableTracker.tp_descr_get_impl` does not exist.** The
+      `tp_descr_set` half was added (graph-breaks with gb_type
+      `tp_descr_set_impl not implemented`, matching `tp_repr_impl` /
+      `mp_ass_subscript_impl`). The get half is still missing, so a VT whose type
+      has the slot but no model raises an internal AttributeError instead of
+      graph breaking. Reached via the item above.
+
+- [ ] **`tp_getset` entries have no setters.**
+      `GetSetDescriptorVariable.tp_descr_set_impl` only consults
+      `obj.lookup_tp_getset_member`, so every getset with a real C setter that a
+      VT does not declare is reported as read-only: `Tensor.grad`,
+      `Tensor.requires_grad`, `BaseException.args` on an exception *input* (not
+      an `ExceptionVariable`), `object.__class__` (must graph break, not raise),
+      and `function.__module__` / `__name__` / `__qualname__` / `__doc__`. The
+      last one breaks the `functools.wraps` and `functools.partial` tests in
+      `test/dynamo/test_functions.py` (10 errors, all `attribute '__module__' of
+      'function' objects is not writable`).
+      Covered by `test_setattr_protocol.py`: `test_tensor_grad`,
+      `test_tensor_requires_grad`, `test_exception_attributes_input`,
+      `test_getset_descriptor_dunder_set`, `test_class_assignment_is_unsupported`,
+      `test_tensor_unsupported_getset`.
+      Fix has three parts:
+      1. `lookup_tp_getset_member` returning None conflates "C says read-only"
+         with "we have not modelled it", and both arms
+         (`object_generic_setattr`, `GetSetDescriptorVariable`) collapse them
+         into `AttributeError: not writable`. Split them: AttributeError for
+         read-only, graph break for unmodelled. Either a readonly marker on
+         `GetSet`, or treat absence from the table as unmodelled and require an
+         explicit `GetSet(getter, None)` for the genuinely read-only ones
+         (`deque.maxlen`, `generator.gi_code`, ...).
+      2. Add `TensorVariable.tp_getset` setters, porting the tensor arm of the
+         deleted `BuiltinVariable._call_setattr`: `requires_grad` keeps its
+         `unimplemented(gb_type="setattr() on Tensor.requires_grad")`, `data`
+         keeps the `shallow_copy_data_` sequence, and `grad`/`_grad` share one
+         setter that stores under `"grad"` (mirrors `THPVariable_properties`
+         sharing the C setter, replacing the old name rewrite).
+      3. Drop `is_tensor_getset_descriptor` (`utils.py:5406`) once (1) lands:
+         its whole job was graph-breaking on unmodelled tensor getsets, which
+         then falls out of the generic path.
+
+- [ ] **`member_descriptor` ignores the READONLY flag.**
+      `MemberDescriptorVariable.tp_descr_set_impl` calls `store_attr`
+      unconditionally: it does not check the `PyMemberDef` READONLY flag, so
+      `slice(1, 2).start = 5` reports the getset message instead of `readonly
+      attribute`; and `store_attr` on a VT that does not track attribute mutation
+      (e.g. `g.__code__.co_argcount = 7`) trips an internal assertion instead of
+      raising AttributeError.
+      Covered by `test_readonly_member` and `test_readonly_member_untracked_object`.
+
+- [x] **`UserDefinedObjectVariable.tp_setattro_impl` gates on
+      `inherits_base_slot`.** That returned False for a plain `object` subclass (no
+      `_base_methods`), so `tp_setattro_impl` tried to trace `object.__setattr__`
+      and graph broke with gb9493 `C-implemented special method without
+      VariableTracker model` instead of taking the generic path.
+      Now gates on `isinstance(method, types.WrapperDescriptorType)` instead,
+      which is CPython's own test: `update_one_slot` installs
+      `slot_tp_setattro` only when the MRO descriptor is *not* a wrapper for
+      that slot, so a wrapper means `tp_setattro` is the wrapped C function.
+      `inherits_base_slot` drops out - `_base_methods` is built from
+      `<type>.__dict__.values()`, so every member is a C method and the wrapper
+      arm already covers it. Picked over `isinstance(method, FunctionType)`
+      (the predicate `class_has_getattribute` uses) because that one sends a
+      `staticmethod` or a callable object assigned as `__setattr__` to the
+      generic path, where CPython would trace it.
+      Measured 0 newly broken / 97 newly fixed across `test_setattr_protocol`,
+      `test_misc`, `test_functions`, `test_repros`.
+      The commented-out block below the method still has to be folded in or
+      dropped; the non-const-name half of it is already handled by
+      `generic_setattr`'s `issubclass(name.python_type(), str)` check.
+
+- [ ] **Types with a genuine custom C `tp_setattro` take the generic path.**
+      Fallout from the item above: routing every wrapper descriptor to
+      `object_generic_setattr` is right for almost all of them, but a few C types
+      have a `tp_setattro` that is neither `PyObject_GenericSetAttr` nor
+      `slot_tp_setattro`. `_NON_GENERIC_SETATTRO_TYPES`
+      (`variables/user_defined.py`) graph-breaks on those instead: `weakref`
+      proxies forward to the referent, `threading.local` writes a per-thread
+      dict, `_pickle.Pickler`/`Unpickler` reject unknown names. Without it,
+      eager succeeds and compiled raises AttributeError (both have
+      `__dictoffset__ == 0`).
+      Note the list is *not* "defines `__setattr__` in its own `__dict__`" -
+      `ast.AST` and `_struct.Struct` both do and both keep the generic slot.
+      Reading `tp_setattro` out of `PyTypeObject` is what separates them.
+      Exact fix, if the hand-maintained list is not good enough (it cannot know
+      about third-party C extensions): one helper next to `is_instancemethod` in
+      `torch/csrc/dynamo/utils.cpp` returning
+      `((PyTypeObject*)cls)->tp_setattro == PyObject_GenericSetAttr`, which
+      collapses `tp_setattro_impl` to a single check. Costs a rebuild; verified
+      to have zero regressions.
+
+- [x] **nn.Module setattr recurses.** `self.attr = x` inside forward, and a
+      property read on a partially initialized module, recurse until
+      RecursionError in
+      `InliningInstructionTranslator.should_compile_partial_graph`:
+      `test_setattr_protocol.py::test_module_attribute`,
+      `test_repros.py::test_partially_initialized_module_property`,
+      `test_misc.py::test_module_hooks_dict_reconstructed_as_ordered_dict`.
+      Also still red: `test_thread_local_setattr`, `test_user_defined_setattr1`,
+      `test_user_defined_setattr2`.
+      Root cause: an explicit `super().__setattr__` / `object.__setattr__` binds
+      to the *base* slot, but `variables/misc.py:342` routes it through
+      `generic_setattr`, which dispatches virtually on `tp_setattro_impl`. So the
+      `super().__setattr__(name, value)` tail of `nn.Module.__setattr__` re-enters
+      `NNModuleVariable.tp_setattro_impl`, which traces `nn.Module.__setattr__`
+      again. Call `object_generic_setattr` there instead. `builtin.py`'s
+      `object.__setattr__`/`__delattr__` arm already does this; audit every other
+      `is_standard_setattr` / unbound-slot call site for the same mistake, and
+      `object.__getattribute__` for its mirror image.
+
+- [ ] **`UserDefinedExceptionObjectVariable.tp_setattro_impl` compares a
+      VariableTracker against string literals.** `variables/user_defined.py`:
+      `if name in ("__cause__", "__context__", "__suppress_context__",
+      "__traceback__")`. `name` arrives unresolved from `generic_setattr`
+      (`object_protocol.py`) and `VariableTracker` defines no `__eq__` (the one
+      in `base.py` is on `MutationType`), so the test is always False and the
+      getset writes never reach `_base_vt`. The comment above it says this is
+      what makes `raise X from Y` record `X.__cause__`, so that path is dead.
+      Resolve the name first, as `object_generic_setattr` does. Probably
+      accounts for some of the 10 red in `test_exceptions.py`
+      (`test_set___cause___CustomException`, `test_set_cause_with_arg`,
+      `test_set_cause_with_arg_error`).
+
+- [x] **`object_generic_setattr` mis-tracks pre-existing objects.** The
+      instance-dict step only ever calls `track_attribute_mutation_new`. The
+      deleted `_call_setattr` had a branch ahead of `store_attr` that, for an
+      object with a source, an untracked mutation state and an underlying value
+      with a `__dict__` (`obj.get_value_for_setattr()`), called
+      `side_effects.track_object_existing(underlying, obj)` first. Without it a
+      sourced object is recorded as newly created, so side effects reconstruct it
+      instead of mutating the real one.
+
+- [ ] **`NNModuleVariable.tp_setattro_impl` dropped three checks** that
+      `_call_setattr` had: the `tx.output.is_root_tracer()` graph break
+      (gb_type `nn.Module mutation in HigherOrderOp`), the no-op fast path when
+      the assigned tensor is the same fake as the current attribute *and*
+      `__setattr__` is `torch.nn.Module.__setattr__`, and the final
+      `obj.convert_to_unspecialized(tx)`. Only the `is_state_mutated`
+      bookkeeping and the `__delattr__` tracing survived
+      (`variables/nn_module.py:1424`).
+
+## Tests
+
+- [ ] **Nothing covers `_NON_GENERIC_SETATTRO_TYPES`.** The tuple could be
+      emptied and the whole suite still passes. Wanted: setattr on a
+      `weakref.proxy` and on a `threading.local` graph-breaks under
+      `fullgraph=True`, and reads on both still trace. Both objects must be
+      created *outside* the compiled region - constructed inside, they graph
+      break at the constructor before `tp_setattro` is reached, which is why
+      this gap was invisible.
+
+## Failing tests
+
+Triaged 2026-09-18, branch rebased onto upstream/viable/strict a6098f5b016.
+Started at 19 failures over two files, four root causes; 16 of them are gone
+now that `TensorVariable.tp_getset` models the write half. Everything else is
+green:
+
+      python test/dynamo/test_tp_setattro.py    # 33 tests, 30 pass, 3 fail
+      python test/dynamo/test_getitem.py        # 112 pass
+      python test/dynamo/test_fwd_loss_bwd.py   # 53 pass
+
+Both expected-failure files this branch deletes do now really pass, checked
+individually: `test/cpython/v3_13/test_descr.py
+ClassPropertiesAndMethods.test_compattr` and `test/cpython/v3_13/test_builtin.py
+BuiltinTest.test_delattr`.
+
+- [x] **`TensorVariable` has no `tp_setattro_impl` -- 15 of the 19.** This is the
+      layer-2 gap the Layering note above already predicts. The deleted
+      `_call_setattr` tensor branch carried four behaviours that nothing replaces:
+      the `requires_grad` fast path (`method_requires_grad_`, added upstream by
+      #191129 / 04b971abedf, so it is a regression against viable/strict rather
+      than against the old base), `.data` via `shallow_copy_data_`, the
+      `_grad`/`grad` aliasing from NOTE: [Tensor "grad" and "_grad" attr], and
+      `is_tensor_getset_descriptor(name)` -> `Failed to set tensor attribute`.
+      Writes now fall through to `object_generic_setattr` and graph-break with
+      GB6404 `Write to unmodeled getset/member attribute`.
+      13 in `test_fwd_loss_bwd.py`, all of them `requires_grad`:
+      ```
+      test_autograd_grad_manual_update_matches_eager
+      test_autograd_grad_with_requires_grad_setattr
+      test_requires_grad_setattr_intermediate_single_graph_via_setattr_{complex64,float32,float64}
+      test_requires_grad_setattr_graph_input_graph_breaks
+      test_requires_grad_setattr_leaked_output_graph_breaks
+      test_requires_grad_setattr_non_differentiable_dtype_graph_breaks_{bool,int32,int64}
+      test_requires_grad_setattr_unsupported_value_graph_breaks_{value_False,value_1,value2}
+      ```
+      2 in `test_tp_setattro.py`:
+      ```
+      test_tensor_grad                  y.grad = x  -> GB6404
+      test_tensor_unsupported_getset    y.real = x  -> asserts "Failed to set
+                                        tensor attribute", gets GB6404's text
+      ```
+      The other 40 tests in `test_fwd_loss_bwd.py` pass, so the file is not
+      broadly broken. No clean-base A/B was run for it (the tree was dirty), but
+      every failure is a test of the one feature this branch deletes.
+      Fixed as tp_getset rather than as a `tp_setattro_impl` override:
+      THPVariableType's tp_setattro *is* PyObject_GenericSetAttr, so the tensor
+      cases belong in layer 3, and `object_generic_setattr` already consults
+      `lookup_tp_getset_member` first. `TensorVariable.tp_getset`
+      (`variables/tensor.py`) now carries `requires_grad`, `data` and
+      `grad`/`_grad` sharing one setter; the getters are `unmodeled_get`
+      (`variables/base.py`), which declines so reads keep their existing
+      `tp_getattro_impl` path. `lookup_tp_getset_member` is overridden to hand
+      any other `is_tensor_getset_descriptor(name)` an unmodeled setter, which
+      is what restores `Failed to set tensor attribute`. All 53 of
+      `test_fwd_loss_bwd.py` and both `test_tp_setattro.py` tensor tests pass.
+      `is_tensor_getset_descriptor` (`utils.py`) is still live, so the third
+      part of the tp_getset item above (dropping it) is not done.
+
+- [x] **The `__class__` assignment ban was dropped** -- `test_class_assignment_is
+      _unsupported`. The old `UserDefinedObjectVariable.tp_setattro_impl` body
+      raised `unimplemented(gb_type="__class__ assignment on user-defined
+      object")`; the replacement did not, so `o.__class__ = B` escaped as
+      `ObservedAttributeError: AttributeError('readonly attribute')` instead of a
+      graph break.
+      Restored in `object_generic_setattr_str` (`variables/object_protocol.py`)
+      rather than on UDOV: `__class__` is a getset on `object`, so the ban now
+      covers every VT that reaches layer 3, and gb_type is plain
+      `__class__ assignment`. Registry entry GB4271 repointed to it by hand --
+      `gb_registry_linter.py` refuses to regenerate while the pre-existing
+      duplicate `tp_descr_set_impl not implemented` (GB5473 / GB9368) is in the
+      registry, which is its own thing to fix.
+      The `P2POp mutation` ban was deleted in the same edit and has no test at
+      all; still dropped.
+
+- [x] **`BaseException.args` writes are unmodeled -- 2 tests.** `args` is a getset
+      with a real C setter, reachable two ways and broken on both:
+      ```
+      test_exception_attributes_input     e.args = ("bang",) on an exception that
+                                          is a graph *input* -> GB6404. Not an
+                                          ExceptionVariable, so the C setter is
+                                          never reached. (The test's own comment
+                                          predicts AttributeError; it graph-breaks
+                                          instead, so the comment is stale.)
+      test_getset_descriptor_dunder_set   type(e).args.__set__(e, ("bang",)) ->
+                                          GB9368 tp_descr_set_impl not
+                                          implemented, and the VT is
+                                          GetAttrVariable, not
+                                          GetSetDescriptorVariable -- so
+                                          type(e).args does not resolve to a
+                                          descriptor VT in the first place. Two
+                                          gaps stacked; see the tp_getset item
+                                          above.
+      ```
+
+- [ ] **Readonly member write trips an internal assertion** --
+      `test_readonly_member_untracked_object`, as its comment predicts.
+      `g.__code__.co_argcount = 7` should raise `AttributeError('readonly
+      attribute')` but reaches the store instead:
+      ```
+      AssertionError: Expected attribute mutation for ConstantVariable(code: ...)
+      in store_attr
+      ```
+      Related to the `member_descriptor` READONLY item above, but this one fails
+      before the message is even chosen.
+
+## Failing tests -- wider dynamo suites
+
+Run 2026-09-18, after `TensorVariable.tp_getset` landed (all 53 of
+`test_fwd_loss_bwd.py` and 30/33 of `test_tp_setattro.py` now pass):
+
+      python test/dynamo/test_misc.py        # 876 tests, 6 fail
+      python test/dynamo/test_functions.py   # 588 tests, 1 fail
+      python test/dynamo/test_repros.py      # 389 tests, 3 fail
+      python test/dynamo/test_getitem.py     # 112 pass
+
+Every failure below reproduces when the test is run on its own, so none of them
+is order-dependent. The three `test_repros.py` errors are this machine, not the
+branch: `linalg_inv` x2 need a LAPACK build ("Calling torch.linalg.lu_factor on
+a CPU tensor requires compiling PyTorch with LAPACK") and
+`test_one_hot_bounds_check_compiled` dies in the inductor C++ compiler
+(`CppCompileError`). They are not listed as work items.
+
+- [x] **`_wrap_descr_get` references an unimported name -- 4 tests.**
+      `variables/base.py:932` does `owner = args[1] if len(args) > 1 else
+      ConstantVariable(None)`, but `base.py` never imports `ConstantVariable`, so
+      any single-argument `__get__` call raises
+      `InternalTorchDynamoError: NameError: name 'ConstantVariable' is not
+      defined`. One-line fix (the local import the rest of the module uses).
+      ```
+      test_misc.py::MiscTests.test_inspect_signature_bind_non_user_function
+      test_misc.py::MiscTests.test_sourceless_inspect_parameter
+      test_misc.py::MiscTests.test_sourceless_mapping_proxy
+      test_functions.py::FunctionTests.test_type_getset_descriptor_metaclass_shadow
+      ```
+
+- [ ] **`test_misc.py::MiscTests.test_instance_dunder_dict`.** `dict(obj.__dict__)`
+      on an object built inside the compiled region comes back with the keys
+      `a` and `b` that eager does not report:
+      `Additional keys in the actual mapping: ['a', 'b']`. Not a tensor or a
+      setattr path -- a plain `UserDefinedObjectVariable`, so it is a separate
+      regression from the items above, but it is in the instance-dict step that
+      `object_generic_setattr` writes to.
+
+- [ ] **`test_misc.py::MiscTests.test_thread_local_setattr`** -- `l.x = x` on a
+      `threading.local` graph breaks (gb4247). Expected while
+      `_NON_GENERIC_SETATTRO_TYPES` is a hand-maintained ban list; see the
+      `Types with a genuine custom C tp_setattro` item above and the
+      `_NON_GENERIC_SETATTRO_TYPES` test gap under Tests.
+
+- [ ] **`test_misc.py::MiscTests.test_user_defined_setattr2`** -- raises
+      `ObservedKeyError: KeyError('pfx_x')`, surfaced as
+      `Unsupported: Observed exception`. A `__setattr__` that rewrites the name
+      before storing, so the read side looks for the unprefixed key. Same family
+      as the `nn.Module setattr recurses` item.
+
+## CPython suite under PYTORCH_TEST_WITH_DYNAMO=1
+
+Run 2026-09-18 over all 79 `test/cpython/v3_13/test_*.py`. 70 files fully green;
+9 files hold 36 failing tests. No file timed out or crashed.
+
+      PYTORCH_TEST_WITH_DYNAMO=1 python test/cpython/v3_13/<file>.py
+
+      test_collections           3 errors      test_functools             6 errors
+      test_contextlib            1 error       test_positional_only_arg   1 error
+      test_copy                  8 errors      test_types                 7 errors
+      test_descr                 2 errors      test_userdict              1 error
+      test_dict                  7 errors
+
+All 36 are regressions, not pre-existing red. Under this flag the harness applies
+`test/dynamo_expected_failures/` as `expectedFailure`, so anything reported as
+ERROR/FAIL has no entry there and therefore passed on viable/strict. Spot-checked
+by hand for seven of them; none has a file. This branch only *deletes* entries
+from that directory (16 of them), it adds none.
+
+- [ ] **Instance-dict writes are invisible through `__dict__` -- 29 of the 36,
+      and the cause of every silently wrong result.** `se.store_attr` records the
+      write where attribute *reads* find it, but no `__dict__` view is rebuilt
+      from pending side effects, so `obj.__dict__`, `dict(obj.__dict__)`,
+      `len(obj.__dict__)`, `in`, iteration and `repr` all see the pre-write dict.
+      Reads of the attribute itself are fine, which is why this hid for so long.
+      ```
+      o.__dict__["z"] = 5 ; o.z              -> 5          ok (dict -> attr works)
+      o.z = 5 ; o.__dict__["z"]              -> KeyError
+      o.z = 5 ; len(o.__dict__), list(...)   -> (0, [])     WRONG, no exception
+      C.__new__(C); y.foo = 7 ; y.foo        -> 7          ok
+      C.__new__(C); y.foo = 7 ; dict(y.__dict__) -> {}      WRONG, no exception
+      SimpleNamespace(); ns.x = 1 ; repr(ns) -> 'namespace()'  WRONG, no exception
+      ```
+      The last line is verbatim the `test_types` failure
+      (`AssertionError('namespace(x=1) != namespace()')`). The `test_copy` group
+      is the same bug one step removed: under this flag the whole test method is
+      traced, so `C(42)` runs inside the region, `__init__`'s `self.foo = foo`
+      leaves `x.__dict__` empty, and `copy.copy`'s
+      `y.__dict__.update(x.__dict__)` then copies nothing -- hence
+      `AttributeError("'C' object has no attribute 'foo'")`. Broader than the
+      `object_generic_setattr` mis-tracking item above: that one is about sourced
+      objects, this reproduces on objects created inside the region too.
+      Symptom split: 13 `AssertionError` (mostly `'False is not true'` from
+      `'x' in obj.__dict__`), 9 `AttributeError`, 7 `KeyError`.
+      ```
+      test_collections  test_dict_copy, test_list_copy,
+                        test_namedtuple_subclass_issue_24931
+      test_contextlib   test_contextmanager_attribs
+      test_copy         test_copy_inst_{vanilla,getinitargs,setstate},
+                        test_deepcopy_inst_{vanilla,getinitargs,setstate},
+                        test_deepcopy_reflexive_inst, test_reconstruct_reflexive
+      test_descr        test_slots_special
+      test_dict         test_instance_dict_getattr_str_subclass, test_splittable_pop,
+                        test_splittable_update, test_splittable_to_generic_combinedtable,
+                        test_object_set_item_single_instance_non_str_key,
+                        test_reverse_iterator_for_shared_shared_dicts
+      test_functools    test_default_update (x2)
+      test_types        test_attrset, test_attrdel, test_equal, test_nested,
+                        test_repr, test_recursive_repr, test_replace
+      test_userdict     test_all
+      ```
+
+- [ ] **`Write to unmodeled getset/member attribute` (GB6404) -- 6 tests.** Same
+      gb_type as the tensor items in the section above, reached on non-tensor VTs:
+      ```
+      test_functools             test_setstate, test_setstate_subclasses (x2 each)
+                                 UserDefinedObjectVariable(partial) and
+                                 UserDefinedObjectVariable(PyPartialSubclass)
+                                 -- functools.partial.__setstate__
+      test_positional_only_arg   test_change_default_pos_only
+                                 NestedUserFunctionVariable() -- __defaults__
+      test_dict                  test_store_evilattr
+                                 UserDefinedObjectVariable(Obj)
+      ```
+
+- [x] **One stale expected-failure file to delete.** `test_descr` now reports an
+      unexpected success for
+      `test/dynamo_expected_failures/CPython313-test_descr-ClassPropertiesAndMethods.test_properties`.
+      The branch fixes it; the file has to go or the suite stays red.
+
+Caveat on the numbers: the first full pass straddled edits to `variables/base.py`,
+`builtin.py` and `tensor.py`, so the nine failing files were re-run together at
+the end and those are the counts above. `base.py` changed once more during that
+re-run, so treat the per-file split as good to +/-1. A `NameError: name
+'ConstantVariable' is not defined` from `_wrap_descr_get` (`base.py`, the
+`ConstantVariable(None)` default, imported only under `TYPE_CHECKING`) appeared in
+the first pass and was gone by the re-run.
+
+## Re-assessment 2026-09-18 (later pass)
+
+Re-ran everything after the tensor/descriptor work landed. Probes are eager vs
+`torch.compile(backend="eager", fullgraph=True)` on the same input.
+
+      dynamo/test_fwd_loss_bwd    53 tests  OK          (was 13 failures)
+      dynamo/test_getitem        112 tests  OK
+      dynamo/test_tp_setattro     42 tests  4 failures + 2 errors
+      cpython (9 files)                     35 errors   (was 36)
+
+Closed and verified, checkboxes flipped above:
+
+      C descriptors through __dict__   P.__dict__["v"].__set__/__get__ both match
+      base tp_descr_get_impl           now defined (variables/base.py:2131)
+      nn.Module setattr recurses       Mod()(x) matches eager
+      mis-tracks pre-existing objects  sourced obj write matches eager
+      stale expected-failure file      already deleted
+      gb registry entry                present in graph_break_registry.json
+      unused `import os`               gone (pyflakes clean)
+
+Also confirmed fixed, inside items that stay open for their other halves:
+`Tensor.grad`, `Tensor.requires_grad` and `function.__module__` all match eager
+now (the `tp_getset` item), and `slice(1, 2).start = 5` gives the right
+`readonly attribute` message (the `member_descriptor` item).
+
+- [ ] **`test_tp_setattro.py` is red: 6 tests lost their `@unittest.expectedFailure`.**
+      The six `__dict__`-visibility tests are now plain tests, and the bug they
+      pin is still open, so the file reports 4 failures + 2 errors instead of
+      staying green. Either restore the decorators or fix the bug -- do not
+      delete the tests.
+      ```
+      test_dict_getitem_after_attr_write        test_dict_view_on_graph_input_object
+      test_dict_len_and_keys_after_attr_write   test_simple_namespace_repr_after_write
+      test_dict_contains_after_attr_write       test_copy_copy_reads_empty_dict
+      ```
+
+- [ ] **`test_class_assignment_is_unsupported` no longer tests what it says.**
+      Its assertion was relaxed from `assertRaisesRegex(Unsupported, "__class__
+      assignment")` to a bare `assertRaises(Unsupported)`, so it passes on the
+      `ObservedAttributeError` path while its own comment still reads "the write
+      must graph break rather than raise AttributeError". `o.__class__ = B`
+      currently raises where eager succeeds. Either restore the regex or rewrite
+      the comment to match the behaviour that is actually wanted.
+
+Still open, re-confirmed failing:
+
+      del obj.missing never raises     compiled='no error', eager=AttributeError
+                                       (silent wrong result)
+      no-__dict__ message wrong arm    compiled="'Slotted' object has no attribute
+                                       'attr'", eager="... attribute 'attr' is
+                                       read-only"
+      co_argcount untracked write      compiled raises AssertionError('Expected
+                                       attribute mutation for ConstantVariable')
+      instance __dict__ invisible      unchanged; 29 of the 35 CPython errors
+      GB6404 getset/member writes      unchanged; test_functools 6,
+                                       test_positional_only_arg 1, test_dict 1
+      tp_getset: __class__ + exc.args  __class__ raises instead of breaking;
+                                       e.args on an exception *input* still GB6404
+
+The `_NON_GENERIC_SETATTRO_TYPES` item may already be satisfied: `threading.local`
+and `weakref.proxy` writes now graph break under `fullgraph=True`, which is what
+its Tests entry asked for -- though via gb9493 `C-implemented special method
+without VariableTracker model` rather than a tp_setattro-specific gb_type. Worth
+a decision on whether that gb_type is the one you want before closing it.
+
+Stale reference: the Lint entry still points at `test/dynamo/test_setattr_protocol.py`,
+which no longer exists (renamed `test_tp_setattro.py`). Four other mentions of the
+old name remain at lines 95, 142, 172 and in that same entry.
+
+## Lint
+
+- [x] The new gb_type `C-implemented tp_setattro without VariableTracker model`
+      has no entry in `torch/_dynamo/graph_break_registry.json`.
+      `tools/linter/adapters/gb_registry_linter.py` generates it, but see the
+      warning below before running `lintrunner -a` anywhere near
+      `test_setattr_protocol.py`.
+- [x] Unused `import os` in `variables/user_defined.py` (ruff F401).
+- [ ] pyrefly `bad-return` at `variables/functions.py:4801`
+      (`GetSetDescriptorVariable.tp_descr_set_impl`: `getset.setter` is typed
+      `VariableTracker | None`, the method is declared `VariableTracker`).
+- [ ] B010 at `test/dynamo/test_setattr_protocol.py:141` wants a `# noqa: B010`.
+      Do NOT run `lintrunner -a` on that file: it rewrites the deliberate
+      `setattr(obj, "y", x + 1)` into `obj.y = x + 1` and destroys what the test
+      checks.
+
+## Checked, no action needed
+
+- [x] `py_type.__dictoffset__ != 0` correctly detects managed dicts (a plain
+      class reports -1, a slotted one 0).
+- [x] `functools.cached_property` has no `__set__`, so a write correctly falls
+      through to the instance dict and shadows the cached value.
+- [x] The getattr side has the same blind spot as the item above but needs no
+      list. `class_has_getattribute` (`utils.py`) only detects a Python
+      override, so `weakref` proxies, `threading.local` and `_pickle.Pickler`
+      fall through to `generic_getattr` - and still read correctly, because its
+      step 5b calls `type(self.value).__getattribute__` on the live object.
+      A read can consult the real object; a write cannot, since it has to be
+      replayed as bytecode by `SideEffects`. That asymmetry is why only the
+      setattr side needs the list, and it is also what makes the list safe: a
+      banned type keeps working for reads, only its writes break the graph.
+- [x] `test_len_protocol.py` / `test_contains_protocol.py` are heavily red (127
+      and 73 errors) but the cause is unrelated to any of the above: with
+      `enable_trace_unittest`, tracing `assertEqual` reaches
+      `torch/testing/_comparison.py` `originate_pairs`, whose `except Exception`
+      arm wraps what it hits in a RuntimeError. A/B tested against the
+      `_lookup_method` change - the failure is identical either way.

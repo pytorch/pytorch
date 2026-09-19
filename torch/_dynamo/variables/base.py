@@ -46,7 +46,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import format_source_range, istype
+from ..utils import check_positional, format_source_range, istype
 
 
 _RICHCOMPARE_OPS = frozenset(
@@ -454,6 +454,13 @@ class Member:
 
     getter: Getter
     setter: Setter
+
+
+def unmodeled_get(self: Any, tx: InstructionTranslatorBase) -> None:
+    """Getter for a tp_getset/tp_members entry whose read half is not modeled
+    here: returning None declines, so the read falls through to the VT's
+    tp_getattro_impl. Used by entries that exist only to model the setter."""
+    return None
 
 
 def readonly_setter(
@@ -897,7 +904,7 @@ def _wrap_delattr(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0])
+    return func(self, tx, args[0], None)
 
 
 def _wrap_getattro(
@@ -923,16 +930,19 @@ def _wrap_descr_get(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_descr_get via __get__(obj, owner=None): owner defaults to type(obj).
+    from .constant import ConstantVariable
+
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) not in (1, 2):
-        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+
+    check_positional(tx, "__get__", len(args), 1, 2)
+
+    obj = args[0]
+    owner = args[1] if len(args) > 1 else ConstantVariable(None)
     # wrap_descr_get treats None as absent for both arguments and rejects the
     # call when both are absent.
-    if all(a.is_constant_none() for a in args):
+    if obj.is_constant_none() and owner.is_constant_none():
         raise_type_error(tx, "__get__(None, None) is invalid")
-    obj = args[0]
-    owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
     return func(self, tx, obj, owner)
 
 
@@ -1221,19 +1231,18 @@ _SLOTDEFS: list[SlotDef] = [
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
-    # This needs one to model tp_setattro first + PyObject_GenericSetAttr / PyObject_GenericDelAttr
-    # TPSLOT(
-    #     "__setattr__",
-    #     "setattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_setattr,
-    # ),
-    # TPSLOT(
-    #     "__delattr__",
-    #     "delattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_delattr,
-    # ),
+    TPSLOT(
+        "__setattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_setattr,
+    ),
+    TPSLOT(
+        "__delattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_delattr,
+    ),
     TPSLOT(
         "__lt__",
         "tp_richcompare_impl",
@@ -2176,6 +2185,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
         """
         return None
+
+    def tp_setattro_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        from .object_protocol import object_generic_setattr
+
+        return object_generic_setattr(tx, self, name, value)
 
     def tp_getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
