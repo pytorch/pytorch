@@ -100,6 +100,10 @@ std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qpa
       quant_min <= quant_max,
       "`quant_min` should be less than or \
         equal to `quant_max`.");
+  TORCH_CHECK(
+      scale.numel() == 1 && zero_point.numel() == 1 && fake_quant_enabled.numel() == 1,
+      "`scale`, `zero_point` and `fake_quant_enabled` should each have exactly one element, but got ",
+      scale.numel(), ", ", zero_point.numel(), " and ", fake_quant_enabled.numel(), " elements.");
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
   auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
   fake_quant_tensor_cachemask_tensor_qparams_stub(
