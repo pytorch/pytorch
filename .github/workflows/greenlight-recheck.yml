@@ -1,0 +1,164 @@
+# Owner(s): ["module: ci"]
+#
+# Green Light — "@greenlight recheck" comment trigger
+# ===================================================
+# LOCATION: this file belongs in pytorch/pytorch/.github/workflows/greenlight-recheck.yml
+#
+# WHAT IT DOES
+#   When a trusted maintainer comments "@greenlight recheck" on an OPEN pull
+#   request, this workflow acknowledges the comment with a 👍 reaction and
+#   dispatches the Green Light review scan (greenlight-review.yml) in
+#   pytorch/test-infra for that single PR, passing the commenter as `requester`.
+#
+#   NOTE: a recheck on an already-decided PR whose head has NOT changed is a
+#   deliberate no-op — the scan only re-reviews a PR when its content actually
+#   changed — so an unchanged recheck may intentionally produce no new verdict
+#   and no visible reply beyond the 👍. This is expected, not a failure.
+#
+# REQUIRED SECRET
+#   secrets.GREENLIGHT_DISPATCH_TOKEN — used ONLY to dispatch the scan in the
+#   other repo. The default GITHUB_TOKEN is scoped to pytorch/pytorch and CANNOT
+#   trigger a workflow in pytorch/test-infra, so a dedicated credential is
+#   required.
+#
+#   RECOMMENDED: a Green Light App installation token scoped to pytorch/test-infra
+#   with Actions: write. It is not tied to a person and is short-lived, so it
+#   avoids the rotation/offboarding burden of a personal credential. Minting it
+#   here needs an extra actions/create-github-app-token step (the App id/key as
+#   secrets on pytorch/pytorch) before the dispatch step.
+#
+#   ALTERNATIVE (simpler, weaker): a fine-grained PAT scoped to the
+#   pytorch/test-infra repo with the "Actions" repository permission = Read and
+#   write. Downside: it is a PERSONAL credential and carries rotation and
+#   offboarding burden — it breaks if the owner leaves or loses access.
+#
+#   BLAST RADIUS: Actions: write on test-infra lets this token dispatch ANY
+#   workflow in pytorch/test-infra, not just greenlight-review.yml. Scope it to
+#   test-infra only; it never needs any permission on pytorch/pytorch.
+#
+# INTER-WORKFLOW INPUT CONTRACT
+#   The dispatch passes inputs `pr` and `requester`. greenlight-review.yml in
+#   pytorch/test-infra must declare BOTH as workflow_dispatch inputs or GitHub
+#   rejects the dispatch with HTTP 422. (`pr` already exists; `requester` must be
+#   added there and threaded into the scan as the author to authorize.)
+#
+# SECURITY MODEL
+#   The job-level `if:` below is ONLY a CHEAP PRE-FILTER: it drops obvious
+#   outsiders (non-members, bots, non-PR / closed-PR comments, unrelated
+#   comments) so a dispatch is not spent on them. It is NOT the security
+#   boundary. The AUTHORITATIVE authorization — the TRUSTED_AUTHORS allowlist —
+#   runs inside the test-infra Green Light scan, which receives the commenter's
+#   login as `requester` and re-validates it before acting.
+#
+#   - on: issue_comment/created ONLY. pull_request_review_comment is
+#     intentionally unsupported: that event can run workflow code from the PR
+#     branch, letting a malicious PR inject code when a maintainer comments.
+#     See https://github.com/orgs/community/discussions/55940#discussioncomment-5950832
+#   - This workflow never checks out PR code and always runs from the default
+#     branch (issue_comment always uses the default-branch copy of the workflow).
+#   - Untrusted comment text is never interpolated into a run:/script: body. The
+#     command match reads comment.body only as a structured runtime field inside
+#     github-script (never via ${{ }}); dispatch inputs use only bounded fields:
+#     issue.number (int) and comment.user.login (GitHub username).
+
+name: Green Light Recheck
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write  # react 👍 to the triggering comment (PR comments are issue comments)
+
+jobs:
+  dispatch:
+    # Collapse a flood of repeated rechecks on the SAME PR to the newest one: a
+    # broad set of org members can trigger this, and the test-infra scan is a
+    # singleton — without this, repeated comments would queue no-op scans ahead
+    # of legitimate rechecks. Keyed per PR so unrelated PRs never contend.
+    concurrency:
+      group: greenlight-recheck-${{ github.event.issue.number }}
+      cancel-in-progress: true
+    # CHEAP PRE-FILTER ONLY — not the security boundary (see header). This gate
+    # only avoids spending a dispatch on obvious outsiders; the AUTHORITATIVE
+    # authorization is the scan's TRUSTED_AUTHORS check, keyed on `requester`.
+    # The OWNER/MEMBER/COLLABORATOR allowlist is intentionally BROAD for MVP —
+    # any org member passes here but is still refused by the scan unless they are
+    # in TRUSTED_AUTHORS. Tightening this pre-filter (e.g. a dedicated GitHub team
+    # membership check) is a documented follow-up. Do NOT duplicate the
+    # TRUSTED_AUTHORS list into this workflow — its single source of truth is the
+    # scan.
+    #   - only this repo (never a fork that copied the workflow)
+    #   - only comments on an OPEN pull request
+    #   - never bots
+    #   - coarse "@greenlight recheck" substring gate (precise start-of-line
+    #     anchoring happens in the "Check command" step below)
+    #   - only org owners / members / collaborators
+    if: >-
+      github.repository == 'pytorch/pytorch' &&
+      github.event.issue.pull_request &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.user.type != 'Bot' &&
+      contains(github.event.comment.body, '@greenlight recheck') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check command is an anchored "@greenlight recheck"
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Read the body as a structured field (never interpolated into this
+            // script), then require "@greenlight recheck" at the start of a
+            // trimmed line so an incidental mid-text or quoted mention does not
+            // trigger a scan. Actions expressions have no regex, so this precise
+            // match lives here rather than in the job-level `if:`.
+            const body = context.payload.comment.body || '';
+            const re = /^@greenlight recheck(\s|$)/;
+            const matched = body.split('\n').some((line) => re.test(line.trim()));
+            core.setOutput('is_recheck', matched ? 'true' : 'false');
+            if (!matched) {
+              core.info('No anchored "@greenlight recheck" line; treating as a mention, not a command.');
+            }
+
+      - name: Acknowledge with 👍
+        if: steps.check.outputs.is_recheck == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // comment.id is an integer from the event payload — safe to use directly.
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: '+1',
+            });
+
+      - name: Dispatch Green Light scan in pytorch/test-infra
+        if: steps.check.outputs.is_recheck == 'true'
+        uses: actions/github-script@v7
+        with:
+          # Cross-repo dispatch: the default GITHUB_TOKEN cannot trigger a
+          # workflow in another repo, so use the dedicated dispatch credential.
+          github-token: ${{ secrets.GREENLIGHT_DISPATCH_TOKEN }}
+          script: |
+            // Values come from structured, bounded event fields — never from the
+            // free-form comment body. number is an int; login is a GitHub username.
+            const pr = context.payload.issue.number;
+            const requester = context.payload.comment.user.login;
+            // `ref: 'main'` pins the test-infra branch the scan runs from; it is
+            // never taken from the comment. workflow_dispatch inputs must be
+            // strings, hence String(pr).
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'pytorch',
+              repo: 'test-infra',
+              workflow_id: 'greenlight-review.yml',
+              ref: 'main',
+              inputs: {
+                pr: String(pr),
+                requester: requester,
+              },
+            });
+            core.info(`Dispatched greenlight-review.yml for PR #${pr} (requester: ${requester})`);
