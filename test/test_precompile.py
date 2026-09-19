@@ -1399,9 +1399,50 @@ class TestPrecompile(TestCase):
                 return mm(t)
             return mm(t) + 1
 
-        with self.assertRaisesRegex(PrecompileError, "guard on a dim marked with"):
+        with self.assertRaisesRegex(PrecompileError, "guard on a value this capture"):
             with _CaptureToFiles(needs_guard) as cap:
                 cap(m, x)
+
+    def test_dynamic_shapes_unbacked_item_captured(self):
+        # Stays on the callable API: ported by the module commit (#197343), not here.
+        # An unbacked capture is the only path with a ShapeEnv, so where a static capture
+        # refuses .item() outright it holds the value as an unbacked symbol: a use that
+        # never guards on it captures, and the loaded artifact matches eager. Replay on a
+        # DIFFERENT input (fresh values, a different marked size) so a baked .item() value
+        # or a specialized batch dim fails here rather than passing on the capture input.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def scale_by_item(mm, t):
+            return mm(t) * t.sum().item()
+
+        code, cache = _precompile_pair(scale_by_item, m, x)
+        f_c = torch.compiler.precompile.load(code, cache)
+        other = torch.randn(16, 4)
+        self.assertEqual(f_c(m, other), scale_by_item(m, other))
+
+    def test_dynamic_shapes_unbacked_item_guard_rejected(self):
+        # Stays on the callable API: ported by the module commit (#197343), not here.
+        # The other half of the same contract: a branch on the .item() value must guard
+        # on that unbacked symbol, so capture fails LOUDLY instead of baking the value
+        # the example run happened to produce.
+        m = torch.nn.Linear(4, 3).eval()
+        x = torch.randn(8, 4)
+        mark_unbacked(x, 0)
+
+        def branches_on_item(mm, t):
+            return mm(t) if t.sum().item() > 0 else mm(t) + 1
+
+        with self.assertRaisesRegex(
+            PrecompileError, "guard on a value this capture"
+        ) as cm:
+            _precompile_pair(branches_on_item, m, x)
+        # The refusal must name the VALUE symbol (an unbacked float, zuf0), not the marked
+        # dim (u0) -- the marked-dim case produces the same top line verbatim. The zuf
+        # prefix is the whole claim; how sympy renders the 0.0 it is compared against is
+        # not precompile's behavior, so it is left out.
+        self.assertRegex(str(cm.exception), r"Underlying:.*zuf\d+ >")
 
     def test_dynamic_shapes_eager_rejected(self):
         m = torch.nn.Linear(4, 3).eval()
@@ -2265,6 +2306,41 @@ class TestPrecompile(TestCase):
         ref(x).sum().backward()
         self.assertEqual(run.weight.grad, ref.weight.grad)
 
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know is refused rather than baked from the example. The two distinct
+        # fake-tensor failure paths, each exercised end to end through capture:
+        # .item() (DataDependentOutputException) and .nonzero()
+        # (DynamicOutputShapeException).
+        from torch._subclasses.fake_tensor import (
+            DataDependentOutputException,
+            DynamicOutputShapeException,
+        )
+
+        model = torch.nn.Linear(4, 4)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        def nonzero(m, x):
+            return m(x)[x[:, 0].nonzero().flatten()]
+
+        # The two fake-tensor classes are asserted per case: both raises produce a
+        # byte-identical message, so the regex alone cannot tell them apart and a swap
+        # (or a future change that degenerates .nonzero() to the value class) would pass.
+        for fn, cause in (
+            (items, DataDependentOutputException),
+            (nonzero, DynamicOutputShapeException),
+        ):
+            with self.subTest(fn=fn.__name__):
+                # Both asserts stay inside the subTest: chained after it, a regressed
+                # refusal would be swallowed by subTest and then re-reported as an
+                # AttributeError on cm.exception, aborting the loop before the next case.
+                with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
+                    with _CaptureToFiles(fn, backend="eager") as cap:
+                        cap(model, torch.randn(3, 4))
+                self.assertIsInstance(cm.exception.__cause__, cause)
+
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
         # than the raw internal assertion fakeifying one raises (a static capture has no
@@ -2602,6 +2678,31 @@ class TestPrecompile(TestCase):
             op = torch.ops.quantized.mlprecompile_unbacked_no_meta
             with self.assertRaises(UnsupportedOperatorException):
                 _precompile_pair(lambda mm, t, u: mm(t) + op(u).sum(), m, x, y)
+
+    def test_data_dependent_refusal_omits_the_mark_unbacked_hint_when_unbacked(self):
+        # The refusal's closing advice ("mark a user-input dim with mark_unbacked") is only
+        # actionable for a STATIC capture. On the unbacked path the caller has already
+        # marked a dim and the ShapeEnv exists, so an op no ShapeEnv can help with
+        # (aten.equal) must not be answered with "go mark a dim". Unbacked capture is
+        # inductor-only, so that half takes the default backend.
+        def equal_branch(m, t):
+            return m(t) if torch.equal(t, t) else m(t) * 2
+
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(4, 4)
+        mark_unbacked(x, 0)
+        with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
+            _precompile_pair(equal_branch, model, x)
+        self.assertNotIn("mark_unbacked", str(cm.exception))
+        # The body is path-specific too: on the unbacked path it must diagnose a missing
+        # fake rule, not the .item()/control-flow cause that only a static capture has.
+        self.assertIn("no fake rule under a ShapeEnv", str(cm.exception))
+        with self.assertRaisesRegex(PrecompileError, "data-dependent op") as cm:
+            _precompile_pair(equal_branch, model, torch.randn(4, 4), backend="eager")
+        self.assertIn("mark_unbacked", str(cm.exception))
+        # The static hint covers the VALUE half of the family the clause catches, not just
+        # the shape-producing half: a .item() is capturable on the unbacked path too.
+        self.assertIn("A data-dependent value (.item())", str(cm.exception))
 
     def test_mutating_custom_op_captures_without_a_registered_fake(self):
         # The one carve-out in "fake tracing needs a meta/fake kernel for every op": a
@@ -3890,6 +3991,24 @@ class TestPrecompileCaptureFiles(TestCase):
         rewritten = (os.stat(self.artifact).st_ino, os.stat(self.cache).st_ino)
         self.assertEqual(rewritten, inodes)
         self.assertEqual(self._leftovers(), [])
+
+    def test_a_failed_trace_is_reported_as_a_failed_call(self):
+        # The single-call flag counts a RENDER, not an attempt: after a call that raised
+        # nothing was captured, so the retry must describe that raise rather than claim a
+        # call was captured, and save() / the exit must not ask for a call already made.
+        def data_dependent(model, x):
+            return model(x) * x.sum().item()
+
+        cap = self._capture(data_dependent)
+        with self.assertRaisesRegex(PrecompileError, "without rendering an artifact"):
+            with cap:
+                with self.assertRaisesRegex(PrecompileError, "data-dependent"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "already ran and raised"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "without rendering"):
+                    cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
 
     def test_tracer_decompositions_are_used(self):
         # MakeFxTracer.decompositions reaches make_fx through capture(): the custom
