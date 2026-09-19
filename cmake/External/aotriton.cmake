@@ -17,7 +17,7 @@ if(NOT __AOTRITON_INCLUDED)
       "manylinux_2_28"  # rocm7.1
       "manylinux_2_28"  # rocm7.2
       "manylinux_2_28"  # rocm7.14
-      "manylinux_2_28"  # rocm7.15
+      "manylinux_2_28"  # rocm7.16
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.4"
@@ -25,22 +25,20 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.1"
       "rocm7.2"
       "rocm7.14"
-      "rocm7.15"
+      "rocm7.16"
       )
   if(DEFINED ENV{PYTORCH_AOTRITON_COMMIT})
     set(__AOTRITON_CI_COMMIT "$ENV{PYTORCH_AOTRITON_COMMIT}")
   else()
-    set(__AOTRITON_CI_COMMIT "44fa7def5bdfd87f687b21ee2fa283e133e727da")
+    set(__AOTRITON_CI_COMMIT "1c7c973c0d76013e97f1c385847adaf94ab4771a")
   endif()
-  # SHA256 for rocm6.4/7.0/7.1/7.2/7.15 are placeholders (0s): no such
-  # artifact has been built for 0.14b yet, only rocm7.14 has.
   set(__AOTRITON_SHA256_LIST
-      "0000000000000000000000000000000000000000000000000000000000000000"  # rocm6.4
-      "0000000000000000000000000000000000000000000000000000000000000000"  # rocm7.0
-      "0000000000000000000000000000000000000000000000000000000000000000"  # rocm7.1
-      "0000000000000000000000000000000000000000000000000000000000000000"  # rocm7.2
-      "bb1edc7090882650fe3c84881c0c217b7cf6a10a715191d96c28fd45723ba848"  # rocm7.14
-      "0000000000000000000000000000000000000000000000000000000000000000"  # rocm7.15
+      "d83c5c659d015d0a0288c8843e2287de8d7123398654c82caa0fd900837737ea"  # rocm6.4
+      "9c94cfe6d77898edca7bba783953507de8f80de4b48e634e5d67e3074d2fbf90"  # rocm7.0
+      "7614dc3daa1929be0d9b956c1fef1325a9830c869cd09ac6bcac36e50195c00b"  # rocm7.1
+      "d0522d670e51898770571fefebb73eb760b95c892ef10b7e05b71a015bcd92cd"  # rocm7.2
+      "a26c5e4eee83976d7dd06bda69192c40b01474a0ddc2a44acfa0d544c47f84f2"  # rocm7.14
+      "81dbadf0d6e74be35a7308aa339173b74ecaa8e35d2d48369ce4696903e03116"  # rocm7.16
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -52,39 +50,14 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx1250"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
-     "e5e891000401548a1f166584ed305c2ec4dd27536ec0fa254930e9f8446d1f8d" # amd-gfx90a
-     "81e28934cc44f8354c7d33cf0a926e90c743b74fff962793ddf4f43bf90c0d18" # amd-gfx942
-     "3fd6143379221836a15c8fc33d50f9b4832c2b3571a780ad948c3eb1497dbbd2" # amd-gfx950
-     "65af418feb232c143d5bcea6a53b1aef1185dfcc68769c3fbe5fdfc689634805" # amd-gfx110x
-     "a83695777a7e1a5ca47f3297ddeb0ba292717aecea9138c56b2317377d8a9ca1" # amd-gfx115x
-     "489c81800acf874c8bacf2f85210cdef7bd92b106afa614f7a241caa96e434fc" # amd-gfx120x
-     "fe4c72c18d91d5437c4f0f4bde9421a8c75b5dd4470ea3db403d0eeb4a81d322" # amd-gfx1250
+     "c5bcdb2d877a0f85e7d00de74d7385fcd51b1f816fe3f80470be702f03c58ef5" # amd-gfx90a
+     "4620fe64fc9029fd3a5bd0a4e5e16fdcd9daa3a69b4e2455ac7186fd71751db1" # amd-gfx942
+     "5ad1491fdf85c7fb973e4831f33d5eadf10e05e06291e2ff460fc92990ca381c" # amd-gfx950
+     "fc7c6eabe2bcd5c523b188a74db4bf594cea0d97d7d21f3f2ead2c91354ba19a" # amd-gfx110x
+     "af0057a7e2a57e45fa00d07beaccf0fc89f58aa455458a9d5ed5c01c9d97b5dc" # amd-gfx115x
+     "0b26d8ec7f7b8b0b309302be81bfd988d2d9360b9b4c7bd43bb305c1a21d728c" # amd-gfx120x
+     "e82a9ff3872c703a72b5e12646df8e7b4ec964e54081a3d82408e58d8b3f7e1d" # amd-gfx1250
      )
-  if(USE_ASAN)
-    set(__AOTRITON_BUILD_VARIANTS "+asan")
-    set(__AOTRITON_MANYLINUX_LIST
-        "manylinux_2_28"  # rocm7.14
-        "manylinux_2_28"  # rocm7.15
-        )
-    # ASAN only supports rocm7.14
-    set(__AOTRITON_ROCM_LIST
-        "rocm7.14"
-        "rocm7.15"
-        )
-    set(__AOTRITON_SHA256_LIST
-        "3f5cfba6c42261a3e3b44022c66083ec859fcc98296faa4646b65373fead3448"  # rocm7.14+asan
-        "7a7928d881d6341fc0b8ffb3ad7077f62438a8412ec57f97fb4b4dfbc73b3e64"  # rocm7.15+asan
-        )
-    # ASAN only supports gfx942+gfx950
-    set(__AOTRITON_IMAGE_LIST
-        "amd-gfx942"
-        "amd-gfx950"
-       )
-    set(__AOTRITON_IMAGE_SHA256_LIST
-       "563d2e4c41b367725c7b8e12fdfd04df4d1b1ff15947e011e2452818f3a43d26" # amd-gfx942+asan
-       "b428dfe6eef7a1dcfac54ac2408dd136dbd622016331dc863e87ce9ea84c8054" # amd-gfx950+asan
-       )
-  endif()
   set(__AOTRITON_BASE_URL "$ENV{PYTORCH_AOTRITON_BASE_URL}")
   if(NOT __AOTRITON_BASE_URL)
     set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
