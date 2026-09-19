@@ -7987,6 +7987,29 @@ print(value, end="")
     def test_power_draw(self):
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
+    @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
+    def test_power_draw_converts_watts_to_milliwatts(self):
+        # amdsmi_get_power_info is queried a second time when average socket
+        # power is unavailable, so the responses below come in pairs.
+        with (
+            patch.object(torch.cuda, "_get_amdsmi_handler", return_value="handle"),
+            patch.object(
+                torch.cuda.amdsmi,
+                "amdsmi_get_power_info",
+                side_effect=[
+                    {"average_socket_power": 68},
+                    {"average_socket_power": "N/A"},
+                    {"current_socket_power": 71},
+                    {"average_socket_power": "N/A"},
+                    {"current_socket_power": "N/A"},
+                ],
+            ),
+        ):
+            self.assertEqual(torch.cuda.power_draw(), 68_000)
+            self.assertEqual(torch.cuda.power_draw(), 71_000)
+            self.assertEqual(torch.cuda.power_draw(), 0)
+
     @skipIfRocmVersionAtLeast([10, 1])  # ROCM-30651
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @skipIfRocmArch(MI350_ARCH)
