@@ -27,9 +27,10 @@ from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
     IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
-from torch.testing._internal.common_utils import TEST_CUDA
+from torch.testing._internal.common_utils import HardwareClassification, TEST_CUDA
 from torch.utils import _pytree as pytree
 
 
@@ -1883,6 +1884,101 @@ def forward(self, arg0_1):
             return level1()
 
         self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
+class TestExperimentDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _test_export_blockmask_with_mask_fn(self, make_mask_fn, device):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self, mask_fn_factory):
+                super().__init__()
+                self.mask_fn_factory = mask_fn_factory
+
+            def forward(self, x):
+                mask_fn = self.mask_fn_factory()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device=device)
+        module = Model(make_mask_fn)
+
+        out_eager, mask_eager = module(x)
+
+        compiled = _dynamo_graph_capture_for_export(module)(x)
+        out_compiled, mask_compiled = compiled(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
+        )
+
+    def test_export_blockmask(self, device):
+        def make_mask_fn():
+            res = 4
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
+
+    def test_export_blockmask_mutated_closure(self, device):
+        def make_mask_fn():
+            res = 1
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            res = 4  # mutation after function definition
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
+
+    def test_export_blockmask_closure_with_containers(self, device):
+        def make_mask_fn():
+            offsets = [1, 2, 3]
+            config = {"base": 4, "nested": {"scale": 2}}
+
+            def fn(b, h, q, k):
+                return q >= k + config["base"] + sum(offsets)
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
+
+    def test_export_blockmask_closure_triple_nested(self, device):
+        def make_mask_fn():
+            a = 1
+
+            def level1():
+                b = 2
+
+                def level2():
+                    c = 3
+
+                    def fn(bx, h, q, k):
+                        return q >= k + a + b + c
+
+                    return fn
+
+                return level2()
+
+            return level1()
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn, device)
+
+
+instantiate_device_type_tests(TestExperimentDevice, globals(), except_for="cpu")
 
 
 if __name__ == "__main__":
