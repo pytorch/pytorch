@@ -180,18 +180,25 @@ format may change between releases without a deprecation cycle.
        call; a block that raised leaves them untouched (the exception propagates), and a
        clean exit with nothing captured -- no call was made, or the only call raised and was
        caught -- raises ``PrecompileError`` instead of writing an empty artifact.
-   :raises PrecompileError: if capture, lowering, or a runtime call violates the
-       contract (see the exception below); if one of the two paths is handed artifact
-       contents rather than a path; if ``tracer`` is a
-       :class:`precompile.DynamoTracer` (not available in this build yet); if the block
-       exits cleanly with nothing captured; a second make_fx call also raises.
+   :raises PrecompileError: if one of the two paths is handed artifact contents rather
+       than a path; if ``tracer`` is a :class:`precompile.DynamoTracer` (not available in
+       this build yet); or if ``fn`` IS a model, or HOLDS a tensor or an ``nn.Module``
+       where this can see it (a bound method's ``__self__``, a ``functools.partial``'s
+       bound argument) instead of taking it as a call argument.
    :raises ValueError: for an unknown ``backend``, for one file named as both halves, or
        for a path that exists but is not a regular file.
    :raises TypeError: if ``tracer`` is not a :class:`precompile.MakeFxTracer` or
-       :class:`precompile.DynamoTracer`, or if a ``MakeFxTracer`` capture is called with
-       keyword arguments.
-   :raises NotImplementedError: for ``backend="eager"`` with a ``mark_unbacked`` input
-       (dynamic shapes need the inductor backend).
+       :class:`precompile.DynamoTracer`.
+
+   Those are what this call raises; the capture object has its own, documented on
+   :class:`precompile.Capture` and :meth:`precompile.Capture.save`: a ``TypeError`` for a
+   ``MakeFxTracer`` call made with keyword arguments, a ``NotImplementedError`` for
+   ``backend="eager"`` with a ``mark_unbacked`` input (dynamic shapes need the inductor
+   backend), a ``PrecompileError`` for capture, lowering or a served call violating the
+   contract (see the exception below) and for every refusal of the capture's state machine
+   (a second make_fx call, a clean exit with nothing captured), and the re-raised
+   ``OSError`` of a write that failed out of the block exit or ``cap.save()`` -- the one to
+   catch to retry the write.
 
    Example::
 
@@ -384,7 +391,9 @@ format may change between releases without a deprecation cycle.
       the last checkpoint loadable; a :class:`precompile.MakeFxTracer` capture records a
       single call, so ``save()`` and block exit write the same files. A gate refusal (the
       ``DynamoTracer`` ``require_*`` fields) or a write failure raises but writes nothing
-      partial: the previous files stay intact and the capture stays open.
+      partial: the previous files stay intact and the capture stays open. A failed write
+      re-raises its ``OSError``, and ``save()`` stays open to retry that write, from
+      outside the block too.
 
 .. py:class:: precompile.PrecompileSummary
 
@@ -411,7 +420,7 @@ format may change between releases without a deprecation cycle.
 
    .. py:attribute:: bypassed
 
-      Frames that fell back to eager.
+      Frames the artifact holds nothing installable for (not an eager fallback).
 
    .. py:attribute:: truncated
 
@@ -423,7 +432,8 @@ format may change between releases without a deprecation cycle.
 
    .. py:attribute:: wont_generalize
 
-      Frames whose guards pin a value and so will not generalize.
+      Guard sources a kept value-equality guard pins, so no captured variant served
+      another value of them.
 
    .. py:attribute:: dropped_guards
 
@@ -460,13 +470,13 @@ format may change between releases without a deprecation cycle.
       (``allow_empty_graphs`` lets a frame that compiled nothing still count as a guarded
       code, so ``guarded_codes`` alone cannot tell a real capture from an empty one).
 
-   .. py:method:: dropped_guard_types()
+   .. py:property:: dropped_guard_types
 
-      Count omitted guards by guard type.
+      The distinct omitted slots counted by guard type.
 
-   .. py:method:: kept_guard_types()
+   .. py:property:: kept_guard_types
 
-      Count serialized guards by guard type.
+      The distinct serialized slots counted by guard type.
 
 .. py:class:: precompile.GuardFact
 
