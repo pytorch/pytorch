@@ -1252,9 +1252,12 @@ def add(x, y):
         # which is never a sys.modules key; import_source resolves it through
         # the importer registry keyed by that same name, so the registry's
         # module is the one the name resolves to now, and a same-named module a
-        # writer left in the slot is accepted and replaced by it. The alias is
-        # reached through an inlined call: the packaged function's global read
-        # roots at its own module, not the frame's.
+        # writer left in the slot is accepted and replaced by it. The registry
+        # is keyed by the module's own mangled __name__, so module_name ==
+        # value_name here, and this pins the acceptance rather than the
+        # value_name widening. The alias is reached through an inlined call: the
+        # packaged function's global read roots at its own module, not the
+        # frame's.
         name = "torch_test_package_import_alias_packaged"
         path = os.path.join(self.path(), "alias.pt")
         src = "SCALE = 2\n\ndef helper(x):\n    return x * SCALE\n"
@@ -1276,6 +1279,7 @@ def add(x, y):
             self.assertIs(fn.__globals__[alias], packaged)
         finally:
             fn.__globals__.pop(alias, None)
+            torch.package.package_importer._package_imported_modules.pop(mangled, None)
             torch._dynamo.reset()
 
     def test_import_alias_taken_by_a_non_module_graph_breaks(self):
@@ -1594,7 +1598,7 @@ def add(x, y):
         # reaches that arm, so a comptime callback calls import_source on the
         # live translator mid-trace, with the frame's real globals and output
         # behind it, as IMPORT_NAME does (graph_break_ok). A refused call
-        # stores nothing in cache_method's cache, which fills on the return
+        # stores nothing in _import_source_memo, which fills on the return
         # path only.
         key = "torch_test_package_import_alias_non_module_value"
         alias = f"__import_{key}"
