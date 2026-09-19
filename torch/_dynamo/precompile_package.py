@@ -925,6 +925,115 @@ _IDENTITY_GUARD_TYPES = frozenset(
 )
 
 
+# Ellipsis and NotImplemented repr by name, so they are as stable as a literal.
+_STABLE_CONST_TYPES = (
+    str,
+    int,
+    float,
+    complex,
+    bytes,
+    bool,
+    type(None),
+    type(Ellipsis),
+    type(NotImplemented),
+)
+
+
+def _stable_consts(consts: tuple[object, ...]) -> tuple[object, ...]:
+    """
+    co_consts reduced to the part that reprs the same in every process.
+
+    A nested code object reprs with its ADDRESS, so it cannot go into a digest
+    that ends up in a file meant to be committed and diffed. Containers are
+    filtered recursively rather than dropped whole: two lambdas differing only
+    in a tuple or frozenset constant -- ``x * (1, 2)`` against ``x * (1, 3)`` --
+    are genuinely different variants, and dropping the container is what let
+    them collide. A const of any other type keeps its SLOT as a type marker:
+    ``x[..., 0]`` and ``x[0, ...]`` fold to one const tuple at the same index,
+    so with the slot dropped they would collide the same way.
+    """
+    out: list[object] = []
+    for c in consts:
+        if isinstance(c, _STABLE_CONST_TYPES):
+            out.append(c)
+        elif isinstance(c, types.CodeType):
+            # A nested code object reprs with its ADDRESS, so it cannot go in
+            # verbatim -- but dropping it merges two lambdas that differ only in
+            # a comprehension or an inner lambda, which is this same bug one
+            # level down. Recurse into its own fingerprint instead.
+            out.append(_code_fingerprint(c))
+        elif isinstance(c, tuple):
+            out.append(_stable_consts(c))
+        elif isinstance(c, frozenset):
+            # Sorted by repr so the digest does not inherit set iteration order.
+            out.append(tuple(sorted(_stable_consts(tuple(c)), key=repr)))
+        else:
+            out.append(f"<{type(c).__name__}>")
+    return tuple(out)
+
+
+def _code_fingerprint(code: types.CodeType) -> str:
+    """
+    Name a code object by its body, for callables a definition site cannot tell
+    apart -- an ACT2FN table written on one source line makes every lambda in it
+    agree on file AND lineno.
+
+    Everything hashed is derived from the source, so the digest is identical in
+    another process. It is NOT stable across Python versions, since co_code is
+    version-specific bytecode: a committed invariants file churns wholesale on
+    an interpreter upgrade even with unchanged source.
+    """
+    return _hash_text(
+        repr(
+            (
+                code.co_code,
+                code.co_names,
+                code.co_varnames,
+                # LOAD_DEREF addresses a cell by INDEX, so two closures that
+                # capture different variables have identical co_code and are
+                # told apart only by the names they close over.
+                code.co_freevars,
+                code.co_cellvars,
+                _stable_consts(code.co_consts),
+            )
+        )
+    )
+
+
+def _object_identity(value: object) -> str:
+    """
+    A stable stand-in for the id ``_normalize`` stripped.
+
+    A qualname alone does not separate the case this exists for: an ACT2FN-style
+    table whose entries are all ``<lambda>`` in one module, where two variants
+    holding different entries would render identically and the CLOSURE_MATCH
+    that split them would be reported as an invariant of both. So a callable is
+    also named by where it is DEFINED (basename, so no checkout path) and by a
+    digest of its body, both source-derived and so stable across processes.
+
+    The discriminating part goes FIRST: truncation bounds this string, and a
+    transformers lambda nested in a long module path exceeds the limit on the
+    qualname alone, so a digest appended at the end would be cut off exactly on
+    the names that need it most.
+
+    Only the code object is named, not the data bound to it. Two closures from
+    one factory (``make(2)`` and ``make(3)``), two functions differing only in
+    ``__defaults__``, bound methods of two instances, and every
+    ``functools.partial`` render the same, as do two instances of one class.
+    """
+    if isinstance(value, types.ModuleType):
+        return f"is module {value.__name__}"
+    name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+    if isinstance(name, str):
+        code = getattr(value, "__code__", None)
+        where = ""
+        if isinstance(code, types.CodeType):
+            filename = os.path.basename(code.co_filename or "?")
+            where = f"@{filename}:{code.co_firstlineno}#{_code_fingerprint(code)} "
+        return _normalize(f"is {where}{_owning_module(value) or '?'}.{name}")[:160]
+    return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
+
+
 # Guard types that pin an input's shape, value or kind. An invariance policy
 # never drops one, and the report compares them across variants.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
