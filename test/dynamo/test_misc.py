@@ -11,6 +11,7 @@ import enum
 import functools
 import gc
 import importlib
+import inspect
 import itertools
 import json
 import logging
@@ -191,6 +192,20 @@ def closure_adder(val):
         return torch.sin(x + val)
 
     return inner
+
+
+def compare_deleted_cell(x):
+    # `del` empties the cell a while keeping the cell objects themselves alive,
+    # so comparing the two cells must treat the emptied one as empty.
+    a = 1
+    b = 2
+
+    def inner():
+        return a, b
+
+    ca, cb = inner.__closure__
+    del a
+    return x + (1 if ca < cb else 0)
 
 
 class UserDefineSetAttr:
@@ -2852,6 +2867,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
+
+    # Asserting on the graph break counters rather than on the compiled result:
+    # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
+    # and turns a failure to trace the comparison into a silent fall back to
+    # eager, so the result alone would look correct either way.
+    def test_cell_comparison_deleted_cell(self):
+        x = torch.ones(2)
+        expected = torch.ones(2) + 1
+        self.assertEqual(compare_deleted_cell(x), expected)
+        counters.clear()
+        got = torch.compile(compare_deleted_cell, backend="eager")(x)
+        self.assertEqual(got, expected)
+        self.assertEqual(dict(counters["graph_break"]), {})
 
     def test_return_nested_function(self):
         out = None
@@ -7711,6 +7739,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         # If this doesn't crash, the test passes
         fn(torch.ones(3))
+
+    @parametrize("sequence_type", [torch.Size, tuple, list])
+    @parametrize("shape", [(), (0,), (1, 4), (3, 4)])
+    @parametrize("dynamic", [False, True])
+    def test_tensor_ctor_sequence_shape(self, sequence_type, shape, dynamic):
+        def fn(x):
+            return torch.Tensor(sequence_type(x.size()))
+
+        x = torch.empty(shape)
+        expected_shape = shape if sequence_type is torch.Size else (len(shape),)
+        self.assertEqual(fn(x).shape, expected_shape)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=dynamic)
+        self.assertEqual(compiled(x).shape, expected_shape)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_ctor_list_of_tensor(self):
@@ -15608,6 +15649,13 @@ fn
         self.assertEqual(f(torch.randn(0)).shape, (1,))
         self.assertEqual(f(torch.randn(2)).shape, (2,))
 
+    def _clear_inspect_mro_cache(self):
+        # Some Python 3.12 builds cache classes in inspect.getattr_static.
+        cache = getattr(inspect, "_shadowed_dict_from_mro_tuple", None)
+        cache_clear = getattr(cache, "cache_clear", None)
+        if cache_clear is not None:
+            cache_clear()
+
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         """
         Args:
@@ -15630,6 +15678,7 @@ fn
             torch.compile(mod, backend="eager")(inp)
 
         run()
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
@@ -15698,6 +15747,7 @@ fn
 
         run()
         # del fc  # This should delete all the references
+        self._clear_inspect_mro_cache()
         gc.collect()
         self.assertTrue(cleared)
 
