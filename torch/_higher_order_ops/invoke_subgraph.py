@@ -1305,9 +1305,26 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # NB: invoke_subgraph subgraph re-trace seq_nr
             # The joint graph seq_nr will get wrong in the subsequent re-trace (all nodes will have the same seq_nr),
             # so we preserve the original graph's seq_nr here.
+            # reenter_make_fx normally executes a GraphModule's generated forward
+            # code. That replay creates new proxy nodes without transferring the
+            # original nodes' stack-trace metadata, so downstream exporters lose
+            # the Python source locations for operations inside the subgraph.
+            def run_subgraph_with_metadata(*args):
+                # Interpret the original graph while preserve_node_meta maps each
+                # dispatched operation back to the metadata of its source node.
+                with torch.fx.traceback.preserve_node_meta():
+                    return torch.fx.Interpreter(subgraph).run(*args)
+
+            # Non-GraphModule callables do not have FX node metadata to preserve,
+            # so keep their existing re-trace path unchanged.
+            trace_fn = (
+                run_subgraph_with_metadata
+                if isinstance(subgraph, torch.fx.GraphModule)
+                else subgraph
+            )
             with torch.fx.traceback._preserve_node_seq_nr():
                 graph = reenter_make_fx(
-                    subgraph, subgraph_decomp_table=subgraph_decomp_table
+                    trace_fn, subgraph_decomp_table=subgraph_decomp_table
                 )(*operands)
 
         # Propagate nested_region_config from the original subgraph to the
