@@ -1053,6 +1053,32 @@ def sample_inputs_linalg_solve_triangular(
         else:
             yield SampleInput(A, args=(B,), kwargs=kwargs)
 
+    shapes = (
+        (16, 16),
+        (16, 1),
+        (16, 8),
+        (16, 17),
+        (32, 31),
+        (32, 64),
+        (64, 1),
+        (64, 63),
+        (64, 128),
+        (64, 136),
+        (64, 129),
+    )
+    for (n, k), (left, upper, uni) in product(shapes, product((True, False), repeat=3)):
+        A = make_arg((2, n, n), low=-1, high=1).mul_(0.25 / n**0.5)
+        A = A.triu_() if upper else A.tril_()
+        A.diagonal(0, -2, -1).fill_(1)
+        if not uni:
+            A.diagonal(0, -2, -1).copy_(make_arg((2, n), low=1, high=2))
+        B = make_arg((2, n, k) if left else (2, k, n), low=-1, high=1)
+        yield SampleInput(
+            A.requires_grad_(requires_grad),
+            args=(B.requires_grad_(requires_grad),),
+            kwargs={"upper": upper, "unitriangular": uni, "left": left},
+        )
+
 
 def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -2265,7 +2291,50 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_linalg_solve_triangular,
         supports_fwgrad_bwgrad=True,
-        skips=(skipCPUIfNoLapack,),
+        skips=(
+            skipCPUIfNoLapack,
+            # ROCm returns incorrect complex results for the 64 x 64 batched samples.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cuda",
+                dtypes=[torch.complex64],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMathBits",
+                "test_conj_view",
+                device_type="cuda",
+                dtypes=[torch.complex64],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestBwdGradients",
+                "test_fn_grad",
+                device_type="cuda",
+                dtypes=[torch.complex128],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestBwdGradients",
+                "test_fn_gradgrad",
+                device_type="cuda",
+                dtypes=[torch.complex128],
+                active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFwdGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
+                dtypes=[torch.complex128],
+                active_if=TEST_WITH_ROCM,
+            ),
+        ),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
         supports_forward_ad=True,
     ),

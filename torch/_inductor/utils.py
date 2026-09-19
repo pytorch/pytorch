@@ -3692,6 +3692,14 @@ def parallel_num_threads() -> int:
     return threads
 
 
+def fp32_matmul_precision_key() -> str:
+    # Read per-backend fp32 precision instead of
+    # torch.get_float32_matmul_precision(), which raises if the legacy and
+    # per-backend APIs have been mixed.
+    getter = torch._C._get_fp32_precision_getter
+    return f"cuda:{getter('cuda', 'matmul')},mkldnn:{getter('mkldnn', 'matmul')}"
+
+
 @functools.cache
 def get_backend_num_stages() -> int:
     from .runtime.triton_helpers import get_backend_options
@@ -3701,31 +3709,44 @@ def get_backend_num_stages() -> int:
 
 
 @functools.cache
-def get_device_tflops(dtype: torch.dtype) -> float:
-    """
-    We don't want to throw errors in this function. First check to see if the device is in device_info.py,
-    then fall back to the inaccurate triton estimation.
-    """
-    is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
-    if torch.xpu.is_available():
-        is_tf32 = torch.backends.mkldnn.allow_tf32
-    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
+def _get_device_tflops(dtype: torch.dtype, device: torch.device) -> float:
+    is_tf32 = False
+    if device.type == "cuda":
+        is_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    elif device.type == "xpu":
+        is_tf32 = bool(torch.backends.mkldnn.allow_tf32)
+    device_info_key = _get_device_info_key(device)
+    ds_tops = (
+        datasheet_tops(dtype, is_tf32=is_tf32, device_name=device_info_key)
+        if device_info_key is not None
+        else None
+    )
     if ds_tops is not None:
         return ds_tops
 
-    if not torch.cuda.is_available():
+    if device.type != "cuda" or not torch.cuda.is_available():
         log.warning(
-            "get_device_tflops: no Triton fallback available for non-CUDA devices. "
-            "Returning 0.0; roofline estimates will use memory bandwidth only."
+            "get_device_tflops: no Triton fallback available for %s. "
+            "Returning 0.0; roofline estimates will use memory bandwidth only.",
+            device,
         )
         return 0.0
 
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
-    SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (
-        8,
-        0,
-    )
+    device_idx = device.index
+    if device_idx is None:
+        log.warning("get_device_tflops requires a concrete CUDA device; returning 0.0")
+        return 0.0
+    try:
+        SM80OrLater = torch.cuda.get_device_capability(device_idx) >= (8, 0)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to query CUDA capability for %s; returning 0.0 TFLOPS",
+            device,
+            exc_info=True,
+        )
+        return 0.0
 
     if dtype not in (torch.float16, torch.bfloat16, torch.float32):
         raise AssertionError(
@@ -3736,14 +3757,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         # Triton API change in https://github.com/triton-lang/triton/pull/2293
         from torch._utils_internal import max_clock_rate
 
-        sm_clock = max_clock_rate()
+        sm_clock = max_clock_rate(device_idx)
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            return get_max_tensorcore_tflops(dtype, sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock, device_idx)
 
         if torch.backends.cuda.matmul.fp32_precision == "tf32":
-            return get_max_tensorcore_tflops(torch.float32, sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock, device_idx)
         else:
-            return get_max_simd_tflops(torch.float32, sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock, device_idx)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype)
@@ -3752,6 +3773,34 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_tensorcore_tflops(torch.float32)
         else:
             return get_max_simd_tflops(torch.float32)
+
+
+def get_device_tflops(
+    dtype: torch.dtype, device: torch.device | str | None = None
+) -> float:
+    """
+    Return peak compute throughput without assuming a CUDA device.
+
+    Prefer registered or built-in device information. Devices exposed through
+    PyTorch's ``cuda`` device type, including ROCm, retain the existing Triton
+    fallback; other devices without registered information return zero.
+    """
+    resolved_device = (
+        torch.device(device) if device is not None else _current_accelerator_device()
+    )
+    if resolved_device is None:
+        log.warning("No accelerator available for TFLOPS estimation")
+        return 0.0
+    try:
+        resolved_device = decode_device(resolved_device)
+    except (AssertionError, IndexError, RuntimeError, ValueError):
+        log.warning(
+            "Unable to resolve a device index for %s; returning 0.0 TFLOPS",
+            resolved_device,
+            exc_info=True,
+        )
+        return 0.0
+    return _get_device_tflops(dtype, resolved_device)
 
 
 def _current_accelerator_device() -> torch.device | None:
