@@ -117,6 +117,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -4682,16 +4683,33 @@ class GuardsStatePickler(FunctionPicklerBase):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
+            dispatch_keys = torch._C._dispatch_keys(obj)
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                # Both reads above describe the FAKE, not the tensor it stands
+                # for: _dispatch_keys() on a fake reports Python and
+                # PythonTLSSnapshot keys the real tensor never had, and
+                # empty_like under the live FakeTensorMode returns another
+                # FakeTensor, dragging the mode and its converters into the
+                # pickle. The converter recorded the real tensor's keys.
+                if obj.dispatch_keys is not None:
+                    dispatch_keys = obj.dispatch_keys
+                with no_dispatch():
+                    meta = torch.empty_like(
+                        obj, device="meta", requires_grad=obj.requires_grad
+                    )
+            else:
+                meta = torch.empty_like(
+                    obj, device="meta", requires_grad=obj.requires_grad
+                )
 
             return type(self)._unpickle_tensor, (
-                torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
+                meta,
                 obj.device,
                 pytype,
-                torch._C._dispatch_keys(obj).raw_repr(),
+                dispatch_keys.raw_repr(),
                 obj.grad,
             )
 

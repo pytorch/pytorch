@@ -1251,6 +1251,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         ):
             load_guards_state(buf.getvalue())
 
+    def test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys(self):
+        # A guarded FakeTensor stands for a real tensor: the converter recorded
+        # that tensor's dispatch keys, whereas _dispatch_keys(fake) reports the
+        # Python keys of the fake itself, and empty_like under the live mode
+        # returns another fake that drags the mode into the pickle.
+        from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+
+        real = torch.randn(2)
+        mode = FakeTensorMode()
+        # from_meta_and_device is how a loaded artifact's tensors are rebuilt
+        # (from_real_tensor records keys only for an mkldnn source).
+        fake = mode.fake_tensor_converter.from_meta_and_device(
+            mode,
+            torch.empty_like(real, device="meta"),
+            real.device,
+            torch.Tensor,
+            torch._C._dispatch_keys(real),
+        )
+        real_keys = torch._C._dispatch_keys(real).raw_repr()
+        self.assertEqual(fake.dispatch_keys.raw_repr(), real_keys)
+        self.assertNotEqual(torch._C._dispatch_keys(fake).raw_repr(), real_keys)
+        buf = io.BytesIO()
+        with mode:
+            pickler = GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf)
+            # The meta template is a plain tensor, not another fake carrying
+            # the mode (without no_dispatch the dump still succeeds, with the
+            # mode and its converters pickled along).
+            _, args = pickler.reducer_override(fake)
+            self.assertIs(type(args[0]), torch.Tensor)
+            pickler.dump({"t": fake})
+        self.assertNotIn(b"FakeTensorMode", buf.getvalue())
+        out = load_guards_state(buf.getvalue())["t"]
+        self.assertIsInstance(out, FakeTensor)
+        self.assertEqual(out.dispatch_keys.raw_repr(), real_keys)
+        self.assertEqual(out.shape, real.shape)
+
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
         # torch.float32 registered the one dtype object as missing, and every
