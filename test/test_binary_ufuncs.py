@@ -4071,6 +4071,69 @@ class TestBinaryUfuncsDevice(TestCase):
     def test_logaddexp2(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=True)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/196704.
+    # The backward of logaddexp is the logistic weight
+    # 1 / (1 + exp(other - self)) (and 1 / (1 + pow(2, other - self)) for
+    # logaddexp2). Those expressions overflow to inf for large operand gaps:
+    # the first-order gradient survives (grad / inf == 0), but the expression
+    # autograd differentiates for the double backward evaluates to
+    # inf / inf, so second-order AD returned nan. The forward-mode formula had
+    # exactly the same problem, so nested jvp returned nan as well.
+    @dtypes(torch.float32, torch.float64)
+    def test_logaddexp_higher_order_large_operand_gap(self, device, dtype):
+        from torch.func import jvp
+
+        def grad_of_jvp(fn, a, b):
+            def fwd(a, b):
+                return jvp(fn, (a, b), (torch.ones_like(a), torch.zeros_like(b)))[1]
+
+            return jvp(fwd, (a, b), (torch.ones_like(a), torch.zeros_like(b)))[1]
+
+        # Gaps well past the overflow thresholds of exp (log(DBL_MAX) ~ 709)
+        # and of pow(2, .) (1024).
+        for fn in (torch.logaddexp, torch.logaddexp2):
+            for gap in (800.0, 1601.0, -800.0, -1601.0):
+                a = torch.zeros(4, dtype=dtype, device=device, requires_grad=True)
+                b = torch.full(
+                    (4,), gap, dtype=dtype, device=device, requires_grad=True
+                )
+                grad_a, grad_b = torch.autograd.grad(
+                    fn(a, b).sum(), (a, b), create_graph=True
+                )
+                for grad, x in ((grad_a, a), (grad_b, b)):
+                    (second,) = torch.autograd.grad(
+                        grad, x, grad_outputs=torch.ones_like(grad), retain_graph=True
+                    )
+                    self.assertTrue(
+                        torch.isfinite(second).all().item(),
+                        f"{fn.__name__}: second derivative is not finite for gap={gap}",
+                    )
+                self.assertTrue(
+                    torch.isfinite(grad_of_jvp(fn, a.detach(), b.detach()))
+                    .all()
+                    .item(),
+                    f"{fn.__name__}: second forward derivative is not finite for gap={gap}",
+                )
+
+    @dtypes(torch.float64)
+    def test_logaddexp_second_order_accuracy(self, device, dtype):
+        # d^2/da^2 logaddexp(a, b) == sigma'(a - b) == 1 / (2 + 2 * cosh(a - b))
+        # d^2/da^2 logaddexp2(a, b) == log(2) * sigma'(log(2) * (a - b))
+        for fn, log_base in ((torch.logaddexp, 1.0), (torch.logaddexp2, math.log(2.0))):
+            for gap in (0.0, 0.5, 1.0, 5.0, 10.0, 20.0, -1.0, -5.0, -10.0, -20.0):
+                a = torch.zeros((), dtype=dtype, device=device, requires_grad=True)
+                b = torch.full((), gap, dtype=dtype, device=device)
+                (grad_a,) = torch.autograd.grad(fn(a, b), a, create_graph=True)
+                (second,) = torch.autograd.grad(grad_a, a)
+                expected = log_base / (2 + 2 * math.cosh(log_base * gap))
+                # Relative-only tolerance: evaluating sigma'(x) as
+                # sigma(x) * (1 - sigma(x)) rounds off like sigma(x) itself for
+                # larger |x|, and atol would hide a regression to 0 for the
+                # small values covered here.
+                self.assertEqual(
+                    second, torch.full_like(second, expected), rtol=1e-4, atol=0.0
+                )
+
     def test_add(self, device):
         dtypes = floating_and_complex_types()
         for dtype in dtypes:
