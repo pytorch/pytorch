@@ -10,11 +10,13 @@ from typing import Any, Protocol, TYPE_CHECKING
 
 import torch
 
-from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from ._blocking import _BlockingTransport
 
 
 if TYPE_CHECKING:
     from triton.language import uint32, uint64
+
+    from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Work
 else:
     uint32 = None
     uint64 = None
@@ -532,7 +534,7 @@ class _TritonGPUNetIOProvider:
         self._dump_tensor = None
 
 
-class IBVerbsTransport(Transport):
+class IBVerbsTransport(_BlockingTransport):
     """RDMA transport backed by the ``ibverbs`` package from rdma4py."""
 
     def __init__(

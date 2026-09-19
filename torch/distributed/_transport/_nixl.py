@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import operator
 import time
 import uuid
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from importlib import import_module
-from threading import get_ident, Lock
-from typing import Any, cast
+from threading import RLock
+from typing import Any
 
 import torch
 
 from ._api import MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
-from ._work import _validate_timeout
+from ._work import _PollingWork, _validate_timeout, wait_all
 
 
 def _load_backend() -> Any:
@@ -157,11 +160,11 @@ class NIXLTransport(Transport):
         self._default_timeout = timeout
         self._peer_name: str | None = None
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
-        self._transfers: dict[tuple[Any, ...], Any] = {}
-        self._operation_lock = Lock()
+        self._transfers: dict[int, Any] = {}
+        self._pending: dict[int, _NIXLWork] = {}
+        self._operation_lock = RLock()
         self._closed = False
-        self._close_lock = Lock()
-        self._shutdown_work: Work | None = None
+        self._closing = False
 
     @staticmethod
     def supported() -> bool:
@@ -174,17 +177,38 @@ class NIXLTransport(Transport):
             return False
 
     def _ensure_open(self) -> Any:
-        if self._closed:
+        if self._closed or self._closing:
             raise RuntimeError("transport is closed")
         return self._agent
 
+    @contextmanager
+    def _locked(self, timeout: float | None):
+        timeout = self._timeout if timeout is None else timeout
+        _validate_timeout(timeout)
+        if not self._operation_lock.acquire(timeout=timeout):
+            raise TimeoutError("transport lock wait timed out")
+        try:
+            yield
+        finally:
+            self._operation_lock.release()
+
+    @asynccontextmanager
+    async def _locked_async(self, deadline: float):
+        while not self._operation_lock.acquire(blocking=False):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("transport lock wait timed out")
+            await asyncio.sleep(0.001)
+        try:
+            yield
+        finally:
+            self._operation_lock.release()
+
     def _call(self, operation: Any, timeout: float | None) -> Any:
-        return self._work_queue.run(
-            operation,
-            torch.device("cpu"),
-            async_op=False,
-            timeout=self._timeout if timeout is None else timeout,
-        )
+        # NIXL metadata/registration APIs are synchronous. The deadline bounds
+        # lock acquisition, not execution inside the native library.
+        with self._locked(timeout):
+            self._ensure_open()
+            return operation()
 
     def bind(self, *, timeout: float | None = None) -> bytes:
         return self._call(lambda: self._ensure_open().get_agent_metadata(), timeout)
@@ -200,7 +224,7 @@ class NIXLTransport(Transport):
         return 0
 
     def connected(self) -> bool:
-        return self._peer_name is not None and not self._closed
+        return self._peer_name is not None and not self._closed and not self._closing
 
     def register_memory(
         self, tensor: torch.Tensor, *, timeout: float | None = None
@@ -250,14 +274,15 @@ class NIXLTransport(Transport):
             metadata,
         )
 
-    def _transfer(
+    def _submit(
         self,
         operation: str,
         local_buffer: MemoryView,
         remote_buffer: RemoteBuffer,
         *,
         mutable: bool,
-    ) -> int:
+        timeout: float,
+    ) -> _NIXLWork:
         agent = self._ensure_open()
         expected_type = NIXLMutableMemoryView if mutable else NIXLMemoryView
         if not isinstance(local_buffer, expected_type) or (
@@ -278,83 +303,70 @@ class NIXLTransport(Transport):
             raise RuntimeError(
                 "registered tensor was resized or its storage was replaced"
             )
+        work = _NIXLWork(self, local_buffer, remote_buffer, timeout)
         if local_buffer.size() == 0:
-            return 0
-        key = (
-            operation,
-            id(registration),
-            local_buffer._offset,
-            local_buffer.size(),
-            remote_buffer.agent_name,
-            remote_buffer.address,
-            remote_buffer.length,
-            remote_buffer.device_id,
-            remote_buffer.memory_type,
-            remote_buffer.metadata,
+            work._done = True
+            return work
+        loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
+        if loaded_name != remote_buffer.agent_name:
+            raise ValueError("remote buffer metadata names a different agent")
+        local_descs = agent.get_xfer_descs(
+            [
+                (
+                    registration.address + local_buffer._offset,
+                    local_buffer.size(),
+                    registration.device_id,
+                )
+            ],
+            mem_type=registration.memory_type,
         )
-        with self._operation_lock:
-            handle = self._transfers.get(key)
-            if handle is None:
-                loaded_name = _agent_name(
-                    agent.add_remote_agent(remote_buffer.metadata)
-                )
-                if loaded_name != remote_buffer.agent_name:
-                    raise ValueError("remote buffer metadata names a different agent")
-                local_descs = agent.get_xfer_descs(
-                    [
-                        (
-                            registration.address + local_buffer._offset,
-                            local_buffer.size(),
-                            registration.device_id,
-                        )
-                    ],
-                    mem_type=registration.memory_type,
-                )
-                remote_descs = agent.get_xfer_descs(
-                    [
-                        (
-                            remote_buffer.address,
-                            local_buffer.size(),
-                            remote_buffer.device_id,
-                        )
-                    ],
-                    mem_type=remote_buffer.memory_type,
-                )
-                handle = agent.initialize_xfer(
-                    operation,
-                    local_descs,
-                    remote_descs,
-                    remote_buffer.agent_name,
-                    backends=[self._plugin],
-                )
-                self._transfers[key] = handle
-            try:
-                error: BaseException | None = None
-                state = "PROC"
-                try:
-                    state = agent.transfer(handle)
-                except BaseException as dispatch_error:
-                    error = dispatch_error
-                while state == "PROC":
-                    try:
-                        state = agent.check_xfer_state(handle)
-                    except BaseException as check_error:
-                        # A failed query does not establish that DMA has stopped.
-                        if error is None:
-                            error = check_error
-                    if state == "PROC":
-                        time.sleep(0.001)
-                if error is not None:
-                    raise error
-                if state != "DONE":
-                    raise RuntimeError(f"NIXL {operation.lower()} failed")
-            except BaseException:
-                self._transfers.pop(key, None)
-                try:
-                    agent.release_xfer_handle(handle)
-                except Exception:
-                    pass
-                raise
+        remote_descs = agent.get_xfer_descs(
+            [(remote_buffer.address, local_buffer.size(), remote_buffer.device_id)],
+            mem_type=remote_buffer.memory_type,
+        )
+        # A request handle belongs to exactly one live Work. Reusing a handle
+        # while its previous transfer is pending corrupts native request state.
+        work._handle = agent.initialize_xfer(
+            operation,
+            local_descs,
+            remote_descs,
+            remote_buffer.agent_name,
+            backends=[self._plugin],
+        )
+        work._descriptors = (local_descs, remote_descs)
+        self._transfers[id(work)] = work._handle
+        self._pending[id(work)] = work
+        _live_transports.add(self)
+        try:
+            work._state = agent.transfer(work._handle)
+        except BaseException as error:
+            # Dispatch may have started DMA before raising. Keep polling and
+            # retain buffers until a native terminal state establishes safety.
+            work._error = error
+        return work
+
+    def _start(
+        self,
+        operation: str,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        mutable: bool,
+        async_op: bool,
+        timeout: float | None,
+    ) -> int | Work:
+        timeout = self._timeout if timeout is None else timeout
+        _validate_timeout(timeout)
+        deadline = time.monotonic() + timeout
+        with self._locked(timeout):
+            work = self._submit(
+                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
+            )
+        if async_op:
+            return work
+        # Native submission itself is synchronous and cannot be preempted.
+        work._timeout = max(0.0, deadline - time.monotonic())
+        work.wait()
         return 0
 
     def write(
@@ -365,13 +377,13 @@ class NIXLTransport(Transport):
         async_op: bool = False,
         timeout: float | None = None,
     ) -> int | Work:
-        if not isinstance(local_buffer, NIXLMemoryView):
-            raise TypeError("local_buffer was not registered by this transport")
-        return self._run_transfer(
-            lambda: self._transfer("WRITE", local_buffer, remote_buffer, mutable=False),
-            local_buffer._memory._registration.tensor.device,
+        return self._start(
+            "WRITE",
+            local_buffer,
+            remote_buffer,
+            mutable=False,
             async_op=async_op,
-            timeout=self._timeout if timeout is None else timeout,
+            timeout=timeout,
         )
 
     def read(
@@ -382,48 +394,182 @@ class NIXLTransport(Transport):
         async_op: bool = False,
         timeout: float | None = None,
     ) -> int | Work:
-        if not isinstance(local_buffer, NIXLMutableMemoryView):
-            raise TypeError("local_buffer was not registered by this transport")
-        return self._run_transfer(
-            lambda: self._transfer("READ", local_buffer, remote_buffer, mutable=True),
-            local_buffer._memory._registration.tensor.device,
+        return self._start(
+            "READ",
+            local_buffer,
+            remote_buffer,
+            mutable=True,
             async_op=async_op,
-            timeout=self._timeout if timeout is None else timeout,
+            timeout=timeout,
         )
+
+    async def _transfer_async(
+        self,
+        operation: str,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        mutable: bool,
+        timeout: float | None,
+    ) -> None:
+        timeout = self._timeout if timeout is None else timeout
+        _validate_timeout(timeout)
+        deadline = time.monotonic() + timeout
+        async with self._locked_async(deadline):
+            work = self._submit(
+                operation, local_buffer, remote_buffer, mutable=mutable, timeout=timeout
+            )
+        await wait_all([work], timeout=max(0.0, deadline - time.monotonic()))
+
+    async def write_async(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        await self._transfer_async(
+            "WRITE", local_buffer, remote_buffer, mutable=False, timeout=timeout
+        )
+
+    async def read_async(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        await self._transfer_async(
+            "READ", local_buffer, remote_buffer, mutable=True, timeout=timeout
+        )
+
+    def _begin_close(self, timeout: float) -> list[_NIXLWork]:
+        self._closing = True
+        with self._locked(timeout):
+            return list(self._pending.values())
 
     def close(self, *, timeout: float | None = None) -> None:
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
-        if get_ident() == self._work_queue.worker_ident:
-            raise RuntimeError("cannot close a transport from its worker")
-        with self._close_lock:
-            if self._shutdown_work is None:
-                self._shutdown_work = cast(
-                    Work,
-                    self._run_transfer(
-                        self._release_resources, torch.device("cpu"), async_op=True
-                    ),
+        deadline = time.monotonic() + timeout
+        pending = self._begin_close(timeout)
+        error: BaseException | None = None
+        for work in pending:
+            try:
+                work.wait(
+                    timedelta(seconds=max(0.0, deadline - time.monotonic()))
+                    or timedelta(microseconds=1)
                 )
-        self._close_work(timeout)
-        cast(Work, self._shutdown_work).wait()
+            except BaseException as failure:
+                if not work.is_completed():
+                    raise
+                if error is None:
+                    error = failure
+        with self._locked(max(0.0, deadline - time.monotonic())):
+            self._release_resources()
+        if error is not None:
+            raise error
+
+    async def close_async(self, *, timeout: float | None = None) -> None:
+        """Await outstanding DMA before synchronous native resource cleanup.
+
+        Cancellation/timeout retains resources and rejects new submissions.
+        Retry close after pending work completes. Native cleanup is not
+        interruptible; peer access must already have been stopped externally.
+        """
+        timeout = self._timeout if timeout is None else timeout
+        _validate_timeout(timeout)
+        deadline = time.monotonic() + timeout
+        self._closing = True
+        async with self._locked_async(deadline):
+            pending = list(self._pending.values())
+        error: BaseException | None = None
+        try:
+            await wait_all(pending, timeout=max(0.0, deadline - time.monotonic()))
+        except BaseException as failure:
+            if isinstance(failure, asyncio.CancelledError) or any(
+                not w.is_completed() for w in pending
+            ):
+                raise
+            error = failure
+        async with self._locked_async(deadline):
+            self._release_resources()
+        if error is not None:
+            raise error
 
     def _release_resources(self) -> int:
         if self._closed:
             return 0
-        self._closed = True
         agent = self._agent
-        peer_name = self._peer_name
-        self._peer_name = None
-        for handle in self._transfers.values():
+        for key, handle in list(self._transfers.items()):
             agent.release_xfer_handle(handle)
-        self._transfers.clear()
-        for registration in self._registrations.values():
+            del self._transfers[key]
+        for key, registration in list(self._registrations.items()):
             agent.deregister_memory(registration.descs, backends=[self._plugin])
-        self._registrations.clear()
-        if peer_name is not None:
-            agent.remove_remote_agent(peer_name)
+            del self._registrations[key]
+        if self._peer_name is not None:
+            agent.remove_remote_agent(self._peer_name)
+            self._peer_name = None
         self._agent = None
+        self._closed = True
         return 0
+
+
+# Dropping a Work or transport must not free memory still used by DMA. Entries
+# are removed only after polling establishes completion; users must wait/close.
+_live_transports: set[NIXLTransport] = set()
+
+
+class _NIXLWork(_PollingWork):
+    def __init__(
+        self,
+        transport: NIXLTransport,
+        local: MemoryView,
+        remote: NIXLRemoteBuffer,
+        timeout: float,
+    ) -> None:
+        super().__init__(timeout)
+        self._transport = transport
+        self._buffers = (local, remote)
+        self._descriptors: Any = None
+        self._handle: Any = None
+        self._state = "PROC"
+        self._done = False
+
+    def _poll(self) -> bool:
+        transport = self._transport
+        if not transport._operation_lock.acquire(blocking=False):
+            return False
+        try:
+            if self._done:
+                return True
+            if self._state == "PROC":
+                try:
+                    self._state = transport._agent.check_xfer_state(self._handle)
+                except BaseException as error:
+                    if self._error is None:
+                        self._error = error
+                    return False
+            if self._state == "PROC":
+                return False
+            if self._state != "DONE" and self._error is None:
+                self._error = RuntimeError(f"NIXL transfer failed: {self._state}")
+            try:
+                transport._agent.release_xfer_handle(self._handle)
+                transport._transfers.pop(id(self))
+            except BaseException as error:
+                # Keep unreleased handles for close; disallow new requests so
+                # an old Work's identity cannot be reused as a new handle key.
+                transport._closing = True
+                if self._error is None:
+                    self._error = error
+            self._done = True
+            transport._pending.pop(id(self))
+            if not transport._pending:
+                _live_transports.discard(transport)
+            return True
+        finally:
+            transport._operation_lock.release()
 
 
 __all__ = ["NIXLTransport"]
