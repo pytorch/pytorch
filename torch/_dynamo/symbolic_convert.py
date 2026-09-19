@@ -2423,8 +2423,8 @@ class InstructionTranslatorBase(
     ) -> GlobalSource:
         """
         Create an alias to a module for use in guards. A slot already holding
-        something other than the resolved module is a hard error unless the
-        caller can graph break there.
+        something other than the resolved module is a hard error unless
+        graph_break_ok says the caller can graph break there.
         """
         if (memo := self._import_source_memo.get(module_name)) is not None:
             return memo
@@ -2478,11 +2478,14 @@ class InstructionTranslatorBase(
                 # f_globals is the root frame's: an inlined callee's own module is not
                 # where the alias lives, so the message names the module whose it is.
                 scope = f_globals.get("__name__") or "<a scope with no __name__>"
-                # A graph break only where the traced bytecode chose the name, IMPORT_NAME.
-                # Every other caller resolves a name of Dynamo's choosing -- torch's, the
-                # stdlib's, a class's __module__, an inlined callee's module -- and from
-                # codegen an Unsupported is not a graph break but a frame skipped after the
-                # backend ran, silent at default log levels; those keep the hard error.
+                # A graph break only where the traced bytecode chose the name,
+                # IMPORT_NAME. The codegen callers keep the hard error because an
+                # Unsupported there is not a graph break but a frame skipped after
+                # the backend ran, silent at default log levels. The tracing-phase
+                # ones keep it because the alias stands for a name no import
+                # statement of the user's spelled -- call_apply (misc.py) included,
+                # whose autograd.Function __module__ is a user module read under a
+                # handler that would absorb a break, so that one is a choice.
                 if not graph_break_ok:
                     raise AssertionError(
                         f"import alias {alias} for {module_name} is already bound to "
@@ -2492,7 +2495,7 @@ class InstructionTranslatorBase(
                     gb_type="Import alias already bound",
                     context=f"{alias} for {module_name}: {offender}",
                     explanation=f"The module alias {alias} for {module_name} is already bound to "
-                    f"a {offender} in the globals of {scope}, the module of the frame being compiled.",
+                    f"a {offender} in the globals of {scope}, the globals of the frame being compiled.",
                     hints=[
                         f"Remove or rename the global {alias} from the globals of {scope}.",
                         "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
