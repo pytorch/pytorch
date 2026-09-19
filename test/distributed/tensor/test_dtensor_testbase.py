@@ -18,6 +18,25 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DTensorContinuousTestBaseTest(TestCase):
+    def test_device_selection_matches_instance_property(self):
+        class Fixture(DTensorContinuousTestBase):
+            world_size = 4
+
+        with (
+            patch.object(common_dtensor, "TEST_CUDA", True),
+            patch.object(common_dtensor, "DEVICE_TYPE", "cuda"),
+        ):
+            for count in (0, 1, 4, 8):
+                with (
+                    self.subTest(device_count=count),
+                    patch.object(common_dtensor, "DEVICE_COUNT", count, create=True),
+                ):
+                    expected = "cpu" if count < Fixture.world_size else "cuda"
+                    self.assertEqual(Fixture().device_type, expected)
+                    self.assertEqual(
+                        Fixture.backend_str(), "gloo" if expected == "cpu" else "nccl"
+                    )
+
     def test_cpu_fallback_backend(self):
         class FallbackTest(DTensorContinuousTestBase):
             world_size = 4
