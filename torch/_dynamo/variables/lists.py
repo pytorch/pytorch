@@ -716,25 +716,35 @@ class BaseListVariable(VariableTracker):
                     )
                 return bool(result.as_python_constant())
 
+        sort_items = saved
+        if key_fn_var.is_constant_none():
+            from .misc import SourcedRandomVariable
+
+            # A complete runtime shuffle sorts the same for any order, so sort
+            # its population instead.
+            shuffle_values = SourcedRandomVariable.complete_shuffle_values(tx, saved)
+            if shuffle_values is not None:
+                sort_items = shuffle_values
+
         try:
             if key_fn_var.is_constant_none():
-                keys = saved
+                keys = sort_items
             else:
-                keys = [key_fn_var.call_function(tx, [x], {}) for x in saved]
+                keys = [key_fn_var.call_function(tx, [x], {}) for x in sort_items]
 
             if all(k.is_python_constant() for k in keys):
                 order = sorted(
-                    range(len(saved)),
+                    range(len(sort_items)),
                     key=lambda i: keys[i].as_python_constant(),
                     reverse=reverse,
                 )
             else:
                 order = sorted(
-                    range(len(saved)),
+                    range(len(sort_items)),
                     key=lambda i: _TracedKey(keys[i]),
                     reverse=reverse,
                 )
-            new_items = [saved[i] for i in order]
+            new_items = [sort_items[i] for i in order]
         except Exception as e:
             self.items[:] = saved
             if isinstance(e, (ObservedException, Unsupported)):

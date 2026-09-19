@@ -138,6 +138,7 @@ from .source import (
     LocalSource,
     NumpyTensorSource,
     ParamBufferSource,
+    RandomCall,
     ShapeEnvSource,
     SyntheticLocalSource,
     TensorProperty,
@@ -344,9 +345,17 @@ class GraphCompileReason:
             graph_break_reasons.append(self)
 
 
-def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
-    def _gen_rand_values() -> list[Any]:
-        return [fn(*args, **kwargs) for fn, args, kwargs in random_calls]
+def _get_gen_rand_values_fn(
+    random_calls: list[RandomCall],
+) -> Callable[..., list[Any]]:
+    def _gen_rand_values(*sourced_fns: Callable[..., Any]) -> list[Any]:
+        # The prologue passes the reconstructed callables of the
+        # source-backed calls, in order.
+        sourced = iter(sourced_fns)
+        return [
+            call(next(sourced) if isinstance(call.fn, Source) else call.fn)
+            for call in random_calls
+        ]
 
     return _gen_rand_values
 
@@ -963,9 +972,7 @@ class OutputGraph(OutputGraphCommon):
         # functions that returns a tuple of random values for each original call.
         # random_calls tracks calls to random() and random_values_var stores the name of
         # the variable that stores __gen_rand_values results.
-        self.random_calls: list[
-            tuple[Callable[..., object], tuple[object, ...], dict[str, object]]
-        ] = []
+        self.random_calls: list[RandomCall] = []
         self.random_values_var: Any = None
 
         # Bytecode to insert right before we call the graph
@@ -2148,7 +2155,6 @@ class OutputGraph(OutputGraphCommon):
 
         # to handle random calls
         if len(self.random_calls) > 0:
-            random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
             rand_fn = disable(
                 _get_gen_rand_values_fn(self.random_calls),
@@ -2158,14 +2164,15 @@ class OutputGraph(OutputGraphCommon):
             codegen = PyCodegen(
                 self.root_tx, root, overridden_sources=overridden_sources
             )
-            random_calls_instructions.extend(
-                codegen.load_function_name(rand_fn_name, True)
-            )
-            random_calls_instructions.extend(create_call_function(0, False))
-            random_calls_instructions.append(
-                codegen.create_store(self.random_values_var),
-            )
-            self.add_output_instructions(random_calls_instructions)
+            codegen.extend_output(codegen.load_function_name(rand_fn_name, True))
+            fn_sources = [
+                call.fn for call in self.random_calls if isinstance(call.fn, Source)
+            ]
+            for fn_source in fn_sources:
+                codegen(fn_source)
+            codegen.extend_output(create_call_function(len(fn_sources), False))
+            codegen.append_output(codegen.create_store(self.random_values_var))
+            self.add_output_instructions(codegen.get_instructions())
 
         # Codegen stack convention before the unsupported instruction
         # NOTE: in these comment blocks, "locals" EXCLUDE free and cell vars.
