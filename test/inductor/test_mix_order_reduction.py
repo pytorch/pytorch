@@ -16,7 +16,10 @@ from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1601,6 +1604,31 @@ class OverFusionTest(TestBase):
         # max_reads should limit over-fusion, not disable mix_order entirely
         self.assertGreater(metrics.codegen_mix_order_reduction, 0)
         self.assertGreater(metrics.rejected_mix_order_reduction_fusion, 0)
+
+
+class MixOrderReductionNumericTest(TestBase):
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+        }
+    )
+    def test_split_column_reduction_masks_padded_rows(self, device):
+        def f(x):
+            y = x * 2 + 0.25
+            return y.max(dim=-1).values, y.float().sum(dim=0)
+
+        x = torch.zeros((40961, 129), dtype=torch.bfloat16, device=device)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+
+instantiate_device_type_tests(MixOrderReductionNumericTest, globals(), only_for="cuda")
 
 
 class MixOrderReductionHeuristicTest(TestBase):
