@@ -3,11 +3,13 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any, TYPE_CHECKING
 
-from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Transport, Work
+from ._blocking import _BlockingTransport
 
 
 if TYPE_CHECKING:
     import torch
+
+    from ._api import Memory, MemoryView, MutableMemoryView, RemoteBuffer, Work
 
 
 def _load_backend() -> Any:
@@ -58,7 +60,7 @@ class _Memory:
         return self.native.reused_registration()
 
 
-class TorchCommsTransport(Transport):
+class TorchCommsTransport(_BlockingTransport):
     """Adapter for torchcomms' RDMA transport."""
 
     def __init__(self, device: torch.device | str | None = None) -> None:
