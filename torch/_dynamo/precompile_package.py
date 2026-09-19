@@ -889,7 +889,10 @@ def _is_risky_drop(
 # value of an int/float/str subclass argument; the two iterator guards pin an
 # iterator argument's exact position. Length and key-set guards
 # (SEQUENCE_LENGTH, TUPLE_ITERATOR_LEN, MAPPING_KEYS_CHECK) pin a container's
-# structure rather than a value and are deliberately not counted.
+# structure rather than a value and are deliberately not counted; the set keys
+# on guard type alone, so an EQUALS_MATCH installed on a container argument
+# itself (a dict_keys or a frozenset of torch ops, variables/builder.py) IS
+# counted, its contents being the value the artifact then serves only for.
 _VALUE_EQUALITY_GUARD_TYPES = frozenset(
     {
         "CONSTANT_MATCH",
@@ -1083,14 +1086,14 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
-# Guards that pin an input's SHAPE, VALUE or KIND, or ambient state the graph
-# was traced under, never policy-dropped even when they held identically across
-# every captured variant. A drop is licensed by "it discriminated nothing", but
-# with a single example nothing CAN discriminate, and what would disappear is
-# the check that the runtime input looks like the captured one at all. A dropped
-# shape guard crashes inside a kernel on inductor and can quietly miscompute on
-# eager; a dropped value guard serves the captured branch to every other value
-# with correct-looking numerics.
+# Guards that pin an input's SHAPE, VALUE or KIND: compared across variants,
+# and never policy-dropped even when they held identically across every captured
+# variant. A drop is licensed by "it discriminated nothing", but with a single
+# example nothing CAN discriminate, and what would disappear is the check that
+# the runtime input looks like the captured one at all. A dropped shape guard
+# crashes inside a kernel on inductor and can quietly miscompute on eager; a
+# dropped value guard serves the captured branch to every other value with
+# correct-looking numerics.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
         "TENSOR_MATCH",
@@ -1123,22 +1126,6 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         # reference-type opaque object.
         "TYPE_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
-        # Ambient state (installed on GlobalStateSource, not an input): the
-        # graph specialized on utils_device.CURRENT_DEVICE; captured under the
-        # default None and served under set_default_device("cuda"), it returns
-        # CPU tensors with no refusal. The next three are the same shape, and
-        # GlobalStateGuard::init snapshots none of the four. The vmap level the
-        # graph baked in (output_graph.functorch_layers, itself serialized)
-        # lives in BatchedTensorImpl, not in the keys TENSOR_MATCH compares.
-        "DEFAULT_DEVICE",
-        "FUNCTORCH_STACK_MATCH",
-        # The traced level is a graph constant (_exit_dual_level(level=N));
-        # under another _current_level unpack_dual returns no tangent.
-        "DUAL_LEVEL",
-        # The predicate that installs it also bakes the pack/unpack subgraphs
-        # into the graph; a hook-free capture served under inlineable hooks
-        # skips them with no refusal.
-        "AUTOGRAD_SAVED_TENSORS_HOOKS",
         # Membership, key-set, length and iterator-position facts, each a branch
         # the graph specialized on.
         "COUNT_ITERATOR_MATCH",
@@ -1151,8 +1138,8 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "SET_CONTAINS",
         "SET_NOT_CONTAINS",
         "TUPLE_ITERATOR_LEN",
-        # Installed on a module's empty hook dicts under every config; its leaf,
-        # a SEQUENCE_LENGTH on the dict, exists only when
+        # Installed on a module's empty hook dicts whatever the config; its
+        # leaf, a SEQUENCE_LENGTH on the dict, exists only when
         # skip_nnmodule_hook_guards is off. Never dropped either way: with the
         # leaf it pins a length, and without one dropping the entry buys nothing.
         "EMPTY_NN_MODULE_HOOKS_DICT",
@@ -1164,14 +1151,15 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
 )
 
 
-# Guards whose C++ leaf compares something no fingerprint in this module reads:
-# subclass metadata, a DTensor placement, an opaque object's guard values, a raw
-# DispatchKeySet, the symbolic shape environment, or process-wide state the leaf
-# snapshots for itself (GlobalStateGuard's state, the torch-function mode
-# stack). Calling two of these equal is how the report ends up asserting a
-# precondition that does not hold, so they are never compared and are reported
-# as undetermined. They are never dropped either: a policy may drop only what
-# its droppable set names, and these are in no such set.
+# Guards that check process or ambient state, or metadata, that no fingerprint
+# in this module reads and their filter entry cannot expose: the leaf snapshots
+# it for itself (GlobalStateGuard's state, the torch-function mode stack,
+# CURRENT_DEVICE) or compares subclass metadata, a DTensor placement, an opaque
+# object's guard values, a raw DispatchKeySet or the symbolic shape environment.
+# Calling two of these equal is how the report ends up asserting a precondition
+# that does not hold, so they are never compared and are reported as
+# undetermined. They are never dropped either: a policy may drop only what its
+# droppable set names, and these are in no such set.
 _UNMODELLED_GUARD_TYPES = frozenset(
     {
         "DISPATCH_KEY_SET_MATCH",
@@ -1187,6 +1175,29 @@ _UNMODELLED_GUARD_TYPES = frozenset(
         "SHAPE_ENV",
         "TENSOR_SUBCLASS_METADATA_MATCH",
         "TORCH_FUNCTION_STATE",
+        # Ambient state the graph was traced under, installed on
+        # GlobalStateSource rather than on an input and outside
+        # GlobalStateGuard::init's snapshot. Never dropped: each fails silently
+        # when missing. Never compared: GlobalStateSource's name is "", so
+        # make_guard_filter_entry yields has_value=False and a per-call MISSING
+        # sentinel without reading a value, and two of the four are
+        # add_lambda_guard closures with no value to expose at all. The graph
+        # specialized on utils_device.CURRENT_DEVICE, which the C++ leaf
+        # snapshots for itself; captured under the default None and served
+        # under set_default_device("cuda"), it returns CPU tensors with no
+        # refusal.
+        "DEFAULT_DEVICE",
+        # The vmap level the graph baked in (output_graph.functorch_layers,
+        # itself serialized) lives in BatchedTensorImpl, not in the keys
+        # TENSOR_MATCH compares.
+        "FUNCTORCH_STACK_MATCH",
+        # The traced level is a graph constant (_exit_dual_level(level=N));
+        # under another _current_level unpack_dual returns no tangent.
+        "DUAL_LEVEL",
+        # The predicate that installs it also bakes the pack/unpack subgraphs
+        # into the graph; a hook-free capture served under inlineable hooks
+        # skips them with no refusal.
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
     }
 )
 
@@ -1356,6 +1367,14 @@ def _wont_generalize(
     the next -- so a generic mention elsewhere must not erase a real pin here.
     ``GuardFact.source`` and a kept slot's name share one spelling, the
     ``GuardFilterEntry.name`` with local scope stripped (``L['x']`` -> ``x``).
+    A fact whose guard the filter dropped (``enforced`` False) checks nothing,
+    so its variant counts as serving the source generically, not as pinning it.
+
+    KNOWN GAP: "reached it without pinning it" is read as "serves other
+    values", and an unspecialized int breaks that: its variant carries only a
+    TYPE_MATCH on the name, and if the trace then specializes the symbol the
+    ``L['scale'] == 3`` check is a SHAPE_ENV fact with an EMPTY source, so the
+    variant looks generic and cancels a sibling's pin that nothing serves.
     """
     pinned = {n for t, n in kept if _pins_a_value(t, n)}
     if not pinned:
@@ -1367,7 +1386,11 @@ def _wont_generalize(
         pins: set[str] = set()
         generic: set[str] = set()
         for facts in variants:
-            here = {f.source for f in facts if _pins_a_value(f.guard_type, f.source)}
+            here = {
+                f.source
+                for f in facts
+                if f.enforced and _pins_a_value(f.guard_type, f.source)
+            }
             pins |= here
             # A variant that reached the source without pinning it is the
             # graph that serves other values.
