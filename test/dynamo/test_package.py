@@ -1107,7 +1107,7 @@ def add(x, y):
         # The first hint names the module whose globals hold the slot -- the
         # root frame's, which an inlined callee's own module is not.
         hint = f"Remove or rename the global {alias} from the globals of {scope}."
-        cached = "When this graph break is not raised as an error, Dynamo caches"
+        cached = "When this graph break is not raised as an error, nothing guards"
         args = (torch.randn(3, 2),)
         try:
             sys.modules[name] = module
@@ -1121,6 +1121,7 @@ def add(x, y):
                         torch.compile(fn, backend="eager", fullgraph=True)(*args)
                     self.assertIn(hint, str(cm.exception))
                     self.assertIn(cached, str(cm.exception))
+                    self.assertIn("Import alias already bound", str(cm.exception))
                     self.assertIs(fn.__globals__[alias], bound)
         finally:
             sys.modules.pop(name, None)
@@ -1192,7 +1193,7 @@ def add(x, y):
         args = (torch.randn(3, 2),)
         try:
             refused_prefix = (
-                f"alias {alias} for torch.autograd.profiler is already bound "
+                f"alias {alias} for {re.escape('torch.autograd.profiler')} is already bound "
                 "to a str in the globals of "
             )
             with self.assertRaisesRegex(AssertionError, f"{refused_prefix}throwaway"):
@@ -1209,6 +1210,7 @@ def add(x, y):
             ):
                 torch.compile(nameless_fn, backend=cnt)(*args)
             self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(nameless[alias], "not a module")
         finally:
             _import_module.cache_clear()
             torch._dynamo.reset()
@@ -1355,6 +1357,8 @@ def add(x, y):
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
+            # The memo outlives the sys.modules entry: a same-process rerun would
+            # otherwise resolve this run's module from it.
             _import_module.cache_clear()
             torch._dynamo.reset()
 
