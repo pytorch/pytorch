@@ -203,6 +203,32 @@ supported_ctx_manager_classes = dict.fromkeys(
 )
 
 
+def _get_privateuse1_autocast() -> Any:
+    device_type = torch._C._get_privateuse1_backend_name()
+    device_module = getattr(torch, device_type, None)
+    amp_module = getattr(device_module, "amp", None)
+    return getattr(amp_module, "autocast", None)
+
+
+def _is_privateuse1_autocast(value: Any) -> bool:
+    if not isinstance(value, type) or not issubclass(
+        value, torch.amp.autocast_mode.autocast
+    ):
+        return False
+    return value is _get_privateuse1_autocast() and getattr(
+        value, "_dynamo_autocast_passthrough", False
+    )
+
+
+def _install_privateuse1_autocast_guards() -> None:
+    torch_source = ImportSource("torch")
+    device_type = torch._C._get_privateuse1_backend_name()
+    autocast_source = AttrSource(
+        AttrSource(AttrSource(torch_source, device_type), "amp"), "autocast"
+    )
+    install_guard(autocast_source.make_guard(GuardBuilder.CLASS_MATCH))
+
+
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
     [
         torch._shape_as_tensor,
@@ -681,24 +707,40 @@ class BaseTorchVariable(VariableTracker):
 class TorchCtxManagerClassVariable(BaseTorchVariable):
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
+    _nonvar_fields = {
+        "is_privateuse1_autocast",
+        *BaseTorchVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self, value: Any, *, is_privateuse1_autocast: bool = False, **kwargs: Any
+    ) -> None:
+        super().__init__(value, **kwargs)
+        self.is_privateuse1_autocast = is_privateuse1_autocast
+
     def __repr__(self) -> str:
         return f"TorchCtxManagerClassVariable({self.value})"
 
     @staticmethod
-    def is_matching_cls(value: Any) -> bool:
+    def matching_cls_kind(value: Any) -> str | None:
+        # Check the registered entrypoint before unwrapping it.  Some backend
+        # classes look like Dynamo wrappers to is_function().
+        if _is_privateuse1_autocast(value):
+            return "privateuse1_autocast"
         # Unwrap if it's a functools.lru_cache wrapper
         value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        return (
-            # Context manager type or function with @contextmanager is callable
-            callable(value)
-            and (
-                hashable(value)  # accesses value.__hash__()
-                and value in supported_ctx_manager_classes
-            )
-        )
+        if not callable(value) or not hashable(value):
+            return None
+        if value in supported_ctx_manager_classes:
+            return "supported"
+        return None
+
+    @staticmethod
+    def is_matching_cls(value: Any) -> bool:
+        return TorchCtxManagerClassVariable.matching_cls_kind(value) is not None
 
     def call_function(
         self,
@@ -832,10 +874,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                     {},
                 ),
             )
-        elif self.value in (
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
+        elif (
+            self.value
+            in (
+                torch.amp.autocast_mode.autocast,
+                torch.cuda.amp.autocast,
+                torch.cpu.amp.autocast,
+            )
+            or self.is_privateuse1_autocast
         ):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
