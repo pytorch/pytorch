@@ -98,6 +98,11 @@ def manual_seed(seed: int) -> None:
     .. warning::
         If you are working with a multi-GPU model, this function is insufficient
         to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
+
+    .. note::
+        Seeding makes device-side sampling reproducible on the same GPU; the same
+        seed is not guaranteed to give the same values on a different GPU model or
+        on a MIG partition. See :ref:`reproducibility`.
     """
     seed = int(seed)
 
