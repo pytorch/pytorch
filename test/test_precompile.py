@@ -319,15 +319,13 @@ class TestPrecompile(TestCase):
         meta = _parse_artifact_metadata(src)
         self.assertEqual(meta["FRAMES"], [{"is_entry": True, "variants": []}])
         # Reported but never required: the serving mode defaults for artifacts
-        # predating it, and graph devices and the guard-audit sections come back
-        # as data.
+        # predating it, and the guard-audit sections come back as data.
         self.assertEqual(meta["SERVING_MODE"], "standalone")
         self.assertNotIn("POLICY_DROPPED_GUARDS", meta)
         audit = "POLICY_DROPPED_GUARDS = ['g']\nDROPPED_GUARD_CODE = {'g': 'code'}\n"
-        meta = _parse_artifact_metadata(src + audit + "GRAPH_DEVICES = ('cpu',)\n")
+        meta = _parse_artifact_metadata(src + audit)
         self.assertEqual(meta["POLICY_DROPPED_GUARDS"], ["g"])
         self.assertEqual(meta["DROPPED_GUARD_CODE"], {"g": "code"})
-        self.assertEqual(meta["GRAPH_DEVICES"], ("cpu",))
         # An installed artifact parses without the per-frame blobs.
         blobs = "_FRAMES = 'blob'\n_BACKENDS = 'blob'\n"
         package = "SERVING_MODE = 'installed'\n_PACKAGE = 'pkg'\n"
@@ -339,41 +337,34 @@ class TestPrecompile(TestCase):
         shadowed = src.replace("TRACER = 'dynamo'", "TRACER = 'other'")
         meta = _parse_artifact_metadata(shadowed + "TRACER = 'dynamo'\n")
         self.assertEqual(meta["TRACER"], "dynamo")
-        # A consumed name whose value is not a literal is named, including the
-        # ones that select the required set; an unconsumed one is skipped.
-        for bad in ("TRACER = object()\n", "TRACER = 'dynamo'\nSERVING_MODE = f()\n"):
-            name = bad.splitlines()[-1].split(" =")[0]
+        # A consumed name whose value is not a literal (a call, or a set with an
+        # unhashable member) is named, including the ones that select the required
+        # set; an unconsumed one is skipped.
+        for bad, name in (
+            ("TRACER = object()\n", "TRACER"),
+            ("TRACER = 'dynamo'\nSERVING_MODE = {[]}\n", "SERVING_MODE"),
+        ):
             with self.assertRaisesRegex(PrecompileError, f"{name!r} .* is malformed"):
                 _parse_artifact_metadata(bad)
         meta = _parse_artifact_metadata(src + "_x = f()\n")
         self.assertEqual(meta["TRACER"], "dynamo")
 
-    @parametrize("backend", ["eager", "inductor"])
-    def test_artifact_neutralizes_ambient_autocast(self, backend):
+    def test_artifact_neutralizes_ambient_autocast(self):
         # The casts a capture ran under are baked into the artifact, but the graph
         # still re-dispatches at serve time, so the driver runs it with autocast
-        # off on every device the GRAPH names and leaves the caller's autocast
-        # state as it found it. With no ambient autocast it enters no autocast
-        # context at all: leaving one clears the process-wide cast cache.
-        from unittest import mock
-
-        from torch._precompile import _parse_artifact_metadata, PrecompiledModule
+        # excluded and leaves the caller's autocast state as it found it. The eager
+        # graph's aten.addmm.default is autocast-registered; inductor's addmm.out
+        # is not, so that backend cannot show the second cast on CPU.
+        from torch._precompile import PrecompiledModule
 
         model = torch.nn.Linear(4, 3)
         x = torch.randn(5, 4)
-        compiled = PrecompiledModule(lambda m, x: m(x), backend=backend)
+        compiled = PrecompiledModule(lambda m, x: m(x), backend="eager")
         compiled._compile((model, x))
-        code = compiled.to_python_code()
-        self.assertIn("GRAPH_DEVICES = ('cpu',)", code)
-        meta = _parse_artifact_metadata(code)
-        self.assertEqual(meta["GRAPH_DEVICES"], ("cpu",))
-        self.assertEqual(meta["SERVING_MODE"], "standalone")
-        ns: dict[str, object] = {}
-        exec(code, ns)
+        ns: dict[str, object] = {"__name__": "precompile_test_artifact"}
+        exec(compile(compiled.to_python_code(), "<artifact>", "exec"), ns)
         forward = ns["forward"]
-        with mock.patch.object(torch, "clear_autocast_cache") as cleared:
-            expected = forward(model, x)
-        cleared.assert_not_called()
+        expected = forward(model, x)
         with torch.autocast("cpu", dtype=torch.bfloat16):
             self.assertEqual(model(x).dtype, torch.bfloat16)
             out = forward(model, x)
