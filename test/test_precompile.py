@@ -382,6 +382,23 @@ class TestPrecompile(TestCase):
         self.assertEqual(out.dtype, torch.float32)
         self.assertEqual(out, expected)
 
+    def test_precompiled_module_is_a_standalone_runnable(self):
+        # A loaded make_fx artifact is the standalone PrecompiledRunnable: it
+        # installs nothing, so entering and unloading it are no-ops, and it hands
+        # positional and keyword arguments alike to the loaded forward.
+        from torch._precompile import PrecompiledModule, PrecompiledRunnable
+
+        f = PrecompiledModule._from_loaded(lambda *a, **k: (a, k), backend="eager")
+        self.assertIsInstance(f, PrecompiledRunnable)
+        self.assertFalse(f.installed)
+        with f as entered:
+            self.assertIs(entered, f)
+            self.assertEqual(f(1, k=2), ((1,), {"k": 2}))
+        f.unload()
+        self.assertEqual(f(3), ((3,), {}))
+        with self.assertRaisesRegex(PrecompileError, "not runnable"):
+            PrecompiledModule(lambda x: x)(1)
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
