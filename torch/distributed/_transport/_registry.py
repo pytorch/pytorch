@@ -14,8 +14,9 @@ if TYPE_CHECKING:
 
 _ENTRY_POINT_GROUP = "torch.distributed.transports"
 _BUILTIN_ENTRY_POINTS = {
-    "nixl": "torch.distributed._transport._nixl:NIXLTransport",
     "ibverbs": "torch.distributed._transport._rdma4py:IBVerbsTransport",
+    "mooncake": "torch.distributed._transport._mooncake:MooncakeTransport",
+    "nixl": "torch.distributed._transport._nixl:NIXLTransport",
     "tcp": "torch.distributed._transport._tcp:TCPTransport",
     "torchcomms": "torch.distributed._transport._torchcomms:TorchCommsTransport",
     "ucxx": "torch.distributed._transport._ucxx:UCXXTransport",
