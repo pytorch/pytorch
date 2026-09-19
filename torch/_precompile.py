@@ -421,8 +421,8 @@ class _MakeFxCapture(Capture):
     Takes the :class:`MakeFxTracer` the caller passed as ``tracer=`` and forwards
     its ``decompositions`` to the ``PrecompiledModule`` it builds for ``fn``. Only
     the constructor and ``__enter__`` exist so far: the constructor refuses a
-    partial, builds that module, and records the paths and the
-    ``_traced``/``_rendered`` state the capture drives. ``__call__`` and
+    partial and a ``tracer`` that is not a :class:`MakeFxTracer`, builds that module,
+    and records the paths and the ``_traced``/``_rendered`` state the capture drives. ``__call__`` and
     ``__exit__`` still raise ``NotImplementedError`` from :class:`Capture`; the
     one-call rule they will enforce is the one :class:`MakeFxTracer` documents.
     """
@@ -435,19 +435,21 @@ class _MakeFxCapture(Capture):
         *,
         backend: str,
         tracer: MakeFxTracer,
-        # Unread until the follow-up's __call__: it runs the one traced call under
-        # torch.enable_grad() when True (torch.no_grad() otherwise), the only mode in
-        # which make_fx builds a .backward() in fn as graph ops (see the grad-mode
-        # comment in _capture). It is not a serve-time or lowering knob: the grads
-        # ride out as extra outputs of one flat graph (invariant 5), so the lowering
-        # stays on AOTAutograd's inference path (to_standalone_python.py pins no_grad)
-        # and both drivers serve the artifact with grad disabled.
+        # Unread until the follow-up's __call__ selects the grad mode of the one traced
+        # call from it; _capture traces in the caller's mode (#197289), so a backward in
+        # fn is built as graph ops only when True. Not a lowering or serve-time knob:
+        # the grads ride out as extra outputs of one flat graph (invariant 5).
         training: bool,
     ) -> None:
         if isinstance(fn, functools.partial):
             raise PrecompileError(
                 "precompile cannot capture a partial. Pass the underlying function "
                 "and give its bound arguments as call arguments."
+            )
+        if not isinstance(tracer, MakeFxTracer):
+            raise PrecompileError(
+                f"precompile expects a MakeFxTracer as tracer, got {tracer!r}. Pass "
+                "MakeFxTracer(...), not the tracer name."
             )
         self._module = PrecompiledModule(
             fn, backend=backend, tracer="make_fx", decompositions=tracer.decompositions
