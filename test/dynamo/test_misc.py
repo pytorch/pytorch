@@ -17706,6 +17706,33 @@ fn
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_guard_filter_entry_snapshots_the_guard_code(self):
+        # entry.code is a copy of orig_guard.code_list taken at inspection
+        # time; build_guards resets and repopulates the list on every later
+        # build, so the entry must not share it.
+        seen = []
+
+        def guard_filter_fn(entries):
+            for entry in entries:
+                self.assertEqual(entry.code, tuple(entry.orig_guard.code_list or ()))
+            seen.extend(entries)
+            return [entry.guard_type == "TENSOR_MATCH" for entry in entries]
+
+        @torch.compile(
+            fullgraph=True,
+            options={"guard_filter_fn": guard_filter_fn},
+            backend="eager",
+        )
+        def fn(x):
+            return x + 1
+
+        fn(torch.randn(3, 2))
+        entry = next(e for e in seen if e.guard_type == "TENSOR_MATCH")
+        self.assertTrue(entry.code)
+        snapshot = entry.code
+        entry.orig_guard.code_list = None  # what the next build_guards does
+        self.assertEqual(entry.code, snapshot)
+
     def test_guard_filter_fn_by_id(self):
         def guard_filter_fn(entries):
             return [entry.guard_type != "ID_MATCH" for entry in entries]
