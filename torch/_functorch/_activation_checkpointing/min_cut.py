@@ -1,0 +1,170 @@
+"""Minimum cut specialized for activation-checkpointing graphs.
+
+The activation-checkpointing partitioner represents each FX node by an ``in``
+and an ``out`` vertex.  The edge between them is the cost of saving that
+activation, dependency edges constrain which values can be recomputed, and
+the source and sink represent the forward and backward sides of the
+partition.  A minimum cut therefore selects the least expensive valid set of
+activations to save.
+
+Why not use ``networkx.minimum_cut`` directly?
+------------------------------------------------
+NetworkX supports arbitrary graph and node types, several interchangeable
+flow algorithms, reusable residual graphs, and extensive validation.  To
+provide that generality it constructs a dictionary-backed residual
+``DiGraph`` and performs the flow computation through nested Python mappings.
+Activation-checkpointing graphs can contain tens of thousands of vertices and
+are solved several times while choosing a memory budget, making that object
+and traversal overhead a visible part of compilation.  Selecting NetworkX's
+``dinitz`` flow function changes the flow algorithm but retains this generic
+representation.
+
+This implementation first maps arbitrary node names to dense integer indices,
+then stores the residual network in flat lists.  The partitioner only needs a
+directed graph with nonnegative capacities, so the additional flexibility of
+the generic implementation is unnecessary here.  NetworkX remains the graph
+builder and a correctness oracle in tests.
+
+Dinic's algorithm
+-----------------
+Dinic's algorithm repeatedly performs two operations:
+
+1. A breadth-first search builds a *level graph*.  It assigns each reachable
+   vertex its shortest residual distance from the source.  Flow is allowed to
+   move only from level ``i`` to level ``i + 1``.
+2. The algorithm sends a *blocking flow* through those level-respecting edges.
+   Once no source-to-sink path remains in the level graph, another breadth-
+   first search starts the next phase.
+
+When the sink is no longer reachable, the flow is maximal.  By the max-flow
+min-cut theorem, vertices still reachable from the source in the final
+residual network form the source side of a minimum cut.
+
+The general complexity is ``O(V^2 E)``, but the partitioner's graphs are
+sparse and highly structured.  The implementation is iterative so long FX
+graphs cannot overflow Python's recursion limit.  ``current`` pointers avoid
+rescanning exhausted edges within a level-graph phase, and reverse edges are
+stored next to their forward edges so ``edge ^ 1`` finds the reverse edge.
+"""
+
+from __future__ import annotations
+
+import math
+from collections import deque
+from typing import Any
+
+
+def minimum_cut(
+    graph: Any,
+    source: Any,
+    sink: Any,
+) -> tuple[float, tuple[set[Any], set[Any]]]:
+    """Return the minimum-cut value and ``(source_side, sink_side)`` partition.
+
+    ``graph`` must provide NetworkX-style node iteration and ``edges`` access.
+    Capacities must be nonnegative.  The caller checks for an all-infinite
+    source-to-sink path before entering this function; such a path has no
+    finite cut and is handled by the partitioner's diagnostic path instead.
+
+    Different maximum-flow algorithms may return different partitions when
+    several cuts have the same minimum capacity.  The returned partition is
+    deterministic for a fixed graph iteration order.
+    """
+    nodes = list(graph)
+    node_index = {node: index for index, node in enumerate(nodes)}
+    node_count = len(nodes)
+    source_index = node_index[source]
+    sink_index = node_index[sink]
+
+    finite_capacity = sum(
+        capacity
+        for start, end, capacity in graph.edges(data="capacity", default=math.inf)
+        if start != end and capacity > 0 and not math.isinf(capacity)
+    )
+    infinite_capacity = 3 * finite_capacity if finite_capacity else 1
+    adjacency: list[list[int]] = [[] for _ in nodes]
+    destinations: list[int] = []
+    residual: list[float] = []
+
+    def add_edge(start: int, end: int, capacity: float) -> None:
+        # Forward and reverse residual edges are adjacent, so toggling the low
+        # bit moves between them without another lookup table.
+        edge = len(destinations)
+        destinations.extend((end, start))
+        residual.extend((capacity, 0))
+        adjacency[start].append(edge)
+        adjacency[end].append(edge + 1)
+
+    for start, end, capacity in graph.edges(data="capacity", default=math.inf):
+        if start == end or capacity <= 0:
+            continue
+        add_edge(
+            node_index[start],
+            node_index[end],
+            min(capacity, infinite_capacity),
+        )
+
+    flow = 0.0
+    while True:
+        levels = [-1] * node_count
+        levels[source_index] = 0
+        queue = deque([source_index])
+        while queue and levels[sink_index] < 0:
+            node = queue.popleft()
+            next_level = levels[node] + 1
+            for edge in adjacency[node]:
+                end = destinations[edge]
+                if residual[edge] > 0 and levels[end] < 0:
+                    levels[end] = next_level
+                    queue.append(end)
+        if levels[sink_index] < 0:
+            break
+
+        current = [0] * node_count
+
+        def send_one() -> float:
+            """Send flow through one level-respecting path without recursion."""
+            path_nodes = [source_index]
+            path_edges: list[int] = []
+            bottlenecks = [math.inf]
+            while path_nodes:
+                node = path_nodes[-1]
+                if node == sink_index:
+                    amount = bottlenecks[-1]
+                    for edge in path_edges:
+                        residual[edge] -= amount
+                        residual[edge ^ 1] += amount
+                    return amount
+                edges = adjacency[node]
+                while current[node] < len(edges):
+                    edge = edges[current[node]]
+                    end = destinations[edge]
+                    if residual[edge] > 0 and levels[end] == levels[node] + 1:
+                        path_edges.append(edge)
+                        path_nodes.append(end)
+                        bottlenecks.append(min(bottlenecks[-1], residual[edge]))
+                        break
+                    current[node] += 1
+                else:
+                    levels[node] = -1
+                    path_nodes.pop()
+                    bottlenecks.pop()
+                    if path_edges:
+                        path_edges.pop()
+            return 0
+
+        while amount := send_one():
+            flow += amount
+
+    # The source-reachable residual vertices define the source side of the cut.
+    reachable_indices = {source_index}
+    queue = deque([source_index])
+    while queue:
+        node = queue.popleft()
+        for edge in adjacency[node]:
+            end = destinations[edge]
+            if residual[edge] > 0 and end not in reachable_indices:
+                reachable_indices.add(end)
+                queue.append(end)
+    reachable = {nodes[index] for index in reachable_indices}
+    return flow, (reachable, set(nodes) - reachable)
