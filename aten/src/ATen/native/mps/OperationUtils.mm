@@ -11,6 +11,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
@@ -20,6 +21,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
@@ -490,19 +492,14 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // Starting with macOS 15.0, MPS supports native strides directly in the kernels
   if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
-      Tensor emptyShell = Tensor();
-      // use "_tensor" from Placeholder to retain view's output during its usage in other ops
-      // And preserve conjugated property here
-      if (!src.is_conj()) {
-        _tensor = gatherViewTensor(src, emptyShell);
-      } else {
-        _tensor = gatherViewTensor(src.conj(), emptyShell).conj();
-      }
-      if (!_tensor.has_storage()) {
-        // if we cannot gather, we make the tensor contiguous implicitly, and keep
-        // it in placeholder to be able to retrieve it when we return from constructor
-        _tensor = src.clone(MemoryFormat::Contiguous);
-      }
+      // Materialize the view; "_tensor" retains it for as long as other ops use it. Carrying src's
+      // conj/neg bits over makes the copy a plain restride, so the bits stay lazy for the ops below
+      // that inspect them instead of being resolved into the buffer twice.
+      Tensor gathered = at::empty(src.sizes(), src.options());
+      gathered._set_conj(src.is_conj());
+      gathered._set_neg(src.is_neg());
+      copy_cast_kernel_mps(gathered, src);
+      _tensor = gathered;
       srcBuf = getMTLBufferStorage(_tensor);
     }
   }
