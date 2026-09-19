@@ -571,6 +571,24 @@ _efficient_attention_backward(
     }
     return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
   }
+  // Both ROCm backends honour torch.use_deterministic_algorithms(), so resolve
+  // it once here rather than per-backend. Only compiled when a backend exists to
+  // consume it; with neither it would be set but never read.
+#if defined(USE_ROCM_CK_SDPA) || !defined(DISABLE_AOTRITON)
+  bool deterministic{false};
+  {
+    auto& ctx = at::globalContext();
+    if (ctx.deterministicAlgorithms()) {
+      if (ctx.deterministicAlgorithmsWarnOnly()) {
+        TORCH_WARN_ONCE(
+            "Memory Efficient attention defaults to a non-deterministic algorithm. ",
+            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+      } else {
+        deterministic = true;
+      }
+    }
+  }
+#endif
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
@@ -608,7 +626,7 @@ _efficient_attention_backward(
                      my_softmax_scale,
                      custom_mask_type != static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask), // is_causal
                      custom_mask_type == static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft), // causal_top_left
-                     false, // deterministic
+                     deterministic,
                      false, // zero_tensors
                      ck_philox_seed,
                      ck_philox_offset);
@@ -625,17 +643,6 @@ _efficient_attention_backward(
       TORCH_CHECK(false,
                 "[AOTriton] Accelerated SDPA only supports MI200/MI300X/7900XTX/9070XT GPUs"
                 " (gfx90a/gfx942/gfx1100/gfx1201)")
-    }
-    bool deterministic{false};
-    auto& ctx = at::globalContext();
-    if (ctx.deterministicAlgorithms()) {
-      if (ctx.deterministicAlgorithmsWarnOnly()) {
-        TORCH_WARN_ONCE(
-            "Memory Efficient attention defaults to a non-deterministic algorithm. ",
-            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
-      } else {
-        deterministic = true;
-      }
     }
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     bool is_causal;

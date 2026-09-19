@@ -5930,18 +5930,22 @@ class TestSDPAAccelerator(NNTestCase):
                                           torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward())
 
     @onlyCUDA
-    # AOTriton's fp32 forward is not run-to-run deterministic on gfx950.
-    @skipIfRocmArch(MI350_ARCH)
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
+    @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"])
     @setSdpaBackendsToDefaultFinally
-    def test_mem_eff_backwards_determinism(self, device):
+    def test_mem_eff_backwards_determinism(self, device, sdpa_backend):
+        # CK mem-efficient attention is fp16/bf16 only, so the fp32 this test has
+        # always used would be rejected before reaching the CK backward.
+        dtype = torch.bfloat16 if sdpa_backend == "ck" else torch.float32
         if TEST_WITH_ROCM:
-            # CK's mem-efficient backward ignores deterministic mode; pin AOTriton.
-            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
+            # AOTriton's fp32 forward is not run-to-run deterministic on gfx950.
+            if dtype == torch.float32 and isRocmArchAnyOf(MI350_ARCH):
+                self.skipTest("AOTriton's fp32 forward is not deterministic on gfx950")
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
         # Without deterministic mode this shape uses num_splits_key > 1, whose grad_q accumulation order is racy
         shape = (1, 1, 4096, 64)
-        query, key, value = (torch.rand(shape, device=device, requires_grad=True) for _ in range(3))
-        upward_grad = torch.rand(shape, device=device)
+        query, key, value = (torch.rand(shape, device=device, dtype=dtype, requires_grad=True) for _ in range(3))
+        upward_grad = torch.rand(shape, device=device, dtype=dtype)
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]), use_deterministic_algorithims(True, warn_only=False):
             out = F.scaled_dot_product_attention(query, key, value)
             expected = torch.autograd.grad(out, (query, key, value), upward_grad)
