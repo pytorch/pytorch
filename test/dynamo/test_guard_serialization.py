@@ -1315,6 +1315,25 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsNone(out.grad)
         self.assertEqual(out.shape, x.shape)
 
+    def test_symbolic_scalars_are_refused_as_package_errors(self):
+        # SymInt was refused with a RuntimeError while SymFloat and SymBool fell
+        # through to default pickling; all three are the same serialization
+        # limit and surface as the PackageError the bypass path understands.
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        env = ShapeEnv()
+        for sym in (
+            env.create_unbacked_symint(),
+            env.create_unbacked_symfloat(),
+            env.create_unbacked_symbool(),
+        ):
+            with self.assertRaisesRegex(
+                PackageError, f"Cannot serialize {type(sym).__name__} "
+            ):
+                GuardsStatePickler({id(sym): sym}, {}, {}, {}, io.BytesIO()).dump(
+                    {"s": sym}
+                )
+
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
         # torch.float32 registered the one dtype object as missing, and every
