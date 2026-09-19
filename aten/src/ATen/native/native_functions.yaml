@@ -5753,12 +5753,6 @@
     CUDA: _chunk_cat_out_cuda
     XPU: _chunk_cat_out_xpu
 
-- func: _chunk_cat_with_prefixes_(Tensor(a!) self, Tensor[] tensors, int[] num_leading_dims, int num_chunks) -> Tensor(a!)
-  dispatch:
-    CompositeExplicitAutograd: _chunk_cat_with_prefixes_
-    CUDA: _chunk_cat_with_prefixes_cuda_
-  autogen: _chunk_cat_with_prefixes, _chunk_cat_with_prefixes.out
-
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: stack
@@ -15156,12 +15150,6 @@
     CompositeExplicitAutograd: split_with_sizes_copy_out
     CUDA: split_with_sizes_copy_out_cuda
     XPU: split_with_sizes_copy_out_xpu
-
-- func: _split_with_sizes_copy_with_prefixes_(Tensor(a!)[] self, Tensor input, int[] split_sizes, int[] num_prefixes, int num_chunks) -> ()
-  dispatch:
-    CompositeExplicitAutograd: _split_with_sizes_copy_with_prefixes_
-    CUDA: _split_with_sizes_copy_with_prefixes_cuda_
-  autogen: _split_with_sizes_copy_with_prefixes, _split_with_sizes_copy_with_prefixes.out
 
 - func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function

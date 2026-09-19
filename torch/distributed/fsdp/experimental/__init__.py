@@ -79,7 +79,7 @@ def all_gather_output_fn_for_nonzero_dim_shards(
         reorder_infos.append((fsdp_param, outputs))
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
-        torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
             copy_outputs,
             all_gather_output,
             all_gather_result.all_gather_input_split_sizes,
@@ -96,8 +96,8 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
 ) -> _ReduceScatterInputs:
     """Optimize reduce-scatter inputs for ``Shard(1)`` and higher shard dimensions.
 
-    Copy contiguous unsharded gradients using native prefix metadata, avoiding
-    Tensor views and an intermediate chunk-and-concatenate reorder.
+    Copy contiguous unsharded gradients directly into the reduce-scatter buffer,
+    avoiding an intermediate chunk-and-concatenate reorder.
     Noncontiguous gradients use the usual chunk-and-concatenate path.
     Nonzero-dimension sharding must be even. ``Shard(0)`` gradients and groups of
     size one use the usual preparation, so groups may mix shard dimensions.

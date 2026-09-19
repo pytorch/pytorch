@@ -845,7 +845,7 @@ def foreach_reduce_scatter_copy_in(
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
     if num_leading_dims is not None:
-        torch.ops.aten._chunk_cat_with_prefixes_(
+        torch.ops.fsdp._chunk_cat_with_prefixes_(
             reduce_scatter_input, unsharded_grads, num_leading_dims, world_size
         )
         return

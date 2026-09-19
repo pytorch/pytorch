@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import math
+import unittest
 
 import torch
+import torch.distributed as dist
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
@@ -12,6 +15,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
+@unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
     @parametrize("num_chunks", [1, 4])
     @parametrize("num_prefixes", [1, 128])
@@ -36,7 +40,7 @@ class TestPrefixCopy(TestCase):
             prefixes = [math.prod(s[:dim]) for dim, s in enumerate(shapes)]
             versions = [t._version for t in outputs] if not inference else None
 
-            result = torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+            result = torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
                 outputs, source, splits, prefixes, num_chunks
             )
 
@@ -69,7 +73,7 @@ class TestPrefixCopy(TestCase):
         outputs = [torch.empty_like(t) for t in expected]
         splits = [t.nbytes // num_chunks for t in expected]
 
-        torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
             outputs, source, splits, [1, 2, 6], num_chunks
         )
 
@@ -81,11 +85,11 @@ class TestPrefixCopy(TestCase):
         if all_empty:
             source = source[:0]
         outputs = [torch.empty(0, device=device), torch.empty_like(source)]
-        torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
             outputs, source, [0, source.numel() // 4], [128, 1], 4
         )
         self.assertEqual(outputs[1], source)
-        torch.ops.aten._split_with_sizes_copy_with_prefixes_([], source[:0], [], [], 4)
+        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_([], source[:0], [], [], 4)
 
     @parametrize(
         "invalid,match",
@@ -133,7 +137,7 @@ class TestPrefixCopy(TestCase):
         elif invalid == "output_contiguity":
             outputs = [torch.empty(32, device=device)[::2]]
         with self.assertRaisesRegex(RuntimeError, match):
-            torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+            torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
                 outputs, source, splits, prefixes, num_chunks
             )
 
@@ -176,15 +180,31 @@ class TestPrefixCopy(TestCase):
         expected = torch.stack(rank_outputs)
         buffer = expected.new_full((expected.numel() + 10,), 7)
         output = buffer[5:-5].view(expected.shape)
+        version = output._version
 
-        result = torch.ops.aten._chunk_cat_with_prefixes_(
+        result = torch.ops.fsdp._chunk_cat_with_prefixes_(
             output, tensors, [0, 1, 2], num_chunks
         )
 
         self.assertIs(result, output)
+        self.assertGreater(output._version, version)
         self.assertEqual(output, expected, atol=0, rtol=0)
         self.assertEqual(buffer[:5], buffer.new_full((5,), 7))
         self.assertEqual(buffer[-5:], buffer.new_full((5,), 7))
+
+    @parametrize("num_leading_dims", [1, 2])
+    def test_chunk_cat_empty_prefix(self, device, num_leading_dims):
+        tensor = make_tensor((2, 8, 3), device=device, dtype=torch.float32)
+        if num_leading_dims == 2:
+            tensor = tensor.unsqueeze(0)
+        expected = torch.stack(
+            [shard.flatten() for shard in torch.chunk(tensor, 4, num_leading_dims)]
+        )
+        output = torch.empty_like(expected)
+        torch.ops.fsdp._chunk_cat_with_prefixes_(
+            output, [tensor[:0], tensor], [num_leading_dims] * 2, 4
+        )
+        self.assertEqual(output, expected, atol=0, rtol=0)
 
     @parametrize(
         "invalid,match",
@@ -227,7 +247,7 @@ class TestPrefixCopy(TestCase):
         elif invalid == "output_contiguity":
             output = output.t()
         with self.assertRaisesRegex(RuntimeError, match):
-            torch.ops.aten._chunk_cat_with_prefixes_(output, tensors, dims, num_chunks)
+            torch.ops.fsdp._chunk_cat_with_prefixes_(output, tensors, dims, num_chunks)
 
     @parametrize("operation", ["split", "chunk"])
     @parametrize("view", ["conjugate", "negative"])
@@ -245,16 +265,16 @@ class TestPrefixCopy(TestCase):
             output = view_fn(output)
         if operation == "split" and flagged_output:
             with self.assertRaisesRegex(RuntimeError, "mutable TensorLists"):
-                torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+                torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
                     [output], packed, [tensor.numel() // 4], [2], 4
                 )
             return
         if operation == "split":
-            torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+            torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
                 [output], packed, [tensor.numel() // 4], [2], 4
             )
         else:
-            torch.ops.aten._chunk_cat_with_prefixes_(output, [tensor], [1], 4)
+            torch.ops.fsdp._chunk_cat_with_prefixes_(output, [tensor], [1], 4)
         self.assertEqual(output, expected, atol=0, rtol=0)
 
     @parametrize("operation", ["split", "chunk"])
@@ -266,11 +286,11 @@ class TestPrefixCopy(TestCase):
 
         def copy(destination):
             if operation == "split":
-                torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+                torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
                     [destination], packed, [tensor.numel() // 4], [2], 4
                 )
             else:
-                torch.ops.aten._chunk_cat_with_prefixes_(destination, [tensor], [1], 4)
+                torch.ops.fsdp._chunk_cat_with_prefixes_(destination, [tensor], [1], 4)
             return destination
 
         result = torch.func.functionalize(copy)(output)
@@ -282,11 +302,32 @@ class TestPrefixCopy(TestCase):
         tensor = torch.zeros(2, 8, device=device)
         output = torch.empty(16)
         with self.assertRaisesRegex(RuntimeError, "same device"):
-            torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+            torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
                 [output], tensor, [4], [2], 4
             )
         with self.assertRaisesRegex(RuntimeError, "same device"):
-            torch.ops.aten._chunk_cat_with_prefixes_(output, [tensor], [1], 4)
+            torch.ops.fsdp._chunk_cat_with_prefixes_(output, [tensor], [1], 4)
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_device_and_stream(self, devices):
+        stream = torch.cuda.Stream(device=devices[0])
+        with torch.cuda.stream(stream):
+            tensor = make_tensor((2, 8, 3), device=devices[0], dtype=torch.float32)
+            expected = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, 1)])
+            packed = torch.empty_like(expected)
+            output = torch.empty_like(tensor)
+            with torch.cuda.device(devices[1]):
+                torch.ops.fsdp._chunk_cat_with_prefixes_(packed, [tensor], [1], 4)
+                torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
+                    [output], packed, [12], [2], 4
+                )
+                self.assertEqual(
+                    torch.cuda.current_device(), torch.device(devices[1]).index
+                )
+        stream.synchronize()
+        self.assertEqual(packed, expected, atol=0, rtol=0)
+        self.assertEqual(output, tensor, atol=0, rtol=0)
 
     @onlyCUDA
     def test_cuda_graph(self, device):
@@ -298,16 +339,16 @@ class TestPrefixCopy(TestCase):
         splits = [t.numel() // num_chunks for t in tensors]
         packed = tensors[0].new_empty((num_chunks, sum(splits)))
         outputs = [torch.empty_like(t) for t in tensors]
-        torch.ops.aten._chunk_cat_with_prefixes_(packed, tensors, [0, 1], num_chunks)
-        torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+        torch.ops.fsdp._chunk_cat_with_prefixes_(packed, tensors, [0, 1], num_chunks)
+        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
             outputs, packed, splits, [1, 128], num_chunks
         )
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
-            torch.ops.aten._chunk_cat_with_prefixes_(
+            torch.ops.fsdp._chunk_cat_with_prefixes_(
                 packed, tensors, [0, 1], num_chunks
             )
-            torch.ops.aten._split_with_sizes_copy_with_prefixes_(
+            torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
                 outputs, packed, splits, [1, 128], num_chunks
             )
         for tensor in tensors:
