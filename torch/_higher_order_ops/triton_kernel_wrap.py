@@ -1514,7 +1514,20 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
         tensors_to_clone: list[str],
         launch_kwargs: tuple[str, ...] | None = None,
         tensor_bases: dict[str, Tensor] | None = None,
+        tensor_alias_groups: tuple[tuple[str, ...], ...] | None = None,
     ) -> dict[str, Any]:
+        # Symbolic clone names and distinct FX placeholders cannot determine
+        # runtime Tensor identity.
+        if (
+            tensor_alias_groups is None
+            and not isinstance(kwargs, fx.Proxy)
+            and not isinstance(tensors_to_clone, fx.Proxy)
+            and not any(
+                isinstance(key, fx.Proxy) or isinstance(kwargs[key], fx.Proxy)
+                for key in tensors_to_clone
+            )
+        ):
+            tensor_alias_groups = _get_tensor_alias_groups(kwargs, tensors_to_clone)
         hop_kwargs: dict[str, Any] = {
             "kernel_idx": kernel_idx,
             "constant_args_idx": constant_args_idx,
@@ -1523,6 +1536,8 @@ class TritonKernelWrapperFunctional(_TritonKernelWrapper):
             "kwargs": kwargs,
             "tensors_to_clone": tensors_to_clone,
         }
+        if tensor_alias_groups is not None:
+            hop_kwargs["tensor_alias_groups"] = tensor_alias_groups
         if tensor_bases:
             hop_kwargs["tensor_bases"] = tensor_bases
         if launch_kwargs:
@@ -1832,6 +1847,47 @@ def _clone_mutated_arg(
     )
 
 
+def _get_tensor_alias_groups(
+    kwargs: dict[str, Any], tensors_to_clone: list[str]
+) -> tuple[tuple[str, ...], ...]:
+    # These groups capture exact identity among the original mutated arguments,
+    # not storage or view aliasing. They remain authoritative after graph rewrites.
+    groups: dict[int, list[str]] = {}
+    for key in tensors_to_clone:
+        value = kwargs[key]
+        groups.setdefault(id(value), []).append(key)
+    return tuple(tuple(group) for group in groups.values())
+
+
+def _clone_mutated_args(
+    kwargs: dict[str, Any],
+    tensors_to_clone: list[str],
+    tensor_bases: dict[str, Tensor] | None,
+    tensor_alias_groups: tuple[tuple[str, ...], ...],
+) -> dict[str, Any]:
+    mutated = set(tensors_to_clone)
+    group_by_key = {
+        key: group for group, keys in enumerate(tensor_alias_groups) for key in keys
+    }
+    clones: dict[int, Tensor] = {}
+    result: dict[str, Any] = {}
+
+    for key, value in kwargs.items():
+        if key not in mutated:
+            result[key] = value
+            continue
+
+        if not isinstance(value, Tensor):
+            raise TypeError(f"Mutated argument {key!r} must be a Tensor")
+
+        group = group_by_key[key]
+        if group not in clones:
+            clones[group] = _clone_mutated_arg(key, value, tensor_bases)
+        result[key] = clones[group]
+
+    return result
+
+
 @triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_functional_dense(
     *,
@@ -1841,6 +1897,7 @@ def triton_kernel_wrapper_functional_dense(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    tensor_alias_groups: tuple[tuple[str, ...], ...] | None = None,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
@@ -1848,14 +1905,11 @@ def triton_kernel_wrapper_functional_dense(
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
-    kwargs = {
-        key: (
-            _clone_mutated_arg(key, val, tensor_bases)
-            if key in tensors_to_clone
-            else val
-        )
-        for key, val in kwargs.items()
-    }
+    if tensor_alias_groups is None:
+        tensor_alias_groups = _get_tensor_alias_groups(kwargs, tensors_to_clone)
+    kwargs = _clone_mutated_args(
+        kwargs, tensors_to_clone, tensor_bases, tensor_alias_groups
+    )
     mutation_kwargs: dict[str, Any] = {
         "kernel_idx": kernel_idx,
         "constant_args_idx": constant_args_idx,
@@ -1878,6 +1932,7 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    tensor_alias_groups: tuple[tuple[str, ...], ...] | None = None,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
@@ -1885,10 +1940,13 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
+    if tensor_alias_groups is None:
+        tensor_alias_groups = _get_tensor_alias_groups(kwargs, tensors_to_clone)
+    cloned_kwargs = _clone_mutated_args(
+        kwargs, tensors_to_clone, tensor_bases, tensor_alias_groups
+    )
     return {
-        key: _clone_mutated_arg(key, val, tensor_bases)
-        for key, val in kwargs.items()
-        if key in tensors_to_clone
+        key: value for key, value in cloned_kwargs.items() if key in tensors_to_clone
     }
 
 
@@ -1902,9 +1960,12 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    tensor_alias_groups: tuple[tuple[str, ...], ...] | None = None,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
+    if tensor_alias_groups is None:
+        tensor_alias_groups = _get_tensor_alias_groups(kwargs, tensors_to_clone)
     node_args: dict[str, Any] = {
         "kernel_idx": kernel_idx,
         "constant_args_idx": constant_args_idx,
@@ -1912,6 +1973,7 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
         "tma_descriptor_metadata": tma_descriptor_metadata,
         "kwargs": kwargs,
         "tensors_to_clone": tensors_to_clone,
+        "tensor_alias_groups": tensor_alias_groups,
     }
     if tensor_bases:
         node_args["tensor_bases"] = tensor_bases
@@ -1928,6 +1990,21 @@ def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
     return ret
 
 
+def _wrap_tensors_preserve_identity(
+    ctx: "BaseFunctionalizeAPI", outputs: dict[str, Any]
+) -> dict[str, Any]:
+    tensors: dict[int, Tensor] = {}
+    for value in outputs.values():
+        if isinstance(value, Tensor):
+            tensors.setdefault(id(value), value)
+
+    wrapped = dict(zip(tensors, ctx.wrap_tensors(tuple(tensors.values())), strict=True))
+    return {
+        key: wrapped[id(value)] if isinstance(value, Tensor) else value
+        for key, value in outputs.items()
+    }
+
+
 @triton_kernel_wrapper_functional.py_functionalize_impl
 def triton_kernel_wrapper_functional_functionalize(
     ctx: "BaseFunctionalizeAPI",
@@ -1937,11 +2014,14 @@ def triton_kernel_wrapper_functional_functionalize(
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
     tensors_to_clone: list[str],
+    tensor_alias_groups: tuple[tuple[str, ...], ...] | None = None,
     launch_kwargs: tuple[str, ...] | None = None,
     tensor_bases: dict[str, Tensor] | None = None,
 ) -> dict[str, Any]:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     unwrapped_tensor_bases = ctx.unwrap_tensors(tensor_bases)  # type: ignore[arg-type]
+    if tensor_alias_groups is None:
+        tensor_alias_groups = _get_tensor_alias_groups(kwargs, tensors_to_clone)
     with ctx.redispatch_to_next():
         functional_kwargs: dict[str, Any] = {
             "kernel_idx": kernel_idx,
@@ -1950,13 +2030,14 @@ def triton_kernel_wrapper_functional_functionalize(
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": unwrapped_kwargs,
             "tensors_to_clone": tensors_to_clone,
+            "tensor_alias_groups": tensor_alias_groups,
         }
         if unwrapped_tensor_bases:
             functional_kwargs["tensor_bases"] = unwrapped_tensor_bases
         if launch_kwargs:
             functional_kwargs["launch_kwargs"] = launch_kwargs
         outputs = triton_kernel_wrapper_functional(**functional_kwargs)
-        return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
+        return _wrap_tensors_preserve_identity(ctx, outputs)
 
 
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
