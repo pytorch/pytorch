@@ -8797,7 +8797,7 @@ class TestPrecompileCaptureFiles(TestCase):
             "torch.compiler.load_cache_artifacts", side_effect=RuntimeError("stale")
         ):
             with self.assertLogs("torch._precompile", level="WARNING") as logs:
-                f = load(self.artifact, self.cache)
+                f = torch.compiler.precompile.load(self.artifact, self.cache)
         self.assertIn("could not prime the cache", "\n".join(logs.output))
         self.assertEqual(f(self.model, self.x), self.model(self.x))
 
