@@ -849,9 +849,10 @@ class TestPrecompile(TestCase):
         compiled = torch._dynamo.optimize(
             backend="eager", package=package, guard_filter_fn=default_guard_filter_fn
         )(step)
-        # The second call recompiles only the continuation (len(rest) is a
-        # constant in its graph), so that frame carries two variants whose
-        # outputs differ by one: dispatch has to pick, not just run.
+        # The second call recompiles both frames (rest is an entry local guarded
+        # at length 0; len(rest) is a constant in the continuation's graph), so
+        # the continuation carries two variants whose outputs differ by one:
+        # dispatch has to pick, not just run.
         expected = compiled(model, x)
         expected_rest = compiled(model, x, torch.ones(1))
         self.assertNotEqual(expected, expected_rest)
@@ -920,12 +921,18 @@ class TestPrecompile(TestCase):
         resume_miss = "no captured variant of 'torch_dynamo_resume_in_step"
         with self.assertRaisesRegex(PrecompileError, resume_miss):
             forward(model, x, torch.ones(1), torch.ones(1))
-        # A zero-variant continuation is diagnosed by cause, not as a coverage
-        # gap, at the call that reaches it (the entry refuses at build).
+        # A zero-variant continuation is diagnosed by cause (trivial or BYPASSED),
+        # not as a coverage gap, at the call that reaches it; the build succeeds
+        # where the entry would refuse.
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
             with self.assertRaisesRegex(PrecompileError, "produced no guarded code"):
                 build()(model, x)
+        bypassed = [frames[0], {**frames[1], "bypassed": True, "variants": []}]
+        with mock.patch.dict(ns, {"_FRAMES": _b64(bypassed)}):
+            forward_bypassed = build()
+        with self.assertRaisesRegex(PrecompileError, "was BYPASSED"):
+            forward_bypassed(model, x)
         # A dead record from a module this process cannot import is not what the
         # artifact dispatches, so it neither refuses the load nor binds anything.
         dead = {**frames[1], "variants": [], "bypassed": True}
