@@ -6,8 +6,10 @@ import torch
 import torch.distributed as dist
 
 
-if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
+if not dist.is_available() or (
+    not dist.is_nccl_available() and not dist.is_xccl_available()
+):
+    print("c10d NCCL/XCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import (
@@ -15,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
@@ -36,17 +39,18 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         Strategy 1: sum all_reduce
         Strategy 2: avg all_reduce * world_size
         """
+
+        device = f"{GPU_TYPE}:{self.rank}"
+        backend = dist.get_default_backend_for_device(device)
+
         dist.init_process_group(
-            backend="nccl",
+            backend=backend,
             init_method=f"file:///tmp/test_equiv_allreduce_{self.id()}",
             world_size=self.world_size,
             rank=self.rank,
         )
 
         dist.barrier()
-
-        rank = dist.get_rank()
-        device = f"cuda:{rank}"
 
         from torch._C._distributed_c10d import _register_process_group
 
@@ -118,17 +122,18 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         vLLM uses custom allreduce optimized for small tensors (<8MB).
         Two implementations simulate vLLM's registered=False mode vs standard NCCL.
         """
+
+        device = f"{GPU_TYPE}:{self.rank}"
+        backend = dist.get_default_backend_for_device(device)
+
         dist.init_process_group(
-            backend="nccl",
+            backend=backend,
             init_method=f"file:///tmp/test_vllm_allreduce_{self.id()}",
             world_size=self.world_size,
             rank=self.rank,
         )
 
         dist.barrier()
-
-        rank = dist.get_rank()
-        device = f"cuda:{rank}"
 
         from torch._C._distributed_c10d import _register_process_group
 
@@ -184,7 +189,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
 
         model = torch.compile(VLLMAllReduceModel()).to(device)
 
-        torch.manual_seed(42 + rank)
+        torch.manual_seed(42 + self.rank)
         x = torch.randn(128, 256, device=device)
 
         y = model(x)
