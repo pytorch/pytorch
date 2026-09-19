@@ -7544,6 +7544,51 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
+    def test_as_strided_view_of_unrealized_producer(self):
+        # https://github.com/pytorch/pytorch/issues/197431
+        def fn(x):
+            full = x.repeat((3, 1))
+            return torch.as_strided(full[:, ::2], (6, 2), full.stride())
+
+        self.common(fn, (torch.randn(2, 2),))
+
+    def test_as_strided_view_of_unrealized_producer_with_offset(self):
+        # The default storage_offset comes from the input view.
+        def fn(x):
+            full = x + 1
+            return torch.as_strided(full[:, 1:], (3, 1), (1, 1))
+
+        self.common(
+            fn,
+            (torch.arange(6, dtype=torch.float32).reshape(3, 2),),
+            exact_stride=True,
+        )
+
+    def test_as_strided_view_of_unrealized_producer_in_bounds(self):
+        # The extent fits in the view, so only the aliased storage tells the
+        # correct answer.
+        def fn(x):
+            full = x + 1
+            return torch.as_strided(full[:, ::2], (3, 1), (1, 1))
+
+        self.common(
+            fn,
+            (torch.arange(6, dtype=torch.float32).reshape(3, 2),),
+            exact_stride=True,
+        )
+
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_as_strided_view_of_unrealized_producer_unbacked(self):
+        # The extent is not known while compiling.
+        def fn(x, out):
+            full = x + 1
+            return torch.as_strided(full[:, ::2], (out.size(0), 1), (2, 2))
+
+        x = torch.arange(6, dtype=torch.float32, device=self.device).reshape(3, 2)
+        out = torch.empty(3, device=self.device)
+        torch._dynamo.decorators.mark_unbacked(out, 0)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x, out), fn(x, out))
+
     @skipIfRocm(msg="loads before the graph input pointer read back 0 on ROCm")
     def test_as_strided_past_input_extent(self):
         # A graph input aliasing a larger storage may legitimately be

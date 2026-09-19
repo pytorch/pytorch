@@ -2152,6 +2152,13 @@ class GraphLowering(torch.fx.Interpreter):
                             ir.BaseView,
                         )
                         if is_view and not (is_output and config.strict_output_strides):
+                            if is_input_for_as_strided and isinstance(
+                                result, ir.TensorBox
+                            ):
+                                # as_strided reads its input storage-relative, so realize the
+                                # base and let require_strides reinterpret it rather than
+                                # copying the view into a smaller buffer.
+                                result.realize()
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(strides),
