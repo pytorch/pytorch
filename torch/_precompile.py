@@ -150,7 +150,9 @@ it.
 #    AOTAutograd / inductor one) lacks the data-ptr snapshot as well, so a ``.data_ptr()``
 #    read would bake 0 rather than raise; a torch.compile / export mode does build under
 #    that patch, so for those two only the fallback setting is lost.
-#    Call precompile outside the enclosing trace.
+#    Call precompile outside the enclosing trace. What this refuses is an ACTIVE mode: a fake
+#    tensor built under a since-exited ``FakeTensorMode`` and passed as an example input is
+#    not an enclosing trace, so it is not refused -- it is refaked into capture's own mode.
 #
 #    You can opt specific user-input dims into being dynamic by marking them with
 #    ``torch._dynamo.decorators.mark_unbacked`` before calling: those dims are
@@ -290,6 +292,7 @@ import logging
 import os
 import stat
 import uuid
+import warnings
 from types import MappingProxyType
 from typing import Any, cast, NewType, TYPE_CHECKING
 from typing_extensions import Self
@@ -1099,9 +1102,14 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     # Swallowing is sound but not because a declining tensor is unpinned (a vmap-batched
     # view of pinned memory declines the op AND is pinned): such an input cannot be SHOWN
     # to be pinned here, and it is refused elsewhere on its own terms -- a batched one by
-    # invariant 1, once its compute is traced.
+    # invariant 1, once its compute is traced. Warnings are suppressed for the same reason
+    # the raise is: a decline can WARN first (MaskedTensor's __torch_dispatch__ warns "please
+    # file an issue" before returning NotImplemented), and that would name an op the user
+    # never called out of a capture that SUCCEEDS.
     try:
-        is_pinned = a.is_pinned()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            is_pinned = a.is_pinned()
     except (RuntimeError, TypeError, ValueError):
         is_pinned = False
     if is_pinned:
@@ -1301,7 +1309,9 @@ def _capture(
     # mode's own non-fake-input assertion before any refusal of ours. Ask detect_fake_mode
     # -- what make_fx itself resolves through -- so both sources it sees without arguments
     # (an ambient TracingContext, the dispatch-mode stack) are refused by name here instead
-    # of reaching its own mode-mismatch assertion once capture enters its mode.
+    # of reaching its own mode-mismatch assertion once capture enters its mode; a fake tensor
+    # handed in as an example input, its third source, is not covered, so that one case still
+    # reaches capture's own mode as a cross-mode refake.
     if detect_fake_mode() is not None:
         raise PrecompileError(
             "precompile: capture cannot run inside another trace -- a FakeTensorMode is "
@@ -2489,6 +2499,9 @@ def _write_artifact(
     on the undo has the reasoning). Process death between the renames is not covered, nor
     a reader or a second writer racing them: that can leave one source beside the other's
     cache, which ``load`` refuses on the cache's sha256, and can cost the previous source.
+    Nor is a SYMLINKED artifact name: ``os.link`` follows it, so the backup holds the
+    link's target while ``os.replace`` replaces the link itself, and an undo therefore
+    restores a regular file where the symlink stood.
     The parent directory is fsync'd after, best effort.
     """
     written = []
@@ -2579,13 +2592,16 @@ def _write_artifact(
             # temp that is GONE is its rename having run. Only consulted there, since a
             # temp says nothing about a SECOND writer repointing the name afterwards, which
             # is what the inode read sees and what the restore below must not overwrite.
-            blind = not new_stats[0].st_ino
+            # Per HALF: the two names are independent arguments, so one can be on a
+            # filesystem with inodes and the other not.
+            blind_artifact = not new_stats[0].st_ino
+            blind_cache = not new_stats[1].st_ino
             landed = _same_inode(artifact_path, new_stats[0]) or (
-                blind and not os.path.lexists(artifact_tmp)
+                blind_artifact and not os.path.lexists(artifact_tmp)
             )
             complete = landed and (
                 _same_inode(cache_path, new_stats[1])
-                or (blind and not os.path.lexists(cache_tmp))
+                or (blind_cache and not os.path.lexists(cache_tmp))
             )
             kept = os.path.lexists(backup)
             aside = kept and not os.path.lexists(artifact_path)
