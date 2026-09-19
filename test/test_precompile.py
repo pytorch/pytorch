@@ -571,16 +571,23 @@ class TestPrecompile(TestCase):
             _MakeFxCapture(
                 bound, "m.py", "m.cache", backend="eager", tracer=tracer, training=False
             )
-        name = "make_fx"
-        with self.assertRaisesRegex(PrecompileError, "not the tracer name"):
+        with self.assertRaisesRegex(PrecompileError, "MakeFxTracer instance as tracer"):
             _MakeFxCapture(
-                step, "m.py", "m.cache", backend="eager", tracer=name, training=False
+                step,
+                "m.py",
+                "m.cache",
+                backend="eager",
+                tracer="make_fx",
+                training=False,
             )
         cap = _MakeFxCapture(
             step, "m.py", "m.cache", backend="eager", tracer=tracer, training=False
         )
         self.assertIs(cap.__enter__(), cap)
         self.assertIs(cap._module._decompositions, table)
+        self.assertEqual(cap._artifact_path, "m.py")
+        self.assertEqual(cap._cache_path, "m.cache")
+        self.assertFalse(cap._training)
         self.assertFalse(cap._traced)
         self.assertIsNone(cap._rendered)
 
