@@ -1183,6 +1183,30 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+class _HolderWithGenerator:
+    def __init__(self):
+        self.it = (i for i in range(3))
+        self.cfg = {"a": 1}
+
+
+class _PipelineWithSetstate:
+    def __init__(self):
+        self.stages = ["a", "b"]
+        self.n = len(self.stages)
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.n = len(self.stages)
+
+
+class _RebuiltFromNewargs:
+    def __init__(self, a):
+        self.a = a
+
+    def __getnewargs__(self):
+        return (self.a,)
+
+
 class _ModuleWithGenerators(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1333,6 +1357,41 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 GuardsStatePickler({id(sym): sym}, {}, {}, {}, io.BytesIO()).dump(
                     {"s": sym}
                 )
+
+    def test_unguarded_bystander_on_a_guarded_user_object_is_pruned(self):
+        # Only nn.Module attributes were pruned; a guarded plain object holding
+        # one unpicklable bystander failed the whole dump.
+        h = _HolderWithGenerator()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(h): h, id(h.cfg): h.cfg}, {}, {}, {}, buf).dump({"h": h})
+        out = load_guards_state(buf.getvalue())["h"]
+        self.assertIsInstance(out.it, _Missing)
+        self.assertEqual(out.cfg, {"a": 1})
+
+    def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
+        # Attribute pruning assumes the default pickle protocol; a __setstate__
+        # that recomputes a field from an unguarded one would read _Missing.
+        p = _PipelineWithSetstate()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(p): p}, {}, {}, {}, buf).dump({"p": p})
+        out = load_guards_state(buf.getvalue())["p"]
+        self.assertEqual((out.stages, out.n), (["a", "b"], 2))
+
+    def test_object_rebuilt_from_newargs_is_pickled_whole(self):
+        # __getnewargs__ feeds cls.__new__ through the same pickler, so a pruned
+        # attribute it returns would arrive as the sentinel.
+        obj = _RebuiltFromNewargs([1])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"o": obj})
+        self.assertEqual(load_guards_state(buf.getvalue())["o"].a, [1])
+
+    def test_torch_namespace_objects_are_pickled_whole(self):
+        # type(obj).__module__ == "torch" is torch's namespace too, so the
+        # exclusion must not stop at "torch."; the wrapper's config dict stays.
+        wrapper = torch._TorchCompileInductorWrapper("default", None, False)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(wrapper): wrapper}, {}, {}, {}, buf).dump({"w": wrapper})
+        self.assertIsInstance(load_guards_state(buf.getvalue())["w"].config, dict)
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding

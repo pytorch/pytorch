@@ -4255,6 +4255,36 @@ def _is_interned_singleton(value: Any) -> bool:
     )
 
 
+def _instance_dict(obj: Any) -> dict[str, Any] | None:
+    """obj.__dict__ via object.__getattribute__: a user __getattr__ or
+    __getattribute__ never runs (a type-level __dict__ property still does, and
+    only its AttributeError is absorbed); None when there is no instance dict."""
+    try:
+        d = object.__getattribute__(obj, "__dict__")
+    except AttributeError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _pickles_by_default(obj: Any) -> bool:
+    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``.
+
+    Attribute pruning is only sound for that protocol. A custom __reduce_ex__
+    (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
+    __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
+    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
+    """
+    cls = type(obj)
+    return (
+        cls.__reduce_ex__ is object.__reduce_ex__
+        and cls.__reduce__ is object.__reduce__
+        and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
+        and not hasattr(cls, "__setstate__")
+        and not hasattr(cls, "__getnewargs__")
+        and not hasattr(cls, "__getnewargs_ex__")
+    )
+
+
 # The exact-container bookkeeping nn.Module.__init__ installs: __getattr__
 # indexes the three dicts for every attribute outside __dict__ (parameters,
 # buffers, submodules) and state_dict/named_buffers read
@@ -4842,6 +4872,27 @@ class GuardsStatePickler(FunctionPicklerBase):
         elif isinstance(obj, types.CellType):
             return self._reduce_cell(obj)
 
+        if (
+            id(obj) in self.guard_tree_values
+            and _instance_dict(obj) is not None
+            and not inspect.isclass(obj)
+            and not inspect.ismodule(obj)
+            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
+            and type(obj).__module__.partition(".")[0] != "torch"
+            and _pickles_by_default(obj)
+        ):
+            # Any object the guard tree reached, not just an nn.Module: a guarded
+            # train pipeline or dataloader wrapper was pickled whole, so one
+            # unguarded attribute several levels down (a live generator, a
+            # process group) took the entire frame with it. Deliberately LAST,
+            # so every specific reducer above (functions, methods, cells, ops)
+            # gets first refusal, and deliberately USER objects only: pruning is
+            # safe when nothing reads the pruned attribute on the way back,
+            # which does not hold for torch's structural types (a DTensorSpec's
+            # fields rebuild the spec although no guard names each one; a tensor
+            # subclass carries its spec in __dict__).
+            self._prune_unguarded_attributes(obj)
+
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
         ):
@@ -4876,21 +4927,22 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+    def _prune_unguarded_attributes(self, obj: Any) -> None:
         """Mark every ``__dict__`` value nothing guards as prunable.
 
-        Reaching a module through the guard tree does not mean its whole state
+        Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
-        What the module itself reads back at load stays: the containers
-        nn.Module.__getattr__ indexes, and everything on a module whose own
-        __setstate__ may read any attribute (the caller checks that).
+        What the object itself reads back at load stays: the containers
+        nn.Module.__getattr__ indexes, and everything on an object whose own
+        __setstate__/__reduce__ may read any attribute (the callers check that).
         """
-        for name, attr in obj.__dict__.items():
+        is_module = isinstance(obj, torch.nn.Module)
+        for name, attr in (_instance_dict(obj) or {}).items():
             if isinstance(attr, (torch.Tensor, torch.nn.Module)):
                 continue
-            if name in _NN_MODULE_STATE_ATTRS:
+            if is_module and name in _NN_MODULE_STATE_ATTRS:
                 continue
             if id(attr) in self.guard_tree_values:
                 continue
