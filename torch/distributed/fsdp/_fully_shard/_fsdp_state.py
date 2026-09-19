@@ -421,21 +421,24 @@ class FSDPState(_State):
                         fsdp_param_group.post_backward()
                     fsdp_param_group._training_state = TrainingState.IDLE
                 state._training_state = TrainingState.IDLE
-                if self._state_ctx.is_last_backward:
-                    for fsdp_param_group in state._fsdp_param_groups:
-                        fsdp_param_group.finalize_backward()
             if self._state_ctx.is_last_backward:
-                self._comm_ctx.post_forward_order.clear()
-                # Wait on and release any retained reduce-scatter input buffers:
-                # the last module's (which no later module's rs_wait clears) and,
-                # when set_reduce_scatter_max_input_buffers retains more than
-                # one in flight, the rest. The compute stream (which reuses the
-                # memory) is ordered past each reduce-scatter first.
-                for rs_state in self._comm_ctx.reduce_scatter_states:
-                    if rs_state.event is not None:
-                        self._device_handle.current_stream().wait_event(rs_state.event)
-                self._comm_ctx.reduce_scatter_states.clear()
+                self._finalize_backward()
             self._state_ctx.post_backward_final_callback_queued = False
+
+    def _finalize_backward(self) -> None:
+        for state in self._state_ctx.all_states:
+            for fsdp_param_group in state._fsdp_param_groups:
+                fsdp_param_group.finalize_backward()
+        self._comm_ctx.post_forward_order.clear()
+        # Wait on and release any retained reduce-scatter input buffers:
+        # the last module's (which no later module's rs_wait clears) and,
+        # when set_reduce_scatter_max_input_buffers retains more than
+        # one in flight, the rest. The compute stream (which reuses the
+        # memory) is ordered past each reduce-scatter first.
+        for rs_state in self._comm_ctx.reduce_scatter_states:
+            if rs_state.event is not None:
+                self._device_handle.current_stream().wait_event(rs_state.event)
+        self._comm_ctx.reduce_scatter_states.clear()
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
