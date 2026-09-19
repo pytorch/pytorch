@@ -576,6 +576,13 @@ class Capture:
         raise NotImplementedError
 
     def save(self) -> None:
+        """Checkpoint everything captured so far to the capture's two files.
+
+        Raises ``PrecompileError`` for a write with nothing captured -- the capture was
+        never called, or its call raised -- and for a capture no longer open to a write,
+        and re-raises the ``OSError`` of a write that FAILED; after that failure this
+        stays open as the retry of that write, from outside the block too.
+        """
         raise NotImplementedError
 
 
@@ -643,8 +650,9 @@ class _MakeFxCapture(Capture):
         self._write_failed = False
         self._rendered: tuple[str, bytes] | None = None
         # Paired with _rendered: True once THAT render is on disk, so a clean exit does
-        # not rewrite what an in-block save() already landed. Cleared wherever the render
-        # is, so it can never vouch for bytes that are no longer the ones in hand.
+        # not rewrite what an in-block save() already landed. A make_fx capture renders
+        # at most once, so nothing ever clears this again: it can only vouch for bytes
+        # that are still the ones in hand.
         self._written = False
 
     def __enter__(self) -> Self:
@@ -786,7 +794,6 @@ class _MakeFxCapture(Capture):
                 self._module._compile(args)
                 python_code = self._module.to_python_code()
                 self._rendered = (python_code, self._module.to_cache_bytes(python_code))
-                self._written = False
             except RuntimeError as e:
                 self._trace_failed = True
                 # Precompile's own refusals are already explained, and one IS a
@@ -830,7 +837,7 @@ class _MakeFxCapture(Capture):
                 # The serve is where the driver's own runtime checks run, so a serve that
                 # raised is a call that did not work: drop the render, or a CAUGHT serve
                 # error would leave the exit writing a pair whose serve never worked.
-                self._serve_failed, self._rendered, self._written = True, None, False
+                self._serve_failed, self._rendered = True, None
                 raise
 
 
@@ -1813,13 +1820,14 @@ def _capture(
                 # FakeTensor; a kernel that dereferences a fake (e.g. tensor_split with
                 # tensor indices) hits TensorImpl's typed data_ptr_impl, which reports
                 # uninitialized storage instead -- that message is not fake-exclusive in
-                # principle, but no real tensor reaches it from Python (a sparse one takes
-                # the doesn't-have-storage arm, a meta one returns 0, a storage-freed one is
-                # dereferenced with no check at all); and a NumPy conversion (t.numpy(),
-                # np.asarray(t), t.__array__()) is rejected earlier by tensor_numpy.cpp,
-                # which blames "tensor subclasses" -- usually capture's own FakeTensor, but
-                # it CAN be one the caller wrote (the check is is_python_dispatch()), which
-                # is why the refusal points at Underlying: rather than asserting whose it is.
+                # principle, but no real tensor reaches it on the paths capture constructs
+                # (a sparse one takes the doesn't-have-storage arm, a meta one returns 0,
+                # and a storage-freed input is fakeified before any kernel sees it); and a
+                # NumPy conversion (t.numpy(), np.asarray(t), t.__array__()) is rejected
+                # earlier by tensor_numpy.cpp, which blames "tensor subclasses" -- usually
+                # capture's own FakeTensor, but it CAN be one the caller wrote (the check
+                # is is_python_dispatch()), which is why the refusal points at Underlying:
+                # rather than asserting whose it is.
                 reads_fake_data = (
                     "Cannot access data pointer of Tensor (e.g." in str(e)
                     or "its data is not allocated yet" in str(e)
@@ -2825,11 +2833,13 @@ def _check_path_pair(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
 ) -> None:
-    """Refuse an artifact_path / cache_path pair no entry point can use.
+    """Refuse an artifact_path / cache_path pair no entry point accepts.
 
-    Two ways it can be unusable: one file named for both halves after resolving links
-    (the write would clobber the source), and a path that exists but is not a regular
-    file.
+    Two ways a pair is refused: one file named for both halves after resolving links, and
+    a path that exists but is not a regular file. The same file for both halves is what
+    capture() cannot do at all (the cache write would clobber the source it just wrote);
+    load() could in fact degrade its way through such a pair, and refuses it so that the
+    two entry points accept exactly the same pairs.
     """
     # fsdecode first: realpath is type-preserving, so a bytes spelling and a str
     # spelling of one file would never compare equal.
@@ -3039,7 +3049,7 @@ def capture(
     :func:`load` for reading the pair back.
 
     Raises ``ValueError`` for a ``backend`` outside ``{"inductor", "eager"}`` and for a
-    path pair no entry point can use (one file named for both halves, a path that is not
+    path pair no entry point accepts (one file named for both halves, a path that is not
     a regular file); ``TypeError`` for a ``tracer`` that is not a tracer object;
     ``PrecompileError`` for a :class:`DynamoTracer`, which this build does not capture
     with, and for an ``fn`` that IS a model, or that HOLDS a tensor or an ``nn.Module``
@@ -3095,10 +3105,11 @@ def load(
         format may change between releases without a deprecation cycle.
 
     Name the two files :func:`capture` wrote -- the ``python_code`` artifact and its
-    ``cache``. ``python_code`` alone is enough to run: the cache is honored only as its
-    matched pair (it carries a sha256 of exactly the python_code bytes it was emitted
-    with), a cache that claims a DIFFERENT capture is refused, and a cache that does not
-    decode at all is dropped with a warning (see ``Raises``).
+    ``cache``. BOTH paths are required, and a half that cannot be read at all is fatal
+    (see ``Raises``); what the cache half offers is acceleration, honored only as
+    ``python_code``'s matched pair (it carries a sha256 of exactly the python_code bytes
+    it was emitted with), refused when it claims a DIFFERENT capture, and dropped with a
+    warning when it does not decode.
 
     The driver runs from ``python_code`` -- the single source of truth for the whole
     calling convention. ``load`` reads ``BACKEND`` out of ``python_code``'s metadata
@@ -3106,8 +3117,9 @@ def load(
     the source, so a cache from another capture is refused) and, for the inductor
     backend, primes the inductor kernel caches from the cache's ``save_cache_artifacts``
     bundle (via ``torch.compiler.load_cache_artifacts``) so a warm reload loads
-    precompiled kernels instead of JIT-compiling; then it exec's ``python_code``. With
-    no usable cache it degrades to JIT'ing from ``python_code``.
+    precompiled kernels instead of JIT-compiling; then it exec's ``python_code``. A cache
+    it cannot use degrades to JIT'ing from ``python_code``; a cache it cannot READ does
+    not.
 
     Call the result with the SAME argument structure ``fn`` took -- the model(s) in their
     original positions plus the runtime inputs. Per invariant 2 of Note [precompile
@@ -3131,7 +3143,7 @@ def load(
     only, so ``load`` degrades to JIT'ing from ``python_code`` rather than crashing.
     A half that cannot be READ at all -- a missing file -- or a ``python_code`` half that
     is not utf-8 -- the two paths passed the wrong way round -- is a ``PrecompileError``
-    too, with the original error as its ``__cause__``. A pair no entry point can use
+    too, with the original error as its ``__cause__``. A pair no entry point accepts
     raises ``ValueError`` instead: one file named for both halves, or a path that is not
     a regular file.
     """
