@@ -47,6 +47,7 @@ def build_deps():
         "-DCMAKE_INSTALL_PREFIX="
         + os.path.realpath(os.path.join(BASE_DIR, "torch_openreg")),
         "-DPYTHON_INCLUDE_DIR=" + sysconfig.get_paths().get("include"),
+        "-DPYTHON_EXECUTABLE=" + sys.executable,
         "-DPYTORCH_INSTALL_DIR=" + get_pytorch_dir(),
     ]
 
