@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    _get_device_type,
     DTensorContinuousTestBase,
     NUM_DEVICES,
     with_comms,
@@ -77,7 +78,7 @@ class TestHSDPCheckpoint(DTensorContinuousTestBase):
 
     @classmethod
     def backend_str(cls):
-        device_type = object.__new__(cls).device_type
+        device_type = _get_device_type(cls.world_size)
         if device_type == "cpu":
             return "gloo"
         curr_backend = dist.get_default_backend_for_device(device_type)
