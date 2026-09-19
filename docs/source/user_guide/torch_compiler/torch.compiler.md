@@ -50,12 +50,12 @@ f = torch.compiler.precompile.load("m.py", "m.cache")
 
 The capture writes a self-contained, runnable Python source artifact plus an acceleration
 cache when the block exits cleanly having captured at least one call (a block that raised
-writes nothing). The default `MakeFxTracer` captures a single call;
-`DynamoTracer`, which captures several calls with the graph breaks and recompilations
-between them, is landing in follow-up changes. Call `cap.save()` inside the block to write
-the on-disk artifact without ending the capture; with `DynamoTracer` that checkpoints the
-loop partway through, while a `MakeFxTracer` capture records a single call, so `save()` and
-block exit write the same files. Reload the artifact with
+writes nothing). The default tracer captures several calls, with the graph breaks
+and recompilations between them; pass `tracer=torch.compiler.precompile.MakeFxTracer()` to
+capture a single call instead. Call `cap.save()` inside the block to checkpoint the on-disk
+artifact partway through a training loop without ending the capture (a `MakeFxTracer`
+capture records a single call, so `save()` and block exit write the same files). Reload the
+artifact with
 `torch.compiler.precompile.load`; since no weights are baked in, you pass the model again at
 runtime. See the {ref}`API reference <torch.compiler_api>` for details.
 
