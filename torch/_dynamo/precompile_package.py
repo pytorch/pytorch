@@ -58,7 +58,7 @@ from .source import (
 
 if TYPE_CHECKING:
     import traceback
-    from collections.abc import Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 
     from torch._guards import Source
     from torch.compiler._precompile_types import GuardFact as _GuardFact
@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from .convert_frame import ConvertFrameReturn
     from .hooks import Hooks
     from .package import _DynamoCacheEntry
+    from .repro.after_dynamo import WrapBackendDebug
     from .types import CacheEntry, DynamoFrameType, GuardFilterEntry
     from .variables.builder import FrameStateSizeEntry
 
@@ -140,7 +141,21 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
     artifact outside any capture-config scope. Beneath CatchErrorsWrapper
     rather than replacing it: frames its skipfile checks reject never pay the
     patch, and this frame stays out of the user stack dynamo_start reports.
+    The DDPOptimizer clone keeps the subclass and the package, so a DDP-wrapped
+    capture compiles the same frames the unwrapped one does. The stance path
+    (eval_frame._create_wrapped_callback, behind the process-wide set_stance
+    backend and the eager_then_compile stances) rebuilds a plain ConvertFrame
+    with no package at all and is outside a capture session's contract.
     """
+
+    @property
+    def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
+        return lambda backend: type(self)(
+            backend,
+            self._hooks,
+            package=self._inner_convert._package,
+            recompile_limit=self._recompile_limit,
+        )
 
     def __call__(
         self,
@@ -1184,118 +1199,54 @@ def _object_identity(value: object) -> str:
     return f"is a {type(value).__module__}.{type(value).__qualname__}"[:160]
 
 
-# Guards that pin an input's SHAPE, VALUE or KIND: compared across variants,
-# and never policy-dropped even when they held identically across every captured
-# variant. A drop is licensed by "it discriminated nothing", but with a single
-# example nothing CAN discriminate, and what would disappear is the check that
-# the runtime input looks like the captured one at all. A dropped shape guard
-# crashes inside a kernel on inductor and can quietly miscompute on eager; a
-# dropped value guard serves the captured branch to every other value with
-# correct-looking numerics.
+# Guard types that pin an input's shape, value or kind. An invariance policy
+# never drops one, and the report compares them across variants.
 _SHAPE_BEARING_GUARD_TYPES = frozenset(
     {
-        "TENSOR_MATCH",
-        "SEQUENCE_LENGTH",
-        # Python values the graph specialized on: an int or bool argument,
-        # module.training, an .item() result, mask=None. BOOL_MATCH is reached
-        # only through CONSTANT_MATCH, so it shows up in an entry's
-        # derived_guard_types and never as its guard_type; it is listed for
-        # the totality test over GuardBuilder methods.
-        "CONSTANT_MATCH",
-        "EQUALS_MATCH",
         "BOOL_MATCH",
+        "CONSTANT_MATCH",
         "CONSTANT_SUBCLASS_MATCH",
-        "NONE_MATCH",
-        "NOT_NONE_MATCH",
-        # Pins that two inputs alias, so a graph traced under `x is y` is never
-        # served two distinct tensors.
-        "DUPLICATE_INPUT",
-        # hasattr is a branch the graph specialized on; a single-variant capture
-        # makes it look invariant, and it may be the only guard on an optional
-        # attribute.
-        "HASATTR",
-        # An input's KIND: a graph traced for one class and served to another
-        # returns the first one's answer, with no shape to crash on. Upstream
-        # leans on this guard specifically: VariableBuilder.wrap_tensor relaxes
-        # an AsyncCollectiveTensor's class guards (UnwrapCollectiveTensorSource)
-        # so an ACT-traced graph serves the resolved tensor, and
-        # BuiltinVariable.call_isinstance reinstalls TYPE_MATCH where the class
-        # is observed. FAKE_SCRIPT_TYPE_MATCH is the same pin for a
-        # reference-type opaque object.
-        "TYPE_MATCH",
-        "FAKE_SCRIPT_TYPE_MATCH",
-        # Membership, key-set, length and iterator-position facts, each a branch
-        # the graph specialized on.
         "COUNT_ITERATOR_MATCH",
+        "COW_TENSOR_MATCH",
         "DICT_CONTAINS",
         "DICT_KEYS_MATCH",
         "DICT_NOT_CONTAINS",
+        "DUPLICATE_INPUT",
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        "EQUALS_MATCH",
+        "FAKE_SCRIPT_TYPE_MATCH",
+        "HASATTR",
         "MAPPING_KEYS_CHECK",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
         "NOT_PRESENT_IN_GENERIC_DICT",
         "RANGE_ITERATOR_MATCH",
+        "SEQUENCE_LENGTH",
         "SET_CONTAINS",
         "SET_NOT_CONTAINS",
+        "TENSOR_MATCH",
         "TUPLE_ITERATOR_LEN",
-        # Installed on a module's empty hook dicts whatever the config; its
-        # leaf, a SEQUENCE_LENGTH on the dict, exists only when
-        # skip_nnmodule_hook_guards is off. Never dropped either way: with the
-        # leaf it pins a length, and without one dropping the entry buys nothing.
-        "EMPTY_NN_MODULE_HOOKS_DICT",
-        # Pins a folded torch._C._is_cow_tensor branch. Kept, load_guard_manager
-        # re-runs the builder on the unpickled FakeTensor and its AssertionError
-        # kills the load; dropped, the folded branch is served silently.
-        "COW_TENSOR_MATCH",
+        "TYPE_MATCH",
     }
 )
 
 
-# Guards that check process or ambient state, or metadata, that no fingerprint
-# in this module reads and their filter entry cannot expose: the leaf snapshots
-# it for itself (GlobalStateGuard's state, the torch-function mode stack,
-# CURRENT_DEVICE) or compares subclass metadata, a DTensor placement, an opaque
-# object's guard values, a raw DispatchKeySet or the symbolic shape environment.
-# Calling two of these equal is how the report ends up asserting a precondition
-# that does not hold, so they are never compared and are reported as
-# undetermined. They are never dropped either: a policy may drop only what its
-# droppable set names, and these are in no such set.
+# Guard types on ambient or process state that the guard leaf checks for itself
+# and nothing in this module fingerprints. Never dropped, never compared.
 _UNMODELLED_GUARD_TYPES = frozenset(
     {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "DEFAULT_DEVICE",
         "DISPATCH_KEY_SET_MATCH",
         "DTENSOR_SPEC_MATCH",
-        # Its builder is a no-op like GRAD_MODE's, but GlobalStateGuard does not
-        # snapshot FSDP training state (the method's in-tree "we always guard on
-        # this via GlobalStateGuard()" comment is stale: GlobalStateGuard::init
-        # has no FSDP field) and the state is per param group, so nothing here
-        # can model or vouch for it.
+        "DUAL_LEVEL",
         "FSDP_TRAINING_STATE",
+        "FUNCTORCH_STACK_MATCH",
         "GLOBAL_STATE",
         "OPAQUE_OBJ_GUARD_FN_MATCH",
         "SHAPE_ENV",
         "TENSOR_SUBCLASS_METADATA_MATCH",
         "TORCH_FUNCTION_STATE",
-        # Ambient state the graph was traced under, installed on
-        # GlobalStateSource rather than on an input and outside
-        # GlobalStateGuard::init's snapshot. Never dropped: each fails silently
-        # when missing. Never compared: GlobalStateSource's name is "", so
-        # make_guard_filter_entry yields has_value=False and a per-call MISSING
-        # sentinel without reading a value, and two of the four are
-        # add_lambda_guard closures with no value to expose at all. The graph
-        # specialized on utils_device.CURRENT_DEVICE, which the C++ leaf
-        # snapshots for itself; captured under the default None and served
-        # under set_default_device("cuda"), it returns CPU tensors with no
-        # refusal.
-        "DEFAULT_DEVICE",
-        # The vmap level the graph baked in (output_graph.functorch_layers,
-        # itself serialized) lives in BatchedTensorImpl, not in the keys
-        # TENSOR_MATCH compares.
-        "FUNCTORCH_STACK_MATCH",
-        # The traced level is a graph constant (_exit_dual_level(level=N));
-        # under another _current_level unpack_dual returns no tangent.
-        "DUAL_LEVEL",
-        # The predicate that installs it also bakes the pack/unpack subgraphs
-        # into the graph; a hook-free capture served under inlineable hooks
-        # skips them with no refusal.
-        "AUTOGRAD_SAVED_TENSORS_HOOKS",
     }
 )
 
