@@ -2981,6 +2981,42 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
 
+    @skipIfRocm
+    @dynamo_config.patch(capture_scalar_outputs=True)
+    @config.patch({"triton.cudagraphs": False})
+    def test_bounded_unbacked_uses_int64_indexing(self):
+        # `torch._check` bounds on unbacked sizes are not guaranteed at runtime.
+        def fn(x, n):
+            u0 = n.item()
+            torch._check(u0 >= 1)
+            torch._check(u0 <= 1000)
+            y = x.new_ones(u0)
+            return torch.cat([y, y]) + 1.0
+
+        x = torch.randn(4, device=device_type)
+        n = torch.tensor(64, device=device_type)
+        result, codes = run_and_get_code(torch.compile(fn, fullgraph=True), x, n)
+        FileCheck().check("tl.arange(0, XBLOCK)[:].to(tl.int64)").run("\n".join(codes))
+        self.assertEqual(result, fn(x, n))
+
+    @skipIfRocm
+    @config.patch({"triton.cudagraphs": False})
+    def test_backward_dynamic_uses_int64_indexing(self):
+        # Backward cannot rely on `check_leq`: its guard may be elided, and
+        # autograd does not redispatch through Dynamo when the size grows.
+        def fn(x):
+            y = torch.cat([x, x], dim=0)
+            return (y * y).sum()
+
+        x = torch.randn(1024, 512, device=device_type, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        compiled = torch.compile(fn, fullgraph=True)
+
+        _, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: compiled(x))
+        idiom = "tl.arange(0, XBLOCK)[:].to(tl.int64)"
+        self.assertNotIn(idiom, fw_code)
+        self.assertIn(idiom, bw_code)
+
     @skipCUDAIf(
         not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
     )
