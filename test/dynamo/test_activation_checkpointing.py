@@ -2523,6 +2523,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
 
         self.assertEqual(budgets, [0.0, 0.0, 0.7, 0.7])
 
+
+
     @torch._functorch.config.patch(activation_memory_budget_require_full_coverage=False)
     def test_region_activation_memory_budget_partial_coverage_survives_graph_break(
         self,
@@ -2540,6 +2542,7 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
         self.assertEqual(out, x.sin().cos() + 1)
         out.sum().backward()
 
+ main
     def test_region_activation_memory_budget_nested_graph_breaks(self):
         graphs = []
 
@@ -2851,6 +2854,7 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
     """Checkpointing the same module at two sibling call sites. See
     https://github.com/pytorch/pytorch/issues/193194."""
 
+
     def test_sac_with_bound_method_context_fn(self):
         # A bound method is a valid context_fn; extracting the underlying
         # function instead would call it with the receiver missing.
@@ -2917,6 +2921,7 @@ class ActivationCheckpointingSharedModuleTests(torch._dynamo.test_case.TestCase)
             torch._dynamo.exc.Unsupported, "bound to a non-constant receiver"
         ):
             torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
 
     def test_dynamic_shape_checkpoint_shared_module_two_call_sites(self):
         # An unspecialized plain-float module attribute (self.eps), read
@@ -4063,6 +4068,39 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
             fx_x.requires_grad_(True)
 
         ctx = TracingContext(fake_mode)
+
+         @requires_gpu_and_triton
+    def test_kwargs(self, device):
+        def gn(x, y, z=None):
+            a = torch.matmul(x, y)
+            if z is not None:
+                return torch.matmul(a, z)
+            return a
+
+        def fn(x, y, z):
+            return torch.utils.checkpoint.checkpoint(gn, x, y, z=z, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        z = torch.randn(4, 4, device=device, requires_grad=True)
+
+        backend = "aot_eager"
+        self._validate(fn, backend, x, y, z)
+
+        x = torch.randn(4, 4, requires_grad=True, device=device)
+        y = torch.randn(4, 4, requires_grad=True, device=device)
+        z = torch.randn(4, 4, requires_grad=True, device=device)
+
+        fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=6, op=torch.ops.aten.mm.default
+        )  # mm operations recomputed in backward pass
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
+        self._validate(fn, backend, x, y, z)
 
         with (
             fake_mode,
