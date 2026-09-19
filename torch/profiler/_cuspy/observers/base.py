@@ -108,6 +108,14 @@ class CuspyObserver:
     (eager only -- external ids don't survive graph capture; under graphs use
     ``graph_node_id``)."""
 
+    # Whether this observer identifies a graph node by its source (capture-graph) id alone,
+    # so _with_graph_fields can leave the exec id out of the selection and keep records
+    # smaller. Default False: select both and resolve source-then-exec, which is what a
+    # trace mixing key_by="source" and key_by="exec" graphs needs. A subclass offering the
+    # narrower mode sets it before calling super().__init__() (see NodeTimerObserver's
+    # key_space).
+    _source_key_space: bool = False
+
     # Both graph resolvers are keyed on graph_node_id: a node's annotation and lane are stable
     # once its graph is baked, so each resolves once for this observer's lifetime (reused across
     # every buffer delivery). Both take the int graph_node_id and are wrapped in functools.cache
@@ -185,7 +193,7 @@ class CuspyObserver:
             )
             self._eager = annotations.support_eager_annotations
         if self._annotation_resolver is not None:
-            activities = self._with_graph_fields(activities)
+            activities = self._with_graph_fields(activities, self._source_key_space)
         if self._eager:
             activities = self._with_eager_fields(activities)
         # frozenset of requested kinds (a field map collapses to keys) for the observer's
@@ -305,12 +313,15 @@ class CuspyObserver:
         return aug
 
     @staticmethod
-    def _with_graph_fields(activities: Any) -> dict[int, set[int]]:
+    def _with_graph_fields(
+        activities: Any, source_key_space: bool = False
+    ) -> dict[int, set[int]]:
         """Augment a field map so the graph resolver can name nodes: add each GPU-op kind's
         GRAPH_NODE_ID, plus its SOURCE_GRAPH_NODE_ID where the CUPTI ABI has one (the key an
         annotation kept on its capture graph is under). Collection-free (normal record
         fields, no extra kinds, stays on the vectorized path). Expects a ``{kind: fields}``
-        map."""
+        map. With ``source_key_space`` the exec id is left out for any kind that has a
+        source id, since the caller names nodes by the latter alone."""
         from torch.profiler._cuspy.records import (
             GRAPH_NODE_FIELD,
             SOURCE_GRAPH_NODE_FIELD,
@@ -320,10 +331,11 @@ class CuspyObserver:
         for kind, sel in dict(activities).items():
             k = int(kind)
             fields = {int(f) for f in sel}
-            if k in GRAPH_NODE_FIELD:
-                fields.add(GRAPH_NODE_FIELD[k])
-            if k in SOURCE_GRAPH_NODE_FIELD:
+            has_source = k in SOURCE_GRAPH_NODE_FIELD
+            if has_source:
                 fields.add(SOURCE_GRAPH_NODE_FIELD[k])
+            if k in GRAPH_NODE_FIELD and not (has_source and source_key_space):
+                fields.add(GRAPH_NODE_FIELD[k])
             aug[k] = fields
         return aug
 
