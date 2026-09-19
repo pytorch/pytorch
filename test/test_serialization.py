@@ -20,6 +20,7 @@ import unittest
 import warnings
 import zipfile
 from collections import namedtuple, OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -1250,6 +1251,60 @@ class TestSerialization(TestCase, SerializationMixin):
             with torch.serialization.safe_globals([print]):
                 f.seek(0)
                 torch.load(f, weights_only=True)
+
+    @parametrize("persistent", [False, True])
+    def test_safe_globals_thread_isolation(self, persistent):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        buffer = io.BytesIO()
+        torch.save(Point(1, 2), buffer)
+        payload = buffer.getvalue()
+
+        def load_in_thread():
+            self.assertEqual(Point in torch.serialization.get_safe_globals(), persistent)
+            if persistent:
+                self.assertEqual(torch.load(io.BytesIO(payload), weights_only=True), Point(1, 2))
+            else:
+                with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global"):
+                    torch.load(io.BytesIO(payload), weights_only=True)
+
+        if persistent:
+            torch.serialization.add_safe_globals([Point])
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with safe_globals([Point]):
+                self.assertEqual(torch.load(io.BytesIO(payload), weights_only=True), Point(1, 2))
+                executor.submit(load_in_thread).result(timeout=10)
+        self.assertEqual(Point in torch.serialization.get_safe_globals(), persistent)
+
+    @parametrize("persistent", [False, True])
+    def test_safe_globals_nested_context(self, persistent):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        if persistent:
+            torch.serialization.add_safe_globals([Point])
+        context = safe_globals([Point])
+        with context:
+            with self.assertRaisesRegex(RuntimeError, "test error"):
+                with context:
+                    raise RuntimeError("test error")
+            self.assertIn(Point, torch.serialization.get_safe_globals())
+        self.assertEqual(Point in torch.serialization.get_safe_globals(), persistent)
+
+    def test_safe_globals_clear_nested_context(self):
+        previous = torch.serialization.get_safe_globals()
+        self.addCleanup(torch.serialization.add_safe_globals, previous)
+        self.addCleanup(torch.serialization.clear_safe_globals)
+        torch.serialization.clear_safe_globals()
+        with safe_globals([Point]):
+            with safe_globals([Point]):
+                torch.serialization.clear_safe_globals()
+                self.assertEqual(torch.serialization.get_safe_globals(), [])
+            self.assertEqual(torch.serialization.get_safe_globals(), [])
+        self.assertEqual(torch.serialization.get_safe_globals(), [])
 
     def test_weights_only_safe_globals_newobj(self):
         # This will use NEWOBJ
