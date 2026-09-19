@@ -141,20 +141,25 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
     artifact outside any capture-config scope. Beneath CatchErrorsWrapper
     rather than replacing it: frames its skipfile checks reject never pay the
     patch, and this frame stays out of the user stack dynamo_start reports.
-    The DDPOptimizer clone keeps the subclass and the package, so a DDP-wrapped
-    capture compiles the same frames the unwrapped one does. The stance path
-    (eval_frame._create_wrapped_callback, behind the process-wide set_stance
-    backend and the eager_then_compile stances) rebuilds a plain ConvertFrame
-    with no package at all and is outside a capture session's contract.
+    A frame under DistributedDataParallel with optimize_ddp="ddp_optimizer" is
+    refused by name: DDPOptimizer compiles the graph one bucket at a time and
+    no bucket carries the backend id the package records, so the artifact could
+    never be completed. The stance path (eval_frame._create_wrapped_callback,
+    behind the process-wide set_stance backend and the eager_then_compile
+    stances) rebuilds a plain ConvertFrame with no package at all and is
+    outside a capture session's contract.
     """
 
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
-        return lambda backend: type(self)(
-            backend,
-            self._hooks,
-            package=self._inner_convert._package,
-            recompile_limit=self._recompile_limit,
+        # CatchErrorsWrapper asks for this clone only for a frame under an
+        # active DDP module in ddp_optimizer mode (the default, optimize_ddp=True).
+        raise PackageError(
+            "Cannot precompile a DistributedDataParallel forward with "
+            f"torch._dynamo.config.optimize_ddp={torch._dynamo.config.optimize_ddp!r}: "
+            "DDPOptimizer compiles the graph one bucket at a time and no bucket "
+            "records a backend under the id the package saves, so the capture "
+            "could not serialize this frame"
         )
 
     def __call__(
