@@ -8,7 +8,6 @@ from torch._environment import is_fbcode
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -170,10 +169,6 @@ class CppThreadTest(TestCase):
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
     )
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
-    )
     def test_with_enable_profiler_in_child_thread(self, device) -> None:
         type(self).EventHandler.device = device
         device_type = torch.device(device).type
@@ -191,10 +186,6 @@ class CppThreadTest(TestCase):
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
     )
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
-    )
     def test_without_enable_profiler_in_child_thread(self, device) -> None:
         type(self).EventHandler.device = device
         device_type = torch.device(device).type
@@ -211,10 +202,6 @@ class CppThreadTest(TestCase):
     @skipCUDAIf(
         IS_WINDOWS,
         "Failing on windows cuda, see https://github.com/pytorch/pytorch/pull/130037 for slightly more context",
-    )
-    @skipXPUIf(
-        True,
-        "The XPU Profiler will not cover this case for now. Will support it in next period.",
     )
     def test_profile_memory(self, device) -> None:
         type(self).EventHandler.device = device

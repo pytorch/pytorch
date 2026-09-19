@@ -16952,6 +16952,9 @@ op_db: list[OpInfo] = [
                          device_type='xpu'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_meta_outplace",
                          device_type='xpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestMetaCudaRef', "test_dispatch_symbolic_meta_outplace_all_strides",
+                         device_type='xpu'),
+
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
@@ -17789,6 +17792,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
                          device_type=('xpu',)),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type=('xpu',)),
+            DecorateInfo(unittest.expectedFailure, 'TestMetaCudaRef', 'test_dispatch_symbolic_meta_outplace_all_strides',
                          device_type=('xpu',)),
         ),
     ),
@@ -22284,7 +22289,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_noncontiguous_samples", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="mps"),
-        )),
+       )),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
         "grid_sampler_2d",
