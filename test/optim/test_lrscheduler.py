@@ -449,6 +449,25 @@ class TestLRScheduler(TestCase):
         scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=5)
         self._test(scheduler, targets, epochs)
 
+    def test_constantlr_zero_total_iters(self):
+        # total_iters=0 asks for the factor to apply over no iterations at all,
+        # which is how _get_closed_form_lr already reads it, so the lr is the
+        # base lr from the very first epoch.
+        # lr = 0.05 for every epoch
+        epochs = 10
+        single_targets = [0.05] * epochs
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=0)
+        self._test(scheduler, targets, epochs)
+
+    def test_constantlr_negative_total_iters(self):
+        # Same reasoning as total_iters=0: the milestone is already behind us.
+        epochs = 10
+        single_targets = [0.05] * epochs
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = ConstantLR(self.opt, factor=1.0 / 2, total_iters=-1)
+        self._test(scheduler, targets, epochs)
+
     def test_linearlr(self):
         # lr = 0.025     if epoch == 0
         # lr = 0.03125   if epoch == 1
