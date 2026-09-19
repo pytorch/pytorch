@@ -3908,7 +3908,7 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
 
         ctx = TracingContext(fake_mode)
 
-       @requires_gpu_and_triton
+         @requires_gpu_and_triton
     def test_kwargs(self, device):
         def gn(x, y, z=None):
             a = torch.matmul(x, y)
@@ -3917,11 +3917,14 @@ class ActivationCheckpointingNestedCompileTests(torch._dynamo.test_case.TestCase
             return a
 
         def fn(x, y, z):
-            return torch.cos(
-                torch.utils.checkpoint.checkpoint(
-                    gn, torch.sin(x), y, z=z, use_reentrant=False
-                )
-            )
+            return torch.utils.checkpoint.checkpoint(gn, x, y, z=z, use_reentrant=False)
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+        z = torch.randn(4, 4, device=device, requires_grad=True)
+
+        backend = "aot_eager"
+        self._validate(fn, backend, x, y, z)
 
         x = torch.randn(4, 4, requires_grad=True, device=device)
         y = torch.randn(4, 4, requires_grad=True, device=device)
