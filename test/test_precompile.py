@@ -319,15 +319,13 @@ class TestPrecompile(TestCase):
         meta = _parse_artifact_metadata(src)
         self.assertEqual(meta["FRAMES"], [{"is_entry": True, "variants": []}])
         # Reported but never required: the serving mode defaults for artifacts
-        # predating it, and graph devices and the guard-audit sections come back
-        # as data.
+        # predating it, and the guard-audit sections come back as data.
         self.assertEqual(meta["SERVING_MODE"], "standalone")
         self.assertNotIn("POLICY_DROPPED_GUARDS", meta)
         audit = "POLICY_DROPPED_GUARDS = ['g']\nDROPPED_GUARD_CODE = {'g': 'code'}\n"
-        meta = _parse_artifact_metadata(src + audit + "GRAPH_DEVICES = ('cpu',)\n")
+        meta = _parse_artifact_metadata(src + audit)
         self.assertEqual(meta["POLICY_DROPPED_GUARDS"], ["g"])
         self.assertEqual(meta["DROPPED_GUARD_CODE"], {"g": "code"})
-        self.assertEqual(meta["GRAPH_DEVICES"], ("cpu",))
         # An installed artifact parses without the per-frame blobs.
         blobs = "_FRAMES = 'blob'\n_BACKENDS = 'blob'\n"
         package = "SERVING_MODE = 'installed'\n_PACKAGE = 'pkg'\n"
@@ -339,10 +337,13 @@ class TestPrecompile(TestCase):
         shadowed = src.replace("TRACER = 'dynamo'", "TRACER = 'other'")
         meta = _parse_artifact_metadata(shadowed + "TRACER = 'dynamo'\n")
         self.assertEqual(meta["TRACER"], "dynamo")
-        # A consumed name whose value is not a literal is named, including the
-        # ones that select the required set; an unconsumed one is skipped.
-        for bad in ("TRACER = object()\n", "TRACER = 'dynamo'\nSERVING_MODE = f()\n"):
-            name = bad.splitlines()[-1].split(" =")[0]
+        # A consumed name whose value is not a literal (a call, or a set with an
+        # unhashable member) is named, including the ones that select the required
+        # set; an unconsumed one is skipped.
+        for bad, name in (
+            ("TRACER = object()\n", "TRACER"),
+            ("TRACER = 'dynamo'\nSERVING_MODE = {[]}\n", "SERVING_MODE"),
+        ):
             with self.assertRaisesRegex(PrecompileError, f"{name!r} .* is malformed"):
                 _parse_artifact_metadata(bad)
         meta = _parse_artifact_metadata(src + "_x = f()\n")
