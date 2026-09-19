@@ -1260,6 +1260,11 @@ class Pointwise(Loops):
 
 
 @ir_dataclass
+class BooleanCopy(Pointwise):
+    """Marks a CUDA bool copy that must preserve each input storage byte."""
+
+
+@ir_dataclass
 class Scatter(Pointwise):
     output_indexer: Callable[[Sequence[Expr]], Expr]
     scatter_mode: StoreMode = None
@@ -7369,7 +7374,16 @@ class ExternKernel(InputsKernel):
 
     @staticmethod
     def copy_input(x: IRNode) -> TensorBox:
-        pw = Pointwise.create(
+        # Keep byte-preserving bool copy semantics when an external kernel needs
+        # a separate contiguous input buffer.
+        node_cls = (
+            BooleanCopy
+            if isinstance(x, TensorBox)
+            and isinstance(x.data, StorageBox)
+            and isinstance(x.data.data, BooleanCopy)
+            else Pointwise
+        )
+        pw = node_cls.create(
             device=x.get_device(),
             dtype=x.get_dtype(),
             inner_fn=x.make_loader(),

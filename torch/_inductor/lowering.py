@@ -4064,7 +4064,19 @@ def clone(x, *, memory_format=None):
     # Don't materialize the layout here based on memory_format,
     # as we want to give the scheduler opportunity to perform layout optimization.
     # Let the downstream op handle the input stride as needed.
-    return Pointwise.create(
+    # CUDA eager can copy noncanonical bool storage bytes without normalizing
+    # them to 0 or 1. BooleanCopy preserves those bytes in Triton codegen.
+    input_layout = x.maybe_get_layout()
+    node_cls = (
+        ir.BooleanCopy
+        if x.get_dtype() == torch.bool
+        and x.get_device().type == "cuda"
+        and input_layout is not None
+        and input_layout.is_contiguous()
+        else Pointwise
+    )
+
+    return node_cls.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=x.make_loader(),
@@ -7726,7 +7738,14 @@ def mutate_to(changed, val, unsafe_alias=False):
 
     if not isinstance(val, ir.StorageBox):
         # introduce a copy to handle views
-        node = Pointwise.create(
+        # A CUDA mutation through a bool view must preserve the source bytes.
+        node_cls = (
+            ir.BooleanCopy
+            if changed.get_dtype() == val.get_dtype() == torch.bool
+            and changed.get_device().type == "cuda"
+            else Pointwise
+        )
+        node = node_cls.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
             inner_fn=val.make_loader(),

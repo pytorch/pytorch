@@ -17243,6 +17243,91 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         y = torch.randn(8, 8, device=self.device)
         self.common(fn, (x, y), reference_in_float=False)
 
+    def test_bool_dtypeview_copy_preserves_storage(self):
+        # https://github.com/pytorch/pytorch/issues/193760
+        def fn(x, y):
+            return x.view(torch.bool).copy_(y.view(torch.bool)).view(torch.float32)
+
+        x = torch.randn(8, 8, device=self.device)
+        y = torch.randn(8, 8, device=self.device)
+        self.common(fn, (x, y), reference_in_float=False)
+
+    @skipCPUIf(True, "CUDA bool storage semantics")
+    def test_bool_dtypeview_clone_preserves_storage(self):
+        # https://github.com/pytorch/pytorch/issues/193760
+        def fn(x):
+            cloned = x.clone()
+            return cloned.view(torch.uint8)
+
+        raw = torch.arange(256, dtype=torch.uint8, device=self.device)
+        self.common(fn, (raw.view(torch.bool),), reference_in_float=False)
+
+    @skipCPUIf(True, "BooleanCopy is CUDA-specific")
+    @parametrize("copy_kind", ["clone", "copy_"])
+    def test_bool_storage_copy_preserves_storage(self, copy_kind):
+        def fn(mask):
+            if copy_kind == "clone":
+                copied = mask.clone()
+            else:
+                copied = torch.empty_like(mask)
+                copied.copy_(mask)
+            return copied.view(torch.uint8)
+
+        raw = torch.tensor([0, 1, 2, 3], dtype=torch.uint8, device=self.device)
+        mask = raw.view(torch.bool)
+        expected = fn(mask)
+        actual, codes = run_and_get_code(torch.compile(fn, fullgraph=True), mask)
+        self.assertEqual(actual, expected)
+
+        if self.device == "cuda":
+            code = "\n".join(codes)
+            self.assertIn("def triton_", code)
+            self.assertNotIn("torch.ops.aten.clone.default(", code)
+            self.assertNotIn("torch.ops.aten.copy_.default(", code)
+
+    @skipCPUIf(True, "BooleanCopy is CUDA-specific")
+    def test_bool_clone_mixed_storage_and_logical_consumers(self):
+        def fn(mask, values):
+            copied = mask.clone()
+            raw = copied.view(torch.uint8)
+            logical = torch.where(copied, values, 0.0)
+            return raw, logical
+
+        raw = torch.tensor([0, 1, 2, 3], dtype=torch.uint8, device=self.device)
+        mask = raw.view(torch.bool)
+        values = torch.tensor([10.0, 20.0, 30.0, 40.0], device=self.device)
+        expected = fn(mask, values)
+        actual, codes = run_and_get_code(
+            torch.compile(fn, fullgraph=True), mask, values
+        )
+        self.assertEqual(actual, expected)
+
+        if self.device == "cuda":
+            code = "\n".join(codes)
+            self.assertIn("def triton_", code)
+            self.assertNotIn("torch.ops.aten.clone.default(", code)
+
+    @skipCPUIf(True, "CUDA bool copy layout behavior")
+    @parametrize("copy_kind", ["clone", "copy_"])
+    def test_noncontiguous_bool_storage_copy_matches_eager(self, copy_kind):
+        def fn(mask):
+            if copy_kind == "clone":
+                copied = mask.clone()
+            else:
+                copied = torch.empty_like(mask)
+                copied.copy_(mask)
+            return copied.view(torch.uint8)
+
+        raw = torch.tensor(
+            [2, 99, 3, 99, 4, 99, 255, 99],
+            dtype=torch.uint8,
+            device=self.device,
+        )
+        mask = raw.view(torch.bool)[::2]
+        expected = fn(mask)
+        actual = torch.compile(fn, fullgraph=True)(mask)
+        self.assertEqual(actual, expected)
+
     @expectedFailureCodegenDynamic
     def test_reinterpret_dtypeview(self):
         @torch.compile
