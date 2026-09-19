@@ -875,3 +875,55 @@ def _is_risky_drop(
             or _defined_where_read(value, source.global_name, stack)
         )
     return True
+
+
+# Guard types that pin an input's shape, value or kind. An invariance policy
+# never drops one, and the report compares them across variants.
+_SHAPE_BEARING_GUARD_TYPES = frozenset(
+    {
+        "BOOL_MATCH",
+        "CONSTANT_MATCH",
+        "CONSTANT_SUBCLASS_MATCH",
+        "COUNT_ITERATOR_MATCH",
+        "COW_TENSOR_MATCH",
+        "DICT_CONTAINS",
+        "DICT_KEYS_MATCH",
+        "DICT_NOT_CONTAINS",
+        "DUPLICATE_INPUT",
+        "EMPTY_NN_MODULE_HOOKS_DICT",
+        "EQUALS_MATCH",
+        "FAKE_SCRIPT_TYPE_MATCH",
+        "HASATTR",
+        "MAPPING_KEYS_CHECK",
+        "NONE_MATCH",
+        "NOT_NONE_MATCH",
+        "NOT_PRESENT_IN_GENERIC_DICT",
+        "RANGE_ITERATOR_MATCH",
+        "SEQUENCE_LENGTH",
+        "SET_CONTAINS",
+        "SET_NOT_CONTAINS",
+        "TENSOR_MATCH",
+        "TUPLE_ITERATOR_LEN",
+        "TYPE_MATCH",
+    }
+)
+
+
+# Guard types on ambient or process state that the guard leaf checks for itself
+# and nothing in this module fingerprints. Never dropped, never compared.
+_UNMODELLED_GUARD_TYPES = frozenset(
+    {
+        "AUTOGRAD_SAVED_TENSORS_HOOKS",
+        "DEFAULT_DEVICE",
+        "DISPATCH_KEY_SET_MATCH",
+        "DTENSOR_SPEC_MATCH",
+        "DUAL_LEVEL",
+        "FSDP_TRAINING_STATE",
+        "FUNCTORCH_STACK_MATCH",
+        "GLOBAL_STATE",
+        "OPAQUE_OBJ_GUARD_FN_MATCH",
+        "SHAPE_ENV",
+        "TENSOR_SUBCLASS_METADATA_MATCH",
+        "TORCH_FUNCTION_STATE",
+    }
+)
