@@ -49,6 +49,33 @@ class GuardFact:
     enforced: bool
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class FrameInvariants:
+    """Guards that held, varied, or were undetermined across one frame's variants.
+
+    Guards from different frames are not comparable (an entry frame guards its
+    arguments, a resume frame whatever crossed the break), so the report is per frame.
+
+    Attributes:
+        frame: The frame's code name.
+        filename: The file its code lives in.
+        lineno: Its first line.
+        variants: How many guarded variants of the frame were captured.
+        invariant: Guards that held identically in every variant: preconditions
+            the artifact is only valid under.
+        varying: Guards that differed between variants: what tells its graphs apart.
+        undetermined: Guards a single variant could not classify either way.
+    """
+
+    frame: str
+    filename: str
+    lineno: int
+    variants: int
+    invariant: tuple[GuardFact, ...]
+    varying: tuple[GuardFact, ...]
+    undetermined: tuple[GuardFact, ...]
+
+
 @dataclasses.dataclass(frozen=True)
 class PrecompileSummary:
     """Coverage and guard information from an observed precompile capture."""
