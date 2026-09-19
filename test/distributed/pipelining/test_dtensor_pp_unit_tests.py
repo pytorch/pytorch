@@ -41,11 +41,10 @@ from torch.distributed.pipelining.microbatch import (
 )
 from torch.distributed.pipelining.stage import PipelineStage
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
-from torch.testing._internal.common_distributed import (
-    MultiProcContinuousTest,
-    requires_accelerator_dist_backend,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_MULTIACCELERATOR,
@@ -61,15 +60,9 @@ batch_size = 64
 n_microbatches = 4
 microbatch_size = batch_size // n_microbatches
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-backend = dist.get_default_backend_for_device(device_type)
-
 
 def _requires_multi_gpu(fn):
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 4+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIACCELERATOR, "Test requires 4+ GPUs")
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         return fn(*args, **kwargs)
@@ -82,28 +75,33 @@ def _requires_multi_gpu(fn):
 # =============================================================================
 
 
-class TestDTensorPPUnitTests(MultiProcContinuousTest):
+class DTensorPPTestBase(MultiProcContinuousTest):
+    # instantiate_device_type_tests copies non-test members using getattr(). A
+    # classmethod defined on generic_test_class is copied already bound to that
+    # class and cannot see the generated class's device_type. Defining backend_str
+    # on this base leaves it inherited, so cls refers to the generated
+    # device-specific test class when called.
+    @classmethod
+    def backend_str(cls) -> str:
+        return dist.get_default_backend_for_device(cls.device_type)
+
+    def _rank_device(self, device: str) -> torch.device:
+        device_type = torch.device(device).type
+        return torch.device(device_type, self.rank)
+
+
+class TestDTensorPPUnitTests(DTensorPPTestBase):
     """Unit tests for DTensor PP metadata infrastructure.
 
     All tests live in a single class so the process group is initialized once
     rather than once per test category.
     """
 
-    @classmethod
-    def backend_str(cls) -> str:
-        return backend
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    @classmethod
-    def device_type(cls) -> str:
-        return device_type
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
-
-    def init_pg(self):
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+    def init_pg(self, device: torch.device):
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(device)
 
     # -----------------------------------------------------------------
     # Shared helpers
@@ -112,12 +110,14 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     def _make_mesh(self, dim_names=("tp",)):
         """Create a 1D device mesh spanning all ranks."""
         return init_device_mesh(
-            device_type, (self.world_size,), mesh_dim_names=dim_names
+            self.device_type, (self.world_size,), mesh_dim_names=dim_names
         )
 
-    def _make_dtensor(self, mesh, placements, shape=(8, 16), requires_grad=False):
+    def _make_dtensor(
+        self, mesh, placements, shape=(8, 16), requires_grad=False, *, device
+    ):
         """Create a DTensor with given properties."""
-        t = torch.randn(*shape, device=self.device, requires_grad=requires_grad)
+        t = torch.randn(*shape, device=device, requires_grad=requires_grad)
         return distribute_tensor(t, mesh, placements)
 
     def _make_tensor_meta(
@@ -151,9 +151,10 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # -----------------------------------------------------------------
 
     @_requires_multi_gpu
-    def test_tensor_meta_extraction_roundtrip_and_errors(self):
+    def test_tensor_meta_extraction_roundtrip_and_errors(self, device):
         """Test _TensorMeta: extraction, roundtrip, DTensor rejection."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
         # Extraction and roundtrip for various shapes/dtypes/requires_grad
@@ -168,7 +169,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                     self.assertEqual(meta.requires_grad, requires_grad)
 
                     # Roundtrip via tensor on device
-                    reconstructed = meta.to_tensor(self.device)
+                    reconstructed = meta.to_tensor(rank_device)
                     reconstructed_meta = _TensorMeta(
                         shape=reconstructed.shape,
                         stride=reconstructed.stride(),
@@ -178,15 +179,16 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                     self.assertEqual(meta.get_diff(reconstructed_meta), [])
 
         # DTensor rejection
-        dt = self._make_dtensor(mesh, [Shard(0)])
+        dt = self._make_dtensor(mesh, [Shard(0)], device=rank_device)
         with self.assertRaises(PipeliningMetadataError) as ctx:
             _TensorMeta.from_tensor(dt)
         self.assertIn("DTensor", str(ctx.exception))
 
     @_requires_multi_gpu
-    def test_tensor_meta_non_float_requires_grad_guard(self):
+    def test_tensor_meta_non_float_requires_grad_guard(self, device):
         """Test that to_tensor/to_dtensor don't set requires_grad on non-float dtypes."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
         # _TensorMeta: non-float with requires_grad=True in metadata should not crash
@@ -197,7 +199,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 dtype=dtype,
                 requires_grad=True,  # would crash without the guard
             )
-            t = meta.to_tensor(self.device)
+            t = meta.to_tensor(rank_device)
             self.assertEqual(t.dtype, dtype)
             self.assertFalse(t.requires_grad)
 
@@ -208,7 +210,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             dtype=torch.float32,
             requires_grad=True,
         )
-        t = float_meta.to_tensor(self.device)
+        t = float_meta.to_tensor(rank_device)
         self.assertTrue(t.requires_grad)
 
         # _DTensorMeta: non-float with requires_grad=True should not crash
@@ -224,18 +226,19 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 mesh_dim_names=("tp",),
                 mesh_layout=mesh._layout,
             )
-            dt = dt_meta.to_dtensor(self.device, mesh)
+            dt = dt_meta.to_dtensor(rank_device, mesh)
             self.assertEqual(dt.dtype, dtype)
             self.assertFalse(dt.requires_grad)
 
     @_requires_multi_gpu
-    def test_dtensor_meta_extraction_and_roundtrip(self):
+    def test_dtensor_meta_extraction_and_roundtrip(self, device):
         """Test _DTensorMeta: extraction and roundtrip for Shard/Replicate."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
         for placements in [[Shard(0)], [Replicate()]]:
-            dt = self._make_dtensor(mesh, placements)
+            dt = self._make_dtensor(mesh, placements, device=rank_device)
             meta = _DTensorMeta.from_dtensor(dt)
 
             self.assertEqual(meta.global_shape, dt.shape)
@@ -244,14 +247,15 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             self.assertEqual(meta.mesh_cache_key, (("tp",), mesh._layout))
 
             # Roundtrip
-            reconstructed = meta.to_dtensor(self.device, mesh)
+            reconstructed = meta.to_dtensor(rank_device, mesh)
             reconstructed_meta = _DTensorMeta.from_dtensor(reconstructed)
             self.assertEqual(meta.get_diff(reconstructed_meta), [])
 
     @_requires_multi_gpu
-    def test_get_diff_detects_mismatches(self):
+    def test_get_diff_detects_mismatches(self, device):
         """Test get_diff() detects shape/dtype/placement/cross-type differences."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
         # _TensorMeta: shape
@@ -264,8 +268,8 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertTrue(any("dtype" in d for d in m1.get_diff(m3)))
 
         # _DTensorMeta: placement
-        dt_shard = self._make_dtensor(mesh, [Shard(0)])
-        dt_rep = self._make_dtensor(mesh, [Replicate()])
+        dt_shard = self._make_dtensor(mesh, [Shard(0)], device=rank_device)
+        dt_rep = self._make_dtensor(mesh, [Replicate()], device=rank_device)
         dm1 = _DTensorMeta.from_dtensor(dt_shard)
         dm2 = _DTensorMeta.from_dtensor(dt_rep)
         self.assertTrue(any("placements" in d for d in dm1.get_diff(dm2)))
@@ -275,9 +279,10 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertTrue(any("type" in d.lower() or "_TensorMeta" in d for d in diffs))
 
     @_requires_multi_gpu
-    def test_mesh_cache_operations(self):
+    def test_mesh_cache_operations(self, device):
         """Test _MeshCache: __contains__/put/get_mesh/callback/update_from_tensors."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
         key = (("tp",), mesh._layout)
 
@@ -319,8 +324,8 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
 
         # --- update_from_tensors: extracts mesh from DTensors ---
         cache_upd = _MeshCache()
-        dt = self._make_dtensor(mesh, [Shard(0)], shape=(4, 4))
-        plain = torch.randn(4, 4, device=self.device)
+        dt = self._make_dtensor(mesh, [Shard(0)], shape=(4, 4), device=rank_device)
+        plain = torch.randn(4, 4, device=rank_device)
         cache_upd.update_from_tensors((dt, plain, None))
         self.assertTrue(key in cache_upd)
         self.assertIs(cache_upd.get_mesh(key), mesh)
@@ -331,9 +336,10 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # -----------------------------------------------------------------
 
     @_requires_multi_gpu
-    def test_needs_dynamic_all_cases(self):
+    def test_needs_dynamic_all_cases(self, device):
         """Test all 8 cases of the needs_dynamic() decision matrix."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         tm = self._make_tensor_meta()
         dm = self._make_dtensor_meta()
 
@@ -386,13 +392,16 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
                 )
 
     @_requires_multi_gpu
-    def test_NoneGrad_dtensor_grad_metadata_not_derived(self):
-        self.init_pg()
+    def test_NoneGrad_dtensor_grad_metadata_not_derived(self, device):
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
         plain_meta = self._make_tensor_meta()
         dtensor_meta = _DTensorMeta.from_dtensor(
-            self._make_dtensor(mesh, [Replicate()], requires_grad=True)
+            self._make_dtensor(
+                mesh, [Replicate()], requires_grad=True, device=rank_device
+            )
         )
 
         plain_grad_meta, dtensor_grad_meta = _derive_grad_metas(
@@ -402,14 +411,16 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertIsNone(dtensor_grad_meta)
 
     @_requires_multi_gpu
-    def test_NoneGrad_dtensor_runtime_send_contract(self):
-        self.init_pg()
+    def test_NoneGrad_dtensor_runtime_send_contract(self, device):
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
         dtensor_grad = self._make_dtensor(
             mesh,
             [Replicate()],
             shape=(4, 8),
             requires_grad=False,
+            device=rank_device,
         )
         dtensor_meta = _DTensorMeta.from_dtensor(dtensor_grad)
 
@@ -417,7 +428,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             torch.nn.Identity(),
             1,
             self.world_size,
-            self.device,
+            rank_device,
         )
         stage.has_backward = True
         stage.chunks = 1
@@ -442,18 +453,19 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # -----------------------------------------------------------------
 
     @_requires_multi_gpu
-    def test_validate_metadata(self):
+    def test_validate_metadata(self, device):
         """Test validate_metadata: match, raise, warn, type mismatch."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
         # Match → no diffs
-        dt = self._make_dtensor(mesh, [Shard(0)])
+        dt = self._make_dtensor(mesh, [Shard(0)], device=rank_device)
         meta = _DTensorMeta.from_dtensor(dt)
         self.assertEqual(validate_metadata("test", meta, dt), [])
 
         # Mismatch with raise_on_mismatch
-        other = self._make_dtensor(mesh, [Replicate()])
+        other = self._make_dtensor(mesh, [Replicate()], device=rank_device)
         with self.assertRaises(PipeliningMetadataError):
             validate_metadata("test", meta, other, raise_on_mismatch=True)
 
@@ -465,17 +477,18 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             self.assertTrue(any("Metadata mismatch" in str(x.message) for x in w))
 
         # Type mismatch: _DTensorMeta vs plain tensor
-        plain = torch.randn(8, 16, device=self.device)
+        plain = torch.randn(8, 16, device=rank_device)
         diffs = validate_metadata("test", meta, plain)
         self.assertTrue(any("type" in d for d in diffs))
 
     @_requires_multi_gpu
-    def test_validate_tensors_metadata(self):
+    def test_validate_tensors_metadata(self, device):
         """Test validate_tensors_metadata: batch validation, length mismatch, None handling."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
-        dt = self._make_dtensor(mesh, [Shard(0)])
+        dt = self._make_dtensor(mesh, [Shard(0)], device=rank_device)
         meta = _DTensorMeta.from_dtensor(dt)
 
         # Match
@@ -505,15 +518,22 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             validate_tensors_metadata("test", (meta,), (None,))
 
     @_requires_multi_gpu
-    def test_validate_static_arg_grad_correspondence(self):
+    def test_validate_static_arg_grad_correspondence(self, device):
         """Test DTensor↔grad correspondence: all valid/invalid combos."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
-        dt_grad = self._make_dtensor(mesh, [Shard(0)], requires_grad=True)
-        dt_nograd = self._make_dtensor(mesh, [Shard(0)], requires_grad=False)
-        dt_grad2 = self._make_dtensor(mesh, [Replicate()], requires_grad=True)
-        plain = torch.randn(8, 16, device=self.device)
+        dt_grad = self._make_dtensor(
+            mesh, [Shard(0)], requires_grad=True, device=rank_device
+        )
+        dt_nograd = self._make_dtensor(
+            mesh, [Shard(0)], requires_grad=False, device=rank_device
+        )
+        dt_grad2 = self._make_dtensor(
+            mesh, [Replicate()], requires_grad=True, device=rank_device
+        )
+        plain = torch.randn(8, 16, device=rank_device)
 
         # DTensor(requires_grad=True) + DTensor grad → OK
         validate_static_arg_grad_correspondence(
@@ -546,13 +566,14 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # -----------------------------------------------------------------
 
     @_requires_multi_gpu
-    def test_extract_tensor_metas(self):
+    def test_extract_tensor_metas(self, device):
         """Test extract_tensor_metas: plain, DTensor, None handling."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
-        dt = self._make_dtensor(mesh, [Shard(0)])
-        plain = torch.randn(4, 4, device=self.device)
+        dt = self._make_dtensor(mesh, [Shard(0)], device=rank_device)
+        plain = torch.randn(4, 4, device=rank_device)
 
         # None input → None output
         self.assertIsNone(extract_tensor_metas(None))
@@ -575,13 +596,16 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             extract_tensor_metas((dt, None))  # type: ignore[arg-type]
 
     @_requires_multi_gpu
-    def test_to_local_if_dtensor(self):
+    def test_to_local_if_dtensor(self, device):
         """Test to_local_if_dtensor: DTensor→local, plain passthrough, detach."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
-        dt = self._make_dtensor(mesh, [Shard(0)], requires_grad=True)
-        plain = torch.randn(4, 4, device=self.device, requires_grad=True)
+        dt = self._make_dtensor(
+            mesh, [Shard(0)], requires_grad=True, device=rank_device
+        )
+        plain = torch.randn(4, 4, device=rank_device, requires_grad=True)
 
         # DTensor → local tensor (not DTensor)
         local = to_local_if_dtensor(dt)
@@ -598,10 +622,11 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertFalse(local_detached.requires_grad)
 
     @_requires_multi_gpu
-    def test_validate_and_normalize_to_tuple(self):
+    def test_validate_and_normalize_to_tuple(self, device):
         """Test validate_and_normalize_to_tuple: single, tuple, list, None, errors."""
-        self.init_pg()
-        t = torch.randn(4, 4, device=self.device)
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
+        t = torch.randn(4, 4, device=rank_device)
 
         # None → None
         self.assertIsNone(validate_and_normalize_to_tuple(None))
@@ -641,17 +666,18 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
     # -----------------------------------------------------------------
 
     @_requires_multi_gpu
-    def test_split_tensor_dtensor_preserves_placements(self):
+    def test_split_tensor_dtensor_preserves_placements(self, device):
         """Test _split_tensor splits a DTensor into chunks that are still DTensors
         with the same placements, correct local shapes, and matching data."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
         num_chunks = 2
         split_dim = 0
         shape = (8, 16)
 
         for placements in [[Shard(0)], [Replicate()]]:
-            dt = self._make_dtensor(mesh, placements, shape=shape)
+            dt = self._make_dtensor(mesh, placements, shape=shape, device=rank_device)
             spec = TensorChunkSpec(split_dim)
             chunks = _split_tensor(dt, spec, num_chunks)
 
@@ -684,17 +710,18 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             )
 
     @_requires_multi_gpu
-    def test_merge_chunks_dtensor_roundtrip(self):
+    def test_merge_chunks_dtensor_roundtrip(self, device):
         """Test that split → merge is a roundtrip: merge_chunks reconstructs
         the original DTensor data and preserves placements."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
         num_chunks = 2
         split_dim = 0
         shape = (8, 16)
 
         for placements in [[Shard(0)], [Replicate()]]:
-            dt = self._make_dtensor(mesh, placements, shape=shape)
+            dt = self._make_dtensor(mesh, placements, shape=shape, device=rank_device)
             chunk_spec = TensorChunkSpec(split_dim)
 
             # Split into chunks
@@ -722,14 +749,17 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
             self.assertEqual(merged_dt.shape, dt.shape)
 
     @_requires_multi_gpu
-    def test_merge_chunks_dtensor_placement_mismatch_raises(self):
+    def test_merge_chunks_dtensor_placement_mismatch_raises(self, device):
         """Test that merge_chunks raises when chunk placements don't match."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
         shape = (8, 16)
 
-        dt_shard = self._make_dtensor(mesh, [Shard(0)], shape=shape)
-        dt_rep = self._make_dtensor(mesh, [Replicate()], shape=shape)
+        dt_shard = self._make_dtensor(mesh, [Shard(0)], shape=shape, device=rank_device)
+        dt_rep = self._make_dtensor(
+            mesh, [Replicate()], shape=shape, device=rank_device
+        )
 
         chunk_spec = TensorChunkSpec(0)
         with self.assertRaises(AssertionError) as ctx:
@@ -740,14 +770,15 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertIn("placement mismatch", str(ctx.exception))
 
     @_requires_multi_gpu
-    def test_merge_chunks_dtensor_mixed_types_raises(self):
+    def test_merge_chunks_dtensor_mixed_types_raises(self, device):
         """Test that merge_chunks raises when mixing DTensors and plain tensors."""
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
         shape = (4, 8)
 
-        dt = self._make_dtensor(mesh, [Shard(0)], shape=shape)
-        plain = torch.randn(*shape, device=self.device)
+        dt = self._make_dtensor(mesh, [Shard(0)], shape=shape, device=rank_device)
+        plain = torch.randn(*shape, device=rank_device)
 
         chunk_spec = TensorChunkSpec(0)
         with self.assertRaises(AssertionError) as ctx:
@@ -758,7 +789,7 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         self.assertIn("mix", str(ctx.exception))
 
     @_requires_multi_gpu
-    def test_split_target_preserves_dtensor_placements(self):
+    def test_split_target_preserves_dtensor_placements(self, device):
         """Regression test: schedules' target-split path must split DTensor
         targets via _split_tensor (not torch.tensor_split) so that Shard
         placements survive (no implicit all-gather to Replicate) and so that
@@ -767,13 +798,16 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         this test fails."""
         from torch.distributed.pipelining.schedules import _TARGET_CHUNK_SPEC
 
-        self.init_pg()
+        rank_device = self._rank_device(device)
+        self.init_pg(rank_device)
         mesh = self._make_mesh()
 
         # Even-split and uneven-split cases; Shard(0) and Replicate() placements.
         for n_microbatches, batch in [(2, 8), (3, 7)]:
             for placements in ([Shard(0)], [Replicate()]):
-                dt = self._make_dtensor(mesh, placements, shape=(batch,))
+                dt = self._make_dtensor(
+                    mesh, placements, shape=(batch,), device=rank_device
+                )
                 chunks = list(_split_tensor(dt, _TARGET_CHUNK_SPEC, n_microbatches))
 
                 self.assertEqual(len(chunks), n_microbatches)
@@ -795,6 +829,14 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
 # =============================================================================
 # Run Tests
 # =============================================================================
+
+instantiate_device_type_tests(
+    TestDTensorPPUnitTests,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
