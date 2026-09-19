@@ -1295,13 +1295,11 @@ def add(x, y):
             torch._dynamo.reset()
 
     def test_import_alias_keeps_the_installed_live_module(self):
-        # The memo is taken at the first trace of the name; install() then binds
-        # the alias to the live entry a handover has since put in sys.modules.
-        # A later trace in the same globals finds the two disagreeing and must
-        # not put the memoized module back: its graph is specialized on the
-        # live one, which is what __import__ hands IMPORT_NAME, and the alias
-        # roots its guards, so a change to the live module has to fail them.
-        # The sibling below pins the memo written back and the change unseen.
+        # install() binds the alias to the live entry a handover has put in
+        # sys.modules, and a later trace in the same globals resolves that entry
+        # too, not the module its memo still holds: the alias keeps it, the
+        # graph is specialized on it, and the alias roots its guards, so a
+        # change to the live module recompiles.
         ctx = DiskDynamoStore()
         name = "torch_test_package_import_alias_installed"
         alias = f"__import_{name}"
@@ -1464,9 +1462,12 @@ def add(x, y):
         # which is never a sys.modules key; import_source resolves it through
         # the importer registry keyed by that same name, so the registry's
         # module is the one the name resolves to now, and a same-named module a
-        # writer left in the slot is accepted and replaced by it. The alias is
-        # reached through an inlined call: the packaged function's global read
-        # roots at its own module, not the frame's.
+        # writer left in the slot is accepted and replaced by it. The registry
+        # is keyed by the module's own mangled __name__, so module_name ==
+        # value_name here, and this pins the acceptance rather than the
+        # value_name widening. The alias is reached through an inlined call: the
+        # packaged function's global read roots at its own module, not the
+        # frame's.
         name = "torch_test_package_import_alias_packaged"
         path = os.path.join(self.path(), "alias.pt")
         src = "SCALE = 2\n\ndef helper(x):\n    return x * SCALE\n"
@@ -1489,6 +1490,7 @@ def add(x, y):
         finally:
             _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
+            torch.package.package_importer._package_imported_modules.pop(mangled, None)
             torch._dynamo.reset()
 
     def test_import_alias_the_trace_left_alone_is_recorded_for_install(self):
@@ -1576,7 +1578,7 @@ def add(x, y):
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
-    def test_import_alias_of_an_empty_slot_reads_an_attribute_the_cached_module_lacks(
+    def test_import_alias_of_an_empty_slot_reads_an_attribute_only_the_live_module_has(
         self,
     ):
         # The loud form of the parent's staleness, from an empty slot: the
