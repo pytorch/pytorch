@@ -1898,11 +1898,7 @@ class AOTCompiledModel:
     an ``except SystemError`` no longer catches a boundary wrap whose cause is
     an ``Exception``; a wrap around a ``KeyboardInterrupt`` or ``SystemExit``
     still reaches the caller as itself. A raise only out of ``check_verbose``
-    here is quoted on its line and chained nowhere. A dispatch raise a later
-    evaluation answered is quoted by the advice's caveat where it fires -- no
-    rejection it rests on taken before any raise from its own tree -- not on
-    its entry line, which carries the re-check's own rejection, accepted-here
-    line or raise; that raise is the ``__cause__`` when recorded first of all.
+    here is quoted on its line and chained nowhere.
     """
 
     model: torch.nn.Module
