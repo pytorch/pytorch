@@ -2418,8 +2418,7 @@ class InstructionTranslatorBase(
     # would key it, so a later argument cannot silently split the memo. Per
     # translator, as the decorator was, and written only past the alias check.
     # graph_break_ok stays out of the key: a memo hit means this translator bound
-    # the alias, an inlined translator's miss finds f_globals[alias] is value,
-    # and a taken slot is decided by each caller's own flag.
+    # the alias, and a taken slot is decided by each caller's own flag.
     def import_source(
         self, module_name: str, graph_break_ok: bool = False
     ) -> GlobalSource:
@@ -2519,7 +2518,6 @@ class InstructionTranslatorBase(
                         f"Remove or rename the global {alias} from the globals of {scope}.",
                         "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
                         "When this graph break is not raised as an error, nothing guards this global, so fixing it later does not by itself retrace the frame; a frame skipped here stays skipped until torch._dynamo.reset().",
-                        *graph_break_hints.USER_ERROR,
                     ],
                 )
         # Recorded only once the check has passed: the package entry outlives a
