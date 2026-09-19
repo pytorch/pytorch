@@ -69,7 +69,6 @@ returns, and the coverage and guard report it produces. It is distinct from
 
 ```{eval-rst}
 .. autoexception:: torch.compiler.PrecompileError
-   :members: result
 
 .. autoclass:: torch.compiler.precompile.MakeFxTracer
 
