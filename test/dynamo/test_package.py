@@ -1862,6 +1862,7 @@ def add(x, y):
                 AssertionError, f"{refused_prefix}<a scope with no __name__>"
             ):
                 torch.compile(nameless_fn, backend=cnt)(*args)
+            self.assertEqual(cnt.frame_count, 2)
         finally:
             _import_module.cache_clear()
             torch._dynamo.reset()
@@ -1895,6 +1896,7 @@ def add(x, y):
         finally:
             _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
+            torch.package.package_importer._package_imported_modules.pop(mangled, None)
             torch._dynamo.reset()
 
     def test_import_alias_taken_for_an_inlined_callees_module_is_a_hard_error(self):
