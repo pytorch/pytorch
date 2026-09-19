@@ -2,6 +2,7 @@
 import functools
 import importlib
 import inspect
+import io
 import pickle
 import sys
 import typing
@@ -529,6 +530,71 @@ class TestPrecompile(TestCase):
         reject("fwd_loss_bwd", [])
         with self.assertRaisesRegex(PrecompileError, r"closes over \['scale'\]"):
             reject("step", [code_entry(step, variants=[variant])])
+
+    def test_static_capture_rejects_data_dependent_ops(self):
+        # A static make_fx capture traces on fake tensors, so a value the trace
+        # cannot know must be refused cleanly, naming the op, rather than baked
+        # from the example or leaked as a raw fake-tensor exception. .item() and
+        # a tensor-value branch raise DataDependentOutputException; .nonzero()
+        # raises the sibling DynamicOutputShapeException, which neither inherits
+        # from the other.
+        from torch._precompile import _capture
+
+        model = torch.nn.Linear(4, 4)
+
+        def branches(m, x):
+            return m(x) if x.sum() > 0 else m(-x)
+
+        def items(m, x):
+            return m(x) * x.sum().item()
+
+        def nonzero(m, x):
+            return m(x)[x.nonzero()[:, 0]]
+
+        scalar = "_local_scalar_dense"
+        for fn, op in ((branches, scalar), (items, scalar), (nonzero, "aten.nonzero")):
+            with self.assertRaisesRegex(PrecompileError, f"data-dependent.*{op}"):
+                _capture(fn, (model, torch.randn(3, 4)), None)
+        # The other way a fake trace fails where a real one ran: an op with no
+        # fake/meta kernel, outside the namespaces fake mode falls back for.
+        with torch.library._scoped_library("precompile_test", "DEF") as lib:
+            lib.define("nometa(Tensor t) -> Tensor")
+            lib.impl("nometa", lambda t: t.clone(), "CPU")
+
+            def nometa(m, x):
+                return m(torch.ops.precompile_test.nometa(x))
+
+            with self.assertRaisesRegex(PrecompileError, "nometa.*register_fake"):
+                _capture(nometa, (model, torch.randn(3, 4)), None)
+
+    def test_static_capture_runs_no_real_compute(self):
+        # The static trace runs on fakes: a backward in fn leaves the example
+        # model's grads alone and an in-place op leaves the example input alone.
+        # A revert to tracing_mode="real" would fail both.
+        from torch._precompile import _capture
+
+        model = torch.nn.Linear(4, 4)
+        x = torch.randn(3, 4)
+        expected = x.clone()
+        _capture(lambda m, x: m(x).sum().backward(), (model, x), None)
+        self.assertTrue(all(p.grad is None for p in model.parameters()))
+        _capture(lambda m, x: m(x.add_(1)), (model, x), None)
+        self.assertEqual(x, expected)
+
+    def test_cache_envelope_carries_the_tracer_tag(self):
+        # The envelope is what a loader checks before trusting a (python_code,
+        # cache) pair; the eager backend has no compiled artifact, so the tag
+        # set is all it holds.
+        from torch._precompile import PrecompiledModule
+
+        pm = PrecompiledModule(lambda m, x: m(x), backend="eager")
+        pm._compile((torch.nn.Linear(4, 4), torch.randn(3, 4)))
+        env = torch.load(io.BytesIO(pm.to_cache_bytes()), weights_only=True)
+        keys = ["format", "version", "backend", "tracer", "code_hash", "artifact"]
+        self.assertEqual(list(env), keys)
+        self.assertEqual(env["backend"], "eager")
+        self.assertEqual(env["tracer"], "make_fx")
+        self.assertIsNone(env["artifact"])
 
     def test_precompiled_module_is_a_standalone_runnable(self):
         # A loaded make_fx artifact is the standalone PrecompiledRunnable: it
