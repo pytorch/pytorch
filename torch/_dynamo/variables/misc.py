@@ -38,7 +38,7 @@ import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from torch._dynamo.variables.base import MutationType
-from torch._dynamo.variables.lists import TupleVariable
+from torch._dynamo.variables.lists import pylist_check, TupleVariable
 from torch._guards import Source
 
 from .. import config, graph_break_hints, trace_rules, variables
@@ -729,6 +729,27 @@ class ExceptionVariable(VariableTracker):
                     se.track_attribute_mutation_new(self)
                 se.store_instance_dict_attr(self, attr, args[1])
             return variables.ConstantVariable.create(None)
+        elif name == "__delattr__":
+            attr = args[0].as_python_constant()
+            se = tx.output.side_effects
+            if se.has_pending_mutation_of_attr(self, attr):
+                value = se.load_attr(self, attr, deleted_ok=True)
+                if not isinstance(value, variables.DeletedVariable):
+                    se.store_instance_dict_attr(self, attr, variables.DeletedVariable())
+                    return variables.ConstantVariable.create(None)
+            elif self.source is not None:
+                return super().call_method(tx, name, args, kwargs)
+
+            msg = (
+                f"'{self.exc_type.__name__}' object has no attribute '{attr}'"
+                if sys.version_info >= (3, 11)
+                else attr
+            )
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[msg],
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def tp_getattro_impl(
@@ -854,10 +875,50 @@ class ExceptionVariable(VariableTracker):
             )
         return variables.ConstantVariable.create(None)
 
+    def add_note(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        [note] = args
+        if not issubclass(note.python_type(), str):
+            if sys.version_info >= (3, 14):
+                msg = f"add_note() argument must be str, not {note.python_type_name()}"
+            else:
+                msg = f"note must be a str, not '{note.python_type_name()}'"
+            raise_type_error(tx, msg)
+
+        se = tx.output.side_effects
+        notes: VariableTracker | None = None
+        if se.has_pending_mutation_of_attr(self, "__notes__"):
+            pending = se.load_attr(self, "__notes__", deleted_ok=True)
+            if not isinstance(pending, variables.DeletedVariable):
+                notes = pending
+
+        if notes is None:
+            notes = variables.ListVariable(
+                [], mutation_type=variables.base.ValueMutationNew()
+            )
+            if not se.is_attribute_mutation(self):
+                se.track_attribute_mutation_new(self)
+            se.store_instance_dict_attr(self, "__notes__", notes)
+        elif not pylist_check(notes):
+            raise_type_error(tx, "Cannot add note: __notes__ is not a list")
+
+        if isinstance(notes, variables.UserDefinedListVariable):
+            if notes._base_vt is None:
+                raise AssertionError("UserDefinedListVariable must have a base VT")
+            notes = notes._base_vt
+        notes.call_method(tx, "append", [note], {})
+        return variables.ConstantVariable.create(None)
+
     tp_methods = {
         "with_traceback": Method(with_traceback),
         "__setstate__": Method(setstate),
     }
+    if sys.version_info >= (3, 11):
+        tp_methods["add_note"] = Method(add_note)
 
     def _get_args(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(
