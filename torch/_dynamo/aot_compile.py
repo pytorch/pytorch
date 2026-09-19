@@ -161,9 +161,12 @@ def _quoted(reason: BaseException) -> str:
     # one wrapping an interrupt included: nothing is unwrapped here, so a bare
     # KeyboardInterrupt or SystemExit out of __str__ propagates while a
     # SystemError raised from one is quoted as the raise it is. What a bare
-    # interrupt costs differs by caller: the report path was already failing,
-    # while the warning's quote is built over a graph whose guards passed, so
-    # the warning spends its one-shot only after the record is out.
+    # interrupt costs differs by caller: on the two _raised_line sites and on the
+    # advice's caveat -- which quotes a dispatch raise whose own entry line quotes
+    # something else, so this may be the first str() of it -- the interrupt
+    # escapes the report the caller was about to get, a report path that was
+    # already failing; the warning's quote is built over a graph whose guards
+    # passed, so the warning spends its one-shot only after the record is out.
     try:
         return str(reason)
     except Exception as exc:
@@ -1897,9 +1900,9 @@ class AOTCompiledModel:
     still reaches the caller as itself. A raise only out of ``check_verbose``
     here is quoted on its line and chained nowhere. A dispatch raise a later
     evaluation answered is quoted by the advice's caveat where it fires -- no
-    rejection it rests on taken before any raise -- not on its entry line,
-    which carries the re-check's own rejection, accepted-here line or raise,
-    and is the ``__cause__`` when recorded first of all.
+    rejection it rests on taken before any raise from its own tree -- not on
+    its entry line, which carries the re-check's own rejection, accepted-here
+    line or raise; that raise is the ``__cause__`` when recorded first of all.
     """
 
     model: torch.nn.Module
@@ -2233,8 +2236,9 @@ class AOTCompiledModel:
                 # inputs nobody opted out. When it is neither -- another checked
                 # tree raised before it -- the caveat below is the only line that
                 # can carry that raise, naming such trees and quoting their raises;
-                # it does not fire where another enabled tree rejected with no
-                # raise on record, and then this report carries that raise nowhere.
+                # it does not fire where another enabled tree rejected before any
+                # raise from its own tree, whether or not it raised after, and
+                # then this report carries that raise nowhere.
                 lines.append(_raised_line(i, raised[i]))
                 continue
             manager = result._live_guard_manager()
