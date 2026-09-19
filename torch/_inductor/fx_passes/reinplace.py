@@ -19,7 +19,11 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
 )
 from torch._inductor import config, inductor_prims
-from torch._inductor.fx_utils import get_node_storage, is_node_realized
+from torch._inductor.fx_utils import (
+    _same_size_stride_and_storage_offset,
+    get_node_storage,
+    is_node_realized,
+)
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
@@ -27,8 +31,6 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     GuardOnDataDependentSymNode,
-    statically_known_true,
-    sym_eq,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
@@ -436,36 +438,18 @@ def _get_view_base(node: torch.fx.Node) -> torch.fx.Node:
     return node
 
 
-def _same_tensor_metadata(lhs: torch.fx.Node, rhs: torch.fx.Node) -> bool:
-    lhs_val = lhs.meta.get("val")
-    rhs_val = rhs.meta.get("val")
-    if not isinstance(lhs_val, torch.Tensor) or not isinstance(rhs_val, torch.Tensor):
-        return False
-
-    def same_value(lhs_value, rhs_value) -> bool:
-        return statically_known_true(sym_eq(lhs_value, rhs_value))
-
-    def same_sequence(lhs_values, rhs_values) -> bool:
-        return len(lhs_values) == len(rhs_values) and all(
-            same_value(lhs_value, rhs_value)
-            for lhs_value, rhs_value in zip(lhs_values, rhs_values)
-        )
-
-    return (
-        same_sequence(lhs_val.size(), rhs_val.size())
-        and same_sequence(lhs_val.stride(), rhs_val.stride())
-        and same_value(lhs_val.storage_offset(), rhs_val.storage_offset())
-    )
-
-
 def _is_layout_preserving_view_copy_back(
     dst: torch.fx.Node,
     src: torch.fx.Node,
     mutated_arg: torch.fx.Node,
     src_base: torch.fx.Node,
 ) -> bool:
-    return _same_tensor_metadata(src_base, mutated_arg) and _same_tensor_metadata(
-        src, dst
+    return _same_size_stride_and_storage_offset(
+        cast(torch.Tensor, src_base.meta["val"]),
+        cast(torch.Tensor, mutated_arg.meta["val"]),
+    ) and _same_size_stride_and_storage_offset(
+        cast(torch.Tensor, src.meta["val"]),
+        cast(torch.Tensor, dst.meta["val"]),
     )
 
 
