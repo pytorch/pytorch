@@ -368,6 +368,15 @@ def annotate(annotation_dict: dict[str, Any]) -> Iterator[None]:
 MEMORY_BUDGET_ANNOTATION_KEY = "_region_activation_memory_budget"
 
 
+@contextmanager
+def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
+    with (
+        annotate({MEMORY_BUDGET_ANNOTATION_KEY: budget}),
+        preserve_node_meta(),
+    ):
+        yield
+
+
 def _get_memory_budget_annotation(node: Node) -> float | None:
     """
     Read the ``region_activation_memory_budget`` annotation off an FX node,
