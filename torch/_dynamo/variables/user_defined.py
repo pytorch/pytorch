@@ -1307,6 +1307,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             GenericContextWrappingVariable,
             get_device_context_manager,
         )
+        from .tensor import CurrentDeviceVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -1331,6 +1332,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
             var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
             return var
+
+        if (
+            self.value is torch.device
+            and not kwargs
+            and len(args) == 1
+            and isinstance(args[0], CurrentDeviceVariable)
+        ):
+            # torch.device(d) is the identity on a device. The rank-relative device
+            # is not a constant, so without this it falls through to device.__new__,
+            # which Dynamo skips.
+            return args[0]
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
