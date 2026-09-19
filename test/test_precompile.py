@@ -3104,6 +3104,18 @@ class TestPrecompileCaptureFiles(TestCase):
                 cap(self.model, self.x)
         self.assertIn("does not require grad", str(cm.exception.__cause__))
         self.assertEqual(os.listdir(self.dir), [])
+        # Caught INSIDE the block instead, the failed trace is what the retry, save() and
+        # the clean exit each report: no artifact was rendered, so there is nothing to
+        # write (the mirror of the failed-serve test above, which renders and then fails).
+        with self.assertRaisesRegex(PrecompileError, "without rendering an artifact"):
+            with self._capture(_files_train_step) as cap:
+                with self.assertRaisesRegex(PrecompileError, "Pass training=True"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "already ran and"):
+                    cap(self.model, self.x)
+                with self.assertRaisesRegex(PrecompileError, "without rendering"):
+                    cap.save()
+        self.assertEqual(os.listdir(self.dir), [])
 
     def test_a_backward_on_a_buffer_points_at_training_true(self):
         # The relabel scan reads module BUFFERS too: a requires_grad buffer differentiated
@@ -3169,9 +3181,14 @@ class TestPrecompileCaptureFiles(TestCase):
         # A grad-requiring input is the only source of requires_grad for t * 2, so it is what
         # exercises the served value stripping it; the same/view asserts need the non-grad x.
         x2 = torch.randn(2, 3, requires_grad=True)
-        same2, _, computed = f(x2)
+        same2, view2, computed = f(x2)
         self.assertIs(same2, x2)
         self.assertFalse(computed.requires_grad)
+        # And the other half of the aliasing claim: eager rebuilds the view off the runtime
+        # input, so a grad-requiring one gives a grad-requiring view (it is the no_grad
+        # driver's, hence a leaf with no grad_fn); inductor still replays the capture's.
+        self.assertTrue(view2.requires_grad)
+        self.assertEqual(view2.grad_fn is None, backend == "eager")
 
     def test_a_failed_cache_rename_restores_the_previous_pair(self):
         # The first rename landed, so the undo renames the backup back over the new source,
