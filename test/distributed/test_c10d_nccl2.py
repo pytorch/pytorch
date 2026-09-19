@@ -524,6 +524,15 @@ class _ProcessGroupNCCL2SubgroupTest(MultiProcContinuousTest):
         dist.all_reduce(t, group=group)
         self.assertEqual(t, torch.full_like(t, self.world_size))
 
+    def _wait_for_rank_zero(self, pg) -> None:
+        # A CUDA barrier would wait on the deliberately hung collective.
+        store = dist.distributed_c10d._get_process_group_store(pg)
+        key = "rank_zero_done"
+        if self.rank == 0:
+            store.set(key, "1")
+        else:
+            store.wait([key], timedelta(seconds=90))
+
 
 class ProcessGroupNCCL2AbortTest(_ProcessGroupNCCL2SubgroupTest):
     @requires_nccl()
@@ -585,9 +594,8 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             # silently proceeding on a dead communicator.
             with self.assertRaises(RuntimeError):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
-        else:
-            time.sleep(30)
 
+        self._wait_for_rank_zero(pg)
         dist.destroy_process_group(pg)
         self._check_all_reduce()
 
@@ -608,9 +616,8 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
             with self.assertRaises(RuntimeError):
                 dist.all_reduce(torch.ones(4, device=self.device), group=pg)
-        else:
-            time.sleep(30)
 
+        self._wait_for_rank_zero(pg)
         dist.destroy_process_group(pg)
         self._check_all_reduce()
 
@@ -633,9 +640,8 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
             )
             with self.assertRaisesRegex(RuntimeError, "timed out"):
                 work.wait()
-        else:
-            time.sleep(30)
 
+        self._wait_for_rank_zero(pg)
         dist.destroy_process_group(pg)
         self._check_all_reduce()
 
@@ -725,9 +731,9 @@ class ProcessGroupNCCL2DumpOnTimeoutTest(_ProcessGroupNCCL2SubgroupTest):
                     {e["profiling_name"].split(":")[0] for e in dump["entries"]},
                     {"nccl2"},
                 )
-            else:
+            self._wait_for_rank_zero(pg)
+            if self.rank != 0:
                 # A rank that saw no failure must not have written a trace.
-                time.sleep(30)
                 self.assertFalse(os.path.exists(path))
 
         dist.destroy_process_group(gloo_pg)
@@ -773,8 +779,7 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
                 hung = [e for e in dump["entries"] if e["input_sizes"] == [[1024]]]
                 self.assertEqual(len(hung), 1)
                 self.assertEqual(hung[0]["profiling_name"], "nccl2:all_reduce")
-            else:
-                time.sleep(30)
+            self._wait_for_rank_zero(pg)
 
         dist.destroy_process_group(pg)
         self._check_all_reduce()
