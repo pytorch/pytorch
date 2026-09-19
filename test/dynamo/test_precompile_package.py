@@ -2453,6 +2453,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertFalse(torch._dynamo.config.allow_empty_graphs)
 
     def test_allow_empty_graphs_convert_frame_refuses_a_ddp_optimizer_frame(self):
+        from torch._dynamo.package import CompilePackage
         from torch._dynamo.precompile_package import _AllowEmptyGraphsConvertFrame
         from torch._dynamo.testing import CompileCounter
         from torch.nn.parallel import DistributedDataParallel
@@ -2472,6 +2473,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             wrapper._torchdynamo_orig_backend = _AllowEmptyGraphsConvertFrame(
                 built._torchdynamo_orig_backend,
                 wrapper.hooks,
+                package=CompilePackage(fn),
                 recompile_limit=built._recompile_limit,
             )
             with (
@@ -2498,15 +2500,17 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
 
         seen = []
 
-        def failing_compile(self, *args, **kwargs):
-            seen.append(torch._dynamo.config.allow_empty_graphs)
+        def failing_compile(self, frame, cache_entry, hooks, frame_state, skip=0):
+            seen.append((torch._dynamo.config.allow_empty_graphs, skip))
             raise RuntimeError("compile failed")
 
         converter = _AllowEmptyGraphsConvertFrame(lambda gm, inputs: gm, Hooks())
         with mock.patch.object(ConvertFrame, "__call__", failing_compile):
             with self.assertRaisesRegex(RuntimeError, "compile failed"):
-                converter(mock.Mock(), None, Hooks(), {})
-        self.assertEqual(seen, [True])
+                converter(mock.Mock(), None, Hooks(), {}, skip=1)
+        # The flag was on for the compile and the converter's own frame is
+        # accounted for in the traceback skip count.
+        self.assertEqual(seen, [(True, 2)])
         self.assertFalse(torch._dynamo.config.allow_empty_graphs)
 
 
