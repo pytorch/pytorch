@@ -635,6 +635,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Set the terminal flag and notify the heartbeat monitor thread to stop.
     void stop();
 
+    // During shutdown, keep the default process group's monitor alive only to
+    // answer a peer's flight-recorder dump request. This mode is bounded and
+    // disables watchdog-heartbeat and communicator-dependent diagnostics.
+    bool monitorDumpSignalsDuringShutdown(std::chrono::milliseconds timeout);
+
     // Set the last update time of watchdog thread.
     void setLastWorkListUpdateTime(
         std::chrono::time_point<std::chrono::steady_clock> time);
@@ -681,6 +686,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Whether or not we should terminate the heartbeat monitoring threads.
     std::atomic<bool> terminateHeartbeatMonitorThread_{false};
+
+    // Whether the monitor is restricted to polling for a peer dump request
+    // while NCCL communicators are being destroyed.
+    std::atomic<bool> shutdownDumpSignalMonitorEnabled_{false};
+
+    // Steady-clock deadline for the shutdown-only dump responder, represented
+    // as milliseconds since the steady-clock epoch for atomic access.
+    std::atomic<int64_t> shutdownDumpSignalDeadlineMillis_{0};
 
     // Condition Variable for monitor thread to wake up early
     std::condition_variable monitorWakeUpCV_;
@@ -1131,7 +1144,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // operations, we might need to use a side thread to do it.
   bool dumpDebuggingInfo(
       bool includeStackTrace = true,
-      bool onlyActive = false);
+      bool onlyActive = false,
+      bool includeCommDump = true);
 
   void dumpExtraDebuggingInfo();
 
