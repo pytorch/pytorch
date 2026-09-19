@@ -739,6 +739,54 @@ class TestMultiheadAttentionNN(NNTestCase):
 class TestMultiheadAttentionNNDeviceType(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @torch.no_grad()
+    @onlyOn(["cpu", "cuda"])
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF,
+        "CrossRef turns on TorchFunctionMode, and so disables fastpath.",
+    )
+    def test_multihead_attn_fast_path_empty_input(self, device):
+        mha = nn.MultiheadAttention(
+            embed_dim=4, num_heads=2, batch_first=True, device=device
+        ).eval()
+        previous_fastpath = torch.backends.mha.get_fastpath_enabled()
+
+        try:
+            for batch_size, seq_len in ((0, 3), (2, 0)):
+                query = torch.empty(batch_size, seq_len, 4, device=device)
+                for average_attn_weights in (True, False):
+                    torch.backends.mha.set_fastpath_enabled(False)
+                    expected = mha(
+                        query,
+                        query,
+                        query,
+                        need_weights=True,
+                        average_attn_weights=average_attn_weights,
+                    )
+
+                    torch.backends.mha.set_fastpath_enabled(True)
+                    actual = mha(
+                        query,
+                        query,
+                        query,
+                        need_weights=True,
+                        average_attn_weights=average_attn_weights,
+                    )
+
+                    self.assertIsNotNone(actual[1])
+                    self.assertEqual(actual, expected)
+
+                torch.backends.mha.set_fastpath_enabled(False)
+                expected = mha(query, query, query, need_weights=False)
+
+                torch.backends.mha.set_fastpath_enabled(True)
+                actual = mha(query, query, query, need_weights=False)
+
+                self.assertIsNone(actual[1])
+                self.assertEqual(actual, expected)
+        finally:
+            torch.backends.mha.set_fastpath_enabled(previous_fastpath)
+
     def test_multihead_self_attn_two_masks_fast_path(self, device):
         """
         Multihead self-attention should give the same result on the fast path (BetterTransformer) as on the slow path
