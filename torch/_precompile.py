@@ -1090,10 +1090,13 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     The required constant set is tracer-dependent: the make_fx tracer emits the full
     calling-convention set the inlined driver reads (PARAM_NAMES, OUT_SPEC, ...), while
     the dynamo tracer's multi-graph driver rehydrates its frames from opaque blobs
-    (_FRAMES and _BACKENDS, or _PACKAGE once installed) and reads only the entry
-    binding and the readable frame report beside them (FN_NAME, FRAMES, the dropped
-    and risky guard lists). TRACER is absent on artifacts predating the dynamo tracer,
-    so its absence means make_fx.
+    (_FRAMES and _BACKENDS, or _PACKAGE and UNREACHABLE_WITHOUT_INSTALL once
+    installed) and reads only _ENTRY_BINDING, the readable frame report beside the
+    blobs (FN_NAME, FRAMES, DROPPED_GUARDS, RISKY_DROPPED_GUARDS, WONT_GENERALIZE)
+    and the two versions that lock them, _DYNAMO_PYTHON_VERSION for the marshalled
+    bytecode and TORCH_VERSION for the pickled guard state; a make_fx artifact inlines
+    neither, so it carries no such lock. TRACER is absent on artifacts predating the
+    dynamo tracer, so its absence means make_fx.
     """
     import ast
 
@@ -1135,7 +1138,6 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         # artifact fails here rather than deep inside the driver.
         wanted = {
             "BACKEND",
-            "TRACER",
             "FN_NAME",
             "FRAMES",
             "DROPPED_GUARDS",
@@ -1153,7 +1155,7 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
         mode = literal("SERVING_MODE") if "SERVING_MODE" in assigns else None
         if mode == "installed":
             wanted -= {"_FRAMES", "_BACKENDS"}
-            wanted |= {"SERVING_MODE", "_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
+            wanted |= {"_PACKAGE", "UNREACHABLE_WITHOUT_INSTALL"}
     else:
         wanted = {
             "BACKEND",
@@ -1175,11 +1177,11 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
             "USER_INPUT_DEVICES",
             "USER_INPUT_BOUNDS",
         }
-    # Parsed when present, never required, so artifacts predating each load
-    # unchanged: the serving mode and graph devices are read by the driver, and
-    # the guard-audit sections are reporting an auditor wants back as data
-    # rather than by grepping the source.
+    # Parsed when present but never required, so older artifacts load unchanged:
+    # TRACER and SERVING_MODE already selected the required set above, and
+    # GRAPH_DEVICES and the guard-audit sections come back as data.
     optional = {
+        "TRACER",
         "SERVING_MODE",
         "GRAPH_DEVICES",
         "POLICY_DROPPED_GUARDS",
@@ -1188,8 +1190,9 @@ def _parse_artifact_metadata(python_code: str) -> dict[str, object]:
     found = {name: literal(name) for name in assigns if name in wanted | optional}
     for name in assigns.keys() - wanted - optional - {"forward"}:
         # Not a metadata name we consume (``forward = ...`` is the multi-graph
-        # driver's own binding). Skipped by design, but log it at debug so a
-        # malformed / renamed artifact is diagnosable rather than silently
+        # driver's own binding, emitted later in this stack). Skipped by design,
+        # but log it at debug
+        # so a malformed / renamed artifact is diagnosable rather than silently
         # dropped.
         log.debug(
             "precompile: ignoring unrecognized top-level assignment %r while "
