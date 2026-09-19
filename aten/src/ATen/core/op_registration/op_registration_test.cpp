@@ -2208,6 +2208,12 @@ Tensor symint_op3(const Tensor& self, const c10::SymInt& length) {
   return self.clone();
 }
 
+Tensor symint_array_ref_op(
+    const Tensor& self,
+    const c10::SymIntArrayRef& sizes) {
+  return self.clone();
+}
+
 TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
   auto m = MAKE_TORCH_LIBRARY(_test);
   m.def("_test::symint_op(Tensor self, SymInt length) -> Tensor");
@@ -2216,6 +2222,19 @@ TEST(OperatorRegistrationTest, TestSymSymRefCompatibility) {
   expectThrows<c10::Error>([&] {
     m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op3));
   }, "doesn't match the expected function schema");
+}
+
+TEST(OperatorRegistrationTest, TestSymIntArrayRefErrorExplainsSupportedSignature) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_array_ref_op(Tensor self, SymInt[] sizes) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+
+  expectThrows<c10::Error>([&] {
+    m_cpu.impl(
+        "symint_array_ref_op",
+        c10::DispatchKey::CPU,
+        TORCH_FN(symint_array_ref_op));
+  }, "pass SymInt by value and SymIntArrayRef directly (not as const SymIntArrayRef&)");
 }
 
 }
