@@ -12315,6 +12315,11 @@ op_db: list[OpInfo] = [
                             device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.expectedFailure, 'TestTorchFunctionRedispatchOpsDevice', 'test_redispatch',
                             device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               # https://github.com/intel/torch-xpu-ops/issues/5668
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                            device_type='xpu', dtypes=(torch.complex64, torch.complex128)),
 
                # MPS arange does not support complex dtypes yet
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='mps',
@@ -22225,6 +22230,13 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                          "test_variant_consistency_eager", device_type="mps"),
             DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_variant_consistency_eager", device_type="xpu"),
+            # https://github.com/intel/torch-xpu-ops/issues/5452
+            DecorateInfo(unittest.expectedFailure, "TestMeta",
+                         "test_meta_outplace", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta",
+                         "test_dispatch_symbolic_meta_outplace", device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, "TestDecomp",
+                         "test_comprehensive", device_type="xpu"),
             # not instantiated on mps
             DecorateInfo(unittest.expectedFailure, "TestCompositeCompliance",
                          "test_operator", device_type="xpu"),
