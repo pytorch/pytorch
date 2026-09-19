@@ -2099,6 +2099,10 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         self.assertTrue(_pins_a_value("EQUALS_MATCH", "scale"))
         self.assertTrue(_pins_a_value("CONSTANT_MATCH", "___stack0"))
         self.assertTrue(_pins_a_value("CONSTANT_SUBCLASS_MATCH", "n"))
+        self.assertTrue(_pins_a_value("RANGE_ITERATOR_MATCH", "it"))
+        self.assertTrue(_pins_a_value("COUNT_ITERATOR_MATCH", "it"))
+        # The empty source of a sourceless guard is not a bare name.
+        self.assertFalse(_pins_a_value("EQUALS_MATCH", ""))
         # Reached THROUGH an argument, or a container element: not counted.
         self.assertFalse(_pins_a_value("CONSTANT_MATCH", "self.eps"))
         self.assertFalse(_pins_a_value("EQUALS_MATCH", "dims[0]"))
@@ -2119,11 +2123,14 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             ("EQUALS_MATCH", "mode"),
             ("CONSTANT_MATCH", "___stack0"),
             ("CONSTANT_MATCH", "fn"),
+            ("EQUALS_MATCH", "keys"),
             ("TENSOR_MATCH", "x"),
         }
         pinned_scale = fact("EQUALS_MATCH", "scale")
         pinned_mode = fact("EQUALS_MATCH", "mode")
         generic_scale = fact("TYPE_MATCH", "scale")
+        pinned_keys = fact("EQUALS_MATCH", "keys")
+        it = fact("COUNT_ITERATOR_MATCH", "it")
         x = fact("TENSOR_MATCH", "x")
         guard_sets = {
             # Two variants of the entry: one pins scale and mode, the other
@@ -2144,13 +2151,22 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
                 frozenset({fact("CONSTANT_MATCH", "fn")}),
                 frozenset({fact("CONSTANT_MATCH", "fn", live=False)}),
             ],
+            # A dict_keys argument gets EQUALS_MATCH and SEQUENCE_LENGTH on one
+            # source in ONE variant (variables/builder.py): a variant's own
+            # companion guard must not cancel its pin. The iterator pin on `it`
+            # has no kept slot, so it is never reported.
+            ("lookup", "m.py", 15): [
+                frozenset({pinned_keys, fact("SEQUENCE_LENGTH", "keys"), it})
+            ],
         }
-        self.assertEqual(_wont_generalize(kept, guard_sets), ("___stack0", "mode"))
+        self.assertEqual(
+            _wont_generalize(kept, guard_sets), ("___stack0", "keys", "mode")
+        )
         # A frame that pins scale in its only variant is a real pin; the entry
         # frame's generic variant cancels the entry's pin, not this one.
         guard_sets[("helper", "m.py", 20)] = [frozenset({pinned_scale})]
         self.assertEqual(
-            _wont_generalize(kept, guard_sets), ("___stack0", "mode", "scale")
+            _wont_generalize(kept, guard_sets), ("___stack0", "keys", "mode", "scale")
         )
         # Nothing pinned: nothing to report, whatever the frames say.
         self.assertEqual(_wont_generalize({("TENSOR_MATCH", "x")}, guard_sets), ())
