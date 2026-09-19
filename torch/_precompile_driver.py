@@ -201,10 +201,7 @@ def _eager_forward(*args):
             )
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
-    # The capture's casts are already baked into the graph, so re-dispatching it under
-    # the serving process's ambient autocast would cast a second time. One dispatch-key
-    # guard, the same one AOTAutograd emits into its own generated runtime source.
-    with _torch._C._DisableAutocast(), _torch.no_grad():
+    with _torch.no_grad():
         out = list(call([*pb, *user_flat]))
     if GRAD_PARAM_INDICES:
         n = len(GRAD_PARAM_INDICES)
@@ -315,10 +312,7 @@ def _inductor_forward(*args):
     pb, _names = _extract_param_buffers(mods)
     _check_structure(pb, _names)
     try:
-        # As in the eager driver: the casts are baked into the kernels, and anything
-        # inductor did not fuse re-dispatches through extern_kernels under autocast.
-        with _torch._C._DisableAutocast():
-            out = list(call([*pb, *user_flat]))
+        out = list(call([*pb, *user_flat]))
     except AssertionError as _e:
         # Only relabel inductor's own assert_size_stride failure (a stride/memory-format
         # mismatch, or a size mismatch on an unbacked dim the static check above cannot
