@@ -9,6 +9,7 @@
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
+#include <torch/csrc/dynamo/guarded_code.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -462,6 +463,14 @@ void initDynamoBindings(PyObject* torch) {
       PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) == 0);
 
   auto m = py::handle(eval_frame).cast<py::module>();
+
+  py::class_<GuardedCode>(m, "_GuardedCode")
+      .def(py::init<py::object, py::object, py::object>())
+      .def(py::init<py::object, py::object, py::object, std::string>())
+      .def_readonly("code", &GuardedCode::code)
+      .def_readonly("guard_manager", &GuardedCode::guard_manager)
+      .def_readonly("compile_id", &GuardedCode::compile_id)
+      .def_readonly("trace_annotation", &GuardedCode::trace_annotation);
 
   py::class_<CacheEntry>(m, "_CacheEntry")
       .def_readonly("guard_manager", &CacheEntry::guard_manager)

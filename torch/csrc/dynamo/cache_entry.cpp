@@ -1,25 +1,17 @@
 #include <torch/csrc/dynamo/cache_entry.h>
+#include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 
-#include <torch/csrc/dynamo/extra_state.h>
-
-CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
-    : backend{py::cast<py::object>(get_backend(backend))} {
-  this->guard_manager = guarded_code.attr("guard_manager");
-  this->code = guarded_code.attr("code");
-  this->compile_id = guarded_code.attr("compile_id");
-  py::object trace_annotation = guarded_code.attr("trace_annotation");
-  const char* trace_annotation_str = PyUnicode_AsUTF8(trace_annotation.ptr());
-  if (trace_annotation) {
-    this->trace_annotation = std::string(trace_annotation_str);
-  } else {
-    this->trace_annotation = "Unknown";
-  }
-  this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
-      this->guard_manager.attr("root"));
-  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
-      this->guard_manager.attr("diff_guard_root"));
-}
+CacheEntry::CacheEntry(const GuardedCode& guarded_code, PyObject* backend)
+    : guard_manager{guarded_code.guard_manager},
+      code{guarded_code.code},
+      compile_id{guarded_code.compile_id},
+      root_mgr{torch::dynamo::convert_to_root_guard_manager(
+          guard_manager.attr("root"))},
+      diff_guard_root_mgr{torch::dynamo::convert_to_root_guard_manager(
+          guard_manager.attr("diff_guard_root"))},
+      backend{py::cast<py::object>(get_backend(backend))},
+      trace_annotation{guarded_code.trace_annotation} {}
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
     "-Wdeprecated-copy-with-user-provided-dtor")
