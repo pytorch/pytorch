@@ -535,6 +535,7 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("jit_core_sources" all_cpu_cpp)
   append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
   append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
+  append_filelist("aten_native_xnnpack_source_list" all_cpu_cpp)
 else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
