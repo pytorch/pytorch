@@ -31,7 +31,7 @@ import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
 from typing import Any, cast, TypeVar
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 from torch._C import (
@@ -2111,12 +2111,18 @@ def is_tensor_method_or_property(func: Callable) -> bool:
     return func in _get_tensor_methods() or func.__name__ == "__get__"
 
 
-def is_tensor_like(inp):
+def is_tensor_like(inp: object) -> TypeIs["torch.Tensor"]:
     """
     Returns ``True`` if the passed-in input is a Tensor-like.
 
     Currently, this occurs whenever there's a ``__torch_function__``
     attribute on the type of the input.
+
+    .. note::
+       Type checkers narrow the argument to ``torch.Tensor`` when this returns
+       ``True``. At runtime it also returns ``True`` for any object implementing
+       ``__torch_function__``, so the narrowed type is a convenience rather than
+       a guarantee.
 
     Examples
     --------
