@@ -3361,6 +3361,71 @@ class TestPatternMatcher(TestCase):
         compiled_fn(x, y)
         self.assertEqual(counter, 1)
 
+    @parametrize("scale_dtype", [torch.float32, torch.float8_e8m0fnu])
+    def test_custom_op_pattern_with_e8m0_input(self, scale_dtype):
+        with torch.library._scoped_library("_test_pm_e8m0", "FRAGMENT") as lib:
+            lib.define("original_op(Tensor x, Tensor scale) -> Tensor")
+            lib.impl(
+                "original_op", lambda x, scale: x.clone(), "CompositeExplicitAutograd"
+            )
+
+            @torch.library.register_fake("_test_pm_e8m0::original_op", lib=lib)
+            def _original_fake(x, scale):
+                return torch.empty_like(x)
+
+            lib.define("replacement_op(Tensor x, Tensor scale) -> Tensor")
+            lib.impl(
+                "replacement_op",
+                lambda x, scale: x.clone(),
+                "CompositeExplicitAutograd",
+            )
+
+            @torch.library.register_fake("_test_pm_e8m0::replacement_op", lib=lib)
+            def _replacement_fake(x, scale):
+                return torch.empty_like(x)
+
+            def pattern(x, scale):
+                return torch.ops._test_pm_e8m0.original_op.default(x, scale)
+
+            def replacement(x, scale):
+                return torch.ops._test_pm_e8m0.replacement_op.default(x, scale)
+
+            example_inputs = [
+                torch.randn(4, 4),
+                torch.empty(4, dtype=scale_dtype),
+            ]
+            patterns = PatternMatcherPass()
+            register_replacement(
+                pattern,
+                replacement,
+                example_inputs,
+                fwd_only,
+                patterns,
+            )
+
+            count = 0
+            post_pass_graph = None
+
+            def custom_pass(graph):
+                nonlocal count, post_pass_graph
+                count = patterns.apply(graph)
+                post_pass_graph = graph
+                return graph
+
+            torch._dynamo.reset()
+            with inductor_config.patch(post_grad_custom_post_pass=custom_pass):
+                result = torch.compile(pattern, fullgraph=True)(*example_inputs)
+
+            self.assertEqual(count, 1)
+            self.assertEqual(result, example_inputs[0])
+            op_targets = [
+                node.target
+                for node in post_pass_graph.nodes
+                if node.op == "call_function"
+            ]
+            self.assertNotIn(torch.ops._test_pm_e8m0.original_op.default, op_targets)
+            self.assertIn(torch.ops._test_pm_e8m0.replacement_op.default, op_targets)
+
 
 @inductor_config.patch(fx_graph_cache=False)
 class TestPatternMatcherLogging(LoggingTestCase):
