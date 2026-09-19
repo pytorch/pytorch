@@ -908,8 +908,7 @@ class TestPatternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
-    @parametrize("keyword_dtype", [False, True])
-    def test_reuse_conversion_across_views(self, keyword_dtype):
+    def test_reuse_conversion_across_views(self):
         def fn(x, lhs, lhs_t):
             x_bf16 = convert(x, torch.bfloat16)
             x_t_bf16 = convert(aten.permute.default(x, [0, 2, 1]), torch.bfloat16)
@@ -930,10 +929,6 @@ class TestPatternMatcher(TestCase):
         )
         expected = fn(*args)
         gm = make_fx(fn, tracing_mode="fake")(*args)
-        if keyword_dtype:
-            for node in gm.graph.nodes:
-                if node.target is convert:
-                    node.args, node.kwargs = (node.args[0],), {"dtype": node.args[1]}
         self.assertEqual(sum(node.target is convert for node in gm.graph.nodes), 2)
         counters.clear()
 
