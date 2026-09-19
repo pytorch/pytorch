@@ -367,6 +367,14 @@ class Benchmarker:
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
         """
+
+        def clear_grads() -> None:
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+
+        n_iters = max(1, inductor_config.autotune_cudagraph_benchmarking_iters)
+
         # Warmup
         torch.cuda.synchronize()
         _callable()
@@ -376,9 +384,7 @@ class Benchmarker:
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(stream):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
+            clear_grads()
             _callable()
         stream.synchronize()
 
@@ -386,16 +392,18 @@ class Benchmarker:
         with torch.cuda.graph(
             cuda_graph, stream=stream, capture_error_mode="thread_local"
         ):
-            if grad_to_none is not None:
-                for x in grad_to_none:
-                    x.grad = None
-            _callable()
+            clear_grads()
+            for _ in range(n_iters):
+                _callable()
 
         torch.cuda.current_stream().wait_stream(stream)
         torch.cuda.synchronize()
 
         # grad clearing is captured in the graph, don't pass it through.
-        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        result = self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        if isinstance(result, list):
+            return [t / n_iters for t in result]  # type: ignore[return-value]
+        return result / n_iters
 
 
 # Make built-in defaults explicit via the registry

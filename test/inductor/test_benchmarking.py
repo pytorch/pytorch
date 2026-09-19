@@ -432,7 +432,7 @@ class TestBenchmarker(TestCase):
         self.assertEqual(result, 3.0)
         self.assertEqual(calls, ["enter", (1, 2, True), "fn", "exit"])
 
-    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+    def _run_fake_cuda_graph_benchmark(self, iters):
         from torch._inductor.runtime import benchmarking as _bench
 
         class FakeCUDAGraph:
@@ -469,6 +469,11 @@ class TestBenchmarker(TestCase):
         previous = _bench.set_gpu_benchmark_lock_context(custom_context)
         try:
             with (
+                patch.object(
+                    _bench.inductor_config,
+                    "autotune_cudagraph_benchmarking_iters",
+                    iters,
+                ),
                 patch("torch.cuda.synchronize"),
                 patch("torch.cuda.Stream", FakeStream),
                 patch("torch.cuda.current_stream", return_value=current_stream),
@@ -481,7 +486,10 @@ class TestBenchmarker(TestCase):
                 )
         finally:
             _bench.set_gpu_benchmark_lock_context(previous)
+        return result, calls
 
+    def test_benchmark_gpu_with_cuda_graph_uses_gpu_benchmark_lock(self):
+        result, calls = self._run_fake_cuda_graph_benchmark(iters=1)
         self.assertEqual(result, 9.0)
         self.assertEqual(
             calls,
@@ -497,6 +505,13 @@ class TestBenchmarker(TestCase):
                 "exit",
             ],
         )
+
+    def test_benchmark_gpu_with_cuda_graph_amortizes_launches(self):
+        # 10 calls captured per graph; the replay time is reported per call
+        result, calls = self._run_fake_cuda_graph_benchmark(iters=10)
+        self.assertEqual(result, 0.9)
+        self.assertEqual(calls.count("call"), 2 + 10)
+        self.assertEqual(calls[-4:], ["benchmark_gpu", "replay", "exit", "exit"])
 
     def test_autotune_cudagraph_benchmarking_requires_max_autotune(self):
         from torch._inductor.runtime import benchmarking as _bench
