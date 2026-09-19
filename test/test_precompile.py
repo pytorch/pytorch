@@ -3266,17 +3266,18 @@ class TestPrecompilePublicSurface(TestCase):
 
     def test_precompiled_callable_protocol(self):
         # Nothing in this build produces a PrecompiledCallable, so construct it over a
-        # stand-in to pin the documented surface: it installs, it delegates the call /
-        # unload / compile count, `with` unloads on exit, and a dynamo PackageError or
-        # RecompileError out of any entry point surfaces as a PrecompileError.
+        # stand-in to pin the documented surface: it installs, it delegates the call
+        # (keywords included, `method` among them) / unload / compile count, `with`
+        # unloads on exit, and a dynamo PackageError or RecompileError out of any entry
+        # point surfaces as a PrecompileError.
         from torch._dynamo.exc import PackageError, RecompileError
 
         class _Installed:
             def __init__(self):
                 self.log = []
 
-            def __call__(self, x):
-                return x + 1
+            def __call__(self, x, *, method="greedy"):
+                return x + 1 if method == "greedy" else x + 2
 
             def __enter__(self):
                 self.log.append("enter")
@@ -3294,6 +3295,9 @@ class TestPrecompilePublicSurface(TestCase):
         with handle as entered:
             self.assertIs(entered, handle)
             self.assertEqual(handle(torch.ones(2)), torch.full((2,), 2.0))
+            self.assertEqual(
+                handle(torch.ones(2), method="beam"), torch.full((2,), 3.0)
+            )
             self.assertEqual(handle.serve_time_compiles(), 3)
         self.assertEqual(installed.log, ["enter", "unload"])
         handle.unload()
