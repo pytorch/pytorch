@@ -343,6 +343,17 @@ function install_torchcomms() {
   pip_build_and_install "git+https://github.com/meta-pytorch/torchcomms.git@${commit}" dist/torchcomms
 }
 
+function install_nccl4py() {
+  local extra=cu12
+  local cutlass_dsl=nvidia-cutlass-dsl==4.6.2
+  if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
+    extra=cu13
+    cutlass_dsl="nvidia-cutlass-dsl[cu13]==4.6.2"
+  fi
+  # Keep CuTeDSL and TVM FFI compatible with PyTorch's vendored QuACK and cutlass.operators.
+  pip_install "nccl4py[${extra}]==0.5.0" "$cutlass_dsl" apache-tvm-ffi==0.1.11
+}
+
 function install_spmd_types() {
   local commit
   commit=$(get_pinned_commit spmd_types)
