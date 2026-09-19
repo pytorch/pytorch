@@ -4340,17 +4340,20 @@ class TestPrecompilePublicSurface(TestCase):
     def test_precompiled_callable_protocol(self):
         # Nothing in this build produces a PrecompiledCallable, so construct it over a
         # stand-in to pin the documented surface: it installs, it delegates the call
-        # (keywords included, `method` among them) / unload / compile count, `with`
-        # unloads on exit, and a dynamo PackageError or RecompileError out of any entry
-        # point surfaces as a PrecompileError.
+        # (keywords included, `method` and `self` among them) / unload / compile
+        # count, `with` unloads on exit, and a dynamo PackageError or RecompileError
+        # out of any entry point surfaces as a PrecompileError.
         from torch._dynamo.exc import PackageError, RecompileError
 
         class _Installed:
             def __init__(self):
                 self.log = []
 
-            def __call__(self, x, *, method="greedy"):
-                return x + 1 if method == "greedy" else x + 2
+            # `self` positional-only here too, so a forwarded `self=` keyword lands in
+            # kwargs instead of colliding with the bound instance.
+            def __call__(self, /, x, *, method="greedy", **kwargs):
+                y = x + 1 if method == "greedy" else x + 2
+                return y + kwargs["self"] if "self" in kwargs else y
 
             def __enter__(self):
                 self.log.append("enter")
@@ -4371,6 +4374,7 @@ class TestPrecompilePublicSurface(TestCase):
             self.assertEqual(
                 handle(torch.ones(2), method="beam"), torch.full((2,), 3.0)
             )
+            self.assertEqual(handle(torch.ones(2), self=10), torch.full((2,), 12.0))
             self.assertEqual(handle.serve_time_compiles(), 3)
         self.assertEqual(installed.log, ["enter", "unload"])
         handle.unload()
@@ -4406,6 +4410,9 @@ class TestPrecompilePublicSurface(TestCase):
                     broken.unload()
                 with self.assertRaisesRegex(PrecompileError, str(exc)):
                     broken.serve_time_compiles()
+        # An empty message falls back to repr, so the type still reaches the caller.
+        with self.assertRaisesRegex(PrecompileError, "PackageError"):
+            torch.compiler.PrecompiledCallable(_Raises(PackageError()))(torch.ones(2))
         # And ONLY those two: a user exception out of a served artifact reaches the
         # caller unchanged rather than relabelled as a precompile failure.
         with self.assertRaisesRegex(ValueError, "mine"):
