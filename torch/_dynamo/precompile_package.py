@@ -921,14 +921,17 @@ def _pins_a_value(guard_type: str, name: str) -> bool:
     ``G['CFG'].width``) is reached THROUGH an argument rather than being one,
     which is where model config lives: every LayerNorm and Dropout contributes
     a CONSTANT_MATCH there, so counting those would flag every model and make
-    the field noise.
+    the field noise. The EMPTY source of a guard checked against no source
+    (``GuardFact.source`` for SHAPE_ENV, GLOBAL_STATE) is not a name either.
 
     KNOWN GAP: a constant inside a container argument is guarded on a
     subscripted source (``dims[0]`` for ``x.sum(dim=[0])``) and is not counted.
     ``kept_guards`` is the authoritative list; this is a lint over it.
     """
-    return guard_type in _VALUE_EQUALITY_GUARD_TYPES and not any(
-        c in name for c in ".["
+    return (
+        bool(name)
+        and guard_type in _VALUE_EQUALITY_GUARD_TYPES
+        and not any(c in name for c in ".[")
     )
 
 
@@ -1304,7 +1307,11 @@ def _wont_generalize(
     ``GuardFact.source`` and a kept slot's name share one spelling, the
     ``GuardFilterEntry.name`` with local scope stripped (``L['x']`` -> ``x``).
     A fact whose guard the filter dropped (``enforced`` False) checks nothing,
-    so its variant counts as serving the source generically, not as pinning it.
+    so its variant counts as serving the source generically, not as pinning it;
+    the drop itself is what ``dropped_guards`` reports, so the case changes
+    fields rather than disappearing. A variant's OWN companion guards on a
+    source it pins (the SEQUENCE_LENGTH beside a dict_keys EQUALS_MATCH) are
+    not a generic mention, hence the ``- here`` below.
 
     KNOWN GAP: "reached it without pinning it" is read as "serves other
     values", and an unspecialized int breaks that: its variant carries only a
