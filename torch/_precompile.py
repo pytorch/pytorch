@@ -120,7 +120,7 @@ it.
 #    constrains the example INPUTS themselves: every example tensor (user input, param or
 #    buffer) must be representable as a fake tensor, so one the meta converter cannot
 #    represent -- a quantized tensor, a lazy-device tensor, a legacy batched tensor, a
-#    view out of a sparse tensor -- fails at capture. A real trace accepted a view out
+#    view out of a sparse tensor -- is refused at capture. A real trace accepted a view out
 #    of a sparse tensor; it did NOT accept a quantized input, it crashed on one with a raw
 #    NotImplementedError out of make_fx's own placeholder fakeification. Three kinds of
 #    input are refused for the opposite reason -- fakeification SUCCEEDS but silently drops
@@ -359,10 +359,11 @@ class PrecompileError(RuntimeError):
     Raised when capture, lowering, ``load``, or a runtime call violates the precompile
     contract -- e.g. a tensor baked as a constant (invariant 1), an unsupported /
     effectful op, a data-dependent op the fake-tensor capture cannot know (``.item()``,
-    ``.nonzero()``, a branch over a tensor value), an example input whose metadata a fake
-    tensor silently drops (a pinned, mkldnn or sparse tensor), a nested example input,
-    neither of which capture supports on either path (invariant 3), a capture attempted
-    inside another trace (invariant 3), a non-tensor output the
+    ``.nonzero()``, a branch over a tensor value), an
+    example input that cannot be represented as a fake tensor (a quantized tensor) or whose
+    metadata a fake tensor drops (a pinned, mkldnn or sparse tensor), a nested example
+    input, none of which capture supports on either path (invariant 3), a capture
+    attempted inside another trace (invariant 3), a non-tensor output the
     inductor backend cannot lower, or a runtime input whose shape or memory format differs
     from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
@@ -926,7 +927,10 @@ def _detect_memory_format(t: torch.Tensor) -> torch.memory_format:
 
 
 def _fakeify_with_unbacked(
-    pb_flat: list[Tensor], user_flat: list[object], marks: list[dict[int, _MarkSpec]]
+    pb_flat: list[Tensor],
+    user_flat: list[object],
+    marks: list[dict[int, _MarkSpec]],
+    labels: list[str],
 ) -> tuple[list[object], FakeTensorMode]:
     """Fakeify the flat capture inputs for an unbacked dynamic-shape capture.
 
@@ -935,6 +939,7 @@ def _fakeify_with_unbacked(
     graph that needs to guard on it fails at capture). Dims sharing a ``shape_id`` reuse
     one symbol; ``min``/``max`` add runtime asserts. Returns ``(flat_fake, fake_mode)``;
     the fake_mode (ShapeEnv) is threaded to the lowering via from_tracing_context.
+    ``labels`` (aligned to ``[*pb_flat, *user_flat]``) names an input in a refusal.
     """
     import torch._functorch.config as functorch_config
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -954,15 +959,26 @@ def _fakeify_with_unbacked(
         )
     # shape_id -> unbacked symint (a dynamic SymInt); untyped so grouped dims share one symbol.
     shared: dict[object, Any] = {}
+    user_labels = labels[len(pb_flat) :]
     with fake_mode:
-        fake_pb = [fake_mode.from_tensor(t, static_shapes=True) for t in pb_flat]
+        fake_pb = [_fakeify_input(fake_mode, t, lbl) for t, lbl in zip(pb_flat, labels)]
         fake_user: list[object] = []
-        for leaf, per in zip(user_flat, marks):
+        for leaf, per, label in zip(user_flat, marks, user_labels):
             if not isinstance(leaf, torch.Tensor):
                 fake_user.append(leaf)
             elif not per:
-                fake_user.append(fake_mode.from_tensor(leaf, static_shapes=True))
+                fake_user.append(_fakeify_input(fake_mode, leaf, label))
             else:
+                # Validate the marked leaf through the same helper, so an unfakeifiable
+                # input is named whether or not it is the marked one -- without this it
+                # escapes as a raw meta-kernel error (for a marked quantized input:
+                # "SymIntArrayRef expected to contain only concrete integers"), because the
+                # rebuild below never consults the meta converter. The probe runs on a
+                # THROWAWAY mode and its fake is discarded: from_tensor memoizes by tensor
+                # id, so probing fake_mode would leave a STATIC fake there that a later
+                # dispatch on this same real tensor (allow_non_fake_inputs) would reuse in
+                # place of the unbacked-sized one built below.
+                _fakeify_input(FakeTensorMode(), leaf, label)
                 sizes: list[Any] = []  # mix of static ints and unbacked SymInts
                 for i, s in enumerate(leaf.shape):
                     if i not in per:
@@ -1006,6 +1022,30 @@ def _fakeify_with_unbacked(
     return [*fake_pb, *fake_user], fake_mode
 
 
+def _fakeify_input(fake_mode: FakeTensorMode, t: Tensor, label: str) -> Tensor:
+    """from_tensor for one static example tensor, naming it if it cannot be fakeified.
+
+    ``label`` is one of ``_capture``'s ``input_labels`` ("parameter w", "buffer nt",
+    "user input 0"), so the refusal names what the caller has to change. Shared by BOTH
+    capture paths, so the same input is refused the same way whether or not any dim is
+    marked. Narrow on purpose: any failure in from_tensor other than the converter's own
+    "cannot represent this" is an internal bug and must surface as itself. Not
+    interchangeable with ``_reject_unfakeifiable_input``, which refuses the inputs
+    from_tensor ACCEPTS but cannot faithfully represent (nested, mkldnn, sparse, pinned).
+    """
+    from torch._subclasses.fake_tensor import UnsupportedFakeTensorException
+
+    try:
+        return fake_mode.from_tensor(t, static_shapes=True)
+    except UnsupportedFakeTensorException as e:
+        raise PrecompileError(
+            f"precompile: example {label} cannot be represented as a fake tensor, which "
+            "capture traces on. Make it a plain dense tensor (or a supported subclass) -- "
+            "on the model for a parameter/buffer, at the call site for a user input. "
+            f"Underlying: {(str(e).splitlines() or [''])[0]}"
+        ) from e
+
+
 def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     """Refuse an example tensor a fake tensor cannot faithfully stand in for.
 
@@ -1022,9 +1062,7 @@ def _reject_unfakeifiable_input(label: str, a: Tensor) -> None:
     with 0 nnz, a pinned one comes back unpinned -- where the real-tensor trace this commit
     replaces baked the right thing. None of the three can be repaired on the fake side, so
     they are refused rather than left to bake a wrong artifact with nothing downstream able
-    to notice. Running before the fake conversion is what makes the refusal possible at all:
-    once from_tensor has run there is no metadata left to test. The clause order is for
-    diagnosis quality: mkldnn precedes the generic-layout
+    to notice. The clause order is for diagnosis quality: mkldnn precedes the generic-layout
     test so an mkldnn input gets the layout-conversion diagnosis rather than the nnz one, and
     the dispatched is_pinned() probe comes last.
     """
@@ -1293,9 +1331,9 @@ def _capture(
     # owns and what a backward in fn populates), not the throwaway fakes. list() snapshots
     # the real tensors here, so the later flat_args rebind does not affect real_flat.
     real_flat = list(flat_args)
-    # Labels for the per-input refusal below, aligned with flat_args. Each names its KIND,
-    # because the model half is not an argument the caller can swap out: a refusal saying
-    # "buffer nt" sends them to the model, "user input 0" to the call site.
+    # Labels for the per-input refusals here and below, aligned with flat_args. Each names
+    # its KIND, because the model half is not an argument the caller can swap out: a
+    # refusal saying "buffer nt" sends them to the model, "user input 0" to the call site.
     input_labels = [
         *(f"parameter {n}" for n in param_names),
         *(f"buffer {n}" for n in buffer_names),
@@ -1464,7 +1502,9 @@ def _capture(
     # that clear (just above) is the only clobber left to undo.
     try:
         if any(marks):
-            flat_args, fake_mode = _fakeify_with_unbacked(pb_flat, user_flat, marks)
+            flat_args, fake_mode = _fakeify_with_unbacked(
+                pb_flat, user_flat, marks, input_labels
+            )
             capture_cm = fake_mode
             user_input_shapes = [
                 None
@@ -1498,10 +1538,10 @@ def _capture(
                 )
             with capture_cm:
                 flat_args = [
-                    capture_cm.from_tensor(a, static_shapes=True)
+                    _fakeify_input(capture_cm, a, label)
                     if isinstance(a, torch.Tensor)
                     else a
-                    for a in flat_args
+                    for a, label in zip(flat_args, input_labels)
                 ]
 
         # Trace on FAKE tensors either way, so no real compute runs on the flattened
@@ -1526,7 +1566,8 @@ def _capture(
         # ambient TracingContext.fake_mode, which detect_fake_mode takes authoritatively, so
         # a capture inside another trace would run under that mode and none of the settings
         # below -- which is why _capture refuses one up front. What the
-        # pre-fakeify loop buys on top is the fake flat_args handed to the
+        # pre-fakeify loop buys on top is the named per-input refusal above (which reports
+        # WHICH example input cannot be fakeified) and the fake flat_args handed to the
         # lowering. The unbacked path keeps its symbolic ShapeEnv ("symbolic"); a static
         # capture uses concrete fake shapes ("fake"). A data-dependent op the fake trace
         # cannot know is refused below rather than leaking the fake exception: a real trace
@@ -3003,12 +3044,12 @@ class _PrecompileApi:
         (invariants 2 and 3). Violations that ARE checked raise ``PrecompileError``: a
         tensor baked as a constant (invariant 1), effectful ops (invariant 4), a
         data-dependent op a static (fake-tensor) capture cannot know -- ``.item()``,
-        ``.nonzero()``, a Python branch over a tensor value -- an example input whose
-        metadata the fake trace silently drops (a pinned, mkldnn or sparse tensor), a
-        nested example input, neither of which capture supports on either path
-        (invariant 3), a capture attempted inside another trace (invariant 3 in the
-        Note has the reason), and -- for the inductor backend -- a runtime input whose
-        stride / memory format differs from the example's (invariant 6).
+        ``.nonzero()``, a Python branch over a tensor value -- an example input the fake
+        trace cannot represent (a quantized tensor) or whose metadata it silently drops
+        (a pinned, mkldnn or sparse tensor), a nested example input, none of which capture
+        supports on either path (invariant 3), a capture attempted inside another trace
+        (invariant 3 in the Note has the reason), and -- for the inductor backend -- a
+        runtime input whose stride / memory format differs from the example's (invariant 6).
 
         A call served from the artifact IGNORES the serving process's ambient autocast:
         whatever the capture ran under is already baked in (ATen casts for ``"eager"``,
