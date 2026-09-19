@@ -857,6 +857,30 @@ Ne(Eq(u1, 1), Eq(u0, 1))""",
         shape_env._rename_unbacked_to(orig, new)
         self.assertEqual(shape_env.replacements[orig], new)
         self.assertEqual(shape_env.replacements[new], dest)
+        self.assertEqual(shape_env.unbacked_renamings, {orig: new})
+
+    def test_rename_unbacked_to_flattens_binding_aliases(self):
+        shape_env = ShapeEnv()
+        terminal = shape_env.create_unbacked_symint().node.expr
+        new = shape_env.create_unbacked_symint().node.expr
+        alias = shape_env.create_unbacked_symint().node.expr
+        transitive_alias = shape_env.create_unbacked_symint().node.expr
+        orig = shape_env.create_unbacked_symint().node.expr
+
+        shape_env._rename_unbacked_to(alias, new)
+        shape_env._rename_unbacked_to(transitive_alias, alias)
+        shape_env._rename_unbacked_to(orig, terminal)
+        shape_env._rename_unbacked_to(orig, new)
+
+        self.assertEqual(
+            shape_env.unbacked_renamings,
+            {
+                new: terminal,
+                alias: terminal,
+                transitive_alias: terminal,
+                orig: terminal,
+            },
+        )
 
     def test_rename_unbacked_to_raises_on_disjoint_ranges(self):
         shape_env = ShapeEnv()
