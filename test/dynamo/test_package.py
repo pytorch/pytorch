@@ -1101,6 +1101,8 @@ def add(x, y):
         finally:
             sys.modules.pop(name, None)
             fn.__globals__.pop(alias, None)
+            # The memo outlives the sys.modules entry: a same-process rerun would
+            # otherwise resolve this run's module from it.
             _import_module.cache_clear()
             torch._dynamo.reset()
 
