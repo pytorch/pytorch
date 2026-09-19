@@ -837,15 +837,19 @@ class TestPrecompile(TestCase):
         resume_miss = "no captured variant of 'torch_dynamo_resume_in_step"
         with self.assertRaisesRegex(PrecompileError, resume_miss):
             forward(model, x, torch.ones(1), torch.ones(1))
-        # Rebuilding the same artifact rebinds its names. Any other artifact of
-        # this module mints the same names (the counters run per capturing
-        # process), so loading it beside a live one is refused; the rows below
-        # are such artifacts and scrub the live one first.
+        # Rebuilding the same artifact rebinds its names. Another capture of this
+        # module mints the same resume names (backend ids carry a uuid, resume
+        # names only the per-process counter), so loading it beside a live one is
+        # refused on the resume name and the live one keeps serving; the rows
+        # below scrub the live artifact first.
         self.assertEqual(build()(model, x), expected)
         trivial = [frames[0], {**frames[1], "variants": []}]
         with mock.patch.dict(ns, {"_FRAMES": _b64(trivial)}):
-            with self.assertRaisesRegex(PrecompileError, "one standalone artifact"):
-                build()
+            other = _b64({f"{k}_other": v for k, v in backends.items()})
+            with mock.patch.dict(ns, {"_BACKENDS": other}):
+                with self.assertRaisesRegex(PrecompileError, "'__resume_at_"):
+                    build()
+            self.assertEqual(forward(model, x), expected)
             # A zero-variant continuation is diagnosed by cause (trivial or
             # BYPASSED), not as a coverage gap, at the call that reaches it; the
             # build succeeds where the entry would refuse.
