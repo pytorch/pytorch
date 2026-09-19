@@ -194,6 +194,20 @@ def closure_adder(val):
     return inner
 
 
+def compare_deleted_cell(x):
+    # `del` empties the cell a while keeping the cell objects themselves alive,
+    # so comparing the two cells must treat the emptied one as empty.
+    a = 1
+    b = 2
+
+    def inner():
+        return a, b
+
+    ca, cb = inner.__closure__
+    del a
+    return x + (1 if ca < cb else 0)
+
+
 class UserDefineSetAttr:
     setup = False
 
@@ -2853,6 +2867,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNone(opt_fn(v, v))
         self.assertEqual(out[0], 1200)
         self.assertEqual(cnts.op_count, 3)
+
+    # Asserting on the graph break counters rather than on the compiled result:
+    # with PYTORCH_TEST_WITH_DYNAMO=1 the harness compiles the whole test method
+    # and turns a failure to trace the comparison into a silent fall back to
+    # eager, so the result alone would look correct either way.
+    def test_cell_comparison_deleted_cell(self):
+        x = torch.ones(2)
+        expected = torch.ones(2) + 1
+        self.assertEqual(compare_deleted_cell(x), expected)
+        counters.clear()
+        got = torch.compile(compare_deleted_cell, backend="eager")(x)
+        self.assertEqual(got, expected)
+        self.assertEqual(dict(counters["graph_break"]), {})
 
     def test_return_nested_function(self):
         out = None
