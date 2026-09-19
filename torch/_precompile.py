@@ -80,13 +80,13 @@ it.
 #
 # ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
 # or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step
-# (a dynamo capture's calls run in whatever grad mode the caller sets, and the tracer
-# lowers the backward eagerly under ``training=True`` -- see the tracer note; a make_fx
-# capture runs its one call with grad enabled iff ``training=True`` and traces THROUGH
-# the backward, invariant 5). Among the positional args, the nn.Module arguments have
-# their parameters and buffers lifted to explicit graph inputs (via functional
-# reparametrization), so nothing live is baked in; the remaining args are the runtime
-# inputs. The artifact embeds NO weights -- you pass the model again at runtime.
+# (the calls run in whatever grad mode the caller sets; a dynamo capture lowers the
+# backward eagerly under ``training=True`` -- see the tracer note -- while a make_fx
+# capture traces THROUGH the backward, invariant 5).
+# Among the positional args, the nn.Module arguments have their parameters and
+# buffers lifted to explicit graph inputs (via functional reparametrization), so
+# nothing live is baked in; the remaining args are the runtime inputs. The artifact
+# embeds NO weights -- you pass the model again at runtime.
 #
 # Because make_fx is a non-strict trace, precompile offers a contract, not a
 # guarantee against misuse. The caller MUST uphold the invariants below. The ones
@@ -189,16 +189,18 @@ it.
 #    precompile performs, and it happens in Python outside the graph, so the graph stays
 #    functional. precompile does not own optimizer state; bring your own optimizer and
 #    zero grads as usual. The dynamo tracer accumulates by a different route (see the
-#    tracer note): a ``.backward()`` in ``fn`` graph-breaks (Dynamo does not trace it
-#    while ``trace_autograd_ops`` is off, the default), so at serve time the live
-#    autograd engine runs it -- under ``training=True`` through the compiled backward the
-#    artifact carries -- and does the accumulate itself; there is no harvested-output
-#    list. What matches make_fx: the accumulate arithmetic, frozen params keeping
-#    ``.grad = None``, and ``fn``'s own return value. What differs: the engine goes
-#    through AccumulateGrad, so tensor hooks and post-accumulate-grad hooks on the params
-#    fire there and not under the make_fx scatter above; and ``requires_grad`` is part of
-#    the params' TENSOR_MATCH guards, so a param flipped at runtime is a loud guard miss
-#    rather than make_fx's silent no-op (invariant 2).
+#    tracer note): a ``.backward()`` in ``fn`` graph-breaks, so at serve time the live
+#    autograd engine runs it -- under ``training=True`` through the compiled backward
+#    the artifact carries -- and does the accumulate itself; there is no
+#    harvested-output list. What matches make_fx: the accumulate arithmetic, frozen
+#    params keeping ``.grad = None``, and ``fn``'s own return value. What differs: the
+#    engine goes through AccumulateGrad, so tensor hooks and post-accumulate-grad hooks
+#    on the params fire; a make_fx capture silently drops them end to end (capture
+#    reparametrizes the module onto fresh fake params, so the hook stays behind on the
+#    real one, and the scatter above never runs AccumulateGrad). And ``requires_grad``
+#    is part of the params' TENSOR_MATCH guards, so a param flipped at runtime is a loud
+#    guard miss on a standalone artifact (an installed one compiles the call fresh, with
+#    a warning) rather than make_fx's silent no-op (invariant 2).
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
