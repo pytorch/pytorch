@@ -22,9 +22,10 @@ from torch._C._dynamo.eval_frame import (
     _ExtraState as ExtraState,
     _FrameAction as FrameAction,
     _FrameExecStrategy as FrameExecStrategy,
+    _GuardedCode as GuardedCode,
     _PyInterpreterFrame as DynamoFrameType,
 )
-from torch._guards import CompileId, Guard
+from torch._guards import Guard
 
 
 # We use a dict to store additional data per frame.
@@ -61,14 +62,6 @@ class GuardFn(Protocol):
 
     # maps locals of user function to bool
     def __call__(self, f_locals: dict[str, object]) -> bool: ...
-
-
-@dataclasses.dataclass
-class GuardedCode:
-    code: types.CodeType
-    guard_manager: GuardFn
-    compile_id: CompileId
-    trace_annotation: str = "Unknown"
 
 
 @dataclasses.dataclass
