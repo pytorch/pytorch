@@ -1527,6 +1527,7 @@ class GuardBuilder(GuardBuilderBase):
             warnings.warn(
                 "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
                 RuntimeWarning,
+                stacklevel=2,
             )
             return None
         return example_value

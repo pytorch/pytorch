@@ -360,11 +360,13 @@ def script_method(fn):
             "`torch.jit.script_method` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     else:
         warnings.warn(
             "`torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     if not _enabled:
         return fn
@@ -1486,11 +1488,13 @@ def script(
             "`torch.jit.script` is not supported in Python 3.14+ and may break. "
             "Please switch to `torch.compile` or `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     else:
         warnings.warn(
             "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.",
             FutureWarning,
+            stacklevel=2,
         )
     if not _enabled:
         return obj
@@ -1643,6 +1647,7 @@ def interface(obj: _T) -> _T:
     warnings.warn(
         "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",
         FutureWarning,
+        stacklevel=2,
     )
     if not inspect.isclass(obj):
         raise RuntimeError("interface must be applied to a class")

@@ -805,7 +805,8 @@ class TestFuser(JitTestCase):
             if 'Failed to compile' in e.args[0]:
                 warnings.warn('CPU fuser test has failed! This is not a hard failure, '  # noqa: F821
                               'because the kernels sometimes trigger bugs in compilers '
-                              '(most notably GCC 7.2).')
+                              '(most notably GCC 7.2).',
+                              stacklevel=2)
                 raise unittest.SkipTest('Failed to compile') from e
             else:
                 raise

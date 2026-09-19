@@ -398,5 +398,6 @@ def try_remove_folder(folder_path):
             shutil.rmtree(folder_path)
         except Exception as e:
             warnings.warn(
-                f"Non-blocking folder removal fails with the following error:\n{str(e)}"
+                f"Non-blocking folder removal fails with the following error:\n{str(e)}",
+                stacklevel=2,
             )
