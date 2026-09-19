@@ -1,7 +1,12 @@
 #include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <array>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
+
+#ifdef USE_CUDA
+#include <c10/cuda/CUDACachingAllocator.h>
+#endif
 
 #include <cstring>
 
@@ -55,6 +60,33 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
   auto* alloc = allocator_array[static_cast<int>(t)];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alloc, "Allocator for ", t, " is not set.");
   return alloc;
+}
+
+bool isKnownAllocator(Allocator* ptr) {
+  if (ptr == nullptr) {
+    return false;
+  }
+  if (ptr == GetDefaultCPUAllocator()) {
+    return true;
+  }
+  if (auto* cpu_alloc = GetCPUAllocator();
+      cpu_alloc != nullptr && ptr == cpu_alloc) {
+    return true;
+  }
+  for (int i = 0;
+       i < static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
+       ++i) {
+    auto* alloc = allocator_array[i];
+    if (alloc != nullptr && ptr == alloc) {
+      return true;
+    }
+  }
+#ifdef USE_CUDA
+  if (ptr == c10::cuda::CUDACachingAllocator::get()) {
+    return true;
+  }
+#endif
+  return false;
 }
 
 bool memoryProfilingEnabled() {
