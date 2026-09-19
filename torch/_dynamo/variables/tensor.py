@@ -36,6 +36,7 @@ import torch.random
 from torch import sym_float, sym_int
 from torch._custom_class_base import CustomClassBase
 from torch._dynamo import compiled_autograd
+from torch._guards import GuardSource
 from torch._library.opaque_object import (
     is_opaque_constant_type,
     is_opaque_symbolic_type,
@@ -1073,6 +1074,27 @@ class TensorVariable(VariableTracker):
                 "handler in TensorVariable.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+
+        if name == "permute":
+            has_runtime_random_dim = False
+
+            def check_runtime_random_dim(value: VariableTracker) -> None:
+                nonlocal has_runtime_random_dim
+                if (
+                    isinstance(value, UnspecializedPythonVariable)
+                    and value.source is not None
+                    and value.source.guard_source is GuardSource.RANDOM_VALUE
+                ):
+                    has_runtime_random_dim = True
+
+            VariableTracker.visit(check_runtime_random_dim, (args, kwargs))
+            if has_runtime_random_dim:
+                unimplemented(
+                    gb_type="Tensor.permute with runtime-random dimensions",
+                    context=f"call_method {self} {name} {args} {kwargs}",
+                    explanation="The permutation depends on runtime random values.",
+                    hints=[*graph_break_hints.FUNDAMENTAL],
+                )
 
         from .builder import wrap_fx_proxy
 

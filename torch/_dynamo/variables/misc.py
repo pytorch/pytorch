@@ -61,6 +61,8 @@ from ..source import (
     DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
+    ListGetItemSource,
+    RandomValueSource,
     TypeDictSource,
     TypeMROSource,
     TypeSource,
@@ -95,7 +97,12 @@ from .functions import (
     UserMethodVariable,
 )
 from .object_protocol import generic_str
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .user_defined import (
+    _call_random_fn,
+    call_random_fn,
+    is_standard_setattr,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -3174,15 +3181,10 @@ class RandomVariable(VariableTracker):
         no_keywords(tx, name, kwargs)
         seq = args[0].realize()
         tx.output.side_effects.mutation(self)
-        # shuffle's permutation depends only on the sequence length and the
-        # RNG state, not on the elements, so shuffle a list of indices to
-        # both advance the symbolic RNG and obtain the permutation to apply.
         if not hasattr(seq, "items"):
             raise AssertionError("shuffle only supports ListVariable and TupleVariable")
-        perm = list(range(len(seq.items)))
-        self.random.shuffle(perm)
         tx.output.side_effects.mutation(seq)
-        seq.items[:] = [seq.items[i] for i in perm]
+        self.random.shuffle(seq.items)
         return variables.ConstantVariable.create(None)
 
     def sample(
@@ -3202,12 +3204,9 @@ class RandomVariable(VariableTracker):
                 "Sample larger than population or is negative",
             )
         tx.output.side_effects.mutation(self)
-        # Like shuffle, sample's selected positions depend only on the
-        # population length and RNG state, so sample over an index range to
-        # advance the symbolic RNG and pick the population elements to keep.
-        indices = self.random.sample(range(len(elems)), k)
+        items = self.random.sample(elems, k)
         return variables.ListVariable(
-            [elems[i] for i in indices],
+            items,
             mutation_type=variables.base.ValueMutationNew(),
         )
 
@@ -3290,6 +3289,183 @@ class RandomVariable(VariableTracker):
         codegen(self.wrap_state(self.random.getstate()))
         codegen.call_function(1, True)
         codegen.pop_top()
+
+
+class GlobalRandomVariable(RandomVariable):
+    """The tracked ``random._inst`` singleton.
+
+    Unlike ``RandomVariable``, calls run on every invocation. Runtime-replayed
+    paths do not mark the generator mutated because side-effect replay would
+    overwrite runtime state with trace-time state.
+    """
+
+    _runtime_primitive_types = (bool, int, float)
+
+    def _record_state_change(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> None:
+        python_args = tuple(arg.as_python_constant() for arg in args)
+        python_kwargs = {
+            key: value.as_python_constant() for key, value in kwargs.items()
+        }
+        getattr(self.random, name)(*python_args, **python_kwargs)
+        tx.output.random_calls.append(
+            (getattr(random._inst, name), python_args, python_kwargs)
+        )
+
+    def seed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self._record_state_change(tx, "seed", args, kwargs)
+        return variables.ConstantVariable.create(None)
+
+    def setstate(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        self._record_state_change(tx, "setstate", args, kwargs)
+        return variables.ConstantVariable.create(None)
+
+    @classmethod
+    def _constant_population(
+        cls, population: list[VariableTracker]
+    ) -> list[Any] | None:
+        try:
+            values = [item.as_python_constant() for item in population]
+        except (AsPythonConstantNotImplementedError, NotImplementedError):
+            return None
+        types = {type(value) for value in values}
+        if len(types) > 1 or not types.issubset(cls._runtime_primitive_types):
+            return None
+        return values
+
+    @classmethod
+    def _wrap_runtime_sequence(
+        cls,
+        tx: "InstructionTranslatorBase",
+        result: list[Any],
+        runtime_call: Callable[[], list[Any]],
+    ) -> list[VariableTracker]:
+        from .builder import VariableBuilder
+
+        random_call_index = len(tx.output.random_calls)
+        tx.output.random_calls.append((runtime_call, (), {}))
+        base = RandomValueSource(random_call_index)
+        items = []
+        for i, value in enumerate(result):
+            source = ListGetItemSource(base, i)
+            items.append(
+                VariableBuilder(tx, source).wrap_unspecialized_primitive(value)
+            )
+        return items
+
+    def _runtime_shuffle(
+        self, tx, population: list[VariableTracker]
+    ) -> list[VariableTracker] | None:
+        values = self._constant_population(population)
+        if values is None:
+            return None
+        result = list(values)
+        self.random.shuffle(result)
+
+        def runtime_call() -> list[Any]:
+            runtime_result = list(values)
+            random._inst.shuffle(runtime_result)
+            return runtime_result
+
+        return self._wrap_runtime_sequence(tx, result, runtime_call)
+
+    def _runtime_sample(
+        self, tx, population: list[VariableTracker], k: int
+    ) -> list[VariableTracker] | None:
+        values = self._constant_population(population)
+        if values is None:
+            return None
+        result = self.random.sample(values, k)
+
+        def runtime_call() -> list[Any]:
+            return random._inst.sample(values, k)
+
+        return self._wrap_runtime_sequence(tx, result, runtime_call)
+
+    def shuffle(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        name = "shuffle"
+        check_positional(tx, name, len(args), 1, 1)
+        no_keywords(tx, name, kwargs)
+        seq = args[0].realize()
+        if not hasattr(seq, "items"):
+            raise AssertionError("shuffle only supports ListVariable and TupleVariable")
+        items = self._runtime_shuffle(tx, seq.items)
+        if items is None:
+            population_size = len(seq.items)
+            indices = list(range(population_size))
+            self.random.shuffle(indices)
+
+            def runtime_call() -> None:
+                runtime_indices = list(range(population_size))
+                random._inst.shuffle(runtime_indices)
+
+            tx.output.random_calls.append((runtime_call, (), {}))
+            items = [seq.items[i] for i in indices]
+        tx.output.side_effects.mutation(seq)
+        seq.items[:] = items
+        return variables.ConstantVariable.create(None)
+
+    def sample(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        name = "sample"
+        check_positional(tx, name, len(args), 2, 2)
+        no_keywords(tx, name, kwargs)
+        elems = unpack_iterable(tx, args[0])
+        k = args[1].as_python_constant()
+        if not isinstance(k, int) or k < 0 or k > len(elems):
+            raise_value_error(tx, "Sample larger than population or is negative")
+        items = self._runtime_sample(tx, elems, k)
+        if items is None:
+            population_size = len(elems)
+            indices = self.random.sample(range(population_size), k)
+
+            def runtime_call() -> None:
+                random._inst.sample(range(population_size), k)
+
+            tx.output.random_calls.append((runtime_call, (), {}))
+            items = [elems[i] for i in indices]
+        return variables.ListVariable(
+            items,
+            mutation_type=variables.base.ValueMutationNew(),
+        )
+
+    def _call_random(self, tx, name, args, kwargs):
+        getattr(self.random, name)(
+            *[arg.as_python_constant() for arg in args],
+            **{key: value.as_python_constant() for key, value in kwargs.items()},
+        )
+        return _call_random_fn(tx, getattr(random._inst, name), args, kwargs)
+
+    tp_methods = {
+        "seed": Method(seed),
+        "setstate": Method(setstate),
+        "shuffle": Method(shuffle),
+        "sample": Method(sample),
+    }
 
 
 class WeakRefVariable(VariableTracker):

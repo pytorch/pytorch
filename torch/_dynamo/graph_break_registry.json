@@ -2515,6 +2515,16 @@
       "Hints": []
     }
   ],
+  "GB1013": [
+    {
+      "Gb_type": "Tensor.permute with runtime-random dimensions",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "The permutation depends on runtime random values.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0159": [
     {
       "Gb_type": "Unsupported ndarray.__version__ access",

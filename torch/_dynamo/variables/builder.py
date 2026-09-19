@@ -62,7 +62,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch._aot_autograd.utils import is_async_collective_tensor_type
-from torch._guards import TracingContext
+from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import (
@@ -271,6 +271,7 @@ from .misc import (
     DebuggingVariable,
     DelayGraphBreakVariable,
     GetAttrVariable,
+    GlobalRandomVariable,
     IgnoredFunctionVariable,
     LambdaVariable,
     LoggingLoggerVariable,
@@ -1539,7 +1540,10 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodType)
-            and value.__name__ in ("shuffle", "sample", "seed")
+            and (
+                value.__name__ in ("shuffle", "sample", "seed")
+                or (value.__name__ == "setstate" and value.__self__ is random._inst)
+            )
             and isinstance(value.__self__, random.Random)
             and RandomVariable.is_supported_random_obj(value.__self__)
         ):
@@ -1924,7 +1928,8 @@ class VariableBuilder:
             value
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = RandomVariable(value, source=self.source)
+            cls = GlobalRandomVariable if value is random._inst else RandomVariable
+            result = cls(value, source=self.source)
             self.tx.output.side_effects.track_mutable(value, result)
             return result
         # Don't use istype, since some python modules are not subclasses of types.ModuleType directly.
@@ -3742,7 +3747,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         wrapped_value = torch.tensor(value)
-        if not isinstance(self.get_source(), RandomValueSource):
+        if self.get_source().guard_source is not GuardSource.RANDOM_VALUE:
             install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
         options = {"source": self.get_source()}

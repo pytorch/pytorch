@@ -1885,13 +1885,22 @@ def call_random_fn(
     args: list[VariableTracker],
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
-    from .builder import VariableBuilder
-
     random_obj = getattr(fn, "__self__", None)
     if random_obj in tx.output.side_effects:
         random_var = tx.output.side_effects[random_obj]
         if isinstance(random_var, variables.RandomVariable):
             return random_var.call_method(tx, fn.__name__, args, kwargs)
+
+    return _call_random_fn(tx, fn, args, kwargs)
+
+
+def _call_random_fn(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> VariableTracker:
+    from .builder import VariableBuilder
 
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}

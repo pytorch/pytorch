@@ -492,23 +492,118 @@ else:
             opt_fn()
 
     def test_random_module_shuffle_sample(self):
-        # Module-level random.shuffle/random.sample must trace under fullgraph
-        # (exercised by the CPython dict/list tests). Like an explicit Random
-        # object, the global RNG state is snapshotted at compile time, so assert
-        # structural correctness rather than cross-run reproducibility.
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             items = list(range(10))
             random.shuffle(items)
-            picks = random.sample("abcdefghij", 4)
-            return items, picks, x + 1
+            picks = random.sample(tuple(range(10)), 4)
+            empty = []
+            random.shuffle(empty)
+            no_picks = random.sample(tuple(range(3)), 0)
+            return items, picks, empty, no_picks, random.random(), x + 1
 
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         random.seed(0)
-        items, picks, _ = fn(torch.zeros(2))
-        self.assertEqual(sorted(items), list(range(10)))
-        self.assertEqual(len(picks), 4)
-        self.assertEqual(len(set(picks)), 4)
-        self.assertTrue(all(p in "abcdefghij" for p in picks))
+        x = torch.zeros(2)
+        eager = [fn(x) for _ in range(3)]
+        eager_state = random.getstate()
+        random.seed(0)
+        compiled = [opt_fn(x) for _ in range(3)]
+        compiled_state = random.getstate()
+        self.assertEqual(eager, compiled)
+        self.assertNotEqual(compiled[0][:2], compiled[1][:2])
+        self.assertEqual(eager_state, compiled_state)
+
+    def test_random_module_shuffle_tensor_permute(self):
+        def fn(x):
+            permutation = list(range(x.ndim))
+            random.shuffle(permutation)
+            return x.permute(permutation)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(2, 3, 4, 5)
+        random.seed(0)
+        eager = [fn(x) for _ in range(3)]
+        eager_state = random.getstate()
+        random.seed(0)
+        compiled = [opt_fn(x) for _ in range(3)]
+        compiled_state = random.getstate()
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(eager_state, compiled_state)
+
+    def test_random_module_shuffle_sample_tensor_list(self):
+        # Tensor elements use the trace-time permutation fallback. The runtime
+        # RNG still advances in order so later runtime-random calls stay fresh.
+        def fn(x):
+            random.seed(0)
+            items = [x + i for i in range(5)]
+            random.shuffle(items)
+            picks = random.sample(items, 2)
+            return items, picks, random.random()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.zeros(1)
+        random.seed(0)
+        expected = fn(x)
+        expected_state = random.getstate()
+        random.seed(0)
+        actual = opt_fn(x)
+        actual_state = random.getstate()
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_state, expected_state)
+
+    def test_random_module_shuffle_heterogeneous_list(self):
+        def fn(x):
+            random.seed(0)
+            items = [1, "not_a_number", 2, "also_not", 3]
+            random.shuffle(items)
+            return items, x + items[0]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(torch.zeros(1))
+        random.seed(0)
+        results = [opt_fn(torch.zeros(1)) for _ in range(15)]
+        self.assertEqual(results, [expected] * len(results))
+
+        def stress_fn(x):
+            items = [1, "not_a_number", 2, "also_not", 3]
+            random.shuffle(items)
+            # A runtime type mismatch here used to feed a string into x + number.
+            number = next(item for item in items if isinstance(item, (int, float)))
+            return items, x + number
+
+        opt_stress_fn = torch.compile(stress_fn, backend="eager", fullgraph=True)
+        random.seed(0)
+        stress_results = [opt_stress_fn(torch.zeros(1)) for _ in range(15)]
+        self.assertEqual(stress_results, [stress_results[0]] * len(stress_results))
+
+    def test_random_module_shuffle_sample_nonnumeric_fallback(self):
+        def fn(x):
+            items = ["a", "b", "c"]
+            random.shuffle(items)
+            picks = random.sample(["a", "b", "c"], 2)
+            return items, picks, x + (1 if items[0] == picks[0] else 2)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        random.seed(0)
+        results = [opt_fn(torch.zeros(1)) for _ in range(15)]
+        self.assertEqual(results, [results[0]] * len(results))
+
+    def test_random_module_shuffle_sample_mixed_numeric_types_fallback(self):
+        def fn():
+            items = [True, False, 1, 2]
+            random.shuffle(items)
+            return items, random.sample([1, 1.0], 1)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        random.seed(0)
+        results = [opt_fn() for _ in range(15)]
+        self.assertEqual(results, [results[0]] * len(results))
+        result_types = [
+            tuple(type(value) for sequence in result for value in sequence)
+            for result in results
+        ]
+        self.assertEqual(result_types, [result_types[0]] * len(result_types))
 
     def test_random_module_seed_shuffle(self):
         # Module-level random.seed is bound to the global random.Random instance
@@ -516,19 +611,40 @@ else:
         # function. A seed() inside the compiled region makes the subsequent
         # shuffle deterministic, matching the CPython test_sort
         # TestOptimizedCompares pattern (seed(0) then shuffle).
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             items = list(range(10))
             random.seed(0)
             random.shuffle(items)
-            return items, x + 1
+            return items, random.random(), x + 1
 
-        compiled_items, _ = fn(torch.zeros(2))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled = [opt_fn(torch.zeros(2)) for _ in range(2)]
 
         expected = list(range(10))
         random.seed(0)
         random.shuffle(expected)
-        self.assertEqual(compiled_items, expected)
+        expected = (expected, random.random())
+        self.assertEqual([result[:2] for result in compiled], [expected, expected])
+
+        def seed_from_system():
+            random.seed()
+            return random.random()
+
+        opt_seed_from_system = torch.compile(
+            seed_from_system, backend="eager", fullgraph=True
+        )
+        self.assertNotEqual(opt_seed_from_system(), opt_seed_from_system())
+
+    def test_random_module_setstate_shuffle(self):
+        def fn():
+            items = list(range(10))
+            random.setstate(random.Random(0).getstate())
+            random.shuffle(items)
+            return items, random.random()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn()
+        self.assertEqual([opt_fn(), opt_fn()], [expected, expected])
 
     def test_random_object_overridden_methods(self):
         # these will result in graph breaks, but we shouldn't crash

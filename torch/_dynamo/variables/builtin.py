@@ -1720,9 +1720,15 @@ class BuiltinVariable(BaseBuiltinVariable):
             if (
                 fn in _OPERATOR_TO_DUNDER
                 and len(args) == 2
-                and any(
-                    not isinstance(a, (variables.TensorVariable, SymNodeVariable))
-                    for a in args
+                and (
+                    any(
+                        not isinstance(a, (variables.TensorVariable, SymNodeVariable))
+                        for a in args
+                    )
+                    or all(
+                        isinstance(a, variables.UnspecializedPythonVariable)
+                        for a in args
+                    )
                 )
             ):
                 return generic_richcompare(
