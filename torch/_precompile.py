@@ -329,11 +329,9 @@ it.
 # returns inside that region, so capture under the autocast you want baked in. Both
 # drivers do it with torch._C._DisableAutocast, the one guard that excludes the whole
 # autocast dispatch keyset -- the same guard AOTAutograd emits into its own generated
-# runtime source for the same reason. Excluding the keys, rather than clearing a
-# per-device autocast bit, covers every autocast-capable device of the serving build at
-# once, including a device an op reaches only inside its own body -- which the captured
-# graph never names, so a per-artifact device tag could not cover it. Invariant 7 still
-# holds: torch._C._DisableAutocast is a name in the artifact's text, not an import.
+# runtime source for the same reason -- so every autocast-capable device of the serving
+# build is covered at once. Invariant 7 still holds: torch._C._DisableAutocast is a name
+# in the artifact's text, not an import.
 #
 # tracer: the capture front-end, orthogonal to backend. "make_fx" (MakeFxTracer) is a
 # non-strict trace -- everything above (the invariants, the contract) describes its
