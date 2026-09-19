@@ -73,10 +73,12 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         return torch.fx.GraphModule(root, graph)
 
     def test_check_multiple_devices_or_any_cpu_nodes(self):
-        """A device-less mapping has nothing to refuse capture over.
+        """A device-less mapping has no GPU work, so capture is refused.
 
         This helper is shared with whole-graph compiles and the dynamo cudagraphs
-        backend, so the empty case has to be right for them too.
+        backend, so the empty case has to be right for them too: a CPU-only graph
+        under partitioning lands here once the cpu entry is popped, and reporting
+        no reason would claim an all-CPU graph is capturable.
         """
         from torch._inductor.cudagraph_utils import (
             check_multiple_devices_or_any_cpu_nodes,
@@ -88,20 +90,33 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
         cuda1 = torch.device("cuda", 1)
         cpu = torch.device("cpu")
 
-        for mapping, expected in (
-            ({}, None),
-            ({meta: graph.placeholder("m")}, None),
-            ({cuda0: graph.placeholder("a"), meta: graph.placeholder("m2")}, None),
-            ({cuda0: graph.placeholder("a2")}, None),
+        for mapping, partition, expected in (
+            ({}, False, "no GPU ops"),
+            ({meta: graph.placeholder("m")}, False, "no GPU ops"),
+            # A CPU-only graph under partitioning: the cpu entry is tolerated and
+            # popped, and what is left is not capturable.
+            ({cpu: graph.placeholder("c1")}, True, "no GPU ops"),
+            (
+                {cuda0: graph.placeholder("a"), meta: graph.placeholder("m2")},
+                False,
+                None,
+            ),
+            ({cuda0: graph.placeholder("a2")}, False, None),
+            (
+                {cuda0: graph.placeholder("a4"), cpu: graph.placeholder("c2")},
+                True,
+                None,
+            ),
             (
                 {cuda0: graph.placeholder("a3"), cuda1: graph.placeholder("b")},
+                False,
                 "multiple devices",
             ),
-            ({cpu: graph.placeholder("c")}, "cpu device"),
+            ({cpu: graph.placeholder("c")}, False, "cpu device"),
         ):
-            with self.subTest(devices=sorted(map(str, mapping))):
+            with self.subTest(devices=sorted(map(str, mapping)), partition=partition):
                 reason = check_multiple_devices_or_any_cpu_nodes(
-                    dict(mapping), use_cudagraph_partition=False
+                    dict(mapping), use_cudagraph_partition=partition
                 )
                 if expected is None:
                     self.assertIsNone(reason)
