@@ -2510,16 +2510,12 @@ class InstructionTranslatorBase(
                     hints=[*graph_break_hints.USER_ERROR],
                 )
 
-            # Before import_source, which binds the result into the traced
-            # frame's globals: a non-module sys.modules entry stays out of them.
-            # Only this arm can take the check: a replayed value is a DummyModule,
-            # not a ModuleType, so it would refuse every replay -- and needs none,
-            # add_local_mod having rejected non-modules when the record was written.
-            # pyrefly: ignore [unbound-name]
+            # A non-module sys.modules entry must not reach import_source, which
+            # binds the result into the traced globals. The replay arm needs no
+            # check: its values are the DummyModules add_local_mod admitted.
             if not isinstance(value, types.ModuleType):
                 unimplemented(
                     gb_type="Bad import result",
-                    # pyrefly: ignore [unbound-name]
                     context=typestr(value),
                     explanation="Import result is not a Python module.",
                     hints=[],
