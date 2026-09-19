@@ -33,11 +33,6 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: list[int]
 
 
-class _ReduceScatterInputs(NamedTuple):
-    padded_unsharded_sizes: list[torch.Size]
-    num_leading_dims: list[int]
-
-
 lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define(
@@ -558,7 +553,7 @@ def _default_reduce_scatter_input_fn(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> tuple[torch.Size, ...]:
+) -> tuple[list[torch.Size], list[int]]:
     """Reorder nonzero-dimension shards for dimension-0 chunk_cat."""
     if world_size > 1:
         for i, (fsdp_param, unsharded_grad) in enumerate(
@@ -573,10 +568,10 @@ def _default_reduce_scatter_input_fn(
             chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
             unsharded_grads[i] = torch.cat(chunks, dim=0)
 
-    padded_unsharded_sizes = tuple(
+    padded_unsharded_sizes = [
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
-    )
-    return padded_unsharded_sizes
+    ]
+    return padded_unsharded_sizes, [0] * len(unsharded_grads)
 
 
 @torch.no_grad()
@@ -639,15 +634,9 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    prepared_inputs = prepare_reduce_scatter_inputs(
+    padded_unsharded_sizes, num_leading_dims = prepare_reduce_scatter_inputs(
         fsdp_params, unsharded_grads, world_size
     )
-    if isinstance(prepared_inputs, _ReduceScatterInputs):
-        padded_unsharded_sizes = prepared_inputs.padded_unsharded_sizes
-        num_leading_dims = prepared_inputs.num_leading_dims
-    else:
-        padded_unsharded_sizes = prepared_inputs
-        num_leading_dims = None
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
     reduce_scatter_input = reduce_scatter_comm.allocate(
@@ -841,16 +830,11 @@ def foreach_reduce_scatter_copy_in(
     reduce_scatter_input: torch.Tensor,
     world_size: int,
     *,
-    num_leading_dims: list[int] | None = None,
+    num_leading_dims: list[int],
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    if num_leading_dims is not None:
-        torch.ops.fsdp._chunk_cat_with_prefixes_(
-            reduce_scatter_input, unsharded_grads, num_leading_dims, world_size
-        )
-        return
-    torch.ops.fsdp.chunk_cat(
-        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+    torch.ops.fsdp._chunk_cat_with_prefixes_(
+        reduce_scatter_input, unsharded_grads, num_leading_dims, world_size
     )
 
 

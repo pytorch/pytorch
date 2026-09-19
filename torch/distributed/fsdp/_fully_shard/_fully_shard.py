@@ -711,30 +711,29 @@ class FSDPModule:
     def set_reduce_scatter_input_fn(
         self, fn: Callable, *, recurse: bool = True
     ) -> None:
-        """Set the function that prepares reduce-scatter inputs.
+        r"""Set the function that prepares reduce-scatter inputs.
 
         .. warning::
             This API is experimental. The callback signature and supported FSDP
             internals may change without backward compatibility.
 
         The function takes ``(fsdp_params, unsharded_grads, world_size)``
-        and returns a sequence of padded unsharded ``torch.Size`` values, one per
-        entry in ``fsdp_params`` in the same order. ``world_size`` is the
-        reduce-scatter group size, or 1 when no reduce-scatter is needed.
+        and returns ``(padded_unsharded_sizes, num_leading_dims)``. The padded
+        sizes are a sequence of ``torch.Size`` values, one per entry in
+        ``fsdp_params`` in the same order. ``world_size`` is the reduce-scatter
+        group size, or 1 when no reduce-scatter is needed.
         Only parameters participating in this reduction are passed.
         The function prepares copy inputs by modifying ``unsharded_grads`` in
         place and may replace or expand its entries. These inputs must preserve
-        dtype and device and be ready for dim-0 ``chunk_cat``. FSDP keeps them
-        alive through copy submission, then clears the same list.
+        dtype and device. ``num_leading_dims`` contains one integer per prepared
+        input: use 0 for inputs ready for dim-0 copying, or the shard dimension
+        for contiguous inputs to copy directly without reordering. The input
+        size along a nonzero shard dimension must be divisible by ``world_size``.
+        FSDP keeps the inputs alive through copy submission, then clears the
+        same list.
         The function runs on the current compute stream; FSDP owns collective
         buffer allocation, the native copy, and communication. All-gather
         copy-out is unaffected.
-
-        The built-in nonzero-dimension callback instead returns an internal
-        ``_ReduceScatterInputs`` containing the padded sizes and the number of
-        leading dimensions to treat as contiguous prefixes for each copy input.
-        FSDP passes those tensors and metadata directly to the native copy,
-        without expanding the inputs into Tensor views in Python.
 
         Args:
             fn (Callable): Function that prepares reduce-scatter inputs.

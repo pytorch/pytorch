@@ -10,7 +10,6 @@ import math
 import torch
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _reassemble_all_gather_outputs,
-    _ReduceScatterInputs,
     AllGatherResult,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
@@ -93,7 +92,7 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> _ReduceScatterInputs:
+) -> tuple[list[torch.Size], list[int]]:
     """Optimize reduce-scatter inputs for ``Shard(1)`` and higher shard dimensions.
 
     Copy contiguous unsharded gradients directly into the reduce-scatter buffer,
@@ -129,4 +128,4 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
         padded_unsharded_sizes.append(
             _get_dim0_padded_size(unsharded_grad.size(), world_size)
         )
-    return _ReduceScatterInputs(padded_unsharded_sizes, num_leading_dims)
+    return padded_unsharded_sizes, num_leading_dims
