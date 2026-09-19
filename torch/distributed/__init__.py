@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
+import os
 import sys
 import traceback
 import typing
@@ -89,7 +90,7 @@ if is_available():
         ProcessGroup as ProcessGroup,
         Reducer,
         set_debug_level,
-        set_debug_level_from_env,
+        set_debug_level_from_env as _set_debug_level_from_env,
         Store,
         TCPStore,
         Work as _Work,
@@ -192,6 +193,12 @@ if is_available():
         register_rendezvous_handler,
         rendezvous,
     )
+
+    def set_debug_level_from_env():
+        """Set the distributed debug level from environment variables."""
+        if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "").upper() == "DETAIL":
+            os.environ.setdefault("TORCH_SHOW_CPP_STACKTRACES", "1")
+        _set_debug_level_from_env()
 
     set_debug_level_from_env()
 
