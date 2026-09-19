@@ -1,12 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
+import asyncio
 import multiprocessing
 import os
 import unittest
 
 import torch
-from torch.distributed._transport import new_transport
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.distributed._transport import new_transport, wait_all
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 def _receive(connection):
@@ -15,46 +21,67 @@ def _receive(connection):
     return connection.recv()
 
 
-def _native_worker(rank, connection):
-    with new_transport("nixl", "cpu", timeout=5) as transport:
+def _native_worker(rank, connection, progress_thread):
+    with new_transport(
+        "nixl", "cpu", timeout=5, enable_prog_thread=progress_thread
+    ) as transport:
         connection.send(transport.bind())
         transport.connect(_receive(connection))
         source = torch.arange(1024, dtype=torch.float32) + rank
         target = torch.zeros_like(source)
+        other_target = torch.zeros_like(source)
         source_memory = transport.register_memory(source)
         target_memory = transport.register_memory(target)
+        other_memory = transport.register_memory(other_target)
         connection.send(
-            (source_memory.to_remote_buffer(), target_memory.to_remote_buffer())
+            (
+                source_memory.to_remote_buffer(),
+                target_memory.to_remote_buffer(),
+                other_memory.to_remote_buffer(),
+            )
         )
-        remote_source, remote_target = _receive(connection)
+        remote_source, remote_target, remote_other = _receive(connection)
         work = transport.write(source_memory.to_view(), remote_target, async_op=True)
-        work.wait()
+        other_work = transport.write(
+            source_memory.to_view(), remote_other, async_op=True
+        )
+        asyncio.run(wait_all([work, other_work], timeout=5))
         connection.send("written")
         if _receive(connection) != "written":
             raise AssertionError("unexpected control-plane message")
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
-        transport.read(target_memory.to_mutable_view(), remote_source, timeout=5)
+        torch.testing.assert_close(other_target, target)
+        asyncio.run(
+            transport.read_async(
+                target_memory.to_mutable_view(), remote_source, timeout=5
+            )
+        )
         torch.testing.assert_close(
             target, torch.arange(1024, dtype=torch.float32) + 1 - rank
         )
         connection.send("finished")
         if _receive(connection) != "finished":
             raise AssertionError("unexpected control-plane message")
+        asyncio.run(transport.close_async(timeout=5))
     connection.close()
 
 
+@instantiate_parametrized_tests
 @unittest.skipUnless(
     os.environ.get("TORCH_TEST_NIXL") == "1",
     "set TORCH_TEST_NIXL=1 with NIXL/UCX installed",
 )
 class TestNIXLNative(TestCase):
-    def test_two_process_cpu_transfers(self):
+    @parametrize("progress_thread", [True, False])
+    def test_two_process_cpu_transfers(self, progress_thread):
         context = multiprocessing.get_context("spawn")
         connections = context.Pipe()
         processes = [
-            context.Process(target=_native_worker, args=(rank, connections[rank]))
+            context.Process(
+                target=_native_worker, args=(rank, connections[rank], progress_thread)
+            )
             for rank in range(2)
         ]
         try:

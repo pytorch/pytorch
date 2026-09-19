@@ -72,6 +72,7 @@ class TransportTestMixin:
             read_memory = first.register_memory(read_target)
             remote = pickle.loads(pickle.dumps(destination_memory.to_remote_buffer()))
             write = first.write(source_memory.to_view(), remote, async_op=True)
+            write.wait()
             read = first.read(read_memory.to_mutable_view(), remote, async_op=True)
             self.assertIsInstance(write, Work)
             self.assertIsInstance(read, Work)
