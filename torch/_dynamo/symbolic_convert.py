@@ -2584,9 +2584,9 @@ class InstructionTranslatorBase(
 
             # Before import_source, which binds the result into the traced
             # frame's globals: a non-module sys.modules entry stays out of them.
-            # Only this arm needs the check: a replayed value is a DummyModule
-            # by construction, add_local_mod having rejected non-modules when
-            # the record was written.
+            # Only this arm can take the check: a replayed value is a DummyModule,
+            # not a ModuleType, so it would refuse every replay -- and needs none,
+            # add_local_mod having rejected non-modules when the record was written.
             # pyrefly: ignore [unbound-name]
             if not isinstance(value, types.ModuleType):
                 unimplemented(
