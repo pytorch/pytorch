@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     # Multi-graph artifact state. _FRAMES is one record per Dynamo frame (its
     # code, its variants' guard state and transformed bytecode, the globals it
     # reads), _BACKENDS the compiled subgraphs, _ENTRY_BINDING the entry's
-    # default arguments; the two versions lock the marshalled bytecode and the
+    # default arguments; the two versions lock the serialized code objects and the
     # pickled guard state to the interpreter and torch build that produced them.
     _FRAMES: str = ""
     _BACKENDS: str = ""
@@ -400,9 +400,10 @@ def _build_multigraph_forward():
     calls the first that matches, so an artifact serves only what it captured.
     The rebuilt bytecode runs, and the guards check, the LIVE globals of the
     module each frame was compiled in, as CompilePackage.install has it; the
-    only names bound there are the ones Dynamo minted while tracing that module
-    (the import aliases, the builtins dict key and the compiled subgraphs),
-    bound the way install binds them.
+    only names bound there are ones Dynamo minted while tracing: that module's
+    import aliases and builtins dict key, and the artifact's compiled subgraphs
+    under their backend ids (every one, into each module opened), bound the way
+    install binds them.
 
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
@@ -432,15 +433,16 @@ def _build_multigraph_forward():
     from torch._precompile import PrecompileError as _PrecompileError
 
     if tuple(_DYNAMO_PYTHON_VERSION) != _sys.version_info[:2]:
-        # marshal only REJECTS a foreign blob across the 3.10 -> 3.11 layout
-        # change; between 3.11 and 3.14 it loads and then segfaults when the
-        # code object runs, so the version has to be checked explicitly.
+        # SerializedCode.to_code_object feeds the recorded co_* fields to
+        # types.CodeType in the running interpreter's get_code_keys() order, so a
+        # foreign artifact raises a bare TypeError or runs foreign bytecode.
         raise _PrecompileError(
             f"precompile: this artifact was produced on Python "
             f"{_DYNAMO_PYTHON_VERSION[0]}.{_DYNAMO_PYTHON_VERSION[1]} and cannot "
             f"load on {_sys.version_info[0]}.{_sys.version_info[1]}: it inlines "
-            f"marshalled bytecode, which is Python-version-locked. Regenerate the "
-            f"artifact under the serving Python."
+            f"serialized code objects whose bytecode and field layout are "
+            f"Python-version-locked. Regenerate the artifact under the serving "
+            f"Python."
         )
     if TORCH_VERSION != torch.__version__:
         # _FRAMES carries pickled Dynamo guard state, which no other torch build
@@ -494,7 +496,8 @@ def _build_multigraph_forward():
     # the rebuilt bytecode and the guards alike: a global rebound after load
     # fails the guard that certified it instead of passing against a stale
     # copy, and a global the frame writes lands where the module reads it.
-    # Only the names Dynamo minted while tracing that module are bound into it,
+    # Only names Dynamo minted while tracing are bound into it (every backend id
+    # of the artifact, plus that module's import aliases and builtins key),
     # never the artifact's own, so nothing here shadows a user global.
     scopes = {}
 
@@ -511,7 +514,8 @@ def _build_multigraph_forward():
 
     def _make_dispatcher(frame):
         target = SerializedCode.to_code_object(frame["code"])
-        if target.co_freevars:
+        is_entry = frame["is_entry"]
+        if is_entry and target.co_freevars:
             # Capture refuses a closure entry, so this is a malformed artifact
             # rather than something to rebuild over empty cells.
             raise _PrecompileError(
@@ -540,8 +544,8 @@ def _build_multigraph_forward():
         # A code object carries no defaults, so the entry gets them back from
         # the artifact; a defaulted parameter the call omits is otherwise absent
         # from f_locals and every guard on it misses.
-        defaults = entry_binding.get("defaults")
-        kwdefaults = entry_binding.get("kwdefaults")
+        defaults = entry_binding.get("defaults") if is_entry else None
+        kwdefaults = entry_binding.get("kwdefaults") if is_entry else None
 
         def _function(code):
             f = types.FunctionType(code, scope, target.co_name, defaults)
@@ -581,14 +585,19 @@ def _build_multigraph_forward():
 
         def dispatch(*args, **kwargs):
             f_locals = bind_locals(signature, *args, **kwargs)
-            for manager, variant in bound:
-                if manager.check(f_locals):
-                    return variant(*args, **kwargs)
+            # A tag-safe root's fast path (GuardManager::check_nopybind) can
+            # refuse without running its tree and disarms itself; check twice.
+            for _ in range(2):
+                for manager, variant in bound:
+                    if manager.check(f_locals):
+                        return variant(*args, **kwargs)
             raise _PrecompileError(
                 f"precompile: no captured variant of {target.co_name!r} matches this "
-                f"call. The artifact serves only what capture exercised; add an "
-                f"example covering it and recapture. Captured "
-                f"{len(variants)} variant(s)."
+                f"call ({len(variants)} captured). Either a guard on the call's "
+                f"arguments or on a module global the graph baked in no longer "
+                f"holds (restore that environment), or this call shape was never "
+                f"captured: the artifact serves only what capture exercised, so add "
+                f"an example covering it and recapture."
             )
 
         return dispatch
