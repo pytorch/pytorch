@@ -41,7 +41,7 @@ append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
-    add_definitions(-DBUILDING_TESTS)
+    add_compile_definitions(BUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
       )
