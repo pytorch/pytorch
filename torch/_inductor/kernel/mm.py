@@ -191,6 +191,48 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
     op_overload=aten._sparse_semi_structured_mm.default,
 )
 
+
+def cslt_sparse_mm_choice(
+    mat1_compressed,
+    mat2,
+    *optional_inputs,
+    has_bias,
+    has_alpha,
+    out_dtype,
+    transpose_result,
+    alg_id,
+    split_k,
+    split_k_mode,
+    kernel=aten._cslt_sparse_mm.default,
+):
+    optional_idx = 0
+    bias = optional_inputs[optional_idx] if has_bias else None
+    optional_idx += int(has_bias)
+    alpha = optional_inputs[optional_idx] if has_alpha else None
+    return kernel(
+        mat1_compressed,
+        mat2,
+        bias,
+        alpha,
+        out_dtype,
+        transpose_result,
+        alg_id,
+        split_k,
+        split_k_mode,
+    )
+
+
+aten__cslt_sparse_mm = ExternKernelChoice(
+    cslt_sparse_mm_choice,
+    name="_cslt_sparse_mm",
+    has_out_variant=False,
+    kernel_creator=functools.partial(
+        cslt_sparse_mm_choice,
+        kernel=functools.partial(FallbackKernel.create, aten._cslt_sparse_mm.default),
+    ),
+)
+
+
 aten__fp8_mm = ExternKernelChoice(
     torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
 )
@@ -1047,6 +1089,65 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
+
+
+@register_lowering(aten._cslt_sparse_mm.default, type_promotion_kind=None)
+def tuned_cslt_sparse_mm(
+    mat1_compressed,
+    mat2,
+    bias=None,
+    alpha=None,
+    out_dtype=None,
+    transpose_result=False,
+    alg_id=0,
+    split_k=1,
+    split_k_mode=-1,
+    layout=None,
+):
+    from torch._inductor.ir import ExternKernel, FixedLayout, FlexibleLayout
+
+    mat1_compressed = ExternKernel.realize_input(mat1_compressed)
+    mat2 = ExternKernel.realize_input(mat2)
+    input_nodes = [mat1_compressed, mat2]
+    if bias is not None:
+        input_nodes.append(ExternKernel.realize_input(bias))
+    if alpha is not None:
+        input_nodes.append(ExternKernel.realize_input(alpha))
+
+    m = mat1_compressed.get_size()[0]
+    n = mat2.get_size()[1]
+    if layout is None:
+        size = [n, m] if transpose_result else [m, n]
+        layout = FixedLayout(
+            mat2.get_device(),
+            out_dtype if out_dtype is not None else mat2.get_dtype(),
+            size,
+            FlexibleLayout.contiguous_strides(size),
+        )
+    elif out_dtype is not None:
+        raise AssertionError("out_dtype is ignored if layout is specified.")
+
+    choices = (
+        [
+            aten__cslt_sparse_mm.bind(
+                input_nodes,
+                layout,
+                has_bias=bias is not None,
+                has_alpha=alpha is not None,
+                out_dtype=out_dtype,
+                transpose_result=transpose_result,
+                alg_id=alg_id,
+                split_k=split_k,
+                split_k_mode=split_k_mode,
+            )
+        ]
+        if use_aten_gemm_kernels()
+        else []
+    )
+    node, _ = autotune_select_algorithm(
+        "cslt_sparse_mm", choices, input_nodes, layout
+    )
     return node
 
 
