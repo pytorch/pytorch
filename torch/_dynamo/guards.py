@@ -74,7 +74,7 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
-from torch._dynamo.package import FunctionPicklerBase, SerializedCode
+from torch._dynamo.package import _Missing, FunctionPicklerBase, SerializedCode
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -4180,22 +4180,6 @@ class GuardsState:
     local_state: Any | None = None
 
 
-class _Missing:
-    def __init__(self, reason: str | None = None) -> None:
-        self._reason = reason
-
-    def __repr__(self) -> str:
-        return f"_Missing({self._reason})"
-
-    def __str__(self) -> str:
-        return f"_Missing({self._reason})"
-
-    # Sometimes _Missing object is used as the callable with functools.partial,
-    # so we add a dummy __call__ here to bypass TypeError from partial().
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return _Missing()
-
-
 class _LiveBuiltins:
     """Stands in a snapshot for builtins.__dict__: resolves to the loading
     process's own, by reference, rather than a copy of the saving one's."""
@@ -4218,9 +4202,50 @@ def _get_unsupported_types() -> tuple[type, ...]:
     )
     try:
         ret += (torch._C._distributed_c10d.ProcessGroup,)
+        # A concrete backend -- ProcessGroupNCCL, ProcessGroupGloo -- is bound
+        # as a subclass of Backend, NOT of ProcessGroup, so the line above misses
+        # it and an unguarded one fails the whole frame with "cannot pickle".
+        ret += (torch._C._distributed_c10d.Backend,)
     except AttributeError:
         pass
     return ret
+
+
+def _is_interned_singleton(value: Any) -> bool:
+    """Whether pruning ``value`` would poison unrelated references to it.
+
+    Pruning is keyed by ``id()``, which asks "is this the same OBJECT" when the
+    question it means is "is this the same REFERENCE". For an interned value the
+    two come apart: ``torch.float32`` is one object, so an unguarded attribute
+    holding it registers that id as missing and EVERY other reference to that
+    dtype -- including ones the artifact genuinely needs -- then resolves to the
+    sentinel, and the artifact fails to load with "empty_strided(): argument
+    'dtype' must be torch.dtype, not _Missing".
+
+    These are also exactly the values pruning gains nothing from: they are
+    immutable, trivially picklable, and a handful of bytes. So skip them rather
+    than make identity carry a distinction it cannot.
+    """
+    if isinstance(value, (tuple, frozenset)) and not value:
+        # () is one object process-wide, so pruning it by id would turn every
+        # empty tuple in the state into the sentinel.
+        return True
+    return isinstance(
+        value,
+        (
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+            type(None),
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            bytes,
+        ),
+    )
 
 
 class GuardsStatePickler(FunctionPicklerBase):
@@ -4653,6 +4678,8 @@ class GuardsStatePickler(FunctionPicklerBase):
                     continue
                 if callable(attr):
                     continue
+                if _is_interned_singleton(attr):
+                    continue
                 self.missing_values[id(attr)] = attr
 
             # DDP module is a special case because it tries to restore unneeded
@@ -4728,7 +4755,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             return _Missing, ("capsule",)
 
         elif isinstance(obj, _get_unsupported_types()):
-            return _Missing, ("unsupported",)
+            # Only when no guard reads it: a guarded one (TYPE_MATCH on a
+            # process-group local) must fail the dump loudly below rather than
+            # load as a sentinel the rebuilt guard can never match.
+            if id(obj) not in self.guard_tree_values:
+                return _Missing, ("unsupported",)
 
         elif inspect.isfunction(obj):
             if "<locals>" in obj.__qualname__.split("."):
@@ -4846,7 +4877,7 @@ def pickle_guards_state(
                         empty_values[id(base)] = base
                     except:  # noqa: E722
                         pass
-            elif id(leaf) not in guard_tree_values:
+            elif id(leaf) not in guard_tree_values and not _is_interned_singleton(leaf):
                 # TODO See if we have lift this branch as the first one.
                 # Prune more objects in pytree hierarchy.
                 missing_values[id(leaf)] = leaf
