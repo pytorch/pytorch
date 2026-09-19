@@ -408,7 +408,7 @@ def _build_multigraph_forward():
     name -- so binding the resume dispatcher under that name in the module is
     all the wiring the graph-break path needs. A load refused partway through
     leaves the names it had already seeded in that module; a load that would
-    rebind a name another standalone artifact of that module holds is refused.
+    rebind a resume name another standalone artifact holds there is refused.
 
     Because there is no compiler behind a source artifact, an uncovered call
     RAISES rather than falling back. That is the point: the artifact serves the
@@ -491,12 +491,10 @@ def _build_multigraph_forward():
         _backend_id: torch._dynamo.disable(_artifact.after_deserialization())
         for _backend_id, _artifact in backends.items()
     }
-    # Resume names and backend ids are minted per capturing process, so two
-    # standalone artifacts of one function mint the same names; every object
-    # this driver binds carries its artifact's tag and _seed refuses a foreign one.
+    # Resume names come from a per-process counter (backend ids carry a uuid),
+    # so another capture of this module can mint one a live artifact holds; each
+    # dispatcher carries its artifact's tag and _seed refuses a foreign one.
     tag = hashlib.sha256(_FRAMES.encode()).hexdigest()[:16]
-    for _fn in compiled.values():
-        _fn.__precompile_artifact__ = tag
 
     def _seed(scope, name, value):
         other = getattr(scope.get(name), "__precompile_artifact__", tag)
@@ -504,8 +502,8 @@ def _build_multigraph_forward():
             raise _PrecompileError(
                 f"precompile: {name!r} in module {scope['__name__']!r} is bound by "
                 f"standalone artifact {other} and this artifact ({tag}) mints the "
-                f"same name: only one standalone artifact of a module may be live "
-                f"per process. Serve them from separate processes."
+                f"same resume name: only one standalone artifact per captured module "
+                f"can serve continuations in a process. Serve them from separate processes."
             )
         # A pre-reset compile's CleanupHook may still own the name; it must not
         # delete this binding once that code object is collected.
