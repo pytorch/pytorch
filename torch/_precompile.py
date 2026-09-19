@@ -1657,9 +1657,12 @@ _MULTIGRAPH_GENERATED_HEADER = """\
 # What the artifact does to the process, which differs by serving mode.
 _SERVING_NOTES = {
     "standalone": """\
-# Nothing is installed onto your code objects and no frame evaluator is involved, so
-# loading this mutates no global state. The flip side is that there is no compiler
-# behind it: a call no captured variant covers RAISES rather than compiling a new one.
+# Nothing is installed onto your code objects and no frame evaluator is involved; the
+# only global state loading touches is the captured module, where the names Dynamo
+# minted while tracing (import aliases, the builtins dict key, the compiled subgraphs
+# under their backend ids) are re-seeded and stay. The flip side is that there is no
+# compiler behind it: a call no captured variant covers RAISES rather than compiling a
+# new one.
 """,
     "installed": """\
 # This artifact SERVES BY INSTALLING onto the live code objects, so loading and then
