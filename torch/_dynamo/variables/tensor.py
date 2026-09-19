@@ -221,6 +221,110 @@ class TensorSpecializedProps(TypedDict):
     is_contiguous: NotRequired[tuple[torch.memory_format, ...] | None]
 
 
+def _current_device_index_variable(
+    tx: "InstructionTranslatorBase",
+) -> VariableTracker:
+    """The current device index for this graph, observed once and reused.
+
+    Cached the way _current_device_edge caches the device itself: the value cannot
+    change within a graph, so a fresh node per read would allocate a fresh unbacked
+    symbol each time -- leaving two reads incomparable to each other, and costing a
+    fallback kernel and a cudagraph partition boundary apiece.
+    """
+    from .builder import wrap_fx_proxy
+
+    cached = tx.output.coor_current_device_index_var
+    if cached is not None:
+        return cached
+    var = wrap_fx_proxy(
+        tx,
+        tx.output.create_proxy(
+            "call_function",
+            torch.ops.coor.current_device_index.default,
+            (),
+            {},
+        ),
+    )
+    tx.output.coor_current_device_index_var = var
+    return var
+
+
+class CurrentDeviceVariable(VariableTracker):
+    """A CooR device with a static accelerator type and runtime-relative index."""
+
+    def __init__(self, value: torch.device, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_proxy(self) -> torch.device:
+        return self.value
+
+    def python_type(self) -> type:
+        return torch.device
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch.fx.experimental.proxy_tensor", "_coor_current_device"
+            )
+        )
+        codegen.call_function(0, False)
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return "torch.fx.experimental.proxy_tensor._coor_current_device()"
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        # Keyed on the device type, to agree with tp_richcompare_impl below: two
+        # reads of the current device are the same device. Without this the base
+        # class falls back to an identity hash, so equal keys land in different
+        # dict buckets and are never compared -- a silently wrong answer for
+        # anything that groups by device, _group_tensors_by_device_and_dtype and
+        # the fused optimizers behind it included.
+        #
+        # is_fake: this is not the runtime hash. At runtime the device carries an
+        # index, so hash(torch.device("cuda", N)) differs from what we return
+        # here, and the value must not escape into output bytecode.
+        return hash(self.value), True
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if name == "type":
+            return ConstantVariable.create(self.value.type)
+        if name == "index":
+            return _current_device_index_variable(tx)
+        return super().tp_getattro_impl(tx, name)
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        if op not in ("__eq__", "__ne__"):
+            return ConstantVariable.create(NotImplemented)
+        if isinstance(other, CurrentDeviceVariable):
+            equal = self.value.type == other.value.type
+            return ConstantVariable.create(equal if op == "__eq__" else not equal)
+        try:
+            other_device = other.as_python_constant()
+        except NotImplementedError:
+            return ConstantVariable.create(NotImplemented)
+        if not isinstance(other_device, torch.device):
+            return ConstantVariable.create(NotImplemented)
+        if other_device.type != self.value.type or other_device.index is None:
+            return ConstantVariable.create(op == "__ne__")
+        compare = operator.eq if op == "__eq__" else operator.ne
+        return variables.BuiltinVariable(compare).call_function(
+            tx,
+            [
+                _current_device_index_variable(tx),
+                ConstantVariable.create(other_device.index),
+            ],
+            {},
+        )
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -593,9 +697,24 @@ class TensorVariable(VariableTracker):
     def method_attr_device(
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
-        if self.device is not None:
-            return VariableTracker.build(tx, self.device)
-        return None
+        if self.device is None:
+            return None
+        from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+        device = self.device
+        if _coor_device_index_is_current(device):
+            # compile-on-one-rank: hand back a bare "cuda" rather than "cuda:N".
+            # x.device is constant-folded here, so an indexed device gets frozen into
+            # the Dynamo graph and every rank produces different text -- and Dynamo
+            # runs before make_fx, which is where the current_device() substitution
+            # happens, so nothing downstream can undo it. An index-less accelerator
+            # device is the form make_fx already rewrites into that node.
+            #
+            # Keep the device type static so type predicates and device-consuming
+            # operations remain traceable, while index-dependent observations are
+            # represented by CurrentDeviceVariable at runtime.
+            return CurrentDeviceVariable(torch.device(device.type))
+        return VariableTracker.build(tx, device)
 
     def method_attr_layout(
         self, tx: "InstructionTranslatorBase"
@@ -1346,6 +1465,12 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker | None:
         if isinstance(self.device, torch.device):
+            from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
+            if _coor_device_index_is_current(self.device):
+                # An int has no index-less form meaning "this rank's device". Read
+                # the index at runtime, as x.device.index does under CooR.
+                return _current_device_index_variable(tx)
             index = self.device.index if self.device.type != "cpu" else -1
             return VariableTracker.build(tx, index)
         return None
