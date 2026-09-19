@@ -66,12 +66,12 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       tensors. Python control flow is specialized to the example inputs, and shapes are
       static -- each size is baked in. Tracing on fakes refuses, on BOTH capture paths, an
       example input whose metadata a fake tensor silently drops (pinned, mkldnn, sparse)
-      and a nested one; and, on a STATIC capture, a data-dependent op (``.item()``,
-      ``.nonzero()``, a Python branch over a tensor value). It also FAILS, rather than
-      baking a wrong answer, on an op with no meta/fake kernel, on a read of a traced
-      tensor's data (``.data_ptr()``, ``.numpy()``), and on an example input a fake tensor
-      cannot represent (quantized), and refuses to run inside another trace, whose fake
-      mode would outrank its own.
+      and a nested one, and it refuses to run inside another trace, whose fake mode would
+      outrank its own; and, on a STATIC capture, it refuses a data-dependent op
+      (``.item()``, ``.nonzero()``, a Python branch over a tensor value). It also FAILS,
+      rather than baking a wrong answer, on an op with no meta/fake kernel, on a read of a
+      traced tensor's data (``.data_ptr()``, ``.numpy()``), and on an example input a fake
+      tensor cannot represent (quantized).
       The exception to static shapes is a tensor dim explicitly marked unbacked (inductor
       backend only) with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before
       the call; such a dim is captured as an unbacked symint, so one artifact serves any
