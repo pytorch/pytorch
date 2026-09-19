@@ -1895,10 +1895,11 @@ class AOTCompiledModel:
     an ``except SystemError`` no longer catches a boundary wrap whose cause is
     an ``Exception``; a wrap around a ``KeyboardInterrupt`` or ``SystemExit``
     still reaches the caller as itself. A raise only out of ``check_verbose``
-    here is quoted on its line and chained nowhere. A raise recorded in
-    dispatch that a later evaluation of the same tree answered is quoted by the
-    advice's caveat, not on its entry line, which quotes the rejection, and it
-    is the ``__cause__`` when it was recorded first of all.
+    here is quoted on its line and chained nowhere. A dispatch raise a later
+    evaluation answered is quoted by the advice's caveat where it fires -- no
+    rejection it rests on taken before any raise -- not on its entry line,
+    which carries the re-check's own rejection, accepted-here line or raise,
+    and is the ``__cause__`` when recorded first of all.
     """
 
     model: torch.nn.Module
@@ -2230,9 +2231,10 @@ class AOTCompiledModel:
                 # survives in the chain when it was recorded first of all, and in
                 # the footer's fix-or-drop line when it was recorded first of the
                 # inputs nobody opted out. When it is neither -- another checked
-                # tree raised before it -- the caveat below is the only line
-                # that carries that raise: it names such trees and quotes their
-                # raises.
+                # tree raised before it -- the caveat below is the only line that
+                # can carry that raise, naming such trees and quoting their raises;
+                # it does not fire where another enabled tree rejected with no
+                # raise on record, and then this report carries that raise nowhere.
                 lines.append(_raised_line(i, raised[i]))
                 continue
             manager = result._live_guard_manager()
