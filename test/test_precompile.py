@@ -2701,11 +2701,22 @@ class TestPrecompile(TestCase):
         # PyTorch documents (every __torch_dispatch__ handler returning NotImplemented ->
         # "Multiple dispatch failed"), which torch.masked.MaskedTensor does for is_pinned.
         # Every raise the probe can make is swallowed, so it neither escapes the public API
-        # nor costs a supported capture; the filter covers the MaskedTensor build only.
+        # nor costs a supported capture. MaskedTensor declines by WARNING first ("please file
+        # an issue") and only then returning NotImplemented, so the probe suppresses warnings
+        # too: the capture below runs with warnings recorded and must emit none, or the user
+        # of a capture that SUCCEEDS is pointed at an op they never called.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             mt = torch.masked.as_masked_tensor(torch.randn(3, 4), torch.randn(3, 4) > 0)
-        code, _ = _precompile_pair(lambda t: t.sum(), mt, backend="eager")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            code, _ = _precompile_pair(lambda t: t.sum(), mt, backend="eager")
+        # Only the probe's leak is asserted absent: the module-switch commit above moves
+        # the MaskedTensor construction, whose own prototype warning is not ours, into
+        # this block.
+        self.assertEqual(
+            [str(w.message) for w in caught if "is_pinned" in str(w.message)], []
+        )
         self.assertIn("aten.sum", code)
 
     def test_capture_inside_another_trace_refused(self):
@@ -3572,7 +3583,12 @@ class TestPrecompileCaptureFiles(TestCase):
         # exercises it, but only where mkldnn is there to lower to).
         with self._capture(backend="inductor") as cap:
             cap(self.model, self.x)
-        self.assertIn("_DisableAutocast", self._read(self.artifact).decode())
+        # The driver's own emitted line, not the bare name: AOTAutograd emits a
+        # `_DisableAutocast_` guard of its own only for a capture made under autocast,
+        # so the bare substring would stop discriminating for such a capture.
+        self.assertIn(
+            "with _torch._C._DisableAutocast():", self._read(self.artifact).decode()
+        )
 
     @unittest.skipUnless(
         torch.backends.mkldnn.is_available() and torch._C._get_mkldnn_enabled(),
@@ -4075,6 +4091,30 @@ class TestPrecompileCaptureFiles(TestCase):
         with self._replacing(self.cache, exc=cut, after=True):
             with self.assertNoLogs("torch._precompile", level="WARNING"):
                 self._rewrite_raises(KeyboardInterrupt, "interrupted")
+        self.assertNotEqual((self._read(self.artifact), self._read(self.cache)), before)
+        self._assert_serves()
+
+    def test_a_zero_inode_cache_half_in_that_window_keeps_the_new_pair(self):
+        # Blindness is a property of each NAME's filesystem, and the two are independent
+        # arguments: here the artifact has inodes and the cache does not. Reading one flag
+        # off the artifact half left the cache half with neither read -- no inode match,
+        # and no temp fallback either -- so the same window called a finished write
+        # incomplete and restored the previous source beside the new cache, a pair ``load``
+        # refuses on the sha256 with the previous cache already overwritten.
+        before = self._write_pair()
+        real_stat = os.stat
+
+        def no_cache_ino(path, **kwargs):
+            st = real_stat(path, **kwargs)
+            if not str(path).startswith(self.cache):
+                return st
+            return os.stat_result((st.st_mode, 0) + tuple(st)[2:])
+
+        cut = KeyboardInterrupt("interrupted after the second rename")
+        with mock.patch("os.stat", no_cache_ino):
+            with self._replacing(self.cache, exc=cut, after=True):
+                with self.assertNoLogs("torch._precompile", level="WARNING"):
+                    self._rewrite_raises(KeyboardInterrupt, "interrupted")
         self.assertNotEqual((self._read(self.artifact), self._read(self.cache)), before)
         self._assert_serves()
 
