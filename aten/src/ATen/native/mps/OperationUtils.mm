@@ -1197,6 +1197,10 @@ void MetalShaderLibrary::exec_unary_kernel_raw(std::string_view name,
   if (numel == 0) {
     return;
   }
+  // The castout kernels pick the store type from a runtime switch over the
+  // dtypes Metal can represent. Any other dst_dtype has no case there and the
+  // store would be silently skipped, so raise for it here instead.
+  scalarToMetalTypeString(dst_dtype);
   const bool use_ilp = ilp_threshold.has_value() && numel >= ilp_threshold.value();
   const std::string_view suffix = use_ilp ? "dense_castout_ilp" : "dense_castout";
   const auto kernel_name = fmt::format("{}_{}_{}", name, suffix, scalarToMetalTypeString(src_dtype));
