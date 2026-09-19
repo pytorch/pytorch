@@ -44,6 +44,45 @@ NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
+
+def _cgroup_memory_limit_gib() -> float | None:
+    """The container's memory ceiling in GiB, or None when unlimited/unknown.
+
+    On a k8s pod the cgroup limit is the pod's request, which is what the OOM
+    killer enforces; /proc/meminfo reports the whole node and is useless here.
+    """
+    for path, unlimited in (
+        ("/sys/fs/cgroup/memory.max", "max"),  # cgroup v2
+        ("/sys/fs/cgroup/memory/memory.limit_in_bytes", None),  # cgroup v1
+    ):
+        try:
+            raw = Path(path).read_text().strip()
+        except OSError:
+            continue
+        if raw == unlimited:
+            return None
+        try:
+            limit = int(raw)
+        except ValueError:
+            continue
+        # v1 reports a sentinel near 2**63 when unlimited.
+        if limit <= 0 or limit > (1 << 62):
+            return None
+        return limit / (1024**3)
+    return None
+
+
+# Each parallel test process carries its own torch import and CUDA context, and
+# the heavier files (test_jit, the inductor suites) peak well above 13GiB. Three
+# of them fit the 104GiB pods these jobs used to land on, but OOM-kill a 41GiB
+# one: "Container job was OOMKilled (exit code 137)". Scale the process count to
+# the memory the container actually has, at roughly 16GiB apiece.
+#
+# Only NUM_PROCS moves. NUM_PROCS_FOR_SHARDING_CALC stays where it is so every
+# shard of a job agrees on the split regardless of the pod it lands on -- the
+# same separation the ROCm clamp relies on. Applied after that clamp so it is
+# the last word on parallelism.
+
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
 # hipInfo gcnArchName lines also contain " gfx", so the same count works on Windows.
@@ -72,6 +111,11 @@ if IS_ROCM and not IS_MEM_LEAK_CHECK:
     else:
         # No GPU query tool available; the safe default is to run tests serially.
         NUM_PROCS = 1
+
+_MEM_GIB_PER_PROC = 16
+_mem_limit_gib = _cgroup_memory_limit_gib()
+if _mem_limit_gib is not None and not IS_MEM_LEAK_CHECK:
+    NUM_PROCS = max(1, min(NUM_PROCS, int(_mem_limit_gib // _MEM_GIB_PER_PROC)))
 
 
 class ShardJob:
