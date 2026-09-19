@@ -1620,7 +1620,7 @@ def add(x, y):
         )
         # The first hint names the module whose globals hold the slot -- the
         # root frame's, which an inlined callee's own module is not.
-        hint = f"Remove or rename the global {alias} in module {scope}."
+        hint = f"Remove or rename the global {alias} from the globals of {scope}."
         args = (torch.randn(3, 2),)
         try:
             sys.modules[name] = module
@@ -1703,11 +1703,23 @@ def add(x, y):
         cnt = CompileCounter()
         args = (torch.randn(3, 2),)
         try:
-            refused = f"alias {alias} for torch.autograd.profiler is already bound to a str in the globals of throwaway"
-            with self.assertRaisesRegex(AssertionError, refused):
+            refused_prefix = (
+                f"alias {alias} for torch.autograd.profiler is already bound "
+                "to a str in the globals of "
+            )
+            with self.assertRaisesRegex(AssertionError, f"{refused_prefix}throwaway"):
                 torch.compile(fn, backend=cnt)(*args)
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(scope[alias], "not a module")
+            # A globals dict with no __name__ at all -- what exec() over a bare
+            # dict leaves -- says so rather than naming the scope None.
+            torch._dynamo.reset()
+            nameless = {"__builtins__": builtins, alias: "not a module"}
+            nameless_fn = types.FunctionType(template.__code__, nameless, "fn")
+            with self.assertRaisesRegex(
+                AssertionError, f"{refused_prefix}<a scope with no __name__>"
+            ):
+                torch.compile(nameless_fn, backend=cnt)(*args)
         finally:
             torch._dynamo.reset()
 
@@ -1738,6 +1750,40 @@ def add(x, y):
                 torch.compile(fn, backend="eager")(*args)
             self.assertEqual(fn.__globals__[alias], "not a module")
         finally:
+            fn.__globals__.pop(alias, None)
+            torch._dynamo.reset()
+
+    def test_import_alias_taken_for_an_inlined_callees_module_is_a_hard_error(self):
+        # The __import_ arm of the same tracing-phase caller: a plain module in
+        # sys.modules, not a packaged one, so the name is one an import statement
+        # could also spell -- and it is the shape hint 2 was written for, the
+        # alias slot in the root frame's globals holding a foreign object while
+        # the name resolves to module B. Reached from a global read in a function
+        # inlined from B, get_globals_source_and_value does not pass
+        # graph_break_ok, so this is the hard error and not the graph break the
+        # same collision found by IMPORT_NAME gets.
+        name = "torch_test_package_import_alias_inlined_taken"
+        alias = f"__import_{name}"
+        module = types.ModuleType(name)
+        exec("SCALE = 2\n\ndef helper(x):\n    return x * SCALE\n", module.__dict__)
+        args = (torch.randn(3, 2),)
+
+        def fn(x):
+            return module.helper(x) + 1
+
+        try:
+            sys.modules[name] = module
+            fn.__globals__[alias] = "not a module"
+            refused = (
+                f"alias {alias} for {name} is already bound to a str "
+                f"in the globals of {fn.__globals__['__name__']}"
+            )
+            with self.assertRaisesRegex(AssertionError, refused):
+                torch.compile(fn, backend="eager")(*args)
+            self.assertEqual(fn.__globals__[alias], "not a module")
+        finally:
+            sys.modules.pop(name, None)
+            _import_module.cache_clear()
             fn.__globals__.pop(alias, None)
             torch._dynamo.reset()
 
@@ -1886,7 +1932,7 @@ def add(x, y):
             (tx,) = seen
             self.assertIs(fn.__globals__[alias], nameless)
             self.assertNotIn(alias, tx.output.import_sources)
-            self.assertNotIn((key, True), tx._cache_method_import_source)
+            self.assertNotIn(key, tx._import_source_memo)
 
             seen.clear()
             torch._dynamo.reset()
