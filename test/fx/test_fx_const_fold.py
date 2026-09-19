@@ -840,7 +840,7 @@ class TestConstFold(TestCase):
 
         # Folding this subgraph without skipping fails, because the symbolic size
         # is unbound at compile time
-        with self.assertRaises(Exception):
+        with self.assertRaises(AssertionError):
             unguarded = const_fold.split_const_subgraphs(
                 _make_parent(), device_for_folded_attrs="cpu"
             )

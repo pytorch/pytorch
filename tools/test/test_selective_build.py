@@ -72,7 +72,7 @@ operators:
         def gen():
             return SelectiveBuilder.from_yaml_str(yaml_config_invalid)
 
-        self.assertRaises(Exception, gen)
+        self.assertRaises(RuntimeError, gen)
 
         selector_all = SelectiveBuilder.from_yaml_str(yaml_config_all)
 
@@ -178,7 +178,7 @@ operators:
         def gen_new_op():
             return combine_operators(op1, op3)
 
-        self.assertRaises(Exception, gen_new_op)
+        self.assertRaises(RuntimeError, gen_new_op)
 
     def test_training_op_fetch(self) -> None:
         yaml_config = """

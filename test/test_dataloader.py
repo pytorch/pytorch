@@ -1967,7 +1967,7 @@ except RuntimeError as e:
             dataset, batch_size=2, num_workers=2, worker_init_fn=local_init_fn
         )
         with self.assertWarnsRegex(UserWarning, "Got pickle error when"):
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 next(iter(dataloader))
 
     def test_get_worker_info(self):

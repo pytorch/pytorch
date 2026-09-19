@@ -1453,16 +1453,16 @@ class TestMatmulCuda(InductorTestCase):
 
             a, b, c = create_inputs()
 
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 torch.baddbmm(expand(c), expand(a), expand(b), out_dtype=torch.float32)
 
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 torch.addmm(c, a, b, out_dtype=torch.float32)
 
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 torch.bmm(expand(a,), expand(b), out_dtype=torch.float32)
 
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 torch.mm(a, b, out_dtype=torch.float32)
 
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum

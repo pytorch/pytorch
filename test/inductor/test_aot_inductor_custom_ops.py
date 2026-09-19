@@ -218,7 +218,7 @@ class AOTInductorTestsTemplate:
             torch.randn(3, 3, device=self.device),
         )
         with config.patch("aot_inductor.output_path", "model.pt2"):
-            with self.assertRaises(Exception):
+            with self.assertRaises(RuntimeError):
                 self.check_model(m, args)
 
     def test_fn_with_optional_tensor_output(self) -> None:
