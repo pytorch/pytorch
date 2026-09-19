@@ -25,11 +25,8 @@ void setHostAllocator(
 
 at::HostAllocator* getHostAllocator(at::DeviceType device_type) {
   auto* allocator = allocator_array[static_cast<int>(device_type)];
-  TORCH_CHECK(
-      allocator,
-      "Host Allocator for ",
-      device_type,
-      " is not set, the backend must register one via REGISTER_HOST_ALLOCATOR.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      allocator, "Host Allocator for ", device_type, " is not set.");
   return allocator;
 }
 
