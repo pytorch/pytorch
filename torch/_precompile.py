@@ -279,9 +279,9 @@ class PrecompileError(RuntimeError):
     input whose shape or memory format differs from the example (invariants 3 and 6).
     See Note [precompile programming model] in this module for the full contract.
 
-    ``result`` is what the call that raised this returned, when it ran before the
-    refusal: an accumulating capture's step has already executed by the time its
-    artifact gate refuses, so the result rides on the error. ``None`` otherwise.
+    ``result`` is what ``fn`` returned when the capture call that raised this had
+    already run before the refusal fired, so the return value is not lost; ``None``
+    otherwise.
     """
 
     result: object = None
@@ -357,9 +357,11 @@ class Capture:
 class _MakeFxCapture(Capture):
     r"""Single-shot capture: the :class:`MakeFxTracer` front-end.
 
-    Only the constructor and ``__enter__`` exist so far: the constructor refuses
-    a partial, builds the ``PrecompiledModule`` for ``fn``, and records the paths
-    and the ``_traced``/``_rendered`` state the capture drives. ``__call__`` and
+    Takes the :class:`MakeFxTracer` the caller passed as ``tracer=`` and forwards
+    its ``decompositions`` to the ``PrecompiledModule`` it builds for ``fn``. Only
+    the constructor and ``__enter__`` exist so far: the constructor refuses a
+    partial, builds that module, and records the paths and the
+    ``_traced``/``_rendered`` state the capture drives. ``__call__`` and
     ``__exit__`` still raise ``NotImplementedError`` from :class:`Capture`; the
     one-call rule they will enforce is the one :class:`MakeFxTracer` documents.
     """
@@ -371,7 +373,14 @@ class _MakeFxCapture(Capture):
         cache_path: str,
         *,
         backend: str,
-        decompositions: dict | None,
+        tracer: MakeFxTracer,
+        # Unread until the follow-up's __call__: it runs the one traced call under
+        # torch.enable_grad() when True (torch.no_grad() otherwise), the only mode in
+        # which make_fx builds a .backward() in fn as graph ops (see the grad-mode
+        # comment in _capture). It is not a serve-time or lowering knob: the grads
+        # ride out as extra outputs of one flat graph (invariant 5), so the lowering
+        # stays on AOTAutograd's inference path (to_standalone_python.py pins no_grad)
+        # and both drivers serve the artifact with grad disabled.
         training: bool,
     ) -> None:
         if isinstance(fn, functools.partial):
@@ -380,7 +389,7 @@ class _MakeFxCapture(Capture):
                 "and give its bound arguments as call arguments."
             )
         self._module = PrecompiledModule(
-            fn, backend=backend, tracer="make_fx", decompositions=decompositions
+            fn, backend=backend, tracer="make_fx", decompositions=tracer.decompositions
         )
         self._artifact_path = artifact_path
         self._cache_path = cache_path
