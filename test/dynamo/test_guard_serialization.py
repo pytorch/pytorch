@@ -1183,6 +1183,15 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         self.assertEqual(ref.check(inputs), loaded.check(inputs))
 
 
+class _ModuleWithGenerators(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.its = [(i for i in range(3))]
+        self.opts = {"k": (i for i in range(3))}
+        self.empty = ()
+        self.cfg = {"a": 1}
+
+
 class _ModuleWithDtypeAttr(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1213,6 +1222,34 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         pickler.dump({"m": lstm})
         self.assertNotIn(id(lstm._all_weights), pickler.missing_values)
         self.assertEqual(pickler.missing_values, {})
+
+    def test_prunes_an_unguarded_builtin_container_holding_a_generator(self):
+        # The C pickler saves an exact list/dict/tuple by type and never consults
+        # reducer_override, so registering one in missing_values still left
+        # "cannot pickle 'generator' object". persistent_id sees every object.
+        m = _ModuleWithGenerators()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m, id(m.cfg): m.cfg}, {}, {}, {}, buf).dump(
+            {"m": m, "shared": ()}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out["m"].its, _Missing)
+        self.assertIs(out["m"].its, out["m"].opts)
+        self.assertEqual(out["m"].cfg, {"a": 1})
+        self.assertEqual(out["m"].empty, ())
+        self.assertEqual(out["shared"], ())
+
+    def test_loader_rejects_a_foreign_persistent_id(self):
+        class Foreign(pickle.Pickler):
+            def persistent_id(self, obj):
+                return "foo" if obj == "X" else None
+
+        buf = io.BytesIO()
+        Foreign(buf).dump(["X"])
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "unknown guards state persistent id 'foo'"
+        ):
+            load_guards_state(buf.getvalue())
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
@@ -3452,6 +3489,38 @@ class TestGuardSerialization(TestGuardSerializationBase):
         h = m.register_backward_hook(lambda *args, **kwargs: None)
         self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
         h.remove()
+
+    def test_loaded_nested_module_keeps_its_bookkeeping_containers(self):
+        # _parameters/_buffers/_modules are exact dicts, so persistent_id would
+        # prune an unguarded one to the sentinel and nn.Module.__getattr__,
+        # which indexes them, would raise TypeError on every attribute miss.
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        def fn(m, x):
+            return m(x)
+
+        self._test_serialization("TENSOR_MATCH", fn, Outer(), torch.randn(2, 4))
+        loaded = load_guards_state(self._cached_guards_state).output_graph
+        self.assertFalse(hasattr(loaded.local_scope["m"].lin, "absent"))
+        self.assertEqual(loaded.local_scope["m"].lin.in_features, 4)
+
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_loaded_rnn_module_survives_its_own_setstate(self):
+        # RNNBase.__setstate__ indexes _all_weights, an unguarded exact list;
+        # a module with its own __setstate__ is pickled whole rather than pruned.
+        def fn(m, x):
+            return m(x)[0]
+
+        lstm, x = torch.nn.LSTM(4, 4), torch.randn(2, 3, 4)
+        self._test_serialization("TENSOR_MATCH", fn, lstm, x)
+        state = load_guards_state(self._cached_guards_state)
+        self.assertIsInstance(state.output_graph.local_scope["m"], torch.nn.LSTM)
 
     def test_grad_mode(self):
         def fn(x):

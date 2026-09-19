@@ -74,7 +74,12 @@ from torch._C._dynamo.guards import (
     TypeGuardAccessor,
     TypeMROGuardAccessor,
 )
-from torch._dynamo.package import _Missing, FunctionPicklerBase, SerializedCode
+from torch._dynamo.package import (
+    _Missing,
+    _PRUNED_VALUE_PID,
+    FunctionPicklerBase,
+    SerializedCode,
+)
 from torch._dynamo.source import (
     get_global_source_name,
     get_local_source_name,
@@ -4616,6 +4621,19 @@ class GuardsStatePickler(FunctionPicklerBase):
             type_params=type_params,
             globals_snapshot=snapshot,
         )
+
+    # The C pickler saves an exact builtin container by type, before it ever
+    # consults reducer_override, so a pruned ``self.its = [generator]`` was
+    # still walked and still failed. persistent_id is asked about every object
+    # first, so it is the one hook that can substitute those. Everything else
+    # in missing_values stays on the reducer_override path.
+    _PRUNED_CONTAINER_TYPES = (list, dict, tuple, set, frozenset, bytearray)
+
+    # pyrefly: ignore [bad-override]
+    def persistent_id(self, obj: Any) -> str | None:
+        if id(obj) in self.missing_values and type(obj) in self._PRUNED_CONTAINER_TYPES:
+            return _PRUNED_VALUE_PID
+        return None
 
     # pyrefly: ignore [bad-override]
     def reducer_override(

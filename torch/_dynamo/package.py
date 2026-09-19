@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import io
 import itertools
 import json
 import logging
@@ -125,6 +126,15 @@ class _Missing:
     # so we add a dummy __call__ here to bypass TypeError from partial().
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return _Missing()
+
+
+# The persistent id GuardsStatePickler.persistent_id emits for a pruned value the
+# C pickler never routes through reducer_override; _GuardsStateUnpickler turns it
+# back into _Missing. Any other persistent id in a guards state is a bug. An
+# artifact is only ever read by the torch that wrote it (SystemInfo's
+# check_compatibility runs before load_guards_state), so no reader from before
+# persistent_id existed sees one.
+_PRUNED_VALUE_PID = "missing values"
 
 
 class FunctionPicklerBase(pickle.Pickler):
@@ -488,6 +498,17 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+class _GuardsStateUnpickler(pickle.Unpickler):
+    # One shared sentinel, so two attributes that held one pruned container
+    # load as one object, as they would have through reducer_override's memo.
+    _pruned = _Missing(_PRUNED_VALUE_PID)
+
+    def persistent_load(self, pid: Any) -> Any:
+        if pid != _PRUNED_VALUE_PID:
+            raise pickle.UnpicklingError(f"unknown guards state persistent id {pid!r}")
+        return self._pruned
+
+
 def load_guards_state(guards_state: bytes) -> Any:
     try:
         import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
@@ -496,7 +517,7 @@ def load_guards_state(guards_state: bytes) -> Any:
     except ImportError:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
-        return pickle.loads(guards_state)
+        return _GuardsStateUnpickler(io.BytesIO(guards_state)).load()
 
 
 def load_guard_manager(
