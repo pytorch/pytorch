@@ -1159,7 +1159,7 @@
     {
       "Gb_type": "Import alias already bound",
       "Context": "{alias} for {module_name}: {offender}",
-      "Explanation": "The module alias {alias} for {module_name} is already bound to a {offender} in the globals of {scope}, the module of the frame being compiled.",
+      "Explanation": "The module alias {alias} for {module_name} is already bound to a {offender} in the globals of {scope}, the globals of the frame being compiled.",
       "Hints": [
         "Remove or rename the global {alias} from the globals of {scope}.",
         "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
