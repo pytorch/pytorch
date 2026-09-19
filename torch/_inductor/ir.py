@@ -10348,14 +10348,16 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = cls.find_device(tensor_args, example_output)
 
-        # find_device only comes back empty when there is no tensor in or out, so
-        # there is no device for the kernel to inherit and nothing to run on but the
-        # host. Torchbind methods and the print HOP get here, as does any other op
-        # that neither takes nor returns a tensor.
-        if not device:
+        # Default to CPU for torchbind methods or HOPs that don't produce tensors
+        if not device and (
+            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
+            or kernel is torch.ops.higher_order.print
+        ):
             device = torch.device("cpu")
 
         def create_direct_output(output: torch.Tensor) -> FallbackKernel:
+            if not device:
+                raise AssertionError("Not sure where to find device info")
             packed = cls(
                 cls.tensor_to_layout(output),
                 kernel,
@@ -10409,6 +10411,12 @@ class FallbackKernel(ExternKernelAlloc):
             return create_direct_output(example_output)
 
         else:
+            # No tensor in or out, so there is no device to inherit and nothing to
+            # run on but the host. An op that produces no output keeps None above --
+            # its placement is decided by the scheduler, and forcing a device there
+            # moves stream and event HOPs out of the stream block they belong to.
+            if not device:
+                device = torch.device("cpu")
             packed = cls(
                 MultiOutputLayout(device=device),
                 kernel,
