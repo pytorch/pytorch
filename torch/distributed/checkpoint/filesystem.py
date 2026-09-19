@@ -70,6 +70,152 @@ _metadata_fn: str = ".metadata"
 
 CURRENT_DCP_VERSION: Final[str] = "1.0.0"
 
+# ---------------------------------------------------------------------------
+# Restricted metadata unpickler (closes security gap: raw pickle.load →
+# restricted unpickler for DCP .metadata sidecar, matching the weights_only
+# protection already applied to tensor payloads on the same load path).
+#
+# The allowlist covers the dataclass types defined in
+# torch.distributed.checkpoint.metadata plus the Python / torch builtins
+# needed to reconstruct them.  Plugin authors who store custom types in
+# ``planner_data`` / ``storage_data`` can register them via
+# ``add_safe_metadata_globals()``.
+# ---------------------------------------------------------------------------
+
+_SAFE_METADATA_MODULES: dict[str, set[str]] = {}
+
+
+def _build_default_safe_modules() -> dict[str, set[str]]:
+    """Build the default allowlist of ``module -> {names}`` for metadata."""
+    from torch.distributed.checkpoint.metadata import (
+        BytesStorageMetadata,
+        ChunkStorageMetadata,
+        Metadata,
+        MetadataIndex,
+        StorageMeta,
+        TensorProperties,
+        TensorStorageMetadata,
+    )
+
+    return {
+        "torch.distributed.checkpoint.metadata": {
+            "Metadata",
+            "MetadataIndex",
+            "StorageMeta",
+            "TensorStorageMetadata",
+            "ChunkStorageMetadata",
+            "TensorProperties",
+            "BytesStorageMetadata",
+            "_MEM_FORMAT_ENCODING",
+        },
+        "torch.distributed.checkpoint._pg_transport": {
+            "_TensorMeta",
+            "_DTensorMeta",
+            "_ShardedTensorMeta",
+            "_StateDictMeta",
+        },
+        "torch.distributed._shard.sharded_tensor": {
+            "ShardMetadata",
+        },
+        "torch.distributed._shard.sharded_tensor.metadata": {
+            "ShardedTensorMetadata",
+        },
+        "torch.distributed.tensor": {
+            "_DTensorSpec",
+        },
+        "torch.utils._pytree": {
+            "TreeSpec",
+        },
+        "torch": {
+            "Size",
+            "dtype",
+            "layout",
+            "device",
+            "memory_format",
+        },
+        "builtins": {
+            "dict",
+            "list",
+            "tuple",
+            "set",
+            "frozenset",
+            "str",
+            "bytes",
+            "int",
+            "float",
+            "bool",
+            "complex",
+            "type",
+            "slice",
+            "range",
+            "Ellipsis",
+            "NoneType",
+        },
+        "collections": {"OrderedDict", "defaultdict"},
+        "collections.OrderedDict": {"__new__"},
+        "copy_reg": {"_reconstructor"},
+        "copyreg": {"_reconstructor"},
+    }
+
+
+_SAFE_METADATA_MODULES = _build_default_safe_modules()
+
+
+def add_safe_metadata_globals(
+    globals: dict[str, set[str]] | list[str],
+) -> None:
+    """Register additional classes as safe for DCP metadata deserialization.
+
+    This mirrors :func:`torch.serialization.add_safe_globals` but applies to
+    the DCP metadata unpickler.  Pass a mapping of ``module -> {names}`` or
+    a list of callables whose ``__module__`` and ``__qualname__`` will be
+    used.
+
+    Example::
+
+        add_safe_metadata_globals({
+            "my_package.my_planner": {"CustomPlannerData"},
+        })
+    """
+    if isinstance(globals, list):
+        mapping: dict[str, set[str]] = {}
+        for obj in globals:
+            mod = getattr(obj, "__module__", None)
+            name = getattr(obj, "__qualname__", None) or getattr(
+                obj, "__name__", None
+            )
+            if mod and name:
+                mapping.setdefault(mod, set()).add(name)
+        globals = mapping
+
+    for mod, names in globals.items():
+        _SAFE_METADATA_MODULES.setdefault(mod, set()).update(names)
+
+
+class _RestrictedMetadataUnpickler(pickle.Unpickler):
+    """Unpickler that only allows classes on the safe-metadata allowlist."""
+
+    def find_class(self, module: str, name: str) -> Any:
+        allowed_names = _SAFE_METADATA_MODULES.get(module, set())
+        if name in allowed_names:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"Blocked unpickling of {module}.{name} from DCP metadata. "
+            f"If this type is expected, register it via "
+            f"torch.distributed.checkpoint.filesystem."
+            f"add_safe_metadata_globals()."
+        )
+
+
+def _restricted_metadata_load(file: IO[bytes]) -> Any:
+    """Load a DCP metadata file using the restricted unpickler."""
+    return _RestrictedMetadataUnpickler(file).load()
+
+
+def _restricted_metadata_loads(data: bytes) -> Any:
+    """Load DCP metadata from bytes using the restricted unpickler."""
+    return _RestrictedMetadataUnpickler(io.BytesIO(data)).load()
+
 
 @dataclass
 class _StorageInfo:
@@ -935,7 +1081,7 @@ class FileSystemReader(StorageReader):
         rank = kwargs.get("rank")
         path = self._get_metadata_path(rank)
         with self.fs.create_stream(path, "rb") as metadata_file:
-            metadata = pickle.load(metadata_file)
+            metadata = _restricted_metadata_load(metadata_file)
 
         if getattr(metadata, "storage_meta", None) is None:
             metadata.storage_meta = StorageMeta()
