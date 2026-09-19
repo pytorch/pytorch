@@ -2413,11 +2413,14 @@ class InstructionTranslatorBase(
             )
         self.output.side_effects.store_global(variable, name, value)
 
-    # Cache note: This cache only exists for the duration of this
-    # InstructionTranslator - so it should be safe to do.
-    @cache_method
+    # Keyed by module_name alone, not the whole argument tuple as @cache_method
+    # would key it, so a later argument cannot silently split the memo. Per
+    # translator, as the decorator was, and written only past the alias check.
     def import_source(self, module_name: str) -> GlobalSource:
         """Create an alias to a module for use in guards"""
+        if (memo := self._import_source_memo.get(module_name)) is not None:
+            return memo
+
         if "torch_package" in module_name:
             value = torch.package.package_importer._package_imported_modules[
                 module_name
@@ -2439,7 +2442,9 @@ class InstructionTranslatorBase(
             )
         f_globals[alias] = value
         self.output.update_co_names(alias)
-        return GlobalSource(alias)
+        source = GlobalSource(alias)
+        self._import_source_memo[module_name] = source
+        return source
 
     def resolve_name(self, name: str, package: str, level: int) -> str:
         """
@@ -5503,6 +5508,8 @@ class InstructionTranslatorBase(
         )
         # Per-prefix record of the most recently generated pycode varname.
         self._pycode_last_varname: dict[str, str] = {}
+        # Module name -> the alias source import_source minted for it.
+        self._import_source_memo: dict[str, GlobalSource] = {}
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
