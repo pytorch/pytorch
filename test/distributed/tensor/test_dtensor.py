@@ -1425,7 +1425,7 @@ class DTensorMeshTest(DTensorTestBase):
                 placements=None,
             )
 
-        x = make_dtensor(1, 1, dtype=torch.bfloat16, device="cuda")
+        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=self.device_type)
 
         # Fails with AssertionError: P1972527564
         torch.cond(
