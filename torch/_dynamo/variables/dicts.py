@@ -111,6 +111,12 @@ class ConstDictVariable(VariableTracker):
 
     _nonvar_fields = {
         "_checking_python_constant",
+        # Reachability has to match what codegen emits, and codegen only
+        # ever emits self.items (removals set should_reconstruct_all rather
+        # than being recorded here). This is a construction-time snapshot,
+        # read only for keys that are still in self.items, so traversing it
+        # would make removed elements look reachable.
+        "original_items",
         *VariableTracker._nonvar_fields,
     }
 
