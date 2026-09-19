@@ -48,6 +48,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
     DTensorTestBase,
+    LocalDTensorContinuousTestBase,
     map_local_tensor_for_rank,
     NUM_DEVICES,
     with_comms,
@@ -76,7 +77,9 @@ class DummyMLP(torch.nn.Module):
             self.net2.bias.fill_(1.2)
 
 
-class DTensorTest(DTensorTestBase):
+class DTensorTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     def test_dtensor_constructor(self):
         device_mesh = self.build_device_mesh()
@@ -998,6 +1001,7 @@ class DTensorTest(DTensorTestBase):
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
+    base_class=LocalDTensorContinuousTestBase,
     skipped_tests=[
         # Async output in local mode is not supported
         "test_dtensor_async_output",
