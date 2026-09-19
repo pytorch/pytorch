@@ -4,13 +4,13 @@ import copy
 from collections import defaultdict
 
 import sympy as sp
+
 import torch
 import torch.fx as fx
 from torch.fx.experimental.shape_inference.infer_shape import infer_shape
 from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
-from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
