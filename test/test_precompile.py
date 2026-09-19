@@ -700,6 +700,33 @@ class TestPrecompile(TestCase):
                 with self.assertRaisesRegex(PrecompileError, "Regenerate the artifact"):
                     build()
 
+    def test_entry_binding_records_defaults(self):
+        from torch._precompile import _entry_binding
+
+        def step(model, x, scale=2.0, *, mode="sum"):
+            return model(x) * scale
+
+        def plain(model, x):
+            return model(x)
+
+        self.assertEqual(
+            _entry_binding(step), {"defaults": (2.0,), "kwdefaults": {"mode": "sum"}}
+        )
+        self.assertEqual(_entry_binding(plain), {"defaults": None, "kwdefaults": None})
+
+    def test_emit_multigraph_driver_source_is_a_complete_section(self):
+        import ast
+
+        from torch._precompile import _DRIVER_MAIN, _emit_multigraph_driver_source
+
+        source = _emit_multigraph_driver_source()
+        self.assertTrue(source.endswith(_DRIVER_MAIN))
+        body = ast.parse(source).body
+        kinds = [type(node).__name__ for node in body]
+        self.assertEqual(kinds, ["FunctionDef", "Assign", "If"])
+        self.assertEqual(body[0].name, "_build_multigraph_forward")
+        self.assertEqual(ast.unparse(body[1]), "forward = _build_multigraph_forward()")
+
     def test_decompositions_kwarg(self):
         # The decompositions table is threaded into make_fx during capture; a
         # custom decomposition is invoked and the result still matches eager.
