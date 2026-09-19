@@ -62,18 +62,31 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
    .. note::
 
-      With the default ``make_fx`` tracer, capture is non-strict. Control flow is
-      specialized to the example inputs, and shapes are static -- each size is baked in.
-      A nested example input is refused on both capture paths, and an unbacked capture
-      (below) also refuses to run inside another trace, whose fake mode would outrank the
-      one that path builds.
-      The exception is a tensor dim explicitly marked unbacked (inductor backend only)
-      with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call; such
-      a dim is captured as an unbacked symint, so one artifact serves any runtime size of
-      it, and a graph that needs to guard on it fails at capture. Each input's dtype and
-      device are specialized too (a runtime mismatch is rejected), and the inductor backend
-      additionally specializes on input memory format. See Note [precompile programming
-      model] in ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
+      With the default ``make_fx`` tracer, capture is non-strict and traces ``fn`` on FAKE
+      tensors. Python control flow is specialized to the example inputs, and shapes are
+      static -- each size is baked in. Tracing on fakes refuses, on BOTH capture paths, a
+      read of a traced tensor's data (``.data_ptr()``, ``.numpy()``), an example input a
+      fake tensor cannot represent (quantized) or whose metadata it silently drops (pinned,
+      mkldnn, sparse), and a nested one; and, on a STATIC capture, a data-dependent op
+      (``.item()``, ``.nonzero()``, a Python branch over a tensor value). It also FAILS,
+      rather than baking a wrong answer, on an op with no meta/fake kernel, and refuses to
+      run inside another trace, whose fake mode would outrank its own.
+      The exception to static shapes is a tensor dim explicitly marked unbacked (inductor
+      backend only) with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before
+      the call; such a dim is captured as an unbacked symint, so one artifact serves any
+      runtime size of it, and a graph that needs to guard on it fails at capture. Such an
+      unbacked capture also holds a data-dependent value symbolically -- it can capture an
+      ``.item()`` result or a ``.nonzero()``-sized intermediate that a static one refuses,
+      and fails if the computation must guard on that value (or if the op is one no
+      ``ShapeEnv`` can fake, e.g. ``aten.equal``). Each input's dtype and device are
+      specialized too (a runtime mismatch is rejected), and the inductor backend
+      additionally specializes on input memory format. A call served from the reloaded
+      artifact also IGNORES the serving process's ambient ``torch.autocast``: whatever
+      the capture ran under is already baked in, so autocast is neutralized for the
+      duration of the call and the call returns the capture's dtypes, not the dtypes the
+      same eager call returns inside that region -- so capture under the autocast you
+      want baked in. See Note [precompile programming model] in
+      ``torch/_precompile.py``. ``torch.compiler.precompile`` is distinct from
       ``torch._dynamo.config.caching_precompile`` (a ``torch.compile`` caching mode).
 
    If ``fn`` runs a backward, the artifact re-runs the whole forward and backward and
@@ -118,6 +131,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
    source of truth); ``cache`` only accelerates loading -- it carries only the compiled
    backend artifact (the Inductor bundle for ``backend="inductor"``; empty for
    ``backend="eager"``) and no weights. You pass the model(s) again at runtime.
+   Calling the result ignores this process's ambient ``torch.autocast``, so it returns
+   the capture's dtypes rather than the dtypes the same eager call returns inside that
+   region (see the autocast contract in the note above).
 
    .. warning::
 
