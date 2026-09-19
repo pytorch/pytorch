@@ -1158,6 +1158,11 @@ def _all_in_parens(string: str) -> bool:
 
 # pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
+    def padded_scatter_padding(self, name: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: padded_scatter_padding should be handled by CSEProxy"
+        )
+
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
         if (
@@ -3122,6 +3127,32 @@ class CSEProxy(DefaultHandler):
                 self.kernel.store_buffer_counts.get(name, 0) + 1
             )
         self.kernel.record_op_trace("store", (name, index, value, mode), {})
+
+    def padded_scatter_padding(self, name: str) -> None:
+        if name in V.graph.removed_buffers:
+            return
+        buffer = V.graph.name_to_buffer[name]
+        get_padding = getattr(buffer, "get_padded_scatter_padding", None)
+        if get_padding is None:
+            raise AssertionError(f"{name} is not a padded scatter buffer")
+        padding = get_padding()
+        codegen_padding = getattr(
+            self.kernel,
+            "codegen_padded_scatter_padding",
+            None,
+        )
+        if codegen_padding is None:
+            raise AssertionError(
+                f"{type(self.kernel).__name__} does not support padded scatter padding"
+            )
+        codegen_padding(
+            name,
+            padding.numel,
+            padding.index_var,
+            padding.output_index,
+            padding.predicate,
+            padding.value,
+        )
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)

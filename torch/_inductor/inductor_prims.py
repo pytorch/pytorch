@@ -56,6 +56,50 @@ def eager_force_stride(input_tensor: Tensor, stride) -> Tensor:
     return new_tensor
 
 
+@torch.library.custom_op(
+    "inductor_prims::padded_xdl_scale_scatter_",
+    mutates_args={"output"},
+    schema="(Tensor(a!) output, Tensor values, SymInt padded_rows, SymInt padded_cols, int logical_row_chunk, int physical_row_chunk, int xdl, int col_chunk, int col_inner) -> ()",
+)
+def padded_xdl_scale_scatter_(
+    output: Tensor,
+    values: Tensor,
+    padded_rows: int,
+    padded_cols: int,
+    logical_row_chunk: int,
+    physical_row_chunk: int,
+    xdl: int,
+    col_chunk: int,
+    col_inner: int,
+) -> None:
+    rows, cols = values.shape
+    output.fill_(127)
+    logical_rows = torch.arange(rows, device=values.device)[:, None]
+    logical_cols = torch.arange(cols, device=values.device)[None, :]
+    physical_rows = (
+        logical_rows // logical_row_chunk * physical_row_chunk
+        + logical_rows % logical_row_chunk
+    )
+    row_outer = physical_rows // (2 * xdl)
+    row_inner = physical_rows % (2 * xdl)
+    col_outer = logical_cols // col_chunk
+    col_inner_index = logical_cols % col_chunk
+    destination_offsets = (
+        (
+            (
+                (row_outer * (padded_cols // col_chunk) + col_outer) * col_inner
+                + col_inner_index % col_inner
+            )
+            * xdl
+            + row_inner % xdl
+        )
+        * 2
+        + col_inner_index // col_inner
+    ) * 2 + row_inner // xdl
+    torch._check(output.numel() == padded_rows * padded_cols)
+    output.view(-1)[destination_offsets.reshape(-1)] = values.reshape(-1)
+
+
 def eager_prepare_softmax(x: Tensor, dim: int) -> tuple[Tensor, Tensor]:
     amax = torch.amax(x, dim, keepdim=True)
     return amax, torch.sum(torch.exp(x - amax), dim, keepdim=True)
