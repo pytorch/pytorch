@@ -2709,23 +2709,30 @@ class TestPrecompile(TestCase):
         # whose _base is SPARSE is itself strided (so the capture-wide scan passes it) and
         # contiguous (so the torch.empty rebuild accepted it and captured), but the meta
         # converter refuses a view out of a sparse tensor -- which only the probe consults.
-        sparse_view = torch.randn(4, 4).to_sparse().coalesce().values()
+        # The "meta converter nyi" half pins THAT refusal: the first half alone is the
+        # shared _fakeify_input message the quantized cases above assert (with "quantized
+        # nyi in meta tensors"), so it cannot tell the probe's decision from an earlier
+        # one. ones(), not randn(): coalesce drops exact zeros, which would leave the
+        # leaf's only dim -- nnz -- decided by the draw.
+        sparse_view = torch.ones(4, 4).to_sparse().coalesce().values()
         mark_unbacked(sparse_view, 0)
         with self.assertRaisesRegex(
-            PrecompileError, "user input 0 cannot be represented as a fake tensor"
+            PrecompileError,
+            "user input 0 cannot be represented as a fake tensor.*meta converter nyi",
         ):
             _precompile_pair(lambda m, t: m(t) + 1, torch.nn.Identity(), sparse_view)
 
         # And the unmarked counterpart, which reaches the same helper on the unmarked-leaf
-        # branch (x carries the mark): invariant 1 claims that refusal for both paths.
+        # branch (x carries the mark): invariant 3 claims that refusal for both paths.
         with self.assertRaisesRegex(
-            PrecompileError, "user input 1 cannot be represented as a fake tensor"
+            PrecompileError,
+            "user input 1 cannot be represented as a fake tensor.*meta converter nyi",
         ):
             _precompile_pair(
                 lambda m, t, u: m(t) + u.sum(),
                 model,
                 x,
-                torch.randn(4, 4).to_sparse().coalesce().values(),
+                torch.ones(4, 4).to_sparse().coalesce().values(),
             )
 
         for marked_input in (False, True):

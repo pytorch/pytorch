@@ -972,10 +972,11 @@ def _fakeify_with_unbacked(
     pb_labels, user_labels = labels[: len(pb_flat)], labels[len(pb_flat) :]
     with fake_mode:
         fake_pb = [
-            _fakeify_input(fake_mode, t, lbl) for t, lbl in zip(pb_flat, pb_labels)
+            _fakeify_input(fake_mode, t, lbl)
+            for t, lbl in zip(pb_flat, pb_labels, strict=True)
         ]
         fake_user: list[object] = []
-        for leaf, per, label in zip(user_flat, marks, user_labels):
+        for leaf, per, label in zip(user_flat, marks, user_labels, strict=True):
             if not isinstance(leaf, torch.Tensor):
                 fake_user.append(leaf)
             elif not per:
