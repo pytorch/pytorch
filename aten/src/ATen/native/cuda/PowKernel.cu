@@ -168,12 +168,32 @@ void pow_tensor_scalar_kernel_impl(TensorIteratorBase& iter,
 }
 
 void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar) {
-  // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
+  // Adding zero before sqrt/rsqrt cancels the sign of -0.0 so
+  // pow(-0.0, +/-0.5) returns a positive result per IEEE-754.
   if (!exp_scalar.isComplex()) {
+    const auto common_dtype = iter.common_dtype();
     if (exp_scalar.equal(.5)) {
-      return sqrt_kernel_cuda(iter);
+      if (isComplexType(common_dtype)) {
+        return sqrt_kernel_cuda(iter);
+      }
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          ScalarType::Half, ScalarType::BFloat16, common_dtype, "pow_half_cuda", [&]() {
+            gpu_kernel(iter, []GPU_LAMBDA(scalar_t base) -> scalar_t {
+              return std::sqrt(base + scalar_t(0));
+            });
+          });
+      return;
     } else if (exp_scalar.equal(-0.5)) {
-      return rsqrt_kernel_cuda(iter);
+      if (isComplexType(common_dtype)) {
+        return rsqrt_kernel_cuda(iter);
+      }
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          ScalarType::Half, ScalarType::BFloat16, common_dtype, "pow_neg_half_cuda", [&]() {
+            gpu_kernel(iter, []GPU_LAMBDA(scalar_t base) -> scalar_t {
+              return ::rsqrt(base + scalar_t(0));
+            });
+          });
+      return;
     } else if (exp_scalar.equal(-1.0)) {
       return reciprocal_kernel_cuda(iter);
     }
