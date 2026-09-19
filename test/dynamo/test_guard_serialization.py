@@ -29,6 +29,7 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import (
     _Missing,
+    _NN_MODULE_STATE_ATTRS,
     CheckFunctionManager,
     CompileId,
     GuardsStatePickler,
@@ -1192,6 +1193,26 @@ class _ModuleWithDtypeAttr(torch.nn.Module):
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
     # Pickler-level: these drive GuardsStatePickler directly rather than
     # through a capture, so none of TestGuardSerialization's setup applies.
+
+    def test_module_bookkeeping_containers_are_never_registered_as_pruned(self):
+        # nn.Module.__getattr__ indexes _parameters/_buffers/_modules for every
+        # attribute outside __dict__, so a loaded module whose bookkeeping had
+        # been pruned raised TypeError on every parameter access.
+        m = torch.nn.Linear(2, 2)
+        pickler = GuardsStatePickler({id(m): m}, {}, {}, {}, io.BytesIO())
+        pickler.dump({"m": m})
+        for name in sorted(_NN_MODULE_STATE_ATTRS):
+            self.assertNotIn(id(m.__dict__[name]), pickler.missing_values, name)
+        self.assertIn(id(m.__dict__["_forward_hooks"]), pickler.missing_values)
+
+    def test_module_with_its_own_setstate_is_not_pruned(self):
+        # RNNBase.__setstate__ indexes self._all_weights, an unguarded exact
+        # list; a module whose __setstate__ is not nn.Module's is pickled whole.
+        lstm = torch.nn.LSTM(4, 4)
+        pickler = GuardsStatePickler({id(lstm): lstm}, {}, {}, {}, io.BytesIO())
+        pickler.dump({"m": lstm})
+        self.assertNotIn(id(lstm._all_weights), pickler.missing_values)
+        self.assertEqual(pickler.missing_values, {})
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding

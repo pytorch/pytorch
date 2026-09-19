@@ -4248,6 +4248,16 @@ def _is_interned_singleton(value: Any) -> bool:
     )
 
 
+# The exact-container bookkeeping nn.Module.__init__ installs: __getattr__
+# indexes the three dicts for every attribute outside __dict__ (parameters,
+# buffers, submodules) and state_dict/named_buffers read
+# _non_persistent_buffers_set. Hook OrderedDicts are not listed: they are pruned
+# unless a guard reads them, and nn.Module.__setstate__ only checks their presence.
+_NN_MODULE_STATE_ATTRS = frozenset(
+    {"_parameters", "_buffers", "_modules", "_non_persistent_buffers_set"}
+)
+
+
 class GuardsStatePickler(FunctionPicklerBase):
     def __init__(
         self,
@@ -4671,21 +4681,17 @@ class GuardsStatePickler(FunctionPicklerBase):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            for attr in obj.__dict__.values():
-                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                    continue
-                if id(attr) in self.guard_tree_values:
-                    continue
-                if callable(attr):
-                    continue
-                if _is_interned_singleton(attr):
-                    continue
-                self.missing_values[id(attr)] = attr
+            # A module with its own __setstate__ (RNNBase indexes _all_weights)
+            # would read a pruned attribute at load, so it is pickled whole. DDP
+            # is rebuilt through nn.Module.__setstate__ below, so it stays pruned.
+            is_ddp = isinstance(obj, torch.nn.parallel.DistributedDataParallel)
+            if is_ddp or type(obj).__setstate__ is torch.nn.Module.__setstate__:
+                self._prune_unguarded_attributes(obj)
 
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
-            if isinstance(obj, torch.nn.parallel.DistributedDataParallel):
+            if is_ddp:
                 return type(self)._unpickle_ddp_module, (obj.__getstate__(),)
 
             if type(obj).__qualname__ == type(obj).__name__:
@@ -4820,6 +4826,30 @@ class GuardsStatePickler(FunctionPicklerBase):
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
 
         return NotImplemented
+
+    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+        """Mark every ``__dict__`` value nothing guards as prunable.
+
+        Reaching a module through the guard tree does not mean its whole state
+        is needed, only the attributes a guard actually reads. The rest becomes
+        the _Missing sentinel, which is what keeps an unpicklable bystander (a
+        generator, a live iterator, a C handle) from taking the frame down.
+        What the module itself reads back at load stays: the containers
+        nn.Module.__getattr__ indexes, and everything on a module whose own
+        __setstate__ may read any attribute (the caller checks that).
+        """
+        for name, attr in obj.__dict__.items():
+            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                continue
+            if name in _NN_MODULE_STATE_ATTRS:
+                continue
+            if id(attr) in self.guard_tree_values:
+                continue
+            if callable(attr):
+                continue
+            if _is_interned_singleton(attr):
+                continue
+            self.missing_values[id(attr)] = attr
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
