@@ -66,7 +66,8 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
       tensors. Python control flow is specialized to the example inputs, and shapes are
       static -- each size is baked in; a control-flow HOP is refused rather than
       specialized when its branch choice is not already a Python constant
-      (``torch.while_loop``, or a ``torch.cond`` with a tensor / ``SymBool`` predicate),
+      (``torch.while_loop``, or a ``torch.cond`` with a tensor predicate -- a ``SymBool``
+      one arises only on the unbacked path, where it is refused too),
       while a ``torch.cond`` whose predicate IS a Python constant (e.g. a comparison of
       static sizes) short-circuits to the taken branch and specializes like any other
       Python ``if``. Tracing on fakes also
