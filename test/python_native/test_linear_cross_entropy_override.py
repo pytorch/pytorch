@@ -432,9 +432,10 @@ class TestLinearCrossEntropyOverride(TestCase):
 
         `fill_uninitialized_memory` is what gives this teeth: `torch.empty`
         otherwise tends to hand back zeroed pages, and the assertion would pass
-        whether or not the allocation is guarded. Deterministic mode is safe
-        here only because an empty batch returns before the chunk loop, whose
-        `index_add_` has no deterministic implementation.
+        whether or not the allocation is guarded. Deterministic mode disturbs
+        nothing else here: this backward has no scatter that would lack a
+        deterministic implementation, which `test_kernel_path_is_deterministic`
+        pins.
         """
         import torch.nn.modules.linear_cross_entropy as lce_module
 
