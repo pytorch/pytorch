@@ -1948,7 +1948,7 @@ def _checkpoint_without_reentrant_generator_impl(
     )
     error_on_nested_fx_trace = torch._dynamo.config.error_on_nested_fx_trace
     is_non_strict_tracing = torch.compiler._is_non_strict_tracing()
-    is_fx_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
+    is_fx_tracing = torch.fx._symbolic_trace._is_fx_tracing_tls.flag
 
     def recompute_fn(*args) -> None:
         # This will be called later during recomputation. This wrapping enables
