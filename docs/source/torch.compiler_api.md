@@ -106,8 +106,9 @@ format may change between releases without a deprecation cycle.
       Python ``if``. Tracing on fakes also
       refuses, on BOTH capture paths, an op with no meta/fake kernel, a read of a traced
       tensor's data (``.data_ptr()``, ``.numpy()``), an example input a fake tensor cannot
-      represent (quantized) or whose metadata it silently drops (pinned, mkldnn, sparse),
-      and a nested one; and, on a STATIC capture, a data-dependent op (``.item()``,
+      represent (quantized, a view out of a sparse tensor) or whose metadata it silently
+      drops (pinned, mkldnn, sparse), and a nested one; and, on a STATIC capture, a
+      data-dependent op (``.item()``,
       ``.nonzero()``, a Python branch over a tensor value). It also refuses to run inside
       another trace, whose fake mode would outrank its own.
       The exception to static shapes is a tensor dim explicitly marked unbacked with
