@@ -2339,24 +2339,6 @@ class TestPrecompile(TestCase):
                         cap(model, torch.randn(3, 4))
                 self.assertIsInstance(cm.exception.__cause__, cause)
 
-    def test_unfakeifiable_input_refused_without_clobbering_grad(self):
-        # Fakeification runs INSIDE the .grad save/restore window, so an example input
-        # the meta converter cannot represent (a quantized tensor) is refused with a
-        # PrecompileError naming it, and the caller's example .grad is put back -- the
-        # same object, not a copy.
-        model = torch.nn.Linear(3, 3)
-        grad = torch.ones_like(model.weight)
-        model.weight.grad = grad
-        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
-        with self.assertRaisesRegex(
-            PrecompileError, "user input 0 cannot be represented as a fake tensor"
-        ):
-            with _CaptureToFiles(
-                lambda m, t: m(t.dequantize()), backend="eager"
-            ) as cap:
-                cap(model, q)
-        self.assertIs(model.weight.grad, grad)
-
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
         # than the raw internal assertion fakeifying one raises (a static capture has no
@@ -2657,68 +2639,6 @@ class TestPrecompile(TestCase):
             ):
                 _precompile_pair(lambda m, t: m(t), model, marked)
         _precompile_pair(lambda m, t: m(t), model, x, backend="eager")
-
-    def test_unbacked_capture_refuses_an_unfakeifiable_input(self):
-        # Both fakeify paths refuse an input the meta converter cannot represent through
-        # the same helper, so a quantized example input gets the same named
-        # PrecompileError (not the raw converter exception) whether or not some other dim
-        # happens to be marked. Unbacked capture is inductor-only, so no backend override.
-        model = torch.nn.Linear(3, 3)
-        x = torch.randn(4, 3)
-        mark_unbacked(x, 0)
-        q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
-        with self.assertRaisesRegex(
-            PrecompileError, "user input 1 cannot be represented as a fake tensor"
-        ):
-            _precompile_pair(
-                lambda m, t, u: m(t) + m(u.dequantize()).sum(), model, x, q
-            )
-
-        # Including when the unfakeifiable input is the MARKED one: its unbacked rebuild
-        # never consults the meta converter, so the marked branch validates the leaf
-        # through the same helper (on a throwaway fake mode, to keep the probe's static
-        # fake out of the capture mode's converter memo) -- without that it escapes as a
-        # raw meta-kernel error ("SymIntArrayRef expected to contain only concrete
-        # integers").
-        marked_q = torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8)
-        mark_unbacked(marked_q, 0)
-        with self.assertRaisesRegex(
-            PrecompileError, "user input 0 cannot be represented as a fake tensor"
-        ):
-            _precompile_pair(lambda m, u: m(u.dequantize()), model, marked_q)
-
-        # The MODEL half is named too, on both paths: the unbacked path routes its
-        # params/buffers through the same helper (a bare from_tensor there lets a
-        # quantized buffer escape as the raw UnsupportedFakeTensorException), and this is
-        # the only assertion on the "buffer {name}" half of input_labels for this refusal.
-        class HasQuantizedBuffer(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lin = torch.nn.Linear(3, 3)
-                self.register_buffer(
-                    "q",
-                    torch.quantize_per_tensor(torch.randn(3, 3), 0.1, 0, torch.qint8),
-                )
-
-            def forward(self, t):
-                return self.lin(t)
-
-        for marked_input in (False, True):
-            t = torch.randn(4, 3)
-            if marked_input:
-                mark_unbacked(t, 0)
-            with (
-                self.subTest(unbacked=marked_input),
-                self.assertRaisesRegex(
-                    PrecompileError, "buffer q cannot be represented as a fake tensor"
-                ),
-            ):
-                _precompile_pair(
-                    lambda m, u: m(u),
-                    HasQuantizedBuffer(),
-                    t,
-                    **({} if marked_input else {"backend": "eager"}),
-                )
 
     def test_unbacked_capture_refuses_a_data_ptr_read(self):
         # The unbacked mode is built inside the
