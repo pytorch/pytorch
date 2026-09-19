@@ -1208,10 +1208,8 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
         fsdp_model(inp)
 
 
-class TestFSDPUseOrigParamsNoSync(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return 2
+class TestFSDPUseOrigParamsNoSync(FSDPTestContinuous):
+    world_size = 2
 
     @skip_if_lt_x_gpu(2)
     def test_no_sync_correctness(self):
