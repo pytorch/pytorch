@@ -1376,11 +1376,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # unguarded local-scope leaf as missing, so a bare dtype local poisoned
         # the tensors' dtype the same way.
         # A class is shared the same way: torch.Tensor is the pytype of every
-        # tensor payload, and the leaf loop has no callable filter.
+        # tensor payload, and the leaf loop has no callable filter. A <locals>
+        # class cannot be pickled by name, so it stays pruned.
+        class Local:
+            pass
+
         t = torch.randn(2)
         graph = types.SimpleNamespace(
             guards=[],
-            local_scope={"dt": torch.float32, "cfg": {"cls": torch.Tensor}, "t": t},
+            local_scope={
+                "dt": torch.float32,
+                "cfg": {"cls": torch.Tensor, "local": Local},
+                "t": t,
+            },
             global_scope={},
             guard_on_key_order=set(),
         )
@@ -1391,6 +1399,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(pickle_guards_state(state, builder)).output_graph
         self.assertIs(out.local_scope["dt"], torch.float32)
         self.assertIs(out.local_scope["cfg"]["cls"], torch.Tensor)
+        self.assertIsInstance(out.local_scope["cfg"]["local"], _Missing)
         self.assertEqual(out.local_scope["t"].dtype, torch.float32)
 
     @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
