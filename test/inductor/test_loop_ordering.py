@@ -19,6 +19,7 @@ from torch._inductor.codegen.triton import TritonScheduling
 from torch._inductor.graph import GraphLowering
 from torch._inductor.invert_expr_analysis import generate_inverse_formula
 from torch._inductor.scheduler import (
+    _iter_loop_state_nodes,
     _LoopMutationTracker,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
@@ -53,6 +54,7 @@ if HAS_GPU:
 
 class MockScheduler:
     available_buffer_names = ()
+    _loop_mutation_listener = None
 
     @staticmethod
     def get_backend(cls, *args):
@@ -308,7 +310,52 @@ class ImplDetailTest(MockSchedulerTest):
             outer.finish(rollback=True)
 
         self.assertIs(snode._body, original_body)
-        self.assertIsNone(snode._loop_mutation_listener)
+        self.assertIsNone(snode.scheduler._loop_mutation_listener)
+
+    def test_loop_mutation_tracker_does_not_eagerly_walk_fused_node(self):
+        snodes = [
+            SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
+            for _ in range(2)
+        ]
+        for order, snode in enumerate(snodes):
+            snode.min_order = snode.max_order = order
+            snode.min_input_distance = snode.max_input_distance = 0
+        fused = FusedSchedulerNode(V.graph.scheduler, snodes)
+
+        with (
+            mock.patch.object(fused, "get_nodes", wraps=fused.get_nodes) as get_nodes,
+            mock.patch(
+                "torch._inductor.scheduler._iter_loop_state_nodes",
+                wraps=_iter_loop_state_nodes,
+            ) as iter_nodes,
+        ):
+            tracker = _LoopMutationTracker.create((fused,))
+            try:
+                self.assertEqual(get_nodes.call_count, 0)
+                self.assertEqual(iter_nodes.call_count, 0)
+            finally:
+                tracker.finish(rollback=False)
+
+    def test_can_fuse_loop_state_tracker_cleanup_on_base_exception(self):
+        scheduler = mock.Mock(spec=Scheduler)
+        scheduler.available_buffer_names = ()
+        scheduler._loop_mutation_listener = None
+        snodes = [
+            SchedulerNode(scheduler, self._create_computed_buffer_ax2())
+            for _ in range(2)
+        ]
+        original_body = snodes[0]._body
+
+        def interrupt(*args, **kwargs):
+            snodes[0].apply_new_loop_order([1, 0])
+            raise KeyboardInterrupt("stop")
+
+        scheduler._can_fuse_impl.side_effect = interrupt
+        with self.assertRaisesRegex(KeyboardInterrupt, "stop"):
+            Scheduler.can_fuse(scheduler, *snodes)
+
+        self.assertIs(snodes[0]._body, original_body)
+        self.assertIsNone(scheduler._loop_mutation_listener)
 
     def test_expand_dimension_loop_state_rollback(self):
         snode = SchedulerNode(V.graph.scheduler, self._create_computed_buffer_ax2())
