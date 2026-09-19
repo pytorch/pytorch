@@ -80,7 +80,7 @@ it.
 #
 # ``fn`` is the WHOLE computation, e.g. ``lambda model, x: model(x)`` for inference
 # or ``lambda model, x, t: loss_fn(model(x), t).backward()`` for a training step
-# (the calls run in whatever grad mode the caller sets; a dynamo capture lowers the
+# (calls run in the caller's grad mode; with grad enabled, a dynamo capture lowers the
 # backward eagerly under ``training=True`` -- see the tracer note -- while a make_fx
 # capture traces THROUGH the backward, invariant 5).
 # Among the positional args, the nn.Module arguments have their parameters and
@@ -192,7 +192,7 @@ it.
 #    tracer note): a ``.backward()`` in ``fn`` graph-breaks, so at serve time the live
 #    autograd engine runs it through the compiled backward and does the accumulate
 #    itself; there is no harvested-output list (``training=True`` lowers that backward
-#    at capture even if ``fn`` never calls ``.backward()``, so serving never compiles).
+#    at capture even if ``fn`` never calls ``.backward()``).
 #    What matches make_fx: the in-place accumulate of the common path, frozen
 #    params keeping ``.grad = None``, and ``fn``'s own return value. What differs: the
 #    engine goes through AccumulateGrad, so tensor hooks and post-accumulate-grad hooks
@@ -200,8 +200,8 @@ it.
 #    reparametrizes the module onto fresh fake params, so the hook stays behind on the
 #    real one, and the scatter above never runs AccumulateGrad). And ``requires_grad``
 #    is part of the params' TENSOR_MATCH guards, so a param flipped at runtime is a loud
-#    guard miss on a standalone artifact (an installed one compiles the call fresh, with
-#    a warning) rather than make_fx's silent no-op (invariant 2).
+#    guard miss on a standalone artifact (an installed one compiles the call fresh)
+#    rather than make_fx's silent no-op (invariant 2).
 #
 # 6. Shapes are static by default (dynamic dims are opt-in via mark_unbacked, invariant
 #    3), each input's dtype/device is baked, and the inductor backend also specializes
