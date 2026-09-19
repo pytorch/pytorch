@@ -190,10 +190,9 @@ class StaticallyLaunchedTritonKernel:
         # function is bound to a single device, so when device_agnostic is set we keep
         # them per device and resolve the current device at launch time. The cubin
         # (device-agnostic) is retained so it can be loaded onto additional devices.
-        # CooR's intended model uses one current device per rank/process, which
-        # make_launcher loads eagerly. These dicts also support sequential reuse across
-        # devices, but lazy initialization for a previously unseen device is not
-        # thread-safe; callers must serialize its first use.
+        # These per-device dicts assume one thread per device for a given launcher (the
+        # single-process multi-device path is sequential in practice); concurrent
+        # first-launch on two new devices would need external locking.
         self.device_agnostic: bool = False
         self.functions: dict[int, int] = {}
         self.modules: dict[int, int] = {}
