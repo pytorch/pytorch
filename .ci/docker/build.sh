@@ -231,7 +231,7 @@ case "$tag" in
   pytorch-linux-noble-rocm-preview-py3.12)
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=13
-    ROCM_VERSION=10.1.0a20260903
+    ROCM_VERSION=10.2.0a20260916
     THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
     USE_MSLK=1
     TRITON=yes
@@ -312,6 +312,27 @@ case "$tag" in
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
+    ;;
+  pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.10-gcc13)
+    CUDA_VERSION=13.0.3
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=13
+    KATEX=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13)
+    CUDA_VERSION=13.2.2
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=13
+    KATEX=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13)
+    CUDA_VERSION=13.4.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=13
+    KATEX=yes
+    TRITON=yes
     ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
