@@ -14,7 +14,7 @@ import re
 import secrets
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from enum import Enum
 from itertools import chain, count
 from typing import Any, Literal, Protocol, TYPE_CHECKING
@@ -109,6 +109,162 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 pexpr = PythonPrinter().doprint
+
+
+def _constant_offload_targets() -> tuple[list[tuple[Any, int]], int]:
+    """Unique CUDA storages backing the graph constants, deduped by data pointer.
+
+    Constants are deduplicated by value, so several names can share one storage;
+    offloading per name would copy the same bytes repeatedly.
+    """
+    targets: list[tuple[Any, int]] = []
+    seen: OrderedSet[int] = OrderedSet()
+    for tensor in V.graph.constants.values():
+        if not isinstance(tensor, torch.Tensor) or tensor.device.type != "cuda":
+            continue
+        storage = tensor.untyped_storage()
+        ptr, nbytes = storage.data_ptr(), storage.nbytes()
+        if ptr == 0 or nbytes == 0 or ptr in seen:
+            continue
+        seen.add(ptr)
+        targets.append((storage, nbytes))
+    return targets, sum(nbytes for _, nbytes in targets)
+
+
+def _storage_bytes(storage: Any, device: str, offset: int, nbytes: int) -> torch.Tensor:
+    view = torch.empty(0, dtype=torch.uint8, device=device)
+    view.set_(storage, offset, (nbytes,), (1,))
+    return view
+
+
+@contextlib.contextmanager
+def _constants_offloaded_to_disk() -> Iterator[None]:
+    """Free the graph constants from device memory across the autotune block.
+
+    The block benchmarks kernels against freshly generated random tensors and
+    reads only size/stride/dtype/device off the constants, so their bytes are
+    not needed while it runs. They are parked in an mmap'd file rather than
+    anonymous host memory: file-backed pages are clean page cache the kernel can
+    evict and re-read, where anonymous pages are reclaimable only to swap and
+    have been observed to drive an OOM kill on an already memory-heavy lowering.
+    """
+    state = None
+
+    if torch.cuda.is_available() and not getattr(
+        # The constant-folding subgraph has no kernels to autotune and no
+        # allocator growth to relieve, so spilling it is pure wall clock.
+        V.graph,
+        "is_const_graph",
+        False,
+    ):
+        targets, total = _constant_offload_targets()
+        if targets:
+            # mem_get_info() reports the current device, which need not be the
+            # one the constants are on; gate against the card they occupy so the
+            # fraction scales with the right capacity.
+            device = targets[0][0].device
+            capacity = torch.cuda.mem_get_info(device)[1]
+            fraction = (
+                config.aot_inductor.autotune_offload_constants_min_device_fraction
+            )
+            if total >= fraction * capacity:
+                state = _spill_constants(targets, total)
+
+    try:
+        yield
+    finally:
+        # Captured before the restore's own handler, which would otherwise
+        # overwrite what sys.exc_info() reports.
+        block_failed = sys.exc_info()[0] is not None
+        if state is not None:
+            try:
+                _restore_constants(*state)
+            except Exception as exc:
+                # The spill file is the only copy of these bytes, and a partial
+                # restore leaves some constants at size zero -- codegen would then
+                # emit silently wrong results rather than fail. Nothing can
+                # recover that, so surface it as a clear fatal error instead of
+                # letting a bare exception escape the finally block.
+                log.exception(
+                    "Failed to restore %d offloaded constant storages to device",
+                    len(state[0]),
+                )
+                # Raising here when the block itself already failed would
+                # bury the original cause. A partial restore is still fatal, but
+                # the in-flight exception is the one worth surfacing.
+                if not block_failed:
+                    raise RuntimeError(
+                        "Graph constants could not be restored to device after "
+                        "the autotune offload; the graph is no longer usable"
+                    ) from exc
+
+
+def _spill_constants(
+    targets: list[tuple[Any, int]], total: int
+) -> tuple[list[tuple[Any, int]], list[int], Any] | None:
+    """Copy constants into an mmap'd file and free their device storage.
+
+    Returns None if the spill could not be completed, in which case no device
+    storage has been freed and lowering proceeds unchanged.
+    """
+    path = os.path.join(
+        tempfile.gettempdir(), f"inductor_const_spill_{os.getpid()}_{id(V.graph)}"
+    )
+    backing = None
+    try:
+        with dynamo_timed("offload_constants_spill", log_pt2_compile_event=True):
+            backing = torch.UntypedStorage.from_file(path, shared=True, nbytes=total)
+            # Unlink while the mapping holds the inode. The bytes stay readable
+            # and the space is reclaimed on process exit by any route, including
+            # the SIGKILL under which cleanup code would never run.
+            os.unlink(path)
+            offsets = []
+            offset = 0
+            # Copy everything before freeing anything: a failure partway through
+            # then leaves every constant intact on device.
+            for storage, nbytes in targets:
+                _storage_bytes(backing, "cpu", offset, nbytes).copy_(
+                    _storage_bytes(storage, "cuda", 0, nbytes)
+                )
+                offsets.append(offset)
+                offset += nbytes
+            for storage, _ in targets:
+                storage.resize_(0)
+            torch.cuda.empty_cache()
+    except (OSError, RuntimeError):
+        log.warning(
+            "Could not spill %.1f GiB of constants to %s; "
+            "continuing without the autotune offload",
+            total / 2**30,
+            path,
+            exc_info=True,
+        )
+        backing = None
+        return None
+
+    # Warning rather than info: this is an automatic, default-on behaviour that
+    # materially changes peak memory and adds wall clock, and the inductor logger
+    # sits at WARNING in the lowering harness, so info would be invisible to
+    # anyone debugging a run. Fires at most once per graph, and only for models
+    # large enough to clear the threshold.
+    log.warning(
+        "Offloaded %d constant storages (%.1f GiB) to disk for autotuning",
+        len(targets),
+        total / 2**30,
+    )
+    return (targets, offsets, backing)
+
+
+def _restore_constants(
+    targets: list[tuple[Any, int]], offsets: list[int], backing: Any
+) -> None:
+    with dynamo_timed("offload_constants_restore", log_pt2_compile_event=True):
+        for (storage, nbytes), offset in zip(targets, offsets):
+            storage.resize_(nbytes)
+            _storage_bytes(storage, "cuda", 0, nbytes).copy_(
+                _storage_bytes(backing, "cpu", offset, nbytes)
+            )
+    del backing
 
 
 def _rewrite_symbol_solution_for_int_codegen(expr: sympy.Expr) -> sympy.Expr:
@@ -2903,10 +3059,13 @@ class PythonWrapperCodegen(CodeGen):
             payload_fn=lambda: tuning_code,
         )
         # Execute the code to autotune kernels
-        try:
-            exec(tuning_code, scope)
-        except Exception as e:
-            raise RuntimeError(f"Failed to run autotuning code block: {e}") from e
+        with _constants_offloaded_to_disk():
+            try:
+                exec(tuning_code, scope)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to run autotuning code block: {e}"
+                ) from e
 
     def memory_plan(self):
         from .memory_planning import MemoryPlanner
