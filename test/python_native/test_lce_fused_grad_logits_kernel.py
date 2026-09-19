@@ -90,9 +90,11 @@ class TestFusedGradLogitsKernel(TestCase):
             self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
         else:
             self.assertEqual(g, want_g)
-        # The loss term, referenced to TORCH's statistics rather than to
-        # anything the kernel emitted, so an error inside it cannot be hidden
-        # by a cancelling error in the same kernel.
+        # The loss term against TORCH's statistics. This pins the DIFFERENCE
+        # only: the row max cancels out of it, and out of `g` as well, so what
+        # these see of the max is its effect on the row sum, not its value.
+        # Keeping `exp` in range is its other job, pinned separately by
+        # `test_a_lone_high_column_pins_the_row_max`.
         self.assertEqual(
             term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
         )
@@ -127,8 +129,8 @@ class TestFusedGradLogitsKernel(TestCase):
         [
             (1, 7),  # below one tile
             (4, 513),  # crosses the block width
-            (8, 2049),  # one column past a full staging group
-            (37, 4097),
+            (8, 2049),  # partial tiles inside one staging group
+            (37, 4097),  # one column past a full staging group
             (128, 32000),  # a realistic chunk, many staging groups
         ],
     )
@@ -192,7 +194,33 @@ class TestFusedGradLogitsKernel(TestCase):
             rtol=1e-5,
         )
 
-    def test_uniform_row_sums_to_the_class_count(self):
+    def test_a_lone_high_column_pins_the_row_max(self):
+        """The row max cancels out of both outputs algebraically -- shift it
+        by `d` and `log(l)` moves by `-d` against a target logit that moves the
+        same way -- so its one load-bearing job is keeping `exp` in range.
+        `test_large_magnitudes_do_not_overflow` exercises that with a uniformly
+        large row, where every lane carries a usable maximum. Here it sits
+        alone in the last thread's column, so the range depends on a single
+        partial surviving the cross-warp combine."""
+        num_rows, V = 4, 4096
+        logits = torch.zeros((num_rows, V), device="cuda", dtype=torch.float32)
+        # Column 511 is the last thread of the default 512-wide block, so its
+        # partial reaches the row max only through the cross-warp combine.
+        # exp(120) is inf in fp32, exp(0) is not.
+        logits[:, 511] = 120.0
+        _, row_scale, target = _inputs(num_rows, V)
+        g, term = self._run(logits, row_scale, target, torch.float32)
+        self.assertTrue(torch.isfinite(g).all())
+        self.assertTrue(torch.isfinite(term).all())
+        want_g, want_log_row_sum, want_shifted = _reference(
+            logits, row_scale, target, torch.float32
+        )
+        self.assertEqual(g, want_g, atol=1e-6, rtol=1e-5)
+        self.assertEqual(
+            term, row_scale * (want_log_row_sum - want_shifted), atol=1e-4, rtol=1e-5
+        )
+
+    def test_uniform_logits_give_the_log_class_count(self):
         num_rows, V = 4, 2048
         logits = torch.full((num_rows, V), 3.5, device="cuda", dtype=torch.float32)
         _, row_scale, target = _inputs(num_rows, V)
@@ -290,13 +318,16 @@ class TestFusedGradLogitsKernel(TestCase):
         self.assertTrue(torch.isfinite(term[[0, 1, 2, 4, 5]]).all())
 
     def test_zero_row_scale_gives_a_zero_gradient(self):
-        """An ignored row carries scale 0, and its whole gradient row -- target
-        column included -- must be exactly zero."""
+        """An ignored row carries scale 0, so its whole gradient row -- target
+        column included -- and its loss contribution must both be exactly zero.
+        The scale multiply is inside the kernel now that it forms the term, so
+        the loss side is kernel arithmetic rather than the caller's."""
         num_rows, V = 6, 300
         logits, row_scale, target = _inputs(num_rows, V)
         row_scale = torch.zeros_like(row_scale)
-        g, _ = self._run(logits, row_scale, target, torch.bfloat16)
+        g, term = self._run(logits, row_scale, target, torch.bfloat16)
         self.assertEqual(g, torch.zeros_like(g))
+        self.assertEqual(term, torch.zeros_like(term))
 
     def test_wider_row_stride(self):
         logits, row_scale, target = _inputs(24, 100)
@@ -308,7 +339,7 @@ class TestFusedGradLogitsKernel(TestCase):
             {},
             {"threads_per_block": 128},
             {"tiles_per_stage": 1},
-            {"threads_per_block": 1024, "tiles_per_stage": 8},
+            {"threads_per_block": 1024, "tiles_per_stage": 4},
         ],
     )
     def test_shape_knobs_do_not_change_the_result(self, meta):

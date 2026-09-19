@@ -16,12 +16,12 @@ Contract, per row ``n`` of the chunk, with ``m_n = max_v z[n, v]`` and
 than left to the caller, who would pay a subtract, a multiply and a reduction
 per chunk on ``(Bc,)`` data for it.
 
-Both halves of that difference carry the row max, and that is the point:
-``(m_n + log(l_n)) - z[n, T_hat_n]`` is the same number algebraically, but a
-row offset far from zero rounds both terms to ``m_n`` in fp32 and the
-difference collapses. Logits of 2**24 -- reachable from bf16 inputs of 4096 --
-make a loss of log(2) come out as 0. Shifted, each half is O(1) and the offset
-never enters.
+Both halves of that difference are shifted by the row max, and that is the
+point: the unshifted pair ``m_n + log(l_n)`` and ``z[n, T_hat_n]`` has the same
+difference algebraically, but a row offset far from zero rounds that pair to
+``m_n`` in fp32 and the difference collapses. Logits of 2**24 -- reachable from
+bf16 inputs of 4096 -- make a loss of log(2) come out as 0. Shifted, each half
+is O(1) and the offset never enters.
 
 The logits stay raw: nothing here mutates them, so the eager loop's in-place
 shift and ``exp_`` disappear along with their traffic, and the buffer can be
@@ -85,12 +85,13 @@ from torch._vendor.quack.reduce import block_reduce
 
 # Defaults for the kernel's two shape knobs, which a caller may override (see
 # `fused_grad_logits_into`). Measured by calling this kernel directly from a
-# captured CUDA graph, on H100 and B200 and in both dtypes, over Bc in
-# {1024, 2048, 4096} x V in {4096, 8192, 16384, 32000, 65536}: (512, 8) is both
-# faster and lower energy per call at all 28 points, by 1.4-12.2% and 3.3-8.5%
-# respectively. The stake end to end is smaller than that -- this kernel is
-# 4-25% of a chunked call and the rest is three cuBLAS GEMMs -- so it is worth
-# 0.1-2.9% of a call.
+# captured CUDA graph over seven (Bc, V) chunk shapes -- V in
+# {4096, 8192, 16384, 32000, 65536} at Bc = 4096, plus Bc in {1024, 2048} at
+# V = 32000 -- in both dtypes on an H100 and a B200, so 28 points: (512, 8) is
+# both faster and lower energy per call at every one, by 1.4-12.2% and
+# 3.3-8.5% respectively. The stake end to end is smaller than that -- this
+# kernel is 4-25% of a chunked call and the rest is three cuBLAS GEMMs -- so it
+# is worth 0.1-2.9% of a call.
 #
 # Legal ranges, as opposed to preferences: `threads_per_block` must be a
 # multiple of 32 and at most 1024, both because a CUDA block stops there and
@@ -337,7 +338,7 @@ def fused_grad_logits_into(
     ``threads_per_block``
         Block width, default 512. A multiple of 32, at most 1024.
     ``tiles_per_stage``
-        Column tiles staged per barrier in pass 2, default 4. At least 1.
+        Column tiles staged per barrier in pass 2, default 8. At least 1.
 
     Each combination compiles its own kernel, so a caller sweeping them pays one
     compile per point and hits the cache thereafter.
