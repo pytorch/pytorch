@@ -1303,6 +1303,64 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertIsNone(out.grad)
         self.assertEqual(out.shape, x.shape)
 
+    def test_symbolic_scalars_are_refused_as_package_errors(self):
+        # SymInt was refused with a RuntimeError while SymFloat and SymBool fell
+        # through to default pickling; all three are the same serialization
+        # limit and surface as the PackageError the bypass path understands.
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        env = ShapeEnv()
+        for sym in (
+            env.create_unbacked_symint(),
+            env.create_unbacked_symfloat(),
+            env.create_unbacked_symbool(),
+        ):
+            with self.assertRaisesRegex(
+                PackageError, f"Cannot serialize {type(sym).__name__} "
+            ):
+                GuardsStatePickler({id(sym): sym}, {}, {}, {}, io.BytesIO()).dump(
+                    {"s": sym}
+                )
+        # An unguarded symbolic LOCAL is a bystander: pickle_guards_state
+        # registers it and it is pruned before the refusal is reached.
+        s, x = env.create_unbacked_symint(), torch.randn(2)
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"s": s, "x": x},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(x): x}, value_guarded_containers={}
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertIsInstance(out.output_graph.local_scope["s"], _Missing)
+
+    def test_a_guarded_dynamic_fake_is_refused_not_loaded_broken(self):
+        # The sizes of a guarded dynamic-shaped fake's meta template are
+        # symbolic and in no guard tree: empty_like keeps the fake's symbolic
+        # sizes, so the template's size() tuple carries SymInts. Pruning them
+        # would dump a payload that dies at load in empty_strided, so the
+        # refusal must stay unconditional.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            ShapeEnv,
+            StatelessSymbolicContext,
+        )
+
+        mode = FakeTensorMode(shape_env=ShapeEnv())
+        ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC]
+        )
+        fake = mode.from_tensor(torch.randn(4, 3), symbolic_context=ctx)
+        with self.assertRaisesRegex(PackageError, "Cannot serialize SymInt"):
+            GuardsStatePickler({id(fake): fake}, {}, {}, {}, io.BytesIO()).dump(
+                {"t": fake}
+            )
+
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
         # torch.float32 registered the one dtype object as missing, and every

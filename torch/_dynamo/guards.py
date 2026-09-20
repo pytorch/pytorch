@@ -4734,7 +4734,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             and hasattr(obj, "_torch_handler_name")
         ):
             if not hasattr(obj, "_torch_unpickler"):
-                raise AssertionError(
+                # A reducer invariant, not a third-party value we cannot carry:
+                # raise PackageError so pickle_guards_state's broad catch, which
+                # rewraps everything else as a bypass, stays honest.
+                raise torch._dynamo.exc.PackageError(
                     f"sympy Function subclass {obj} must have _torch_unpickler attribute"
                 )
             return obj._torch_unpickler, (obj._torch_handler_name,)
@@ -4747,8 +4750,17 @@ class GuardsStatePickler(FunctionPicklerBase):
         ):
             return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
 
-        elif isinstance(obj, torch.SymInt):
-            raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
+        elif isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # Unconditional on purpose. A bystander in a PRUNABLE position (a
+            # local_scope leaf, a direct nn.Module attribute) is registered in
+            # missing_values and pruned by the branch above before this one is
+            # reached. Anything that does arrive here -- the sizes of a guarded
+            # dynamic-shaped tensor's payload, or a scalar nested in a container
+            # carried verbatim -- is refused, because no position reached here
+            # can hold a sentinel safely.
+            raise torch._dynamo.exc.PackageError(
+                f"Cannot serialize {type(obj).__name__} {obj} (node: {obj.node})"
+            )
 
         elif isinstance(obj, types.MappingProxyType):
             return type(self)._unpickle_mapping_proxy, (obj.copy(),)
@@ -4837,14 +4849,14 @@ class GuardsStatePickler(FunctionPicklerBase):
             if obj is not torch.distributed.fsdp._fully_shard.FSDPModule:
                 original_type = obj.__mro__[2]
                 if not issubclass(original_type, torch.nn.Module):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"Expected nn.Module subclass, got {original_type}"
                     )
                 if (
                     original_type
                     not in torch.distributed.fsdp._fully_shard._fully_shard.get_cls_to_fsdp_cls()
                 ):
-                    raise AssertionError(
+                    raise torch._dynamo.exc.PackageError(
                         f"{original_type} not found in FSDP cls-to-fsdp-cls mapping"
                     )
                 return type(self)._unpickle_fsdp_module_type, (original_type,)
