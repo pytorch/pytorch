@@ -110,7 +110,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import vt_is_iterable
+from .object_protocol import pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1259,6 +1259,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 # Use math.fma if constants
                 return None
+
+        @register(math.gcd)
+        def handle_gcd(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
+
+        @register(math.lcm)
+        def handle_lcm(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
@@ -2883,19 +2911,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
-            device_index = device.index
-            if device_index is None:
-                from torch.fx.experimental.proxy_tensor import _coor_enabled
-
-                # Under compile-on-one-rank the index must stay None so the runtime
-                # resolves it per rank and one artifact serves them all.
-                if not _coor_enabled():
-                    device_index = 0
-
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device_index),
+                (device.type, device.index or 0),
                 {},
             )
             return ConstantVariable.create(None)
