@@ -1266,8 +1266,9 @@ class _ModuleWithDtypeAttr(torch.nn.Module):
 
 
 class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
-    # Pickler-level: these drive GuardsStatePickler directly rather than
-    # through a capture, so none of TestGuardSerialization's setup applies.
+    # Pickler-level: these drive GuardsStatePickler, or the loader it feeds,
+    # directly rather than through a capture, so none of
+    # TestGuardSerialization's setup applies.
 
     def test_module_bookkeeping_containers_are_never_registered_as_pruned(self):
         # nn.Module.__getattr__ indexes _parameters/_buffers/_modules for every
