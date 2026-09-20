@@ -1238,6 +1238,14 @@ class _PipelineWithSetstate:
         self.n = len(self.stages)
 
 
+class _SlottedHolder:
+    __slots__ = ("tag", "__dict__")
+
+    def __init__(self):
+        self.tag = "slot"
+        self.extra = [1]
+
+
 class _RebuiltFromNewargs:
     def __init__(self, a):
         self.a = a
@@ -1592,6 +1600,35 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler({id(p): p}, {}, {}, {}, buf).dump({"p": p})
         out = load_guards_state(buf.getvalue())["p"]
         self.assertEqual((out.stages, out.n), (["a", "b"], 2))
+
+    def test_shared_value_is_pruned_only_inside_the_pruned_receiver(self):
+        # The pruned holder is rebuilt from a filtered copy of its own __dict__,
+        # so the list it shares with a pipeline that is pickled whole stays real
+        # where the pipeline's __setstate__ reads it back, in either pickle order.
+        for order in ("holder first", "pipeline first"):
+            shared = ["a", "b"]
+            p = _PipelineWithSetstate()
+            p.stages, p.n = shared, 2
+            h = _HolderWithGenerator()
+            h.data = shared
+            state = {"h": h, "p": p} if order == "holder first" else {"p": p, "h": h}
+            buf = io.BytesIO()
+            GuardsStatePickler(
+                {id(h): h, id(h.cfg): h.cfg, id(p): p}, {}, {}, {}, buf
+            ).dump(state)
+            out = load_guards_state(buf.getvalue())
+            self.assertEqual((out["p"].stages, out["p"].n), (["a", "b"], 2), order)
+            self.assertIsInstance(out["h"].data, _Missing, order)
+            self.assertIsInstance(out["h"].it, _Missing, order)
+
+    def test_slotted_object_is_pickled_whole(self):
+        # A receiver with __slots__ carries state outside __dict__, which the
+        # filtered-__dict__ rebuild would drop, so it is not pruned at all.
+        obj = _SlottedHolder()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(obj): obj}, {}, {}, {}, buf).dump({"o": obj})
+        out = load_guards_state(buf.getvalue())["o"]
+        self.assertEqual((out.tag, out.extra), ("slot", [1]))
 
     def test_object_rebuilt_from_newargs_is_pickled_whole(self):
         # __getnewargs__ feeds cls.__new__ through the same pickler, so a pruned
