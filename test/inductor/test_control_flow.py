@@ -2114,15 +2114,9 @@ class ScanModels:
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
 
+    # A pure reduction: one carry leaf and no per-step output, so the flat output of
+    # the while_loop decomposition is a one-element pack.
     class ScanReduceOnly(torch.nn.Module):
-        """A pure reduction: one carry leaf and no per-step output.
-
-        The scan's total flat output is then a single tensor, the shape whose
-        while_loop decomposition used to leave the `getitem` users of the scan node
-        hanging off the replacement value (`<built-in function getitem> is not an
-        OpOverload` while lowering).
-        """
-
         def forward(self, scan_op, initial, xs):
             def step(acc, x):
                 return acc + x.sin(), ()
