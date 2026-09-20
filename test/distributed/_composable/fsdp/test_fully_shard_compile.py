@@ -23,22 +23,20 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
+from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.utils._triton import has_triton
 
 
-device_type = torch.device(get_devtype())
-
 
 class Mod(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super().__init__()
 
         self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(28 * 28, 1024, device=device_type),
-            torch.nn.Linear(1024, 1024, device=device_type),
-            torch.nn.Linear(1024, 4096, device=device_type),
+            torch.nn.Linear(28 * 28, 1024, device=device),
+            torch.nn.Linear(1024, 1024, device=device),
+            torch.nn.Linear(1024, 4096, device=device),
         )
 
     def forward(self, x):
@@ -68,10 +66,10 @@ class TestFullyShardCompileCompute(FSDPTest):
         orig_trace_rules_check = torch._dynamo.trace_rules.check
         torch.distributed.barrier()
         torch._dynamo.trace_rules.check = patched_trace_rules_check
-        model = MLP(4).to(device_type)
+        model = MLP(4).to(self.device_type)
         fully_shard(model)
         model.compile()
-        out = model(torch.randn((4, 4), device=device_type))
+        out = model(torch.randn((4, 4), device=self.device_type))
         out.sum().backward()
         torch.distributed.barrier()
         torch._dynamo.trace_rules.check = orig_trace_rules_check
@@ -92,11 +90,11 @@ class TestFullyShardCompileCompute(FSDPTest):
         """
         torch._dynamo.reset()
         counters.clear()
-        model = MLP(4).to(device_type)
+        model = MLP(4).to(self.device_type)
         ref_model = copy.deepcopy(model)
         fully_shard(model)
         fully_shard(ref_model)
-        inp = torch.randn((4, 4), device=device_type)
+        inp = torch.randn((4, 4), device=self.device_type)
 
         # Eager reference
         ref_out = ref_model(inp)
@@ -133,7 +131,7 @@ class TestFullyShardCompileCompute(FSDPTest):
         # grad._local_tensor is a view of a 1-D flat gradient buffer. Dynamo
         # must not reuse param's symbolic context for the grad.
         torch._dynamo.reset()
-        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.float32
         )
@@ -141,13 +139,13 @@ class TestFullyShardCompileCompute(FSDPTest):
         with torch.device("meta"):
             model = nn.Conv2d(3, 47, 3, padding=1)
         fully_shard(model, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=False)
-        model.to_empty(device=device_type)
+        model.to_empty(device=self.device_type)
         with torch.no_grad():
             for p in model.parameters():
                 p.uniform_(-0.01, 0.01)
 
         opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-        x = torch.randn(4, 3, 8, 8, device=device_type, dtype=torch.bfloat16)
+        x = torch.randn(4, 3, 8, 8, device=self.device_type, dtype=torch.bfloat16)
 
         # Eager warmup
         model(x).sum().backward()
@@ -166,7 +164,7 @@ class TestFullyShardCompileCompute(FSDPTest):
 
         dim, tp_size = 16, 2
         mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (self.world_size // tp_size, tp_size),
             mesh_dim_names=("dp", "tp"),
         )
@@ -178,9 +176,9 @@ class TestFullyShardCompileCompute(FSDPTest):
         )
 
         class RowwiseLinear(torch.nn.Module):
-            def __init__(self, dim: int):
+            def __init__(self, dim: int, device):
                 super().__init__()
-                self.proj = nn.Linear(dim, dim, bias=False, device=device_type)
+                self.proj = nn.Linear(dim, dim, bias=False, device=device)
 
             def forward(self, x):
                 return self.proj(x).clone()
@@ -193,7 +191,7 @@ class TestFullyShardCompileCompute(FSDPTest):
             return Shard(0)
 
         for compile_model in (False, True):
-            model = RowwiseLinear(dim)
+            model = RowwiseLinear(dim, self.device_type)
             parallelize_module(model, tp_mesh, {"proj": RowwiseParallel()})
             if compile_model:
                 model.compile(backend="eager")
@@ -208,7 +206,7 @@ class TestFullyShardCompileCompute(FSDPTest):
             x = torch.randn(
                 2,
                 dim // tp_size,
-                device=device_type,
+                device=self.device_type,
                 dtype=torch.bfloat16,
             )
             y = model(x)
@@ -233,7 +231,7 @@ class TestFullyShardCompile(FSDPTest):
             (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            device_type,  # device: torch.device,
+            self.device_type,  # device: torch.device,
             None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
@@ -281,13 +279,13 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(x, ref_x)
 
     def test_dynamo_recompiles_on_fsdp_layers(self, device):
-        m = Mod()
+        m = Mod(self.device_type)
         for name, child in m.encoder.named_children():
             if isinstance(child, torch.nn.Linear):
                 new_child = torch.compile(child)
                 setattr(m.encoder, name, new_child)
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
-        inp = torch.randn(32, 784, device=device_type)
+        inp = torch.randn(32, 784, device=self.device_type)
         m(inp)
 
 
