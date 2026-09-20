@@ -792,6 +792,7 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda(self):
         with torch.profiler.profile(profile_memory=True) as p:
@@ -889,6 +890,7 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
         )
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_with_stream(self):
         streams = [torch.cuda.Stream() for _ in range(3)]
@@ -945,6 +947,7 @@ class TestProfilerTreeCUDA(_TestProfilerTreeBase):
         )
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
