@@ -577,7 +577,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             expected = f(out, idx, vals, persistent)
 
-        _, total_gpu = torch.accelerator.get_memory_info()
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
 
         out_bytes = output_size * 4
         baseline_peak = out_bytes + N * 8 + N * 4 + persist_n * 4 + out_bytes
@@ -665,7 +667,9 @@ class TestPartitionedScatterOpt(TestCase):
         with torch.no_grad():
             expected = f(*args)
 
-        _, total_gpu = torch.accelerator.get_memory_info()
+        _, total_gpu = (
+            torch.xpu.mem_get_info() if GPU_TYPE == "xpu" else torch.cuda.mem_get_info()
+        )
 
         # Each out dies right after its own scatter, so the peak at every
         # index_put is the three inputs plus that node's 20 MB output.
