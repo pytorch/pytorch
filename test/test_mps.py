@@ -1185,6 +1185,12 @@ class TestMPS(TestCaseMPS):
         self._run_mixed_mps_ops()
         self._run_mixed_mps_ops_threaded()
 
+    def test_multithreaded_ops(self):
+        # Cold caches: also exercises concurrent lazy population of the shader
+        # library's pipeline-state and function-name caches.
+        # See https://github.com/pytorch/pytorch/issues/197805
+        self._run_mixed_mps_ops_threaded()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
