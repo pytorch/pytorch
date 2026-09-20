@@ -462,12 +462,13 @@ Tensor computeFlatten(
     const std::optional<ScalarType>& outputType,
     at::Device device) {
   std::vector<int64_t> outputShapeVec;
-  for (const auto dim : c10::irange(outputShape.size())) {
-    outputShapeVec.push_back(outputShape[dim].AsNode<LongImm>()->value());
+  outputShapeVec.reserve(outputShape.size());
+  for (const auto& dim : outputShape) {
+    outputShapeVec.push_back(dim.AsNode<LongImm>()->value());
   }
   std::vector<ArgValue> reshapeInputs;
   reshapeInputs.push_back(inputs[0]);
-  reshapeInputs.emplace_back(outputShapeVec);
+  reshapeInputs.emplace_back(std::move(outputShapeVec));
   return computeReshape(
       reshapeInputs, outputShape, outputStrides, outputType, device);
 }
@@ -478,6 +479,7 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     throw std::runtime_error("Empty input list is passed to aten::cat");
   }
   std::vector<BufHandle> bufInputs;
+  bufInputs.reserve(bufList.size());
   std::vector<BufHandle> nonEmptyInputs;
   for (auto buf : bufList) {
     bufInputs.push_back(buf);

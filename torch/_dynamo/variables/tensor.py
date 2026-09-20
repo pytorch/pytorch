@@ -65,7 +65,7 @@ from ..exc import (
 )
 from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, TypeSource
+from ..source import AttrSource
 from ..utils import (
     cmp_name_to_op_mapping,
     fqn,
@@ -85,6 +85,8 @@ from .base import (
     AttributeMutationNew,
     GetSet,
     Method,
+    readonly_setter,
+    unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
 )
@@ -316,8 +318,11 @@ class TensorVariable(VariableTracker):
         for k in ("_size", "stride", "is_contiguous"):
             if k not in specialized_props:
                 setattr(self, k, None)
+        # class_type is not resynced: a non-traceable tensor subclass lives only on
+        # the VariableTracker, so the fake tensor would resolve it to torch.Tensor.
         for k, v in specialized_props.items():
-            setattr(self, k, v)
+            if k != "class_type":
+                setattr(self, k, v)
 
     def _get_fake_version(self) -> int | None:
         """Get the current version of self's fake tensor, or None if unavailable."""
@@ -394,7 +399,9 @@ class TensorVariable(VariableTracker):
         proxy = tx.output.create_proxy(
             "call_function", op_fn, (self.as_proxy(), other.as_proxy()), {}
         )
-        return wrap_fx_proxy_cls(type(self), tx, proxy)
+        # Getting here means no __torch_function__ intercepted the comparison, so the
+        # result is a plain tensor even when self models a subclass.
+        return wrap_fx_proxy_cls(TensorVariable, tx, proxy)
 
     @staticmethod
     def specialize(value: torch.Tensor) -> TensorSpecializedProps:
@@ -750,15 +757,6 @@ class TensorVariable(VariableTracker):
                     f"Unknown property {name} during speculating backward, dynamo will insert contiguous call ahead and speculate it again"
                 )
 
-        if name == "__class__":
-            # Carry provenance on the class, mirroring BuiltinVariable.call_type.
-            # A sourced class self-guards when observed downstream (e.g.
-            # `w.__class__ is SomeType`), which keeps type observation sound even
-            # when the input's own class guard is relaxed (see
-            # VariableBuilder.wrap_tensor and ACT input polymorphism).
-            source = self.source and TypeSource(self.source)
-            return VariableTracker.build(tx, self.python_type(), source)
-
         handler = getattr(self, f"method_attr_{name}", None)
         result = handler(tx) if handler is not None else None
 
@@ -778,7 +776,17 @@ class TensorVariable(VariableTracker):
             )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
-            result.source = AttrSource(self.source, name)
+            if result.is_python_constant():
+                # ConstantVariable.create(None) is a process-wide singleton, and
+                # method_attr_grad hands it back for a pending `p.grad = None`; a
+                # source written onto it leaks into every later compile. Non-constants
+                # keep the in-place write: .data's tracker is AttributeMutationNew,
+                # which __init__ rejects a source for.
+                result = result.clone(
+                    source=AttrSource(self.source, name), source_location=None
+                )
+            else:
+                result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -1241,6 +1249,28 @@ class TensorVariable(VariableTracker):
             )
         return None
 
+    def method_is_pinned(
+        self,
+        tx: "InstructionTranslatorBase",
+        device: VariableTracker | None = None,
+    ) -> ConstantVariable | None:
+        # ATen is_pinned() is always false for non-CPU tensors. CPU pinning can
+        # vary without changing Dynamo's tensor metadata guards, so leave it to
+        # the generic path. Tensor subclasses can override is_pinned through
+        # __torch_dispatch__, so preserve dispatch for them too.
+        no_device = device is None or (
+            isinstance(device, ConstantVariable) and device.value is None
+        )
+        example_value = self.proxy.node.meta.get("example_value")
+        if (
+            no_device
+            and self.device is not None
+            and self.device.type != "cpu"
+            and not is_traceable_wrapper_subclass(example_value)
+        ):
+            return VariableTracker.build(tx, False)
+        return None
+
     def method_type(
         self,
         tx: "InstructionTranslatorBase",
@@ -1666,12 +1696,8 @@ class TensorVariable(VariableTracker):
                     {},
                 ),
             )
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                "only integer tensors of a single element can be converted to an index"
-            ],
+        raise_type_error(
+            tx, "only integer tensors of a single element can be converted to an index"
         )
 
     def nb_int_impl(
@@ -2442,6 +2468,7 @@ class TensorVariable(VariableTracker):
         "is_floating_point": Method(method_is_floating_point),
         "is_inference": Method(method_is_inference),
         "is_complex": Method(method_is_complex),
+        "is_pinned": Method(method_is_pinned),
         "is_contiguous": Method(method_is_contiguous),
         "type": Method(method_type),
         "as_subclass": Method(method_as_subclass),
@@ -2751,6 +2778,18 @@ class TensorVariable(VariableTracker):
         )
 
 
+def _symnode_proxy(name: str) -> Method:
+    def handler(
+        self: "SymNodeVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._proxy_method(tx, name, args, kwargs)
+
+    return Method(handler)
+
+
 class SymNodeVariable(VariableTracker):
     """
     Represents a symbolic scalar, either int, float or bool.  This is most commonly used to
@@ -2867,7 +2906,7 @@ class SymNodeVariable(VariableTracker):
                 case_name="constrain_as_size_example",
             )
 
-    def call_method(
+    def _proxy_method(
         self,
         tx: "InstructionTranslatorBase",
         name: str,
@@ -2884,6 +2923,42 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def int_(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.nb_int_impl(tx)
+
+    # Named instance methods on SymInt / SymFloat. Arithmetic dunders are
+    # number slots. Named int_ so this does not shadow Python's __int__.
+    tp_methods = {
+        "as_integer_ratio": _symnode_proxy("as_integer_ratio"),
+        "bit_length": _symnode_proxy("bit_length"),
+        "conjugate": _symnode_proxy("conjugate"),
+        "has_hint": _symnode_proxy("has_hint"),
+        "hex": _symnode_proxy("hex"),
+        "is_integer": _symnode_proxy("is_integer"),
+        "__int__": Method(int_),
+    }
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Unlisted names keep the generic FX-proxy path so getattr still
+        # dispatches through call_method (_has_custom_call_method).
+        method = self.lookup_tp_method(name)
+        if method is not None:
+            result = method(self, tx, name, args, kwargs)
+            if result is not None:
+                return result
+        return self._proxy_method(tx, name, args, kwargs)
 
     def nb_index_impl(
         self,
@@ -2917,11 +2992,6 @@ class SymNodeVariable(VariableTracker):
                 {},
             ),
         )
-
-    def method___int__(
-        self, tx: "InstructionTranslatorBase", *args: Any, **kwargs: Any
-    ) -> VariableTracker:
-        return self.nb_int_impl(tx)
 
     def nb_add_impl(
         self,
@@ -3276,13 +3346,15 @@ class NumpyNdarrayVariable(TensorVariable):
         )
         return NumpyNdarrayVariable.create(tx, proxy)
 
+    # numpy's array_getsetlist leaves T read-only; real/imag/flat do have setters,
+    # but they write the array in place and the VT is a functional graph proxy.
     tp_getset = {
-        "ndim": GetSet(_get_ndim, None),
-        "itemsize": GetSet(_get_itemsize, None),
-        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T")),
-        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real")),
-        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag")),
-        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat")),
+        "ndim": GetSet(_get_ndim, readonly_setter),
+        "itemsize": GetSet(_get_itemsize, readonly_setter),
+        "T": GetSet(lambda s, tx: s._get_numpy_attr(tx, "T"), readonly_setter),
+        "real": GetSet(lambda s, tx: s._get_numpy_attr(tx, "real"), unmodeled_setter),
+        "imag": GetSet(lambda s, tx: s._get_numpy_attr(tx, "imag"), unmodeled_setter),
+        "flat": GetSet(lambda s, tx: s._get_numpy_attr(tx, "flat"), unmodeled_setter),
     }
 
     def tp_getattro_impl(
@@ -3668,6 +3740,16 @@ class DataPtrVariable(VariableTracker):
             context=f"tp_richcompare_impl {self} {op} {other}",
             explanation="Dynamo can only trace data pointer comparisons "
             "when it can prove both operands have the same data pointer.",
+            hints=[],
+        )
+
+    def nb_bool_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        """DataPtr nb_bool: mirrors long_bool, but the address is runtime-only."""
+        unimplemented(
+            gb_type="Data pointer truth value",
+            context=f"nb_bool_impl {self}",
+            explanation="Dynamo cannot decide the truth value of a data pointer "
+            "because the address is only known at runtime.",
             hints=[],
         )
 
