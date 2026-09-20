@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import copy
 import os
 import types
@@ -77,6 +78,16 @@ class OpaqueScaleFactor(CustomClassBase):
 
 
 register_custom_class(OpaqueScaleFactor, typ="constant", hoist=True)
+
+
+@contextlib.contextmanager
+def scoped_op(ns, schema, impl):
+    """Yields a throwaway `ns::op` overload, with `impl` used as its fake impl too."""
+    with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+        lib.define(f"op{schema}")
+        lib.impl("op", impl, "CompositeExplicitAutograd")
+        torch.library.register_fake(f"{ns}::op", impl, lib=lib)
+        yield getattr(torch.ops, ns).op.default
 
 
 @instantiate_parametrized_tests
@@ -2073,6 +2084,81 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(counter, 1)
             self.assertEqual(actual, expected)
 
+    def _run_replace_by_example(self, op, repl, fn, x, pre_grad=False):
+        test_pass = PatternMatcherPass()
+
+        @register_graph_pattern(CallFunction(op, KeywordArg("x")), pass_dict=test_pass)
+        def _(match: Match, x):
+            with V.fake_mode:
+                match.replace_by_example(repl, [x], run_functional_passes=False)
+
+        def custom_pass(graph):
+            test_pass.apply(graph)
+
+        if pre_grad:
+            with inductor_config.patch(
+                pre_grad_custom_pass=custom_pass, pre_grad_pass_timing="early"
+            ):
+                return torch.compile(fn)(x)
+        return torch.compile(fn, options={"post_grad_custom_post_pass": custom_pass})(x)
+
+    @parametrize("pre_grad", [False, True])
+    @inductor_config.patch(fx_graph_remote_cache=False)
+    def test_replace_by_example_packed_single_output(self, pre_grad):
+        schema = "(Tensor x) -> (Tensor, Tensor)"
+        with scoped_op("_test_pm_packed", schema, lambda x: (x + 1, x + 2)) as op:
+
+            def repl(a):
+                return (a * 3,)
+
+            def fn(x):
+                return op(x)[0] + 1
+
+            x = torch.randn(4, 4)
+            out = self._run_replace_by_example(op, repl, fn, x, pre_grad=pre_grad)
+            self.assertEqual(out, x * 3 + 1)
+
+    def test_replace_by_example_packed_single_output_tensor_list(self):
+        with scoped_op(
+            "_test_pm_list", "(Tensor x) -> Tensor[]", lambda x: [x + 1]
+        ) as op:
+
+            def repl(a):
+                return (a * 3,)
+
+            def fn(x):
+                return op(x)[0] + 1
+
+            x = torch.randn(4, 4)
+            out = self._run_replace_by_example(op, repl, fn, x)
+            self.assertEqual(out, x * 3 + 1)
+
+    def test_replace_by_example_packed_multiple_outputs(self):
+        schema = "(Tensor x) -> (Tensor, Tensor)"
+        with scoped_op("_test_pm_multi", schema, lambda x: (x + 1, x + 2)) as op:
+
+            def repl(a):
+                return (a * 3, a * 4)
+
+            def fn(x):
+                a, b = op(x)
+                return a + b
+
+            x = torch.randn(4, 4)
+            out = self._run_replace_by_example(op, repl, fn, x)
+            self.assertEqual(out, x * 3 + x * 4)
+
+    def test_replace_by_example_single_output_stays_one_to_one(self):
+        def repl(a):
+            return (a.relu(),)
+
+        def fn(x):
+            return torch.sin(x) * 2
+
+        x = torch.randn(4, 4)
+        out = self._run_replace_by_example(aten.sin.default, repl, fn, x)
+        self.assertEqual(out, x.relu() * 2)
+
     def test_addmm_dtype_mismatch(self):
         a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
         a = a.to(dtype=torch.float16)
@@ -3696,80 +3782,6 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
             run_case(1)
             run_case(2)
-
-    def test_replace_by_example_packed_single_output(self):
-        # A replacement graph that returns a one-element tuple, for a match whose
-        # value is packed and unpacked by `getitem`. The `getitem` users have to be
-        # rewired onto the replacement's value; leaving them on it produces
-        # `getitem(<tensor>, 0)`, which then fails to lower. A one-element pack is
-        # what any `replace_by_example` whose replacement returns a single-element
-        # tuple produces -- `scan`'s while_loop decomposition (one carry leaf and no
-        # per-step output) and `triton_kernel_wrapper_functional` among them.
-        with torch.library._scoped_library("_test_pm_packed", "FRAGMENT") as lib:
-            lib.define("two_outs(Tensor x) -> (Tensor, Tensor)")
-            lib.impl("two_outs", lambda x: (x + 1, x + 2), "CompositeExplicitAutograd")
-
-            @torch.library.register_fake("_test_pm_packed::two_outs", lib=lib)
-            def _two_outs_fake(x):
-                return torch.empty_like(x), torch.empty_like(x)
-
-            test_pass = PatternMatcherPass()
-
-            @register_graph_pattern(
-                CallFunction(
-                    torch.ops._test_pm_packed.two_outs.default, KeywordArg("x")
-                ),
-                pass_dict=test_pass,
-            )
-            def two_outs_to_packed_single(match: Match, x):
-                def repl(a):
-                    return (a * 3,)
-
-                with V.fake_mode:
-                    match.replace_by_example(repl, [x], run_functional_passes=False)
-
-            def custom_pass(graph: torch.fx.Graph):
-                test_pass.apply(graph)
-
-            def fn(x):
-                return torch.ops._test_pm_packed.two_outs.default(x)[0] + 1
-
-            x = torch.randn(4, 4)
-            compiled_fn = torch.compile(
-                fn, options={"post_grad_custom_post_pass": custom_pass}
-            )
-            self.assertEqual(compiled_fn(x), x * 3 + 1)
-
-    def test_replace_by_example_single_output_stays_one_to_one(self):
-        # The other half of the dispatch: a match that is *not* packed, replaced by
-        # a graph that happens to return a one-element tuple, is still a 1:1
-        # replacement -- the match's users consume its value directly, so the
-        # packed-return surgery must not fire.
-        test_pass = PatternMatcherPass()
-
-        @register_graph_pattern(
-            CallFunction(aten.add.Tensor, KeywordArg("x"), KeywordArg("y")),
-            pass_dict=test_pass,
-        )
-        def add_to_packed_mul(match: Match, x, y):
-            def repl(a, b):
-                return (a * b,)
-
-            with V.fake_mode:
-                match.replace_by_example(repl, [x, y], run_functional_passes=False)
-
-        def custom_pass(graph: torch.fx.Graph):
-            test_pass.apply(graph)
-
-        def fn(x, y):
-            return (x + y).relu()
-
-        x = torch.randn(4, 4)
-        y = torch.randn(4, 4)
-        compiled_fn = torch.compile(
-            fn, options={"post_grad_custom_post_pass": custom_pass}
-        )
-        self.assertEqual(compiled_fn(x, y), (x * y).relu())
 
     def test_scalar_workaround_arg_survives_specific_match(self):
         def src_pattern(x, dim):
