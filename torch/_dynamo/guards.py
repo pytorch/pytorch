@@ -4267,11 +4267,13 @@ def _pickles_by_default(obj: Any) -> bool:
     Attribute pruning is only sound for that protocol. A custom __reduce_ex__
     (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
     __getnewargs__(_ex) reads attributes no guard named and gets the sentinel
-    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned).
+    instead (newargs ride the same pickler and reach ``cls.__new__`` pruned), and
+    a class with __slots__ anywhere in its MRO carries state outside __dict__.
     """
     cls = type(obj)
     return (
-        cls.__reduce_ex__ is object.__reduce_ex__
+        not any("__slots__" in vars(c) for c in cls.__mro__)
+        and cls.__reduce_ex__ is object.__reduce_ex__
         and cls.__reduce__ is object.__reduce__
         and getattr(cls, "__getstate__", None) is getattr(object, "__getstate__", None)
         and not hasattr(cls, "__setstate__")
@@ -4280,8 +4282,18 @@ def _pickles_by_default(obj: Any) -> bool:
     )
 
 
+def _is_torch_type(cls: type) -> bool:
+    """Whether ``cls`` or any base of it is torch's own: top-level package
+    ``torch``, which also covers a module named exactly ``torch``. Types from
+    other packages (torch_xla, torchrec) are user state to the pruner."""
+    return any(
+        str(getattr(c, "__module__", "")).partition(".")[0] == "torch"
+        for c in cls.__mro__
+    )
+
+
 # Module prefixes of the DTensor structural types the attribute pruner leaves
-# alone (see _prune_unguarded_attributes).
+# alone (see _keeps_attribute).
 _DTENSOR_MODULES = ("torch.distributed.tensor", "torch.distributed.device_mesh")
 
 
@@ -4914,29 +4926,25 @@ class GuardsStatePickler(FunctionPicklerBase):
             id(obj) in self.guard_tree_values
             and _instance_dict(obj) is not None
             and not inspect.isfunction(obj)
-            and str(getattr(type(obj), "__module__", "")).partition(".")[0] != "torch"
+            and type(obj).__qualname__ == type(obj).__name__
+            and not _is_torch_type(type(obj))
             and _pickles_by_default(obj)
             and not pytree.is_constant_class(type(obj))
             and not is_opaque_constant_type(type(obj))
         ):
-            # Any object the guard tree reached, not just an nn.Module: a guarded
-            # train pipeline or dataloader wrapper was pickled whole, so one
+            # Any object the guard tree reached, not only an nn.Module, so one
             # unguarded attribute several levels down (a live generator, a
-            # process group) took the entire frame with it. Deliberately LAST,
-            # so every specific reducer above (methods, cells, ops) gets first
-            # refusal; a by-name function falls through the isfunction branch
-            # and is excluded here, since its __dict__ is never serialized. A
-            # class (mappingproxy), a python module (its branch returns), an
-            # nn.Module and a Tensor (their own pickle protocol) never get here.
-            # Deliberately USER objects only: pruning is safe when nothing reads
-            # the pruned attribute on the way back, which does not hold for
-            # torch's structural types (a DTensorSpec's fields rebuild the spec
-            # although no guard names each one; a tensor subclass carries its
-            # spec in __dict__). A pytree-registered or opaque constant class is
-            # excluded for the same reason from the guard side: EQUALS_MATCH
-            # keeps the object itself and compares it by value at run time, so
-            # a pruned field would make the rebuilt guard miss forever.
-            self._prune_unguarded_attributes(obj)
+            # process group) no longer takes the frame with it. LAST, so every
+            # specific reducer above gets first refusal (a by-name function
+            # never gets here: its __dict__ does not travel). Rebuilt from a
+            # filtered copy of its own __dict__ rather than by registering the
+            # values globally, so the sentinel never reaches another receiver
+            # that shares one of them and reads it back at load. USER objects
+            # only: torch's structural types (a DTensorSpec rebuilds itself from
+            # fields no guard names) and pytree-registered or opaque constants
+            # (EQUALS_MATCH compares the object by value at run time) travel
+            # whole, and a local class falls through to the loud refusal below.
+            return type(obj).__new__, (type(obj),), self._pruned_state(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
             obj, torch.distributed.distributed_c10d.Work
@@ -4972,44 +4980,56 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         return NotImplemented
 
-    def _prune_unguarded_attributes(self, obj: Any) -> None:
-        """Mark every ``__dict__`` value nothing guards as prunable.
+    def _keeps_attribute(self, obj: Any, name: str, attr: Any) -> bool:
+        """Whether a guarded object's ``__dict__`` entry travels as is.
 
         Reaching an object through the guard tree does not mean its whole state
         is needed, only the attributes a guard actually reads. The rest becomes
         the _Missing sentinel, which is what keeps an unpicklable bystander (a
         generator, a live iterator, a C handle) from taking the frame down.
         What the object itself reads back at load stays: for a module, the
-        containers in _NN_MODULE_STATE_ATTRS. Precondition: the callers have
-        checked that no custom __setstate__/__reduce__ reads a pruned attribute
-        at load (DDP qualifies because _unpickle_ddp_module rebuilds it through
-        nn.Module.__setstate__).
+        containers in _NN_MODULE_STATE_ATTRS.
         """
-        is_module = isinstance(obj, torch.nn.Module)
-        for name, attr in (_instance_dict(obj) or {}).items():
-            if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                continue
-            if is_module and name in _NN_MODULE_STATE_ATTRS:
-                continue
-            if id(attr) in self.guard_tree_values:
-                continue
-            if callable(attr):
-                continue
-            if _is_shared_constant(attr):
-                continue
-            if str(getattr(type(attr), "__module__", "")).startswith(_DTENSOR_MODULES):
-                # A DTensor structural value (a Placement, a DeviceMesh) may be
-                # the very object a DTensorSpec elsewhere in the state rebuilds
-                # itself from, and pruning it by id would put the sentinel
-                # there. Only those: any other torch-typed bystander (a
-                # GradScaler whose __getstate__ asserts) stays prunable.
-                continue
-            # Registration is global and by id: an attribute pruned here is the
-            # sentinel wherever else the same object appears, including inside
-            # the state of a receiver excluded from pruning by _pickles_by_default.
-            # Only __dict__ is walked: a bystander in a __slots__ slot of a
-            # receiver that also has a __dict__ is still pickled. Known limits.
-            self.missing_values[id(attr)] = attr
+        if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+            return True
+        if isinstance(obj, torch.nn.Module) and name in _NN_MODULE_STATE_ATTRS:
+            return True
+        if id(attr) in self.guard_tree_values or callable(attr):
+            return True
+        if str(getattr(type(attr), "__module__", "")).startswith(_DTENSOR_MODULES):
+            # A DTensor structural value (a Placement, a DeviceMesh) may be the
+            # very object a DTensorSpec elsewhere in the state rebuilds itself
+            # from: on a module it is registered by id and would become the
+            # sentinel there, and a user object keeps it readable. Only those:
+            # any other torch-typed bystander (a GradScaler whose __getstate__
+            # asserts) stays prunable.
+            return True
+        return _is_shared_constant(attr)
+
+    def _prune_unguarded_attributes(self, obj: torch.nn.Module) -> None:
+        """Register every module attribute nothing guards as prunable.
+
+        Registration is global and by id, so the attribute is the sentinel
+        wherever else the same object appears. Precondition: the caller has
+        checked that the module's __setstate__ is nn.Module's (DDP qualifies
+        because _unpickle_ddp_module rebuilds it through nn.Module.__setstate__).
+        """
+        for name, attr in obj.__dict__.items():
+            if not self._keeps_attribute(obj, name, attr):
+                self.missing_values[id(attr)] = attr
+
+    def _pruned_state(self, obj: Any) -> dict[str, Any]:
+        """The state a guarded user object is rebuilt from: its ``__dict__`` with
+        every unguarded attribute replaced by the sentinel. Scoped to this one
+        receiver, so a value it shares with an object that is pickled whole (one
+        with its own __setstate__, say) stays real where that object reads it
+        back at load."""
+        return {
+            name: attr
+            if self._keeps_attribute(obj, name, attr)
+            else _Missing("unguarded attribute")
+            for name, attr in (_instance_dict(obj) or {}).items()
+        }
 
 
 def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
