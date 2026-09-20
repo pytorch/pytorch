@@ -613,8 +613,8 @@ class TestFlyDSLTemplate(TestCase):
                 self.assertIn(".mark_layout_dynamic()", code)
                 self.assertNotIn("mat2.transpose(0, 1)", code)
                 self.assertRegex(
-                code, r"tensor_args\s*=\s*\(\s*output\s*,\s*mat1\s*,\s*mat2\s*\)"
-            )
+                    code, r"tensor_args\s*=\s*\(\s*output\s*,\s*mat1\s*,\s*mat2\s*\)"
+                )
                 self.assertIn("_inductor_tensor_arg(arg) for arg in tensor_args", code)
                 self.assertIn(".run(", code)
                 self.assertIn("TILE_M: fx.Constexpr", code)

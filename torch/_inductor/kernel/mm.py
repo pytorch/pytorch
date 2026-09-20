@@ -1403,10 +1403,11 @@ def _get_rocm_mxfp_v2_format(
         return None
     if mat_a.get_dtype() != mat_b.get_dtype():
         return None
-    return {
+    formats: dict[torch.dtype, MXFPFormat] = {
         torch.float8_e4m3fn: "mxfp8",
         torch.float4_e2m1fn_x2: "mxfp4",
-    }.get(mat_a.get_dtype())
+    }
+    return formats.get(mat_a.get_dtype())
 
 
 def get_flydsl_mxfp_template_kwargs(

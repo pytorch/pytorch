@@ -306,7 +306,8 @@ def _get_mxfp_candidates(
     mxfp_format: MXFPFormat, exhaustive: bool
 ) -> list[FlyDSLGemmConfig]:
     from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
-        GEMM_DTYPE_MXFP4, GEMM_DTYPE_MXFP8,
+        GEMM_DTYPE_MXFP4,
+        GEMM_DTYPE_MXFP8,
     )
 
     dtype_id = GEMM_DTYPE_MXFP4 if mxfp_format == "mxfp4" else GEMM_DTYPE_MXFP8
@@ -324,7 +325,9 @@ def _get_mxfp_candidates(
             "USE_HALF_TILE_INTERLEAVED": [False, True],
         }
         candidates = [
-            FlyDSLGemmConfig(**dict(zip(selections, values)))
+            FlyDSLGemmConfig(
+                **cast(FlyDSLGemmConfigDict, dict(zip(selections, values)))
+            )
             for values in product(*selections.values())
         ]
     else:
