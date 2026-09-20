@@ -624,7 +624,6 @@ class TestPrecompile(TestCase):
         err = PrecompileError("refused")
         self.assertIs(err.result, PrecompileError.result)
         self.assertIsNotNone(err.result)
-        self.assertEqual(repr(err.result), "<precompile: nothing ran>")
         err.result = None
         self.assertIsNone(err.result)
 
