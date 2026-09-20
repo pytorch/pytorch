@@ -4210,9 +4210,10 @@ def _get_unsupported_types() -> tuple[type, ...]:
         # A concrete backend -- ProcessGroupNCCL, FakeProcessGroup -- is bound as
         # a subclass of Backend, NOT of ProcessGroup, so listing ProcessGroup
         # alone let an unguarded one fail the whole frame with "cannot pickle".
-        # Backend is also the torch.distributed.Backend extension point, so a
-        # Python subclass carrying instance state is covered too, deliberately:
-        # it cannot be pickled either, and nothing rebuilds it at load.
+        # The C++ Backend is also the Python backend extension point (a Python
+        # class subclasses it through its pybind trampoline), so a subclass
+        # carrying instance state is covered too, deliberately: it cannot be
+        # pickled either, and nothing rebuilds it at load.
         ret += (
             torch._C._distributed_c10d.ProcessGroup,
             torch._C._distributed_c10d.Backend,
