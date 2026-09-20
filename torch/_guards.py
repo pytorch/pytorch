@@ -1094,6 +1094,8 @@ class TracingContext:
             return None
         from torch._functorch._aot_autograd.schemas import BackendFwMetadata
         return BackendFwMetadata(self.fw_metadata)
+
+    @staticmethod
     def try_get() -> TracingContext | None:
         return getattr(_TLS, "tracing_context", None)
 
