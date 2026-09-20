@@ -30,7 +30,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 class _TestClipGradNormBase(FSDPTest):
     def _test_clip_grad_norm(
         self,
-        device_type: str,
         max_norm: float | int,
         norm_type: float | int,
         ref_model: nn.Module,
@@ -41,7 +40,7 @@ class _TestClipGradNormBase(FSDPTest):
         dp_mesh: DeviceMesh | None = None,
     ):
         vector_norm_fn = functools.partial(torch.linalg.vector_norm, ord=norm_type)
-        dp_mesh = dp_mesh or init_device_mesh(device_type, (self.world_size,))
+        dp_mesh = dp_mesh or init_device_mesh(self.device_type, (self.world_size,))
         torch.manual_seed(42 + dp_mesh.get_local_rank() + 1)
         for _ in range(10):
             ref_optim.zero_grad()
@@ -105,14 +104,11 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
 
     @skip_if_lt_x_gpu(2)
     def test_clip_grad_norm_1d(self, device):
-        # A bare device type (without index) resolves to each rank's current
-        # device, while the injected `device` is the primary device on every rank.
-        device_type = torch.device(device).type
         for norm_type in (2, 1, float("inf")):
             torch.manual_seed(42)
             model_args = ModelArgs(dropout_p=0.0)
             model = Transformer(model_args)
-            ref_model = replicate(copy.deepcopy(model).to(device_type))
+            ref_model = replicate(copy.deepcopy(model).to(self.device_type))
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
             for module in model.modules():
                 if isinstance(module, TransformerBlock):
@@ -120,10 +116,10 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
             fully_shard(model)
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
             inp = torch.randint(
-                0, model.model_args.vocab_size, (3, 16), device=device_type
+                0, model.model_args.vocab_size, (3, 16), device=self.device_type
             )
             self._test_clip_grad_norm(
-                device_type, 1, norm_type, ref_model, ref_optim, model, optim, inp
+                1, norm_type, ref_model, ref_optim, model, optim, inp
             )
 
 
@@ -138,11 +134,10 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     @skipIfRocmArch(MI350_ARCH)
     def test_clip_grad_norm_2d(self, device):
-        device_type = torch.device(device).type
         for norm_type in (2, 1, 3, float("inf")):
             dp_size = 2
             global_mesh = init_device_mesh(
-                device_type,
+                self.device_type,
                 (dp_size, self.world_size // dp_size),
                 mesh_dim_names=("dp", "tp"),
             )
@@ -152,7 +147,8 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
             # has some more significant numeric differences from the TP
             model = MLPStack(16, with_seq_parallel=True)
             ref_model = replicate(
-                copy.deepcopy(model).to(device_type), process_group=dp_mesh.get_group()
+                copy.deepcopy(model).to(self.device_type),
+                process_group=dp_mesh.get_group(),
             )
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
             model.parallelize(
@@ -162,9 +158,8 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
                 reshard_after_forward=True,
             )
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-            inp = torch.randn(2, 16, device=device_type)
+            inp = torch.randn(2, 16, device=self.device_type)
             self._test_clip_grad_norm(
-                device_type,
                 0.5,
                 norm_type,
                 ref_model,
