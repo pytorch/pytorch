@@ -1696,6 +1696,29 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _offending_value_path(state, holder.cfg.lock, roots),
         )
 
+    def test_pickle_guards_state_names_a_global_after_the_portable_pruning(self):
+        # With no guards every guard is portable, so pickle_guards_state empties
+        # global_scope before dumping; the unpicklable value is still reachable
+        # through another attribute of the graph, and the snapshot taken before
+        # the pruning is what lets the error name the global binding.
+        holder = types.SimpleNamespace(
+            cfg=types.SimpleNamespace(it=(i for i in range(3)))
+        )
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={},
+            global_scope={"CFG": holder},
+            guard_on_key_order=set(),
+            deep=types.SimpleNamespace(a=types.SimpleNamespace(b=holder)),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={}, value_guarded_containers={}
+        )
+        with self.assertRaisesRegex(
+            PackageError, r"reached via: global_scope\['CFG'\]\.cfg\.it$"
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+
     def test_offending_value_path_is_found_by_identity(self):
         from torch._dynamo.guards import _offending_value_path
 
