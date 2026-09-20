@@ -89,7 +89,6 @@ class _NewObjEx:
     # A baked-global fixture whose reduce (__getnewargs_ex__ + dict state) emits a
     # ``_rebuild(...)`` call, used by test_rebuild_helper_spliced_and_runs_in_composed_module
     # to check the composed module splices and runs the _rebuild helper.
-
     def __new__(cls, a, b):
         obj = object.__new__(cls)
         obj.a = a
@@ -137,7 +136,6 @@ class _MatMul(torch.nn.Module):
     # addmm is an autocast-to-bf16 op, so a float32 input under torch.autocast engages
     # autocast and bakes the casts into the graph -- the setup the _DisableAutocast_ test
     # needs (a Linear's addmm behaves the same way).
-
     def __init__(self):
         super().__init__()
         self.l = torch.nn.Linear(4, 3)
@@ -764,6 +762,85 @@ class TestAOTCompileToPython(TestCase):
 
         src = "import torch\nprint(torch.__version__)\n"
         self.assertEqual(namespace_module_names([src, src]), [src, src])
+
+    def test_namespace_module_names_renames_the_del_pair_and_unpacked_targets(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # The two shapes real Inductor modules use that the collector treats specially:
+        # the ``async_compile`` / ``del async_compile`` pair (renamed TOGETHER, unlike in
+        # _module_level_names, which drops del'd names) and tuple-unpacked targets.
+        src = textwrap.dedent(
+            """
+            from torch._inductor.async_compile import AsyncCompile
+            async_compile = AsyncCompile()
+            kernel, other = async_compile.pair()
+            del async_compile
+            def call(args):
+                return kernel(other(args[0]))
+            """
+        )
+        (renamed,) = namespace_module_names([src])
+        self.assertIn("async_compile_s0 = AsyncCompile()", renamed)
+        self.assertIn("del async_compile_s0", renamed)
+        self.assertIn("kernel_s0, other_s0 = async_compile_s0.pair()", renamed)
+        self.assertIn("return kernel_s0(other_s0(args[0]))", renamed)
+        self.assertIn(
+            "from torch._inductor.async_compile import AsyncCompile\n", renamed
+        )
+
+    def test_namespace_module_names_raises_on_a_module_level_compound_binding(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        src = textwrap.dedent(
+            """
+            import torch
+            if torch.backends.mkldnn.is_available():
+                kernel = torch.ones
+            def call(args):
+                return kernel(args[0])
+            """
+        )
+        with self.assertRaisesRegex(NotImplementedError, "compound statement binds"):
+            namespace_module_names([src, src])
+
+    def test_namespace_module_names_raises_on_a_target_shadowed_in_a_nested_scope(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        # The ``global`` + assignment pair Inductor's benchmark harness emits against a
+        # module-level placeholder: the placeholder is renamed, the ``global`` is not.
+        src = textwrap.dedent(
+            """
+            weight = None
+            def get_args():
+                global weight
+                weight = 1
+                return weight
+            """
+        )
+        with self.assertRaisesRegex(NotImplementedError, "nested scope rebinds"):
+            namespace_module_names([src])
+
+    def test_namespace_module_names_raises_when_the_suffixed_name_is_taken(self):
+        from torch._functorch._aot_autograd.to_standalone_python import (
+            namespace_module_names,
+        )
+
+        src = textwrap.dedent(
+            """
+            def call_s0(args):
+                return args
+            def call(args):
+                return call_s0(args)
+            """
+        )
+        with self.assertRaisesRegex(NotImplementedError, "already uses"):
+            namespace_module_names([src])
 
 
 @instantiate_parametrized_tests
