@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -102,6 +103,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
+from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
@@ -112,6 +114,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._indented_buffer import IndentedBuffer
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -4289,7 +4292,11 @@ class GuardsStatePickler(FunctionPicklerBase):
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
-        ret.grad = grad
+        # A .grad the guards never read is pruned to the _Missing sentinel on
+        # the way in (only a training capture has one to prune at all); it was
+        # not guarded on, so the rebuilt tensor does not need it, but assigning
+        # the sentinel raises.
+        ret.grad = grad if isinstance(grad, torch.Tensor) else None
         return ret
 
     @classmethod
@@ -4647,17 +4654,36 @@ class GuardsStatePickler(FunctionPicklerBase):
             # torch.Tensor. This is important for cross-compilation where
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
-            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            dispatch_keys = torch._C._dispatch_keys(obj)
+            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            ):
+            )
+            if is_fake:
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+                # _dispatch_keys() on a fake reports the Python and
+                # PythonTLSSnapshot keys of the fake itself; the converter may
+                # have recorded the real tensor's keys (from_meta_and_device
+                # always does, from_real_tensor only for an mkldnn source).
+                if obj.dispatch_keys is not None:
+                    dispatch_keys = obj.dispatch_keys
+            # A fake answers empty_like with another fake through its own
+            # __torch_dispatch__, whether or not its FakeTensorMode is active,
+            # and that fake would drag the mode and its converters into the
+            # pickle; no_dispatch makes the template a plain meta tensor.
+            with no_dispatch() if is_fake else contextlib.nullcontext():
+                meta = torch.empty_like(
+                    obj, device="meta", requires_grad=obj.requires_grad
+                )
 
             return type(self)._unpickle_tensor, (
-                torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
+                meta,
                 obj.device,
                 pytype,
-                torch._C._dispatch_keys(obj).raw_repr(),
-                obj.grad,
+                dispatch_keys.raw_repr(),
+                # Whatever .grad holds, without the non-leaf warning: a plain
+                # non-leaf has None, a retained-grad non-leaf (torch.optim permits
+                # one as a param) or a fake mirroring one has a real tensor.
+                safe_grad(obj),
             )
 
         elif isinstance(obj, torch.nn.Module):
