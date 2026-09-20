@@ -5254,7 +5254,7 @@ def pickle_guards_state(
             try:
                 scope_roots = _scope_roots(state.output_graph)
             except Exception:
-                scope_roots = None
+                pass
             # Prune more values in AOT precompile when complex pickling
             # structure is not needed.
             state.output_graph.guard_on_key_order = set()
