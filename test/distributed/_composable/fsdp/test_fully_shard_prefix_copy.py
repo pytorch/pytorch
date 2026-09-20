@@ -14,6 +14,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_reorder,
+    reduce_scatter_input_fn_with_reorder,
+)
 from torch.distributed.tensor import Shard
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -44,12 +48,13 @@ class _OpCounter(TorchDispatchMode):
 @unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
+    @parametrize("use_reorder", [False, True])
     @parametrize("nonzero_shards", [False, True])
     @parametrize("world_size", [1, 4])
     @parametrize("mixed_layout", [False, True])
     @dtypes(torch.bfloat16)
     def test_reduce_scatter_preparation(
-        self, device, dtype, nonzero_shards, world_size, mixed_layout
+        self, device, dtype, use_reorder, nonzero_shards, world_size, mixed_layout
     ):
         shapes = [
             (world_size * 3 - 1, 5),
@@ -71,9 +76,14 @@ class TestPrefixCopy(TestCase):
             [shard[rank].flatten() for rank in range(world_size) for shard in shards]
         ).float()
         params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
-        prepared = _default_reduce_scatter_input_fn(params, grads, world_size)
+        prepare = (
+            reduce_scatter_input_fn_with_reorder
+            if use_reorder
+            else _default_reduce_scatter_input_fn
+        )
+        prepared = prepare(params, grads, world_size)
         sizes = prepared.padded_unsharded_sizes
-        use_prefix_copy = nonzero_shards and world_size > 1
+        use_prefix_copy = not use_reorder and nonzero_shards and world_size > 1
         if use_prefix_copy:
             self.assertIsNot(prepared.copy_in, foreach_reduce_scatter_copy_in)
         else:
@@ -92,6 +102,7 @@ class TestPrefixCopy(TestCase):
             counter.counts[torch.ops.fsdp.chunk_cat.default], int(not use_prefix_copy)
         )
 
+    @parametrize("use_reorder", [False, True])
     @parametrize(
         "layout",
         [
@@ -105,7 +116,7 @@ class TestPrefixCopy(TestCase):
             "mixed_fallback",
         ],
     )
-    def test_all_gather_default(self, device, layout):
+    def test_all_gather_output(self, device, use_reorder, layout):
         world_size = 4
         layouts = {
             "mixed": ("shard0", "shard1"),
@@ -173,8 +184,13 @@ class TestPrefixCopy(TestCase):
             splits,
         )
         versions = [output._version for output in outputs]
+        copy_outputs = (
+            all_gather_output_fn_with_reorder
+            if use_reorder
+            else _default_all_gather_output_fn
+        )
         with torch.no_grad(), _OpCounter() as counter:
-            _default_all_gather_output_fn(params, result, world_size)
+            copy_outputs(params, result, world_size)
 
         self.assertEqual(
             [output.view(tensor.shape) for output, tensor in zip(outputs, expected)],
@@ -183,7 +199,9 @@ class TestPrefixCopy(TestCase):
             rtol=0,
         )
         self.assertEqual([output._version for output in outputs], versions)
-        use_prefix_copy = "shard1" in layouts or "singleton_prefix" in layouts
+        use_prefix_copy = not use_reorder and (
+            "shard1" in layouts or "singleton_prefix" in layouts
+        )
         prefix_op = torch.ops.fsdp._split_with_sizes_copy_with_prefixes_.default
         self.assertEqual(counter.counts[prefix_op], int(use_prefix_copy))
         self.assertEqual(
@@ -191,10 +209,12 @@ class TestPrefixCopy(TestCase):
             int(not use_prefix_copy),
         )
         fallback_layouts = ("extension", "zero_prefix")
-        self.assertEqual(
-            counter.counts[torch.ops.aten.cat.out],
-            sum(kind in fallback_layouts for kind in layouts),
+        num_reorders = (
+            sum(param.fsdp_placement.dim != 0 for param in params)
+            if use_reorder
+            else sum(kind in fallback_layouts for kind in layouts)
         )
+        self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)
 
     @parametrize("num_chunks", [1, 4])
     @parametrize("num_prefixes", [1, 128])

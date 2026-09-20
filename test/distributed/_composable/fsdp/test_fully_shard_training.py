@@ -38,7 +38,11 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     HSDPMeshInfo,
     ShardPlacementResult,
 )
-from torch.distributed.fsdp.experimental import ReduceScatterInput
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_reorder,
+    reduce_scatter_input_fn_with_reorder,
+    ReduceScatterInput,
+)
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -385,6 +389,25 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_train_parity_reorder_copy_fns(self):
+        self.run_subtests(
+            {
+                "lin_shapes": [[(32, 16), (16, 8)]],
+                "use_shard_placement_fn": [True],
+                "bias": [False, True],
+                "copy_fns": [
+                    (all_gather_output_fn_with_reorder, None),
+                    (None, reduce_scatter_input_fn_with_reorder),
+                    (
+                        all_gather_output_fn_with_reorder,
+                        reduce_scatter_input_fn_with_reorder,
+                    ),
+                ],
+            },
+            self._test_train_parity_single_group,
+        )
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_custom_reduce_scatter_copy_in(self):
         torch.manual_seed(42)
         model = nn.Sequential(nn.Linear(5, 3), nn.ReLU(), nn.Linear(3, 7))
@@ -454,6 +477,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         lin_shapes: list[tuple[int, int]],
         use_shard_placement_fn: bool,
         bias: bool = True,
+        copy_fns: tuple[Callable | None, Callable | None] = (None, None),
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -470,6 +494,10 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         fully_shard(model, shard_placement_fn=shard_placement_fn)
+        if copy_fns[0] is not None:
+            model.set_all_gather_output_fn(copy_fns[0])
+        if copy_fns[1] is not None:
+            model.set_reduce_scatter_input_fn(copy_fns[1])
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
@@ -2696,10 +2724,21 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
+        self.run_subtests(
+            {"all_gather_output_fn": [None, all_gather_output_fn_with_reorder]},
+            self._test_inference,
+        )
+
+    def _test_inference(self, all_gather_output_fn: Callable | None):
+        torch.manual_seed(42)
         model = nn.Linear(8, 4, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
+        if all_gather_output_fn is not None:
+            model.set_all_gather_output_fn(all_gather_output_fn)
         with torch.inference_mode():
-            model(torch.ones((2, 8), device=device_type))
+            inp = torch.ones((2, 8), device=device_type)
+            self.assertEqual(model(inp), ref_model(inp))
 
 
 class TestFullyShardWorldSize1(FSDPTest):
