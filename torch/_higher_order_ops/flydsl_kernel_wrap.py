@@ -13,7 +13,10 @@ from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode, register_fake
 from torch._ops import HigherOrderOperator
-from torch._prims_common import clone_preserve_strides
+from torch._prims_common import (
+    clone_preserve_strides,
+    is_non_overlapping_and_dense_or_false,
+)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -31,6 +34,7 @@ class FlyDSLLauncherRegistration:
     launcher: Any
     bound_self: Any
     signature: inspect.Signature
+    stream_parameter: tuple[int, inspect.Parameter] | None
     mutated_arg_indices: tuple[int, ...]
     compile_time_arg_indices: frozenset[int]
     constexpr_arg_indices: frozenset[int]
@@ -47,6 +51,7 @@ class TraceableFlyDSLLauncher:
         *,
         bound_self: Any = None,
         signature: inspect.Signature | None = None,
+        stream_parameter: tuple[int, inspect.Parameter] | None = None,
         compile_time_arg_indices: frozenset[int] = frozenset(),
         constexpr_arg_indices: frozenset[int] = frozenset(),
         constexpr_value_signature: Callable[[Any], Any] | None = None,
@@ -59,6 +64,7 @@ class TraceableFlyDSLLauncher:
             launcher,
             bound_self,
             signature,
+            stream_parameter,
             mutated_arg_indices,
             compile_time_arg_indices,
             constexpr_arg_indices,
@@ -90,6 +96,8 @@ class FlyDSLLauncherSideTable:
         self.launcher_to_id: dict[tuple[int, int | None, tuple[int, ...]], int] = {}
         self.id_to_call_spec: dict[int, dict[int, Any]] = {}
         self.call_spec_to_id: dict[tuple[Any, ...], int] = {}
+        self.next_launcher_idx = 0
+        self.next_call_spec_idx = 0
         self.lock = threading.Lock()
 
     def add_launcher(self, registration: FlyDSLLauncherRegistration) -> int:
@@ -105,7 +113,8 @@ class FlyDSLLauncherSideTable:
         with self.lock:
             if key in self.launcher_to_id:
                 return self.launcher_to_id[key]
-            idx = len(self.id_to_launcher)
+            idx = self.next_launcher_idx
+            self.next_launcher_idx += 1
             self.id_to_launcher[idx] = registration
             self.launcher_to_id[key] = idx
             return idx
@@ -130,7 +139,8 @@ class FlyDSLLauncherSideTable:
         with self.lock:
             if key in self.call_spec_to_id:
                 return self.call_spec_to_id[key]
-            idx = len(self.id_to_call_spec)
+            idx = self.next_call_spec_idx
+            self.next_call_spec_idx += 1
             self.id_to_call_spec[idx] = constant_args
             self.call_spec_to_id[key] = idx
             return idx
@@ -235,6 +245,15 @@ def partition_flydsl_launcher_arguments(
     constexpr_indices = []
     for idx, value in enumerate(args):
         if idx in registration.constexpr_arg_indices:
+            if isinstance(
+                value,
+                (bool, int, float, torch.SymBool, torch.SymInt, torch.SymFloat),
+            ):
+                # FlyDSL recompiles for each constexpr value, so specialize symbolic
+                # values before registering the out-of-graph call specification.
+                from torch.fx.experimental.symbolic_shapes import guard_scalar
+
+                value = guard_scalar(value)
             constexpr_indices.append(idx)
             constant_args[idx] = value
             runtime_args[idx] = None
@@ -484,7 +503,7 @@ def flydsl_kernel_wrapper_functional_dense(
             raise AssertionError(
                 f"Expected FlyDSL mutated argument {arg_idx} to be a Tensor"
             )
-        cloned_args[arg_idx] = clone_preserve_strides(arg)
+        cloned_args[arg_idx] = _clone_mutated_arg(arg, arg._base)
     flydsl_kernel_wrapper_mutation(
         launcher_idx,
         call_spec_idx,
@@ -507,7 +526,7 @@ def flydsl_kernel_wrapper_functional_fake(
     clone_indices = set(tensors_to_clone)
     return tuple(
         (
-            clone_preserve_strides(args[arg_idx])
+            _clone_mutated_arg(args[arg_idx], args[arg_idx]._base)
             if output_idx in clone_indices
             else args[arg_idx]
         )
@@ -574,11 +593,50 @@ def _validate_clone_aliases(
         for other_idx, other in tensor_args[position + 1 :]:
             if (
                 arg_idx in cloned_arg_indices or other_idx in cloned_arg_indices
-            ) and cast(Any, torch._C)._is_alias_of(arg, other):
+            ) and _tensors_overlap(arg, other):
                 raise RuntimeError(
                     "FlyDSL functionalization does not support cloning aliased "
                     f"launcher arguments {arg_idx} and {other_idx}"
                 )
+
+
+def _clone_mutated_arg(arg: Tensor, base: Tensor | None) -> Tensor:
+    """Clone a mutated argument without reading outside a realized view buffer."""
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if is_non_overlapping_and_dense_or_false(arg):
+        if guard_or_false(arg.storage_offset() == 0):
+            return clone_preserve_strides(arg)
+        return arg.clone()
+    return clone_preserve_strides(arg, base=base)
+
+
+def _storage_extent_bytes(arg: Tensor) -> tuple[Any, Any] | None:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(arg.numel() == 0):
+        return None
+    start = arg.storage_offset() * arg.element_size()
+    span = sum(
+        (size - 1) * stride for size, stride in zip(arg.size(), arg.stride())
+    )
+    return start, start + (span + 1) * arg.element_size()
+
+
+def _tensors_overlap(left: Tensor, right: Tensor) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+    if not cast(Any, torch._C)._is_alias_of(left, right):
+        return False
+    left_extent = _storage_extent_bytes(left)
+    right_extent = _storage_extent_bytes(right)
+    if left_extent is None or right_extent is None:
+        return False
+    left_start, left_end = left_extent
+    right_start, right_end = right_extent
+    return guard_or_true(left_start < right_end) and guard_or_true(
+        right_start < left_end
+    )
 
 
 for op in (flydsl_kernel_wrapper_mutation, flydsl_kernel_wrapper_functional):
