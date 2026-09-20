@@ -379,6 +379,9 @@ class Vectorized<float> {
     // y = y * 2^n
     vec_res = _mm256_mul_ps(vec_res, vec_two_pow_n);
     vec_res = _mm256_mul_ps(vec_res, vec_two);
+    if (_mm256_movemask_ps(less_ln_flt_min_mask)) {
+      vec_res = _mm256_blendv_ps(vec_res, exp(), less_ln_flt_min_mask);
+    }
     return vec_res;
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
