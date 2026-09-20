@@ -1204,6 +1204,22 @@ class _ModuleWithGenerators(torch.nn.Module):
         self.cfg = {"a": 1}
 
 
+def _make_sum_callback():
+    def cb(x):
+        return x.sum((0, 1))
+
+    return cb
+
+
+class _ModuleSharingAConstantTuple(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.cb = _make_sum_callback()
+        # The compiler folds equal constant tuples in one module into ONE object,
+        # so this unguarded attribute IS cb's `(0, 1)` code constant.
+        self.dims = (0, 1)
+
+
 class _ModuleWithDtypeAttr(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1257,6 +1273,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertEqual(out["m"].cfg, {"a": 1})
         self.assertEqual(out["m"].empty, ())
         self.assertEqual(out["shared"], ())
+
+    def test_an_unguarded_tuple_shared_with_a_code_constant_is_not_substituted(self):
+        # A guarded <locals> callback is rebuilt by value, co_consts included; an
+        # unguarded tuple attribute that is the same object must not turn that
+        # constant into the sentinel, so tuples stay on the C fast path.
+        m = _ModuleSharingAConstantTuple()
+        self.assertIs(m.dims, m.cb.__code__.co_consts[1])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m, id(m.cb): m.cb}, {}, {}, {}, buf).dump({"m": m})
+        out = load_guards_state(buf.getvalue())["m"]
+        self.assertEqual(out.cb.__code__.co_consts[1], (0, 1))
+        self.assertEqual(out.cb(torch.ones(2, 3)), torch.tensor(6.0))
+        self.assertEqual(out.dims, (0, 1))
 
     def test_loader_rejects_a_foreign_persistent_id(self):
         class Foreign(pickle.Pickler):
