@@ -2558,6 +2558,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertTrue(torch.isfinite(loss).item())
             loss.backward()
 
+        # 2D batch: junk padding in row 0 is skipped, the out-of-range used
+        # value in row 1 is reported with its batch and value
+        log_probs = torch.randn(5, 2, 6)
+        targets = torch.tensor([[1, 2, 3, 4, 99], [1, 2, 3, 7, 0]])
+        with self.assertRaisesRegex(RuntimeError, r"range \[0, 6\), but got value 7 for batch 1"):
+            torch.nn.functional.ctc_loss(log_probs, targets, torch.tensor([5, 5]), torch.tensor([4, 4]))
+
+        # target_lengths[b] == 0: all entries are padding and must not be validated
+        log_probs = torch.randn(3, 1, 6)
+        targets = torch.tensor([[99, 98, 97]])
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, torch.tensor([3]), torch.tensor([0]))
+        self.assertTrue(torch.isfinite(loss).item())
+
+        # non-contiguous (transposed) 2D targets: validation must follow the
+        # same offset/stride math as the kernel
+        log_probs = torch.randn(5, 2, 6)
+        targets = torch.tensor([[1, 2], [3, 7], [4, 5]]).t()
+        with self.assertRaisesRegex(RuntimeError, r"range \[0, 6\), but got value 7 for batch 1"):
+            torch.nn.functional.ctc_loss(log_probs, targets, torch.tensor([5, 5]), torch.tensor([3, 2]))
+
         # the public API upcasts targets to int64, so call the op directly to
         # exercise the int32 (kInt) instantiation of the check
         log_probs = torch.randn(5, 1, 6, requires_grad=True)

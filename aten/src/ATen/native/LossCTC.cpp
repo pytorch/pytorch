@@ -119,8 +119,9 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   // Target values are used as indices into log_probs by the kernels below, so
   // validate every target entry that is actually read. Note that entries beyond
   // target_lengths[b] are padded and never used, so they are not checked.
-  // Meta tensors have no data to check.
-  if (!targets.is_meta()) {
+  // Only CPU target tensors have host-readable data; meta tensors have none and
+  // device tensors must not be dereferenced from the host.
+  if (targets.device().is_cpu()) {
     using target_t = std::conditional_t<target_scalar_type == kInt, int, int64_t>;
     const auto* targets_data = targets.const_data_ptr<target_t>();
     for (const auto b : c10::irange(batch_size)) {
