@@ -8,8 +8,8 @@ from torch._inductor.heuristics.registry import register_template_heuristic
 from ...kernel.bmm import aten_baddbmm, aten_bmm, aten_bmm_dtype
 from ...kernel.mm import (
     aten__fp8_mm,
-    aten__scaled_mm_v2,
     aten__int_mm,
+    aten__scaled_mm_v2,
     aten_addmm,
     aten_bias_addmm,
     aten_mm,
