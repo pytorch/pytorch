@@ -4916,6 +4916,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             and not inspect.isfunction(obj)
             and str(getattr(type(obj), "__module__", "")).partition(".")[0] != "torch"
             and _pickles_by_default(obj)
+            and not pytree.is_constant_class(type(obj))
+            and not is_opaque_constant_type(type(obj))
         ):
             # Any object the guard tree reached, not just an nn.Module: a guarded
             # train pipeline or dataloader wrapper was pickled whole, so one
@@ -4930,7 +4932,10 @@ class GuardsStatePickler(FunctionPicklerBase):
             # the pruned attribute on the way back, which does not hold for
             # torch's structural types (a DTensorSpec's fields rebuild the spec
             # although no guard names each one; a tensor subclass carries its
-            # spec in __dict__).
+            # spec in __dict__). A pytree-registered or opaque constant class is
+            # excluded for the same reason from the guard side: EQUALS_MATCH
+            # keeps the object itself and compares it by value at run time, so
+            # a pruned field would make the rebuilt guard miss forever.
             self._prune_unguarded_attributes(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
@@ -5002,6 +5007,8 @@ class GuardsStatePickler(FunctionPicklerBase):
             # Registration is global and by id: an attribute pruned here is the
             # sentinel wherever else the same object appears, including inside
             # the state of a receiver excluded from pruning by _pickles_by_default.
+            # Only __dict__ is walked: a bystander in a __slots__ slot of a
+            # receiver that also has a __dict__ is still pickled. Known limits.
             self.missing_values[id(attr)] = attr
 
 
