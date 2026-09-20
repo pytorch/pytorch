@@ -13,7 +13,8 @@ from torch.distributed.tensor.parallel.style import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -33,6 +34,8 @@ class DummyModule(torch.nn.Module):
 
 
 class TensorParallelAPITests(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         gpu_num = torch.accelerator.device_count()
@@ -107,7 +110,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_params(local_module, dist_module, rank0_only, rowwise)
 
     @with_comms
-    def test_parallelize_mlp_with_module_api(self):
+    def test_parallelize_mlp_with_module_api(self, device):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
         model_tp = deepcopy(model)
@@ -125,7 +128,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_parallelize_mlp_with_module_api_nested(self):
+    def test_parallelize_mlp_with_module_api_nested(self, device):
         inp_size = [12, 10]
         model = torch.nn.Sequential(
             OrderedDict([("dummy_encoder", MLPModule(self.device_type))])
@@ -145,7 +148,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_linear_row_wise_parallel(self):
+    def test_linear_row_wise_parallel(self, device):
         # test RowwiseParallel
         inp_size = [9, 16]
         rowwise = RowwiseParallel()
@@ -163,7 +166,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rowwise=True)
 
     @with_comms
-    def test_linear_col_wise_parallel(self):
+    def test_linear_col_wise_parallel(self, device):
         # test ColwiseParallel
         inp_size = [8, 10]
         colwise = ColwiseParallel(output_layouts=Replicate())
@@ -179,7 +182,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size)
 
     @with_comms
-    def test_prepare_module_input(self):
+    def test_prepare_module_input(self, device):
         module = DummyModule()
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         parallelize_module(
@@ -194,7 +197,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self.assertEqual(inp, output)
 
     @with_comms
-    def test_prepare_module_output(self):
+    def test_prepare_module_output(self, device):
         module = DummyModule()
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         parallelize_module(
@@ -212,7 +215,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self.assertEqual(inp, output)
 
     @with_comms
-    def test_prepare_module_input_output(self):
+    def test_prepare_module_input_output(self, device):
         module = DummyModule()
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         parallelize_module(
@@ -235,7 +238,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self.assertEqual(inp, output)
 
     @with_comms
-    def test_parallelize_module_with_star(self):
+    def test_parallelize_module_with_star(self, device):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -251,7 +254,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_parallelize_module_src_data_rank(self):
+    def test_parallelize_module_src_data_rank(self, device):
         # set seed different for each rank
         torch.manual_seed(self.rank)
         model = MLPModule(self.device_type)
@@ -293,7 +296,7 @@ class TensorParallelAPITests(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
-    def test_parallelize_module_with_question(self):
+    def test_parallelize_module_with_question(self, device):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -309,7 +312,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_parallelize_module_with_digit(self):
+    def test_parallelize_module_with_digit(self, device):
         inp_size = [12, 10]
         model = MLPModule(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -325,7 +328,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_parallelize_module_multi_wildcard(self):
+    def test_parallelize_module_multi_wildcard(self, device):
         inp_size = [12, 10]
         model = MLPStacked(self.device_type, n_layers=2)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -342,7 +345,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_parallelize_module_with_root_module(self):
+    def test_parallelize_module_with_root_module(self, device):
         inp_size = [16, 10]
         model = MLPModule(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -365,7 +368,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_parallelize_module_with_no_match(self):
+    def test_parallelize_module_with_no_match(self, device):
         inp_size = [16, 10]
         model = MLPModule(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -385,7 +388,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
     @with_comms
-    def test_under_devicemesh_context(self):
+    def test_under_devicemesh_context(self, device):
         # test ColwiseParallel
         inp_size = [8, 10]
         colwise = ColwiseParallel(output_layouts=Replicate())
@@ -402,7 +405,7 @@ class TensorParallelAPITests(DTensorTestBase):
         self._compare_module(model, model_tp, inp_size)
 
     @with_comms
-    def test_empty_plan(self):
+    def test_empty_plan(self, device):
         torch.manual_seed(5)
         model = torch.nn.Linear(10, 16, device=self.device_type)
 
@@ -419,6 +422,10 @@ TensorParallelAPITestsWithLocalTensor = create_local_tensor_test_class(
         # Uses mesh_scatter that has local rank dependent logic
         "test_parallelize_module_src_data_rank",
     ],
+)
+instantiate_device_type_tests(TensorParallelAPITests, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TensorParallelAPITestsWithLocalTensor, globals(), allow_xpu=True
 )
 
 
