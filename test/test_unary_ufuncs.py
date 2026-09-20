@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfXPU,
     dtypesIfMPS,
     expectedFailureMPS,
     expectedFailureMPSComplex,
@@ -1425,6 +1426,7 @@ class TestUnaryUfuncs(TestCase):
             self._i0_helper(t)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range1(self, device, dtype):
@@ -1433,6 +1435,7 @@ class TestUnaryUfuncs(TestCase):
         self._i0_range_helper(13.25, device, dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range2(self, device, dtype):
@@ -1448,6 +1451,7 @@ class TestUnaryUfuncs(TestCase):
         self._i0_range_helper(709.75, device, dtype)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_special(self, device, dtype):
@@ -1458,6 +1462,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(torch.i0(t).isnan().all())
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_special_i0_i1_vs_scipy(self, device, dtype):
@@ -1590,6 +1595,15 @@ class TestUnaryUfuncs(TestCase):
             ):
                 torch_op(t, out=out)
 
+    # abs_xpu is not implemented for Float8_e5m2, which is the only fp8 dtype
+    # whose isinf path relies on abs, so skip it on XPU.
+    # See intel/torch-xpu-ops/issues/5559
+    @dtypesIfXPU(
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+        torch.float8_e8m0fnu,
+    )
     @dtypes(*float8_types_and(torch.float8_e8m0fnu))
     @dtypesIfMPS(torch.float8_e4m3fn)
     def test_isinf_isfinite_float8(self, device, dtype):
@@ -1795,6 +1809,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypes(*floating_and_complex_types_and(torch.bfloat16))
     @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @dtypesIfXPU(*floating_and_complex_types_and(torch.half, torch.bfloat16))
     @expectedFailureMPSComplex  # exp(inf+infj) is nan+nanj instead of inf+nanj
     def test_exp(self, device, dtype):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
@@ -2028,7 +2043,7 @@ class TestUnaryUfuncsCUDADevice(TestCase):
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
 
-instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True)
+instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
 instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
 
