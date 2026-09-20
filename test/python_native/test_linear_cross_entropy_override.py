@@ -759,11 +759,19 @@ class TestLinearCrossEntropyOverride(TestCase):
 
         # Any entry into the accumulator means the call fell back, and a
         # fallback would hide exactly the failure this test is about.
-        with unittest.mock.patch.object(
-            lce_module,
-            "_linear_cross_entropy_batch_chunked_accumulator",
-            wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
-        ) as accumulator:
+        # `fill_uninitialized_memory` is the other half of the empty-batch
+        # test below: the parameter gradients are allocated uninitialized on
+        # the promise that the first chunk writes rather than accumulates, and
+        # under the guard anything the first chunk leaves untouched comes back
+        # nan instead of whatever the caching allocator last held.
+        with (
+            unittest.mock.patch.object(
+                lce_module,
+                "_linear_cross_entropy_batch_chunked_accumulator",
+                wraps=lce_module._linear_cross_entropy_batch_chunked_accumulator,
+            ) as accumulator,
+            DeterministicGuard(True, fill_uninitialized_memory=True),
+        ):
             fused = once()
             self.assertEqual(
                 accumulator.call_count,
@@ -835,13 +843,16 @@ class TestLinearCrossEntropyOverride(TestCase):
                 "the call fell back to the accumulator, so this asserted the "
                 "eager path's allocation rather than the override's",
             )
-        loss.backward()
+            loss.backward()
 
         self.assertTrue(torch.isnan(loss), "mean over an empty batch is nan")
-        self.assertTrue(
-            torch.equal(linear_weight.grad, torch.zeros_like(linear_weight.grad)),
-            "the weight gradient is not zeroed on the path that has no chunk "
-            "to write it",
+        self.assertEqual(
+            linear_weight.grad,
+            torch.zeros_like(linear_weight.grad),
+            atol=0,
+            rtol=0,
+            msg="the weight gradient is not zeroed on the path that has no "
+            "chunk to write it",
         )
 
     @_needs_kernel

@@ -143,21 +143,24 @@ class TestFusedGradLogitsKernel(TestCase):
         reference everywhere also proves full coverage -- the aliased buffer is
         its own sentinel.
 
-        The ordering, though, is checked only probabilistically: a missing
-        barrier is a data race, and this sees a symptom rather than the bug.
-        Removing the barrier fails 2-3 of these ten cases, varying run to run,
-        and only ever the ones whose `V` runs past a single staging group --
-        4097 and 32000 at the default knobs. The small-`V` cases pass a
-        barrier-less kernel, so they are not what guards it. A deterministic
-        check would need `compute-sanitizer --tool racecheck`, too slow to keep
-        in this suite.
+        The ordering is NOT what this checks, at the shipped knobs. Removing
+        the barrier and re-running leaves `g` within the fp32-to-bf16 rounding
+        floor of the reference -- max deviation 3.8e-6 at `V=4097`, against
+        3.8e-6 with the barrier in place -- so the race does not manifest at
+        `tiles_per_stage=8` and all ten cases pass a barrier-less kernel. It
+        does manifest at shallower staging: 1.3e-3 at 4 tiles and 7.0e-3 at 2,
+        both far above that floor, though never reliably enough to fail an
+        assertion in 20 trials. So the write ordering rests on the argument in
+        the kernel's module docstring, not on this test; a check that could
+        fail deterministically needs `compute-sanitizer --tool racecheck`, too
+        slow to keep in this suite.
 
         The kernel takes `g`'s layout from the caller and orders its writes
         either way, so this and the separate-buffer tests above exercise one
         compiled mode."""
         logits, row_scale, target = _inputs(num_rows, V)
         source = logits.clone()
-        _, term = _outputs(num_rows, V, dtype)
+        term = torch.empty(num_rows, device="cuda", dtype=torch.float32)
         g = logits.view(dtype).narrow(1, 0, V)
         self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target)
         want_g, want_log_row_sum, want_shifted = _reference(
@@ -188,7 +191,7 @@ class TestFusedGradLogitsKernel(TestCase):
         groups."""
         logits, row_scale, target = _inputs(num_rows, V, logits_dtype=torch.float16)
         source = logits.clone()
-        _, term = _outputs(num_rows, V, torch.float16)
+        term = torch.empty(num_rows, device="cuda", dtype=torch.float32)
         g = logits.view(torch.float16).narrow(1, 0, V)
         self.kernel.fused_grad_logits_into(g, term, logits, row_scale, target)
         want_g, want_log_row_sum, want_shifted = _reference(
