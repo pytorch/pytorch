@@ -20,7 +20,7 @@ from torch._higher_order_ops.invoke_subgraph import (
 # ``__module__`` is set to "torch.compiler" in the impl module to match.
 from torch._precompile import PrecompileError as PrecompileError
 
-from . import config, precompile as precompile
+from . import config, precompile
 from ._cache import CacheInfo
 
 
