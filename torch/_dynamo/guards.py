@@ -4756,8 +4756,9 @@ class GuardsStatePickler(FunctionPicklerBase):
 
         elif isinstance(obj, _get_unsupported_types()):
             # Only when no guard reads it: a guarded one (a TYPE_MATCH on a
-            # stream or process-group local) would otherwise load as a sentinel
-            # the rebuilt guard can never match, so it is refused by name.
+            # stream local, a FAKE_SCRIPT_TYPE_MATCH on a process-group local)
+            # would otherwise load as a sentinel the rebuilt guard can never
+            # match, so it is refused by name.
             if id(obj) in self.guard_tree_values:
                 raise torch._dynamo.exc.PackageError(
                     f"a guard reads a {type(obj).__name__}, which cannot be serialized"
