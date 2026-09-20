@@ -1880,6 +1880,92 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
         kwargs.setdefault("dynamic", False)
         return precompile_capture(fn, **kwargs)
 
+    def _guard_entries(self, fn, *args):
+        """Real GuardFilterEntry objects, recorded off a live capture."""
+        recorded = []
+
+        def record(entries):
+            recorded.append(list(entries))
+            return [True] * len(entries)
+
+        session = self._session(fn, guard_filter_fn=record)
+        with session as cap:
+            cap(*args)
+        self.assertTrue(recorded)
+        return max(recorded, key=len)
+
+    def test_compose_with_default_can_only_narrow_what_the_default_keeps(self):
+        from torch._dynamo.precompile_package import (
+            _compose_with_default,
+            default_guard_filter_fn,
+        )
+
+        entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
+        base = default_guard_filter_fn(entries)
+        self.assertIn(True, base)
+        keep_all = _compose_with_default(lambda e: [True] * len(e))
+        self.assertEqual(list(keep_all(entries)), list(base))
+        keep_none = _compose_with_default(lambda e: [False] * len(e))
+        self.assertEqual(list(keep_none(entries)), [False] * len(entries))
+        # A custom filter cannot re-admit what the default dropped.
+        dropped = [i for i, kept in enumerate(base) if not kept]
+        self.assertTrue(dropped)
+        widened = _compose_with_default(lambda e: [True] * len(e))(entries)
+        self.assertFalse(any(widened[i] for i in dropped))
+
+    def test_compose_with_default_refuses_a_wrong_length_decision_list(self):
+        from torch._dynamo.precompile_package import _compose_with_default
+
+        entries = self._guard_entries(_SessionStep(), torch.randn(3, 4))
+        composed = _compose_with_default(lambda e: [True])
+        with self.assertRaisesRegex(ValueError, "must return one per entry"):
+            composed(entries)
+
+    def test_training_lowers_the_backward_eagerly_inside_the_block(self):
+        import torch._functorch.config as functorch_config
+
+        observed = []
+
+        def spy(entries):
+            observed.append(functorch_config.force_non_lazy_backward_lowering)
+            return [True] * len(entries)
+
+        for training in (False, True):
+            torch._dynamo.reset()
+            observed.clear()
+            session = self._session(
+                _SessionStep(), training=training, guard_filter_fn=spy
+            )
+            with session as cap:
+                cap(torch.randn(3, 4))
+            self.assertTrue(observed)
+            self.assertEqual(set(observed), {training})
+        self.assertFalse(functorch_config.force_non_lazy_backward_lowering)
+
+    def test_capture_config_restores_every_patch_when_the_body_unwinds(self):
+        import torch._functorch.config as functorch_config
+        from torch._dynamo.precompile_package import _capture_config
+
+        def ambient():
+            return (
+                functorch_config.bundled_autograd_cache,
+                functorch_config.bypass_autograd_cache_key,
+                functorch_config.force_non_lazy_backward_lowering,
+                torch._dynamo.config.allow_empty_graphs,
+            )
+
+        before = ambient()
+        with self.assertRaisesRegex(RuntimeError, "unwind"):
+            with _capture_config(True):
+                self.assertEqual(ambient(), (True, True, True, True))
+                with _capture_config(False):
+                    # Nested entries patch once: depth != 0 leaves the outer
+                    # training patch in place rather than downgrading it.
+                    self.assertTrue(functorch_config.force_non_lazy_backward_lowering)
+                self.assertEqual(ambient(), (True, True, True, True))
+                raise RuntimeError("unwind")
+        self.assertEqual(ambient(), before)
+
     def test_each_call_folds_into_the_entry_as_a_guarded_variant(self):
         model = _SessionStep()
         session = self._session(model)
@@ -1910,7 +1996,7 @@ class TestPrecompileSession(torch._inductor.test_case.TestCase):
                 x = torch.randn(rows, 4)
                 self.assertEqual(cap(x), model(x))
         entry = session._package.cache_entry()
-        self.assertLessEqual(len(entry.codes[0].guarded_codes), 2)
+        self.assertEqual(len(entry.codes[0].guarded_codes), 2)
 
     def test_session_is_one_shot_and_refuses_reentry(self):
         from torch._dynamo.exc import PackageError
