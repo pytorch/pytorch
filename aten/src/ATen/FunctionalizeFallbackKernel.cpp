@@ -6,6 +6,7 @@
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/InferSize.h>
 #include <ATen/TensorUtils.h>
+#include <torch/custom_class.h>
 #include <torch/library.h>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
@@ -15,11 +16,13 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/lift.h>
 #include <ATen/ops/lift_fresh.h>
 #include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
+#include <ATen/ops/split_with_sizes_copy_native.h>
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/_unsafe_view.h>
 
@@ -413,6 +416,11 @@ TORCH_LIBRARY_IMPL(_, Functionalize, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  // These out-only overloads decompose through their common implementations.
+  m.impl("_chunk_cat.prefix_out", TORCH_FN(at::native::_chunk_cat_prefix_out));
+  m.impl(
+      "split_with_sizes_copy.prefix_out",
+      TORCH_FN(at::native::split_with_sizes_copy_prefix_out));
   m.impl("resize_", TORCH_FN(resize__functionalization));
   m.impl("lift", TORCH_FN(lift_functionalize));
   m.impl("lift_fresh", TORCH_FN(lift_fresh_functionalize));
