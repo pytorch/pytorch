@@ -441,7 +441,8 @@ class PrecompileError(RuntimeError):
     """
 
     # Re-exported in torch.compiler.__all__, so pickle and test_public_bindings
-    # resolve it there.
+    # resolve it there. Not in torch/compiler/precompile.py's re-homing loop, so its
+    # string annotations resolve against torch.compiler: keep them to builtins.
     __module__ = "torch.compiler"
 
     result: object = _NoResult

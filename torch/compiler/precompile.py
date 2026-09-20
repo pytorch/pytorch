@@ -4,11 +4,10 @@ Prototype API: capture ``fn`` ahead of time from the caller's own calls and lowe
 it to a self-contained Python source artifact plus an acceleration cache, then
 reload it in a fresh process. This module exports the types a capture takes and
 returns: the ``MakeFxTracer`` configuration, the ``Capture`` handle, and the
-``PrecompileSummary`` report. The capture
-session's entry points (``capture``, ``accumulate``, ``load``) build on them. See
-Note [precompile programming model] in ``torch/_precompile.py`` for the contract.
-Signatures, error types and the artifact format may change between releases
-without a deprecation cycle.
+``PrecompileSummary`` report. The capture session's entry points (``capture``,
+``accumulate``, ``load``) build on them. See Note [precompile programming model]
+in ``torch/_precompile.py`` for the contract. Signatures, error types and the
+artifact format may change between releases without a deprecation cycle.
 
 Distinct from ``torch._dynamo.config.caching_precompile`` (a ``torch.compile``
 guard-serialization caching mode), despite the shared word.
