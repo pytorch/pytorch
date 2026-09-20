@@ -1195,6 +1195,11 @@ if torch.distributed.is_available():
             self.calls = []
 
 
+class _AssertingGetstate:
+    def __getstate__(self):
+        raise AssertionError("mid-iteration")
+
+
 class _HolderWithGenerator:
     def __init__(self):
         self.it = (i for i in range(3))
@@ -1529,6 +1534,43 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             "local_scope['p'].deep.it", _offending_value_path(state, holder.deep.it)
         )
         self.assertEqual(_offending_value_path(state, object()), "")
+
+    def test_offending_value_path_names_a_value_inside_a_container(self):
+        from torch._dynamo.guards import _offending_value_path
+
+        lock, tag = threading.Lock(), threading.Lock()
+        holder = types.SimpleNamespace(cfg={"a": [1, (2, lock)]}, tags={tag})
+        graph = types.SimpleNamespace(local_scope={"h": holder}, global_scope={})
+        state = types.SimpleNamespace(output_graph=graph)
+        self.assertIn(
+            "local_scope['h'].cfg['a'][1][1]", _offending_value_path(state, lock)
+        )
+        self.assertIn(
+            "a member of local_scope['h'].tags", _offending_value_path(state, tag)
+        )
+        # A huge container is fanned out to a bound, and the walk still ends.
+        graph.local_scope["big"] = [0] * 10**6
+        self.assertEqual(_offending_value_path(state, object()), "")
+
+    def test_an_object_whose_getstate_raises_is_named_itself(self):
+        # The C pickler consults reducer_override for the object right before
+        # calling its __reduce_ex__, so a __getstate__ that asserts (GradScaler
+        # mid-iteration) is attributed to that object, not to a sibling.
+        bystander, bad = _HolderWithGenerator(), _AssertingGetstate()
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"ok": bystander, "bad": bad},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={id(bystander): bystander, id(bad): bad},
+            value_guarded_containers={},
+        )
+        with self.assertRaisesRegex(
+            PackageError, r"mid-iteration\n  reached via: local_scope\['bad'\]$"
+        ):
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
 
     def test_offending_value_path_never_masks_the_real_error(self):
         # It is a diagnostic appended to an error already being raised, so any

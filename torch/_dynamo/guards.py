@@ -5019,9 +5019,12 @@ def _offending_value_path(state: Any, target: Any) -> str:
     breadth-first and reports the first path holding THAT object -- by
     identity, not by type, which would report a same-typed bystander instead.
 
-    Best-effort by construction: it is a diagnostic appended to an error that is
-    already being raised, so any failure here must stay silent rather than mask
-    the real one.
+    A shared object is reported by the first path breadth-first search reaches,
+    which need not be the one the pickler took. Best-effort by construction: it
+    is a diagnostic appended to an error that is already being raised, so any
+    failure here must stay silent rather than mask the real one, and the walk is
+    bounded (visits and per-container fan-out) so a huge state cannot turn a
+    bypass into a stall.
     """
     try:
         if target is None:
@@ -5032,32 +5035,39 @@ def _offending_value_path(state: Any, target: Any) -> str:
             + [(f"global_scope[{k!r}]", v) for k, v in graph.global_scope.items()]
         )
         seen: set[int] = set()
-        while queue and len(seen) < 20000:
+        for _ in range(20000):
+            if not queue:
+                break
             path, value = queue.popleft()
             if id(value) in seen:
                 continue
             seen.add(id(value))
             if value is target:
                 return f"\n  reached via: {path}"
-            if isinstance(value, (list, tuple, set, frozenset)):
-                queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
-            elif isinstance(value, dict):
-                for i, (k, v) in enumerate(value.items()):
-                    if isinstance(k, (str, int)):
-                        queue.append((f"{path}[{k!r}]", v))
-                    else:
-                        queue.append((f"{path}.keys()[{i}]", k))
-                        queue.append((f"{path}.values()[{i}]", v))
-            # Per node: one object whose __dict__ read raises (a type-level
-            # __dict__ property, a proxy) must not end the whole walk.
-            attributes: list[tuple[str, Any]] = []
+            children: list[tuple[str, Any]] = []
+            # Per node: one object whose container or __dict__ read raises (a
+            # dict subclass, a type-level __dict__ property, a proxy) must not
+            # end the whole walk.
             try:
-                attributes = list((_instance_dict(value) or {}).items())
+                if isinstance(value, (list, tuple)):
+                    children = [(f"{path}[{i}]", v) for i, v in enumerate(value)]
+                elif isinstance(value, (set, frozenset)):
+                    children = [(f"a member of {path}", v) for v in value]
+                elif isinstance(value, dict):
+                    for k, v in value.items():
+                        if isinstance(k, (str, int)):
+                            children.append((f"{path}[{k!r}]", v))
+                        else:
+                            children.append((f"a key of {path}", k))
+                            children.append((f"{path}[<that key>]", v))
+                children += [
+                    (f"{path}.{name}", child)
+                    for name, child in (_instance_dict(value) or {}).items()
+                    if not name.startswith("__")
+                ]
             except Exception:
                 pass
-            for name, child in attributes:
-                if not name.startswith("__"):
-                    queue.append((f"{path}.{name}", child))
+            queue.extend(children[:20000])
     except Exception:
         return ""
     return ""
