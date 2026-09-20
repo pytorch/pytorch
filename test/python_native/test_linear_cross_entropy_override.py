@@ -26,6 +26,31 @@ from torch.testing._internal.common_utils import (
 _OP_SYMBOLS = [op_symbol for op_symbol, _, _ in cutedsl_impl._OVERRIDES]
 
 
+# Repeated on every test that needs a live kernel rather than a fallback.
+_needs_kernel = unittest.skipIf(
+    not TEST_CUDA or not cutedsl_impl._arch_supported(),
+    "the kernel declines this device, so there is no kernel path to test "
+    "-- the call would fall back to eager",
+)
+
+
+def _compact_options(**overrides):
+    """The one options shape the kernel's gate accepts.
+
+    Callers name what they vary -- in practice the chunk size -- and the rest
+    stays fixed, so a call says exactly what it chose and nothing about what it
+    did not.
+    """
+    return LinearCrossEntropyOptions(
+        **{
+            "acc_policy": "compact",
+            "acc_dtype": torch.float32,
+            "chunking_method": None,
+            **overrides,
+        }
+    )
+
+
 @unittest.skipIf(not TEST_CUDA, "the overrides are registered on CUDA")
 class TestLinearCrossEntropyOverride(TestCase):
     def setUp(self):
@@ -60,11 +85,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             self.assertTrue(live, f"no live cutedsl override for {op_symbol}")
             self.assertIn(key, registry_module._override_libs)
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     def test_empty_batch_returns_a_zeroed_bias_gradient(self):
         """`grad_linear_bias` is left uninitialized because the `copy_` after
         the loop writes all of it. An empty batch has no loop, so the early
@@ -86,12 +107,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             num_classes, device="cuda", dtype=torch.bfloat16
         ).requires_grad_()
         target = torch.zeros(0, device="cuda", dtype=torch.int64)
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=8,
-        )
+        options = _compact_options(batch_chunk_size=8)
         with DeterministicGuard(True, fill_uninitialized_memory=True):
             loss = torch.nn.functional.linear_cross_entropy(
                 input, linear_weight, target, linear_bias=linear_bias, options=options
@@ -232,11 +248,7 @@ class TestLinearCrossEntropyOverride(TestCase):
                 f"{generator.__name__} admits none of its samples",
             )
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     def test_noncontiguous_target_reads_the_right_classes(self):
         """The kernel is compiled for a stride-1 target, and `_corrected_target`
         returns the caller's tensor untouched when `ignore_index` is itself a
@@ -268,12 +280,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         pairs = torch.randint(0, num_classes, (num_batches, 2), device="cuda")
         strided = pairs[:, 0]
         self.assertFalse(strided.is_contiguous())
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=16,
-        )
+        options = _compact_options(batch_chunk_size=16)
 
         def run(target):
             leaves = [
@@ -304,11 +311,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         for name, a, b in zip(("loss", "grad_input", "grad_linear_weight"), got, want):
             self.assertEqual(a, b, atol=0, rtol=0, msg=f"{name} depends on the layout")
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     @parametrize("logit", [1.0, 2.0**12, 2.0**24, -(2.0**24)])
     def test_a_large_common_logit_keeps_the_loss(self, logit):
         """Equal logits make the loss log(C) whatever their common value is:
@@ -333,12 +336,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             (num_classes, 1), sign * root, device="cuda", dtype=torch.bfloat16
         )
         target = torch.randint(0, num_classes, (num_batches,), device="cuda")
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=2,
-        )
+        options = _compact_options(batch_chunk_size=2)
 
         leaves = [t.detach().clone().requires_grad_() for t in (input, linear_weight)]
         with unittest.mock.patch.object(
@@ -409,11 +407,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         self.assertTrue(eligible(2**31 - 1), "the largest count int32 can hold")
         self.assertFalse(eligible(2**31), "one class past int32")
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     def test_kernel_declines_a_tensor_on_another_device(self):
         """The gate is the only place that can require one device. Past it the
         launch takes each tensor through the FFI, where a stray CPU one comes
@@ -454,11 +448,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         for name in ("linear_weight", "target", "linear_bias", "weight"):
             self.assertFalse(eligible(**{name: True}), f"{name} on another device")
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     def test_an_out_of_range_target_poisons_both_parameter_gradients(self):
         """What the caller sees when a target is out of range, which is not
         what the kernel does.
@@ -499,12 +489,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         target[bad_row] = num_classes + 5
         # Several chunks, with the bad row in the first: the accumulators live
         # across the whole loop, so which chunk it lands in must not matter.
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=16,
-        )
+        options = _compact_options(batch_chunk_size=16)
         with unittest.mock.patch.object(
             lce_module,
             "_linear_cross_entropy_batch_chunked_accumulator",
@@ -531,11 +516,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             nan_rows, [bad_row], "grad_input is the one output that stays row-local"
         )
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     @parametrize("reduction", ["mean", "sum"])
     @parametrize("weighted", [False, True])
     def test_the_parameter_axes_the_kernel_accepts_match_eager(
@@ -581,12 +562,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             weight = (
                 torch.rand(num_classes, device="cuda", generator=gen) + 0.5
             ).float()
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=16,
-        )
+        options = _compact_options(batch_chunk_size=16)
 
         def once():
             leaves = [
@@ -629,11 +605,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             fused[0], plain[0], rtol=4 * torch.finfo(torch.bfloat16).eps, atol=0
         )
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     def test_label_smoothing_never_reaches_the_chunked_path(self):
         """The kernel implements no label smoothing, and neither does the
         chunked path it overrides -- so `options` are refused one level above
@@ -663,12 +635,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         target = torch.randint(
             0, num_classes, (num_batches,), device="cuda", generator=gen
         )
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=16,
-        )
+        options = _compact_options(batch_chunk_size=16)
         with self.assertWarnsRegex(UserWarning, r"label_smoothing == 0"):
             asked = torch.nn.functional.linear_cross_entropy(
                 input, linear_weight, target, label_smoothing=0.1, options=options
@@ -680,11 +647,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         # path and the two are the same computation.
         self.assertEqual(asked, reference, atol=0, rtol=0)
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("requires_grad", [True, False])
     def test_forward_only_loss_matches_the_reference(self, dtype, requires_grad):
@@ -724,12 +687,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         if requires_grad:
             for leaf in (input, linear_weight, linear_bias):
                 leaf.requires_grad_()
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=16,
-        )
+        options = _compact_options(batch_chunk_size=16)
         with unittest.mock.patch.object(
             lce_module,
             "_linear_cross_entropy_batch_chunked_accumulator",
@@ -754,11 +712,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         # the same reasoning as the bias-dtype test below.
         self.assertEqual(fused, reference, rtol=4 * torch.finfo(dtype).eps, atol=0)
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     @parametrize(
         "dtype, bias_dtype",
         [
@@ -790,12 +744,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         )
         linear_bias = torch.randn(num_classes, device="cuda", dtype=bias_dtype)
         target = torch.randint(0, num_classes, (num_batches,), device="cuda")
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=16,
-        )
+        options = _compact_options(batch_chunk_size=16)
 
         def once():
             leaves = [
@@ -844,11 +793,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             msg="loss disagrees",
         )
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     def test_empty_batch_returns_a_zeroed_weight_gradient(self):
         """`grad_linear_weight` is left uninitialized because the first chunk
         writes it outright. An empty batch has no first chunk, so the early
@@ -871,12 +816,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             num_classes, in_features, device="cuda", dtype=torch.bfloat16
         ).requires_grad_()
         target = torch.zeros(0, device="cuda", dtype=torch.int64)
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=8,
-        )
+        options = _compact_options(batch_chunk_size=8)
 
         with (
             unittest.mock.patch.object(
@@ -904,11 +844,7 @@ class TestLinearCrossEntropyOverride(TestCase):
             "to write it",
         )
 
-    @unittest.skipIf(
-        not TEST_CUDA or not cutedsl_impl._arch_supported(),
-        "the kernel declines this device, so there is no kernel path to test "
-        "-- the call would fall back to eager",
-    )
+    @_needs_kernel
     def test_kernel_path_is_deterministic(self):
         """Two identical calls must give bit-identical gradients.
 
@@ -940,12 +876,7 @@ class TestLinearCrossEntropyOverride(TestCase):
         )
         linear_bias = torch.randn(num_classes, device="cuda", dtype=torch.bfloat16)
         target = torch.randint(0, num_classes, (num_batches,), device="cuda")
-        options = LinearCrossEntropyOptions(
-            acc_policy="compact",
-            acc_dtype=torch.float32,
-            chunking_method=None,
-            batch_chunk_size=32,
-        )
+        options = _compact_options(batch_chunk_size=32)
 
         def once():
             leaves = [
