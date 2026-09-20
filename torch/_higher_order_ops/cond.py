@@ -23,6 +23,7 @@ from torch._higher_order_ops.utils import (
     create_fn_remove_none,
     fill_none_with_masks,
     materialize_as_graph,
+    move_bdim_to_front,
     reenter_make_fx,
     save_values_for_backward,
     saved_values,
@@ -755,7 +756,6 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         )
 
     pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
-    pred_ = get_unwrapped(pred) if pred_is_batched else pred
 
     # unbatched tensors are not vmapped
     tensors, in_dims = zip(
@@ -767,6 +767,9 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
 
     if pred_is_batched:
         # prepend "pred" and vmap everything
+        pred_ = move_bdim_to_front(
+            get_unwrapped(pred), maybe_get_bdim(pred), interpreter.batch_size()
+        )
         tensors = (pred_,) + tensors
         in_dims = (0,) + in_dims
 
