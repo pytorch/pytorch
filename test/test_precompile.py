@@ -3962,7 +3962,9 @@ class TestPrecompileCaptureFiles(TestCase):
         # A path the filesystem cannot open at all reaches the same diagnostic.
         with self.assertRaises(PrecompileError) as cm:
             load("x" * 5000, self.cache)
-        self.assertEqual(cm.exception.__cause__.errno, errno.ENAMETOOLONG)
+        self.assertIsInstance(cm.exception.__cause__, OSError)
+        if sys.platform != "win32":  # Windows maps an over-long name to another errno
+            self.assertEqual(cm.exception.__cause__.errno, errno.ENAMETOOLONG)
 
     def test_transposed_paths_are_reported_as_precompile_errors(self):
         # load takes two same-typed positional paths, so the likeliest caller mistake is
