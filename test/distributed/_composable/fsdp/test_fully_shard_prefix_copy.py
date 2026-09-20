@@ -57,17 +57,14 @@ class TestPrefixCopy(TestCase):
             if use_nonzero_dim
             else _default_reduce_scatter_input_fn
         )
-        sizes, leading_dims = prepare(params, grads, world_size)
-        expected_dims = [0, 0, 0]
-        if use_nonzero_dim and world_size > 1:
-            expected_dims = [0, 1, 0 if mixed_layout else 2]
-        self.assertEqual(leading_dims, expected_dims)
+        prepared = prepare(params, grads, world_size)
+        sizes = prepared.padded_unsharded_sizes
+        if not use_nonzero_dim or world_size == 1:
+            self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
         self.assertEqual(len(sizes), len(params))
         self.assertEqual(sum(size.numel() for size in sizes), expected.numel())
         output = torch.empty_like(expected)
-        foreach_reduce_scatter_copy_in(
-            grads, output, world_size, num_leading_dims=leading_dims
-        )
+        prepared.copy_in(grads, output, world_size)
         self.assertEqual(output, expected, atol=0, rtol=0)
 
     @parametrize("num_chunks", [1, 4])

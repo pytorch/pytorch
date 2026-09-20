@@ -6,17 +6,21 @@
 """
 
 import math
+from functools import partial
 
 import torch
+from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatterInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _reassemble_all_gather_outputs,
     AllGatherResult,
+    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
 from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 
 
 __all__ = [
+    "ReduceScatterInput",
     "all_gather_output_fn_for_nonzero_dim_shards",
     "reduce_scatter_input_fn_for_nonzero_dim_shards",
 ]
@@ -92,7 +96,7 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
     fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
     world_size: int,
-) -> tuple[list[torch.Size], list[int]]:
+) -> ReduceScatterInput:
     """Optimize reduce-scatter inputs for ``Shard(1)`` and higher shard dimensions.
 
     Copy contiguous unsharded gradients directly into the reduce-scatter buffer,
@@ -128,4 +132,19 @@ def reduce_scatter_input_fn_for_nonzero_dim_shards(
         padded_unsharded_sizes.append(
             _get_dim0_padded_size(unsharded_grad.size(), world_size)
         )
-    return padded_unsharded_sizes, num_leading_dims
+    copy_in = foreach_reduce_scatter_copy_in
+    if any(num_leading_dims):
+        copy_in = partial(_copy_reduce_scatter_input, num_leading_dims=num_leading_dims)
+    return ReduceScatterInput(padded_unsharded_sizes, copy_in)
+
+
+def _copy_reduce_scatter_input(
+    unsharded_grads: list[torch.Tensor],
+    output: torch.Tensor,
+    world_size: int,
+    *,
+    num_leading_dims: list[int],
+) -> None:
+    torch.ops.fsdp._chunk_cat_with_prefixes_(
+        output.view(world_size, -1), unsharded_grads, num_leading_dims, world_size
+    )
