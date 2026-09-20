@@ -59,6 +59,28 @@ from torch.testing._internal.common_utils import (
 )
 
 
+
+def _grouped_main_supported(group: int = 2) -> bool:
+    """GroupedMainStore.supports_config arch gate: group-2 is SM100/SM110."""
+    if not torch.cuda.is_available():
+        return False
+    cap = torch.cuda.get_device_capability()[0]
+    return cap in (10, 11) if group == 2 else cap == 10
+
+
+def _grouped_main_skip_reason(group: int = 2) -> str:
+    if group == 4:
+        return "group-4 grouped main outputs are currently SM100-only"
+    return "group-2 grouped main outputs require an SM100 or SM110 config"
+
+
+def skipIfNoGroupedMainStore(group: int = 2):
+    return unittest.skipUnless(
+        _grouped_main_supported(group),
+        _grouped_main_skip_reason(group),
+    )
+
+
 def mx_e8m0_scale(
     amax: torch.Tensor,
     max_value: float = 448.0,
@@ -2720,8 +2742,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     )
     def test_mm_output_contraction_matches_reference(self, case):
         _, group, chunked, tuned, n, config = case
-        if group == 4 and torch.cuda.get_device_capability()[0] != 10:
-            self.skipTest("group-4 grouped main outputs are currently SM100-only")
+        if not _grouped_main_supported(group):
+            self.skipTest(_grouped_main_skip_reason(group))
         m, k = 128, 64
         a = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
         b = (
@@ -2768,6 +2790,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     def test_mm_output_contraction_uint8(self):
         m = n = k = 64
         group = 2
@@ -3701,6 +3724,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     @parametrize("chunked", (False, True))
     def test_mm_output_contraction_dynamic_m(self, chunked):
         group, n, k = 2, 256, 64
@@ -3741,6 +3765,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     def test_mm_output_contraction_dynamic_n(self):
         m = k = 64
 
@@ -3768,6 +3793,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     def test_mm_output_contraction_dynamic_n_guards_tile_n(self):
         # GroupedMainStore requires tile_n <= physical N. A pinned tile_n=256
         # selected at N=512 must not be reused when N shrinks below it.
@@ -3799,6 +3825,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     @parametrize("split_size", (64, 128))
     def test_mm_output_contraction_specializes_split_size(self, split_size):
         torch._dynamo.reset()
@@ -3889,6 +3916,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     def test_mm_output_contraction_chunked_view(self):
         m, n, k = 128, 128, 64
 
@@ -3917,6 +3945,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     @parametrize("indices", ((0, 1), (1, 0), (-1, -2)))
     def test_mm_output_contraction_specializes_select_indices(self, indices):
         m, n, k = 128, 128, 64
@@ -3974,6 +4003,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @skipIfNoGroupedMainStore()
     def test_mm_chunked_output_contraction_rejects_contiguous_b(self):
         def epilogue_fn(acc):
             lhs, rhs = acc.chunk(2, dim=-1)
