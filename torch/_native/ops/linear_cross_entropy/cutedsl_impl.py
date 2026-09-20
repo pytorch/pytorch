@@ -67,9 +67,6 @@ def _no_reduction_impl(
     )[0]
 
 
-# (op_symbol, cond, impl) for every override this module installs on the
-# `torch_nn` namespace. Single source of truth: the registration loop below and
-# test/python_native/test_linear_cross_entropy_override.py both read it.
 @functools.cache
 def _arch_supported(device_index: int = 0) -> bool:
     """Whether the kernel can run on this device: the CuTeDSL runtime's floor.
@@ -106,24 +103,32 @@ def _kernel_eligible(
     compute_linear_bias_grad: bool,
 ) -> bool:
     """What the kernel implements. Shapes, dtypes and device only -- no data
-        reads, so this is safe under FakeTensor tracing.
+    reads, so this is safe under FakeTensor tracing.
 
-        Everything outside this set stays with the op: an ineligible input never
-        enters the override at all and the router falls back, which keeps "the
-        kernel ran" observable in a profile rather than hidden behind an internal
-        delegation.
+    Everything outside this set stays with the op: an ineligible input never
+    enters the override at all and the router falls back, which keeps "the
+    kernel ran" observable in a profile rather than hidden behind an internal
+    delegation.
 
-        The architecture condition is the DSL runtime's floor rather than a list of
-        architectures this was measured on -- see `_arch_supported`.
+    The architecture condition is the DSL runtime's floor rather than a list of
+    architectures this was measured on -- see `_arch_supported`.
 
-    fp16 is eligible because eager keeps fp16 logits under `compact` (fp32
-        for bf16), so at fp16 a chunk is two bytes per element -- which this kernel
-        matches by aliasing `g` into the logits rather than allocating a second
-        buffer.
+    fp16 is eligible because eager keeps fp16 logits under `compact` (fp32 for
+    bf16), so at fp16 a chunk is two bytes per element -- which this kernel
+    matches by aliasing `g` into the logits rather than allocating a second
+    buffer.
     """
     return (
         input.device.type == "cuda"
         and _arch_supported(input.device.index or 0)
+        # Every tensor the launch touches has to be on that same device. The
+        # gate is the only place that can say so: past it, a stray CPU tensor
+        # surfaces as an FFI argument-type error from the launcher rather than
+        # as eager's "expected all tensors to be on the same device".
+        and linear_weight.device == input.device
+        and target.device == input.device
+        and (linear_bias is None or linear_bias.device == input.device)
+        and (weight is None or weight.device == input.device)
         and input.dtype in (torch.bfloat16, torch.float16)
         and linear_weight.dtype is input.dtype
         and acc_dtype is torch.float32
@@ -136,12 +141,21 @@ def _kernel_eligible(
         and label_smoothing == 0.0
         and input.dim() == 2
         and linear_weight.dim() == 2
-        # The class count crosses the FFI as int32 and the kernel's column
-        # arithmetic is int32, so a larger one would truncate rather than
-        # decline. Unreachable today -- a (C, F) weight that big fits in no
-        # memory, and cuBLAS takes GEMM dimensions as int -- so this states the
-        # precondition rather than rejecting anything.
-        and linear_weight.shape[0] <= 2**31 - 1
+        # Both ends of the class count. Zero classes leaves the kernel no
+        # column to read: every target is out of range, the clamp sends the
+        # read to column 0, and on a (Bc, 0) buffer that is out of bounds --
+        # an illegal access rather than a wrong number. Eager raises on the
+        # empty reduction, so decline and let the router fall back to it.
+        # The upper end crosses the FFI as int32 and the kernel indexes
+        # columns in int32, so a larger one would truncate rather than
+        # decline. It guards that rather than marking the exact limit: the
+        # kernel's own arithmetic strides PAST V -- pass 1 by up to
+        # `threads_per_block`, pass 2 by up to a staging group more -- so the
+        # largest count that is actually safe sits below this by a margin the
+        # knobs set, which the gate cannot see. The difference is unreachable:
+        # a (C, F) weight anywhere near it fits in no memory, and cuBLAS takes
+        # GEMM dimensions as int.
+        and 1 <= linear_weight.shape[0] <= 2**31 - 1
     )
 
 
@@ -169,11 +183,18 @@ def _batch_chunked_kernel(
     middle of the loop. Eager walks the `(Bc, V)` logits buffer five more
     times (row max, subtract, gather, `exp_`, row sum, scale) and then
     scatters the one-hot correction into `grad_linear_weight` with
-    `index_add_`; here one kernel reads the logits once and writes the dense
+    `index_add_`; here one kernel reads the logits twice and writes the dense
     gradient-of-logits `g`, which turns both parameter gradients into plain
     GEMMs -- `grad_input = g @ W`, `grad_linear_weight = g^T @ X` -- and
     removes the scatter entirely, so the result is also deterministic where
     eager's was not.
+
+    The scalar loss accumulates in `acc_dtype` here, where eager keeps it in
+    the input dtype for bf16 (`acc_dtype if dtype == float16 else dtype`) and
+    rounds it twice per chunk. This path is the more accurate of the two, and
+    the returned value is cast back to the input dtype either way -- but the
+    two are not bit-comparable, so a test that compares them needs a tolerance
+    in ULP of that dtype rather than an absolute one.
 
     The row statistics follow eager's buffer discipline rather than calling
     `torch.logsumexp`: that is a composite which materializes `self - maxes`,
@@ -186,13 +207,15 @@ def _batch_chunked_kernel(
     separate passes -- two reads of the logits buffer and one write of `g`,
     against five more passes over it. The forward-only path (no gradient
     requested) has no `g` to write, so it takes its statistics from eager ops;
-    fusing that path is B1's job, when its gate is met.
+    fusing that path is separate work.
 
-    The logits buffer stays at `acc_dtype`, eager's parity. A low-precision
-    buffer was measured and dropped: it halves the buffer and the kernel's
-    reads of it, but bf16 stores the logits with absolute error ~|z| * 2^-9
-    while the softmax depends on their differences, so the gradients degrade
-    once |z| reaches the tens -- the regime a trained head operates in.
+    The logits buffer follows eager: `acc_dtype` for bf16 input, and fp16 for
+    fp16 input, which is eager's own choice there. Carrying bf16 input at a
+    low-precision buffer was measured and dropped: it halves the buffer and the
+    kernel's reads of it, but bf16 stores the logits with absolute error
+    ~|z| * 2^-9 while the softmax depends on their differences, so the
+    gradients degrade once |z| reaches the tens -- the regime a trained head
+    operates in.
 
     `g` is a view of the logits storage rather than a second buffer, which
     reaches a low-precision buffer's footprint without its rounding: a chunk
@@ -203,11 +226,11 @@ def _batch_chunked_kernel(
 
     At fp16 the buffer follows eager down to two bytes per element, which makes
     the aliasing overlap exact rather than half-offset, and is also why fp16 is
-    only offered where `inplace_g` is set: a separate `g` would double eager's
-    chunk footprint. The rounded fp16 logits carry eager's own accuracy
-    behaviour, measured and recorded in the plan -- what this path does not
-    inherit is the fp16 rounding of `exp()` and of the scaled gradient, which
-    stay in fp32 registers here.
+    only offered where `g` aliases the logits storage: a separate `g` would
+    double eager's chunk footprint. The rounded fp16 logits carry eager's own
+    accuracy behaviour, measured and recorded in the plan -- what this path
+    does not inherit is the fp16 rounding of `exp()` and of the scaled
+    gradient, which stay in fp32 registers here.
     """
     from torch.nn.modules.linear_cross_entropy import (
         _check_acc_dtype_compatible,
@@ -222,7 +245,10 @@ def _batch_chunked_kernel(
 
     # Installed at a backend key, so the op's body never runs and its checks
     # have to run here -- including the ones inside the accumulator this
-    # replaces.
+    # replaces. Two of the four can fire: the grad-flag and bias-shape checks
+    # read arguments the gate does not constrain. The acc ones cannot, since
+    # the gate already admits only `compact` with fp32 -- they are kept so the
+    # set stays the op's, not a subset chosen to match today's gate.
     _check_batch_chunked_grad_flags(
         input,
         linear_weight,
@@ -262,7 +288,11 @@ def _batch_chunked_kernel(
     grad_linear_weight = _make_zeros(
         linear_weight.shape, dtype, device, when=compute_linear_weight_grad
     )
-    grad_linear_bias = _make_zeros(
+    # The post-loop `copy_` writes all of this, so the zeros it used to be
+    # allocated with were a (C,) fill nothing read. The empty-batch early
+    # return has no loop to write it, so that path keeps the zeros.
+    _make_bias = _make_empty if num_batches > 0 else _make_zeros
+    grad_linear_bias = _make_bias(
         linear_weight.shape[:-1], dtype, device, when=compute_linear_bias_grad
     )
     bias_grad_acc = _make_zeros(
@@ -290,7 +320,11 @@ def _batch_chunked_kernel(
     # of the bytes that held its logits, so a chunk is one buffer, not two. The
     # kernel orders its writes against its reads, which is what makes that safe.
     g_alias = logits_buf.view(dtype).narrow(1, 0, num_classes)
-    row_max_buf = torch.empty((chunk_rows, 1), dtype=logits_dtype, device=device)
+    # Only the forward-only branch shifts in place, so this is the one buffer
+    # here the gradient path never touches.
+    row_max_buf = _make_empty(
+        (chunk_rows, 1), logits_dtype, device, when=not compute_grads
+    )
     # The fused kernel's two (Bc,) statistics outputs, both shifted by the row
     # max so their difference is formed from O(1) terms.
     log_row_sum_buf = torch.empty(chunk_rows, dtype=acc_dtype, device=device)
@@ -380,6 +414,9 @@ _NAMESPACE = "torch_nn"
 _DEFINING_MODULE = "torch.nn.modules.linear_cross_entropy"
 
 
+# (op_symbol, cond, impl) for every override this module installs on the
+# `torch_nn` namespace. Single source of truth: the registration loop below and
+# test/python_native/test_linear_cross_entropy_override.py both read it.
 _OVERRIDES = (
     ("_linear_cross_entropy_batch_chunked", _kernel_eligible, _batch_chunked_kernel),
     (
