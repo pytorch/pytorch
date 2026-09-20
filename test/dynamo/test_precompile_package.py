@@ -1796,7 +1796,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         )
         original = _SourceGraphModule(src)
         dup = copy.deepcopy(original)
-        dup.register_forward_hook(lambda *args: None)
+        handle = dup.register_forward_hook(lambda *args: None)
         dup._non_persistent_buffers_set.add("b")
         self.assertEqual(len(original._forward_hooks), 0)
         self.assertEqual(original._non_persistent_buffers_set, set())
@@ -1806,9 +1806,12 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
         original._buffers["b"].mul_(100)
         self.assertEqual(original(x), x + 100)
         self.assertEqual(dup(x), x + 1)  # live isolation
-        self.assertEqual(pickle.loads(pickle.dumps(dup))(x), x + 1)
-        # And an instance pickles its CURRENT parameters/buffers/submodules,
-        # not its load-time ones (other nn.Module state still comes from _src).
+        handle.remove()  # a lambda hook is unpicklable on any nn.Module
+        # And an instance pickles its CURRENT state, not the state it was built
+        # from: the mutated set survives dup's own round trip.
+        reloaded = pickle.loads(pickle.dumps(dup))
+        self.assertEqual(reloaded(x), x + 1)
+        self.assertEqual(reloaded._non_persistent_buffers_set, {"b"})
         self.assertEqual(pickle.loads(pickle.dumps(original))(x), x + 100)
 
     def test_eager_artifact_round_trips_a_hop_graph_as_source(self):
