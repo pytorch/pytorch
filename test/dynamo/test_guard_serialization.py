@@ -1224,6 +1224,8 @@ class _ModuleWithGenerators(torch.nn.Module):
         super().__init__()
         self.its = [(i for i in range(3))]
         self.opts = {"k": (i for i in range(3))}
+        self.tagset = {(i for i in range(3))}
+        self.blob = bytearray(b"x")
         self.empty = ()
         self.cfg = {"a": 1}
 
@@ -1294,9 +1296,42 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsInstance(out["m"].its, _Missing)
         self.assertIs(out["m"].its, out["m"].opts)
+        self.assertIsInstance(out["m"].tagset, _Missing)
+        self.assertIsInstance(out["m"].blob, _Missing)
         self.assertEqual(out["m"].cfg, {"a": 1})
         self.assertEqual(out["m"].empty, ())
         self.assertEqual(out["shared"], ())
+
+    def test_a_verbatim_default_element_survives_an_unguarded_alias(self):
+        # A value-guarded __defaults__ tuple travels whole, element by element.
+        # When an element is also an UNGUARDED module attribute, the module,
+        # pickled first, registers it mid-dump; persistent_id must still leave
+        # the verbatim tuple's element real, or EQUALS_MATCH misses forever.
+        m = _ModuleWithGenerators()
+
+        def fn(a, cfg=m.cfg):
+            return a
+
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"m": m, "fn": fn},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={
+                id(m): m,
+                id(fn): fn,
+                id(fn.__defaults__): fn.__defaults__,
+            },
+            value_guarded_containers={id(fn.__defaults__): fn.__defaults__},
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertEqual(out.output_graph.local_scope["fn"].__defaults__, ({"a": 1},))
+        # The protection is by object, so the module's alias stays real too.
+        self.assertEqual(out.output_graph.local_scope["m"].cfg, {"a": 1})
 
     def test_an_unguarded_tuple_shared_with_a_code_constant_is_not_substituted(self):
         # A guarded <locals> callback is rebuilt by value, co_consts included; an
