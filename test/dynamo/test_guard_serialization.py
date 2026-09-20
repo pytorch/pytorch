@@ -1285,7 +1285,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the verbatim tuple's element real, or EQUALS_MATCH misses forever.
         m = _ModuleWithGenerators()
 
-        def fn(a, cfg=m.cfg):
+        def fn(a, cfg=[1, m.cfg]):  # noqa: B006
             return a
 
         graph = types.SimpleNamespace(
@@ -1305,7 +1305,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(
             pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
         )
-        self.assertEqual(out.output_graph.local_scope["fn"].__defaults__, ({"a": 1},))
+        self.assertEqual(
+            out.output_graph.local_scope["fn"].__defaults__, ([1, {"a": 1}],)
+        )
         # The protection is by object, so the module's alias stays real too.
         self.assertEqual(out.output_graph.local_scope["m"].cfg, {"a": 1})
 
@@ -1335,28 +1337,28 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             load_guards_state(buf.getvalue())
 
     def test_fake_tensor_reduces_from_the_real_tensors_recorded_dispatch_keys(self):
-        # A guarded FakeTensor stands for a real tensor: the converter recorded
-        # that tensor's dispatch keys, whereas _dispatch_keys(fake) reports the
-        # Python keys of the fake itself, and empty_like under the live mode
-        # returns another fake that drags the mode into the pickle.
+        # A guarded FakeTensor stands for a real tensor: the converter may have
+        # recorded that tensor's dispatch keys, whereas _dispatch_keys(fake)
+        # reports the Python keys of the fake itself, and empty_like(fake)
+        # returns another fake (mode active or not) that drags the mode along.
         from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
         real = torch.randn(2)
         mode = FakeTensorMode()
+        real_keys = torch._C._dispatch_keys(real).raw_repr()
         # from_meta_and_device is how a loaded artifact's tensors are rebuilt
         # (from_real_tensor records keys only for an mkldnn source).
-        fake = mode.fake_tensor_converter.from_meta_and_device(
+        with_keys = mode.fake_tensor_converter.from_meta_and_device(
             mode,
             torch.empty_like(real, device="meta"),
             real.device,
             torch.Tensor,
             torch._C._dispatch_keys(real),
         )
-        real_keys = torch._C._dispatch_keys(real).raw_repr()
-        self.assertEqual(fake.dispatch_keys.raw_repr(), real_keys)
-        self.assertNotEqual(torch._C._dispatch_keys(fake).raw_repr(), real_keys)
-        buf = io.BytesIO()
-        with mode:
+        without_keys = mode.from_tensor(real)
+        self.assertIsNone(without_keys.dispatch_keys)
+        for fake in (with_keys, without_keys):
+            buf = io.BytesIO()
             pickler = GuardsStatePickler({id(fake): fake}, {}, {}, {}, buf)
             # The meta template is a plain tensor, not another fake carrying
             # the mode (without no_dispatch the dump still succeeds, with the
@@ -1364,11 +1366,17 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             _, args = pickler.reducer_override(fake)
             self.assertIs(type(args[0]), torch.Tensor)
             pickler.dump({"t": fake})
-        self.assertNotIn(b"FakeTensorMode", buf.getvalue())
-        out = load_guards_state(buf.getvalue())["t"]
-        self.assertIsInstance(out, FakeTensor)
-        self.assertEqual(out.dispatch_keys.raw_repr(), real_keys)
-        self.assertEqual(out.shape, real.shape)
+            self.assertNotIn(b"FakeTensorMode", buf.getvalue())
+            out = load_guards_state(buf.getvalue())["t"]
+            self.assertIsInstance(out, FakeTensor)
+            self.assertEqual(out.shape, real.shape)
+        buf = io.BytesIO()
+        GuardsStatePickler({id(with_keys): with_keys}, {}, {}, {}, buf).dump(
+            {"t": with_keys}
+        )
+        self.assertEqual(
+            load_guards_state(buf.getvalue())["t"].dispatch_keys.raw_repr(), real_keys
+        )
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
