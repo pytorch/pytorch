@@ -1285,7 +1285,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # the verbatim tuple's element real, or EQUALS_MATCH misses forever.
         m = _ModuleWithGenerators()
 
-        def fn(a, cfg=m.cfg):
+        def fn(a, cfg=[1, m.cfg]):  # noqa: B006
             return a
 
         graph = types.SimpleNamespace(
@@ -1305,7 +1305,9 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(
             pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
         )
-        self.assertEqual(out.output_graph.local_scope["fn"].__defaults__, ({"a": 1},))
+        self.assertEqual(
+            out.output_graph.local_scope["fn"].__defaults__, ([1, {"a": 1}],)
+        )
         # The protection is by object, so the module's alias stays real too.
         self.assertEqual(out.output_graph.local_scope["m"].cfg, {"a": 1})
 
