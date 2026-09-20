@@ -5235,17 +5235,6 @@ def pickle_guards_state(
             buf,
         )
 
-        # Snapshot the diagnostic's search roots before the pruning below
-        # empties global_scope: a value that also lives on a global is then
-        # still named by that global binding, which is what a user recognises
-        # even though the pruned scope itself is not in the artifact, rather
-        # than by a long path through the output graph. Best-effort like the
-        # walk itself: a scope whose read raises must not fail a good dump.
-        try:
-            scope_roots = _scope_roots(state.output_graph)
-        except Exception:
-            scope_roots = None
-
         if all(
             torch.compiler.keep_portable_guards_unsafe(
                 [
@@ -5254,6 +5243,18 @@ def pickle_guards_state(
                 ]
             )
         ):
+            # Snapshot the diagnostic's search roots before the pruning below
+            # empties global_scope: a value that also lives on a global is then
+            # still named by that global binding, which is what a user
+            # recognises even though the pruned scope itself is not in the
+            # artifact, rather than by a long path through the output graph.
+            # Only this branch needs it: with the scopes intact the walk reads
+            # them live. Best-effort like the walk itself: a scope whose read
+            # raises must not fail a good dump.
+            try:
+                scope_roots = _scope_roots(state.output_graph)
+            except Exception:
+                scope_roots = None
             # Prune more values in AOT precompile when complex pickling
             # structure is not needed.
             state.output_graph.guard_on_key_order = set()
