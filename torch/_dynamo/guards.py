@@ -4293,9 +4293,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                 if id(element) in self._verbatim_elements:
                     continue
                 self._verbatim_elements.add(id(element))
-                if type(element) in (list, tuple, set, frozenset):
+                if isinstance(element, (list, tuple, set, frozenset)):
                     stack.append(element)
-                elif type(element) is dict:
+                elif isinstance(element, dict):
+                    # Values only: no pruned type is hashable, so a key can
+                    # neither be one nor contain one.
                     stack.append(list(element.values()))
 
     @classmethod
@@ -4645,13 +4647,17 @@ class GuardsStatePickler(FunctionPicklerBase):
     # one object shared across a module, so an unguarded ``self.dims = (0, 1)``
     # can be the very object in another function's co_consts or in a guarded
     # __defaults__, and substituting it by id would put the sentinel there.
-    # Everything else in missing_values stays on the reducer_override path.
+    # Everything else in missing_values stays on the reducer_override path, and
+    # so does a container that is also in empty_values: reducer_override checks
+    # empty_values first, so a bound method's receiver is rebuilt empty rather
+    # than as the sentinel, and this hook keeps that precedence.
     _PRUNED_CONTAINER_TYPES = frozenset({list, dict, set, bytearray})
 
-    def persistent_id(self, obj: Any) -> int | str | None:
+    def persistent_id(self, obj: object) -> int | str | None:
         if (
             type(obj) in self._PRUNED_CONTAINER_TYPES
             and id(obj) in self.missing_values
+            and id(obj) not in self.empty_values
             and id(obj) not in self._verbatim_elements
         ):
             return _PRUNED_VALUE_PID
