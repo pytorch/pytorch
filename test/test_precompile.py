@@ -621,10 +621,11 @@ class TestPrecompile(TestCase):
 
     @parametrize("name", _PRECOMPILE_PUBLIC_MEMBERS)
     def test_precompile_member_module_and_qualname_resolve_to_it(self, name):
-        # Nothing hung off the singleton rewrites __module__/__qualname__: the
-        # docs place these under torch.compiler.precompile.<name>, but only a
-        # name torch.compiler.__all__ exports may claim torch.compiler, or
-        # pickle cannot resolve the class and inspect cannot find its source.
+        # Each member's __module__/__qualname__ walk back to the object itself,
+        # so pickle and test_public_bindings resolve it at the public path. The
+        # re-homing costs inspect.getsource, which reads the file of
+        # sys.modules[cls.__module__] and finds no class there; torch.onnx makes
+        # the same trade for its public types.
         member = getattr(torch.compiler.precompile, name)
         target = sys.modules[member.__module__]
         for part in member.__qualname__.split("."):
@@ -779,7 +780,7 @@ class TestPrecompile(TestCase):
         # The standalone driver rebuilds each frame's f_locals for the guard
         # check, so the shapes it has to bind are all here: a keyword-only
         # default the call omits, *args, a continuation closing over a cell of
-        # the entry frame (x, which rows() captures), and a module global the
+        # the entry frame (y, which rows() captures), and a module global the
         # entry reads (_MULTIGRAPH_SCALE, guarded by EQUALS_MATCH).
         import inspect
         from unittest import mock
@@ -795,7 +796,10 @@ class TestPrecompile(TestCase):
             torch._dynamo.graph_break()
 
             def rows():
-                return x.shape[0]
+                # Not x: a captured argument keeps a fast-local slot beside the
+                # continuation's free var, and on 3.13+ the LOAD_FAST closure
+                # load reads that slot, which Dynamo dropped, skipping the frame.
+                return y.shape[0]
 
             return y + rows() + len(rest)
 
