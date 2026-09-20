@@ -188,6 +188,8 @@ SKIP_PYTHON_BINDINGS = [
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
 SKIP_PYTHON_BINDINGS_SIGNATURES = [
+    "_chunk_cat.prefix_out(Tensor[] tensors, int[] num_leading_dims, int num_chunks, *, Tensor(a!) out) -> Tensor(a!)",
+    "split_with_sizes_copy.prefix_out(Tensor self, int[] split_sizes, int[] num_prefixes, int num_chunks, *, Tensor(a!)[] out) -> ()",
     "add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
     "add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)",
     "sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",

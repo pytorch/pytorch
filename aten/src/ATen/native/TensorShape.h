@@ -7,6 +7,19 @@ namespace at::native {
 
 TORCH_API at::Tensor clone_preserve_strides(const at::Tensor& self);
 
+TORCH_API void check_split_with_sizes_copy_prefix_inputs(
+    TensorList out,
+    const Tensor& input,
+    IntArrayRef split_sizes,
+    IntArrayRef num_prefixes,
+    int64_t num_chunks);
+
+TORCH_API void check_chunk_cat_prefix_inputs(
+    const Tensor& out,
+    TensorList tensors,
+    IntArrayRef num_leading_dims,
+    int64_t num_chunks);
+
 inline bool cat_should_skip_tensor(const Tensor& t) {
   return t.sym_numel() == 0 && t.dim() == 1;
 }

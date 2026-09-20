@@ -5753,6 +5753,15 @@
     CUDA: _chunk_cat_out_cuda
     XPU: _chunk_cat_out_xpu
 
+# Split each tensor on num_leading_dims[i], folding its leading dimensions into
+# separate inputs packed into num_chunks output rows.
+- func: _chunk_cat.prefix_out(Tensor[] tensors, int[] num_leading_dims, int num_chunks, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: _chunk_cat_prefix_out
+    CUDA: _chunk_cat_prefix_out_cuda
+
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: stack
@@ -15150,6 +15159,17 @@
     CompositeExplicitAutograd: split_with_sizes_copy_out
     CUDA: split_with_sizes_copy_out_cuda
     XPU: split_with_sizes_copy_out_xpu
+
+# split_sizes partitions each of num_chunks flat input rows. Each output contains
+# num_prefixes[i] contiguous regions collecting the same region from all rows.
+# For uint8 input, split_sizes counts bytes and output dtypes may differ.
+- func: split_with_sizes_copy.prefix_out(Tensor self, int[] split_sizes, int[] num_prefixes, int num_chunks, *, Tensor(a!)[] out) -> ()
+  device_check: NoCheck
+  device_guard: False
+  variants: function
+  dispatch:
+    CompositeImplicitAutograd: split_with_sizes_copy_prefix_out
+    CUDA: split_with_sizes_copy_prefix_out_cuda
 
 - func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function

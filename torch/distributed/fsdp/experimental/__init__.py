@@ -82,12 +82,12 @@ def all_gather_output_fn_for_nonzero_dim_shards(
         reorder_infos.append((fsdp_param, outputs))
     non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
     with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
-        torch.ops.fsdp._split_with_sizes_copy_with_prefixes_(
-            copy_outputs,
+        torch.ops.aten.split_with_sizes_copy.prefix_out(
             all_gather_output,
             all_gather_result.all_gather_input_split_sizes,
             num_prefixes,
             world_size,
+            out=copy_outputs,
         )
     _reassemble_all_gather_outputs(reorder_infos, world_size)
 
@@ -145,6 +145,6 @@ def _copy_reduce_scatter_input(
     *,
     num_leading_dims: list[int],
 ) -> None:
-    torch.ops.fsdp._chunk_cat_with_prefixes_(
-        output.view(world_size, -1), unsharded_grads, num_leading_dims, world_size
+    torch.ops.aten._chunk_cat.prefix_out(
+        unsharded_grads, num_leading_dims, world_size, out=output.view(world_size, -1)
     )

@@ -38,6 +38,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_chunk_cat.h>
 #include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
@@ -141,6 +142,7 @@
 #include <ATen/ops/split_copy_native.h>
 #include <ATen/ops/split_native.h>
 #include <ATen/ops/split_with_sizes.h>
+#include <ATen/ops/split_with_sizes_copy.h>
 #include <ATen/ops/split_with_sizes_copy_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
 #include <ATen/ops/squeeze.h>
@@ -3339,6 +3341,80 @@ Tensor& _chunk_cat_out(
   return out;
 }
 
+void check_chunk_cat_prefix_inputs(
+    const Tensor& out,
+    TensorList tensors,
+    IntArrayRef num_leading_dims,
+    int64_t num_chunks) {
+  if (at::GradMode::is_enabled()) {
+    bool requires_grad = out.requires_grad();
+    for (const auto& tensor : tensors) {
+      requires_grad |= tensor.requires_grad();
+    }
+    TORCH_CHECK(
+        !requires_grad,
+        "_chunk_cat(): functions with out=... arguments don't support automatic differentiation, "
+        "but one of the arguments requires grad.");
+  }
+  TORCH_CHECK(num_chunks > 0, "expected positive num_chunks");
+  TORCH_CHECK(!tensors.empty(), "expected a non-empty input tensor list");
+  TORCH_CHECK(
+      tensors.size() == num_leading_dims.size(),
+      "expected one leading dimension count per input");
+  TORCH_CHECK(
+      out.layout() == kStrided && out.is_contiguous(),
+      "expected a contiguous strided output");
+
+  bool has_input = false;
+  for (const auto i : c10::irange(tensors.size())) {
+    const auto& tensor = tensors[i];
+    const auto dim = num_leading_dims[i];
+    TORCH_CHECK(
+        tensor.layout() == kStrided && (dim == 0 || tensor.is_contiguous()),
+        "prefix copies require contiguous strided inputs");
+    TORCH_CHECK(
+        dim >= 0 && dim < tensor.dim(),
+        "leading dimension count must be non-negative and less than input ndim");
+    TORCH_CHECK(
+        dim == 0 || tensor.size(dim) % num_chunks == 0,
+        "prefix copies require an evenly divisible shard dimension");
+    TORCH_CHECK(
+        tensor.dtype() == tensors[0].dtype(),
+        "inputs must have the same dtype");
+    TORCH_CHECK(
+        tensor.device() == out.device(),
+        "inputs and output must be on the same device");
+    if (tensor.numel() == 0) {
+      TORCH_CHECK(
+          dim > 0 && c10::multiply_integers(tensor.sizes().slice(0, dim)) == 0,
+          "expected non-empty inputs");
+    } else {
+      has_input = true;
+    }
+  }
+  TORCH_CHECK(has_input, "expected a non-empty input tensor list");
+}
+
+Tensor& _chunk_cat_prefix_out(
+    TensorList tensors,
+    IntArrayRef num_leading_dims,
+    int64_t num_chunks,
+    Tensor& out) {
+  check_chunk_cat_prefix_inputs(out, tensors, num_leading_dims, num_chunks);
+  std::vector<Tensor> inputs;
+  for (const auto i : c10::irange(tensors.size())) {
+    const auto& tensor = tensors[i];
+    const auto dim = num_leading_dims[i];
+    if (dim == 0) {
+      inputs.push_back(tensor);
+      continue;
+    }
+    auto prefixes = tensor.flatten(0, dim - 1).unbind(0);
+    inputs.insert(inputs.end(), prefixes.begin(), prefixes.end());
+  }
+  return at::_chunk_cat_out(out, inputs, 0, num_chunks);
+}
+
 Tensor stack_meta(TensorList tensors, int64_t dim) {
   TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
@@ -4819,6 +4895,89 @@ void split_with_sizes_copy_out(
     at::TensorList out) {
   auto array = self.split_with_sizes(split_sizes, dim);
   copy_tensor_array_to_out("split_with_sizes_copy_out", array, out);
+}
+
+void check_split_with_sizes_copy_prefix_inputs(
+    TensorList out,
+    const Tensor& input,
+    IntArrayRef split_sizes,
+    IntArrayRef num_prefixes,
+    int64_t num_chunks) {
+  if (at::GradMode::is_enabled()) {
+    bool requires_grad = input.requires_grad();
+    for (const auto& tensor : out) {
+      requires_grad |= tensor.requires_grad();
+    }
+    TORCH_CHECK(
+        !requires_grad,
+        "split_with_sizes_copy(): functions with out=... arguments don't support automatic differentiation, "
+        "but one of the arguments requires grad.");
+  }
+  TORCH_CHECK(num_chunks > 0, "expected positive num_chunks");
+  TORCH_CHECK(
+      input.layout() == kStrided && input.is_contiguous(),
+      "expected a contiguous strided input");
+  TORCH_CHECK(
+      split_sizes.size() == out.size() && num_prefixes.size() == out.size(),
+      "expected one split size and prefix count per output");
+  TORCH_CHECK(
+      input.numel() % num_chunks == 0,
+      "input size must be divisible by num_chunks");
+
+  int64_t remaining = input.numel() / num_chunks;
+  for (const auto i : c10::irange(out.size())) {
+    TORCH_CHECK(
+        split_sizes[i] >= 0 && split_sizes[i] <= remaining,
+        "split sizes must be non-negative and sum to the input chunk size");
+    remaining -= split_sizes[i];
+    TORCH_CHECK(
+        num_prefixes[i] > 0 && split_sizes[i] % num_prefixes[i] == 0,
+        "split size must be divisible by its positive prefix count");
+    TORCH_CHECK(
+        out[i].layout() == kStrided && out[i].is_contiguous(),
+        "expected contiguous strided outputs");
+    TORCH_CHECK(
+        out[i].device() == input.device(),
+        "input and outputs must be on the same device");
+    TORCH_CHECK(
+        input.scalar_type() == kByte || out[i].dtype() == input.dtype(),
+        "output dtype must match the input unless the input has dtype uint8");
+    TORCH_CHECK(
+        out[i].numel() % num_chunks == 0 &&
+            out[i].numel() / num_chunks * out[i].element_size() ==
+                split_sizes[i] * input.element_size(),
+        "output size must match the split size times num_chunks");
+  }
+  TORCH_CHECK(remaining == 0, "split sizes must sum to the input chunk size");
+}
+
+void split_with_sizes_copy_prefix_out(
+    const Tensor& self,
+    IntArrayRef split_sizes,
+    IntArrayRef num_prefixes,
+    int64_t num_chunks,
+    TensorList out) {
+  check_split_with_sizes_copy_prefix_inputs(
+      out, self, split_sizes, num_prefixes, num_chunks);
+  std::vector<int64_t> sizes;
+  std::vector<Tensor> outputs;
+  for (const auto i : c10::irange(out.size())) {
+    const auto size = split_sizes[i] / num_prefixes[i];
+    auto output = out[i].view({-1});
+    if (self.scalar_type() == kByte) {
+      output = output.view(kByte);
+    }
+    auto prefixes = output.view({num_prefixes[i], num_chunks, size}).unbind(0);
+    sizes.insert(sizes.end(), num_prefixes[i], size);
+    outputs.insert(outputs.end(), prefixes.begin(), prefixes.end());
+  }
+  if (self.numel() > 0) {
+    at::split_with_sizes_copy_out(
+        outputs, self.view({num_chunks, self.numel() / num_chunks}), sizes, 1);
+  }
+  for (const auto& output : out) {
+    output.unsafeGetTensorImpl()->bump_version();
+  }
 }
 
 void unbind_copy_int_out(
