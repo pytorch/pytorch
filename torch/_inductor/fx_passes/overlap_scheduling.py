@@ -524,11 +524,13 @@ class OverlapScheduler:
             self.allowed_peak_memory_bytes = self.original_peak_memory + (
                 memory_increase_bytes or 0
             )
-            self.memory_tracker = MemoryTracker(self.graph)
+            self.memory_tracker: MemoryTracker | None = MemoryTracker(self.graph)
         else:
             self.original_peak_memory = 0
             self.allowed_peak_memory_bytes = sys.maxsize
-            self.memory_tracker = None  # type: ignore[assignment]
+            # Defensive default; budget checks are skipped when uncapped and
+            # the in-flight limit remains active.
+            self.memory_tracker = None
 
         self.cumulative_prefetch_mem_by_compute_index: list[int] = [
             0 for _ in range(len(self.compute_nodes))
@@ -642,13 +644,15 @@ class OverlapScheduler:
             return False
 
         # check current mem
-        if (
+        if self.memory_tracker is not None and (
             self.memory_tracker.current_memory_bytes + size
             > self.allowed_peak_memory_bytes
         ):
             return True
 
         start_index = self.current_compute_index
+        # memory_tracker is fixed after __init__, so this is loop-invariant.
+        check_budget = self.memory_tracker is not None
 
         # then, check future mem
         for compute_idx in range(start_index, domination_index):
@@ -661,11 +665,12 @@ class OverlapScheduler:
                 return True
 
             # Check 2: Would total memory (baseline + cumulative prefetch) exceed budget?
-            baseline_mem = self.original_mem_before_compute_index[compute_idx]
-            projected = baseline_mem + cumulative_prefetch + size
+            if check_budget:
+                baseline_mem = self.original_mem_before_compute_index[compute_idx]
+                projected = baseline_mem + cumulative_prefetch + size
 
-            if projected > self.allowed_peak_memory_bytes:
-                return True
+                if projected > self.allowed_peak_memory_bytes:
+                    return True
 
         return False
 
@@ -934,7 +939,7 @@ class OverlapScheduler:
             elif _schedulable_wait_node(node):
                 # Defer exposed waits until hidden or over memory budget
                 info = self.collective_info[self.wait_to_start[node]]
-                over_budget = (
+                over_budget = self.memory_tracker is not None and (
                     self.memory_tracker.current_memory_bytes
                     > self.allowed_peak_memory_bytes
                 )
@@ -1143,12 +1148,11 @@ class OverlapScheduler:
             raise AssertionError(f"node {node} has unscheduled input nodes")
         self.scheduled.add(node)
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
-        self.memory_tracker.schedule_node(node)
-
+        if self.memory_tracker is not None:
+            self.memory_tracker.schedule_node(node)
         log.debug(
-            "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
+            "Scheduled node %s: total_scheduled=%d",
             node.name,
-            self.memory_tracker.get_current_memory_bytes(),
             len(self.scheduled),
         )
 
@@ -1666,24 +1670,27 @@ class OverlapScheduler:
         counters["inductor"]["overlap_scheduling_potentially_hidden"] += len(
             potentially_hidden_collectives
         )
-        counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
-        counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
-
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
-            "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
             "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
             "wasted_compute_ms=%.2f",
             len(exposed),
             len(bad_exposed),
             len(potentially_hidden_collectives),
-            self.original_peak_memory,
-            self.memory_tracker.peak_memory,
             total_exposed,
             hideable_exposed_ms,
             total_potential_exposed,
             self.wasted_compute,
         )
+        if self.memory_tracker is not None:
+            counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
+            counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
+            log.info(
+                "Overlap scheduling memory: original_peak_memory=%d bytes, "
+                "rescheduled_peak_memory=%d bytes",
+                self.original_peak_memory,
+                self.memory_tracker.peak_memory,
+            )
 
         self.reorder_graph()
 
@@ -1932,7 +1939,7 @@ def schedule_overlap_bucketing(
             estimates (deterministic, no GPU sync), "benchmark" uses GPU benchmarking (more accurate).
         max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
-            Uses minimum of absolute and ratio limits when both are specified.
+            Uses maximum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
         bucket_mode: Bucketing mode for grouping collectives.
         pre_bucketing_fsdp_collectives: Pre-bucket FSDP collectives into bandwidth-saturating
