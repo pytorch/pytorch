@@ -1195,6 +1195,33 @@ if torch.distributed.is_available():
             self.calls = []
 
 
+class _ModuleWithGenerators(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.its = [(i for i in range(3))]
+        self.opts = {"k": (i for i in range(3))}
+        self.tagset = {(i for i in range(3))}
+        self.blob = bytearray(b"x")
+        self.empty = ()
+        self.cfg = {"a": 1}
+
+
+def _make_sum_callback():
+    def cb(x):
+        return x.sum((0, 1))
+
+    return cb
+
+
+class _ModuleSharingAConstantTuple(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.cb = _make_sum_callback()
+        # The compiler folds equal constant tuples in one module into ONE object,
+        # so this unguarded attribute IS cb's `(0, 1)` code constant.
+        self.dims = (0, 1)
+
+
 class _ModuleWithDtypeAttr(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1302,6 +1329,82 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         out = load_guards_state(buf.getvalue())
         self.assertIsNone(out.grad)
         self.assertEqual(out.shape, x.shape)
+
+    def test_prunes_an_unguarded_builtin_container_holding_a_generator(self):
+        # The C pickler saves an exact list/dict/tuple by type and never consults
+        # reducer_override, so registering one in missing_values still left
+        # "cannot pickle 'generator' object". persistent_id sees every object.
+        m = _ModuleWithGenerators()
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m, id(m.cfg): m.cfg}, {}, {}, {}, buf).dump(
+            {"m": m, "shared": ()}
+        )
+        out = load_guards_state(buf.getvalue())
+        self.assertIsInstance(out["m"].its, _Missing)
+        self.assertIs(out["m"].its, out["m"].opts)
+        self.assertIsInstance(out["m"].tagset, _Missing)
+        self.assertIsInstance(out["m"].blob, _Missing)
+        self.assertEqual(out["m"].cfg, {"a": 1})
+        self.assertEqual(out["m"].empty, ())
+        self.assertEqual(out["shared"], ())
+
+    def test_a_verbatim_default_element_survives_an_unguarded_alias(self):
+        # A value-guarded __defaults__ tuple travels whole, element by element.
+        # When an element is also an UNGUARDED module attribute, the module,
+        # pickled first, registers it mid-dump; persistent_id must still leave
+        # the verbatim tuple's element real, or EQUALS_MATCH misses forever.
+        m = _ModuleWithGenerators()
+
+        def fn(a, cfg=[1, m.cfg]):  # noqa: B006
+            return a
+
+        graph = types.SimpleNamespace(
+            guards=[],
+            local_scope={"m": m, "fn": fn},
+            global_scope={},
+            guard_on_key_order=set(),
+        )
+        builder = types.SimpleNamespace(
+            guard_tree_values={
+                id(m): m,
+                id(fn): fn,
+                id(fn.__defaults__): fn.__defaults__,
+            },
+            value_guarded_containers={id(fn.__defaults__): fn.__defaults__},
+        )
+        out = load_guards_state(
+            pickle_guards_state(types.SimpleNamespace(output_graph=graph), builder)
+        )
+        self.assertEqual(
+            out.output_graph.local_scope["fn"].__defaults__, ([1, {"a": 1}],)
+        )
+        # The protection is by object, so the module's alias stays real too.
+        self.assertEqual(out.output_graph.local_scope["m"].cfg, {"a": 1})
+
+    def test_an_unguarded_tuple_shared_with_a_code_constant_is_not_substituted(self):
+        # A guarded <locals> callback is rebuilt by value, co_consts included; an
+        # unguarded tuple attribute that is the same object must not turn that
+        # constant into the sentinel, so tuples stay on the C fast path.
+        m = _ModuleSharingAConstantTuple()
+        self.assertIs(m.dims, m.cb.__code__.co_consts[1])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(m): m, id(m.cb): m.cb}, {}, {}, {}, buf).dump({"m": m})
+        out = load_guards_state(buf.getvalue())["m"]
+        self.assertEqual(out.cb.__code__.co_consts[1], (0, 1))
+        self.assertEqual(out.cb(torch.ones(2, 3)), torch.tensor(6.0))
+        self.assertEqual(out.dims, (0, 1))
+
+    def test_loader_rejects_a_foreign_persistent_id(self):
+        class Foreign(pickle.Pickler):
+            def persistent_id(self, obj):
+                return "foo" if obj == "X" else None
+
+        buf = io.BytesIO()
+        Foreign(buf).dump(["X"])
+        with self.assertRaisesRegex(
+            pickle.UnpicklingError, "unknown guards state persistent id 'foo'"
+        ):
+            load_guards_state(buf.getvalue())
 
     def test_an_unguarded_interned_singleton_is_not_pruned(self):
         # Pruning is keyed by id(): an unguarded module attribute holding
@@ -3579,6 +3682,38 @@ class TestGuardSerialization(TestGuardSerializationBase):
         h = m.register_backward_hook(lambda *args, **kwargs: None)
         self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
         h.remove()
+
+    def test_loaded_nested_module_keeps_its_bookkeeping_containers(self):
+        # _parameters/_buffers/_modules are exact dicts, so persistent_id would
+        # prune an unguarded one to the sentinel and nn.Module.__getattr__,
+        # which indexes them, would raise TypeError on every attribute miss.
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        def fn(m, x):
+            return m(x)
+
+        self._test_serialization("TENSOR_MATCH", fn, Outer(), torch.randn(2, 4))
+        loaded = load_guards_state(self._cached_guards_state).output_graph
+        self.assertFalse(hasattr(loaded.local_scope["m"].lin, "absent"))
+        self.assertEqual(loaded.local_scope["m"].lin.in_features, 4)
+
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_loaded_rnn_module_survives_its_own_setstate(self):
+        # RNNBase.__setstate__ indexes _all_weights, an unguarded exact list;
+        # a module with its own __setstate__ is pickled whole rather than pruned.
+        def fn(m, x):
+            return m(x)[0]
+
+        lstm, x = torch.nn.LSTM(4, 4), torch.randn(2, 3, 4)
+        self._test_serialization("TENSOR_MATCH", fn, lstm, x)
+        state = load_guards_state(self._cached_guards_state)
+        self.assertIsInstance(state.output_graph.local_scope["m"], torch.nn.LSTM)
 
     def test_grad_mode(self):
         def fn(x):
