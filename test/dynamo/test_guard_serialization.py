@@ -3760,6 +3760,38 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m, "x": x}, False)
         h.remove()
 
+    def test_loaded_nested_module_keeps_its_bookkeeping_containers(self):
+        # _parameters/_buffers/_modules are exact dicts, so persistent_id would
+        # prune an unguarded one to the sentinel and nn.Module.__getattr__,
+        # which indexes them, would raise TypeError on every attribute miss.
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        def fn(m, x):
+            return m(x)
+
+        self._test_serialization("TENSOR_MATCH", fn, Outer(), torch.randn(2, 4))
+        loaded = load_guards_state(self._cached_guards_state).output_graph
+        self.assertFalse(hasattr(loaded.local_scope["m"].lin, "absent"))
+        self.assertEqual(loaded.local_scope["m"].lin.in_features, 4)
+
+    @torch._dynamo.config.patch(allow_rnn=True)
+    def test_loaded_rnn_module_survives_its_own_setstate(self):
+        # RNNBase.__setstate__ indexes _all_weights, an unguarded exact list;
+        # a module with its own __setstate__ is pickled whole rather than pruned.
+        def fn(m, x):
+            return m(x)[0]
+
+        lstm, x = torch.nn.LSTM(4, 4), torch.randn(2, 3, 4)
+        self._test_serialization("TENSOR_MATCH", fn, lstm, x)
+        state = load_guards_state(self._cached_guards_state)
+        self.assertIsInstance(state.output_graph.local_scope["m"], torch.nn.LSTM)
+
     def test_grad_mode(self):
         def fn(x):
             return x + 1
