@@ -4261,7 +4261,8 @@ def _instance_dict(obj: Any) -> dict[str, Any] | None:
 
 
 def _pickles_by_default(obj: Any) -> bool:
-    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``.
+    """Whether ``obj`` round-trips as ``type(obj).__new__`` plus its ``__dict__``
+    (judged from the type's own hooks; the copyreg dispatch table is not consulted).
 
     Attribute pruning is only sound for that protocol. A custom __reduce_ex__
     (enum.Enum's is ``(cls, (self._value_,))``), __getstate__, __setstate__ or
@@ -4277,6 +4278,11 @@ def _pickles_by_default(obj: Any) -> bool:
         and not hasattr(cls, "__getnewargs__")
         and not hasattr(cls, "__getnewargs_ex__")
     )
+
+
+# Module prefixes of the DTensor structural types the attribute pruner leaves
+# alone (see _prune_unguarded_attributes).
+_DTENSOR_MODULES = ("torch.distributed.tensor", "torch.distributed.device_mesh")
 
 
 # What a loaded nn.Module reads on ORDINARY attribute access, so pruning it
@@ -4985,12 +4991,16 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if _is_shared_constant(attr):
                 continue
-            if str(getattr(type(attr), "__module__", "")).partition(".")[0] == "torch":
-                # The receiver rule, applied to values: a torch structural
-                # object (a Placement, a DeviceMesh) may be the very object a
-                # DTensorSpec elsewhere in the state rebuilds itself from, and
-                # pruning it by id would put the sentinel there.
+            if str(getattr(type(attr), "__module__", "")).startswith(_DTENSOR_MODULES):
+                # A DTensor structural value (a Placement, a DeviceMesh) may be
+                # the very object a DTensorSpec elsewhere in the state rebuilds
+                # itself from, and pruning it by id would put the sentinel
+                # there. Only those: any other torch-typed bystander (a
+                # GradScaler whose __getstate__ asserts) stays prunable.
                 continue
+            # Registration is global and by id: an attribute pruned here is the
+            # sentinel wherever else the same object appears, including inside
+            # the state of a receiver excluded from pruning by _pickles_by_default.
             self.missing_values[id(attr)] = attr
 
 
