@@ -12,6 +12,7 @@
 namespace at::xpu {
 
 TORCH_XPU_API MempoolId_t graph_pool_handle();
+TORCH_XPU_API XPUGraphImpl* get_graph_from_capture_id(size_t capture_id);
 
 using xpuGraph_t = sycl::ext::oneapi::experimental::command_graph<
     sycl::ext::oneapi::experimental::graph_state::modifiable>;

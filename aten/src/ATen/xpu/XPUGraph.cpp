@@ -16,6 +16,14 @@ using namespace sycl::ext::oneapi::experimental;
    (device_architecture) == architecture::intel_gpu_pvc_vg)
 
 static bool _xpu_graphs_debug = false;
+static std::mutex currently_capturing_graphs_mutex;
+static ska::flat_hash_map<size_t, XPUGraphImpl*> currently_capturing_graphs;
+
+XPUGraphImpl* get_graph_from_capture_id(size_t capture_id) {
+  std::lock_guard<std::mutex> lock(currently_capturing_graphs_mutex);
+  auto it = currently_capturing_graphs.find(capture_id);
+  return it == currently_capturing_graphs.end() ? nullptr : it->second;
+}
 
 MempoolId_t graph_pool_handle() {
   // set the second value by default
@@ -35,6 +43,7 @@ void XPUGraphImpl::register_generator_state(const at::Generator& generator) {
   c10::intrusive_ptr<XPUGeneratorImpl> xpu_gen =
       dynamic_intrusive_pointer_cast<XPUGeneratorImpl>(
           generator.getIntrusivePtr());
+  TORCH_CHECK(xpu_gen, "Expected an XPU Generator");
   xpu_gen->register_graph(this);
 }
 
@@ -64,16 +73,6 @@ void XPUGraphImpl::capture_begin(
       "This XPUGraph instance already owns a captured graph. "
       "To capture a new graph, create a new instance.");
 
-  // default generator is always registered
-  auto* gen = get_generator_or_default<XPUGeneratorImpl>(
-      std::nullopt, xpu::detail::getDefaultXPUGenerator());
-  gen->register_graph(this);
-
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->capture_prologue();
-  }
-
   capture_stream_ = at::xpu::getCurrentXPUStream();
   capture_dev_ = c10::xpu::current_device();
 
@@ -95,7 +94,7 @@ void XPUGraphImpl::capture_begin(
 
   auto filter = [this](sycl::queue* queue) {
     return queue->ext_oneapi_get_state() == queue_state::recording &&
-      capture_id_ == queue->ext_oneapi_get_graph().get_id();
+        capture_id_ == queue->ext_oneapi_get_graph().get_id();
   };
 
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(
@@ -134,6 +133,10 @@ void XPUGraphImpl::capture_begin(
       capture_stream_.queue().ext_oneapi_get_state() == queue_state::recording);
 
   c10::xpu::XPUCachingAllocator::markCaptureBegin(capture_dev_);
+  {
+    std::lock_guard<std::mutex> lock(currently_capturing_graphs_mutex);
+    currently_capturing_graphs.emplace(capture_id_, this);
+  }
 }
 
 void XPUGraphImpl::capture_end() {
@@ -145,6 +148,10 @@ void XPUGraphImpl::capture_end() {
 
   graph_->end_recording();
 
+  {
+    std::lock_guard<std::mutex> lock(currently_capturing_graphs_mutex);
+    currently_capturing_graphs.erase(capture_id_);
+  }
   c10::xpu::XPUCachingAllocator::markCaptureEnd(capture_dev_);
 
   c10::xpu::XPUCachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
@@ -152,7 +159,7 @@ void XPUGraphImpl::capture_end() {
 
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
-    wholegraph_increments = generator_state->capture_epilogue();
+    wholegraph_increments = generator_state->capture_epilogue(capture_id_);
   }
 
 #if SYCL_COMPILER_VERSION >= 20260100
@@ -209,7 +216,7 @@ void XPUGraphImpl::replay() {
 
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
-    generator_state->replay_prologue(wholegraph_increments);
+    generator_state->replay_prologue(capture_id_, wholegraph_increments);
   }
 
   auto& queue = at::xpu::getCurrentXPUStream().queue();
@@ -217,6 +224,16 @@ void XPUGraphImpl::replay() {
 }
 
 void XPUGraphImpl::reset() {
+  if (capture_id_ != 0) {
+    for (auto& [generator_state, wholegraph_increments] :
+         captured_generator_states_) {
+      generator_state->remove_capture_state(capture_id_);
+    }
+    std::lock_guard<std::mutex> lock(currently_capturing_graphs_mutex);
+    currently_capturing_graphs.erase(capture_id_);
+    capture_id_ = 0;
+  }
+  captured_generator_states_.clear();
   if (capture_ended_) {
     c10::xpu::XPUCachingAllocator::releasePool(capture_dev_, mempool_id_);
     at::getHostAllocator(at::kXPU)->release_pool(mempool_id_);
@@ -286,10 +303,6 @@ MempoolId_t XPUGraphImpl::pool() const {
 }
 
 XPUGraphImpl::~XPUGraphImpl() {
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->unregister_graph(this);
-  }
   reset();
 }
 
