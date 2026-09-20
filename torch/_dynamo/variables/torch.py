@@ -88,12 +88,14 @@ from ..utils import (
     has_torch_function,
     hashable,
     is_wrapper_or_member_descriptor,
+    no_keywords,
+    no_positional,
     product,
     proxy_args_kwargs,
     unpack_iterable,
     unwrap_if_wrapper,
 )
-from .base import AsPythonConstantNotImplementedError, typestr, VariableTracker
+from .base import AsPythonConstantNotImplementedError, Method, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
@@ -108,7 +110,7 @@ from .functions import (
     UserFunctionVariable,
 )
 from .lists import ListVariable, SizeVariable, TupleVariable
-from .object_protocol import vt_is_iterable
+from .object_protocol import pynumber_index, vt_is_iterable
 from .script_object import CustomClassObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -187,6 +189,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.cuda.use_mem_pool.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback.annotate,
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
+        torch.fx.traceback._dynamo_region_activation_memory_budget,
+        torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -324,6 +328,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
+        torch._C._is_tracing: False,
         torch.fx._symbolic_trace.is_fx_tracing: False,
         torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
@@ -670,7 +675,7 @@ class BaseTorchVariable(VariableTracker):
             # interaction with Kineto is not a valid usecase. So, this is ok.
             return True
 
-        return getattr(self.value, "__module__", None) == "math"
+        return getattr(self.value, "__module__", None) in ("math", "cmath")
 
 
 class TorchCtxManagerClassVariable(BaseTorchVariable):
@@ -795,6 +800,24 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 )
             return FxTracebackAnnotateVariable(
                 args[0].as_python_constant(), source=self.source
+            )
+        elif self.value in (
+            torch.fx.traceback._dynamo_region_activation_memory_budget,
+            torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            if len(args) != 1 or kwargs:
+                raise AssertionError(
+                    "_dynamo_region_activation_memory_budget expects "
+                    "one positional argument"
+                )
+            budget = guard_if_dyn(args[0])
+            if type(budget) is not float:
+                raise AssertionError(
+                    f"expected a float budget, got {type(budget).__name__}"
+                )
+            return FxTracebackAnnotateVariable(
+                {torch.fx.traceback.MEMORY_BUDGET_ANNOTATION_KEY: budget},
+                source=self.source,
             )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
@@ -1131,6 +1154,77 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 kwargs,
             )
 
+        @register(math.ceil)
+        def handle_ceil(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.ceil", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.ceil() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__ceil__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.floor)
+        def handle_floor(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            from .object_protocol import pyfloat_as_double
+
+            no_keywords(tx, "math.floor", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.floor() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__floor__", [])
+            if result is not None:
+                return result
+
+            return self.call_function(tx, [pyfloat_as_double(tx, arg)], {})
+
+        @register(math.trunc)
+        def handle_trunc(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            no_keywords(tx, "math.trunc", kwargs)
+            if len(args) != 1:
+                raise_type_error(
+                    tx, f"math.trunc() takes exactly one argument ({len(args)} given)"
+                )
+            (arg,) = args
+            if not isinstance(arg, variables.UserDefinedObjectVariable):
+                return None
+
+            result = arg._maybe_call_special(tx, "__trunc__", [])
+            if result is None:
+                raise_type_error(
+                    tx, f"type {arg.python_type_name()} doesn't define __trunc__ method"
+                )
+            return result
+
         @register(math.radians)
         def handle_radians(
             self,
@@ -1165,6 +1259,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 # Use math.fma if constants
                 return None
+
+        @register(math.gcd)
+        def handle_gcd(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
+
+        @register(math.lcm)
+        def handle_lcm(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if kwargs or not any(
+                isinstance(arg, UserDefinedObjectVariable) for arg in args
+            ):
+                return None
+
+            return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
         @register(torch.is_inference_mode_enabled)
         def handle_is_inference_mode_enabled(
@@ -2789,10 +2911,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if device.type == "cpu":
                 return ConstantVariable.create(None)
 
+            device_index = device.index
+            if device_index is None:
+                from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+                # Under compile-on-one-rank the index must stay None so the runtime
+                # resolves it per rank and one artifact serves them all.
+                if not _coor_enabled():
+                    device_index = 0
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
-                (device.type, device.index or 0),
+                (device.type, device_index),
                 {},
             )
             return ConstantVariable.create(None)
@@ -4470,30 +4601,34 @@ class DispatchKeySetVariable(BaseTorchVariable):
 
         return python_constant_richcompare_impl(self, tx, other, op)
 
-    def is_constant_fold_method(self, name: str) -> bool:
-        return name == "has"
-
-    def call_method(
+    def has(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        if self.is_constant_fold_method(name) and check_unspec_or_constant_args(
-            args, kwargs
-        ):
-            method = getattr(self.value, name)
-            return VariableTracker.build(
-                tx,
-                method(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-        elif name == "highestPriorityTypeId":
-            return VariableTracker.build(tx, self.value.highestPriorityTypeId())
-        return super().call_method(tx, name, args, kwargs)
+    ) -> VariableTracker | None:
+        if not check_unspec_or_constant_args(args, kwargs):
+            return None
+        return VariableTracker.build(
+            tx,
+            self.value.has(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            ),
+        )
+
+    def highestPriorityTypeId(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.highestPriorityTypeId())
+
+    tp_methods = {
+        "has": Method(has),
+        "highestPriorityTypeId": Method(highestPriorityTypeId),
+    }
 
 
 class FuncTorchInterpreterVariable(BaseTorchVariable):
@@ -4506,29 +4641,68 @@ class FuncTorchInterpreterVariable(BaseTorchVariable):
         install_guard(source.make_guard(GuardBuilder.ID_MATCH))
         return cls(value, source=source)
 
-    def call_method(
+    def key(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "VariableTracker":
-        if name == "key":
-            return VariableTracker.build(tx, self.value.key())
-        elif name == "process":
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, self.value.process.__func__),
-                [self] + args,
-                kwargs,
-            )
-        elif name in ["level", "batch_size", "randomness"]:
-            return VariableTracker.build(tx, getattr(self.value, name)())
-        elif name == "lower":
-            if args:
-                raise AssertionError(f"lower() expects no args, got {len(args)}")
-            if kwargs:
-                raise AssertionError(f"lower() expects no kwargs, got {len(kwargs)}")
-            return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
-                tx, None
-            )
-        return super().call_method(tx, name, args, kwargs)
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.key())
+
+    def process(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, self.value.process.__func__),
+            [self] + args,
+            kwargs,
+        )
+
+    def level(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.level())
+
+    def batch_size(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.batch_size())
+
+    def randomness(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return VariableTracker.build(tx, self.value.randomness())
+
+    def lower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # Python method, so Method cannot derive METH_NOARGS from ml_flags.
+        no_positional(tx, "lower", args)
+        no_keywords(tx, "lower", kwargs)
+        return variables.TemporarilyPopInterpreterStackCtxManagerVariable.create(
+            tx, None
+        )
+
+    tp_methods = {
+        "key": Method(key),
+        "process": Method(process),
+        "level": Method(level),
+        "batch_size": Method(batch_size),
+        "randomness": Method(randomness),
+        "lower": Method(lower),
+    }
