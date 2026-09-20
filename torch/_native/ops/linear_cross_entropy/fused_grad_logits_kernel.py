@@ -1,9 +1,9 @@
 """Row statistics and the softmax-gradient transform in one kernel.
 
-Replaces the five eager passes the chunked loop makes over its ``(Bc, V)``
-logits buffer -- row max, subtract, gather, ``exp_``, row sum -- plus the
-separate gradient-transform kernel, with a single launch that reads the raw
-logits twice and writes the dense gradient-of-logits once.
+Replaces the passes the chunked loop makes over its ``(Bc, V)`` logits buffer
+-- row max, subtract, gather, ``exp_``, row sum, and the scale that turns the
+softmax into the gradient -- with a single launch that reads the raw logits
+twice and writes the dense gradient-of-logits once.
 
 Contract, per row ``n`` of the chunk, with ``m_n = max_v z[n, v]`` and
 ``l_n = sum_v exp(z[n, v] - m_n)``::
@@ -11,8 +11,8 @@ Contract, per row ``n`` of the chunk, with ``m_n = max_v z[n, v]`` and
     g[n, v] = exp(z[n, v] - m_n) * (s_n / l_n) - s_n * [v == T_hat_n]
     term[n] = s_n * (log(l_n) - (z[n, T_hat_n] - m_n))
 
-``g`` is what makes both parameter gradients plain GEMMs (see
-``grad_logits_kernel``); the per-row loss contribution is formed here rather
+``g`` is what makes both parameter gradients plain GEMMs -- ``g @ W`` and
+``g^T @ X``, in the caller; the per-row loss contribution is formed here rather
 than left to the caller, who would pay a subtract, a multiply and a reduction
 per chunk on ``(Bc,)`` data for it.
 
@@ -59,13 +59,20 @@ chunk costs one buffer rather than two, with no value rounding anywhere. Pass 2
 is ordered for that case unconditionally -- it costs nothing measurable when the
 buffers are distinct, and one mode is one thing to reason about.
 
-Why the ordering is needed: ``g[n, j]`` occupies the bytes of ``z[n, j / 2]``,
-so an unsynchronized write would destroy a logit another thread has yet to read.
-Pass 2 therefore stages a group of column tiles in registers, synchronizes, and
-only then writes them. That is safe for any group size: a group's writes reach
-at most halfway into the columns it just read, so they can only land on logits
-this block has already consumed, and never on the columns a later group will
-read. The loop runs the same number of iterations in every thread --
+Why the ordering is needed: ``g[n, j]`` occupies the bytes of ``z[n, j / r]``,
+where ``r`` is how many gradient elements fit in one logit -- 2 with an fp32
+buffer, 1 when the buffer is already at ``g``'s width, which is what fp16 input
+gives. At ``r = 2`` a thread's write lands on a logit column that a DIFFERENT
+thread may not have read yet, so an unsynchronized write would destroy it. Pass
+2 therefore stages a group of column tiles in registers, synchronizes, and only
+then writes them. That is safe for any group size: a group's writes land at
+column ``j / r <= j``, so they reach no further than the columns the group just
+read, and never onto the columns a later group will read.
+
+At ``r = 1`` the mapping is the identity -- a thread overwrites only the
+columns it read itself -- so no ordering is required there at all. The barrier
+runs anyway: it costs nothing measurable, and one mode is one thing to reason
+about. The loop runs the same number of iterations in every thread --
 out-of-range lanes re-read column zero rather than exiting -- because a thread
 that left early would hang the others on the barrier.
 """
@@ -102,11 +109,28 @@ from torch._vendor.quack.reduce import block_reduce
 _DEFAULT_THREADS_PER_BLOCK = 512
 _DEFAULT_TILES_PER_STAGE = 8
 
+# `exp(x)` as `exp2(x * LOG2E)`: the NVVM intrinsic is requested directly, by
+# `approx`, rather than inferred from a fast-math flag. `fastmath=True` is
+# MLIR's `fast`, which includes `nnan|ninf` -- a promise this kernel breaks on
+# purpose. It evaluates `exp(-inf)` on every thread's first finite column, lets
+# a NaN logit reach `exp(nan - m)`, and takes `log` of a NaN row sum, all so the
+# poison reaches the output. Under `nnan|ninf` those results are undefined and
+# the compiler may fold them away; `approx`/`ftz` carry no such licence and
+# lower to the same `ex2.approx.ftz.f32`.
+_LOG2E = 1.4426950408889634
+
 _TORCH_TO_CUTE = {
     torch.float32: Float32,
     torch.float16: Float16,
     torch.bfloat16: BFloat16,
 }
+
+
+def _exp(x):
+    """``exp(x)`` via the hardware ``ex2.approx.ftz.f32``, requested rather
+    than inferred -- see ``_LOG2E``. NaN and -inf propagate as the instruction
+    defines them, which is what this kernel's poisoning depends on."""
+    return cute.math.exp2(x * Float32(_LOG2E), approx=True, ftz=True)
 
 
 def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
@@ -161,7 +185,7 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
             if z > m:
                 # Rescale the sum to the new maximum. A thread that has seen
                 # nothing yet has m = -inf and l = 0, so this yields l = 1.
-                l = l * cute.math.exp(m - z, fastmath=True) + Float32(1.0)
+                l = l * _exp(m - z) + Float32(1.0)
                 m = z
             elif z != Float32(-Float32.inf):
                 # A -inf logit contributes exp(z - m) = 0, except when this
@@ -171,7 +195,7 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
                 # same 0 contribution. The test is `!= -inf` rather than
                 # `> -inf` so that a NaN logit still takes this branch and
                 # still poisons the row, which is what eager does with it.
-                l = l + cute.math.exp(z - m, fastmath=True)
+                l = l + _exp(z - m)
             col = col + threads
 
         row_max = block_reduce(
@@ -180,7 +204,7 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
             buf_max,
             init_val=-Float32.inf,
         )
-        l = l * cute.math.exp(m - row_max, fastmath=True)
+        l = l * _exp(m - row_max)
         row_sum = block_reduce(
             cute.arch.warp_reduction_sum(l),
             operator.add,
@@ -204,8 +228,7 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
             # shifted by the row max -- see the module docstring for why the
             # unshifted difference cannot be taken in fp32.
             mTerm[row] = s * (
-                cute.math.log(row_sum, fastmath=True)
-                - (Float32(mZ[row, target_read]) - row_max)
+                cute.math.log(row_sum) - (Float32(mZ[row, target_read]) - row_max)
             )
 
         # This read of the target logit has to be ordered against the writes
@@ -223,10 +246,7 @@ def _make_kernel(out_dtype, threads_per_block, tiles_per_stage):
                 col_read = col
                 if col >= V:
                     col_read = Int32(0)
-                staged.append(
-                    cute.math.exp(Float32(mZ[row, col_read]) - row_max, fastmath=True)
-                    * factor
-                )
+                staged.append(_exp(Float32(mZ[row, col_read]) - row_max) * factor)
             cute.arch.barrier()
             for j in cutlass.range_constexpr(tiles_per_stage):
                 col = base + Int32(j) * threads
@@ -350,10 +370,12 @@ def fused_grad_logits_into(
             f"unknown meta parameters {sorted(meta)}; this kernel takes"
             " threads_per_block and tiles_per_stage"
         )
-    if threads % 32 or not 32 <= threads <= 1024:
-        raise ValueError(
-            f"threads_per_block must be a multiple of 32 in [32, 1024], got {threads}"
-        )
+    # Split, because the two are different mistakes with different fixes: a
+    # width that is not a warp multiple, and one outside what a block holds.
+    if threads % 32:
+        raise ValueError(f"threads_per_block must be a multiple of 32, got {threads}")
+    if not 32 <= threads <= 1024:
+        raise ValueError(f"threads_per_block must be in [32, 1024], got {threads}")
     if tiles < 1:
         raise ValueError(f"tiles_per_stage must be at least 1, got {tiles}")
     num_rows, V = logits.shape

@@ -590,14 +590,16 @@ endif()
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
   find_program(SCCACHE_EXECUTABLE sccache)
+  # torch-xpu-ops consumes CMAKE_SYCL_COMPILER_LAUNCHER directly; this does not
+  # require CMake to provide native SYCL language support.
   if(CCACHE_PROGRAM)
-    foreach(LANG CXX C CUDA)
+    foreach(LANG CXX C CUDA SYCL)
       set(CMAKE_${LANG}_COMPILER_LAUNCHER
           "${CCACHE_PROGRAM}"
           CACHE STRING "${LANG} compiler launcher")
     endforeach()
   elseif(SCCACHE_EXECUTABLE)
-    foreach(LANG CXX C CUDA)
+    foreach(LANG CXX C CUDA SYCL)
       set(CMAKE_${LANG}_COMPILER_LAUNCHER
           "${SCCACHE_EXECUTABLE}"
           CACHE STRING "${LANG} compiler launcher")
@@ -1116,7 +1118,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
+  "USE_CUDA OR USE_ROCM"
   OFF)
 
 # Flash Attention needs sm80+; disable it if no resolved arch reaches that.
