@@ -29,8 +29,8 @@
 #include <c10/util/irange.h>
 #include <optional>
 
+#include <bit>
 #include <cctype>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -1708,11 +1708,7 @@ ScalarType scalar_type_from_buffer_format(PyObject* obj) {
   auto itemsize = view.itemsize;
   PyBuffer_Release(&view);
 
-  // PEP-3118 format for a single homogeneous scalar:
-  //   [whitespace] [byteorder] [whitespace] [count] [whitespace] typecode
-  // Whitespace is permitted anywhere; a leading count is only meaningful here
-  // when it is 1 (a larger count is a packed multi-element record with no
-  // single-scalar dtype).
+  // PEP-3118 scalar format: [ws] [byteorder] [ws] [count] [ws] typecode
   size_t i = 0;
   auto skip_ws = [&]() {
     while (i < format.size() &&
@@ -1723,8 +1719,7 @@ ScalarType scalar_type_from_buffer_format(PyObject* obj) {
 
   skip_ws();
 
-  constexpr uint16_t kEndianProbe = 1;
-  const bool little_endian = *reinterpret_cast<const char*>(&kEndianProbe) == 1;
+  constexpr bool little_endian = std::endian::native == std::endian::little;
   bool native_order = true;
   if (i < format.size()) {
     switch (format[i]) {
@@ -1761,7 +1756,7 @@ ScalarType scalar_type_from_buffer_format(PyObject* obj) {
   }
   if (i > count_start) {
     TORCH_CHECK_VALUE(
-        format.compare(count_start, i - count_start, "1") == 0,
+        i - count_start == 1 && format[count_start] == '1',
         "could not infer a dtype from buffer format '",
         format,
         "' (multi-element formats are not supported). "

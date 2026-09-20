@@ -4009,10 +4009,7 @@ def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
 
 class _BufferAndSequence:
-    """Wraps a numpy array, exposing both the PEP 688 ``__buffer__`` protocol
-    (Python >= 3.12) and the sequence protocol, so the same object exercises
-    ``torch.asarray``'s buffer path and ``torch.tensor``'s sequence path.
-    """
+    """A numpy array exposed through both the PEP 688 buffer and sequence protocols."""
     def __init__(self, array):
         self._array = array
 
@@ -4214,10 +4211,7 @@ class TestBufferProtocol(TestCase):
 
     @skipIfTorchDynamo("numpy non-native byteorder dtype ('>i4') isn't traceable by dynamo")
     def test_asarray_buffer_non_native_byteorder_raises(self, device):
-        # A non-native byte order can't be reinterpreted (torch has no
-        # non-native dtype), so asarray must raise and point the user at
-        # converting the buffer -- never silently misread the bytes, and never
-        # steer them to dtype= (which would reinterpret and give wrong values).
+        # dtype= would reinterpret in native order, so the error must not suggest it.
         nonnative = ">" if sys.byteorder == "little" else "<"
         view = memoryview(np.array([1, 2, 3], dtype=nonnative + "i4"))
         with self.assertRaisesRegex(ValueError, "non-native byte order"):
@@ -4230,16 +4224,22 @@ class TestBufferProtocol(TestCase):
 
     @skipIfTorchDynamo("numpy structured dtype ('[(a, i4), (b, i4)]') isn't traceable by dynamo")
     def test_asarray_buffer_struct_format_raises(self, device):
-        # A structured (record) buffer format ('T{...}') has no single-scalar
-        # torch dtype and must raise rather than guess.
         arr = np.zeros(3, dtype=[("a", "i4"), ("b", "i4")])
         with self.assertRaisesRegex(ValueError, "could not infer a dtype"):
             torch.asarray(memoryview(arr))
 
+    @skipIfTorchDynamo("numpy string dtypes ('S4'/'U2') aren't traceable by dynamo")
+    def test_asarray_buffer_multi_element_format_raises(self, device):
+        # numpy's bytes/unicode/void dtypes export count-prefixed formats ('4s', '2w', '4x').
+        for arr in (np.array([b"abcd"]), np.array(["ab"]), np.zeros(2, dtype="V4")):
+            with self.assertRaisesRegex(ValueError, "multi-element formats are not supported"):
+                torch.asarray(memoryview(arr))
+        # A count of 1 is a single scalar, but 's' still maps to no torch dtype.
+        with self.assertRaisesRegex(ValueError, r"format '1s'\. Please pass an explicit dtype"):
+            torch.asarray(memoryview(np.array([b"a"])))
+
     def test_asarray_buffer_non_contiguous_raises(self, device):
-        # Non-contiguous buffers aren't supported by tensor_frombuffer, so
-        # asarray must fail the same way with or without a dtype, and must not
-        # steer the user to a dtype= that would not help.
+        # Must fail the same way with and without a dtype.
         view = memoryview(np.arange(10, dtype=np.int64)[::2])
         self.assertFalse(view.contiguous)
         with self.assertRaisesRegex(RuntimeError, "non-contiguous"):
@@ -4248,8 +4248,7 @@ class TestBufferProtocol(TestCase):
             torch.asarray(view, dtype=torch.int64)
 
     def test_asarray_buffer_ctypes_byteorder_prefix(self, device):
-        # ctypes buffers carry an explicit native byte-order prefix (e.g. '<i');
-        # asarray must accept it and infer the base type.
+        # ctypes formats carry an explicit native byte-order prefix (e.g. '<i').
         import ctypes
         arr = (ctypes.c_int * 4)(1, 2, 3, 4)
         result = torch.asarray(arr)
