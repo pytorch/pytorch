@@ -56,11 +56,14 @@ class GemmReductionGeometry:
 
     @property
     def needs_physical_callbacks(self) -> bool:
-        return self.axis == 0 or self.group > GEMM_REDUCTION_FRAGMENT_WIDTH
+        return self.axis == 0 or self.group >= GEMM_REDUCTION_FRAGMENT_WIDTH
 
     @property
     def group_size(self) -> int:
         return self.group
+
+    def transposed(self) -> "GemmReductionGeometry":
+        return GemmReductionGeometry(self.group, 1 - self.axis)
 
     @classmethod
     def from_output_shape(
@@ -420,10 +423,14 @@ NormalizedNode = (
 )
 
 
+# Full reductions (``x.sum()``) normalize with ``dim=None``.
 FUNCTION_REDUCTION_TYPES: dict[Any, tuple[GemmReductionType, bool]] = {
     torch.ops.aten.sum.dim_IntList: ("sum", True),
+    torch.ops.aten.sum.default: ("sum", True),
     torch.ops.aten.mean.dim: ("mean", True),
+    torch.ops.aten.mean.default: ("mean", True),
     torch.ops.aten.prod.dim_int: ("prod", True),
+    torch.ops.aten.prod.default: ("prod", True),
     torch.ops.aten.amax.default: ("max", False),
     torch.ops.aten.amin.default: ("min", False),
 }
@@ -438,8 +445,13 @@ FUNCTION_UNSUPPORTED_REDUCTIONS = frozenset(
         torch.ops.aten.any.default,
         torch.ops.aten.argmax.default,
         torch.ops.aten.argmin.default,
+        torch.ops.aten.max.dim,
+        torch.ops.aten.min.dim,
+        torch.ops.aten.sort.default,
+        torch.ops.aten.sort.stable,
         torch.ops.aten.std.correction,
         torch.ops.aten.std.dim,
+        torch.ops.aten.topk.default,
         torch.ops.aten.var.correction,
         torch.ops.aten.var.dim,
     )

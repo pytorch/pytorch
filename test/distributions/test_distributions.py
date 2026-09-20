@@ -120,6 +120,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
+    parametrize,
     run_tests,
     set_default_dtype,
     set_default_dtype_if_supported,
@@ -1353,7 +1354,17 @@ class TestDistributions(DistributionsTestCase):
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
         if not distribution.support.is_discrete:
-            s = s.detach().requires_grad_()
+            s = s.detach()
+            # For simplex-constrained distributions (e.g. RelaxedOneHotCategorical),
+            # samples near the boundary cause numerical Jacobian to produce nan
+            # because log_prob inverts ExpTransform via log(), and finite
+            # differencing (eps=1e-6) near zero yields log(<=0) = -inf/nan.
+            # Clamp to the simplex interior (1e-4 gives ~100x margin above
+            # gradcheck eps) and renormalize.
+            if isinstance(distribution.support, constraints._Simplex):
+                s = s.clamp(min=1e-4)
+                s = s / s.sum(-1, keepdim=True)
+            s.requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
@@ -2271,6 +2282,24 @@ class TestDistributions(DistributionsTestCase):
             dist = RelaxedOneHotCategorical(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_rand_excludes_upper_bound(self, device, dtype):
+        values = torch.rand(65537, device=device, dtype=dtype)
+        self.assertTrue((values >= 0).all().item())
+        self.assertTrue((values < 1).all().item())
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize("bounds", [(0, 4), (-4, -2), (-2, 3), (2, 2)])
+    def test_uniform_excludes_upper_bound(self, device, dtype, bounds):
+        low, high = bounds
+        values = torch.empty(65537, device=device, dtype=dtype)
+        values.uniform_(low, high)
+        if low == high:
+            self.assertEqual(values, torch.full_like(values, low))
+        else:
+            self.assertTrue((values >= low).all().item())
+            self.assertTrue((values < high).all().item())
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
