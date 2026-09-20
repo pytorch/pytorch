@@ -25,10 +25,9 @@ entry point that reaches it lands later in this stack, so nothing under
 ``torch/`` calls into the session yet.
 
 Capture is by execution, and the caller drives it: the session hands back a
-callable, the caller invokes it with real inputs inside their own loop, and
-every frame Dynamo produces is recorded. Runtime guards stay intact during
-capture; ``guard_filter_fn`` applies only to the serialized copy, and every
-dropped guard is reported in ``PrecompileSummary.dropped_guards``.
+callable, the caller invokes it with real inputs inside their own loop, each
+``cap(...)`` returns the callable's own result, and every frame, break
+continuation and guarded variant the call exercises is recorded.
 
     with torch.compiler.precompile.capture(
         step, artifact_path="m.py", cache_path="m.cache", backend="inductor"
@@ -41,32 +40,30 @@ dropped guard is reported in ``PrecompileSummary.dropped_guards``.
     with compiled, torch.no_grad():
         compiled(model, x1)
 
-The caller's calls ARE the capture: each ``cap(...)`` runs the callable for
-real, returns its result, and records every frame, break continuation and
-guarded variant it exercises.
-
 Calls run with the grad mode the caller sets -- capture does not force
 ``no_grad()`` or ``enable_grad()``. ``training=True`` lowers the backward
 eagerly so the artifact carries one and a served output can be backpropagated.
 No loss is needed for that: the joint trace synthesizes tangents from the
 forward outputs' own metadata.
 
-Live capture retains every runtime guard, so later examples trigger the same
-recompilations as ordinary ``torch.compile``. ``guard_filter_fn`` applies only
-to the serialized copy. If serialization drops a configuration-dependent guard,
-the artifact is refused by default rather than written with variants whose
-dispatch would be ambiguous after load. ``invariants`` writes a readable report
-that separates, per frame, the guards holding in EVERY variant from the ones
-that differed: the first are preconditions the artifact is only valid under,
-the second are what tell its graphs apart. Guards from different frames are not
-comparable -- an entry frame guards its arguments, a resume frame guards
-whatever crossed the break -- so the intersection is per frame.
+``guard_filter_fn`` rides on the optimize context rather than on the
+serializer, so the guards it drops leave the live check too and a capture
+recompiles less often than ordinary ``torch.compile`` would, and every dropped
+guard is reported in ``PrecompileSummary.dropped_guards``. If serialization
+drops a configuration-dependent guard, the artifact is refused by default
+rather than written with variants whose dispatch would be ambiguous after load.
+``invariants`` writes a readable report that separates, per frame, the guards
+holding in EVERY variant from the ones that differed: the first are
+preconditions the artifact is only valid under, the second are what tell its
+graphs apart. Guards from different frames are not comparable -- an entry frame
+guards its arguments, a resume frame guards whatever crossed the break -- so
+the intersection is per frame.
 
-Capture is by execution: a resume function only exists once the frame ahead of
-it has actually run, so every variant must be exercised. Whatever you do not
-run is not in the artifact, and ``summary().complete`` means complete only for
-the observed capture, not for every possible input to the callable. A captured
-call that raises marks the session incomplete even if caller code catches it.
+A resume function only exists once the frame ahead of it has actually run, so
+every variant must be exercised. Whatever you do not run is not in the
+artifact, and ``summary().complete`` means complete only for the observed
+capture, not for every possible input to the callable. A captured call that
+raises marks the session incomplete even if caller code catches it.
 
 Know these before relying on an artifact in production:
 
@@ -78,8 +75,8 @@ Know these before relying on an artifact in production:
 * A non-tensor argument, and any value that crosses a graph break, is guarded
   by equality, so an int/bool/str argument or a break coming from ``.item()``
   yields an artifact that only serves calls reproducing those exact values.
-  ``summary().wont_generalize`` lists them; exercise every value you need to
-  serve with a ``cap(...)`` call, or expect poor coverage on new data.
+  Exercise every value you need to serve with a ``cap(...)`` call, or expect
+  poor coverage on new data.
   ``dynamic=True`` helps with shapes but not with pinned values.
 * Identity guards cannot be serialized, so precompiling gives up on noticing
   that a guarded object was rebound. ``summary().dropped_guards`` is the
@@ -108,6 +105,7 @@ Know these before relying on an artifact in production:
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import contextvars
 import functools
@@ -1016,9 +1014,6 @@ def _compose_with_default(
 _OBJ_ID = re.compile(r"(?<=, )\d+(?=\), type=)")
 
 
-_SAVED_HOOK_IDS = re.compile(r"(?<=top_saved_tensors_hooks ids == )\(\d+(?:, \d+)*\)")
-
-
 _DYNAMO_COUNTER = re.compile(
     r"(__builtins_dict__|__compiled_fn|__resume_at)_*\d+(_\d+)?"
 )
@@ -1039,11 +1034,31 @@ _DYNAMO_GLOBAL_BY_ID = re.compile(r"_\d{9,}_c\d+\b")
 _HEX_ADDRESS = re.compile(r"(?<= at )0x[0-9a-fA-F]+")
 
 
+# A string subscript key is part of a slot's NAME when it reads as an attribute
+# does -- _modules['fc1'] against _modules['fc2'] -- and is the guarded data
+# itself otherwise: GetItemSource interpolates the key's repr into guard.name, so
+# a dict keyed by a path or a prompt spells it in every list this file prints.
+# Masking only the second kind keeps two slots of one dict distinguishable, which
+# the dropped-guard lists and the per-slot fingerprints both need.
+# The <> are for the placeholders the substitutions below leave inside a key
+# (G['__builtins_dict___<n>']), so normalizing a normalized name is a no-op.
+_SLOT_KEY = re.compile(r"\A[A-Za-z_][\w<>]*\Z")
+_QUOTED_KEY = re.compile(r"\['((?:[^'\\]|\\.)*)'\]")
+
+
+def _named_slot(key: str) -> bool:
+    # Length-bounded for the reason _VALUE_CAP exists: past it a key is the data
+    # itself however it spells, and no slot is named that way.
+    return len(key) <= _VALUE_CAP and _SLOT_KEY.match(key) is not None
+
+
 def _normalize(text: str) -> str:
-    text = _SAVED_HOOK_IDS.sub("(<ids>)", text)
     text = _HEX_ADDRESS.sub("<addr>", text)
     text = _DYNAMO_GLOBAL_BY_ID.sub("_<id>_c<n>", _OBJ_ID.sub("<id>", text))
-    return _DYNAMO_COUNTER.sub(r"\1_<n>", text)
+    text = _DYNAMO_COUNTER.sub(r"\1_<n>", text)
+    return _QUOTED_KEY.sub(
+        lambda m: m.group() if _named_slot(m.group(1)) else "[<str>]", text
+    )
 
 
 # Past this many characters a rendered literal is the data itself rather than a
@@ -1051,28 +1066,81 @@ def _normalize(text: str) -> str:
 _VALUE_CAP = 64
 
 
-# What a check compares itself against, e.g. the 3 of EQUALS_MATCH's
-# "L['n'] == 3", rendered by the guard builder with repr(). Past the cap, and for
-# a string or bytes whatever its length, that literal IS the user's data (a
-# prompt, a path, a 10k-element list), so _plain_value's policy applies here too.
-_EMBEDDED_LITERAL = re.compile(r"(?<= == ).+\Z", re.DOTALL)
-_QUOTE_PREFIXES = ("'", '"', "b'", 'b"')
+def _mask_literal(value: object) -> str:
+    """A literal as itself where that is a fingerprint of it, else as its type."""
+    if value is None or isinstance(value, (bool, int, float, complex)):
+        text = repr(value)
+        if len(text) <= _VALUE_CAP:
+            return text
+    return f"<{type(value).__name__}>"
 
 
-def _render_code(code_list: Sequence[str] | None, value: str) -> tuple[str, ...]:
+# guards.py appends this to a verbose identity check (get_type_of_guarded_value):
+# an annotation on the expression rather than part of it, and the only reason a
+# rendered check that IS an expression does not parse as one.
+_CHECK_ANNOTATION = re.compile(r", type=<class '[^']*'>\Z")
+
+
+class _MaskLiterals(ast.NodeTransformer):
+    """Every literal a check embeds, replaced by what _plain_value renders.
+
+    Structural rather than textual, because what a check compares against is the
+    guarded value and the shapes it takes -- a bare repr, a container display, a
+    key argument to ___dict_contains -- share no pattern to anchor on. What
+    survives is the skeleton: the operators, the callables, and the literals that
+    name a slot rather than hold a value.
+    """
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        return ast.Name(id=_mask_literal(node.value))
+
+    def _display(self, node: ast.AST) -> ast.AST:
+        # A display IS the value however short it renders: EQUALS_MATCH over a
+        # list of strings and DICT_KEYS_MATCH's keys list are both one.
+        return ast.Name(id=f"<{type(node).__name__.lower()}>")
+
+    visit_List = visit_Set = visit_Dict = visit_Tuple = _display
+
+    def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+        # A subscript key that names a slot -- L['self'], _modules['fc1'], an
+        # index -- is part of the source path the report prints to say WHICH
+        # guard this is, and masking it would spell two distinct slots one way.
+        key = node.slice if isinstance(node.slice, ast.Constant) else None
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            key = key if _named_slot(key.value) else None
+        self.generic_visit(node)
+        if key is not None:
+            node.slice = key
+        return node
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        # getattr(x, 'attr') names a member, not a value, and TENSOR_MATCH's
+        # dimension marking is legible only through it.
+        member_call = ("getattr", "hasattr")
+        named = isinstance(node.func, ast.Name) and node.func.id in member_call
+        member = node.args[1] if named and len(node.args) > 1 else None
+        self.generic_visit(node)
+        if member is not None:
+            node.args[1] = member
+        return node
+
+
+def _render_code(code_list: Sequence[str] | None) -> tuple[str, ...]:
     # Keep the _dynamo_*_indices parts: they carry TENSOR_MATCH's dimension
     # marking, so mark_static on one variant and not the next shows up only here.
     def form(part: str) -> str:
-        found = _EMBEDDED_LITERAL.search(part)
-        if found is None:
-            return _normalize(part)
-        literal = found.group()
-        if len(literal) <= _VALUE_CAP and not literal.startswith(_QUOTE_PREFIXES):
-            return _normalize(part)
-        # The operator and its target stay: the form of the check is the point.
-        return _normalize(part[: found.start()]) + (value or "<value>")
+        found = _CHECK_ANNOTATION.search(part)
+        try:
+            tree = ast.parse(part[: found.start()] if found else part, mode="eval")
+        except SyntaxError:
+            # A part that is no expression -- the saved-tensors-hooks guard
+            # renders prose -- cannot be masked structurally, so the fact keeps
+            # the type-only rendering _render_fact falls back to.
+            return ""
+        masked = ast.unparse(_MaskLiterals().visit(tree))
+        return _normalize(masked + (found.group() if found else ""))
 
-    return tuple(form(part) for part in (code_list or ()))
+    return tuple(filter(None, (form(part) for part in code_list or ())))
 
 
 # Guards whose drop changes what a graph is reused FOR instead of crashing in a
@@ -1162,15 +1230,14 @@ def _summarize(
     entry: _DynamoCacheEntry,
     dropped: set[tuple[str, str]],
     kept: set[tuple[str, str]],
-    policy_dropped: set[tuple[str, str]],
     risky: set[tuple[str, str]],
     uncovered: frozenset[str],
     capture_errors: Sequence[str],
     dropped_code: Mapping[tuple[str, str], str],
 ) -> PrecompileSummary:
-    # truncated and wont_generalize keep their empty defaults: the recompile-limit
-    # bookkeeping and the value-pinning analysis behind them are not part of this
-    # build.
+    # truncated, wont_generalize and policy_dropped_guards keep their empty
+    # defaults: the recompile-limit bookkeeping, the value-pinning analysis and
+    # the invariance-prune policy behind them are not part of this build.
     return PrecompileSummary(
         frames=len(entry.codes),
         resume_functions=sum(1 for c in entry.codes if c.install_to_global),
@@ -1181,12 +1248,11 @@ def _summarize(
         dropped_guards=tuple(sorted(dropped)),
         dropped_guard_code=tuple(
             (gtype, name, dropped_code[(gtype, name)])
-            for gtype, name in sorted(dropped | policy_dropped)
+            for gtype, name in sorted(dropped)
             if (gtype, name) in dropped_code
         ),
         kept_guards=tuple(sorted(kept)),
         risky_dropped_guards=tuple(sorted(risky)),
-        policy_dropped_guards=tuple(sorted(policy_dropped)),
         capture_errors=tuple(capture_errors),
     )
 
@@ -1229,12 +1295,25 @@ class _PrecompileBackend:
     def __init__(self, backend: str) -> None:
         inner = torch._dynamo.lookup_backend(backend)
         self._torchdynamo_orig_backend = inner
+        # Named the way get_compiler_fn derives a name, because a wrapper object
+        # has none: without it the minifier repro, the compile log and
+        # BackendCompilerFailed all report an unknown backend.
+        self.compiler_name = getattr(inner, "compiler_name", backend)
         self.backend_ctx_ctor = getattr(
             inner, "backend_ctx_ctor", contextlib.nullcontext
         )
 
-    def __call__(self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor]) -> Any:
-        return self._torchdynamo_orig_backend(gm, inputs)
+    # Forwarded, as _TorchCompileWrapper and AotAutograd do, so the inner
+    # backend's one-time init still fires through the wrapper; read at fire time
+    # so the hook can be set after the session was built.
+    @property
+    def _dynamo_backend_init(self) -> Any | None:
+        return getattr(self._torchdynamo_orig_backend, "_dynamo_backend_init", None)
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, inputs: list[torch.Tensor], **kwargs: Any
+    ) -> Any:
+        return self._torchdynamo_orig_backend(gm, inputs, **kwargs)
 
     def get_compiler_config(self) -> Any:
         getter = getattr(self._torchdynamo_orig_backend, "get_compiler_config", None)
@@ -1351,7 +1430,6 @@ class PrecompileSession:
         self._invariants_path = invariants
         # Slots dropped by the invariance policy. The policy itself is not part
         # of this build, so the set stays empty; summary() subtracts it anyway.
-        self._policy_dropped_guards: set[tuple[str, str]] = set()
         # slot -> the check it rendered as, for every slot dropped by any
         # route. See PrecompileSummary.dropped_guard_code for why the slot
         # tuple alone cannot be audited.
@@ -1362,7 +1440,9 @@ class PrecompileSession:
         # slot -> the fingerprints its value took, for slots a filter decision
         # dropped. A slot that took more than one is risky: it demonstrably
         # tells the captured variants apart. See _value_fingerprint.
-        self._dropped_value_prints: dict[tuple[str, str], set[int]] = {}
+        self._dropped_value_prints: dict[
+            tuple[_FrameKey, tuple[str, str]], set[int]
+        ] = {}
         self._capture_errors: list[str] = []
         self._recorded_exception_keys: set[tuple[type[BaseException], str]] = set()
         # frame -> one fact set per compilation of it
@@ -1394,7 +1474,8 @@ class PrecompileSession:
             PrecompileContext,
         )
 
-        for backend_id in self._package.cache_entry().backend_ids:
+        backend_ids = self._package.cache_entry().backend_ids
+        for backend_id in backend_ids:
             artifact = PrecompileContext.take_artifact(backend_id)
             if artifact is not None:
                 self._backend_artifacts[backend_id] = artifact
@@ -1407,6 +1488,19 @@ class PrecompileSession:
                 self._backend_artifacts[backend_id] = EagerCacheArtifact(
                     key=backend_id, content=noop_graph_call
                 )
+        if backend_ids and not self._backend_artifacts and self._backend != "eager":
+            # The bytecode names backend ids but nothing was filed under any of
+            # them, so the render has nothing to serve. A single id with no
+            # artifact is normal (an exercised empty resume frame compiles to
+            # nothing), and an eager capture is exempt: its backends stay on the
+            # package (see _release) instead of being filed here.
+            self._record_capture_error(
+                PackageError(
+                    "the capture recorded no artifact; a grad-enabled capture "
+                    "needs training=True, which lowers the backward eagerly "
+                    "instead of deferring it past the end of the capture"
+                )
+            )
 
     def _record_capture_error(self, error: BaseException) -> None:
         message = str(error)
@@ -1550,7 +1644,7 @@ class PrecompileSession:
             )
 
     def _record_dropped_code(
-        self, slot: tuple[str, str], code: Sequence[str] | None, value: str
+        self, slot: tuple[str, str], code: Sequence[str] | None
     ) -> None:
         """Remember what a dropped slot actually checked.
 
@@ -1560,7 +1654,7 @@ class PrecompileSession:
         the check rather than every value the slot took, and the field cannot
         grow with the variant count.
         """
-        rendered = " ; ".join(_render_code(code, value))
+        rendered = " ; ".join(_render_code(code))
         if rendered:
             with self._state:
                 self._dropped_guard_code.setdefault(slot, rendered)
@@ -1605,25 +1699,24 @@ class PrecompileSession:
                 # that change every run, and the slot lists, the risky subset and
                 # the rendered code end up spelling it three different ways.
                 slot = (entry.guard_type, _normalize(entry.name))
-                # A precondition nothing checks however the filter voted: under
-                # skip_nnmodule_hook_guards, the default, GuardBuilder emits no
-                # check for it and GlobalStateGuard holds no hook state either.
-                # Not risky either, though: no filter decision dropped it.
-                unchecked = (
+                # A precondition nothing checks however the filter voted:
+                # GuardBuilder emits no check for FSDP_TRAINING_STATE, and none
+                # for EMPTY_NN_MODULE_HOOKS_DICT under skip_nnmodule_hook_guards
+                # (the default), while GlobalStateGuard snapshots neither the
+                # training state nor the hook dicts. Not risky either, though:
+                # no filter decision dropped them.
+                unchecked = entry.guard_type == "FSDP_TRAINING_STATE" or (
                     entry.guard_type == "EMPTY_NN_MODULE_HOOKS_DICT"
                     and torch._dynamo.config.skip_nnmodule_hook_guards
                 )
-                # A no-op type's check is GLOBAL_STATE's leaf, made whatever the
-                # filter said about the marker: it is dropped only with
-                # GLOBAL_STATE.
-                enforced = not unchecked and (
-                    keep
-                    or (entry.guard_type in _NOOP_GUARD_TYPES and global_state_kept)
-                )
+                # A no-op type's marker is not what makes its check: GLOBAL_STATE's
+                # leaf is, so the leaf's verdict decides, not the marker's.
+                noop = entry.guard_type in _NOOP_GUARD_TYPES
+                enforced = not unchecked and (global_state_kept if noop else keep)
                 unmodelled = entry.guard_type in _UNMODELLED_GUARD_TYPES
                 value = "" if unmodelled else _plain_value(entry)
                 if not enforced:
-                    self._record_dropped_code(slot, entry.orig_guard.code_list, value)
+                    self._record_dropped_code(slot, entry.orig_guard.code_list)
                 (kept_slots if enforced else dropped_slots).add(slot)
                 # Risky here means a drop the default filter would not have made,
                 # or one whose value differed between variants, which summary()
@@ -1638,7 +1731,7 @@ class PrecompileSession:
                     _GuardFact(
                         guard_type=entry.guard_type,
                         source=slot[1],
-                        code=_render_code(entry.orig_guard.code_list, value),
+                        code=_render_code(entry.orig_guard.code_list),
                         value=value,
                         enforced=enforced,
                     )
@@ -1648,38 +1741,52 @@ class PrecompileSession:
             # attribute the facts to, so they go unrecorded rather than into a
             # made-up one.
             compiling = self._package._current_entry
+            key = None
+            if compiling is not None:
+                code = compiling.python_code
+                key = (
+                    code.co_name,
+                    code.co_filename,
+                    code.co_firstlineno,
+                    id(compiling),
+                )
             # Published under the lock a reader takes, in one step, because this
             # runs on whatever thread is compiling.
             with self._state:
                 self._kept_guards |= kept_slots
                 self._dropped_guards |= dropped_slots
                 self._risky_dropped_guards |= risky_slots
-                for slot, fingerprint in prints.items():
-                    self._dropped_value_prints.setdefault(slot, set()).add(fingerprint)
                 # One object per distinct fact, so a recompiled frame repeating
                 # nearly all of its guards costs facts rather than variants.
                 facts = {pool.setdefault(f, f) for f in facts}
                 undetermined = {pool.setdefault(f, f) for f in undetermined}
-                if compiling is not None:
-                    code = compiling.python_code
-                    key = (
-                        code.co_name,
-                        code.co_filename,
-                        code.co_firstlineno,
-                        id(compiling),
-                    )
+                if key is not None:
+                    # Fingerprinted per FRAME: entry.name is frame-local, so the
+                    # same slot name in two frames is two slots, and one table
+                    # for both would read a rebind that never happened.
+                    for slot, fingerprint in prints.items():
+                        pair = (key, slot)
+                        self._dropped_value_prints.setdefault(pair, set()).add(
+                            fingerprint
+                        )
                     self._guard_sets.setdefault(key, []).append(frozenset(facts))
                     self._undetermined.setdefault(key, set()).update(undetermined)
             return decisions
 
         return filter_fn
 
-    def _value_varying_slots(self) -> set[tuple[str, str]]:
-        """Dropped slots whose value differed between variants. Call under _state."""
+    def _value_varying_slots(
+        self, key: _FrameKey | None = None
+    ) -> set[tuple[str, str]]:
+        """Dropped slots whose value differed between one frame's variants.
+
+        Over every frame when key is None, which is what summary() reports: a
+        slot that varied in the frame that owns it varied. Call under _state.
+        """
         return {
             slot
-            for slot, prints in self._dropped_value_prints.items()
-            if len(prints) > 1
+            for (frame, slot), prints in self._dropped_value_prints.items()
+            if len(prints) > 1 and key in (None, frame)
         }
 
     def invariants(self) -> tuple[FrameInvariants, ...]:
@@ -1708,21 +1815,27 @@ class PrecompileSession:
         # below needs no lock.
         with self._state:
             recorded = [
-                (key, list(sets), set(self._undetermined.get(key, ())))
+                (
+                    key,
+                    list(sets),
+                    set(self._undetermined.get(key, ())),
+                    self._value_varying_slots(key),
+                )
                 for key, sets in self._guard_sets.items()
             ]
-            varying_slots = self._value_varying_slots()
         out = []
         # Ordered by the printed triple alone: the identity tail is an address, so
         # ordering on it would reshuffle the report run to run. Ties (frames that
         # share all three) keep the order they were first compiled in.
-        for key, sets, undetermined in sorted(recorded, key=lambda item: item[0][:3]):
+        for key, sets, undetermined, varying in sorted(
+            recorded, key=lambda item: item[0][:3]
+        ):
             name, filename, lineno, _ = key
             shared = frozenset.intersection(*sets) if sets else frozenset()
             # A dropped slot whose VALUE varied did not hold, however its
             # renderings compare: the report masks the id a check embeds, so two
             # distinct objects render one fact. See _value_fingerprint.
-            shared -= {f for f in shared if (f.guard_type, f.source) in varying_slots}
+            shared -= {f for f in shared if (f.guard_type, f.source) in varying}
             everything: set[_GuardFact] = set()
             for one in sets:
                 everything |= one
@@ -1811,8 +1924,7 @@ class PrecompileSession:
         # same way and risky_dropped_guards really is a subset of dropped_guards.
         with self._state:
             dropped = set(self._dropped_guards)
-            kept = self._kept_guards - self._policy_dropped_guards
-            policy_dropped = set(self._policy_dropped_guards)
+            kept = set(self._kept_guards)
             # Two routes, per risky_dropped_guards: a drop the default filter
             # would not have made, and a drop whose value told the variants
             # apart. Merely being absent from one variant is neither -- that
@@ -1824,7 +1936,6 @@ class PrecompileSession:
             self._package.cache_entry(),
             dropped,
             kept,
-            policy_dropped,
             risky,
             # An uncovered frame needs the package's capture-mode bookkeeping,
             # which is not part of this build.
@@ -1926,9 +2037,8 @@ def precompile_capture(
     produced. ``invariants`` names a file written when the block exits without
     an exception.
 
-    Runtime guards remain intact during capture. ``guard_filter_fn`` applies
-    only to the serialized guard state, so every call observes the same
-    recompilation behavior as ordinary ``torch.compile``.
+    ``guard_filter_fn`` narrows ``default_guard_filter_fn``, and the guards it
+    drops leave the live check as well as the serialized copy.
     """
     return PrecompileSession(
         fn,
@@ -1962,11 +2072,7 @@ def _plain_value(entry: GuardFilterEntry) -> str:
         value = entry.value
         if isinstance(value, torch.Tensor):
             return f"{value.dtype} {tuple(value.shape)} {value.device}"
-        if value is None or isinstance(value, (bool, int, float, complex)):
-            text = repr(value)
-            if len(text) <= _VALUE_CAP:
-                return text
-        return f"<{type(value).__name__}>"
+        return _mask_literal(value)
     except Exception:
         return "<unavailable>"
 
@@ -1979,9 +2085,12 @@ def _value_fingerprint(entry: GuardFilterEntry) -> int:
     ReLU instances both render "<ReLU>" and the id a check embeds is masked out
     to keep the report diffable. This is the rest of that comparison, and it
     stays a number so no caller can print it: a tensor by what a guard compares
-    it by, a scalar by itself, anything else by identity, which holds as long as
-    the captured objects do. Unreadable values fingerprint alike, understating
-    variation rather than inventing it.
+    it by, a scalar by itself, a callable by where it was defined, anything else
+    by what the rendering says. Deliberately NOT identity, which no table that
+    holds an int can trust: an address is reused once the object dies, and a
+    partial or closure minted per call has a new one every variant. Values that
+    compare alike here, and unreadable ones, understate variation rather than
+    inventing it.
     """
     try:
         if not entry.has_value:
@@ -1991,6 +2100,7 @@ def _value_fingerprint(entry: GuardFilterEntry) -> int:
             return hash(_plain_value(entry))
         if value is None or isinstance(value, (bool, int, float, complex, str, bytes)):
             return hash((type(value).__name__, value))
-        return id(value)
+        where = (getattr(value, "__module__", ""), getattr(value, "__qualname__", ""))
+        return hash((where, _plain_value(entry)))
     except Exception:
         return 0
