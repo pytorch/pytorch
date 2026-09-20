@@ -173,6 +173,13 @@ _NOT_LIBRARY_MODULES = {
     "shadowed_descendant_of_a_located_parent": ("collections.abc", {"__file__": os.path.join(_STDLIB_ROOT, "site-packages", "abc.py")}, None),
 }  # fmt: skip
 
+
+class _Ops:
+    @staticmethod
+    def op(x):
+        return x
+
+
 # Rows: risky?, source, value, _entry keywords. The trusted namespaces are the
 # torch, stdlib and own-module globals the test builds through _module_namespaces;
 # G['impl'] is an aliased user module and G['config'] a config module, neither
@@ -184,6 +191,9 @@ _RISKY_DROP_CASES = {
     "trusted_module_itself": (False, GlobalSource("F"), F, {}),
     "own_module_def_read_as_namespace": (False, AttrSource(_OWN, "_user_op"), _user_op, {}),
     "own_module_def_under_another_name": (True, AttrSource(_OWN, "act"), _user_op, {}),
+    "own_module_def_lifted_off_a_class": (True, AttrSource(_OWN, "op"), _Ops.op, {}),
+    # mypkg/__init__.py did `from .impl_b import _user_op`: the same def, owned by mypkg.impl_b.
+    "reexport_from_another_module": (True, AttrSource(GlobalSource("mypkg"), "_user_op"), types.FunctionType(_user_op.__code__, {"__name__": "mypkg.impl_b"}), {}),
     "aliased_user_module": (True, AttrSource(GlobalSource("impl"), "op"), _user_op, {}),
     "config_module_attribute": (True, AttrSource(GlobalSource("config"), "attn_impl"), _user_op, {}),
     "module_in_attribute": (True, AttrSource(AttrSource(LocalSource("self"), "ns"), "gelu"), F.gelu, {}),
@@ -1799,6 +1809,7 @@ class TestPrecompilePackage(torch._inductor.test_case.TestCase):
             (GlobalSource("F"), F),
             (GlobalSource("math"), math),
             (_OWN, sys.modules[__name__]),
+            (GlobalSource("mypkg"), types.ModuleType("mypkg")),
             (GlobalSource("impl"), types.ModuleType("mypkg.impl_b")),
             (GlobalSource("config"), torch._dynamo.config),
         ]
