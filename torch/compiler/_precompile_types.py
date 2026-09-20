@@ -59,7 +59,9 @@ class FrameInvariants:
         invariant: Guards that held identically in every variant: preconditions
             the artifact is only valid under.
         varying: Guards that differed between variants: what tells its graphs apart.
-        undetermined: Guards a single variant could not classify either way.
+        undetermined: Guards whose check this report cannot model a comparable
+            value for, so it cannot say whether they held: every variant's are
+            listed, however many were captured.
     """
 
     frame: str
