@@ -1443,8 +1443,10 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     def test_a_guarded_dynamic_fake_is_refused_not_loaded_broken(self):
         # The sizes of a guarded dynamic-shaped fake's meta template are
-        # symbolic and in no guard tree; pruning them would dump a payload that
-        # dies at load in empty_strided, so the refusal must stay unconditional.
+        # symbolic and in no guard tree: empty_like keeps the fake's symbolic
+        # sizes, so the template's size() tuple carries SymInts. Pruning them
+        # would dump a payload that dies at load in empty_strided, so the
+        # refusal must stay unconditional.
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx.experimental.symbolic_shapes import (
             DimDynamic,
