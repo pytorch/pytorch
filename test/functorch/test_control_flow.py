@@ -6660,11 +6660,16 @@ class AssociativeScanTestsDevice(TestCase):
 
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager"])
+    @parametrize("reverse", [False, True])
+    @parametrize("scan_length", [9, 16])
+    @parametrize("freevar_requires_grad", [False, True])
     def test_associative_scan_pointwise_multiple_additional_inputs_autograd(
-        self, device
+        self, device, compile_mode, reverse, scan_length, freevar_requires_grad
     ):
-        H1 = torch.rand(2, device=device, requires_grad=False)
-        H2 = torch.rand(2, device=device, requires_grad=False)
+        scan_fct = compile_mode_helper(associative_scan, compile_mode)
+        H1 = torch.rand(2, device=device, requires_grad=freevar_requires_grad)
+        H2 = torch.rand(2, device=device, requires_grad=freevar_requires_grad)
 
         # Multiplicative body so bwys is non-unit: this is what exercises the
         # bwys-alignment (torch.cat([bwys[1:], ones])) in the reversed backward scan.
@@ -6673,28 +6678,173 @@ class AssociativeScanTestsDevice(TestCase):
         def combine_fn(x, y):
             return x * y * H1 * H2
 
-        xs = torch.randn(4, 2, device=device, requires_grad=True)
-        result = associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
-        result_ref = _fake_associative_scan(combine_fn, xs, dim=0)
+        xs = torch.randn(scan_length, 2, device=device, requires_grad=True)
+        result = scan_fct(
+            combine_fn, xs, dim=0, reverse=reverse, combine_mode="pointwise"
+        )
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0, reverse=reverse)
         self.assertEqual(result, result_ref)
 
-        grads = torch.autograd.grad(result.sum(), xs)
-        grads_ref = torch.autograd.grad(result_ref.sum(), xs)
+        grad_params = [xs, H1, H2] if freevar_requires_grad else [xs]
+        grads = torch.autograd.grad(result.sum(), grad_params)
+        grads_ref = torch.autograd.grad(result_ref.sum(), grad_params)
         self.assertEqual(grads, grads_ref)
 
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
-    def test_associative_scan_pointwise_additional_input_requires_grad_raises(
-        self, device
-    ):
-        H = torch.rand(2, device=device, requires_grad=True)
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_associative_scan_pointwise_compile_lifted_arg_unsupported(self, device):
+        # Autograd now handles a combine_fn that reads a freevar, but the inductor
+        # scan lowering still cannot pass one into the pointwise subgraph and has to
+        # say so rather than drop it. Needs an accelerator because the
+        # BackendFeature.SCAN device gate in the same lowering is checked first.
+        H = torch.rand(2, device=device)
 
         def combine_fn(x, y):
-            return x + y + H
+            return x * y * H
 
-        xs = torch.randn(4, 2, device=device, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "lifted parameters"):
-            associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+        xs = torch.randn(9, 2, device=device)
+        compiled = torch.compile(associative_scan, fullgraph=True, dynamic=False)
+        with self.assertRaisesRegex(RuntimeError, "unsupported lifted arguments"):
+            compiled(combine_fn, xs, 0, combine_mode="pointwise")
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("reverse", [False, True])
+    def test_associative_scan_pointwise_additional_inputs_partial_grad(self, reverse):
+        device = torch.device("cuda")
+        H_grad = torch.rand(2, device=device, requires_grad=True)
+        H_nograd = torch.rand(2, device=device, requires_grad=False)
+        scale = torch.rand(2, device=device, requires_grad=True)
+
+        def combine_fn(x, y):
+            with torch.no_grad():
+                factor = H_nograd * H_nograd
+            return x * y * H_grad * scale * factor
+
+        xs = torch.randn(9, 2, device=device, requires_grad=True)
+        result = associative_scan(
+            combine_fn, xs, dim=0, reverse=reverse, combine_mode="pointwise"
+        )
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0, reverse=reverse)
+        self.assertEqual(result, result_ref)
+
+        grad_params = [xs, H_grad, scale]
+        grads = torch.autograd.grad(result.sum(), grad_params)
+        grads_ref = torch.autograd.grad(result_ref.sum(), grad_params)
+        self.assertEqual(grads, grads_ref)
+
+    @skipIfTorchDynamo("don't test compile on compile")
+    def test_associative_scan_additional_inputs_lifted_symint(self):
+        # Dynamic shapes lift SymInts into additional_inputs, interleaved with the
+        # tensor freevars. Only the tensors get a gradient, the SymInts get None.
+        H = torch.rand(2, requires_grad=True)
+
+        def model(xs):
+            n = xs.shape[0]
+
+            def combine_fn(x, y):
+                return x * y * H * n
+
+            return associative_scan(combine_fn, xs, dim=0, combine_mode="pointwise")
+
+        backend = EagerAndRecordGraphs()
+        compiled = torch.compile(model, fullgraph=True, dynamic=True, backend=backend)
+        xs = torch.randn(9, 2, requires_grad=True)
+        result = compiled(xs)
+
+        # Pin the interleaving: without this the test still passes if dynamo specializes
+        # the shapes and never lifts a SymInt, which is the case the None grads are for.
+        # How many symbols get lifted is up to dynamo, so only assert that both kinds
+        # are present.
+        (hop_node,) = [
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.target is torch.ops.higher_order.associative_scan
+        ]
+        lifted = [
+            a.meta["example_value"] if isinstance(a, torch.fx.Node) else a
+            for a in hop_node.args[2]
+        ]
+        is_tensor = [isinstance(a, torch.Tensor) for a in lifted]
+        self.assertTrue(any(is_tensor))
+        self.assertFalse(all(is_tensor))
+
+        n = xs.shape[0]
+        result_ref = _fake_associative_scan(lambda x, y: x * y * H * n, xs, dim=0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), [xs, H])
+        grads_ref = torch.autograd.grad(result_ref.sum(), [xs, H])
+        self.assertEqual(grads, grads_ref)
+
+    @parametrize("scan_length", [0, 1])
+    def test_associative_scan_additional_inputs_degenerate_scan_length(
+        self, scan_length
+    ):
+        # combine_fn is applied scan_length - 1 times, so for these lengths the freevar
+        # never participates and its gradient must be all-zero.
+        H = torch.rand(2, dtype=torch.float64, requires_grad=True)
+
+        def combine_fn(x, y):
+            return x * y * H
+
+        xs = torch.randn(scan_length, 2, dtype=torch.float64, requires_grad=True)
+        result = associative_scan(combine_fn, xs, dim=0)
+        self.assertEqual(result, xs)
+
+        g_xs, g_H = torch.autograd.grad(result.sum(), [xs, H])
+        self.assertEqual(g_xs, torch.ones_like(xs))
+        self.assertEqual(g_H, torch.zeros_like(H))
+
+    @parametrize("freevar_shape", [(), (1,)])
+    def test_associative_scan_additional_inputs_broadcast_multiple_leaves(
+        self, freevar_shape
+    ):
+        # A freevar smaller than the leaves exercises the sum-to-size reduction in the
+        # joint, and the differently-shaped leaves make the backward's per-leaf gradient
+        # loop non-trivial while both leaves feed the same freevar gradient.
+        H = torch.rand(freevar_shape, dtype=torch.float64, requires_grad=True) + 0.5
+
+        def combine_fn(a, b):
+            return (a[0] * b[0] * H, a[1] * b[1] * H)
+
+        xs = (
+            torch.randn(6, 2, dtype=torch.float64, requires_grad=True),
+            torch.randn(6, 3, 4, dtype=torch.float64, requires_grad=True),
+        )
+        result = associative_scan(combine_fn, xs, 0)
+        result_ref = _fake_associative_scan(combine_fn, xs, 0)
+        self.assertEqual(result, result_ref)
+
+        loss = sum(r.sum() for r in result)
+        loss_ref = sum(r.sum() for r in result_ref)
+        grad_params = [*xs, H]
+        grads = torch.autograd.grad(loss, grad_params)
+        grads_ref = torch.autograd.grad(loss_ref, grad_params)
+        self.assertEqual(grads, grads_ref)
+
+    @parametrize("scan_length", [2, 5])
+    def test_associative_scan_additional_inputs_only_freevar_requires_grad(
+        self, scan_length
+    ):
+        # bwys is the step-to-step Jacobian that chains g_ys, and it is needed for the
+        # freevar gradient even though xs itself needs none. Deriving it from slices that
+        # inherited requires_grad=False from xs silently zeroed it out, which left the
+        # freevar gradient short of every chained term (correct only for scan_length 2).
+        H = torch.rand(2, dtype=torch.float64, requires_grad=True) + 0.5
+
+        def combine_fn(x, y):
+            return x * y * H
+
+        xs = torch.randn(scan_length, 2, dtype=torch.float64, requires_grad=False)
+        result = associative_scan(combine_fn, xs, dim=0)
+        result_ref = _fake_associative_scan(combine_fn, xs, dim=0)
+        self.assertEqual(result, result_ref)
+
+        grads = torch.autograd.grad(result.sum(), [H])
+        grads_ref = torch.autograd.grad(result_ref.sum(), [H])
+        self.assertEqual(grads, grads_ref)
 
     @onlyAccelerator
     def test_associative_scan_input_mutation(self, device):
