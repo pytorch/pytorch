@@ -12,7 +12,7 @@ from ..source import AttrSource, CallFunctionNoArgsSource, ImportSource
 from .base import Member, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
-
+from ...jit import isinstance
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
@@ -20,15 +20,6 @@ if TYPE_CHECKING:
     from ..codegen import PyCodegen
 
 from torch._library.custom_ops import custom_op
-
-
-def _get_mempool_by_index(index: int) -> torch.cuda.MemPool:
-    mempool = get_external_object_by_index(index)
-    if not isinstance(mempool, torch.cuda.MemPool):
-        raise RuntimeError(
-            f"use_mem_pool expected a torch.cuda.MemPool object at index {index}"
-        )
-    return mempool
 
 
 def _current_cuda_device_source() -> CallFunctionNoArgsSource:
@@ -43,8 +34,14 @@ def _current_cuda_device_source() -> CallFunctionNoArgsSource:
 # side-effects for non-Inductor backends.
 @custom_op("mempool::begin", mutates_args=())
 def begin_mempool(device_index: int, mempool_index: int) -> None:
-    mempool = _get_mempool_by_index(mempool_index)
-    torch.cuda.memory._cuda_beginAllocateCurrentThreadToPool(device_index, mempool.id)
+    mempool = get_external_object_by_index(mempool_index)
+    from torch._dynamo.device_interface import get_interface_for_device
+    iface = get_interface_for_device(torch.accelerator.current_accelerator().type)
+    if not isinstance(mempool, iface.get_mempool_type()):
+        raise RuntimeError(
+            f"use_mem_pool expected a {iface.get_mempool_type()} object at index {mempool_index}"
+        )
+    iface.begin_allocate_to_pool(device_index, mempool.id)
 
 
 @begin_mempool.register_fake
@@ -57,9 +54,15 @@ has_side_effect(torch.ops.mempool.begin.default)
 
 @custom_op("mempool::end", mutates_args=())
 def end_mempool(device_index: int, mempool_index: int) -> None:
-    mempool = _get_mempool_by_index(mempool_index)
-    torch.cuda.memory._cuda_endAllocateToPool(device_index, mempool.id)
-    torch.cuda.memory._cuda_releasePool(device_index, mempool.id)
+    mempool = get_external_object_by_index(mempool_index)
+    from torch._dynamo.device_interface import get_interface_for_device
+    iface = get_interface_for_device(torch.accelerator.current_accelerator().type)
+    if not isinstance(mempool, iface.get_mempool_type()):
+        raise RuntimeError(
+            f"use_mem_pool expected a {iface.get_mempool_type()} object at index {mempool_index}"
+        )
+    iface.end_allocate_to_pool(device_index, mempool.id)
+    iface.release_pool(device_index, mempool.id)
 
 
 @end_mempool.register_fake
@@ -72,11 +75,13 @@ has_side_effect(torch.ops.mempool.end.default)
 
 class CUDAMemPoolVariable(VariableTracker):
     """Represents a torch.cuda.MemPool object."""
+    from torch._dynamo.device_interface import get_interface_for_device
+    iface = get_interface_for_device(torch.accelerator.current_accelerator().type)
 
     def __init__(
         self,
         proxy: Proxy,
-        value: torch.cuda.MemPool,
+        value: iface.get_mempool_type(),
         user_object_index: int,
         **kwargs: Any,
     ) -> None:
@@ -86,7 +91,7 @@ class CUDAMemPoolVariable(VariableTracker):
         self.user_object_index = user_object_index
 
     def python_type(self) -> type:
-        return torch.cuda.MemPool
+        return self.iface.get_mempool_type()
 
     def get_real_python_backed_value(self) -> object:
         return self.value
