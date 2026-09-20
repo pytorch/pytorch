@@ -2415,8 +2415,16 @@ class InstructionTranslatorBase(
     # Keyed by module_name alone, not the whole argument tuple as @cache_method
     # would key it, so a later argument cannot silently split the memo. Per
     # translator, as the decorator was, and written only past the alias check.
-    def import_source(self, module_name: str) -> GlobalSource:
-        """Create an alias to a module for use in guards"""
+    # graph_break_ok stays out of the key: a memo hit means this translator bound
+    # the alias, and a taken slot is decided by each caller's own flag.
+    def import_source(
+        self, module_name: str, graph_break_ok: bool = False
+    ) -> GlobalSource:
+        """
+        Create an alias to a module for use in guards. A slot already holding
+        something other than the resolved module is an AssertionError unless
+        graph_break_ok says the caller can graph break there.
+        """
         if (memo := self._import_source_memo.get(module_name)) is not None:
             return memo
 
@@ -2431,14 +2439,53 @@ class InstructionTranslatorBase(
             value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
 
+        f_globals = self.output.global_scope
+        if alias in f_globals and f_globals[alias] is not value:
+            bound = f_globals[alias]
+            # Named by type, never repr'd: __repr__ is user code too.
+            offender = type(bound).__name__
+            if isinstance(bound, types.ModuleType):
+                # __name__ out of the instance dict: a PEP 562 module __getattr__
+                # and a class-level __getattribute__ (importlib.util._LazyModule
+                # imports on any attribute read) are user code that must not run
+                # inside a trace.
+                name = object.__getattribute__(bound, "__dict__").get("__name__")
+                if type(name) is str:
+                    offender = f"{offender} named {name}"
+            # f_globals is the root frame's: an inlined callee's own module is not
+            # where the alias lives, so the message names the module whose it is.
+            owner = f_globals.get("__name__")
+            scope = owner if type(owner) is str else "<a scope with no __name__>"
+            # A graph break only where the traced bytecode chose the name, IMPORT_NAME.
+            # Two codegen callers, make_call_generated_code's pregraph-marker imports,
+            # keep the hard error because an Unsupported there is not a graph break but
+            # a frame skipped after the backend ran, silent at default log levels, and
+            # the error is loud but unlocated, that code running under
+            # TracingContext.clear_frame, which attaches no user stack. The other
+            # callers keep it too, for now: whether they should break instead is
+            # deferred, so for a module a frame both imports and inlines from, whichever
+            # caller gets here first decides.
+            if not graph_break_ok:
+                raise AssertionError(
+                    f"import alias {alias} for {module_name} is already bound to "
+                    f"a {offender} in the globals of {scope}"
+                )
+            unimplemented(
+                gb_type="Import alias already bound",
+                context=f"{alias} for {module_name}: {offender}",
+                explanation=f"The module alias {alias} for {module_name} is already bound to "
+                f"a {offender} in the globals of {scope}, the globals of the frame being compiled.",
+                hints=[
+                    f"Remove or rename the global {alias} from the globals of {scope}.",
+                    "If it holds a module of another name, two module names mangle onto this __import_ alias (a.b and a_dot_b both alias as __import_a_dot_b): rename one of the two modules.",
+                    "When this graph break is not raised as an error, nothing guards this global, so fixing it later does not by itself retrace the frame; a frame skipped here stays skipped until torch._dynamo.reset().",
+                ],
+            )
+        # Recorded only once the check has passed: the package entry outlives a
+        # graph break here, and install() binds every recorded alias.
         if self.package is not None:
             self.package.add_import_source(alias, module_name)
         self.output.import_sources[alias] = module_name
-        f_globals = self.output.global_scope
-        if not (alias not in f_globals or f_globals[alias] is value):
-            raise AssertionError(
-                "expected alias not in f_globals or f_globals[alias] is value to be true"
-            )
         f_globals[alias] = value
         self.output.update_co_names(alias)
         source = GlobalSource(alias)
@@ -2535,11 +2582,12 @@ class InstructionTranslatorBase(
             # returned, not the module named by module_name. However, when a
             # non-empty fromlist argument is given, the module named by name is
             # returned. Therefore, we set the source correctly here.
+            # graph_break_ok: the name is the traced bytecode's own choice.
             if not fromlist:
                 top_level_module_name = module_name.partition(".")[0]
-                source = self.import_source(top_level_module_name)
+                source = self.import_source(top_level_module_name, graph_break_ok=True)
             else:
-                source = self.import_source(module_name)
+                source = self.import_source(module_name, graph_break_ok=True)
 
         if self.exec_recorder:
             # pyrefly: ignore [unbound-name]
