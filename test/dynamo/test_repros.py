@@ -65,7 +65,6 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     SM70OrLater,
@@ -75,6 +74,7 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
     onlyAccelerator,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -8942,7 +8942,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             if reset_dynamo:
                 torch._dynamo.reset()
             gc.collect()
-            if device == "cuda":
+            if torch.device(device).type == "cuda":
                 torch._C._cuda_clearCublasWorkspaces()
             torch.accelerator.empty_cache()
 
@@ -8960,10 +8960,12 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(opt_f)
 
     @onlyAccelerator
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5321")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16, "requires accelerator bf16 support")
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5321")
     def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
+        if not torch.get_device_module(device).is_bf16_supported():
+            self.skipTest("requires accelerator bf16 support")
+
         x = torch.tensor(
             [[1.0, 2.0, 3.0, 4.0], [2.0, 4.0, 6.0, 8.0]],
             device=device,
