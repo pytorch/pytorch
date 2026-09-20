@@ -134,7 +134,7 @@ class _Missing:
 # artifact is only ever read by the torch that wrote it (SystemInfo's
 # check_compatibility runs before load_guards_state), so no reader from before
 # persistent_id existed sees one.
-_PRUNED_VALUE_PID = "missing values"
+_PRUNED_VALUE_PID = "pruned"
 
 
 class FunctionPicklerBase(pickle.Pickler):
@@ -499,8 +499,9 @@ class _GuardedCodeCacheEntry:
 
 
 class _GuardsStateUnpickler(pickle.Unpickler):
-    # One shared sentinel, so two attributes that held one pruned container
-    # load as one object, as they would have through reducer_override's memo.
+    # One sentinel for every pruned container, aliases and distinct ones alike
+    # (reducer_override's memo would keep distinct ones distinct; a _Missing
+    # carries nothing but its reason, so collapsing them loses nothing).
     _pruned = _Missing(_PRUNED_VALUE_PID)
 
     def persistent_load(self, pid: Any) -> Any:
