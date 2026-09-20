@@ -3,14 +3,14 @@
 import copy
 from collections import defaultdict
 
-import sympy as sp
-
 import torch
 import torch.fx as fx
-from torch.fx.experimental.shape_inference.infer_shape import infer_shape
+from torch._dynamo.source import LocalSource
+from torch.fx.experimental.shape_inference.infer_shape import infer_shape, mksym
 from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
@@ -18,41 +18,38 @@ class TestShapeInference(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_infer_symbol_values(self):
+        # Real ShapeEnv symbols are not named s0..sN; _generate_unique_id hashes
+        # the source name, so production symbols have non-sequential names like
+        # s48/s49. Mirror that here so the test actually exercises the
+        # key-mismatch path fixed in infer_shape, instead of relying on a
+        # sequential s0..sN assumption that never holds in production.
+        shape_env = ShapeEnv()
         N = 8
-        init_symints = [sp.Symbol(f"s{i}") for i in range(N)]
+        sample = {f"s{i}": 2 for i in range(N)}
+        init_symints = [
+            mksym(shape_env, v, LocalSource(k), DimDynamic.DYNAMIC)
+            for k, v in sample.items()
+        ]
         symints = copy.deepcopy(init_symints)
-        symbol_to_idx_dict = {f"s{i}": i for i in range(N)}
+        name = [str(s) for s in init_symints]  # non-sequential names like s48, s49, ...
+        symbol_to_idx_dict = {str(init_symints[i]): i for i in range(N)}
         padding_constraints = defaultdict(list)
 
-        # prepare constraints strings
-        constraints = []
-        constraints.append(
-            "The size of tensor a (s1) must match the size of tensor b (1773) at non-singleton dimension 1)"
-        )
-        constraints.append(
-            "Expected size for first two dimensions of batch2 tensor to be: [s0, (s2//2) + 12] but got: [s0, 120]."
-        )
-        constraints.append("shape '[s0, -1, 32]' is invalid for input of size s0*s3")
-        constraints.append(
-            "a and b must have same reduction dim, but got [32*s0, s3] X [20, 15]."
-        )
-        constraints.append(
-            "a and b must have same reduction dim, but got [s0, s4 + 1568] X [5728, 1024]."
-        )
-        constraints.append(
-            "Expected size for first two dimensions of batch2 tensor to be: [s0, 40] but got: [s0, s5]."
-        )
-        constraints.append(
-            "shape '[s0, -1, 32]' is invalid for input of size s0*s6 + 1344*s0"
-        )
-        constraints.append(
-            "shape '[-1, 47]' is invalid for input of size 32*s0*s6 + 1344*s0"
-        )
-        constraints.append(
-            "Expected size for first two dimensions of batch2 tensor to be: [s0, 47*s6] but got: [s0*s6, 47]."
-        )
-        constraints.append("Split sizes add up to 4258 but got the tensor's size of s7")
-
+        # Constraint strings embed the *real* symbol names; the parser extracts
+        # them and resolves indices via symbol_to_idx_dict, so they must match
+        # the names ShapeEnv actually produced.
+        constraints = [
+            f"The size of tensor a ({name[1]}) must match the size of tensor b (1773) at non-singleton dimension 1)",
+            f"Expected size for first two dimensions of batch2 tensor to be: [{name[0]}, ({name[2]}//2) + 12] but got: [{name[0]}, 120].",
+            f"shape '[{name[0]}, -1, 32]' is invalid for input of size {name[0]}*{name[3]}",
+            f"a and b must have same reduction dim, but got [32*{name[0]}, {name[3]}] X [20, 15].",
+            f"a and b must have same reduction dim, but got [{name[0]}, {name[4]} + 1568] X [5728, 1024].",
+            f"Expected size for first two dimensions of batch2 tensor to be: [{name[0]}, 40] but got: [{name[0]}, {name[5]}].",
+            f"shape '[{name[0]}, -1, 32]' is invalid for input of size {name[0]}*{name[6]} + 1344*{name[0]}",
+            f"shape '[-1, 47]' is invalid for input of size 32*{name[0]}*{name[6]} + 1344*{name[0]}",
+            f"Expected size for first two dimensions of batch2 tensor to be: [{name[0]}, 47*{name[6]}] but got: [{name[0]}*{name[6]}, 47].",
+            f"Split sizes add up to 4258 but got the tensor's size of {name[7]}",
+        ]
         for constraint in constraints:
             infer_symbol_values(
                 symints,
