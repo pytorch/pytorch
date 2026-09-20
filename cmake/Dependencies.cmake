@@ -88,7 +88,7 @@ if(USE_XPU)
     caffe2_update_option(USE_XPU OFF)
   endif()
   foreach(flag ${XPU_HOST_CXX_FLAGS})
-    add_definitions(${flag})
+    add_compile_definitions(${flag})
   endforeach()
 endif()
 
