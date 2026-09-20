@@ -291,7 +291,6 @@ def get_flydsl_mm_template_kwargs(
     *,
     mxfp_format=None,
     has_bias=False,
-    bias_dtype=None,
 ) -> list[dict[str, Any]]:
     """Return shape-compatible FlyDSL GEMM template configurations."""
     from ..heuristics.template.flydsl import (
@@ -411,7 +410,6 @@ def get_flydsl_mm_template_kwargs(
             GEMM_DTYPE_FP16 if layout.dtype == torch.float16 else GEMM_DTYPE_BF16
         )
         extra["OUT_DTYPE_ID"] = out_dtype_id
-        extra["BIAS_IS_FP32"] = has_bias and bias_dtype == torch.float32
         validity["out_dtype_id"] = out_dtype_id
     # Filter shape-incompatible configs before autotuning.
     return [
@@ -1335,9 +1333,7 @@ def _flydsl_mxfp_bias_supported(
     size = get_size()
     if len(size) != 1:
         return False
-    if get_dtype() not in (torch.float32, torch.bfloat16, torch.float16):
-        return False
-    if out_dtype is not None and get_dtype() not in (torch.float32, out_dtype):
+    if get_dtype() != out_dtype:
         return False
     n = mat_b.get_size()[-1]
     if isinstance(size[0], int) and isinstance(n, int):
@@ -1464,7 +1460,6 @@ def get_flydsl_mxfp_template_kwargs(
         True,
         mxfp_format=mxfp_format,
         has_bias=bias is not None,
-        bias_dtype=bias.get_dtype() if bias is not None else None,
     )
 
 

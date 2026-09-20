@@ -46,7 +46,6 @@ class GemmGfx950Param:
     a_is_transposed: fx.Constexpr[bool]
     b_is_transposed: fx.Constexpr[bool]
     has_bias: fx.Constexpr[bool]
-    bias_is_fp32: fx.Constexpr[bool]
     has_k_tail: fx.Constexpr[bool]
     async_load_bytes: fx.Constexpr[int]
     in_data_bytes: fx.Constexpr[int]
@@ -114,7 +113,6 @@ def make_gemm_gfx950_param(
     a_is_transposed: bool,
     b_is_transposed: bool,
     has_bias: bool = False,
-    bias_is_fp32: bool = False,
     has_k_tail: bool = False,
     mma_m: int = 16,
     mma_n: int = 16,
@@ -344,7 +342,6 @@ def make_gemm_gfx950_param(
         a_is_transposed=a_is_transposed,
         b_is_transposed=b_is_transposed,
         has_bias=has_bias,
-        bias_is_fp32=bias_is_fp32,
         has_k_tail=has_k_tail,
         async_load_bytes=GFX950_DMA_BYTES,
         in_data_bytes=in_dbytes,
@@ -379,11 +376,7 @@ def make_gemm_gfx950_kernel_name(param: GemmGfx950Param) -> str:
     name = f"gemm_{dtype_str}_t{param.block_m}x{param.block_n}x{param.block_k}x{param.stages}"
     name += f"_w{param.m_waves}x{param.n_waves}"
     name += f"_gm{param.group_m}"
-    name += (
-        f"_bias{'fp32' if param.bias_is_fp32 else 'out'}"
-        if param.has_bias
-        else "_bias0"
-    )
+    name += f"_bias{int(param.has_bias)}"
     name += f"_ktail{int(param.has_k_tail)}"
     a_layout = "t" if param.a_is_transposed else "n"
     b_layout = "t" if param.b_is_transposed else "n"

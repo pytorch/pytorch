@@ -1244,8 +1244,8 @@ class TestFlyDSLMXFPMetadata(TestCase):
     @parametrize("mxfp_format", ("mxfp4", "mxfp8"))
     def test_contract(self, mxfp_format):
         args = self._args(mxfp_format)
-        bias = Buffer(
-            name="bias",
+        fp32_bias = Buffer(
+            name="fp32_bias",
             layout=FixedLayout(torch.device("cuda", 0), torch.float32, [96], [1]),
         )
         out_bias = Buffer(
@@ -1254,7 +1254,7 @@ class TestFlyDSLMXFPMetadata(TestCase):
         )
         cpu_bias = Buffer(
             name="cpu_bias",
-            layout=FixedLayout(torch.device("cpu"), torch.float32, [96], [1]),
+            layout=FixedLayout(torch.device("cpu"), torch.bfloat16, [96], [1]),
         )
         with mock.patch.object(torch.version, "hip", "test"):
             for overrides, expected in (
@@ -1266,7 +1266,7 @@ class TestFlyDSLMXFPMetadata(TestCase):
                 ({"use_fast_accum": True}, None),
                 ({"contraction_dim": [1]}, None),
                 ({"bias": object()}, None),
-                ({"bias": bias}, mxfp_format),
+                ({"bias": fp32_bias}, None),
                 ({"bias": out_bias}, mxfp_format),
                 ({"bias": cpu_bias}, None),
                 ({"scale_a": []}, None),
@@ -1369,7 +1369,9 @@ class TestFlyDSLMXFPDevice(TestCase):
     ):
         inputs, reference = _mxfp_case(mxfp_format, shape, device, *transposed)
         out = torch.empty(shape[:2], device=device, dtype=out_dtype)
-        bias = torch.randn(shape[1], device=device) if bias else None
+        bias = (
+            torch.randn(shape[1], device=device, dtype=out_dtype) if bias else None
+        )
         param = _mxfp_param(
             mxfp_format,
             tile,
@@ -1377,7 +1379,6 @@ class TestFlyDSLMXFPDevice(TestCase):
             out_dtype,
             transposed,
             has_bias=bias is not None,
-            bias_is_fp32=bias is not None and bias.dtype == torch.float32,
         )
         _mxfp_call(inputs, out, param, bias)()
         expected = reference if bias is None else reference + bias
@@ -1430,17 +1431,7 @@ class TestFlyDSLMXFPDevice(TestCase):
         import flydsl.compiler as flyc
 
         tile = (256, 256, 256 if mxfp_format == "mxfp4" else 128, 2, 2, 4, 0, True)
-        params = {
-            bias_is_fp32: _mxfp_param(
-                mxfp_format,
-                tile,
-                640,
-                out_dtype,
-                has_bias=True,
-                bias_is_fp32=bias_is_fp32,
-            )
-            for bias_is_fp32 in (False, True)
-        }
+        param = _mxfp_param(mxfp_format, tile, 640, out_dtype, has_bias=True)
         compiler = mock.Mock(wraps=flyc.compile)
         with mock.patch.object(
             kernels.gemm_mxfp_gfx950, "_compiled_cache", {}, create=True
@@ -1475,13 +1466,8 @@ class TestFlyDSLMXFPDevice(TestCase):
                         (m * stride + 32,), -317, device=device, dtype=out_dtype
                     )
                     out = arena[16:-16].view(m, stride)[:, :n]
-                    bias_is_fp32 = i % 2 == 0
-                    bias = torch.randn(
-                        n,
-                        device=device,
-                        dtype=torch.float32 if bias_is_fp32 else out_dtype,
-                    )
-                    call = _mxfp_call(inputs, out, params[bias_is_fp32], bias, compiler)
+                    bias = torch.randn(n, device=device, dtype=out_dtype)
+                    call = _mxfp_call(inputs, out, param, bias, compiler)
                     graph = torch.cuda.CUDAGraph()
                     with torch.cuda.graph(graph):
                         call()
@@ -1502,7 +1488,7 @@ class TestFlyDSLMXFPDevice(TestCase):
                             arena[16:-16].view(m, stride)[:, n:],
                         ):
                             self.assertEqual(guard, torch.full_like(guard, -317))
-        self.assertEqual(compiler.call_count, 2)
+        self.assertEqual(compiler.call_count, 1)
 
     @parametrize("mxfp_format", ("mxfp4", "mxfp8", None))
     def test_compiled_routes(self, device, mxfp_format):
