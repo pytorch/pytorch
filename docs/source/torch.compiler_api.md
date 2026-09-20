@@ -59,9 +59,7 @@ without a deprecation cycle.
 
 % precompile is a module whose members are documented manually below (autosummary cannot
 % render them under the parent module's currentmodule), one entry per name in
-% ``torch.compiler.precompile.__all__``; the reference prose for each -- the capture
-% contract, the programming-model note, the parameter tables and the examples -- lands in
-% the docs commit above this one.
+% ``torch.compiler.precompile.__all__``, each deliberately a one-line description.
 
 ```{eval-rst}
 .. py:function:: precompile.capture(fn, /, *, artifact_path, cache_path, tracer=MakeFxTracer(), backend="inductor", training=False)
