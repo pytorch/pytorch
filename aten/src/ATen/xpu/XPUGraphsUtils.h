@@ -1,8 +1,17 @@
 #pragma once
 
 #include <c10/xpu/XPUGraphsC10Utils.h>
+#include <optional>
 
 namespace at::xpu {
+
+inline std::optional<size_t> currentStreamCaptureId() {
+  auto& queue = c10::xpu::getCurrentXPUStream().queue();
+  if (queue.ext_oneapi_get_state() == queue_state::recording) {
+    return queue.ext_oneapi_get_graph().get_id();
+  }
+  return std::nullopt;
+}
 
 inline CaptureStatus currentStreamCaptureStatus() {
   return c10::xpu::currentStreamCaptureStatusMayInitCtx();
