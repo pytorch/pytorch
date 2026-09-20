@@ -5030,9 +5030,12 @@ def _offending_value_path(state: Any, target: Any) -> str:
     slots and partials are descended too; modules are not, since they pickle
     by name and their dicts lead to the whole of sys.modules.
 
-    Best-effort by construction: it is a diagnostic appended to an error that is
-    already being raised, so any failure here must stay silent rather than mask
-    the real one.
+    A shared object is reported by the first path breadth-first search reaches,
+    which need not be the one the pickler took. Best-effort by construction: it
+    is a diagnostic appended to an error that is already being raised, so any
+    failure here must stay silent rather than mask the real one, and the walk is
+    bounded (visits and per-container fan-out) so a huge state cannot turn a
+    bypass into a stall.
     """
     try:
         if target is None:
@@ -5047,61 +5050,84 @@ def _offending_value_path(state: Any, target: Any) -> str:
         # Higher than the scope-only walk needed: the whole guard state is
         # orders of magnitude larger, and this runs once, on a path that is
         # already raising.
-        while queue and len(seen) < 200000:
+        for _ in range(200000):
+            if not queue:
+                break
             path, value = queue.popleft()
             if id(value) in seen:
                 continue
             seen.add(id(value))
             if value is target:
                 return f"\n  reached via: {path}"
-            if isinstance(value, (list, tuple, set, frozenset, OrderedSet)):
-                queue.extend((f"{path}[{i}]", v) for i, v in enumerate(value))
-            elif isinstance(value, dict):
-                for i, (k, v) in enumerate(value.items()):
-                    if isinstance(k, (str, int)):
-                        queue.append((f"{path}[{k!r}]", v))
-                    else:
-                        queue.append((f"{path}.keys()[{i}]", k))
-                        queue.append((f"{path}.values()[{i}]", v))
-            elif isinstance(value, functools.partial):
-                # Guard.create_fn is a partial whose arguments the pickler walks.
-                queue.append((f"{path}.func", value.func))
-                queue.extend((f"{path}.args[{i}]", v) for i, v in enumerate(value.args))
-                queue.extend(
-                    (f"{path}.keywords[{k!r}]", v) for k, v in value.keywords.items()
-                )
-            elif isinstance(value, types.FunctionType):
-                # A function a guard is rooted at is pickled by value, defaults,
-                # kwdefaults and closure cells included (its __dict__ is walked
-                # below like any other), so a failure behind one of those has
-                # to be reachable from here.
-                queue.extend(
-                    (f"{path}.__defaults__[{i}]", v)
-                    for i, v in enumerate(value.__defaults__ or ())
-                )
-                queue.extend(
-                    (f"{path}.__kwdefaults__[{k!r}]", v)
-                    for k, v in (value.__kwdefaults__ or {}).items()
-                )
-                for name, cell in zip(
-                    value.__code__.co_freevars, value.__closure__ or ()
-                ):
-                    try:
-                        contents = cell.cell_contents
-                    except ValueError:  # an empty cell
-                        continue
-                    queue.append((f"{path}.__closure__[{name!r}]", contents))
             if inspect.ismodule(value):
                 # Pickled by name, so nothing inside it is in the artifact; its
                 # dict leads to sys.modules and would saturate the walk.
                 continue
-            # Per node: one object whose __dict__ read raises (a type-level
-            # __dict__ property, a proxy) must not end the whole walk.
-            attributes: list[tuple[str, Any]] = []
+            children: list[tuple[str, Any]] = []
+            # Per node: one object whose container or __dict__ read raises (a
+            # dict subclass, a type-level __dict__ property, a proxy) must not
+            # end the whole walk.
             try:
+                if isinstance(value, (list, tuple, OrderedSet)):
+                    children = [(f"{path}[{i}]", v) for i, v in enumerate(value)]
+                elif isinstance(value, (set, frozenset)):
+                    children = [(f"a member of {path}", v) for v in value]
+                elif isinstance(value, dict):
+                    for k, v in value.items():
+                        if isinstance(k, (str, int)):
+                            children.append((f"{path}[{k!r}]", v))
+                        else:
+                            children.append((f"a key of {path}", k))
+                            children.append((f"{path}[<that key>]", v))
+                elif isinstance(value, functools.partial):
+                    # Guard.create_fn is a partial whose arguments the pickler walks.
+                    children.append((f"{path}.func", value.func))
+                    children += [
+                        (f"{path}.args[{i}]", v) for i, v in enumerate(value.args)
+                    ]
+                    children += [
+                        (f"{path}.keywords[{k!r}]", v)
+                        for k, v in value.keywords.items()
+                    ]
+                elif isinstance(value, types.FunctionType):
+                    # A function a guard is rooted at is pickled by value,
+                    # defaults, kwdefaults and closure cells included (its
+                    # __dict__ is walked below like any other), so a failure
+                    # behind one of those has to be reachable from here.
+                    children += [
+                        (f"{path}.__defaults__[{i}]", v)
+                        for i, v in enumerate(value.__defaults__ or ())
+                    ]
+                    children += [
+                        (f"{path}.__kwdefaults__[{k!r}]", v)
+                        for k, v in (value.__kwdefaults__ or {}).items()
+                    ]
+                    for i, (name, cell) in enumerate(
+                        zip(value.__code__.co_freevars, value.__closure__ or ())
+                    ):
+                        try:
+                            contents = cell.cell_contents
+                        except ValueError:  # an empty cell
+                            continue
+                        # A pasteable accessor, annotated with the variable name.
+                        children.append(
+                            (
+                                f"{path}.__closure__[{i}].cell_contents  # {name}",
+                                contents,
+                            )
+                        )
+                elif isinstance(value, types.MethodType):
+                    # A guard can be rooted at a bound method; the reducer
+                    # carries its function and receiver.
+                    children.append((f"{path}.__func__", value.__func__))
+                    children.append((f"{path}.__self__", value.__self__))
                 instance_dict = _instance_dict(value)
                 if instance_dict is not None:
-                    attributes = list(instance_dict.items())
+                    children += [
+                        (f"{path}.{name}", child)
+                        for name, child in instance_dict.items()
+                        if not name.startswith("__")
+                    ]
                 else:
                     # A slotted object (Guard is a slots dataclass) has no
                     # __dict__; its state lives in the slots along the MRO.
@@ -5109,14 +5135,14 @@ def _offending_value_path(state: Any, target: Any) -> str:
                         slots = klass.__dict__.get("__slots__", ())
                         for name in (slots,) if isinstance(slots, str) else slots:
                             try:
-                                attributes.append((name, getattr(value, name)))
+                                children.append(
+                                    (f"{path}.{name}", getattr(value, name))
+                                )
                             except AttributeError:  # an unset slot
                                 pass
             except Exception:
                 pass
-            for name, child in attributes:
-                if not name.startswith("__"):
-                    queue.append((f"{path}.{name}", child))
+            queue.extend(children[:20000])
     except Exception:
         return ""
     return ""
