@@ -1318,12 +1318,7 @@ partitioned_scatter_min_contention_ratio: float = 4.0
 partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
 
 # Accumulate the partial sums in fp32 when the scatter dtype is a narrower float,
-# rounding once in the reduce. Set False to keep them in the scatter's dtype: each
-# partition still sums index_numel / num_partitions values, so in bf16 a partial
-# stagnates once it outgrows the addend's ulp, the same way the unpartitioned scatter
-# does. fp32 costs 2x the expanded buffer, an fp32 copy of the values, and a median
-# 25% of the optimized kernel time on MI308X (0% where the kernel is already bound on
-# the scatter itself, up to 65% on the index_add family).
+# rounding once in the reduce
 partitioned_scatter_fp32_accumulation: bool = (
     os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FP32_ACCUMULATION", "1") == "1"
 )
