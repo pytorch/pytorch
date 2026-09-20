@@ -2585,6 +2585,32 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, "target values to be in the range"):
             torch._ctc_loss(log_probs, targets, [5], [4], 0, False)
 
+    def test_CTCLoss_target_value_checks_backward_cpu(self):
+        # The backward revalidates target values: autograd can reach it with a
+        # saved targets tensor mutated after the forward (e.g. through .data,
+        # which does not bump the version counter).
+        log_probs = torch.randn(5, 6, requires_grad=True)
+        targets = torch.tensor([[3, 5, 4, 2]])
+        loss = torch.nn.functional.ctc_loss(log_probs, targets, torch.tensor([5]), torch.tensor([4]))
+        targets.data[0, 0] = 99
+        with self.assertRaisesRegex(RuntimeError, r"range \[0, 6\), but got value 99 for batch 0"):
+            loss.backward()
+
+        # 1D concatenated targets: nonzero per-batch offset in the backward
+        log_probs = torch.randn(5, 2, 6, requires_grad=True)
+        targets = torch.tensor([1, 2, 3, 4, 5])
+        loss = torch.nn.functional.ctc_loss(
+            log_probs, targets, torch.tensor([5, 5]), torch.tensor([3, 2]), reduction="sum")
+        targets.data[4] = 9
+        with self.assertRaisesRegex(RuntimeError, r"range \[0, 6\), but got value 9 for batch 1"):
+            loss.backward()
+
+        # same nonzero-offset path in the forward
+        targets = torch.tensor([1, 2, 3, 4, 9])
+        with self.assertRaisesRegex(RuntimeError, r"range \[0, 6\), but got value 9 for batch 1"):
+            torch.nn.functional.ctc_loss(
+                log_probs, targets, torch.tensor([5, 5]), torch.tensor([3, 2]), reduction="sum")
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)

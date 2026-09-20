@@ -54,6 +54,23 @@ inline int64_t get_target_prime(target_t* target, int64_t offset, int64_t stride
   }
 }
 
+// Validate the target entries that the kernels actually read. Entries beyond
+// target_lengths[b] are padding and are never used, so they are not checked.
+template<typename target_t>
+void check_target_values(const Tensor& targets, IntArrayRef target_lengths, int64_t num_labels,
+                         const std::vector<int64_t>& tg_batch_offsets, int64_t tg_target_stride,
+                         CheckedFrom c) {
+  const auto* targets_data = targets.const_data_ptr<target_t>();
+  for (const auto b : c10::irange(static_cast<int64_t>(target_lengths.size()))) {
+    for (const auto j : c10::irange(target_lengths[b])) {
+      const auto t = targets_data[tg_batch_offsets[b] + tg_target_stride * j];
+      TORCH_CHECK(t >= 0 && t < num_labels,
+                  "Expected target values to be in the range [0, ", num_labels, "), but got value ", t,
+                  " for batch ", b, " (while checking arguments for ", c, ")");
+    }
+  }
+}
+
 template<typename scalar_t, ScalarType target_scalar_type>
 std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outputs(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
   // log_probs: input_len x batch_size x num_labels
@@ -117,21 +134,13 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
   }
 
   // Target values are used as indices into log_probs by the kernels below, so
-  // validate every target entry that is actually read. Note that entries beyond
-  // target_lengths[b] are padded and never used, so they are not checked.
+  // validate every target entry that is actually read.
   // Only CPU target tensors have host-readable data; meta tensors have none and
-  // device tensors must not be dereferenced from the host.
+  // accelerator tensors must not be dereferenced from the host.
   if (targets.device().is_cpu()) {
     using target_t = std::conditional_t<target_scalar_type == kInt, int, int64_t>;
-    const auto* targets_data = targets.const_data_ptr<target_t>();
-    for (const auto b : c10::irange(batch_size)) {
-      for (const auto j : c10::irange(target_lengths[b])) {
-        const auto t = targets_data[tg_batch_offsets[b] + static_cast<int64_t>(tg_target_stride) * j];
-        TORCH_CHECK(t >= 0 && t < num_labels,
-                    "Expected target values to be in the range [0, ", num_labels, "), but got value ", t,
-                    " for batch ", b, " (while checking arguments for ", c, ")");
-      }
-    }
+    check_target_values<target_t>(targets, target_lengths, num_labels, tg_batch_offsets,
+                                  static_cast<int64_t>(tg_target_stride), c);
   }
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
@@ -263,7 +272,10 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   int64_t num_labels = log_probs.size(2);
   Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // at this point, this is log of empty sum
 
-  // The admin bits. We don't do much checking and assume that the forward did.
+  // The admin bits. Lengths are trusted from the forward, but target values are
+  // revalidated below: autograd can reach the backward with a saved targets
+  // tensor mutated after the forward (e.g. through .data, which does not bump
+  // the version counter) and direct callers of the op bypass the forward.
   int64_t tg_target_stride = 0;
   int64_t max_target_length = 0;
   std::vector<int64_t> tg_batch_offsets(batch_size);
@@ -288,6 +300,9 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     tg_target_stride = targets.stride(1);
     max_target_length = targets.size(1);
   }
+
+  check_target_values<target_t>(targets, target_lengths, num_labels, tg_batch_offsets, tg_target_stride,
+                                "ctc_loss_backward_cpu");
 
   Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);  // could be optimized to use only 2 rows
   auto lpp  = log_probs.permute({1,0,2});
