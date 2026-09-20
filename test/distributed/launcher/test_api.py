@@ -11,10 +11,16 @@ import os
 from unittest.mock import MagicMock, patch
 
 from torch.distributed.launcher.api import launch_agent, LaunchConfig
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class LauncherApiTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         # Save original environment variable if it exists
