@@ -1211,6 +1211,28 @@ class _HolderWithGenerator:
         self.cfg = {"a": 1}
 
 
+class _OuterHolder:
+    def __init__(self):
+        self.inner = _HolderWithGenerator()
+        self.name = "outer"
+
+
+@dataclasses.dataclass(frozen=True)
+class _ConstantCfg:
+    dims: tuple
+    tags: list
+
+    def __hash__(self):
+        return hash(self.dims)
+
+
+pytree.register_constant(_ConstantCfg)
+
+
+def _by_name_fn(x):
+    return x
+
+
 class _PipelineWithSetstate:
     def __init__(self):
         self.stages = ["a", "b"]
@@ -1560,15 +1582,12 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # A guarded module-level function is saved by reference, so its __dict__
         # never travels; registering its values would only prune a shared object
         # somewhere else in the state.
-        global_add.cache = {"k": 1}
-        try:
-            pickler = GuardsStatePickler(
-                {id(global_add): global_add}, {}, {}, {}, io.BytesIO()
-            )
-            pickler.dump({"f": global_add})
-            self.assertNotIn(id(global_add.cache), pickler.missing_values)
-        finally:
-            del global_add.cache
+        _by_name_fn.cache = {"k": 1}
+        pickler = GuardsStatePickler(
+            {id(_by_name_fn): _by_name_fn}, {}, {}, {}, io.BytesIO()
+        )
+        pickler.dump({"f": _by_name_fn})
+        self.assertNotIn(id(_by_name_fn.cache), pickler.missing_values)
 
     def test_guarded_object_with_a_custom_setstate_is_pickled_whole(self):
         # Attribute pruning assumes the default pickle protocol; a __setstate__
@@ -1615,7 +1634,35 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         wrapper = torch._TorchCompileInductorWrapper("default", None, False)
         buf = io.BytesIO()
         GuardsStatePickler({id(wrapper): wrapper}, {}, {}, {}, buf).dump({"w": wrapper})
-        self.assertIsInstance(load_guards_state(buf.getvalue())["w"].config, dict)
+        loaded = load_guards_state(buf.getvalue())["w"]
+        self.assertEqual(loaded.config, wrapper.config)
+        self.assertEqual(loaded.dynamic, wrapper.dynamic)
+
+    def test_bystander_several_levels_down_is_pruned(self):
+        # The guard tree reaches the inner holder through the outer one; the
+        # generator two levels down is pruned, what the guards read survives.
+        o = _OuterHolder()
+        buf = io.BytesIO()
+        GuardsStatePickler(
+            {id(o): o, id(o.inner): o.inner, id(o.inner.cfg): o.inner.cfg},
+            {},
+            {},
+            {},
+            buf,
+        ).dump({"o": o})
+        out = load_guards_state(buf.getvalue())["o"]
+        self.assertIsInstance(out.inner.it, _Missing)
+        self.assertEqual(out.inner.cfg, {"a": 1})
+        self.assertEqual(out.name, "outer")
+
+    def test_registered_constant_object_is_pickled_whole(self):
+        # EQUALS_MATCH keeps a pytree-registered constant itself and compares it
+        # by value at run time, so pruning its unguarded list field would make
+        # the rebuilt guard miss forever.
+        c = _ConstantCfg((0, 1), ["a"])
+        buf = io.BytesIO()
+        GuardsStatePickler({id(c): c}, {}, {}, {}, buf).dump({"c": c})
+        self.assertEqual(load_guards_state(buf.getvalue())["c"], c)
 
     def test_unpicklable_guarded_attribute_names_its_path(self):
         # A type alone ("cannot pickle 'generator' object") is not actionable in
@@ -4131,6 +4178,20 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertIsInstance(loaded, torch.nn.LSTM)
         self.assertEqual(loaded._all_weights, lstm._all_weights)
         self.assertEqual(loaded._flat_weights_names, lstm._flat_weights_names)
+
+    def test_guarded_plain_object_with_a_generator_bystander_round_trips(self):
+        # The headline case through a real capture: the guard on h.cfg["a"]
+        # reaches the holder, its generator is pruned, and the loaded guards
+        # still pass against the original inputs.
+        def fn(h, x):
+            return x + h.cfg["a"]
+
+        h, x = _HolderWithGenerator(), torch.randn(2)
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, h, x)
+        self._test_check_fn(ref, loaded, {"h": h, "x": x}, True)
+        state = load_guards_state(self._cached_guards_state).output_graph
+        self.assertIsInstance(state.local_scope["h"].it, _Missing)
+        self.assertEqual(state.local_scope["h"].cfg, {"a": 1})
 
     def test_grad_mode(self):
         def fn(x):
