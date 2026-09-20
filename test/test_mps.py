@@ -1158,6 +1158,33 @@ class TestMPS(TestCaseMPS):
         # completed waiting on the events.
         self.assertTrue(finished_waiting.is_set())
 
+    def _run_mixed_mps_ops(self, iters=30):
+        dtypes = [torch.float32, torch.float16, torch.bfloat16]
+        unary = [torch.log, torch.abs, torch.exp, torch.sqrt, torch.sin, torch.tanh, torch.erf]
+        for i in range(iters):
+            dtype = dtypes[i % len(dtypes)]
+            a = torch.arange(0, 4096 + i, 1, device="mps", dtype=dtype)
+            b = torch.linspace(0.0, 1.0, 2048 + i, device="mps", dtype=dtype)
+            c = unary[i % len(unary)](torch.rand(1024 + i, device="mps", dtype=dtype) + 0.5)
+            float(a.float().sum() + b.float().sum() + c.float().sum())
+
+    def _run_mixed_mps_ops_threaded(self, nthreads=4):
+        threads = [threading.Thread(target=self._run_mixed_mps_ops) for _ in range(nthreads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    def test_multithreaded_ops_warm(self):
+        # Same work as test_multithreaded_ops, but every pipeline state is
+        # populated single-threaded first, so the shader library caches are
+        # read-only by the time the threads start. What is left is the command
+        # encoder being acquired off the stream's serial queue, where another
+        # thread's endKernelCoalescing() can end and release it mid-use.
+        # See https://github.com/pytorch/pytorch/issues/197805
+        self._run_mixed_mps_ops()
+        self._run_mixed_mps_ops_threaded()
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
