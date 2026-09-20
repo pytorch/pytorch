@@ -481,9 +481,7 @@ test_python_smoke() {
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
-  # TODO(#189590): Re-enable CUTLASS API after NVGEMM migrates to
-  # cutlass.operators. The preview package pins apache-tvm-ffi==0.1.7, which
-  # is incompatible with CuTeDSL 4.6.2 used by the rest of this job.
+  install_cutlass_operators
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -758,6 +756,11 @@ test_inductor_core() {
               inductor/test_torchinductor \
               inductor/test_mkldnn_pattern_matcher \
               inductor/test_torchinductor_codegen_dynamic_shapes \
+              inductor/test_max_autotune_blackwell \
+              inductor/test_torchinductor_codegen_config_overrides \
+              inductor/test_torchinductor_opinfo \
+              inductor/test_torchinductor_opinfo_properties \
+              inductor/test_torchinductor_strided_blocks \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
