@@ -103,7 +103,8 @@ def wrap_flydsl(
     The launcher must write results into explicit tensor arguments and return
     ``None``. AOTInductor executes a wrapped launcher on PyTorch's current
     device stream. Direct eager calls require the default device stream;
-    launchers with an explicit FlyDSL ``Stream`` parameter are unsupported.
+    Defaulted FlyDSL ``Stream`` parameters are omitted so the launcher uses the
+    current device stream; callers cannot pass an explicit stream value.
     ``mutates_args`` names the tensor arguments written by the launcher.
     Runtime arguments must be graphable PyTorch values rather than
     preconstructed FlyDSL ``JitArgument`` objects.
@@ -164,10 +165,13 @@ def wrap_flydsl(
         )
     signature = jit_argument.resolve_signature(jit_launcher.func)
     parameters = tuple(signature.parameters.values())
-    has_self = bool(parameters) and parameters[0].name == "self"
-    if has_self:
-        if bound_self is None:
-            raise TypeError("FlyDSL JIT methods must be wrapped from a bound instance")
+    if bound_self is not None:
+        if not parameters:
+            raise TypeError("Bound FlyDSL JIT methods must declare a receiver")
+        if parameters[0].name != "self":
+            raise TypeError(
+                "Bound FlyDSL JIT methods must name their receiver 'self'"
+            )
         signature = signature.replace(parameters=parameters[1:])
     if any(
         parameter.kind
@@ -175,14 +179,39 @@ def wrap_flydsl(
         for parameter in signature.parameters.values()
     ):
         raise TypeError("FlyDSL launchers with variadic parameters cannot be wrapped")
-    if any(
-        getattr(parameter.annotation, "_is_stream_param", False)
+    stream_parameters = tuple(
+        parameter
         for parameter in signature.parameters.values()
-    ):
+        if getattr(parameter.annotation, "_is_stream_param", False)
+    )
+    required_stream_parameters = tuple(
+        parameter.name
+        for parameter in stream_parameters
+        if parameter.default is inspect.Parameter.empty
+    )
+    if required_stream_parameters:
         raise TypeError(
-            "FlyDSL launchers with explicit Stream parameters cannot be wrapped; "
-            "AOT launchers use PyTorch's current device stream"
+            "FlyDSL launchers with required Stream parameters cannot be wrapped; "
+            "default the stream to use PyTorch's current device stream: "
+            f"{list(required_stream_parameters)}"
         )
+    if len(stream_parameters) > 1:
+        raise TypeError("FlyDSL launchers may declare at most one Stream parameter")
+    stream_parameter = (
+        (
+            tuple(signature.parameters).index(stream_parameters[0].name),
+            stream_parameters[0],
+        )
+        if stream_parameters
+        else None
+    )
+    signature = signature.replace(
+        parameters=[
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter not in stream_parameters
+        ]
+    )
 
     compile_time_arg_indices = frozenset(
         idx
@@ -242,6 +271,7 @@ def wrap_flydsl(
         mutated_arg_indices,
         bound_self=bound_self,
         signature=signature,
+        stream_parameter=stream_parameter,
         compile_time_arg_indices=compile_time_arg_indices,
         constexpr_arg_indices=constexpr_arg_indices,
         constexpr_value_signature=flydsl_typing.Constexpr.value_signature,
