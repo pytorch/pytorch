@@ -20,6 +20,7 @@ from __future__ import annotations
 import ast
 import builtins
 import collections
+import contextlib
 import dataclasses
 import enum
 import functools
@@ -4319,10 +4320,13 @@ class GuardsStatePickler(FunctionPicklerBase):
         stack = list(value_guarded_containers.values())
         while stack:
             for element in stack.pop():
-                if type(element) is tuple:
+                if id(element) in self._verbatim_elements:
+                    continue
+                self._verbatim_elements.add(id(element))
+                if type(element) in (list, tuple, set, frozenset):
                     stack.append(element)
-                else:
-                    self._verbatim_elements.add(id(element))
+                elif type(element) is dict:
+                    stack.append(list(element.values()))
 
     @classmethod
     def _unpickle_module(cls, state: Any) -> torch.nn.Module:
@@ -4731,23 +4735,22 @@ class GuardsStatePickler(FunctionPicklerBase):
             # we compile with fake tensors but run with real tensors.
             pytype = type(obj)
             dispatch_keys = torch._C._dispatch_keys(obj)
-            if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
+            is_fake = isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
-            ):
+            )
+            if is_fake:
                 pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-                # Both reads above describe the FAKE, not the tensor it stands
-                # for: _dispatch_keys() on a fake reports Python and
-                # PythonTLSSnapshot keys the real tensor never had, and
-                # empty_like under the live FakeTensorMode returns another
-                # FakeTensor, dragging the mode and its converters into the
-                # pickle. The converter recorded the real tensor's keys.
+                # _dispatch_keys() on a fake reports the Python and
+                # PythonTLSSnapshot keys of the fake itself; the converter may
+                # have recorded the real tensor's keys (from_meta_and_device
+                # always does, from_real_tensor only for an mkldnn source).
                 if obj.dispatch_keys is not None:
                     dispatch_keys = obj.dispatch_keys
-                with no_dispatch():
-                    meta = torch.empty_like(
-                        obj, device="meta", requires_grad=obj.requires_grad
-                    )
-            else:
+            # A fake answers empty_like with another fake through its own
+            # __torch_dispatch__, whether or not its FakeTensorMode is active,
+            # and that fake would drag the mode and its converters into the
+            # pickle; no_dispatch makes the template a plain meta tensor.
+            with no_dispatch() if is_fake else contextlib.nullcontext():
                 meta = torch.empty_like(
                     obj, device="meta", requires_grad=obj.requires_grad
                 )
@@ -4891,22 +4894,24 @@ class GuardsStatePickler(FunctionPicklerBase):
         if (
             id(obj) in self.guard_tree_values
             and _instance_dict(obj) is not None
-            and not inspect.isclass(obj)
-            and not inspect.ismodule(obj)
-            and not isinstance(obj, (torch.nn.Module, torch.Tensor))
-            and type(obj).__module__.partition(".")[0] != "torch"
+            and not inspect.isfunction(obj)
+            and str(getattr(type(obj), "__module__", "")).partition(".")[0] != "torch"
             and _pickles_by_default(obj)
         ):
             # Any object the guard tree reached, not just an nn.Module: a guarded
             # train pipeline or dataloader wrapper was pickled whole, so one
             # unguarded attribute several levels down (a live generator, a
             # process group) took the entire frame with it. Deliberately LAST,
-            # so every specific reducer above (functions, methods, cells, ops)
-            # gets first refusal, and deliberately USER objects only: pruning is
-            # safe when nothing reads the pruned attribute on the way back,
-            # which does not hold for torch's structural types (a DTensorSpec's
-            # fields rebuild the spec although no guard names each one; a tensor
-            # subclass carries its spec in __dict__).
+            # so every specific reducer above (methods, cells, ops) gets first
+            # refusal; a by-name function falls through the isfunction branch
+            # and is excluded here, since its __dict__ is never serialized. A
+            # class (mappingproxy), a python module (its branch returns), an
+            # nn.Module and a Tensor (their own pickle protocol) never get here.
+            # Deliberately USER objects only: pruning is safe when nothing reads
+            # the pruned attribute on the way back, which does not hold for
+            # torch's structural types (a DTensorSpec's fields rebuild the spec
+            # although no guard names each one; a tensor subclass carries its
+            # spec in __dict__).
             self._prune_unguarded_attributes(obj)
 
         if hasattr(torch.distributed, "distributed_c10d") and isinstance(
@@ -4952,7 +4957,9 @@ class GuardsStatePickler(FunctionPicklerBase):
         generator, a live iterator, a C handle) from taking the frame down.
         What the object itself reads back at load stays: for a module, the
         containers in _NN_MODULE_STATE_ATTRS. Precondition: the callers have
-        checked that no custom __setstate__/__reduce__ may read any attribute.
+        checked that no custom __setstate__/__reduce__ reads a pruned attribute
+        at load (DDP qualifies because _unpickle_ddp_module rebuilds it through
+        nn.Module.__setstate__).
         """
         is_module = isinstance(obj, torch.nn.Module)
         for name, attr in (_instance_dict(obj) or {}).items():
