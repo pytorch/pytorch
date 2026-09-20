@@ -1166,7 +1166,6 @@ def scan_batch_rule(
             after_move_dims,
             interpreter.batch_size(),
             interpreter.randomness(),
-            op_name="scan",
         )
         op_kwargs = {}
         if mutated_arg_indices:
